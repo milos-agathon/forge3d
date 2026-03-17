@@ -248,7 +248,7 @@ impl DenoisePass {
         if iterations == 0 {
             return None;
         }
-        if iterations % 2 != 0 {
+        if !iterations.is_multiple_of(2) {
             // Odd: Last write was to B
             self.view_b.as_ref()
         } else {

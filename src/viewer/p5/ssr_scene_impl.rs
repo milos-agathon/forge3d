@@ -131,7 +131,7 @@ impl Viewer {
         for y in 0..size {
             for x in 0..size {
                 let stripe_idx = x / stripe_width;
-                let is_bright = stripe_idx % 2 == 0;
+                let is_bright = stripe_idx.is_multiple_of(2);
                 let idx = ((y * size + x) * 4) as usize;
 
                 let (r, g, b) = if is_bright {

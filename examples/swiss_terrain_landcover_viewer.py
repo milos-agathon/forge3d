@@ -285,8 +285,8 @@ def add_legend_to_image(image_path: Path, output_path: Path = None,
     # Optionally add semi-transparent white background behind legend for readability
     if not transparent_background:
         bg_padding = int(final_legend_width * 0.05)
-        bg = Image.new('RGBA', (final_legend_width + bg_padding * 2, final_legend_height + bg_padding * 2), 
-                       (255, 255, 255, 200))
+        bg = Image.new('RGBA', (final_legend_width + bg_padding * 2, final_legend_height + bg_padding * 2),
+                       (255, 255, 255, 255))
         # Composite background then legend
         map_img.paste(bg, (x - bg_padding, y - bg_padding), bg)
     
@@ -602,7 +602,18 @@ def main() -> int:
     # High-quality presets
     parser.add_argument("--preset", choices=["hq1", "hq2", "hq3", "hq4"],
                         help="High-quality rendering preset (see --help for details)")
-    
+
+    # Camera position
+    cam_group = parser.add_argument_group("Camera", "Orbital camera position")
+    cam_group.add_argument("--cam-phi", type=float, default=45.0,
+                           help="Camera azimuth angle in degrees (default: 45.0)")
+    cam_group.add_argument("--cam-theta", type=float, default=40.0,
+                           help="Camera elevation angle in degrees (default: 40.0)")
+    cam_group.add_argument("--cam-radius", type=float, default=4500.0,
+                           help="Camera distance from center in world units (default: 4500.0)")
+    cam_group.add_argument("--cam-fov", type=float, default=35.0,
+                           help="Camera field of view in degrees (default: 35.0)")
+
     # Overlay options
     overlay_group = parser.add_argument_group("Overlay Options", "Land cover overlay settings")
     overlay_group.add_argument("--overlay-opacity", type=float, default=1,
@@ -615,6 +626,13 @@ def main() -> int:
                                help="Add land cover legend to snapshots (default: on)")
     overlay_group.add_argument("--no-legend", action="store_false", dest="legend",
                                help="Disable land cover legend on snapshots")
+    overlay_group.add_argument("--legend-position", type=str, default="southeast",
+                               choices=["west", "east", "northwest", "southwest", "northeast", "southeast"],
+                               help="Legend position on the image (default: southeast)")
+    overlay_group.add_argument("--legend-scale", type=float, default=0.35,
+                               help="Legend size relative to image height (default: 0.35)")
+    overlay_group.add_argument("--legend-transparent-bg", action="store_true",
+                               help="Use transparent legend background (blends with render background)")
     
     # Background options
     bg_group = parser.add_argument_group("Background", "Background color settings")
@@ -695,30 +713,30 @@ def main() -> int:
     
     if args.preset:
         if args.preset == "hq1":
-            # Standard high quality - optimized for land cover overlay
+            # Standard high quality
             if not user_set_resolution:
                 args.width = 1920
                 args.height = 1080
             args.msaa = 8
-            height_ao = False  # Disabled to preserve land cover colors
-            sun_vis = False     # Disabled to preserve land cover colors
-            args.exposure = 1.2
+            height_ao = True
+            sun_vis = True
+            args.exposure = 1.25
             res_str = f"{args.width}x{args.height}"
-            print(f"Preset: hq1 - Standard high quality ({res_str}, MSAA 8x)")
+            print(f"Preset: hq1 - Standard high quality ({res_str}, MSAA 8x, AO, sun vis)")
         elif args.preset == "hq2":
-            # Alpine preset - optimized for land cover overlay
+            # Alpine preset
             if not user_set_resolution:
                 args.width = 1920
                 args.height = 1080
-            args.msaa = 4
-            height_ao = False   # Disabled to preserve land cover colors
-            sun_vis = False     # Disabled to preserve land cover colors
-            snow = False        # Disabled - land cover provides colors
-            rock = False        # Disabled - land cover provides colors
+            args.msaa = 8
+            height_ao = True
+            sun_vis = True
+            snow = False        # Land cover provides colors
+            rock = False        # Land cover provides colors
             temperature = 7000.0  # Cool for alpine
             args.exposure = 1.3
             res_str = f"{args.width}x{args.height}"
-            print(f"Preset: hq2 - Alpine ({res_str}, cool temperature)")
+            print(f"Preset: hq2 - Alpine ({res_str}, cool temperature, AO, sun vis)")
         elif args.preset == "hq3":
             # Cinematic - optimized for land cover overlay
             if not user_set_resolution:
@@ -733,22 +751,22 @@ def main() -> int:
             res_str = f"{args.width}x{args.height}"
             print(f"Preset: hq3 - Cinematic ({res_str}, lens effects, warm tones)")
         elif args.preset == "hq4":
-            # Maximum quality - optimized for land cover overlay
+            # Maximum quality - AO and sun visibility add depth without destroying
+            # overlay colors (overlay is blended into albedo before lighting)
             if not user_set_resolution:
                 args.width = 1920
                 args.height = 1080
             args.msaa = 8
-            height_ao = False  # Disabled to preserve land cover colors
-            sun_vis = False     # Disabled to preserve land cover colors
+            height_ao = True    # Adds depth/dimension to terrain
+            sun_vis = True      # Terrain self-shadowing for realism
             snow = False        # Disabled - land cover provides colors
             rock = False        # Disabled - land cover provides colors
             dof = False         # Disabled - focus on full terrain
             lens_effects = True
             temperature = 6500.0
-            args.exposure = 1.3  # Increased for better visibility
-            # Keep solid=True so terrain is visible even where overlay has alpha=0
+            args.exposure = 1.35  # Slightly brighter to compensate for AO darkening
             res_str = f"{args.width}x{args.height}"
-            print(f"Preset: hq4 - Maximum quality ({res_str}, MSAA 8x, lens effects)")
+            print(f"Preset: hq4 - Maximum quality ({res_str}, MSAA 8x, AO, sun vis, lens effects)")
     
     # Resample land cover to match DEM
     overlay_png_path = None
@@ -881,7 +899,7 @@ def main() -> int:
     # radius is in pixel-space units, so ~4500 is appropriate for full view
     send_ipc(sock, {
         "cmd": "set_terrain",
-        "phi": 45.0, "theta": 40.0, "radius": 4500.0, "fov": 35.0,
+        "phi": args.cam_phi, "theta": args.cam_theta, "radius": args.cam_radius, "fov": args.cam_fov,
         "zscale": 0.05,  # Height exaggeration factor
         "sun_azimuth": args.sun_azimuth,
         "sun_elevation": args.sun_elevation,
@@ -1050,8 +1068,10 @@ def main() -> int:
         if args.snapshot.exists():
             # Add land cover legend to the image if enabled
             if args.legend and not args.no_overlay and HAS_PIL:
-                add_legend_to_image(args.snapshot, legend_scale=0.35, position="southeast",
-                                    max_legend_height=800, transparent_background=False)
+                add_legend_to_image(args.snapshot, legend_scale=args.legend_scale,
+                                    position=args.legend_position,
+                                    max_legend_height=800,
+                                    transparent_background=args.legend_transparent_bg)
                 print(f"Saved with legend: {args.snapshot}")
             else:
                 print(f"Saved: {args.snapshot}")

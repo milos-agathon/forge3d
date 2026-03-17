@@ -174,29 +174,45 @@ def load_places(gpkg_path: Path) -> list[dict]:
             x, y = parse_gpkg_point(geom)
             if x is not None and y is not None:
                 # Prefer English name, fallback to local name
-                # Also ensure we only use ASCII characters since our atlas is limited
                 display_name = name_en if name_en else name
-                
+
                 # Parse elevation
                 try:
                     ele = float(ele_str) if ele_str else 0.0
                 except ValueError:
                     ele = 0.0
-                
-                # Check if display_name is ASCII
-                if not all(ord(c) < 128 for c in display_name):
-                    # If local name is not ASCII and we don't have English, skip or try to find ASCII in name
-                    # (Sometimes name contains "Local (English)")
+
+                # Filter to ASCII-renderable names (atlas limitation)
+                # but keep names that have at least some ASCII content
+                ascii_chars = [c for c in display_name if ord(c) < 128 and c.strip()]
+                if len(ascii_chars) < 2:
                     continue
-                    
-                places.append({"name": display_name, "x": x, "y": y, "ele": ele})
+                # Strip non-ASCII characters for rendering
+                clean_name = "".join(c if ord(c) < 128 else "" for c in display_name).strip()
+                if len(clean_name) < 2:
+                    continue
+
+                places.append({"name": clean_name, "x": x, "y": y, "ele": ele})
         conn.close()
     except Exception as e:
         print(f"Warning: Failed to read places from {gpkg_path}: {e}")
-        # Fallback hardcoded places (approx coords)
-        places = [
-            {"name": "Mount Fuji", "x": 138.7278, "y": 35.3606, "ele": 3776.0},
-        ]
+        places = []
+
+    # Always ensure key landmarks are present with English labels
+    key_places = [
+        {"name": "Mount Fuji", "x": 138.7278, "y": 35.3606, "ele": 3776.0},
+        {"name": "Fujiyoshida", "x": 138.8078, "y": 35.4875, "ele": 770.0},
+        {"name": "Gotemba", "x": 138.9342, "y": 35.3084, "ele": 456.0},
+        {"name": "Fujinomiya", "x": 138.6175, "y": 35.2227, "ele": 135.0},
+        {"name": "Lake Yamanaka", "x": 138.8678, "y": 35.4106, "ele": 981.0},
+        {"name": "Lake Kawaguchi", "x": 138.7578, "y": 35.5106, "ele": 833.0},
+        {"name": "Subashiri 5th", "x": 138.7878, "y": 35.3706, "ele": 1970.0},
+        {"name": "Yoshida 5th", "x": 138.7328, "y": 35.3906, "ele": 2305.0},
+    ]
+    existing_names = {p["name"].lower() for p in places}
+    for kp in key_places:
+        if kp["name"].lower() not in existing_names:
+            places.append(kp)
     
     return places
 
@@ -1064,6 +1080,8 @@ def main() -> int:
         resp = send_ipc(sock, {
             "cmd": "snapshot",
             "path": str(snapshot_abs),
+            "width": args.width,
+            "height": args.height,
         })
         print(f"Snapshot result: {resp}")
 

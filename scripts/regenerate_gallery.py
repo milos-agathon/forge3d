@@ -98,7 +98,7 @@ def run_example(name: str, args: list[str], output_path: Path) -> None:
     instead verify success by checking whether the output file was
     actually written.
     """
-    print(f"  [{name}] running …")
+    print(f"  [{name}] running ...")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.unlink(missing_ok=True)
 
@@ -118,10 +118,10 @@ def run_example(name: str, args: list[str], output_path: Path) -> None:
             timeout=180,
         )
     except subprocess.TimeoutExpired:
-        print(f"  [{name}] subprocess timed out (180 s) — checking file …")
+        print(f"  [{name}] subprocess timed out (180 s) -- checking file ...")
 
     wait_for_file(output_path)
-    print(f"  [{name}] done → {output_path.name}")
+    print(f"  [{name}] done -> {output_path.name}")
 
 
 def draw_halo_text(
@@ -200,13 +200,18 @@ def render_01_rainier() -> None:
         "examples/terrain_viewer_interactive.py",
         "--dem", "assets/tif/dem_rainier.tif",
         "--width", str(W), "--height", str(H),
+        "--cam-radius", "5200",
         "--pbr", "--msaa", "8",
-        "--shadow-technique", "pcss",
-        "--exposure", "1.1",
-        "--sun-azimuth", "302", "--sun-elevation", "24",
-        "--height-ao", "--height-ao-strength", "1.0",
+        "--shadow-technique", "pcss", "--shadow-map-res", "4096",
+        "--exposure", "1.25",
+        "--sun-azimuth", "305", "--sun-elevation", "28",
+        "--height-ao", "--height-ao-strength", "1.2",
+        "--height-ao-directions", "8", "--height-ao-steps", "24",
         "--sun-vis", "--sun-vis-mode", "soft",
+        "--sun-vis-samples", "6", "--sun-vis-steps", "32",
+        "--normal-strength", "1.1",
         "--tonemap", "aces",
+
         "--snapshot", str(tmp),
     ], tmp)
 
@@ -223,11 +228,16 @@ def render_02_fuji_labels() -> None:
         "examples/fuji_labels_demo.py",
         "--width", str(W), "--height", str(H),
         "--pbr", "--msaa", "8",
-        "--shadows", "pcss",
-        "--exposure", "1.1",
-        "--sun-azimuth", "296", "--sun-elevation", "22",
-        "--height-ao",
-        "--sun-vis",
+        "--shadows", "pcss", "--shadow-map-res", "4096",
+        "--exposure", "1.25",
+        "--sun-azimuth", "296", "--sun-elevation", "26",
+        "--height-ao", "--height-ao-strength", "1.2",
+        "--height-ao-directions", "8", "--height-ao-steps", "24",
+        "--sun-vis", "--sun-vis-mode", "soft",
+        "--sun-vis-samples", "6", "--sun-vis-steps", "32",
+        "--normal-strength", "1.1",
+        "--tonemap", "aces",
+
         "--snapshot", str(tmp),
     ], tmp)
 
@@ -237,14 +247,31 @@ def render_02_fuji_labels() -> None:
 def render_03_swiss_landcover() -> None:
     """Swiss terrain with raster land-cover overlay."""
     print("[gallery] 03 Swiss Landcover")
+    tmp = WORK_DIR / "03-base.png"
     out = IMAGES_DIR / "03-swiss-landcover.png"
+
+    sw, sh = 3840, 3840
 
     run_example("03 swiss", [
         "examples/swiss_terrain_landcover_viewer.py",
         "--preset", "hq4",
-        "--width", str(W), "--height", str(H),
-        "--snapshot", str(out),
-    ], out)
+        "--width", str(sw), "--height", str(sh),
+        "--cam-radius", "14000",
+        "--cam-phi", "80",
+        "--no-solid",
+        "--background", "#ffffff",
+        "--legend-position", "northwest",
+        "--legend-scale", "0.3",
+        "--legend-transparent-bg",
+        "--msaa", "8",
+        "--shadow-technique", "pcss",
+        "--exposure", "1.35",
+        "--snapshot", str(tmp),
+    ], tmp)
+
+    # White background — skip dark title bar, just copy the render.
+    from shutil import copy2
+    copy2(tmp, out)
 
 
 def render_04_luxembourg_rail() -> None:
@@ -255,17 +282,25 @@ def render_04_luxembourg_rail() -> None:
 
     run_example("04 rail", [
         "examples/luxembourg_rail_overlay.py",
-        "--width", str(W), "--height", str(H),
+        "--width", "3840", "--height", "3840",
+        "--phi", "90",
+        "--radius", "3400",
         "--msaa", "8",
         "--shadow-technique", "pcss", "--shadow-map-res", "4096",
-        "--exposure", "1.2",
-        "--height-ao",
-        "--sun-vis",
-        "--normal-strength", "1.2",
+        "--exposure", "1.4",
+        "--sun-azimuth", "215", "--sun-elevation", "45",
+        "--sun-intensity", "1.2",
+        "--height-ao", "--height-ao-strength", "0.7",
+        "--sun-vis", "--sun-vis-mode", "soft",
+        "--normal-strength", "0.9",
+        "--tonemap", "aces",
+        "--no-solid",
         "--snapshot", str(tmp),
     ], tmp)
 
-    compose_titled(tmp, out, "Luxembourg", "rail network overlay")
+    compose_titled(tmp, out, "Luxembourg", "rail network overlay",
+                   width=3840, height=3840)
+
 
 
 def render_05_buildings() -> None:
@@ -309,16 +344,18 @@ def render_07_flyover() -> None:
 
     for i, phi in enumerate(angles):
         tmp = WORK_DIR / f"07-frame-{phi}.png"
-        run_example(f"07 frame {phi}°", [
+        run_example(f"07 frame {phi}deg", [
             "examples/terrain_viewer_interactive.py",
             "--dem", "assets/tif/dem_rainier.tif",
             "--width", str(frame_w), "--height", str(H - 72),
             "--pbr", "--msaa", "8",
-            "--shadow-technique", "pcss",
-            "--exposure", "1.1",
-            "--sun-azimuth", str(302 + phi), "--sun-elevation", "24",
-            "--height-ao",
-            "--sun-vis",
+            "--shadow-technique", "pcss", "--shadow-map-res", "4096",
+            "--exposure", "1.25",
+            "--sun-azimuth", str(305 + phi), "--sun-elevation", "28",
+            "--height-ao", "--height-ao-strength", "1.2",
+            "--sun-vis", "--sun-vis-mode", "soft",
+            "--normal-strength", "1.1",
+            "--tonemap", "aces",
             "--snapshot", str(tmp),
         ], tmp)
         frame_paths.append(tmp)
@@ -450,31 +487,37 @@ def render_09_shadow_comparison() -> None:
     panel_w = W // 2
     panel_h = H - 72  # room for title + labels
 
-    # Morning: east sun
+    # Morning: east sun - dramatic low-angle lighting
     run_example("09 morning", [
         "examples/terrain_viewer_interactive.py",
         "--dem", "assets/tif/dem_rainier.tif",
         "--width", str(panel_w), "--height", str(panel_h),
         "--pbr", "--msaa", "8",
-        "--shadow-technique", "pcss",
-        "--exposure", "1.1",
-        "--sun-azimuth", "110", "--sun-elevation", "18",
-        "--height-ao",
-        "--sun-vis",
+        "--shadow-technique", "pcss", "--shadow-map-res", "4096",
+        "--exposure", "1.2",
+        "--sun-azimuth", "110", "--sun-elevation", "16",
+        "--height-ao", "--height-ao-strength", "1.2",
+        "--sun-vis", "--sun-vis-mode", "soft",
+        "--sun-vis-samples", "6", "--sun-vis-steps", "32",
+        "--normal-strength", "1.1",
+        "--tonemap", "aces",
         "--snapshot", str(left_tmp),
     ], left_tmp)
 
-    # Evening: west sun
+    # Evening: west sun - warm golden hour
     run_example("09 evening", [
         "examples/terrain_viewer_interactive.py",
         "--dem", "assets/tif/dem_rainier.tif",
         "--width", str(panel_w), "--height", str(panel_h),
         "--pbr", "--msaa", "8",
-        "--shadow-technique", "pcss",
-        "--exposure", "1.1",
-        "--sun-azimuth", "285", "--sun-elevation", "42",
-        "--height-ao",
-        "--sun-vis",
+        "--shadow-technique", "pcss", "--shadow-map-res", "4096",
+        "--exposure", "1.2",
+        "--sun-azimuth", "285", "--sun-elevation", "38",
+        "--height-ao", "--height-ao-strength", "1.2",
+        "--sun-vis", "--sun-vis-mode", "soft",
+        "--sun-vis-samples", "6", "--sun-vis-steps", "32",
+        "--normal-strength", "1.1",
+        "--tonemap", "aces",
         "--snapshot", str(right_tmp),
     ], right_tmp)
 
@@ -527,11 +570,14 @@ def render_10_map_plate() -> None:
         "--dem", "assets/tif/dem_rainier.tif",
         "--width", "900", "--height", "560",
         "--pbr", "--msaa", "8",
-        "--shadow-technique", "pcss",
-        "--exposure", "1.1",
-        "--sun-azimuth", "315", "--sun-elevation", "32",
-        "--height-ao",
-        "--sun-vis",
+        "--shadow-technique", "pcss", "--shadow-map-res", "4096",
+        "--exposure", "1.25",
+        "--sun-azimuth", "315", "--sun-elevation", "30",
+        "--height-ao", "--height-ao-strength", "1.2",
+        "--sun-vis", "--sun-vis-mode", "soft",
+        "--normal-strength", "1.1",
+        "--tonemap", "aces",
+
         "--snapshot", str(source_tmp),
     ], source_tmp)
 

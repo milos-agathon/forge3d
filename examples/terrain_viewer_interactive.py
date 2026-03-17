@@ -81,6 +81,7 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -116,7 +117,18 @@ def main() -> int:
                         help="Take snapshot at this path and exit")
     parser.add_argument("--preset", choices=["default", "alpine", "cinematic", "high_quality"],
                         help="Rendering preset (overrides individual settings)")
-    
+
+    # Camera position
+    cam_group = parser.add_argument_group("Camera", "Orbital camera position")
+    cam_group.add_argument("--cam-phi", type=float, default=30.0,
+                           help="Camera azimuth angle in degrees (default: 30.0)")
+    cam_group.add_argument("--cam-theta", type=float, default=45.0,
+                           help="Camera elevation angle in degrees (default: 45.0)")
+    cam_group.add_argument("--cam-radius", type=float, default=3800.0,
+                           help="Camera distance from center in world units (default: 3800.0)")
+    cam_group.add_argument("--cam-fov", type=float, default=30.0,
+                           help="Camera field of view in degrees (default: 30.0)")
+
     # PBR+POM rendering options
     pbr_group = parser.add_argument_group("PBR Rendering", "High-quality terrain rendering options")
     pbr_group.add_argument("--pbr", action="store_true",
@@ -559,7 +571,17 @@ def main() -> int:
         print("Timeout waiting for viewer")
         process.terminate()
         return 1
-    
+
+    # Drain viewer stdout in background to prevent pipe buffer deadlock
+    def _drain_stdout():
+        try:
+            for line in process.stdout:
+                pass
+        except Exception:
+            pass
+
+    threading.Thread(target=_drain_stdout, daemon=True).start()
+
     # Connect and load terrain
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect(("127.0.0.1", port))
@@ -585,7 +607,7 @@ def main() -> int:
         
     send_ipc(sock, {
         "cmd": "set_terrain",
-        "phi": 30.0, "theta": 45.0, "radius": 3800.0, "fov": 30.0,
+        "phi": args.cam_phi, "theta": args.cam_theta, "radius": args.cam_radius, "fov": args.cam_fov,
         "zscale": 0.1,
         "sun_azimuth": args.sun_azimuth,
         "sun_elevation": args.sun_elevation,

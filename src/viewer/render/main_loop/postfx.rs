@@ -260,45 +260,38 @@ impl Viewer {
                 self.comp_uniform = Some(ub);
                 self.comp_uniform.as_ref().unwrap()
             };
-            // Sampler: non-filtering so we can bind depth/non-filterable textures safely
-            let comp_sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
-                label: Some("viewer.comp.sampler"),
-                mag_filter: wgpu::FilterMode::Nearest,
-                min_filter: wgpu::FilterMode::Nearest,
-                mipmap_filter: wgpu::FilterMode::Nearest,
-                ..Default::default()
-            });
             let comp_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("viewer.comp.bg"),
                 layout: comp_bgl,
                 entries: &[
+                    // binding 0: sky_tex
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::TextureView(src_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&comp_sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: buf_ref.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
                         resource: wgpu::BindingResource::TextureView(&self.sky_output_view),
                     },
+                    // binding 1: depth_tex
                     wgpu::BindGroupEntry {
-                        binding: 4,
+                        binding: 1,
                         resource: wgpu::BindingResource::TextureView(&gi.gbuffer().depth_view),
                     },
+                    // binding 2: fog_tex
                     wgpu::BindGroupEntry {
-                        binding: 5,
+                        binding: 2,
                         resource: wgpu::BindingResource::TextureView(if self.fog_enabled {
                             &self.fog_output_view
                         } else {
                             &self.fog_zero_view
                         }),
+                    },
+                    // binding 3: params (uniform)
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: buf_ref.as_entire_binding(),
+                    },
+                    // binding 4: color_tex
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::TextureView(src_view),
                     },
                 ],
             });
