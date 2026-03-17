@@ -31,7 +31,7 @@ fn face_normal(a: [f32; 3], b: [f32; 3], c: [f32; 3]) -> [f32; 3] {
 }
 
 fn watertight_edge_check(indices: &[u32]) -> bool {
-    if indices.len() % 3 != 0 {
+    if !indices.len().is_multiple_of(3) {
         return false;
     }
     let mut edges: HashMap<(u32, u32), u32> = HashMap::new();

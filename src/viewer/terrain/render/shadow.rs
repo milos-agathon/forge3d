@@ -136,6 +136,13 @@ impl ViewerTerrainScene {
             render_pass.draw(0..vertex_count, 0..1);
         }
 
+        // Sync CSM cascade matrices to match the terrain-covering projection
+        // used above.  The shader samples shadow_maps using these matrices, so
+        // they MUST match what was used to render the depth pass.
+        for i in 0..cascade_count as usize {
+            csm.uniforms.cascades[i].light_view_proj = terrain_light_view_proj_arr;
+        }
+
         // Execute moment generation pass for VSM/EVSM/MSM techniques
         // This converts the depth maps into moment statistics
         let technique = match self.pbr_config.shadow_technique.to_lowercase().as_str() {

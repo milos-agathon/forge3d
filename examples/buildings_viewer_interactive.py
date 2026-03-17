@@ -66,6 +66,7 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
@@ -490,6 +491,16 @@ def main() -> int:
         print("Timeout waiting for viewer")
         process.terminate()
         return 1
+
+    # Drain viewer stdout in background to prevent pipe buffer deadlock
+    def _drain_stdout():
+        try:
+            for line in process.stdout:
+                pass
+        except Exception:
+            pass
+
+    threading.Thread(target=_drain_stdout, daemon=True).start()
 
     # Connect
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

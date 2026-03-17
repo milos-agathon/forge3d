@@ -176,7 +176,7 @@ pub fn validate_polygon_vertices(vertices: &[PolygonVertex], indices: &[u32]) ->
         return ValidationResult::invalid("Empty index array".to_string());
     }
 
-    if indices.len() % 3 != 0 {
+    if !indices.len().is_multiple_of(3) {
         return ValidationResult::invalid(format!(
             "Index count {} is not divisible by 3 (not triangles)",
             indices.len()

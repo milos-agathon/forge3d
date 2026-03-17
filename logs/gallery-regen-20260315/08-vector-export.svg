@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720">
+  <polygon points="100.00,654.55 1100.00,654.55 900.00,196.36 200.00,65.45" fill="rgba(51,132,211,0.92)" stroke="#143056" stroke-width="3.00" stroke-linejoin="round"/>
+  <polygon points="280.00,536.73 580.00,576.00 720.00,445.09 450.00,314.18" fill="rgba(242,186,89,0.82)" stroke="#8c5414" stroke-width="2.00" stroke-linejoin="round"/>
+  <polyline points="150.00,589.09 500.00,425.45 1000.00,261.82" fill="none" stroke="#111419" stroke-width="4.00" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="650.00" y="314.18" font-family="sans-serif" font-size="20.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="none" stroke="rgba(255,255,255,0.80)" stroke-width="3.00" stroke-linejoin="round">Ridge</text>
+  <text x="650.00" y="314.18" font-family="sans-serif" font-size="20.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="#111419">Ridge</text>
+</svg>

@@ -80,7 +80,7 @@ fn read_or_generate_indices<'a, 's, F>(
         out.indices = indices.into_u32().collect();
     } else {
         let vertex_count = out.positions.len();
-        if vertex_count % 3 == 0 {
+        if vertex_count.is_multiple_of(3) {
             out.indices = (0u32..(vertex_count as u32)).collect();
         }
     }

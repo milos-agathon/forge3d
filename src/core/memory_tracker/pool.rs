@@ -1,7 +1,7 @@
+use super::types::{DefragStats, MemoryPoolStats};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use wgpu::{Buffer, BufferDescriptor, BufferUsages, Device};
-use super::types::{DefragStats, MemoryPoolStats};
 
 /// A single allocated block from a memory pool
 #[derive(Debug, Clone)]

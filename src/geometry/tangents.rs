@@ -23,7 +23,7 @@ pub fn generate_tangents(mesh: &MeshBuffers) -> Vec<[f32; 4]> {
     let mut tan1 = vec![[0.0f32; 3]; n_verts];
     let mut tan2 = vec![[0.0f32; 3]; n_verts];
 
-    if mesh.uvs.len() != n_verts || mesh.indices.len() % 3 != 0 {
+    if mesh.uvs.len() != n_verts || !mesh.indices.len().is_multiple_of(3) {
         // No UVs or invalid indices: return default X tangents with w=1
         return vec![[1.0, 0.0, 0.0, 1.0]; n_verts];
     }

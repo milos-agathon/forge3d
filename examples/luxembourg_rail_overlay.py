@@ -37,6 +37,7 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import List, Tuple
@@ -109,27 +110,23 @@ except ImportError:
 
 
 def generate_dem_mask(dem_path: Path, output_path: Path) -> bool:
-    """Generate a transparency mask from the DEM nodata values."""
+    """Generate a transparency mask from the DEM nodata values.
+
+    Uses white RGB so that multiply-blend mode preserves terrain colours
+    (white * albedo = albedo).  Alpha encodes valid-data (255) vs nodata (0).
+    """
     if not HAS_RASTERIO:
         print("Error: rasterio is required to generate DEM mask")
         return False
-        
+
     try:
         with rasterio.open(dem_path) as src:
-            # Read the mask (255=valid, 0=nodata)
-            mask = src.read_masks(1)
-            
-            # Create an RGBA image
-            # RGB doesn't matter since we'll set opacity to 0, but black is safe
-            # Alpha is the mask itself
+            mask = src.read_masks(1)  # 255=valid, 0=nodata
+
             h, w = mask.shape
-            
-            # Create RGBA buffer: R=0, G=0, B=0, A=mask
-            # We can stack them
-            zeros = np.zeros_like(mask)
-            rgba = np.dstack((zeros, zeros, zeros, mask))
-            
-            # Save as PNG
+            ones = np.full_like(mask, 255)
+            rgba = np.dstack((ones, ones, ones, mask))  # white + alpha
+
             img = Image.fromarray(rgba, 'RGBA')
             img.save(output_path)
             return True
@@ -211,9 +208,10 @@ def load_gpkg_lines(gpkg_path: Path, dem_path: Path, color: List[float], line_wi
                         print(f"  DEM bounds (EPSG:3035): X=[{dem_min_x:.1f}, {dem_max_x:.1f}], Y=[{dem_min_y:.1f}, {dem_max_y:.1f}]")
                     except Exception as e:
                         print(f"  Warning: Could not reproject DEM bounds: {e}")
-                        # Fall back to using GeoPackage bounds
-                        total_bounds = gdf.total_bounds
-                        dem_min_x, dem_min_y, dem_max_x, dem_max_y = total_bounds
+                        # Use DEM bounds directly (better than GPKG bounds even without reprojection)
+                        dem_min_x, dem_min_y = dem_bounds.left, dem_bounds.bottom
+                        dem_max_x, dem_max_y = dem_bounds.right, dem_bounds.top
+                        print(f"  Using DEM native bounds as fallback")
                 else:
                     # If no pyproj, use DEM bounds directly (assumes same CRS)
                     dem_min_x, dem_min_y = dem_bounds.left, dem_bounds.bottom
@@ -221,14 +219,15 @@ def load_gpkg_lines(gpkg_path: Path, dem_path: Path, color: List[float], line_wi
                     print(f"  Warning: pyproj not available, using DEM bounds directly")
         except Exception as e:
             print(f"  Warning: Could not read DEM: {e}")
-            # Fall back to GeoPackage bounds
+            # Last resort: use GeoPackage bounds (rail will span full terrain)
             total_bounds = gdf.total_bounds
             dem_min_x, dem_min_y, dem_max_x, dem_max_y = total_bounds
+            print(f"  WARNING: Using GPKG bounds - rail positioning may be inaccurate")
     else:
         print(f"  Using default terrain_width={terrain_width} (rasterio not available or DEM not found)")
-        # Fall back to GeoPackage bounds
         total_bounds = gdf.total_bounds
         dem_min_x, dem_min_y, dem_max_x, dem_max_y = total_bounds
+        print(f"  WARNING: Using GPKG bounds - rail positioning may be inaccurate")
     
     # Also print GeoPackage bounds for reference
     gpkg_bounds = gdf.total_bounds
@@ -510,22 +509,40 @@ def load_gpkg_lines_sqlite(gpkg_path: Path, dem_path: Path, color: List[float], 
     
     if not raw_lines:
         return [], []
-        
-    # Compute bounds and normalize
+
+    # Compute data bounds for reference
     all_x = [p[0] for l in raw_lines for p in l]
     all_y = [p[1] for l in raw_lines for p in l]
-    min_x, max_x = min(all_x), max(all_x)
-    min_y, max_y = min(all_y), max(all_y)
-    
-    print(f"  Native Bounds: X[{min_x:.1f}, {max_x:.1f}], Y[{min_y:.1f}, {max_y:.1f}]")
-    
+    data_min_x, data_max_x = min(all_x), max(all_x)
+    data_min_y, data_max_y = min(all_y), max(all_y)
+    print(f"  Native Bounds: X[{data_min_x:.1f}, {data_max_x:.1f}], Y[{data_min_y:.1f}, {data_max_y:.1f}]")
+
+    # Use DEM bounds for normalization (NOT data bounds) so rails align with terrain
+    norm_min_x, norm_max_x = data_min_x, data_max_x
+    norm_min_y, norm_max_y = data_min_y, data_max_y
+
+    if HAS_RASTERIO and dem_path.exists():
+        try:
+            with rasterio.open(dem_path) as dem:
+                dem_bounds = dem.bounds
+                dem_crs = dem.crs
+                # Use DEM bounds directly if they are in the same CRS as the data
+                # (native GPKG CRS, since we didn't reproject here)
+                norm_min_x = dem_bounds.left
+                norm_max_x = dem_bounds.right
+                norm_min_y = dem_bounds.bottom
+                norm_max_y = dem_bounds.top
+                print(f"  Using DEM bounds for normalization: X[{norm_min_x:.1f}, {norm_max_x:.1f}], Y[{norm_min_y:.1f}, {norm_max_y:.1f}]")
+        except Exception as e:
+            print(f"  Warning: Could not read DEM bounds: {e}, using data bounds")
+
     # Generate quads
     vertices = []
     indices = []
-    
+
     for pts in raw_lines:
         _add_linestring_as_quads(pts, color, vertices, indices, 0,
-                      min_x, max_x, min_y, max_y, 
+                      norm_min_x, norm_max_x, norm_min_y, norm_max_y,
                       terrain_width, line_width)
     return vertices, indices
 
@@ -905,7 +922,17 @@ def main() -> int:
         print("Timeout waiting for viewer to start")
         proc.terminate()
         return 1
-    
+
+    # Drain viewer stdout in background to prevent pipe buffer deadlock
+    def _drain_stdout():
+        try:
+            for line in proc.stdout:
+                print(f"  {line.rstrip()}")
+        except Exception:
+            pass
+
+    threading.Thread(target=_drain_stdout, daemon=True).start()
+
     # Connect to IPC
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect(("127.0.0.1", port))
@@ -1249,17 +1276,18 @@ def main() -> int:
                 
                 if generate_dem_mask(args.dem, mask_path):
                     print(f"Loading mask overlay: {mask_path}")
-                    # Load the mask as a raster overlay
                     resp = send_ipc(sock, {
                         "cmd": "load_overlay",
                         "name": "mask",
-                        "path": str(mask_path.absolute())
+                        "path": str(mask_path.absolute()),
                     })
-                    
+
                     if resp.get("ok"):
-                        # Set opacity to 0 so we don't see the black color, just use alpha for masking
-                        send_ipc(sock, {"cmd": "set_overlay_opacity", "opacity": 0.0})
-                        # Enable non-solid mode (discard fragments with 0 alpha in overlay)
+                        # Set global overlay opacity to 0 so the mask doesn't
+                        # blend its colour into the terrain.  The shader's
+                        # solid=false check uses overlay alpha directly
+                        # (independent of opacity) to discard nodata fragments.
+                        send_ipc(sock, {"cmd": "set_global_overlay_opacity", "opacity": 0.0})
                         send_ipc(sock, {"cmd": "set_overlay_solid", "solid": False})
                         print("Mask loaded successfully. Terrain outside Luxembourg will be hidden.")
                     else:
