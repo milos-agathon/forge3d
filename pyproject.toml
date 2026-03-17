@@ -104,6 +104,19 @@ module-name = "forge3d._forge3d"
 cargo-extra-args = "--profile release-lto"
 # Generate abi3 wheels for Python 3.10+ compatibility
 features = ["extension-module", "weighted-oit", "enable-tbn", "copc_laz"]
+exclude = [
+    "_build/**",
+    "assets/**",
+    "dist*/**",
+    "docs/**",
+    "logs/**",
+    "output/**",
+    "python/forge3d/*.pdb",
+    "python/forge3d/*.pyd",
+    "python/forge3d/*.so",
+    "target*/**",
+    "triangle.png",
+]
 
 # Note: Cargo profiles are defined in Cargo.toml
 

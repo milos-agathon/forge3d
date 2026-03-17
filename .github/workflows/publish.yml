@@ -196,6 +196,7 @@ jobs:
       id-token: write
     environment:
       name: pypi
+      url: https://pypi.org/project/forge3d/
 
     steps:
       - uses: actions/checkout@v4
@@ -227,3 +228,5 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
