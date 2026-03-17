@@ -1,11 +1,13 @@
 import importlib.util
 import itertools
 from pathlib import Path
+import re
 
 from packaging.tags import sys_tags
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "install_compatible_wheel.py"
+PYPROJECT_PATH = Path(__file__).resolve().parents[1] / "pyproject.toml"
 
 
 def _load_script_module():
@@ -16,8 +18,15 @@ def _load_script_module():
     return module
 
 
+def _package_version() -> str:
+    text = PYPROJECT_PATH.read_text(encoding="utf-8")
+    match = re.search(r'^version\s*=\s*"(.+?)"', text, re.MULTILINE)
+    assert match, "No version entry found in pyproject.toml"
+    return match.group(1)
+
+
 def _wheel_name(tag) -> str:
-    return f"forge3d-1.12.2-{tag.interpreter}-{tag.abi}-{tag.platform}.whl"
+    return f"forge3d-{_package_version()}-{tag.interpreter}-{tag.abi}-{tag.platform}.whl"
 
 
 def _unsupported_platform_tag():
@@ -35,7 +44,7 @@ def test_wheel_score_rejects_unsupported_platform():
 
     supported_path = Path(_wheel_name(tags[0]))
     unsupported_path = Path(
-        f"forge3d-1.12.2-{tags[0].interpreter}-{tags[0].abi}-{_unsupported_platform_tag()}.whl"
+        f"forge3d-{_package_version()}-{tags[0].interpreter}-{tags[0].abi}-{_unsupported_platform_tag()}.whl"
     )
 
     ranks = module._supported_tag_ranks()
@@ -63,7 +72,7 @@ def test_main_installs_best_matching_wheel(tmp_path, monkeypatch):
     best = tmp_path / _wheel_name(tags[0])
     fallback = tmp_path / _wheel_name(tags[-1])
     wrong_platform = tmp_path / (
-        f"forge3d-1.12.2-{tags[0].interpreter}-{tags[0].abi}-{_unsupported_platform_tag()}.whl"
+        f"forge3d-{_package_version()}-{tags[0].interpreter}-{tags[0].abi}-{_unsupported_platform_tag()}.whl"
     )
     for wheel in (best, fallback, wrong_platform):
         wheel.touch()

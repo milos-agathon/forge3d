@@ -1,5 +1,6 @@
 """Smoke tests for package installation metadata and public API."""
 
+from importlib.metadata import metadata
 from pathlib import Path
 import re
 import sys
@@ -83,3 +84,15 @@ def test_legacy_render_api_removed():
 
     for name in ("render_raster", "render_polygons", "render_raytrace_mesh"):
         assert not hasattr(forge3d, name), f"Legacy API should be removed: {name}"
+
+
+def test_installed_project_urls_match_public_metadata():
+    """Installed metadata should point at the live repository and docs."""
+
+    meta = metadata("forge3d")
+    project_urls = meta.get_all("Project-URL") or meta.get_all("Project-Url") or []
+    assert "Homepage, https://forge3d.dev" in project_urls
+    assert "Documentation, https://docs.forge3d.dev" in project_urls
+    assert "Repository, https://github.com/milos-agathon/forge3d" in project_urls
+    assert "Bug Tracker, https://github.com/milos-agathon/forge3d/issues" in project_urls
+    assert all("github.com/forge3d/forge3d" not in value for value in project_urls)

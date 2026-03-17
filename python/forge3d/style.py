@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ._license import requires_pro
+from ._license import _check_pro_access
 
 
 @dataclass
@@ -147,7 +147,6 @@ class StyleSpec:
         return [l for l in self.layers if l.source_layer == source_layer]
 
 
-@requires_pro(feature="Mapbox style loading")
 def load_style(path: Path | str) -> StyleSpec:
     """[Pro] Load a Mapbox GL Style Spec JSON file.
 
@@ -162,6 +161,7 @@ def load_style(path: Path | str) -> StyleSpec:
         FileNotFoundError: If file does not exist.
         json.JSONDecodeError: If JSON is invalid.
     """
+    _check_pro_access("Mapbox style loading")
     path = Path(path)
     with open(path) as f:
         data = json.load(f)
@@ -533,7 +533,6 @@ def layer_to_label_style(layer: StyleLayer) -> LabelStyle:
     return layout_to_label_style(layer.layout, layer.paint)
 
 
-@requires_pro(feature="Mapbox style application")
 def apply_style(
     spec: StyleSpec,
     features: list[dict],
@@ -551,6 +550,7 @@ def apply_style(
     Returns:
         List of (feature, VectorStyle) tuples for features that match.
     """
+    _check_pro_access("Mapbox style application")
     result = []
 
     # Get applicable layers

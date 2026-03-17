@@ -20,6 +20,10 @@ def _ensure_python_path():
     pkg_dir = repo / "python"
     if str(pkg_dir) not in sys.path:
         sys.path.insert(0, str(pkg_dir))
+    # Also make test helpers (e.g. _license_test_keys) importable.
+    tests_dir = repo / "tests"
+    if str(tests_dir) not in sys.path:
+        sys.path.insert(0, str(tests_dir))
 
 
 def _install_maturin():
@@ -54,10 +58,11 @@ def _license_api():
 @pytest.fixture
 def pro_license():
     """Enable a deterministic test license for Pro-gated APIs."""
+    from _license_test_keys import sign_test_key
 
     _reset_license_state, set_license_key = _license_api()
     _reset_license_state()
-    set_license_key("F3D-PRO-20991231-test-signature")
+    set_license_key(sign_test_key("PRO", "20991231"))
     try:
         yield
     finally:
@@ -164,6 +169,11 @@ def pytest_sessionfinish(session, exitstatus):
 
 def pytest_sessionstart(session):
     del session
+
+    # Always make test helpers importable, even in no-bootstrap mode.
+    tests_dir = _repo_root() / "tests"
+    if str(tests_dir) not in sys.path:
+        sys.path.insert(0, str(tests_dir))
 
     if os.environ.get("FORGE3D_NO_BOOTSTRAP") == "1":
         return
