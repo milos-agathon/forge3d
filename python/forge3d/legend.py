@@ -10,6 +10,24 @@ from typing import Literal
 import numpy as np
 
 
+def _linear_to_srgb(rgb: np.ndarray) -> np.ndarray:
+    """Convert linear RGB values in [0, 1] to display sRGB."""
+    return np.where(
+        rgb <= 0.0031308,
+        rgb * 12.92,
+        1.055 * np.power(rgb, 1.0 / 2.4) - 0.055,
+    )
+
+
+def _rgba_linear_to_display_u8(rgba: np.ndarray) -> np.ndarray:
+    """Convert a linear RGBA color to uint8 display space."""
+    color = np.clip(np.asarray(rgba, dtype=np.float32), 0.0, 1.0)
+    out = np.empty(4, dtype=np.uint8)
+    out[:3] = np.round(_linear_to_srgb(color[:3]) * 255.0).astype(np.uint8)
+    out[3] = np.uint8(round(float(color[3]) * 255.0))
+    return out
+
+
 @dataclass
 class LegendConfig:
     """Configuration for legend rendering."""
@@ -76,7 +94,7 @@ class Legend:
                 t = 1.0 - (y / (cfg.bar_height - 1))
                 idx = int(t * (n_colors - 1))
                 idx = max(0, min(n_colors - 1, idx))
-                color = (cmap[idx] * 255).astype(np.uint8)
+                color = _rgba_linear_to_display_u8(cmap[idx])
                 bar[y, :] = color
         else:
             bar = np.zeros((cfg.bar_width, cfg.bar_height, 4), dtype=np.uint8)
@@ -84,7 +102,7 @@ class Legend:
                 t = x / (cfg.bar_height - 1)
                 idx = int(t * (n_colors - 1))
                 idx = max(0, min(n_colors - 1, idx))
-                color = (cmap[idx] * 255).astype(np.uint8)
+                color = _rgba_linear_to_display_u8(cmap[idx])
                 bar[:, x] = color
         return bar
 

@@ -150,7 +150,7 @@ html_favicon = 'assets/favicon.ico' if os.path.exists(_FAVICON) else None
 # HTML context
 html_context = {
     'display_github': True,
-    'github_user': 'forge3d',
+    'github_user': 'milos-agathon',
     'github_repo': 'forge3d',
     'github_version': 'main',
     'conf_py_path': '/docs/',

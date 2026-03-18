@@ -6,6 +6,8 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-03-17
+
 ### Changed
 - Removed the legacy `render_raster`, `render_polygons`, and `render_raytrace_mesh` Python API in favor of the viewer/IPC rendering path.
 - Raised the Python support floor to 3.10+ and aligned the Rust abi3 target with that floor (`abi3-py310`).

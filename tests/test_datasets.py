@@ -96,3 +96,10 @@ def test_fetch_kind_validation_rejects_wrong_registry_kind():
     """Kind-specific helpers should reject datasets from the wrong category."""
     with pytest.raises(ValueError, match="expected 'dem'"):
         datasets.fetch_dem("sample-buildings")
+
+
+def test_default_dataset_base_url_uses_live_repository_path():
+    """The fallback download base URL should use the live GitHub repository."""
+
+    assert "milos-agathon/forge3d" in datasets._DEFAULT_DATASET_BASE_URL
+    assert "github.com/forge3d/forge3d" not in datasets._DEFAULT_DATASET_BASE_URL

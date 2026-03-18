@@ -206,6 +206,19 @@ class TestLegendGeneration:
         img = legend.render()
         assert img.shape[1] >= 100
 
+    def test_legend_gradient_converts_linear_rgb_to_display_srgb(self):
+        linear_gray = np.tile(np.array([[0.25, 0.25, 0.25, 1.0]], dtype=np.float32), (2, 1))
+        legend = Legend(
+            linear_gray,
+            domain=(0, 1),
+            config=LegendConfig(bar_height=4, bar_width=1),
+        )
+        bar = legend._render_gradient_bar()
+        assert int(bar[0, 0, 0]) == 137
+        assert int(bar[0, 0, 1]) == 137
+        assert int(bar[0, 0, 2]) == 137
+        assert int(bar[0, 0, 3]) == 255
+
 
 class TestScaleBarConfig:
     def test_default_config(self):

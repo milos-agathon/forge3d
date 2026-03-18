@@ -69,6 +69,22 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_set_point_cloud_camera_params() {
+        let json = r#"{"cmd":"set_point_cloud_params","phi":0.6,"theta":0.5,"radius":1.4}"#;
+        let req = parse_ipc_request(json).unwrap();
+        match req {
+            IpcRequest::SetPointCloudParams {
+                phi, theta, radius, ..
+            } => {
+                assert_eq!(phi, Some(0.6));
+                assert_eq!(theta, Some(0.5));
+                assert_eq!(radius, Some(1.4));
+            }
+            _ => panic!("Expected SetPointCloudParams"),
+        }
+    }
+
+    #[test]
     fn test_response_serialization() {
         let resp = IpcResponse::success();
         let json = serde_json::to_string(&resp).unwrap();

@@ -78,6 +78,9 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             point_size,
             visible,
             color_mode,
+            phi,
+            theta,
+            radius,
         } => {
             if let Some(ref mut point_cloud) = viewer.point_cloud {
                 if let Some(size) = point_size {
@@ -90,9 +93,23 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                     use crate::viewer::pointcloud::ColorMode;
                     point_cloud.color_mode = ColorMode::from_str(mode);
                 }
+                if let Some(v) = phi {
+                    point_cloud.cam_phi = *v;
+                }
+                if let Some(v) = theta {
+                    point_cloud.cam_theta = v.clamp(0.1, 1.5);
+                }
+                if let Some(v) = radius {
+                    point_cloud.cam_radius = v.clamp(0.1, 100.0);
+                }
                 println!(
-                    "[pointcloud] Params updated: size={}, visible={}, mode={:?}",
-                    point_cloud.point_size, point_cloud.visible, point_cloud.color_mode
+                    "[pointcloud] Params updated: size={}, visible={}, mode={:?}, phi={:.3}, theta={:.3}, radius={:.3}",
+                    point_cloud.point_size,
+                    point_cloud.visible,
+                    point_cloud.color_mode,
+                    point_cloud.cam_phi,
+                    point_cloud.cam_theta,
+                    point_cloud.cam_radius,
                 );
             }
             true

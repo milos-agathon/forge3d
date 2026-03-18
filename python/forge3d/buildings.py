@@ -24,7 +24,7 @@ from typing import Any
 
 import numpy as np
 
-from ._license import requires_pro
+from ._license import _check_pro_access
 
 # Try to import native module
 try:
@@ -259,7 +259,6 @@ def material_from_name(name: str) -> BuildingMaterial:
 # GeoJSON Loading
 # ============================================================================
 
-@requires_pro(feature="GeoJSON building import")
 def add_buildings(
     geojson_path: str | Path,
     *,
@@ -283,6 +282,7 @@ def add_buildings(
         layer = add_buildings("buildings.geojson", default_height=12.0)
         print(f"Loaded {layer.building_count} buildings")
     """
+    _check_pro_access("GeoJSON building import")
     path = Path(geojson_path)
     if not path.exists():
         raise FileNotFoundError(f"GeoJSON file not found: {path}")
@@ -368,7 +368,6 @@ def add_buildings(
 # CityJSON Loading
 # ============================================================================
 
-@requires_pro(feature="CityJSON building import")
 def add_buildings_cityjson(
     cityjson_path: str | Path,
     *,
@@ -391,6 +390,7 @@ def add_buildings_cityjson(
         layer = add_buildings_cityjson("3dbag_tile.json")
         print(f"Loaded {layer.building_count} buildings at LOD {layer.max_lod}")
     """
+    _check_pro_access("CityJSON building import")
     path = Path(cityjson_path)
     if not path.exists():
         raise FileNotFoundError(f"CityJSON file not found: {path}")
@@ -511,7 +511,6 @@ def add_buildings_cityjson(
 # 3D Tiles Loading
 # ============================================================================
 
-@requires_pro(feature="3D Tiles building import")
 def add_buildings_3dtiles(
     tileset_path: str | Path,
     *,
@@ -534,6 +533,7 @@ def add_buildings_3dtiles(
         layer = add_buildings_3dtiles("path/to/tileset.json")
         print(f"Tileset bounds: {layer.bounds()}")
     """
+    _check_pro_access("3D Tiles building import")
     path = Path(tileset_path)
     if not path.exists():
         raise FileNotFoundError(f"Tileset not found: {path}")

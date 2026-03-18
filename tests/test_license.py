@@ -13,6 +13,8 @@ from forge3d._license import (
     requires_pro,
     set_license_key,
 )
+from forge3d._native import NATIVE_AVAILABLE, get_native_module
+from _license_test_keys import sign_test_key
 
 
 @pytest.fixture(autouse=True)
@@ -52,24 +54,68 @@ def test_set_license_key_rejects_invalid_format():
         set_license_key("not-a-license")
 
 
+def test_forged_signature_rejected():
+    """A key with a plausible but invalid signature is rejected."""
+
+    fake_sig = "aa" * 64  # 64 bytes of 0xaa — not a valid Ed25519 signature
+    with pytest.raises(LicenseError, match="signature verification failed"):
+        set_license_key(f"F3D-PRO-forge3d-ci-20991231-{fake_sig}")
+
+
+def test_tampered_expiry_rejected():
+    """Changing the expiry after signing invalidates the key."""
+
+    key = sign_test_key("PRO", "20991231")
+    # Tamper with the expiry: 20991231 -> 20991230
+    tampered = key.replace("20991231", "20991230")
+    with pytest.raises(LicenseError, match="signature verification failed"):
+        set_license_key(tampered)
+
+
+def test_enterprise_tier_accepted():
+    """ENTERPRISE tier keys are accepted."""
+
+    key = sign_test_key("ENTERPRISE", "20991231")
+    set_license_key(key)
+    state = _get_license_state()
+    assert state["valid"] is True
+    assert state["tier"] == "enterprise"
+
+
 def test_set_license_key_accepts_well_formed_key():
     """A well-formed key populates cached tier and expiry."""
 
-    set_license_key("F3D-PRO-20991231-test-signature")
+    key = sign_test_key("PRO", "20991231")
+    set_license_key(key)
     state = _get_license_state()
     assert state["valid"] is True
     assert state["tier"] == "pro"
+    assert state["customer_id"] == "forge3d-ci"
     assert state["expiry"] == dt.date(2099, 12, 31)
 
 
 def test_license_key_can_load_from_environment(monkeypatch):
     """The first Pro check can load a key from FORGE3D_LICENSE_KEY."""
 
-    monkeypatch.setenv("FORGE3D_LICENSE_KEY", "F3D-PRO-20991231-env-signature")
+    env_key = sign_test_key("PRO", "20991231")
+    monkeypatch.setenv("FORGE3D_LICENSE_KEY", env_key)
     _reset_license_state(allow_env_reload=True)
     state = _get_license_state()
     assert state["valid"] is True
-    assert state["key"] == "F3D-PRO-20991231-env-signature"
+    assert state["key"] == env_key
+    assert state["customer_id"] == "forge3d-ci"
+
+
+def test_native_license_verifier_exports_when_extension_present():
+    """Fresh native builds expose the verifier and public-key helpers."""
+
+    if not NATIVE_AVAILABLE:
+        pytest.skip("native extension not available")
+
+    native = get_native_module()
+    assert native is not None
+    assert hasattr(native, "verify_license_signature")
+    assert hasattr(native, "license_public_key_hex")
 
 
 def test_requires_pro_blocks_without_key():
@@ -125,7 +171,8 @@ def test_requires_pro_warns_during_grace():
     """Calls still work during grace but emit a renewal warning."""
 
     expired_recently = (dt.date.today() - dt.timedelta(days=3)).strftime("%Y%m%d")
-    set_license_key(f"F3D-PRO-{expired_recently}-grace-signature")
+    key = sign_test_key("PRO", expired_recently)
+    set_license_key(key)
 
     @requires_pro(feature="Map plate composition")
     def guarded() -> str:

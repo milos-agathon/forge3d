@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ._license import requires_pro
+from ._license import _check_pro_access
 
 # Bundle format version
 BUNDLE_VERSION = 1
@@ -167,7 +167,6 @@ def _compute_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-@requires_pro(feature="Scene bundle save")
 def save_bundle(
     path: str | Path,
     *,
@@ -200,6 +199,7 @@ def save_bundle(
     Returns:
         Path to created bundle directory
     """
+    _check_pro_access("Scene bundle save")
     bundle_path = Path(path)
     if not bundle_path.suffix:
         bundle_path = bundle_path.with_suffix(f".{BUNDLE_EXTENSION}")
@@ -286,7 +286,6 @@ class LoadedBundle:
     hdr_path: Path | None = None
 
 
-@requires_pro(feature="Scene bundle load")
 def load_bundle(path: str | Path, verify_checksums: bool = True) -> LoadedBundle:
     """[Pro] Load a scene bundle from disk.
     
@@ -300,6 +299,7 @@ def load_bundle(path: str | Path, verify_checksums: bool = True) -> LoadedBundle
     Raises:
         ValueError: If bundle is invalid or checksums don't match
     """
+    _check_pro_access("Scene bundle load")
     bundle_path = Path(path)
     manifest_path = bundle_path / "manifest.json"
     

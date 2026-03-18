@@ -146,16 +146,16 @@ fn get_material(h_norm: f32, slope: f32) -> vec4<f32> {
     
     // Imhof palette: green valleys -> brown slopes -> white peaks
     if h_norm < 0.3 {
-        // Green valleys
-        albedo = mix(vec3<f32>(0.15, 0.55, 0.12), vec3<f32>(0.35, 0.65, 0.18), h_norm / 0.3);
+        // Darker foothill greens with less pastel bias
+        albedo = mix(vec3<f32>(0.16, 0.42, 0.14), vec3<f32>(0.32, 0.56, 0.21), h_norm / 0.3);
         roughness = 0.8;
     } else if h_norm < 0.7 {
-        // Brown slopes
-        albedo = mix(vec3<f32>(0.35, 0.65, 0.18), vec3<f32>(0.55, 0.38, 0.2), (h_norm - 0.3) / 0.4);
+        // Warmer, earthier midslopes
+        albedo = mix(vec3<f32>(0.32, 0.56, 0.21), vec3<f32>(0.50, 0.39, 0.24), (h_norm - 0.3) / 0.4);
         roughness = 0.7;
     } else {
-        // White peaks
-        albedo = mix(vec3<f32>(0.55, 0.38, 0.2), vec3<f32>(0.95, 0.95, 0.95), (h_norm - 0.7) / 0.3);
+        // Snow/high rock without clipping to pure white
+        albedo = mix(vec3<f32>(0.50, 0.39, 0.24), vec3<f32>(0.88, 0.88, 0.84), (h_norm - 0.7) / 0.3);
         roughness = 0.4;
     }
     
@@ -605,7 +605,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let combined_shadow = shadow * sun_vis;
     let shadow_term = mix(1.0, combined_shadow, shadow_strength);
     // Soften shadow color: shadowed areas get a cool blue tint instead of pure black
-    let shadow_tint = mix(vec3<f32>(0.65, 0.72, 0.85), vec3<f32>(1.0), shadow_term);
+    let shadow_tint = mix(vec3<f32>(0.42, 0.47, 0.56), vec3<f32>(1.0), shadow_term);
 
     // View direction
     let view_dir = normalize(u.camera_pos.xyz - in.world_pos);
@@ -630,16 +630,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // === FILL LIGHT (simulates bounce/GI from opposite side of sun) ===
     let fill_dir = normalize(vec3<f32>(-sun_dir.x, 0.35, -sun_dir.z));
     let fill_ndotl = max(dot(normal, fill_dir), 0.0);
-    let fill_color = vec3<f32>(0.30, 0.35, 0.50); // Cool blue-ish bounce
-    let fill_light = albedo * fill_color * fill_ndotl * 0.18 * sun_intensity;
+    let fill_color = vec3<f32>(0.22, 0.26, 0.34); // Subtle cool bounce
+    let fill_light = albedo * fill_color * fill_ndotl * 0.08 * sun_intensity;
 
     // === GROUND BOUNCE (warm light from below) ===
     let bounce_ndotl = max(dot(normal, vec3<f32>(0.0, -1.0, 0.0)), 0.0);
-    let bounce_color = vec3<f32>(0.25, 0.20, 0.14); // Warm earth tone
-    let ground_bounce = albedo * bounce_color * bounce_ndotl * 0.10;
+    let bounce_color = vec3<f32>(0.18, 0.14, 0.10); // Warm earth tone
+    let ground_bounce = albedo * bounce_color * bounce_ndotl * 0.05;
 
     // === HEMISPHERE AMBIENT (sky + ground, modulated by AO) ===
-    let ambient_hemi = sky_ambient(normal) * albedo * ambient_strength * ibl_intensity * height_ao;
+    let ambient_hemi = sky_ambient(normal) * albedo * ambient_strength * ibl_intensity * height_ao * 0.75;
 
     // === FRESNEL RIM LIGHT (depth cue at grazing angles) ===
     let n_dot_v = max(dot(normal, view_dir), 0.0);
@@ -656,12 +656,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
               + rim_light;
 
     // === ATMOSPHERIC PERSPECTIVE (depth-based haze) ===
-    let atmo_scale = 0.25 / max(terrain_width, 1.0);
+    let atmo_scale = 0.12 / max(terrain_width, 1.0);
     let view_dist = length(u.camera_pos.xyz - in.world_pos);
     let atmo_factor = 1.0 - exp(-view_dist * atmo_scale);
     let atmo_color = mix(
-        vec3<f32>(0.62, 0.70, 0.82),  // Haze near color
-        vec3<f32>(0.72, 0.78, 0.88),  // Haze far color
+        vec3<f32>(0.55, 0.62, 0.72),  // Haze near color
+        vec3<f32>(0.64, 0.70, 0.79),  // Haze far color
         clamp(atmo_factor, 0.0, 1.0)
     );
 
@@ -673,7 +673,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     color = pow(color, vec3<f32>(1.0 / 2.2));
 
     // Apply atmospheric haze AFTER tonemapping (in display space)
-    color = mix(color, atmo_color, clamp(atmo_factor * 0.30, 0.0, 0.35));
+    color = mix(color, atmo_color, clamp(atmo_factor * 0.16, 0.0, 0.20));
 
     // Apply vignette (lens effect)
     let vignette_strength = u.lens_params.x;

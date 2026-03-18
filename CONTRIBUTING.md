@@ -3,7 +3,7 @@
 ## Development Setup
 
 1. Install Rust from <https://rustup.rs>.
-2. Clone the repo: `git clone https://github.com/forge3d/forge3d`
+2. Clone the repo: `git clone https://github.com/milos-agathon/forge3d`
 3. Create a Python environment for Python 3.10+.
 4. Install build tooling: `python -m pip install -U pip maturin pytest`
 5. Build the extension in development mode: `maturin develop`

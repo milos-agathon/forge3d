@@ -72,7 +72,14 @@ pub enum IpcRequest {
     SetGlobalVectorOverlayOpacity { opacity: f32 },
     LoadPointCloud { path: String, #[serde(default = "default_point_size")] point_size: f32, #[serde(default = "default_max_points")] max_points: u64, #[serde(default)] color_mode: Option<String> },
     ClearPointCloud,
-    SetPointCloudParams { #[serde(default)] point_size: Option<f32>, #[serde(default)] visible: Option<bool>, #[serde(default)] color_mode: Option<String> },
+    SetPointCloudParams {
+        #[serde(default)] point_size: Option<f32>,
+        #[serde(default)] visible: Option<bool>,
+        #[serde(default)] color_mode: Option<String>,
+        #[serde(default)] phi: Option<f32>,
+        #[serde(default)] theta: Option<f32>,
+        #[serde(default)] radius: Option<f32>,
+    },
     AddLabel {
         text: String, world_pos: [f32; 3], #[serde(default)] size: Option<f32>, #[serde(default)] color: Option<[f32; 4]>, #[serde(default)] halo_color: Option<[f32; 4]>,
         #[serde(default)] halo_width: Option<f32>, #[serde(default)] priority: Option<i32>, #[serde(default)] min_zoom: Option<f32>, #[serde(default)] max_zoom: Option<f32>,

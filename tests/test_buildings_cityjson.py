@@ -298,5 +298,19 @@ def test_cityjson_transform_application():
         cityjson_path.unlink()
 
 
+def test_sample_cityjson_dataset_contains_renderable_geometry():
+    """The bundled sample CityJSON asset should parse into real building meshes."""
+    import forge3d as f3d
+
+    layer = f3d.add_buildings_cityjson(f3d.fetch_cityjson("sample-buildings"))
+
+    assert layer.source_format == "cityjson"
+    assert layer.building_count == 5
+    assert layer.total_vertices > 0
+    assert layer.total_triangles > 0
+    assert all(building.positions.size > 0 for building in layer.buildings)
+    assert all(building.indices.size > 0 for building in layer.buildings)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

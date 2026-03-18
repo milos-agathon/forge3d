@@ -27,7 +27,7 @@ __all__ = [
 _DATA_DIR = Path(__file__).resolve().parent / "data"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_CACHE_DIR = Path.home() / ".forge3d" / "datasets"
-_DEFAULT_DATASET_BASE_URL = "https://raw.githubusercontent.com/forge3d/forge3d/main/assets/"
+_DEFAULT_DATASET_BASE_URL = "https://raw.githubusercontent.com/milos-agathon/forge3d/main/assets/"
 
 
 @dataclass(frozen=True)
@@ -113,7 +113,7 @@ _REMOTE_DATASETS: Dict[str, _RemoteDataset] = {
         filename="sample_buildings.city.json",
         description="Small CityJSON building set for tutorial and test scenes.",
         relative_url="geojson/sample_buildings.city.json",
-        known_hash="sha256:ac7e90c90d11bd83259e1af41228447dba9afd3b2fde49e319ef286e960e71c9",
+        known_hash="sha256:378a25afdd4932de4038b310216078181fb7eb9b19bb0f658045893371ba91c7",
         local_path="assets/geojson/sample_buildings.city.json",
     ),
     "mount-fuji-buildings": _RemoteDataset(

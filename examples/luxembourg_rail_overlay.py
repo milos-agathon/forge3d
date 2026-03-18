@@ -127,7 +127,7 @@ def generate_dem_mask(dem_path: Path, output_path: Path) -> bool:
             ones = np.full_like(mask, 255)
             rgba = np.dstack((ones, ones, ones, mask))  # white + alpha
 
-            img = Image.fromarray(rgba, 'RGBA')
+            img = Image.fromarray(rgba)
             img.save(output_path)
             return True
     except Exception as e:
@@ -694,7 +694,7 @@ def main() -> int:
     rail_group.add_argument("--overlay-opacity", type=float, default=1.0,
                             help="Rail overlay opacity 0.0-1.0 (default: 1.0)")
     rail_group.add_argument("--no-solid", action="store_true",
-                            help="Hide terrain where raster overlay alpha=0 (NOTE: only works with raster overlays like swiss_terrain_landcover_viewer.py; for vector overlays, terrain always remains visible)")
+                            help="Hide terrain where the DEM has nodata by generating a temporary alpha mask overlay")
     rail_group.add_argument("--drape", action="store_true", default=True, help="Drape lines onto terrain")
     rail_group.add_argument("--no-drape", action="store_false", dest="drape", help="Don't drape lines")
     rail_group.add_argument("--drape-offset", type=float, default=50.0, help="Height above terrain (default: 50)")
@@ -1266,10 +1266,8 @@ def main() -> int:
         else:
             print(f"Vector overlay added successfully (opacity={args.overlay_opacity})")
             
-            # Handle --no-solid: note that this only works with RASTER overlays
-            # For vector overlays (triangle geometry), the terrain shader always renders
-            # the full DEM surface. The set_overlay_solid IPC command is sent but will
-            # only have effect when a raster overlay (load_overlay) is also present.
+            # Handle --no-solid by generating a temporary raster alpha mask from the
+            # DEM nodata region, then using the existing overlay solid=false path.
             if args.no_solid:
                 print("Generating DEM mask for --no-solid mode...")
                 mask_path = args.dem.parent / "luxembourg_mask.png"
