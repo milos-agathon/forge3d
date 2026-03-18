@@ -243,6 +243,7 @@ __pycache__/
 *.hdr
 
 # Whitelist doc/gallery images that must be in the repo
+!docs/assets/highres.png
 !docs/gallery/images/*.png
 !docs/gallery/images/*.jpg
 !docs/gallery/thumbs/*.png

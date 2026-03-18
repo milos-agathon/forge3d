@@ -8,9 +8,11 @@ import urllib.error
 import urllib.request
 
 
+DOCS_URL = "https://milos-agathon.github.io/forge3d/"
+
 TARGETS = [
     ("homepage", "https://forge3d.dev"),
-    ("docs", "https://milos-agathon.github.io/forge3d/"),
+    ("docs", DOCS_URL),
     ("pro", "https://forge3d.dev/pro"),
     ("pypi", "https://pypi.org/project/forge3d/"),
     (
