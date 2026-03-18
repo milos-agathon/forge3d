@@ -34,7 +34,7 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://forge3d.dev"
+Homepage = "https://github.com/milos-agathon/forge3d"
 Repository = "https://github.com/milos-agathon/forge3d"
 Documentation = "https://milos-agathon.github.io/forge3d/"
 "Bug Tracker" = "https://github.com/milos-agathon/forge3d/issues"

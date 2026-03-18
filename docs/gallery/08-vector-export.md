@@ -1,7 +1,7 @@
 # Vector Export
 
 > **Pro Feature:** SVG and PDF export require a
-> [Pro license](https://forge3d.dev/pro).
+> commercial license. See https://github.com/milos-agathon/forge3d#license
 
 ![Vector export preview](images/08-vector-export.png)
 

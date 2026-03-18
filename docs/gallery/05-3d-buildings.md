@@ -1,7 +1,7 @@
 # 3D Buildings
 
 > **Pro Feature:** The buildings import pipeline in this recipe requires a
-> [Pro license](https://forge3d.dev/pro).
+> commercial license. See https://github.com/milos-agathon/forge3d#license
 
 ![3D buildings preview](images/05-3d-buildings.png)
 

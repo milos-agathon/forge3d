@@ -35,7 +35,7 @@ def test_license_error_message_has_help_text():
     message = str(err)
     assert "PDF export requires a Pro license." in message
     assert "forge3d.set_license_key" in message
-    assert "https://forge3d.dev/pro" in message
+    assert "https://github.com/milos-agathon/forge3d#license" in message
 
 
 def test_set_license_key_clears_state():

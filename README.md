@@ -92,7 +92,7 @@ Professional cartography and production workflows:
 - **3D buildings** — GeoJSON, CityJSON, and 3D Tiles import with roof inference and PBR materials
 - **Mapbox Style Spec** — load and apply Mapbox-compatible styles
 - **Scene bundles** — save and share complete `.forge3d` scene packages
-- **[Get a Pro key &rarr;](https://forge3d.dev/pro)**
+- **Commercial licensing details &rarr;** https://github.com/milos-agathon/forge3d#license
 
 ## Tutorials
 
@@ -119,4 +119,4 @@ widget.snapshot()  # renders inline
 
 ## License
 
-Open-source core released under Apache-2.0 OR MIT. Pro features require a [commercial license](https://forge3d.dev/pro) key set with `forge3d.set_license_key(...)`.
+Open-source core released under Apache-2.0 OR MIT. Pro features require a commercial license key set with `forge3d.set_license_key(...)`. Licensing details live at https://github.com/milos-agathon/forge3d#license

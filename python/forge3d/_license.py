@@ -13,7 +13,7 @@ from typing import Any, ParamSpec, TypeVar, cast, overload
 _log = logging.getLogger(__name__)
 
 _GRACE_PERIOD_DAYS = 14
-_PRO_URL = "https://forge3d.dev/pro"
+_PRO_URL = "https://github.com/milos-agathon/forge3d#license"
 _KEY_FORMAT_HELP = "F3D-TIER-CUSTOMER-YYYYMMDD-signature"
 
 # Ed25519 public key for license signature verification.

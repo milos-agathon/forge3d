@@ -9,11 +9,13 @@ import urllib.request
 
 
 DOCS_URL = "https://milos-agathon.github.io/forge3d/"
+REPO_URL = "https://github.com/milos-agathon/forge3d"
+LICENSE_INFO_URL = f"{REPO_URL}#license"
 
 TARGETS = [
-    ("homepage", "https://forge3d.dev"),
+    ("homepage", REPO_URL),
     ("docs", DOCS_URL),
-    ("pro", "https://forge3d.dev/pro"),
+    ("license", LICENSE_INFO_URL),
     ("pypi", "https://pypi.org/project/forge3d/"),
     (
         "datasets",

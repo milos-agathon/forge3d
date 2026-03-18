@@ -1,7 +1,7 @@
 # Map Plate
 
 > **Pro Feature:** Map plate composition requires a
-> [Pro license](https://forge3d.dev/pro).
+> commercial license. See https://github.com/milos-agathon/forge3d#license
 
 ![Map plate preview](images/10-map-plate.png)
 

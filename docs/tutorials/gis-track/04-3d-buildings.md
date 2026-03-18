@@ -1,7 +1,7 @@
 # 3D Buildings
 
 > **Pro Feature:** This tutorial uses features that require a
-> [Pro license](https://forge3d.dev/pro). You can read and learn from the code,
+> commercial license. See https://github.com/milos-agathon/forge3d#license. You can read and learn from the code,
 > but the highlighted functions will raise `LicenseError` without a valid key.
 
 The buildings module sits between GIS assets and the viewer. It parses common
