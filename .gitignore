@@ -248,6 +248,8 @@ __pycache__/
 !docs/gallery/images/*.jpg
 !docs/gallery/thumbs/*.png
 !docs/gallery/thumbs/*.jpg
+!docs/tutorials/images/*.png
+!docs/tutorials/images/*.jpg
 /out/
 /diag_out/
 /artifacts/

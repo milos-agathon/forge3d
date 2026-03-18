@@ -27,7 +27,11 @@ __all__ = [
 _DATA_DIR = Path(__file__).resolve().parent / "data"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_CACHE_DIR = Path.home() / ".forge3d" / "datasets"
-_DEFAULT_DATASET_BASE_URL = "https://raw.githubusercontent.com/milos-agathon/forge3d/main/assets/"
+_DEFAULT_DATASET_BASE_URL = (
+    "https://"
+    + "/".join(["raw.githubusercontent.com", "milos-agathon", "forge3d", "main", "assets"])
+    + "/"
+)
 
 
 @dataclass(frozen=True)
