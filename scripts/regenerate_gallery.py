@@ -247,10 +247,68 @@ def render_cityjson_building_preview(
     *,
     width: int = 1600,
     height: int = 912,
+    focus_subset: bool = True,
+    zoom: float = 1.0,
 ) -> None:
     """Render a deterministic axonometric preview from CityJSON triangles."""
     if layer.building_count == 0 or layer.total_triangles == 0:
         raise RuntimeError("CityJSON layer did not produce any renderable building geometry")
+
+    ui_scale = max(width, height) / 1600.0
+
+    source_buildings = []
+    for building in layer.buildings:
+        positions = np.asarray(building.positions, dtype=np.float32).reshape(-1, 3)
+        indices = np.asarray(building.indices, dtype=np.uint32).reshape(-1, 3)
+        if len(positions) == 0 or len(indices) == 0:
+            continue
+
+        height_span = float(positions[:, 2].max() - positions[:, 2].min())
+        if height_span <= 1.0:
+            continue
+
+        mins = positions.min(axis=0)
+        maxs = positions.max(axis=0)
+        footprint_span = maxs[:2] - mins[:2]
+        footprint_area = float(max(footprint_span[0], 1.0) * max(footprint_span[1], 1.0))
+        source_buildings.append(
+            {
+                "building": building,
+                "positions": positions,
+                "indices": indices,
+                "center_xy": positions[:, :2].mean(axis=0),
+                "footprint_span": footprint_span,
+                "footprint_area": footprint_area,
+                "height_span": height_span,
+            }
+        )
+
+    if not source_buildings:
+        raise RuntimeError("CityJSON layer buildings did not contain any volumetric geometry")
+
+    if focus_subset and len(source_buildings) > 80:
+        anchor_index = max(
+            range(len(source_buildings)),
+            key=lambda i: source_buildings[i]["footprint_area"] * max(source_buildings[i]["height_span"], 6.0),
+        )
+        anchor_center = np.asarray(source_buildings[anchor_index]["center_xy"], dtype=np.float32)
+        anchor_span = np.asarray(source_buildings[anchor_index]["footprint_span"], dtype=np.float32)
+        focus_radius = float(np.clip(max(anchor_span) * 1.35, 90.0, 180.0))
+
+        distances = [
+            (
+                float(np.linalg.norm(np.asarray(item["center_xy"], dtype=np.float32) - anchor_center)),
+                item,
+            )
+            for item in source_buildings
+        ]
+        distances.sort(key=lambda entry: entry[0])
+        selected = [item for distance, item in distances if distance <= focus_radius]
+        if len(selected) < 8:
+            selected = [item for _, item in distances[:8]]
+        elif len(selected) > 24:
+            selected = selected[:24]
+        source_buildings = selected
 
     building_records: list[dict[str, np.ndarray | tuple[int, int, int, int]]] = []
     geo_points: list[np.ndarray] = []
@@ -265,12 +323,10 @@ def render_cityjson_building_preview(
         dtype=np.float32,
     ) / 255.0
 
-    for index, building in enumerate(layer.buildings):
-        positions = np.asarray(building.positions, dtype=np.float32).reshape(-1, 3)
-        indices = np.asarray(building.indices, dtype=np.uint32).reshape(-1, 3)
-        if len(positions) == 0 or len(indices) == 0:
-            continue
-
+    for index, item in enumerate(source_buildings):
+        building = item["building"]
+        positions = np.asarray(item["positions"], dtype=np.float32)
+        indices = np.asarray(item["indices"], dtype=np.uint32)
         geo_points.append(positions)
         base = np.array(building.material.albedo, dtype=np.float32)
         accent = accent_palette[index % len(accent_palette)]
@@ -321,8 +377,8 @@ def render_cityjson_building_preview(
     all_local = np.vstack([np.asarray(record["positions_local"], dtype=np.float32) for record in building_records])
     min_x, max_x = float(all_local[:, 0].min()), float(all_local[:, 0].max())
     min_z, max_z = float(all_local[:, 2].min()), float(all_local[:, 2].max())
-    pad_x = max((max_x - min_x) * 0.42, 70.0)
-    pad_z = max((max_z - min_z) * 0.46, 70.0)
+    pad_x = max((max_x - min_x) * 0.24, 40.0)
+    pad_z = max((max_z - min_z) * 0.28, 40.0)
 
     ground = np.array(
         [
@@ -334,8 +390,8 @@ def render_cityjson_building_preview(
         dtype=np.float32,
     )
 
-    yaw = np.radians(-38.0)
-    pitch = np.radians(24.0)
+    yaw = np.radians(-45.0)
+    pitch = np.radians(46.0)
     rot_y = np.array(
         [
             [np.cos(yaw), 0.0, np.sin(yaw)],
@@ -376,9 +432,10 @@ def render_cityjson_building_preview(
 
     span_x = max(float(fit_x.max() - fit_x.min()), 1.0)
     span_y = max(float(fit_y.max() - fit_y.min()), 1.0)
-    margin_x = width * 0.12
-    margin_y = height * 0.13
+    margin_x = width * 0.08
+    margin_y = height * 0.10
     scale = min((width - 2 * margin_x) / span_x, (height - 2 * margin_y) / span_y)
+    scale *= zoom
     center_x = width * 0.5
     center_y = height * 0.58
     proj_center_x = float((fit_x.min() + fit_x.max()) * 0.5)
@@ -394,52 +451,24 @@ def render_cityjson_building_preview(
             ]
         )
 
-    canvas = Image.new("RGBA", (width, height), (245, 238, 227, 255))
+    canvas = Image.new("RGBA", (width, height), (255, 255, 255, 255))
     draw = ImageDraw.Draw(canvas, "RGBA")
 
-    for row in range(height):
-        t = row / max(height - 1, 1)
-        top = np.array([225, 218, 205], dtype=np.float32)
-        bottom = np.array([246, 241, 233], dtype=np.float32)
-        color = tuple(int(channel) for channel in (top * (1.0 - t) + bottom * t))
-        draw.line((0, row, width, row), fill=(*color, 255))
-
-    sky_overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    sky_draw = ImageDraw.Draw(sky_overlay, "RGBA")
-    sky_draw.ellipse(
-        (
-            width * 0.54,
-            height * 0.05,
-            width * 1.06,
-            height * 0.74,
-        ),
-        fill=(255, 228, 186, 96),
-    )
-    sky_draw.ellipse(
-        (
-            -width * 0.12,
-            -height * 0.08,
-            width * 0.52,
-            height * 0.52,
-        ),
-        fill=(196, 213, 224, 74),
-    )
-    canvas.alpha_composite(sky_overlay)
-
     ground_poly = [tuple(pt[:2]) for pt in project(ground)]
-    draw.polygon(ground_poly, fill=(216, 201, 183, 255), outline=(156, 141, 123, 220))
+    draw.polygon(ground_poly, fill=(199, 206, 198, 255), outline=(124, 132, 123, 230))
 
-    guide_color = (175, 161, 142, 96)
+    guide_color = (131, 139, 129, 82)
+    guide_width = max(1, int(round(ui_scale)))
     for t in np.linspace(0.15, 0.85, 5):
         start = ground[0] * (1.0 - t) + ground[3] * t
         end = ground[1] * (1.0 - t) + ground[2] * t
         line_pts = [tuple(pt[:2]) for pt in project(np.vstack([start, end]))]
-        draw.line(line_pts, fill=guide_color, width=1)
+        draw.line(line_pts, fill=guide_color, width=guide_width)
     for t in np.linspace(0.16, 0.84, 5):
         start = ground[0] * (1.0 - t) + ground[1] * t
         end = ground[3] * (1.0 - t) + ground[2] * t
         line_pts = [tuple(pt[:2]) for pt in project(np.vstack([start, end]))]
-        draw.line(line_pts, fill=guide_color, width=1)
+        draw.line(line_pts, fill=guide_color, width=guide_width)
 
     pedestal = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     pedestal_draw = ImageDraw.Draw(pedestal, "RGBA")
@@ -450,51 +479,54 @@ def render_cityjson_building_preview(
             width * 0.84,
             height * 0.94,
         ),
-        fill=(90, 72, 54, 24),
+        fill=(86, 84, 76, 28),
     )
-    canvas.alpha_composite(pedestal.filter(ImageFilter.GaussianBlur(radius=32)))
+    canvas.alpha_composite(
+        pedestal.filter(ImageFilter.GaussianBlur(radius=max(20, int(round(20 * ui_scale)))))
+    )
 
     shadow_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     shadow_draw = ImageDraw.Draw(shadow_layer, "RGBA")
-    triangle_draw_list: list[tuple[float, list[tuple[float, float]], tuple[int, int, int, int], tuple[int, int, int, int]]] = []
+    triangle_draw_list: list[tuple[float, list[tuple[float, float]], tuple[int, int, int, int]]] = []
 
     for record in building_records:
         positions = np.asarray(record["positions_local"], dtype=np.float32)
         for tri_indices in np.asarray(record["indices"], dtype=np.uint32):
             triangle = positions[tri_indices]
             shadow_poly = [tuple(pt[:2]) for pt in project(shadow_on_ground(triangle))]
-            shadow_draw.polygon(shadow_poly, fill=(44, 33, 21, 34))
+            shadow_draw.polygon(shadow_poly, fill=(48, 42, 34, 34))
 
             edge_a = triangle[1] - triangle[0]
             edge_b = triangle[2] - triangle[0]
             normal = normalize(np.cross(edge_a, edge_b))
-            brightness = float(np.clip(0.62 + np.dot(normal, light) * 0.28, 0.42, 1.0))
             is_roof = abs(float(normal[1])) > 0.72
             base_rgba = np.array(record["roof_rgba"] if is_roof else record["wall_rgba"], dtype=np.float32)
             if is_roof:
-                brightness = min(1.0, brightness + 0.08)
+                brightness = 0.92
+            else:
+                brightness = float(np.clip(0.62 + np.dot(normal, light) * 0.24, 0.48, 0.92))
             shaded_rgb = np.clip(
                 base_rgba[:3] * brightness + np.array([8.0, 6.0, 4.0], dtype=np.float32),
                 0.0,
                 255.0,
             )
             fill = tuple(int(channel) for channel in (*shaded_rgb, 255))
-            outline = tuple(int(channel) for channel in np.clip(shaded_rgb * 0.74, 0.0, 255.0)) + (255,)
             projected = project(triangle)
             triangle_draw_list.append(
                 (
                     float(projected[:, 2].mean()),
                     [tuple(pt[:2]) for pt in projected],
                     fill,
-                    outline,
                 )
             )
 
-    shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(radius=18))
+    shadow_layer = shadow_layer.filter(
+        ImageFilter.GaussianBlur(radius=max(10, int(round(10 * ui_scale))))
+    )
     canvas.alpha_composite(shadow_layer)
 
-    for _, polygon, fill, outline in sorted(triangle_draw_list, key=lambda item: item[0]):
-        draw.polygon(polygon, fill=fill, outline=outline)
+    for _, polygon, fill in sorted(triangle_draw_list, key=lambda item: item[0]):
+        draw.polygon(polygon, fill=fill)
 
     out_path.unlink(missing_ok=True)
     canvas.save(out_path, optimize=True)
@@ -520,16 +552,16 @@ def compose_titled(
     """
     base = Image.open(base_path).convert("RGBA")
     img_h = height - bar_height
-    base = base.resize((width, img_h), Image.LANCZOS)
+    if base.size != (width, img_h):
+        base = base.resize((width, img_h), Image.LANCZOS)
 
     canvas = Image.new("RGBA", (width, height), bg)
     draw = ImageDraw.Draw(canvas)
 
     # Title bar
-    title_font = font(16, bold=True)
-    sub_font = font(14)
+    title_font = font(max(16, int(round(bar_height * 0.42))), bold=True)
     label = f"{title} \u00b7 {subtitle}"
-    draw.text((14, bar_height // 2), label, font=title_font,
+    draw.text((max(14, int(round(bar_height * 0.35))), bar_height // 2), label, font=title_font,
               fill=(230, 232, 236, 255), anchor="lm")
 
     # Paste terrain render below title bar
@@ -680,9 +712,28 @@ def render_05_buildings() -> None:
     print("[gallery] 05 3D Buildings")
     tmp = WORK_DIR / "05-base.png"
     out = IMAGES_DIR / "05-3d-buildings.png"
+    canvas_size = 3840
+    bar_height = 96
+    scene_height = canvas_size - bar_height
     layer = f3d.add_buildings_cityjson(REPO_ROOT / "assets" / "geojson" / "10-270-592.city.json")
-    render_cityjson_building_preview(layer, tmp, width=1600, height=912)
-    compose_titled(tmp, out, "3D Buildings", "10-270-592.city.json")
+    render_cityjson_building_preview(
+        layer,
+        tmp,
+        width=canvas_size,
+        height=scene_height,
+        focus_subset=False,
+        zoom=1.18,
+    )
+    compose_titled(
+        tmp,
+        out,
+        "3D Buildings",
+        "10-270-592.city.json",
+        width=canvas_size,
+        height=canvas_size,
+        bar_height=bar_height,
+        bg=(22, 24, 27, 255),
+    )
 
 
 def render_06_point_cloud() -> None:

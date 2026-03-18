@@ -325,6 +325,8 @@ diag_out/
 # R9 audit: ensure docs and pytest artifacts ignored
 docs/_build/
 .pytest_cache/
+.pytest-temp-root/
+.pytest-tmp/
 
 # Large data files
 landuse/landuse/glad_cropland_2019.tif

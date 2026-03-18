@@ -8,7 +8,7 @@ license = "Apache-2.0 OR MIT"
 readme = "README.md"
 repository = "https://github.com/milos-agathon/forge3d"
 homepage = "https://forge3d.dev"
-documentation = "https://docs.forge3d.dev"
+documentation = "https://milos-agathon.github.io/forge3d/"
 
 [lib]
 name = "forge3d"

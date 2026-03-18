@@ -1,10 +1,4 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo/forge3d_dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo/forge3d_light.svg">
-    <img alt="forge3d" src="docs/assets/logo/forge3d_dark.svg" width="320">
-  </picture>
-</p>
+# forge3d
 
 <p align="center">
   <strong>GPU-accelerated 3D terrain rendering for Python.</strong><br>
@@ -15,13 +9,13 @@
   <a href="https://pypi.org/project/forge3d/"><img src="https://img.shields.io/pypi/v/forge3d?color=EFA026&style=flat-square" alt="PyPI"></a>
   <a href="https://pypi.org/project/forge3d/"><img src="https://img.shields.io/pypi/pyversions/forge3d?color=D0C8BA&style=flat-square" alt="Python 3.10+"></a>
   <a href="https://github.com/milos-agathon/forge3d/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0%20%2F%20MIT-blue?style=flat-square" alt="License"></a>
-  <a href="https://docs.forge3d.dev"><img src="https://img.shields.io/badge/docs-forge3d.dev-blue?style=flat-square" alt="Docs"></a>
+  <a href="https://milos-agathon.github.io/forge3d/"><img src="https://img.shields.io/badge/docs-GitHub%20Pages-blue?style=flat-square" alt="Docs"></a>
 </p>
 
 ---
 
 <p align="center">
-  <img src="assets/highres.png" alt="forge3d hero render" width="720">
+  <img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/assets/highres.png" alt="forge3d hero render" width="720">
 </p>
 
 **This image was generated with 5 lines of Python.** Load a DEM, launch the GPU viewer, position the camera, and capture a publication-quality snapshot. No shaders to write. No OpenGL boilerplate. Just `pip install forge3d`.
@@ -53,23 +47,23 @@ pip install "forge3d[all]"         # everything
 
 <table>
   <tr>
-    <td align="center"><img src="docs/gallery/images/01-mount-rainier.png" width="280"><br><sub>PBR terrain</sub></td>
-    <td align="center"><img src="docs/gallery/images/03-swiss-landcover.png" width="280"><br><sub>Landcover overlay</sub></td>
-    <td align="center"><img src="docs/gallery/images/06-point-cloud.png" width="280"><br><sub>LiDAR point cloud</sub></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/gallery/images/01-mount-rainier.png" width="280"><br><sub>PBR terrain</sub></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/gallery/images/03-swiss-landcover.png" width="280"><br><sub>Landcover overlay</sub></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/gallery/images/06-point-cloud.png" width="280"><br><sub>LiDAR point cloud</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/gallery/images/09-shadow-comparison.png" width="280"><br><sub>Sun & shadow control</sub></td>
-    <td align="center"><img src="docs/gallery/images/02-mount-fuji-labels.png" width="280"><br><sub>GeoPackage labels</sub></td>
-    <td align="center"><img src="docs/gallery/images/05-3d-buildings.png" width="280"><br><sub>CityJSON buildings</sub></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/gallery/images/09-shadow-comparison.png" width="280"><br><sub>Sun & shadow control</sub></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/gallery/images/02-mount-fuji-labels.png" width="280"><br><sub>GeoPackage labels</sub></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/gallery/images/05-3d-buildings.png" width="280"><br><sub>CityJSON buildings</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/gallery/images/04-luxembourg-rail-network.png" width="280"><br><sub>Vector overlays</sub></td>
-    <td align="center"><img src="docs/gallery/images/07-camera-flyover.png" width="280"><br><sub>Camera animation</sub></td>
-    <td align="center"><img src="docs/gallery/images/10-map-plate.png" width="280"><br><sub>Map plate compositor</sub></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/gallery/images/04-luxembourg-rail-network.png" width="280"><br><sub>Vector overlays</sub></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/gallery/images/07-camera-flyover.png" width="280"><br><sub>Camera animation</sub></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/gallery/images/10-map-plate.png" width="280"><br><sub>Map plate compositor</sub></td>
   </tr>
 </table>
 
-<p align="center"><a href="docs/gallery/index.md"><strong>See the full gallery &rarr;</strong></a></p>
+<p align="center"><a href="https://milos-agathon.github.io/forge3d/gallery/"><strong>See the full gallery &rarr;</strong></a></p>
 
 ## What You Get
 
@@ -102,9 +96,9 @@ Professional cartography and production workflows:
 
 Two tracks depending on your background:
 
-- **GIS professionals** — [Visualize your first DEM &rarr;](https://docs.forge3d.dev/tutorials/gis-track/)
-- **Python developers** — [Your first 3D terrain &rarr;](https://docs.forge3d.dev/tutorials/python-track/)
-- **Architecture overview** — [How forge3d works &rarr;](https://docs.forge3d.dev/architecture/)
+- **GIS professionals** — [Visualize your first DEM &rarr;](https://milos-agathon.github.io/forge3d/tutorials/gis-track/)
+- **Python developers** — [Your first 3D terrain &rarr;](https://milos-agathon.github.io/forge3d/tutorials/python-track/)
+- **Architecture overview** — [How forge3d works &rarr;](https://milos-agathon.github.io/forge3d/architecture.html)
 
 ## Jupyter
 
@@ -119,7 +113,7 @@ widget.snapshot()  # renders inline
 
 ## Links
 
-[Documentation](https://docs.forge3d.dev) &nbsp;&middot;&nbsp; [API Reference](https://docs.forge3d.dev/api/) &nbsp;&middot;&nbsp; [GitHub](https://github.com/milos-agathon/forge3d) &nbsp;&middot;&nbsp; [PyPI](https://pypi.org/project/forge3d/)
+[Documentation](https://milos-agathon.github.io/forge3d/) &nbsp;&middot;&nbsp; [API Reference](https://milos-agathon.github.io/forge3d/api/api_reference.html) &nbsp;&middot;&nbsp; [GitHub](https://github.com/milos-agathon/forge3d) &nbsp;&middot;&nbsp; [PyPI](https://pypi.org/project/forge3d/)
 
 ## License
 
