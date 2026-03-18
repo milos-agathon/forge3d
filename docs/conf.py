@@ -141,6 +141,12 @@ else:
 # HTML output options
 html_title = 'forge3d Documentation'
 html_short_title = 'forge3d'
+# Use a repo-hosted default so canonical links stay valid until a custom domain
+# is configured again; allow CI to override for forks or future domain moves.
+html_baseurl = os.environ.get(
+    'FORGE3D_DOCS_BASE_URL',
+    'https://milos-agathon.github.io/forge3d/',
+).rstrip('/') + '/'
 # Guard logo and favicon to avoid warnings when assets are missing.
 _LOGO = os.path.join(_HERE, 'assets', 'logo-forge3d.png')
 _FAVICON = os.path.join(_HERE, 'assets', 'favicon.ico')

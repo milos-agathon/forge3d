@@ -4,6 +4,7 @@ from importlib.metadata import metadata
 from pathlib import Path
 import re
 import sys
+import tomllib
 
 import pytest
 
@@ -91,8 +92,13 @@ def test_installed_project_urls_match_public_metadata():
 
     meta = metadata("forge3d")
     project_urls = meta.get_all("Project-URL") or meta.get_all("Project-Url") or []
-    assert "Homepage, https://forge3d.dev" in project_urls
-    assert "Documentation, https://docs.forge3d.dev" in project_urls
-    assert "Repository, https://github.com/milos-agathon/forge3d" in project_urls
-    assert "Bug Tracker, https://github.com/milos-agathon/forge3d/issues" in project_urls
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    if not pyproject.exists():
+        pytest.skip("pyproject.toml not available in this environment")
+
+    with pyproject.open("rb") as fh:
+        expected_urls = tomllib.load(fh)["project"]["urls"]
+
+    for label, url in expected_urls.items():
+        assert f"{label}, {url}" in project_urls
     assert all("github.com/forge3d/forge3d" not in value for value in project_urls)

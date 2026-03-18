@@ -10,7 +10,7 @@ import urllib.request
 
 TARGETS = [
     ("homepage", "https://forge3d.dev"),
-    ("docs", "https://docs.forge3d.dev"),
+    ("docs", "https://milos-agathon.github.io/forge3d/"),
     ("pro", "https://forge3d.dev/pro"),
     ("pypi", "https://pypi.org/project/forge3d/"),
     (
