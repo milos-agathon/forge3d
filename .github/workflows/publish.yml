@@ -19,7 +19,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   build-wheels:
@@ -197,6 +196,8 @@ jobs:
     environment:
       name: pypi
       url: https://pypi.org/project/forge3d/
+    env:
+      HAS_PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN != '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -224,9 +225,26 @@ jobs:
           name: sdist
           path: dist/
 
-      - name: Publish to PyPI
+      - name: Select publish auth mode
+        run: |
+          if [ "${HAS_PYPI_API_TOKEN}" = "true" ]; then
+            echo "Using PYPI_API_TOKEN for publish."
+          else
+            echo "No PYPI_API_TOKEN configured; falling back to PyPI trusted publishing."
+          fi
+
+      - name: Publish to PyPI with API token
+        if: env.HAS_PYPI_API_TOKEN == 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
           user: __token__
           password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
+
+      - name: Publish to PyPI with trusted publishing
+        if: env.HAS_PYPI_API_TOKEN != 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          skip-existing: true

@@ -16,6 +16,11 @@ from pathlib import Path
 pytest.importorskip("forge3d")
 
 REPO_ROOT = Path(__file__).parent.parent
+RENDER_LOOP_SOURCE_PATHS = (
+    "src/viewer/render/main_loop.rs",
+    "src/viewer/render/main_loop/geometry.rs",
+    "src/viewer/render/main_loop/geometry/pass.rs",
+)
 
 
 def read_existing_contents(*relative_paths: str) -> list[str]:
@@ -183,10 +188,7 @@ class TestJitterIntegration:
 
     def test_jitter_applied_in_main_loop(self):
         """Verify jitter is applied to projection in main render loop."""
-        contents = read_existing_contents(
-            "src/viewer/render/main_loop.rs",
-            "src/viewer/render/main_loop/geometry.rs",
-        )
+        contents = read_existing_contents(*RENDER_LOOP_SOURCE_PATHS)
         assert contents, "render main loop source files not found"
         assert any("apply_jitter" in content for content in contents), (
             "apply_jitter not called in render loop sources"
@@ -197,10 +199,7 @@ class TestJitterIntegration:
 
     def test_jitter_advances_each_frame(self):
         """Verify jitter advances to next sample each frame."""
-        contents = read_existing_contents(
-            "src/viewer/render/main_loop.rs",
-            "src/viewer/render/main_loop/geometry.rs",
-        )
+        contents = read_existing_contents(*RENDER_LOOP_SOURCE_PATHS)
         assert contents, "render main loop source files not found"
         assert any("taa_jitter.advance()" in content for content in contents), (
             "Jitter advance not called in render loop sources"
