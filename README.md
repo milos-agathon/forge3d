@@ -1,4 +1,6 @@
-# forge3d
+<p align="center">
+  <img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/assets/logo/forge3d_light.svg" alt="forge3d" width="320">
+</p>
 
 <p align="center">
   <strong>GPU-accelerated 3D terrain rendering for Python.</strong><br>
