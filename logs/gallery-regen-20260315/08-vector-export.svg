@@ -1,8 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720">
-  <polygon points="100.00,654.55 1100.00,654.55 900.00,196.36 200.00,65.45" fill="rgba(51,132,211,0.92)" stroke="#143056" stroke-width="3.00" stroke-linejoin="round"/>
-  <polygon points="280.00,536.73 580.00,576.00 720.00,445.09 450.00,314.18" fill="rgba(242,186,89,0.82)" stroke="#8c5414" stroke-width="2.00" stroke-linejoin="round"/>
-  <polyline points="150.00,589.09 500.00,425.45 1000.00,261.82" fill="none" stroke="#111419" stroke-width="4.00" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="650.00" y="314.18" font-family="sans-serif" font-size="20.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="none" stroke="rgba(255,255,255,0.80)" stroke-width="3.00" stroke-linejoin="round">Ridge</text>
-  <text x="650.00" y="314.18" font-family="sans-serif" font-size="20.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="#111419">Ridge</text>
+  <polygon points="50.00,650.60 220.00,676.63 420.00,633.25 440.00,485.78 230.00,425.06 90.00,494.46" fill="rgba(198,219,173,0.96)" stroke="#567547" stroke-width="2.00" stroke-linejoin="round"/>
+  <polygon points="180.00,407.71 270.00,338.31 400.00,355.66 480.00,277.59 420.00,182.17 260.00,208.19" fill="rgba(91,170,219,0.94)" stroke="#1c4468" stroke-width="2.00" stroke-linejoin="round"/>
+  <polygon points="460.00,624.58 670.00,563.86 650.00,355.66 410.00,381.69" fill="rgba(239,209,140,0.90)" stroke="#916623" stroke-width="2.00" stroke-linejoin="round"/>
+  <polygon points="550.00,294.94 800.00,242.89 970.00,294.94 1110.00,190.84 1020.00,78.07 790.00,43.37 600.00,130.12" fill="rgba(183,147,109,0.90)" stroke="#563823" stroke-width="2.00" stroke-linejoin="round"/>
+  <polygon points="710.00,598.55 940.00,589.88 1150.00,641.93 1150.00,442.41 980.00,346.99 750.00,399.04" fill="rgba(170,209,153,0.92)" stroke="#4f7242" stroke-width="2.00" stroke-linejoin="round"/>
+  <polyline points="90.00,451.08 260.00,416.39 470.00,320.96 640.00,260.24 880.00,216.87 1120.00,164.82" fill="none" stroke="#1e5199" stroke-width="5.00" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="110.00,598.55 320.00,529.16 530.00,468.43 780.00,494.46 1060.00,520.48" fill="none" stroke="#262323" stroke-width="6.00" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="490.00,208.19 620.00,156.14 730.00,138.80 870.00,104.10 1030.00,138.80" fill="none" stroke="rgba(140,102,51,0.90)" stroke-width="3.00" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="670.00" y="268.92" font-family="sans-serif" font-size="18.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="none" stroke="rgba(255,255,255,0.80)" stroke-width="3.00" stroke-linejoin="round">River</text>
+  <text x="670.00" y="268.92" font-family="sans-serif" font-size="18.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="#142d4c">River</text>
+  <text x="860.00" y="494.46" font-family="sans-serif" font-size="18.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="none" stroke="rgba(255,255,255,0.80)" stroke-width="3.00" stroke-linejoin="round">Road</text>
+  <text x="860.00" y="494.46" font-family="sans-serif" font-size="18.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="#111419">Road</text>
+  <text x="240.00" y="529.16" font-family="sans-serif" font-size="18.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="none" stroke="rgba(255,255,255,0.80)" stroke-width="3.00" stroke-linejoin="round">Valley</text>
+  <text x="240.00" y="529.16" font-family="sans-serif" font-size="18.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="#334228">Valley</text>
+  <text x="870.00" y="130.12" font-family="sans-serif" font-size="18.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="none" stroke="rgba(255,255,255,0.80)" stroke-width="3.00" stroke-linejoin="round">Peak</text>
+  <text x="870.00" y="130.12" font-family="sans-serif" font-size="18.00" font-weight="normal" text-anchor="middle" dominant-baseline="middle" fill="#30231e">Peak</text>
 </svg>

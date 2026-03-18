@@ -95,10 +95,16 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             point_size,
             visible,
             color_mode,
+            phi,
+            theta,
+            radius,
         } => Some(ViewerCmd::SetPointCloudParams {
             point_size: *point_size,
             visible: *visible,
             color_mode: color_mode.clone(),
+            phi: *phi,
+            theta: *theta,
+            radius: *radius,
         }),
         _ => None,
     }

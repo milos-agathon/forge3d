@@ -97,7 +97,14 @@ pub enum ViewerCmd {
 
     LoadPointCloud { path: String, point_size: f32, max_points: u64, color_mode: Option<String> },
     ClearPointCloud,
-    SetPointCloudParams { point_size: Option<f32>, visible: Option<bool>, color_mode: Option<String> },
+    SetPointCloudParams {
+        point_size: Option<f32>,
+        visible: Option<bool>,
+        color_mode: Option<String>,
+        phi: Option<f32>,
+        theta: Option<f32>,
+        radius: Option<f32>,
+    },
     AddLabel {
         text: String, world_pos: [f32; 3], size: Option<f32>, color: Option<[f32; 4]>,
         halo_color: Option<[f32; 4]>, halo_width: Option<f32>, priority: Option<i32>,

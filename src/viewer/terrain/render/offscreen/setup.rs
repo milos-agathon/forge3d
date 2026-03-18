@@ -72,23 +72,55 @@ impl ViewerTerrainScene {
             }
         }
 
-        let use_pbr = self.pbr_config.enabled && self.pbr_pipeline.is_some();
-        let terrain = self.terrain.as_ref().unwrap();
+        if self.pbr_config.enabled
+            && (self.pbr_config.height_ao.enabled || self.pbr_config.sun_visibility.enabled)
+        {
+            if let Err(e) = self.init_heightfield_compute_pipelines() {
+                eprintln!(
+                    "[snapshot] Failed to initialize heightfield compute pipelines: {}",
+                    e
+                );
+            }
+        }
 
-        let phi = terrain.cam_phi_deg.to_radians();
-        let theta = terrain.cam_theta_deg.to_radians();
-        let r = terrain.cam_radius;
-        let (tw, th) = terrain.dimensions;
+        let use_pbr = self.pbr_config.enabled && self.pbr_pipeline.is_some();
+        let (
+            phi,
+            theta,
+            r,
+            tw,
+            th,
+            terrain_z_scale,
+            domain,
+            fov_deg,
+            sun_azimuth_deg,
+            sun_elevation_deg,
+        ) = {
+            let terrain = self.terrain.as_ref().unwrap();
+            (
+                terrain.cam_phi_deg.to_radians(),
+                terrain.cam_theta_deg.to_radians(),
+                terrain.cam_radius,
+                terrain.dimensions.0,
+                terrain.dimensions.1,
+                terrain.z_scale,
+                terrain.domain,
+                terrain.cam_fov_deg,
+                terrain.sun_azimuth_deg,
+                terrain.sun_elevation_deg,
+            )
+        };
+
         let terrain_width = tw.max(th) as f32;
-        let h_range = terrain.domain.1 - terrain.domain.0;
-        let legacy_z_scale = terrain.z_scale * h_range * 1000.0 / terrain_width.max(1.0);
+        let h_range = domain.1 - domain.0;
+        let legacy_z_scale = terrain_z_scale * h_range * 1000.0 / terrain_width.max(1.0);
         let shader_z_scale = if use_pbr {
-            terrain.z_scale
+            terrain_z_scale
         } else {
             legacy_z_scale
         };
         let center_y = if use_pbr {
-            h_range * terrain.z_scale * 0.5
+            h_range * terrain_z_scale * 0.5
         } else {
             terrain_width * legacy_z_scale * 0.001 * 0.5
         };
@@ -101,7 +133,7 @@ impl ViewerTerrainScene {
         );
         let view_mat = glam::Mat4::look_at_rh(eye, center, glam::Vec3::Y);
         let proj_base = glam::Mat4::perspective_rh(
-            terrain.cam_fov_deg.to_radians(),
+            fov_deg.to_radians(),
             width as f32 / height as f32,
             1.0,
             r * 10.0,
@@ -119,8 +151,8 @@ impl ViewerTerrainScene {
         };
         let view_proj = proj * view_mat;
 
-        let sun_az = terrain.sun_azimuth_deg.to_radians();
-        let sun_el = terrain.sun_elevation_deg.to_radians();
+        let sun_az = sun_azimuth_deg.to_radians();
+        let sun_el = sun_elevation_deg.to_radians();
         let sun_dir = glam::Vec3::new(
             sun_el.cos() * sun_az.sin(),
             sun_el.sin(),
@@ -128,12 +160,26 @@ impl ViewerTerrainScene {
         )
         .normalize();
 
+        if use_pbr && self.shadow_pipeline.is_none() {
+            self.init_shadow_depth_pipeline();
+            self.update_shadow_bind_groups();
+        }
+        if use_pbr && self.shadow_pipeline.is_some() {
+            self.render_shadow_passes(encoder, view_mat, proj, -sun_dir);
+        } else if use_pbr {
+            eprintln!(
+                "[snapshot] Skipping shadow passes: pipeline={}",
+                self.shadow_pipeline.is_some()
+            );
+        }
+
+        let terrain = self.terrain.as_ref().unwrap();
         let uniforms = TerrainUniforms {
             view_proj: view_proj.to_cols_array_2d(),
             sun_dir: [sun_dir.x, sun_dir.y, sun_dir.z, 0.0],
             terrain_params: [
-                terrain.domain.0,
-                terrain.domain.1 - terrain.domain.0,
+                domain.0,
+                h_range,
                 terrain_width,
                 shader_z_scale,
             ],
@@ -170,8 +216,8 @@ impl ViewerTerrainScene {
 
         let pbr_uniforms_data = if use_pbr {
             Some((
-                terrain.domain,
-                terrain.z_scale,
+                domain,
+                terrain_z_scale,
                 terrain.sun_intensity,
                 terrain.ambient,
                 terrain.shadow_intensity,

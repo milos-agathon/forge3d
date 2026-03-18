@@ -18,16 +18,22 @@ import time
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYTHON_DIR = REPO_ROOT / "python"
+TESTS_DIR = REPO_ROOT / "tests"
 if str(PYTHON_DIR) not in sys.path:
     sys.path.insert(0, str(PYTHON_DIR))
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
 
 os.environ.setdefault("FORGE3D_REPO_ROOT", str(REPO_ROOT))
-os.environ.setdefault("FORGE3D_LICENSE_KEY", "F3D-PRO-20991231-test-signature")
+
+from _license_test_keys import sign_test_key
+
+os.environ.setdefault("FORGE3D_LICENSE_KEY", sign_test_key("PRO", "20991231"))
 
 import forge3d as f3d
 from forge3d._license import set_license_key
@@ -71,6 +77,29 @@ def rgba(color: tuple[float, float, float, float]) -> tuple[int, int, int, int]:
     return tuple(int(max(0.0, min(1.0, c)) * 255) for c in color)
 
 
+def build_natural_relief_colormap(domain: tuple[float, float]):
+    """Build the earth-tone relief ramp used by the map plate legend."""
+    from forge3d.colormaps.core import from_stops
+
+    vmin, vmax = map(float, domain)
+    span = max(vmax - vmin, 1.0)
+    anchor_colors = [
+        (0.00, "#427038"),
+        (0.08, "#548a45"),
+        (0.18, "#73994c"),
+        (0.30, "#8c944f"),
+        (0.42, "#9e854c"),
+        (0.55, "#947047"),
+        (0.68, "#856652"),
+        (0.80, "#99918a"),
+        (0.90, "#c7c1bc"),
+        (1.00, "#f2f2f5"),
+    ]
+    stops = [(vmin + t * span, color) for t, color in anchor_colors]
+    normalized_stops = [((value - vmin) / span, color) for value, color in stops]
+    return from_stops("forge3d:natural_relief", normalized_stops, n=256)
+
+
 def wait_for_file(path: Path, timeout_s: float = 120.0) -> None:
     deadline = time.time() + timeout_s
     last_size = -1
@@ -105,7 +134,7 @@ def run_example(name: str, args: list[str], output_path: Path) -> None:
     env = os.environ.copy()
     env["FORGE3D_REPO_ROOT"] = str(REPO_ROOT)
     env["FORGE3D_LICENSE_KEY"] = env.get(
-        "FORGE3D_LICENSE_KEY", "F3D-PRO-20991231-test-signature"
+        "FORGE3D_LICENSE_KEY", sign_test_key("PRO", "20991231")
     )
     env["PYTHONPATH"] = str(PYTHON_DIR)
 
@@ -121,6 +150,64 @@ def run_example(name: str, args: list[str], output_path: Path) -> None:
         print(f"  [{name}] subprocess timed out (180 s) -- checking file ...")
 
     wait_for_file(output_path)
+    print(f"  [{name}] done -> {output_path.name}")
+
+
+def run_example_interactive(
+    name: str,
+    args: list[str],
+    commands: list[str],
+    output_path: Path,
+) -> None:
+    """Run an interactive example, feed scripted stdin commands, wait for
+    *output_path*, then close the viewer.
+    """
+    print(f"  [{name}] running ...")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.unlink(missing_ok=True)
+
+    env = os.environ.copy()
+    env["FORGE3D_REPO_ROOT"] = str(REPO_ROOT)
+    env["FORGE3D_LICENSE_KEY"] = env.get(
+        "FORGE3D_LICENSE_KEY", sign_test_key("PRO", "20991231")
+    )
+    env["PYTHONPATH"] = str(PYTHON_DIR)
+
+    process = subprocess.Popen(
+        [sys.executable] + args,
+        cwd=REPO_ROOT,
+        env=env,
+        stdin=subprocess.PIPE,
+        text=True,
+    )
+
+    try:
+        if process.stdin is None:
+            raise RuntimeError("Failed to open stdin for interactive example")
+
+        for command in commands:
+            process.stdin.write(command + "\n")
+            process.stdin.flush()
+            time.sleep(0.3)
+
+        wait_for_file(output_path)
+
+        process.stdin.write("quit\n")
+        process.stdin.flush()
+        process.stdin.close()
+
+        try:
+            process.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            print(f"  [{name}] interactive subprocess hung on shutdown -- terminating ...")
+            process.kill()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+    except BrokenPipeError:
+        print(f"  [{name}] interactive subprocess exited early -- checking file ...")
+
     print(f"  [{name}] done -> {output_path.name}")
 
 
@@ -144,6 +231,273 @@ def draw_halo_text(
                 (x + dx, y + dy), text, font=label_font, fill=halo, anchor=anchor
             )
     draw.text((x, y), text, font=label_font, fill=fill, anchor=anchor)
+
+
+def normalize(vec: np.ndarray) -> np.ndarray:
+    """Return a normalized 3-vector, preserving zeros."""
+    length = float(np.linalg.norm(vec))
+    if length <= 1e-8:
+        return vec
+    return vec / length
+
+
+def render_cityjson_building_preview(
+    layer,
+    out_path: Path,
+    *,
+    width: int = 1600,
+    height: int = 912,
+) -> None:
+    """Render a deterministic axonometric preview from CityJSON triangles."""
+    if layer.building_count == 0 or layer.total_triangles == 0:
+        raise RuntimeError("CityJSON layer did not produce any renderable building geometry")
+
+    building_records: list[dict[str, np.ndarray | tuple[int, int, int, int]]] = []
+    geo_points: list[np.ndarray] = []
+    accent_palette = np.array(
+        [
+            (190, 136, 105),
+            (156, 112, 90),
+            (169, 142, 116),
+            (143, 120, 102),
+            (181, 154, 129),
+        ],
+        dtype=np.float32,
+    ) / 255.0
+
+    for index, building in enumerate(layer.buildings):
+        positions = np.asarray(building.positions, dtype=np.float32).reshape(-1, 3)
+        indices = np.asarray(building.indices, dtype=np.uint32).reshape(-1, 3)
+        if len(positions) == 0 or len(indices) == 0:
+            continue
+
+        geo_points.append(positions)
+        base = np.array(building.material.albedo, dtype=np.float32)
+        accent = accent_palette[index % len(accent_palette)]
+        wall_rgb = np.clip(base * 0.5 + accent * 0.5, 0.0, 1.0)
+        roof_rgb = np.clip(
+            wall_rgb * np.array([0.95, 0.88, 0.82], dtype=np.float32) + 0.04,
+            0.0,
+            1.0,
+        )
+
+        building_records.append(
+            {
+                "positions_geo": positions,
+                "indices": indices,
+                "wall_rgba": tuple(int(channel * 255) for channel in (*wall_rgb, 1.0)),
+                "roof_rgba": tuple(int(channel * 255) for channel in (*roof_rgb, 1.0)),
+            }
+        )
+
+    if not building_records:
+        raise RuntimeError("CityJSON layer buildings did not contain any triangles")
+
+    all_geo = np.vstack(geo_points)
+    is_geographic = bool(
+        np.all(np.abs(all_geo[:, 0]) <= 180.0 + 1e-3)
+        and np.all(np.abs(all_geo[:, 1]) <= 90.0 + 1e-3)
+    )
+
+    center_x = float(all_geo[:, 0].mean())
+    center_y = float(all_geo[:, 1].mean())
+    if is_geographic:
+        x_scale = 111_000.0 * np.cos(np.radians(center_y))
+        y_scale = 111_000.0
+    else:
+        x_scale = 1.0
+        y_scale = 1.0
+
+    for record in building_records:
+        positions_geo = np.asarray(record["positions_geo"], dtype=np.float32)
+        record["positions_local"] = np.column_stack(
+            [
+                (positions_geo[:, 0] - center_x) * x_scale,
+                positions_geo[:, 2],
+                -(positions_geo[:, 1] - center_y) * y_scale,
+            ]
+        ).astype(np.float32)
+
+    all_local = np.vstack([np.asarray(record["positions_local"], dtype=np.float32) for record in building_records])
+    min_x, max_x = float(all_local[:, 0].min()), float(all_local[:, 0].max())
+    min_z, max_z = float(all_local[:, 2].min()), float(all_local[:, 2].max())
+    pad_x = max((max_x - min_x) * 0.42, 70.0)
+    pad_z = max((max_z - min_z) * 0.46, 70.0)
+
+    ground = np.array(
+        [
+            [min_x - pad_x, 0.0, min_z - pad_z],
+            [max_x + pad_x, 0.0, min_z - pad_z * 0.7],
+            [max_x + pad_x * 1.2, 0.0, max_z + pad_z],
+            [min_x - pad_x * 0.8, 0.0, max_z + pad_z * 1.15],
+        ],
+        dtype=np.float32,
+    )
+
+    yaw = np.radians(-38.0)
+    pitch = np.radians(24.0)
+    rot_y = np.array(
+        [
+            [np.cos(yaw), 0.0, np.sin(yaw)],
+            [0.0, 1.0, 0.0],
+            [-np.sin(yaw), 0.0, np.cos(yaw)],
+        ],
+        dtype=np.float32,
+    )
+    rot_x = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, np.cos(pitch), -np.sin(pitch)],
+            [0.0, np.sin(pitch), np.cos(pitch)],
+        ],
+        dtype=np.float32,
+    )
+    rotation = rot_x @ rot_y
+
+    light = normalize(np.array([-0.55, 1.15, -0.42], dtype=np.float32))
+
+    def rotate(points: np.ndarray) -> np.ndarray:
+        return np.asarray(points, dtype=np.float32) @ rotation.T
+
+    def shadow_on_ground(points: np.ndarray) -> np.ndarray:
+        heights = points[:, 1:2]
+        shadow = points.copy()
+        shadow[:, 0:1] -= light[0] * (heights / light[1])
+        shadow[:, 2:3] -= light[2] * (heights / light[1])
+        shadow[:, 1] = 0.0
+        return shadow
+
+    shadow_points = np.vstack(
+        [shadow_on_ground(np.asarray(record["positions_local"], dtype=np.float32)) for record in building_records]
+    )
+    fit_points = np.vstack([rotate(all_local), rotate(shadow_points), rotate(ground)])
+    fit_x = fit_points[:, 0]
+    fit_y = -fit_points[:, 1]
+
+    span_x = max(float(fit_x.max() - fit_x.min()), 1.0)
+    span_y = max(float(fit_y.max() - fit_y.min()), 1.0)
+    margin_x = width * 0.12
+    margin_y = height * 0.13
+    scale = min((width - 2 * margin_x) / span_x, (height - 2 * margin_y) / span_y)
+    center_x = width * 0.5
+    center_y = height * 0.58
+    proj_center_x = float((fit_x.min() + fit_x.max()) * 0.5)
+    proj_center_y = float((fit_y.min() + fit_y.max()) * 0.5)
+
+    def project(points: np.ndarray) -> np.ndarray:
+        rotated = rotate(points)
+        return np.column_stack(
+            [
+                center_x + (rotated[:, 0] - proj_center_x) * scale,
+                center_y + (-rotated[:, 1] - proj_center_y) * scale,
+                rotated[:, 2],
+            ]
+        )
+
+    canvas = Image.new("RGBA", (width, height), (245, 238, 227, 255))
+    draw = ImageDraw.Draw(canvas, "RGBA")
+
+    for row in range(height):
+        t = row / max(height - 1, 1)
+        top = np.array([225, 218, 205], dtype=np.float32)
+        bottom = np.array([246, 241, 233], dtype=np.float32)
+        color = tuple(int(channel) for channel in (top * (1.0 - t) + bottom * t))
+        draw.line((0, row, width, row), fill=(*color, 255))
+
+    sky_overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    sky_draw = ImageDraw.Draw(sky_overlay, "RGBA")
+    sky_draw.ellipse(
+        (
+            width * 0.54,
+            height * 0.05,
+            width * 1.06,
+            height * 0.74,
+        ),
+        fill=(255, 228, 186, 96),
+    )
+    sky_draw.ellipse(
+        (
+            -width * 0.12,
+            -height * 0.08,
+            width * 0.52,
+            height * 0.52,
+        ),
+        fill=(196, 213, 224, 74),
+    )
+    canvas.alpha_composite(sky_overlay)
+
+    ground_poly = [tuple(pt[:2]) for pt in project(ground)]
+    draw.polygon(ground_poly, fill=(216, 201, 183, 255), outline=(156, 141, 123, 220))
+
+    guide_color = (175, 161, 142, 96)
+    for t in np.linspace(0.15, 0.85, 5):
+        start = ground[0] * (1.0 - t) + ground[3] * t
+        end = ground[1] * (1.0 - t) + ground[2] * t
+        line_pts = [tuple(pt[:2]) for pt in project(np.vstack([start, end]))]
+        draw.line(line_pts, fill=guide_color, width=1)
+    for t in np.linspace(0.16, 0.84, 5):
+        start = ground[0] * (1.0 - t) + ground[1] * t
+        end = ground[3] * (1.0 - t) + ground[2] * t
+        line_pts = [tuple(pt[:2]) for pt in project(np.vstack([start, end]))]
+        draw.line(line_pts, fill=guide_color, width=1)
+
+    pedestal = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    pedestal_draw = ImageDraw.Draw(pedestal, "RGBA")
+    pedestal_draw.ellipse(
+        (
+            width * 0.18,
+            height * 0.69,
+            width * 0.84,
+            height * 0.94,
+        ),
+        fill=(90, 72, 54, 24),
+    )
+    canvas.alpha_composite(pedestal.filter(ImageFilter.GaussianBlur(radius=32)))
+
+    shadow_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow_layer, "RGBA")
+    triangle_draw_list: list[tuple[float, list[tuple[float, float]], tuple[int, int, int, int], tuple[int, int, int, int]]] = []
+
+    for record in building_records:
+        positions = np.asarray(record["positions_local"], dtype=np.float32)
+        for tri_indices in np.asarray(record["indices"], dtype=np.uint32):
+            triangle = positions[tri_indices]
+            shadow_poly = [tuple(pt[:2]) for pt in project(shadow_on_ground(triangle))]
+            shadow_draw.polygon(shadow_poly, fill=(44, 33, 21, 34))
+
+            edge_a = triangle[1] - triangle[0]
+            edge_b = triangle[2] - triangle[0]
+            normal = normalize(np.cross(edge_a, edge_b))
+            brightness = float(np.clip(0.62 + np.dot(normal, light) * 0.28, 0.42, 1.0))
+            is_roof = abs(float(normal[1])) > 0.72
+            base_rgba = np.array(record["roof_rgba"] if is_roof else record["wall_rgba"], dtype=np.float32)
+            if is_roof:
+                brightness = min(1.0, brightness + 0.08)
+            shaded_rgb = np.clip(
+                base_rgba[:3] * brightness + np.array([8.0, 6.0, 4.0], dtype=np.float32),
+                0.0,
+                255.0,
+            )
+            fill = tuple(int(channel) for channel in (*shaded_rgb, 255))
+            outline = tuple(int(channel) for channel in np.clip(shaded_rgb * 0.74, 0.0, 255.0)) + (255,)
+            projected = project(triangle)
+            triangle_draw_list.append(
+                (
+                    float(projected[:, 2].mean()),
+                    [tuple(pt[:2]) for pt in projected],
+                    fill,
+                    outline,
+                )
+            )
+
+    shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(radius=18))
+    canvas.alpha_composite(shadow_layer)
+
+    for _, polygon, fill, outline in sorted(triangle_draw_list, key=lambda item: item[0]):
+        draw.polygon(polygon, fill=fill, outline=outline)
+
+    out_path.unlink(missing_ok=True)
+    canvas.save(out_path, optimize=True)
 
 
 # ---------------------------------------------------------------------------
@@ -203,15 +557,20 @@ def render_01_rainier() -> None:
         "--cam-radius", "5200",
         "--pbr", "--msaa", "8",
         "--shadow-technique", "pcss", "--shadow-map-res", "4096",
-        "--exposure", "1.25",
-        "--sun-azimuth", "305", "--sun-elevation", "28",
+        "--exposure", "1.35",
+        "--sun-azimuth", "305", "--sun-elevation", "24",
         "--height-ao", "--height-ao-strength", "1.2",
         "--height-ao-directions", "8", "--height-ao-steps", "24",
         "--sun-vis", "--sun-vis-mode", "soft",
         "--sun-vis-samples", "6", "--sun-vis-steps", "32",
         "--normal-strength", "1.1",
+        "--snow", "--snow-altitude", "3200", "--snow-blend", "300",
+        "--snow-slope", "50",
+        "--rock", "--rock-slope", "42",
         "--tonemap", "aces",
-
+        "--white-balance", "--temperature", "6000",
+        "--lens-vignette", "0.25",
+        "--sky", "--sky-turbidity", "2.5",
         "--snapshot", str(tmp),
     ], tmp)
 
@@ -224,21 +583,28 @@ def render_02_fuji_labels() -> None:
     tmp = WORK_DIR / "02-base.png"
     out = IMAGES_DIR / "02-mount-fuji-labels.png"
 
-    run_example("02 fuji", [
+    run_example_interactive("02 fuji", [
         "examples/fuji_labels_demo.py",
         "--width", str(W), "--height", str(H),
         "--pbr", "--msaa", "8",
         "--shadows", "pcss", "--shadow-map-res", "4096",
-        "--exposure", "1.25",
+        "--exposure", "1.3",
         "--sun-azimuth", "296", "--sun-elevation", "26",
         "--height-ao", "--height-ao-strength", "1.2",
         "--height-ao-directions", "8", "--height-ao-steps", "24",
         "--sun-vis", "--sun-vis-mode", "soft",
         "--sun-vis-samples", "6", "--sun-vis-steps", "32",
         "--normal-strength", "1.1",
+        "--snow", "--snow-altitude", "2800", "--snow-blend", "400",
+        "--snow-slope", "50",
+        "--rock", "--rock-slope", "40",
         "--tonemap", "aces",
-
-        "--snapshot", str(tmp),
+        "--white-balance", "--temperature", "6200",
+        "--lens-vignette", "0.2",
+        "--sky", "--sky-turbidity", "2.0",
+    ], [
+        "set phi=332 theta=18 radius=3650 fov=34",
+        f"snap {tmp} {W}x{H}",
     ], tmp)
 
     compose_titled(tmp, out, "Mount Fuji", "labels from GeoPackage")
@@ -288,13 +654,19 @@ def render_04_luxembourg_rail() -> None:
         "--msaa", "8",
         "--shadow-technique", "pcss", "--shadow-map-res", "4096",
         "--exposure", "1.4",
-        "--sun-azimuth", "215", "--sun-elevation", "45",
-        "--sun-intensity", "1.2",
-        "--height-ao", "--height-ao-strength", "0.7",
+        "--sun-azimuth", "215", "--sun-elevation", "32",
+        "--sun-intensity", "1.5",
+        "--height-ao", "--height-ao-strength", "0.5",
         "--sun-vis", "--sun-vis-mode", "soft",
         "--normal-strength", "0.9",
+        "--wetness", "--wetness-strength", "0.25",
         "--tonemap", "aces",
+        "--white-balance", "--temperature", "6200",
+        "--lens-vignette", "0.2",
+        "--sky", "--sky-turbidity", "3.0",
         "--no-solid",
+        "--line-width", "22.0",
+        "--line-color", "#D92626",
         "--snapshot", str(tmp),
     ], tmp)
 
@@ -304,33 +676,33 @@ def render_04_luxembourg_rail() -> None:
 
 
 def render_05_buildings() -> None:
-    """3D buildings (CityJSON) on Fuji terrain."""
+    """3D buildings rendered from CityJSON geometry."""
     print("[gallery] 05 3D Buildings")
+    tmp = WORK_DIR / "05-base.png"
     out = IMAGES_DIR / "05-3d-buildings.png"
-
-    run_example("05 buildings", [
-        "examples/buildings_viewer_interactive.py",
-        "--fuji",
-        "--width", str(W), "--height", str(H),
-        "--snapshot", str(out),
-    ], out)
+    layer = f3d.add_buildings_cityjson(REPO_ROOT / "assets" / "geojson" / "10-270-592.city.json")
+    render_cityjson_building_preview(layer, tmp, width=1600, height=912)
+    compose_titled(tmp, out, "3D Buildings", "10-270-592.city.json")
 
 
 def render_06_point_cloud() -> None:
     """LiDAR point cloud (Mt St Helens)."""
     print("[gallery] 06 Point Cloud")
+    tmp = WORK_DIR / "06-base.png"
     out = IMAGES_DIR / "06-point-cloud.png"
 
     run_example("06 pointcloud", [
         "examples/pointcloud_viewer_interactive.py",
         "--input", "assets/lidar/MtStHelens.laz",
-        "--width", str(W), "--height", str(H),
-        "--point-size", "2.0",
-        "--max-points", "500000",
+        "--width", "1600", "--height", "912",
+        "--point-size", "3.5",
+        "--max-points", "750000",
         "--color-mode", "rgb",
-        "--phi", "0.8", "--theta", "0.62", "--radius", "2.1",
-        "--snapshot", str(out),
-    ], out)
+        "--phi", "0.6", "--theta", "0.5", "--radius", "1.4",
+        "--snapshot", str(tmp),
+    ], tmp)
+
+    compose_titled(tmp, out, "Mt St. Helens", "LiDAR point cloud")
 
 
 def render_07_flyover() -> None:
@@ -355,7 +727,11 @@ def render_07_flyover() -> None:
             "--height-ao", "--height-ao-strength", "1.2",
             "--sun-vis", "--sun-vis-mode", "soft",
             "--normal-strength", "1.1",
+            "--snow", "--snow-altitude", "3200", "--snow-blend", "300",
+            "--rock", "--rock-slope", "42",
             "--tonemap", "aces",
+            "--white-balance", "--temperature", "6000",
+            "--sky", "--sky-turbidity", "2.5",
             "--snapshot", str(tmp),
         ], tmp)
         frame_paths.append(tmp)
@@ -400,27 +776,74 @@ def render_08_vector_export() -> None:
 
     scene = VectorScene()
     scene.add_polygon(
-        [(0, 0), (100, 0), (80, 70), (10, 90)],
-        fill_color=(0.20, 0.52, 0.83, 0.92),
-        stroke_color=(0.08, 0.19, 0.34, 1.0),
-        stroke_width=3.0,
+        [(0, 6), (34, 0), (74, 10), (78, 44), (36, 58), (8, 42)],
+        fill_color=(0.78, 0.86, 0.68, 0.96),
+        stroke_color=(0.34, 0.46, 0.28, 1.0),
+        stroke_width=2.0,
     )
     scene.add_polygon(
-        [(18, 18), (48, 12), (62, 32), (35, 52)],
-        fill_color=(0.95, 0.73, 0.35, 0.82),
-        stroke_color=(0.55, 0.33, 0.08, 1.0),
+        [(26, 62), (44, 78), (70, 74), (86, 92), (74, 114), (42, 108)],
+        fill_color=(0.36, 0.67, 0.86, 0.94),
+        stroke_color=(0.11, 0.27, 0.41, 1.0),
+        stroke_width=2.0,
+    )
+    scene.add_polygon(
+        [(82, 12), (124, 26), (120, 74), (72, 68)],
+        fill_color=(0.94, 0.82, 0.55, 0.9),
+        stroke_color=(0.57, 0.40, 0.14, 1.0),
+        stroke_width=2.0,
+    )
+    scene.add_polygon(
+        [(100, 88), (150, 100), (184, 88), (212, 112), (194, 138),
+         (148, 146), (110, 126)],
+        fill_color=(0.72, 0.58, 0.43, 0.9),
+        stroke_color=(0.34, 0.22, 0.14, 1.0),
+        stroke_width=2.0,
+    )
+    scene.add_polygon(
+        [(132, 18), (178, 20), (220, 8), (220, 54), (186, 76), (140, 64)],
+        fill_color=(0.67, 0.82, 0.60, 0.92),
+        stroke_color=(0.31, 0.45, 0.26, 1.0),
         stroke_width=2.0,
     )
     scene.add_polyline(
-        [(5, 10), (40, 35), (90, 60)],
-        stroke_color=(0.07, 0.08, 0.10, 1.0),
-        stroke_width=4.0,
+        [(8, 52), (42, 60), (84, 82), (118, 96), (166, 106), (214, 118)],
+        stroke_color=(0.12, 0.32, 0.60, 1.0),
+        stroke_width=5.0,
     )
     scene.add_label(
-        "Ridge",
-        position=(55, 52),
-        font_size=20,
+        "River",
+        position=(124, 94),
+        font_size=18,
+        color=(0.08, 0.18, 0.30, 1.0),
+    )
+    scene.add_polyline(
+        [(12, 18), (54, 34), (96, 48), (146, 42), (202, 36)],
+        stroke_color=(0.15, 0.14, 0.14, 1.0),
+        stroke_width=6.0,
+    )
+    scene.add_label(
+        "Road",
+        position=(162, 42),
+        font_size=18,
         color=(0.07, 0.08, 0.10, 1.0),
+    )
+    scene.add_polyline(
+        [(88, 108), (114, 120), (136, 124), (164, 132), (196, 124)],
+        stroke_color=(0.55, 0.40, 0.20, 0.9),
+        stroke_width=3.0,
+    )
+    scene.add_label(
+        "Valley",
+        position=(38, 34),
+        font_size=18,
+        color=(0.20, 0.26, 0.16, 1.0),
+    )
+    scene.add_label(
+        "Peak",
+        position=(164, 126),
+        font_size=18,
+        color=(0.19, 0.14, 0.12, 1.0),
     )
 
     svg_path = WORK_DIR / "08-vector-export.svg"
@@ -441,17 +864,31 @@ def render_08_vector_export() -> None:
 
     image = Image.new("RGBA", (W, H), (248, 246, 239, 255))
     draw = ImageDraw.Draw(image, "RGBA")
+
+    grid_left = 40
+    grid_top = 36
+    grid_right = W - 40
+    grid_bottom = H - 36
+    for x in range(grid_left, grid_right + 1, 48):
+        alpha = 30 if (x - grid_left) % 144 == 0 else 14
+        draw.line((x, grid_top, x, grid_bottom), fill=(60, 72, 82, alpha), width=1)
+    for y in range(grid_top, grid_bottom + 1, 48):
+        alpha = 30 if (y - grid_top) % 144 == 0 else 14
+        draw.line((grid_left, y, grid_right, y), fill=(60, 72, 82, alpha), width=1)
+
     draw.rounded_rectangle(
         (28, 28, W - 28, H - 28), radius=24,
         outline=(36, 43, 50, 32), width=2,
     )
     draw.rounded_rectangle(
-        (54, 44, 356, 126), radius=18, fill=(255, 255, 255, 224)
+        (54, 44, 404, 138), radius=18, fill=(255, 255, 255, 228)
     )
     draw.text((76, 70), "Vector Export", font=font(32, bold=True),
               fill=(24, 31, 36, 255), anchor="lm")
-    draw.text((76, 102), "SVG scene preview", font=font(18),
+    draw.text((76, 102), "SVG scene preview with map annotations", font=font(18),
               fill=(72, 82, 90, 255), anchor="lm")
+    draw.text((76, 126), "graticule, labels, legend", font=font(16),
+              fill=(98, 106, 114, 255), anchor="lm")
 
     for polygon in scene.polygons:
         pts = [project(p) for p in polygon.exterior]
@@ -465,12 +902,33 @@ def render_08_vector_export() -> None:
                   joint="curve")
     for label in scene.labels:
         pt = project(label.position)
+        draw.ellipse(
+            (pt[0] - 3, pt[1] - 3, pt[0] + 3, pt[1] + 3),
+            fill=(34, 39, 46, 220),
+        )
         draw_halo_text(
-            draw, pt, label.text,
+            draw, (pt[0], pt[1] - 12), label.text,
             label_font=font(int(round(label.style.font_size)), bold=True),
             fill=rgba(label.style.color),
             halo=rgba(label.style.halo_color),
         )
+
+    legend_box = (868, 66, 1140, 246)
+    draw.rounded_rectangle(legend_box, radius=18, fill=(255, 255, 255, 226),
+                           outline=(44, 52, 60, 42), width=2)
+    draw.text((892, 92), "Legend", font=font(24, bold=True),
+              fill=(28, 34, 40, 255), anchor="lm")
+    draw.line((892, 128, 952, 128), fill=(18, 82, 153, 255), width=5)
+    draw.text((970, 128), "River", font=font(17), fill=(54, 63, 72, 255), anchor="lm")
+    draw.line((892, 158, 952, 158), fill=(38, 36, 36, 255), width=6)
+    draw.text((970, 158), "Road", font=font(17), fill=(54, 63, 72, 255), anchor="lm")
+    draw.rounded_rectangle((892, 182, 952, 206), radius=8,
+                           fill=(239, 208, 140, 255), outline=(145, 102, 36, 255))
+    draw.text((970, 194), "Valley floor", font=font(17),
+              fill=(54, 63, 72, 255), anchor="lm")
+    draw.polygon([(892, 232), (922, 208), (952, 232)], fill=(161, 118, 88, 255))
+    draw.text((970, 226), "Peak zone", font=font(17),
+              fill=(54, 63, 72, 255), anchor="lm")
 
     out.unlink(missing_ok=True)
     image.save(out, optimize=True)
@@ -495,12 +953,17 @@ def render_09_shadow_comparison() -> None:
         "--pbr", "--msaa", "8",
         "--shadow-technique", "pcss", "--shadow-map-res", "4096",
         "--exposure", "1.2",
-        "--sun-azimuth", "110", "--sun-elevation", "16",
+        "--sun-azimuth", "85", "--sun-elevation", "12",
         "--height-ao", "--height-ao-strength", "1.2",
         "--sun-vis", "--sun-vis-mode", "soft",
-        "--sun-vis-samples", "6", "--sun-vis-steps", "32",
+        "--sun-vis-samples", "8", "--sun-vis-steps", "48",
         "--normal-strength", "1.1",
+        "--snow", "--snow-altitude", "3200", "--snow-blend", "300",
+        "--snow-slope", "50",
+        "--rock", "--rock-slope", "42",
         "--tonemap", "aces",
+        "--white-balance", "--temperature", "7500",
+        "--sky", "--sky-turbidity", "2.5",
         "--snapshot", str(left_tmp),
     ], left_tmp)
 
@@ -512,12 +975,17 @@ def render_09_shadow_comparison() -> None:
         "--pbr", "--msaa", "8",
         "--shadow-technique", "pcss", "--shadow-map-res", "4096",
         "--exposure", "1.2",
-        "--sun-azimuth", "285", "--sun-elevation", "38",
+        "--sun-azimuth", "275", "--sun-elevation", "45",
         "--height-ao", "--height-ao-strength", "1.2",
         "--sun-vis", "--sun-vis-mode", "soft",
-        "--sun-vis-samples", "6", "--sun-vis-steps", "32",
+        "--sun-vis-samples", "8", "--sun-vis-steps", "48",
         "--normal-strength", "1.1",
+        "--snow", "--snow-altitude", "3200", "--snow-blend", "300",
+        "--snow-slope", "50",
+        "--rock", "--rock-slope", "42",
         "--tonemap", "aces",
+        "--white-balance", "--temperature", "5500",
+        "--sky", "--sky-turbidity", "2.5",
         "--snapshot", str(right_tmp),
     ], right_tmp)
 
@@ -563,11 +1031,22 @@ def render_10_map_plate() -> None:
     source_tmp = WORK_DIR / "10-plate-source.png"
     out = IMAGES_DIR / "10-map-plate.png"
     bbox = BBox(west=-122.0, south=46.7, east=-121.6, north=46.95)
+    dem_path = REPO_ROOT / "assets" / "tif" / "dem_rainier.tif"
+    legend_domain = (0.0, 4000.0)
+
+    try:
+        import rasterio
+
+        with rasterio.open(dem_path) as src:
+            band = src.read(1, masked=True)
+            legend_domain = (float(band.min()), float(band.max()))
+    except Exception as exc:
+        print(f"  [10 map plate] warning: using fallback legend domain: {exc}")
 
     # Render base terrain
     run_example("10 terrain", [
         "examples/terrain_viewer_interactive.py",
-        "--dem", "assets/tif/dem_rainier.tif",
+        "--dem", str(dem_path),
         "--width", "900", "--height", "560",
         "--pbr", "--msaa", "8",
         "--shadow-technique", "pcss", "--shadow-map-res", "4096",
@@ -576,8 +1055,12 @@ def render_10_map_plate() -> None:
         "--height-ao", "--height-ao-strength", "1.2",
         "--sun-vis", "--sun-vis-mode", "soft",
         "--normal-strength", "1.1",
+        "--snow", "--snow-altitude", "3200", "--snow-blend", "300",
+        "--rock", "--rock-slope", "42",
         "--tonemap", "aces",
-
+        "--white-balance", "--temperature", "6000",
+        "--lens-vignette", "0.15",
+        "--sky", "--sky-turbidity", "2.0",
         "--snapshot", str(source_tmp),
     ], source_tmp)
 
@@ -591,10 +1074,10 @@ def render_10_map_plate() -> None:
     plate.add_title("Map Plate \u00b7 legend + scale bar + north arrow",
                     font_size=24)
 
-    cmap = f3d.get_colormap("forge3d:viridis")
+    cmap = build_natural_relief_colormap(legend_domain)
     legend = Legend.from_colormap(
         cmap,
-        domain=(0.0, 4000.0),
+        domain=legend_domain,
         config=LegendConfig(title="Elevation", label_suffix=" m",
                             tick_count=5),
     )

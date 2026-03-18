@@ -15,6 +15,17 @@ impl ViewerTerrainScene {
             }
         }
 
+        if self.pbr_config.enabled
+            && (self.pbr_config.height_ao.enabled || self.pbr_config.sun_visibility.enabled)
+        {
+            if let Err(e) = self.init_heightfield_compute_pipelines() {
+                eprintln!(
+                    "[render] Failed to initialize heightfield compute pipelines: {}",
+                    e
+                );
+            }
+        }
+
         let use_pbr = self.pbr_config.enabled && self.pbr_pipeline.is_some();
         let needs_dof = self.pbr_config.dof.enabled;
         let needs_post_process = self.pbr_config.lens_effects.enabled

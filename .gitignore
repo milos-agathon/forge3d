@@ -4,6 +4,10 @@ docs/prompt.md
 CLAUDE.md
 AGENTS.md
 
+# License signing keys (NEVER commit private keys)
+forge3d_license.key
+*.key
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
