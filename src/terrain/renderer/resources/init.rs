@@ -1,23 +1,23 @@
 use super::*;
 
-pub(super) struct BaseInitResources {
-    pub(super) sampler_linear: wgpu::Sampler,
-    pub(super) height_curve_lut_sampler: wgpu::Sampler,
-    pub(super) height_curve_identity_texture: wgpu::Texture,
-    pub(super) height_curve_identity_view: wgpu::TextureView,
-    pub(super) water_mask_fallback_texture: wgpu::Texture,
-    pub(super) water_mask_fallback_view: wgpu::TextureView,
-    pub(super) detail_normal_fallback_view: wgpu::TextureView,
-    pub(super) detail_normal_sampler: wgpu::Sampler,
+pub(in crate::terrain::renderer) struct BaseInitResources {
+    pub(in crate::terrain::renderer) sampler_linear: wgpu::Sampler,
+    pub(in crate::terrain::renderer) height_curve_lut_sampler: wgpu::Sampler,
+    pub(in crate::terrain::renderer) height_curve_identity_texture: wgpu::Texture,
+    pub(in crate::terrain::renderer) height_curve_identity_view: wgpu::TextureView,
+    pub(in crate::terrain::renderer) water_mask_fallback_texture: wgpu::Texture,
+    pub(in crate::terrain::renderer) water_mask_fallback_view: wgpu::TextureView,
+    pub(in crate::terrain::renderer) detail_normal_fallback_view: wgpu::TextureView,
+    pub(in crate::terrain::renderer) detail_normal_sampler: wgpu::Sampler,
 }
 
-pub(super) struct AccumulationInitResources {
-    pub(super) accumulation_bind_group_layout: wgpu::BindGroupLayout,
-    pub(super) accumulation_pipeline: wgpu::ComputePipeline,
-    pub(super) accumulation_params_buffer: wgpu::Buffer,
+pub(in crate::terrain::renderer) struct AccumulationInitResources {
+    pub(in crate::terrain::renderer) accumulation_bind_group_layout: wgpu::BindGroupLayout,
+    pub(in crate::terrain::renderer) accumulation_pipeline: wgpu::ComputePipeline,
+    pub(in crate::terrain::renderer) accumulation_params_buffer: wgpu::Buffer,
 }
 
-pub(super) fn create_base_init_resources(
+pub(in crate::terrain::renderer) fn create_base_init_resources(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> Result<BaseInitResources> {
@@ -142,7 +142,7 @@ pub(super) fn create_base_init_resources(
     })
 }
 
-pub(super) fn create_accumulation_init_resources(
+pub(in crate::terrain::renderer) fn create_accumulation_init_resources(
     device: &wgpu::Device,
 ) -> AccumulationInitResources {
     let accumulation_bind_group_layout =

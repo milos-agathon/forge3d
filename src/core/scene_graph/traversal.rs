@@ -39,7 +39,11 @@ impl SceneGraph {
         Ok(())
     }
 
-    fn would_create_cycle(&self, parent_id: NodeId, child_id: NodeId) -> RenderResult<bool> {
+    pub(super) fn would_create_cycle(
+        &self,
+        parent_id: NodeId,
+        child_id: NodeId,
+    ) -> RenderResult<bool> {
         let mut current = Some(parent_id);
         while let Some(current_id) = current {
             if current_id == child_id {
@@ -50,7 +54,7 @@ impl SceneGraph {
         Ok(false)
     }
 
-    fn mark_descendants_dirty(&mut self, node_id: NodeId) -> RenderResult<()> {
+    pub(super) fn mark_descendants_dirty(&mut self, node_id: NodeId) -> RenderResult<()> {
         if let Some(node) = self.nodes.get_mut(&node_id) {
             node.mark_world_dirty();
             let children = node.children.clone();

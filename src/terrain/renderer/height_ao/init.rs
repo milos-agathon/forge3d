@@ -1,23 +1,22 @@
 use super::pipelines::{create_height_ao_pipeline_resources, create_sun_vis_pipeline_resources};
-use super::*;
 
-pub(super) struct HeightfieldInitResources {
-    pub(super) ao_debug_sampler: wgpu::Sampler,
-    pub(super) ao_debug_fallback_texture: wgpu::Texture,
-    pub(super) ao_debug_fallback_view: wgpu::TextureView,
-    pub(super) height_ao_fallback_view: wgpu::TextureView,
-    pub(super) height_ao_sampler: wgpu::Sampler,
-    pub(super) height_ao_compute_pipeline: wgpu::ComputePipeline,
-    pub(super) height_ao_bind_group_layout: wgpu::BindGroupLayout,
-    pub(super) height_ao_uniform_buffer: wgpu::Buffer,
-    pub(super) sun_vis_fallback_view: wgpu::TextureView,
-    pub(super) sun_vis_sampler: wgpu::Sampler,
-    pub(super) sun_vis_compute_pipeline: wgpu::ComputePipeline,
-    pub(super) sun_vis_bind_group_layout: wgpu::BindGroupLayout,
-    pub(super) sun_vis_uniform_buffer: wgpu::Buffer,
+pub(in crate::terrain::renderer) struct HeightfieldInitResources {
+    pub(in crate::terrain::renderer) ao_debug_sampler: wgpu::Sampler,
+    pub(in crate::terrain::renderer) ao_debug_fallback_texture: wgpu::Texture,
+    pub(in crate::terrain::renderer) ao_debug_fallback_view: wgpu::TextureView,
+    pub(in crate::terrain::renderer) height_ao_fallback_view: wgpu::TextureView,
+    pub(in crate::terrain::renderer) height_ao_sampler: wgpu::Sampler,
+    pub(in crate::terrain::renderer) height_ao_compute_pipeline: wgpu::ComputePipeline,
+    pub(in crate::terrain::renderer) height_ao_bind_group_layout: wgpu::BindGroupLayout,
+    pub(in crate::terrain::renderer) height_ao_uniform_buffer: wgpu::Buffer,
+    pub(in crate::terrain::renderer) sun_vis_fallback_view: wgpu::TextureView,
+    pub(in crate::terrain::renderer) sun_vis_sampler: wgpu::Sampler,
+    pub(in crate::terrain::renderer) sun_vis_compute_pipeline: wgpu::ComputePipeline,
+    pub(in crate::terrain::renderer) sun_vis_bind_group_layout: wgpu::BindGroupLayout,
+    pub(in crate::terrain::renderer) sun_vis_uniform_buffer: wgpu::Buffer,
 }
 
-pub(super) fn create_heightfield_init_resources(
+pub(in crate::terrain::renderer) fn create_heightfield_init_resources(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> HeightfieldInitResources {

@@ -1,8 +1,9 @@
 use super::*;
+use super::uniforms::{compute_mirrored_view_matrix, mul_mat4, WaterReflectionUniforms};
 
 impl TerrainScene {
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn prepare_water_reflection_bind_group(
+    pub(in crate::terrain::renderer) fn prepare_water_reflection_bind_group(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         params: &render_params::TerrainRenderParams,

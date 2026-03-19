@@ -3,7 +3,7 @@ use wgpu::{Extent3d, ImageCopyTexture, ImageDataLayout, Origin3d, TextureAspect,
 
 impl VirtualTexture {
     /// Load tile data; current implementation generates a procedural tile.
-    fn load_tile_data(&self, tile_id: TileId) -> Result<TileData, String> {
+    pub(super) fn load_tile_data(&self, tile_id: TileId) -> Result<TileData, String> {
         let tile_size = self.config.tile_size as usize;
         let pixel_count = tile_size * tile_size;
         let bytes_per_pixel = match self.config.format {
@@ -48,7 +48,7 @@ impl VirtualTexture {
         })
     }
 
-    fn upload_tile_to_atlas(
+    pub(super) fn upload_tile_to_atlas(
         &self,
         device: &Device,
         queue: &Queue,
@@ -134,16 +134,16 @@ impl VirtualTexture {
         Ok(())
     }
 
-    fn tile_id_to_page_index(&self, tile_id: TileId) -> usize {
+    pub(super) fn tile_id_to_page_index(&self, tile_id: TileId) -> usize {
         let pages_x = (self.config.width + self.config.tile_size - 1) / self.config.tile_size;
         (tile_id.y * pages_x + tile_id.x) as usize
     }
 
-    fn resident_tile_memory_bytes(&self) -> u64 {
+    pub(super) fn resident_tile_memory_bytes(&self) -> u64 {
         self.calculate_memory_usage()
     }
 
-    fn calculate_memory_usage(&self) -> u64 {
+    pub(super) fn calculate_memory_usage(&self) -> u64 {
         let bytes_per_pixel = match self.config.format {
             TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb => 4,
             TextureFormat::Rg8Unorm

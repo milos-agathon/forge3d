@@ -1,4 +1,4 @@
-use super::overlay::OverlayConfig;
+use crate::viewer::terrain::overlay::OverlayConfig;
 use std::path::PathBuf;
 
 /// Configuration for PBR terrain rendering mode

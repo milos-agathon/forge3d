@@ -1,4 +1,4 @@
-use super::{allocator::AtlasAllocator, AtlasSlot, CacheEntry, TileId};
+use super::{allocator::AtlasAllocator, types::CacheEntry, AtlasSlot, TileId};
 use std::collections::{HashMap, VecDeque};
 
 /// LRU cache statistics

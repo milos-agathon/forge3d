@@ -3,8 +3,6 @@ use super::*;
 mod execute;
 mod setup;
 
-use setup::{PreparedMaterials, RenderTargets, UploadedHeightInputs};
-
 impl TerrainScene {
     pub(crate) fn render_internal(
         &mut self,

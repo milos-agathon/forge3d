@@ -1,17 +1,18 @@
-use super::WaterReflectionUniforms;
+use super::uniforms::WaterReflectionUniforms;
+use wgpu::util::DeviceExt;
 
-pub(super) struct WaterReflectionInitResources {
-    pub(super) water_reflection_uniform_buffer: wgpu::Buffer,
-    pub(super) water_reflection_texture: wgpu::Texture,
-    pub(super) water_reflection_view: wgpu::TextureView,
-    pub(super) water_reflection_sampler: wgpu::Sampler,
-    pub(super) water_reflection_depth_texture: wgpu::Texture,
-    pub(super) water_reflection_depth_view: wgpu::TextureView,
-    pub(super) water_reflection_size: (u32, u32),
-    pub(super) water_reflection_fallback_view: wgpu::TextureView,
+pub(in crate::terrain::renderer) struct WaterReflectionInitResources {
+    pub(in crate::terrain::renderer) water_reflection_uniform_buffer: wgpu::Buffer,
+    pub(in crate::terrain::renderer) water_reflection_texture: wgpu::Texture,
+    pub(in crate::terrain::renderer) water_reflection_view: wgpu::TextureView,
+    pub(in crate::terrain::renderer) water_reflection_sampler: wgpu::Sampler,
+    pub(in crate::terrain::renderer) water_reflection_depth_texture: wgpu::Texture,
+    pub(in crate::terrain::renderer) water_reflection_depth_view: wgpu::TextureView,
+    pub(in crate::terrain::renderer) water_reflection_size: (u32, u32),
+    pub(in crate::terrain::renderer) water_reflection_fallback_view: wgpu::TextureView,
 }
 
-pub(super) fn create_water_reflection_init_resources(
+pub(in crate::terrain::renderer) fn create_water_reflection_init_resources(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     color_format: wgpu::TextureFormat,

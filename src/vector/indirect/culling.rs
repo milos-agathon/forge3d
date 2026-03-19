@@ -1,5 +1,6 @@
 use super::{
-    CullableInstance, CullingStats, CullingUniforms, IndirectDrawCommand, IndirectRenderer,
+    types::CullingUniforms, CullableInstance, CullingStats, IndirectDrawCommand,
+    IndirectRenderer,
 };
 use crate::core::error::RenderError;
 use crate::core::gpu_timing::GpuTimingManager;

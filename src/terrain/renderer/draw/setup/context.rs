@@ -1,34 +1,34 @@
 use super::*;
 
-pub(super) struct UploadedHeightInputs {
-    pub(super) width: u32,
-    pub(super) height: u32,
+pub(in crate::terrain::renderer) struct UploadedHeightInputs {
+    pub(in crate::terrain::renderer) width: u32,
+    pub(in crate::terrain::renderer) height: u32,
     #[allow(dead_code)]
-    pub(super) heightmap_texture: wgpu::Texture,
-    pub(super) heightmap_view: wgpu::TextureView,
+    pub(in crate::terrain::renderer) heightmap_texture: wgpu::Texture,
+    pub(in crate::terrain::renderer) heightmap_view: wgpu::TextureView,
     #[allow(dead_code)]
-    pub(super) water_mask_texture: Option<wgpu::Texture>,
-    pub(super) water_mask_view_uploaded: Option<wgpu::TextureView>,
+    pub(in crate::terrain::renderer) water_mask_texture: Option<wgpu::Texture>,
+    pub(in crate::terrain::renderer) water_mask_view_uploaded: Option<wgpu::TextureView>,
 }
 
-pub(super) struct PreparedMaterials {
-    pub(super) gpu_materials: Arc<crate::render::material_set::GpuMaterialSet>,
-    pub(super) shading_buffer: wgpu::Buffer,
-    pub(super) overlay_buffer: wgpu::Buffer,
-    pub(super) overlay_binding: OverlayBinding,
-    pub(super) fallback_colormap_view: Option<wgpu::TextureView>,
+pub(in crate::terrain::renderer) struct PreparedMaterials {
+    pub(in crate::terrain::renderer) gpu_materials: Arc<crate::render::material_set::GpuMaterialSet>,
+    pub(in crate::terrain::renderer) shading_buffer: wgpu::Buffer,
+    pub(in crate::terrain::renderer) overlay_buffer: wgpu::Buffer,
+    pub(in crate::terrain::renderer) overlay_binding: OverlayBinding,
+    pub(in crate::terrain::renderer) fallback_colormap_view: Option<wgpu::TextureView>,
 }
 
 impl PreparedMaterials {
-    pub(super) fn material_view(&self) -> &wgpu::TextureView {
+    pub(in crate::terrain::renderer) fn material_view(&self) -> &wgpu::TextureView {
         &self.gpu_materials.view
     }
 
-    pub(super) fn material_sampler(&self) -> &wgpu::Sampler {
+    pub(in crate::terrain::renderer) fn material_sampler(&self) -> &wgpu::Sampler {
         &self.gpu_materials.sampler
     }
 
-    pub(super) fn colormap_view(&self) -> &wgpu::TextureView {
+    pub(in crate::terrain::renderer) fn colormap_view(&self) -> &wgpu::TextureView {
         if let Some(lut) = self.overlay_binding.lut.as_ref() {
             &lut.view
         } else {
@@ -36,7 +36,7 @@ impl PreparedMaterials {
         }
     }
 
-    pub(super) fn colormap_sampler(&self) -> &wgpu::Sampler {
+    pub(in crate::terrain::renderer) fn colormap_sampler(&self) -> &wgpu::Sampler {
         if let Some(lut) = self.overlay_binding.lut.as_ref() {
             &lut.sampler
         } else {
@@ -46,7 +46,7 @@ impl PreparedMaterials {
 }
 
 impl TerrainScene {
-    pub(super) fn upload_height_inputs(
+    pub(in crate::terrain::renderer) fn upload_height_inputs(
         &mut self,
         heightmap: PyReadonlyArray2<f32>,
         water_mask: Option<PyReadonlyArray2<f32>>,
@@ -113,7 +113,7 @@ impl TerrainScene {
         })
     }
 
-    pub(super) fn prepare_material_context(
+    pub(in crate::terrain::renderer) fn prepare_material_context(
         &self,
         material_set: &crate::render::material_set::MaterialSet,
         params: &crate::terrain::render_params::TerrainRenderParams,
@@ -174,7 +174,7 @@ impl TerrainScene {
         })
     }
 
-    pub(super) fn prepare_ibl_bind_group(
+    pub(in crate::terrain::renderer) fn prepare_ibl_bind_group(
         &self,
         env_maps: &crate::lighting::ibl_wrapper::IBL,
     ) -> Result<wgpu::BindGroup> {

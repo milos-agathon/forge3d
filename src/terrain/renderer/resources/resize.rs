@@ -1,7 +1,11 @@
 use super::*;
 
 impl TerrainScene {
-    pub(super) fn ensure_reflection_texture_size(&self, width: u32, height: u32) -> Result<bool> {
+    pub(in crate::terrain::renderer) fn ensure_reflection_texture_size(
+        &self,
+        width: u32,
+        height: u32,
+    ) -> Result<bool> {
         let target_width = (width / 2).max(1);
         let target_height = (height / 2).max(1);
 
@@ -78,7 +82,7 @@ impl TerrainScene {
         Ok(true)
     }
 
-    pub(super) fn ensure_height_ao_texture_size(
+    pub(in crate::terrain::renderer) fn ensure_height_ao_texture_size(
         &self,
         width: u32,
         height: u32,
@@ -147,7 +151,7 @@ impl TerrainScene {
         Ok(true)
     }
 
-    pub(super) fn ensure_sun_vis_texture_size(
+    pub(in crate::terrain::renderer) fn ensure_sun_vis_texture_size(
         &self,
         width: u32,
         height: u32,

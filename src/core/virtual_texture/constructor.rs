@@ -1,7 +1,5 @@
 use super::*;
-use wgpu::{
-    Extent3d, TextureAspect, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
-};
+use wgpu::{Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages};
 
 impl VirtualTexture {
     pub(super) fn publish_resident_metrics(&self) {

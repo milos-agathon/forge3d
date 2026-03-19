@@ -1,20 +1,20 @@
 use super::*;
 
-pub(super) struct RenderTargets {
-    pub(super) internal_texture: wgpu::Texture,
-    pub(super) internal_view: wgpu::TextureView,
+pub(in crate::terrain::renderer) struct RenderTargets {
+    pub(in crate::terrain::renderer) internal_texture: wgpu::Texture,
+    pub(in crate::terrain::renderer) internal_view: wgpu::TextureView,
     #[allow(dead_code)]
-    pub(super) msaa_texture: Option<wgpu::Texture>,
-    pub(super) msaa_view: Option<wgpu::TextureView>,
-    pub(super) out_width: u32,
-    pub(super) out_height: u32,
-    pub(super) internal_width: u32,
-    pub(super) internal_height: u32,
-    pub(super) needs_scaling: bool,
+    pub(in crate::terrain::renderer) msaa_texture: Option<wgpu::Texture>,
+    pub(in crate::terrain::renderer) msaa_view: Option<wgpu::TextureView>,
+    pub(in crate::terrain::renderer) out_width: u32,
+    pub(in crate::terrain::renderer) out_height: u32,
+    pub(in crate::terrain::renderer) internal_width: u32,
+    pub(in crate::terrain::renderer) internal_height: u32,
+    pub(in crate::terrain::renderer) needs_scaling: bool,
 }
 
 impl TerrainScene {
-    pub(super) fn prepare_frame_lighting(
+    pub(in crate::terrain::renderer) fn prepare_frame_lighting(
         &self,
         decoded: &crate::terrain::render_params::DecodedTerrainSettings,
     ) -> Result<()> {
@@ -62,7 +62,10 @@ impl TerrainScene {
         Ok(())
     }
 
-    pub(super) fn ensure_pipeline_sample_count(&self, effective_msaa: u32) -> Result<()> {
+    pub(in crate::terrain::renderer) fn ensure_pipeline_sample_count(
+        &self,
+        effective_msaa: u32,
+    ) -> Result<()> {
         let mut pipeline_cache = self
             .pipeline
             .lock()
@@ -89,7 +92,7 @@ impl TerrainScene {
         Ok(())
     }
 
-    pub(super) fn create_render_targets(
+    pub(in crate::terrain::renderer) fn create_render_targets(
         &self,
         params: &crate::terrain::render_params::TerrainRenderParams,
         requested_msaa: u32,

@@ -1,9 +1,9 @@
-use super::overlay::OverlayConfig;
 use super::types::{
     DenoiseConfig, DofConfig, HeightAoConfig, LensEffectsConfig, MaterialLayerConfig,
     MotionBlurConfig, SunVisConfig, TonemapConfig, VectorOverlayConfig, ViewerTerrainPbrConfig,
     VolumetricsConfig,
 };
+use crate::viewer::terrain::overlay::OverlayConfig;
 
 impl Default for HeightAoConfig {
     fn default() -> Self {

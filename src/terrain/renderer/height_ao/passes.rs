@@ -1,7 +1,7 @@
 use super::*;
 
 impl TerrainScene {
-    pub(super) fn compute_height_ao_pass(
+    pub(in crate::terrain::renderer) fn compute_height_ao_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         heightmap_view: &wgpu::TextureView,
@@ -97,7 +97,7 @@ impl TerrainScene {
         Ok(true)
     }
 
-    pub(super) fn compute_sun_visibility_pass(
+    pub(in crate::terrain::renderer) fn compute_sun_visibility_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         heightmap_view: &wgpu::TextureView,

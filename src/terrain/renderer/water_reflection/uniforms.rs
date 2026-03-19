@@ -2,16 +2,16 @@ use super::*;
 
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Pod, Zeroable)]
-pub(super) struct WaterReflectionUniforms {
-    pub(super) reflection_view_proj: [[f32; 4]; 4],
-    pub(super) water_plane: [f32; 4],
-    pub(super) reflection_params: [f32; 4],
-    pub(super) camera_world_pos: [f32; 4],
-    pub(super) enable_flags: [f32; 4],
+pub(in crate::terrain::renderer) struct WaterReflectionUniforms {
+    pub(in crate::terrain::renderer) reflection_view_proj: [[f32; 4]; 4],
+    pub(in crate::terrain::renderer) water_plane: [f32; 4],
+    pub(in crate::terrain::renderer) reflection_params: [f32; 4],
+    pub(in crate::terrain::renderer) camera_world_pos: [f32; 4],
+    pub(in crate::terrain::renderer) enable_flags: [f32; 4],
 }
 
 impl WaterReflectionUniforms {
-    pub(super) fn disabled() -> Self {
+    pub(in crate::terrain::renderer) fn disabled() -> Self {
         Self {
             reflection_view_proj: [
                 [1.0, 0.0, 0.0, 0.0],
@@ -26,7 +26,7 @@ impl WaterReflectionUniforms {
         }
     }
 
-    pub(super) fn enabled_main_pass(
+    pub(in crate::terrain::renderer) fn enabled_main_pass(
         reflection_view_proj: [[f32; 4]; 4],
         water_plane_height: f32,
         camera_pos: [f32; 3],
@@ -45,7 +45,7 @@ impl WaterReflectionUniforms {
         }
     }
 
-    pub(super) fn for_reflection_pass(water_plane_height: f32) -> Self {
+    pub(in crate::terrain::renderer) fn for_reflection_pass(water_plane_height: f32) -> Self {
         Self {
             reflection_view_proj: [
                 [1.0, 0.0, 0.0, 0.0],
@@ -61,7 +61,7 @@ impl WaterReflectionUniforms {
     }
 }
 
-pub(super) fn compute_mirrored_view_matrix(
+pub(in crate::terrain::renderer) fn compute_mirrored_view_matrix(
     view_matrix: [[f32; 4]; 4],
     plane_height: f32,
 ) -> [[f32; 4]; 4] {
@@ -74,7 +74,10 @@ pub(super) fn compute_mirrored_view_matrix(
     mul_mat4(view_matrix, reflect)
 }
 
-pub(super) fn mul_mat4(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
+pub(in crate::terrain::renderer) fn mul_mat4(
+    a: [[f32; 4]; 4],
+    b: [[f32; 4]; 4],
+) -> [[f32; 4]; 4] {
     let mut result = [[0.0f32; 4]; 4];
     for i in 0..4 {
         for j in 0..4 {
