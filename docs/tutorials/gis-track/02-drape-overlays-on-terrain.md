@@ -1,7 +1,8 @@
 # Drape Overlays On Terrain
 
 Raster overlays stay in the main viewer path: load terrain, add a named layer,
-then adjust opacity and draw order.
+then adjust opacity and draw order. The polished Swiss scene below is the same
+one rendered by `scripts/regenerate_gallery.py`.
 
 ## Example: Swiss DEM plus land-cover overlay
 
@@ -21,6 +22,29 @@ with f3d.open_viewer_async(terrain_path=dem_path, width=1500, height=960) as vie
     viewer.set_orbit_camera(phi_deg=42, theta_deg=58, radius=9000)
     viewer.set_sun(azimuth_deg=312, elevation_deg=33)
     viewer.snapshot("swiss-land-cover.png")
+```
+
+## Gallery-backed script
+
+The gallery image for this workflow comes from
+`examples/swiss_terrain_landcover_viewer.py`, invoked by
+`scripts/regenerate_gallery.py` with a higher-quality preset:
+
+```bash
+python examples/swiss_terrain_landcover_viewer.py ^
+  --preset hq4 ^
+  --width 3840 --height 3840 ^
+  --cam-radius 14000 ^
+  --cam-phi 80 ^
+  --no-solid ^
+  --background "#ffffff" ^
+  --legend-position northwest ^
+  --legend-scale 0.3 ^
+  --legend-transparent-bg ^
+  --msaa 8 ^
+  --shadow-technique pcss ^
+  --exposure 1.35 ^
+  --snapshot swiss-land-cover.png
 ```
 
 ## When you need vector overlays
@@ -47,10 +71,11 @@ viewer.send_ipc(
 ```
 
 That is the same IPC surface the lower-level helpers in `forge3d.viewer_ipc`
-wrap for scripts.
+wrap for scripts. If you want the exact published render, follow the gallery
+script above or start from [](../../gallery/03-swiss-landcover.md).
 
 Next: [](03-build-a-map-plate.md)
 
 ## Expected output
 
-![Expected output for the overlay draping tutorial](../images/gis-02-overlays.png)
+![Expected output for the overlay draping tutorial](../../gallery/images/03-swiss-landcover.png)

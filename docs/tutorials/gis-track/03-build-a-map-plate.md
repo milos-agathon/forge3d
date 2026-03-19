@@ -6,7 +6,8 @@
 
 `MapPlate` is the composition layer above the live viewer. It takes an RGBA map
 image and adds cartographic furniture such as a title, legend, scale bar, north
-arrow, and insets.
+arrow, and insets. The expected output below is the gallery render produced by
+`scripts/regenerate_gallery.py`.
 
 This example keeps the source image on the main viewer path by taking a
 snapshot first, then composing the plate from that RGBA output.
@@ -21,22 +22,23 @@ from PIL import Image
 
 import forge3d as f3d
 
-dem = f3d.mini_dem()
-snapshot_path = Path("mini-dem-source.png")
+dem_path = f3d.fetch_dem("rainier")
+snapshot_path = Path("plate-source.png")
 
 with f3d.open_viewer_async(
-    terrain_path=f3d.mini_dem_path(),
-    width=1200,
-    height=760,
+    terrain_path=dem_path,
+    width=900,
+    height=560,
 ) as viewer:
-    viewer.set_orbit_camera(phi_deg=32, theta_deg=56, radius=1.7, fov_deg=45)
-    viewer.set_sun(azimuth_deg=315, elevation_deg=32)
-    viewer.snapshot(snapshot_path, width=1200, height=760)
+    viewer.set_z_scale(0.1)
+    viewer.set_orbit_camera(phi_deg=28, theta_deg=49, radius=5400, fov_deg=42)
+    viewer.set_sun(azimuth_deg=315, elevation_deg=30)
+    viewer.snapshot(snapshot_path, width=900, height=560)
 
 map_rgba = np.asarray(Image.open(snapshot_path).convert("RGBA"), dtype=np.uint8)
 
 bbox = f3d.BBox(west=-122.0, south=46.7, east=-121.6, north=46.95)
-domain = (float(dem.min()), float(dem.max()))
+domain = (0.0, 4000.0)
 
 legend = f3d.Legend.from_colormap(
     f3d.get_colormap("terrain"),
@@ -54,8 +56,16 @@ plate.add_title("Mini DEM Plate", font_size=28)
 plate.add_legend(legend.render())
 plate.add_scale_bar(scale_bar.render())
 plate.add_north_arrow(north_arrow.render())
-plate.export_png("mini-dem-plate.png")
+plate.export_png("map-plate.png")
 ```
+
+## Gallery-backed script
+
+The published map plate comes from `render_10_map_plate()` inside
+`scripts/regenerate_gallery.py`. That flow first calls
+`examples/terrain_viewer_interactive.py` to render the base terrain image, then
+composes the plate in Python with `MapPlate`, `Legend`, `ScaleBar`, and
+`NorthArrow`.
 
 ## Notes
 
@@ -64,9 +74,11 @@ plate.export_png("mini-dem-plate.png")
   customize them independently.
 - For real-world products, use the actual map bounds and image width when
   computing `meters_per_pixel`.
+- If you want the exact published output, compare against
+  [](../../gallery/10-map-plate.md).
 
 Next: [](04-3d-buildings.md)
 
 ## Expected output
 
-![Expected output for the map plate tutorial](../images/gis-03-map-plate.png)
+![Expected output for the map plate tutorial](../../gallery/images/10-map-plate.png)

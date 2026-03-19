@@ -1,7 +1,8 @@
 # Camera, Lighting, And Animation
 
 Camera and lighting control are ordinary method calls on `ViewerHandle`, which
-makes automation straightforward.
+makes automation straightforward. The gallery image below comes from the same
+automated flyover workflow used by `scripts/regenerate_gallery.py`.
 
 ## Manual camera and sun updates
 
@@ -45,8 +46,33 @@ widget.set_sun(azimuth_deg=290, elevation_deg=34)
 widget
 ```
 
+## Gallery-backed script
+
+For the published flyover panel, `scripts/regenerate_gallery.py` calls
+`examples/terrain_viewer_interactive.py` three times with different orbit
+angles, then composites the frames into one image:
+
+```bash
+python examples/terrain_viewer_interactive.py ^
+  --dem assets/tif/dem_rainier.tif ^
+  --width 400 --height 648 ^
+  --pbr --msaa 8 ^
+  --shadow-technique pcss --shadow-map-res 4096 ^
+  --exposure 1.25 ^
+  --sun-azimuth 305 --sun-elevation 28 ^
+  --height-ao --height-ao-strength 1.2 ^
+  --sun-vis --sun-vis-mode soft ^
+  --normal-strength 1.1 ^
+  --snow --snow-altitude 3200 --snow-blend 300 ^
+  --rock --rock-slope 42 ^
+  --tonemap aces ^
+  --white-balance --temperature 6000 ^
+  --sky --sky-turbidity 2.5 ^
+  --snapshot frame-000.png
+```
+
 Next: [](03-point-clouds.md)
 
 ## Expected output
 
-![Expected output for the camera and lighting tutorial](../images/python-02-camera-lighting.png)
+![Expected output for the camera and lighting tutorial](../../gallery/images/07-camera-flyover.png)

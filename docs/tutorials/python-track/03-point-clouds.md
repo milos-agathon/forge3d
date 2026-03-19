@@ -1,6 +1,7 @@
 # Point Clouds
 
-Point clouds stay on the same viewer IPC surface as terrain and overlays.
+Point clouds stay on the same viewer IPC surface as terrain and overlays. The
+image below is the gallery render generated from the point-cloud example script.
 
 ## Load a LAZ sample
 
@@ -32,8 +33,24 @@ with f3d.open_viewer_async(terrain_path=f3d.fetch_dem("rainier")) as viewer:
 The point-cloud helper is thin by design. If you need advanced tuning beyond the
 convenience methods, use `viewer.send_ipc(...)` directly.
 
+## Gallery-backed script
+
+`scripts/regenerate_gallery.py` renders the published point-cloud image by
+calling `examples/pointcloud_viewer_interactive.py` with the same dataset:
+
+```bash
+python examples/pointcloud_viewer_interactive.py ^
+  --input assets/lidar/MtStHelens.laz ^
+  --width 1600 --height 912 ^
+  --point-size 3.5 ^
+  --max-points 750000 ^
+  --color-mode rgb ^
+  --phi 0.6 --theta 0.5 --radius 1.4 ^
+  --snapshot point-cloud.png
+```
+
 Next: [](04-scene-bundles.md)
 
 ## Expected output
 
-![Expected output for the point-cloud tutorial](../images/python-03-point-clouds.png)
+![Expected output for the point-cloud tutorial](../../gallery/images/06-point-cloud.png)

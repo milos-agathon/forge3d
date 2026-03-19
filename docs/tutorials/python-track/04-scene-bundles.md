@@ -44,14 +44,33 @@ print(loaded.preset)
 
 ## Load the same bundle into a running viewer
 
-`ViewerHandle` does not have a dedicated bundle helper yet, so use raw IPC:
+`ViewerHandle` does not have a dedicated high-level bundle loader yet. Load the
+bundle in Python, then apply its terrain, bookmark, and preset state to the
+viewer explicitly:
 
 ```python
-with f3d.open_viewer_async() as viewer:
-    viewer.send_ipc({"cmd": "LoadBundle", "path": str(bundle_path)})
+loaded = f3d.load_bundle(bundle_path)
+bookmark = loaded.manifest.camera_bookmarks[0]
+sun = (loaded.preset or {}).get("sun", {})
+
+with f3d.open_viewer_async(terrain_path=loaded.dem_path) as viewer:
+    viewer.set_camera_lookat(
+        eye=bookmark.eye,
+        target=bookmark.target,
+        up=bookmark.up,
+    )
+    viewer.set_fov(bookmark.fov_deg)
+    if sun:
+        viewer.set_sun(
+            azimuth_deg=float(sun.get("azimuth_deg", 315.0)),
+            elevation_deg=float(sun.get("elevation_deg", 30.0)),
+        )
     viewer.snapshot("bundle-loaded.png")
 ```
 
+That flow is what actually works today. Raw `LoadBundle` IPC only queues a
+pending request for higher-level interactive apps to handle.
+
 ## Expected output
 
-![Expected output for the scene bundle tutorial](../images/python-04-scene-bundles.png)
+![Expected output for the scene bundle tutorial](../../gallery/images/01-mount-rainier.png)

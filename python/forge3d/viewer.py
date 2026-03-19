@@ -102,6 +102,33 @@ def _cleanup_paths(paths: List[Path]) -> None:
             pass
 
 
+def _wait_for_snapshot(
+    path: Path,
+    *,
+    timeout: float,
+    previous_mtime_ns: Optional[int],
+    poll_interval: float = 0.05,
+) -> None:
+    """Wait for a viewer snapshot file to appear or be updated."""
+    deadline = time.time() + max(timeout, poll_interval)
+    while time.time() < deadline:
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            time.sleep(poll_interval)
+            continue
+
+        if previous_mtime_ns is None:
+            if stat.st_size > 0:
+                return
+        elif stat.st_mtime_ns != previous_mtime_ns and stat.st_size > 0:
+            return
+
+        time.sleep(poll_interval)
+
+    raise ViewerError(f"Timed out waiting for snapshot output: {path}")
+
+
 class ViewerError(Exception):
     """Error from viewer IPC communication."""
     pass
@@ -316,7 +343,7 @@ class ViewerHandle:
     
     def set_z_scale(self, value: float) -> None:
         """Set terrain z-scale (height exaggeration). Only applies to terrain scenes."""
-        self._send_command({"cmd": "set_z_scale", "value": float(value)})
+        self._send_command({"cmd": "set_terrain", "zscale": float(value)})
     
     def set_orbit_camera(
         self,
@@ -350,14 +377,24 @@ class ViewerHandle:
         height: Optional[int] = None,
     ) -> None:
         """Take a snapshot and save to file. Optionally override resolution."""
-        cmd: Dict[str, Any] = {"cmd": "snapshot", "path": str(path)}
+        output_path = Path(path)
+        previous_mtime_ns: Optional[int]
+        try:
+            previous_mtime_ns = output_path.stat().st_mtime_ns
+        except FileNotFoundError:
+            previous_mtime_ns = None
+
+        cmd: Dict[str, Any] = {"cmd": "snapshot", "path": str(output_path)}
         if width is not None:
             cmd["width"] = int(width)
         if height is not None:
             cmd["height"] = int(height)
         self._send_command(cmd)
-        # Give viewer time to write the file
-        time.sleep(0.5)
+        _wait_for_snapshot(
+            output_path,
+            timeout=max(self._timeout, 2.0),
+            previous_mtime_ns=previous_mtime_ns,
+        )
     
     def render_animation(
         self,

@@ -460,6 +460,12 @@ else:
                 raise RuntimeError("Viewer process is not running")
             self._handle.set_sun(azimuth_deg=azimuth_deg, elevation_deg=elevation_deg)
 
+        def set_z_scale(self, value: float) -> None:
+            """Set terrain height exaggeration on the running viewer."""
+            if self._handle is None:
+                raise RuntimeError("Viewer process is not running")
+            self._handle.set_z_scale(value)
+
         def snapshot(
             self,
             path: Optional[Any] = None,
@@ -512,5 +518,11 @@ else:
                 except Exception:
                     pass
             self._temp_paths.clear()
-            self._status.value = "<b>Viewer:</b> closed"
-            super().close()
+            try:
+                self._status.value = "<b>Viewer:</b> closed"
+            except Exception:
+                pass
+            try:
+                super().close()
+            except Exception:
+                pass

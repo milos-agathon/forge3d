@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 import re
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any, Dict
 
@@ -322,6 +324,46 @@ class TestViewerHandleValidation:
 
         for path in cleanup_paths:
             path.unlink(missing_ok=True)
+
+
+class TestViewerHandleHelpers:
+    """Test higher-level ViewerHandle helper behavior without a live viewer."""
+
+    def test_set_z_scale_uses_set_terrain_command(self):
+        """set_z_scale forwards through the terrain IPC surface."""
+        handle = ViewerHandle.__new__(ViewerHandle)
+        sent: list[dict[str, Any]] = []
+        handle._send_command = lambda cmd: sent.append(cmd) or {"ok": True}  # type: ignore[attr-defined]
+
+        handle.set_z_scale(0.15)
+
+        assert sent == [{"cmd": "set_terrain", "zscale": 0.15}]
+
+    def test_snapshot_waits_for_file_creation(self, tmp_path):
+        """snapshot waits for the file to be written instead of sleeping blindly."""
+        handle = ViewerHandle.__new__(ViewerHandle)
+        handle._timeout = 1.0  # type: ignore[attr-defined]
+        out = tmp_path / "snap.png"
+
+        def fake_send(cmd: dict[str, Any]) -> dict[str, Any]:
+            assert cmd["cmd"] == "snapshot"
+
+            def writer() -> None:
+                time.sleep(0.2)
+                out.write_bytes(b"png")
+
+            threading.Thread(target=writer, daemon=True).start()
+            return {"ok": True}
+
+        handle._send_command = fake_send  # type: ignore[attr-defined]
+
+        start = time.perf_counter()
+        handle.snapshot(out)
+        elapsed = time.perf_counter() - start
+
+        assert out.exists()
+        assert out.read_bytes() == b"png"
+        assert elapsed >= 0.15
 
 
 class TestNDJSONProtocol:
