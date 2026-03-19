@@ -203,47 +203,6 @@ impl PointSpotLightRenderer {
             multiview: None,
         });
 
-        // Create shadow pipeline layout and pipeline
-        let shadow_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("shadow_pipeline_layout"),
-                bind_group_layouts: &[],
-                push_constant_ranges: &[],
-            });
-
-        let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("point_spot_lights_shadow_pipeline"),
-            layout: Some(&shadow_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_shadow",
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: 12, // position only
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[wgpu::VertexAttribute {
-                        offset: 0,
-                        shader_location: 0,
-                        format: wgpu::VertexFormat::Float32x3,
-                    }],
-                }],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_shadow",
-                targets: &[],
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        });
-
         // Create buffers
         let mut uniforms = PointSpotLightUniforms::default();
         uniforms.max_lights = max_lights as u32;
@@ -278,7 +237,6 @@ impl PointSpotLightRenderer {
         Self {
             deferred_pipeline,
             _forward_pipeline: forward_pipeline,
-            _shadow_pipeline: shadow_pipeline,
             main_bind_group_layout,
             shadow_bind_group_layout,
             uniforms_buffer,

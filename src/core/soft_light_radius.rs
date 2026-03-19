@@ -158,8 +158,6 @@ impl SoftLightPreset {
 /// Core renderer for soft light radius effects
 pub struct SoftLightRadiusRenderer {
     pipeline: wgpu::RenderPipeline,
-    _multiple_lights_pipeline: wgpu::RenderPipeline,
-    soft_shadows_pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     uniforms_buffer: wgpu::Buffer,
     bind_group: Option<wgpu::BindGroup>,
@@ -259,94 +257,6 @@ impl SoftLightRadiusRenderer {
             multiview: None,
         });
 
-        // Create pipeline for multiple lights
-        let multiple_lights_pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("soft_light_radius_multiple_pipeline"),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: "vs_main",
-                    buffers: &[],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: "fs_multiple_lights",
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        blend: Some(wgpu::BlendState {
-                            color: wgpu::BlendComponent {
-                                src_factor: wgpu::BlendFactor::One,
-                                dst_factor: wgpu::BlendFactor::One,
-                                operation: wgpu::BlendOperation::Add,
-                            },
-                            alpha: wgpu::BlendComponent {
-                                src_factor: wgpu::BlendFactor::One,
-                                dst_factor: wgpu::BlendFactor::One,
-                                operation: wgpu::BlendOperation::Add,
-                            },
-                        }),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                multiview: None,
-            });
-
-        // Create pipeline for soft shadows
-        let soft_shadows_pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("soft_light_radius_shadows_pipeline"),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: "vs_main",
-                    buffers: &[],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: "fs_soft_shadows",
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        blend: Some(wgpu::BlendState {
-                            color: wgpu::BlendComponent {
-                                src_factor: wgpu::BlendFactor::One,
-                                dst_factor: wgpu::BlendFactor::One,
-                                operation: wgpu::BlendOperation::Add,
-                            },
-                            alpha: wgpu::BlendComponent {
-                                src_factor: wgpu::BlendFactor::One,
-                                dst_factor: wgpu::BlendFactor::One,
-                                operation: wgpu::BlendOperation::Add,
-                            },
-                        }),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                multiview: None,
-            });
-
         // Create uniforms buffer
         let uniforms = SoftLightRadiusUniforms::default();
         let uniforms_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -357,8 +267,6 @@ impl SoftLightRadiusRenderer {
 
         Self {
             pipeline,
-            _multiple_lights_pipeline: multiple_lights_pipeline,
-            soft_shadows_pipeline,
             bind_group_layout,
             uniforms_buffer,
             bind_group: None,
@@ -459,14 +367,9 @@ impl SoftLightRadiusRenderer {
 
     /// Render soft light radius effect
     pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>, use_soft_shadows: bool) {
+        let _ = use_soft_shadows;
         if let Some(bind_group) = &self.bind_group {
-            let pipeline = if use_soft_shadows {
-                &self.soft_shadows_pipeline
-            } else {
-                &self.pipeline
-            };
-
-            render_pass.set_pipeline(pipeline);
+            render_pass.set_pipeline(&self.pipeline);
             render_pass.set_bind_group(0, bind_group, &[]);
             render_pass.draw(0..3, 0..1); // Full-screen triangle
         }

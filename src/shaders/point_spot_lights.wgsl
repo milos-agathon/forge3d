@@ -135,21 +135,30 @@ fn calculate_spot_light_cone(
 }
 
 // Shadow mapping functions
-fn sample_shadow_map(shadow_coord: vec3<f32>, shadow_map: texture_2d<f32>, shadow_sampler: sampler) -> f32 {
+fn sample_shadow_map(
+    shadow_coord: vec3<f32>,
+    shadow_map: texture_depth_2d_array,
+    shadow_sampler: sampler_comparison
+) -> f32 {
     if shadow_coord.x < 0.0 || shadow_coord.x > 1.0 ||
        shadow_coord.y < 0.0 || shadow_coord.y > 1.0 {
         return 1.0; // No shadow outside shadow map
     }
 
-    let depth = textureSample(shadow_map, shadow_sampler, shadow_coord.xy).r;
-    return select(0.0, 1.0, shadow_coord.z <= depth + SHADOW_BIAS);
+    return textureSampleCompare(
+        shadow_map,
+        shadow_sampler,
+        shadow_coord.xy,
+        0,
+        shadow_coord.z - SHADOW_BIAS
+    );
 }
 
 // PCF (Percentage Closer Filtering) for soft shadows
 fn sample_shadow_pcf(
     shadow_coord: vec3<f32>,
-    shadow_map: texture_2d<f32>,
-    shadow_sampler: sampler,
+    shadow_map: texture_depth_2d_array,
+    shadow_sampler: sampler_comparison,
     softness: f32
 ) -> f32 {
     let texel_size = 1.0 / SHADOW_MAP_SIZE;
@@ -177,8 +186,8 @@ fn calculate_light_contribution(
     world_normal: vec3<f32>,
     view_dir: vec3<f32>,
     shadow_coord: vec3<f32>,
-    shadow_map: texture_2d<f32>,
-    shadow_sampler: sampler,
+    shadow_map: texture_depth_2d_array,
+    shadow_sampler: sampler_comparison,
     shadow_quality: u32
 ) -> vec3<f32> {
     let to_light = light.position - world_pos;
@@ -239,8 +248,8 @@ fn calculate_light_contribution(
 @group(0) @binding(3) var g_buffer_normal: texture_2d<f32>;
 @group(0) @binding(4) var g_buffer_depth: texture_2d<f32>;
 @group(0) @binding(5) var g_buffer_sampler: sampler;
-@group(1) @binding(0) var shadow_map_array: texture_2d_array<f32>;
-@group(1) @binding(1) var shadow_sampler: sampler;
+@group(1) @binding(0) var shadow_map_array: texture_depth_2d_array;
+@group(1) @binding(1) var shadow_sampler: sampler_comparison;
 
 // Fragment shader - deferred lighting pass
 @fragment

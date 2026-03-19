@@ -6,6 +6,16 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-03-19
+
+### Fixed
+- Stopped `Scene.enable_soft_light_radius()` from panicking during pipeline creation by removing eager construction of unsupported multi-light and soft-shadow pipelines.
+- Fixed the point/spot light shader to use depth-array shadow resource types that match the Rust bind-group layout, eliminating the `invalid function call` panic in `Scene.enable_point_spot_lights()`.
+- Stopped eager construction of the unused point/spot shadow pipeline, avoiding a second validation failure once the shader module is created successfully.
+
+### Added
+- Added `tests/test_light_feature_enablement.py` to lock the Windows notebook repro sequence: create `Scene`, upload `mini_dem`, enable soft light radius, enable point/spot lights, add/clear lights, and render successfully.
+
 ## [1.13.0] - 2026-03-17
 
 ### Changed

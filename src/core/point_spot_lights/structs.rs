@@ -7,7 +7,6 @@ pub struct PointSpotLightRenderer {
     // Rendering pipelines
     pub(crate) deferred_pipeline: wgpu::RenderPipeline,
     pub(crate) _forward_pipeline: wgpu::RenderPipeline,
-    pub(crate) _shadow_pipeline: wgpu::RenderPipeline,
 
     // Bind group layouts
     pub(crate) main_bind_group_layout: wgpu::BindGroupLayout,
