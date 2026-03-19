@@ -4,9 +4,66 @@ from importlib.metadata import metadata
 from pathlib import Path
 import re
 import sys
-import tomllib
 
 import pytest
+
+try:
+    import tomllib  # type: ignore[attr-defined]
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
+    tomllib = None
+
+
+def _load_project_urls(pyproject: Path) -> dict[str, str]:
+    """Return the ``[project.urls]`` table without requiring Python 3.11+."""
+    if tomllib is not None:
+        with pyproject.open("rb") as fh:
+            return tomllib.load(fh)["project"]["urls"]
+
+    urls: dict[str, str] = {}
+    in_urls = False
+    for raw_line in pyproject.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line == "[project.urls]":
+            in_urls = True
+            continue
+        if in_urls and line.startswith("["):
+            break
+        if not in_urls:
+            continue
+
+        match = re.match(r'^"?(.+?)"?\s*=\s*"(.+)"$', line)
+        if match:
+            urls[match.group(1)] = match.group(2)
+
+    if not urls:
+        raise AssertionError("No [project.urls] table found in pyproject.toml")
+    return urls
+
+
+def test_load_project_urls_falls_back_without_tomllib(monkeypatch, tmp_path):
+    """Python 3.10 still loads project URLs without stdlib tomllib."""
+
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        """
+[project]
+name = "forge3d"
+
+[project.urls]
+Homepage = "https://example.com"
+"Bug Tracker" = "https://example.com/issues"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(sys.modules[__name__], "tomllib", None)
+
+    assert _load_project_urls(pyproject) == {
+        "Homepage": "https://example.com",
+        "Bug Tracker": "https://example.com/issues",
+    }
 
 
 def test_python_version_floor():
@@ -96,8 +153,7 @@ def test_installed_project_urls_match_public_metadata():
     if not pyproject.exists():
         pytest.skip("pyproject.toml not available in this environment")
 
-    with pyproject.open("rb") as fh:
-        expected_urls = tomllib.load(fh)["project"]["urls"]
+    expected_urls = _load_project_urls(pyproject)
 
     for label, url in expected_urls.items():
         assert f"{label}, {url}" in project_urls
