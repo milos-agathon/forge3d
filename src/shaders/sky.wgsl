@@ -2,17 +2,41 @@
 // Implements analytic atmospheric scattering for realistic sky rendering
 
 struct SkyParams {
-    sun_direction: vec3<f32>,      // Normalized sun direction
-    turbidity: f32,                // Atmospheric turbidity [1.0-10.0, 2.0=clear, 6.0=hazy]
-    ground_albedo: f32,            // Ground reflectance [0-1]
-    model: u32,                    // 0=Preetham, 1=Hosek-Wilkie
-    sun_intensity: f32,            // Sun intensity multiplier
-    exposure: f32,                 // Exposure adjustment
-    _pad: vec2<f32>,
+    sun_direction_turbidity: vec4<f32>,
+    ground_albedo_sun_size_sun_intensity_exposure: vec4<f32>,
+    model_pad: vec4<u32>,
 }
 
 const PI: f32 = 3.14159265359;
 const INV_PI: f32 = 0.31830988618;
+
+fn sky_sun_direction(params: SkyParams) -> vec3<f32> {
+    return params.sun_direction_turbidity.xyz;
+}
+
+fn sky_turbidity(params: SkyParams) -> f32 {
+    return params.sun_direction_turbidity.w;
+}
+
+fn sky_ground_albedo(params: SkyParams) -> f32 {
+    return params.ground_albedo_sun_size_sun_intensity_exposure.x;
+}
+
+fn sky_sun_size(params: SkyParams) -> f32 {
+    return params.ground_albedo_sun_size_sun_intensity_exposure.y;
+}
+
+fn sky_sun_intensity(params: SkyParams) -> f32 {
+    return params.ground_albedo_sun_size_sun_intensity_exposure.z;
+}
+
+fn sky_exposure(params: SkyParams) -> f32 {
+    return params.ground_albedo_sun_size_sun_intensity_exposure.w;
+}
+
+fn sky_model(params: SkyParams) -> u32 {
+    return params.model_pad.x;
+}
 
 // ============================================================================
 // Hosek-Wilkie sky model (2012) - More accurate than Preetham
@@ -103,12 +127,17 @@ fn hosek_wilkie_compute_coeffs(turbidity: f32, albedo: f32, sun_elevation: f32) 
 fn eval_hosek_wilkie(view_dir: vec3<f32>, params: SkyParams) -> vec3<f32> {
     // Compute angles
     let cos_theta = max(0.0, view_dir.y);  // angle to zenith
-    let cos_gamma = dot(view_dir, params.sun_direction);  // angle to sun
-    let cos_theta_sun = max(0.0, params.sun_direction.y);  // sun zenith angle
+    let sun_direction = sky_sun_direction(params);
+    let cos_gamma = dot(view_dir, sun_direction);  // angle to sun
+    let cos_theta_sun = max(0.0, sun_direction.y);  // sun zenith angle
 
     // Compute sky model coefficients
     let sun_elevation = asin(cos_theta_sun);
-    let coeffs = hosek_wilkie_compute_coeffs(params.turbidity, params.ground_albedo, sun_elevation);
+    let coeffs = hosek_wilkie_compute_coeffs(
+        sky_turbidity(params),
+        sky_ground_albedo(params),
+        sun_elevation,
+    );
 
     // Evaluate for each RGB channel
     var sky_color: vec3<f32>;
@@ -165,10 +194,11 @@ fn preetham_compute_coeffs(turbidity: f32) -> vec3<f32> {
 
 fn eval_preetham(view_dir: vec3<f32>, params: SkyParams) -> vec3<f32> {
     let cos_theta = max(0.0, view_dir.y);
-    let cos_gamma = dot(view_dir, params.sun_direction);
-    let cos_theta_sun = max(0.0, params.sun_direction.y);
+    let sun_direction = sky_sun_direction(params);
+    let cos_gamma = dot(view_dir, sun_direction);
+    let cos_theta_sun = max(0.0, sun_direction.y);
 
-    let t = params.turbidity;
+    let t = sky_turbidity(params);
 
     // Preetham luminance coefficients
     let A = 0.1787 * t - 1.4630;
@@ -205,7 +235,7 @@ fn eval_preetham(view_dir: vec3<f32>, params: SkyParams) -> vec3<f32> {
     sky_color = mix(sky_color, haze_tint, min(t / 10.0, 0.5));
 
     // Ground albedo contribution
-    sky_color = sky_color * (1.0 + params.ground_albedo * 0.2);
+    sky_color = sky_color * (1.0 + sky_ground_albedo(params) * 0.2);
 
     return max(sky_color, vec3<f32>(0.0));
 }
@@ -214,11 +244,17 @@ fn eval_preetham(view_dir: vec3<f32>, params: SkyParams) -> vec3<f32> {
 // Sun disk rendering
 // ============================================================================
 
-fn render_sun_disk(view_dir: vec3<f32>, sun_dir: vec3<f32>, intensity: f32) -> vec3<f32> {
+fn render_sun_disk(
+    view_dir: vec3<f32>,
+    sun_dir: vec3<f32>,
+    intensity: f32,
+    sun_size: f32
+) -> vec3<f32> {
     let cos_angle = dot(view_dir, sun_dir);
 
     // Sun angular diameter is ~0.53 degrees = ~0.0093 radians
-    let sun_cos_radius = cos(0.0093);
+    let sun_radius = 0.0093 * max(sun_size, 0.01);
+    let sun_cos_radius = cos(sun_radius);
 
     if (cos_angle >= sun_cos_radius) {
         // Inside sun disk
@@ -228,7 +264,7 @@ fn render_sun_disk(view_dir: vec3<f32>, sun_dir: vec3<f32>, intensity: f32) -> v
     }
 
     // Sun corona/glow
-    let glow_angle = 0.05;  // ~2.8 degrees
+    let glow_angle = max(0.05 * max(sun_size, 0.25), sun_radius * 2.0);
     let glow_cos = cos(glow_angle);
     if (cos_angle >= glow_cos) {
         let glow_factor = smoothstep(glow_cos, sun_cos_radius, cos_angle);
@@ -236,6 +272,42 @@ fn render_sun_disk(view_dir: vec3<f32>, sun_dir: vec3<f32>, intensity: f32) -> v
     }
 
     return vec3<f32>(0.0);
+}
+
+fn render_solar_scattering(view_dir: vec3<f32>, params: SkyParams) -> vec3<f32> {
+    let sun_dir = sky_sun_direction(params);
+    let sun_alignment = max(dot(view_dir, sun_dir), 0.0);
+    let sun_elevation = max(sun_dir.y, 0.0);
+    let low_sun = 1.0 - smoothstep(0.18, 0.72, sun_elevation);
+    let haze = clamp((sky_turbidity(params) - 1.0) / 9.0, 0.0, 1.0);
+    let intensity = sky_sun_intensity(params);
+    let size_norm = clamp(sky_sun_size(params) / 4.0, 0.0, 1.0);
+    let horizon = 1.0 - clamp(view_dir.y, 0.0, 1.0);
+
+    let forward_focus = mix(22.0, 4.0, size_norm);
+    let forward_scatter = pow(sun_alignment, forward_focus);
+    let broad_scatter = pow(sun_alignment, mix(10.0, 2.5, size_norm));
+    let horizon_glow = pow(horizon, 2.0) * low_sun * (0.35 + haze * 0.35 + size_norm * 0.2);
+    let ambient_scatter = intensity * (0.02 + haze * 0.03);
+
+    let sunset_color = mix(
+        vec3<f32>(1.0, 0.95, 0.9),
+        vec3<f32>(1.0, 0.72, 0.42),
+        low_sun * (0.75 + haze * 0.2),
+    );
+    let daylight_color = mix(
+        vec3<f32>(1.0, 0.97, 0.92),
+        vec3<f32>(1.0, 0.9, 0.78),
+        haze * 0.6,
+    );
+    let scatter_color = mix(daylight_color, sunset_color, low_sun);
+
+    return scatter_color * (
+        forward_scatter * intensity * 0.35
+        + broad_scatter * intensity * (0.06 + size_norm * 0.08)
+        + horizon_glow * intensity * 0.22
+        + ambient_scatter
+    );
 }
 
 // ============================================================================
@@ -248,18 +320,23 @@ fn eval_sky(view_dir: vec3<f32>, params: SkyParams) -> vec3<f32> {
     var sky_color: vec3<f32>;
 
     // Choose sky model
-    if (params.model == 1u) {
+    if (sky_model(params) == 1u) {
         sky_color = eval_hosek_wilkie(normalized_view, params);
     } else {
         sky_color = eval_preetham(normalized_view, params);
     }
 
     // Add sun disk
-    let sun_contribution = render_sun_disk(normalized_view, params.sun_direction, params.sun_intensity);
-    sky_color = sky_color + sun_contribution;
+    let sun_contribution = render_sun_disk(
+        normalized_view,
+        sky_sun_direction(params),
+        sky_sun_intensity(params),
+        sky_sun_size(params),
+    );
+    sky_color = sky_color + sun_contribution + render_solar_scattering(normalized_view, params);
 
     // Apply exposure
-    sky_color = sky_color * params.exposure;
+    sky_color = sky_color * sky_exposure(params);
 
     // Simple tonemapping
     sky_color = sky_color / (sky_color + vec3<f32>(1.0));

@@ -170,6 +170,8 @@ class FogSettings:
     
     Height-based exponential fog applied after PBR, before tonemap.
     When density = 0.0, fog is disabled (no-op for P1 compatibility).
+    When SkySettings.enabled=True, terrain inscatter/aerial tint is derived from
+    the sky path rather than a separate hardcoded terrain-only atmosphere color.
     
     base_height: World-space Z coordinate below which fog is at full density.
                  Should be set to the minimum terrain elevation (in world units).
@@ -855,9 +857,10 @@ class SkySettings:
     Renders procedural sky with:
     - Rayleigh and Mie scattering
     - Sun disc rendering
-    - Aerial perspective for distant terrain
+    - Aerial perspective for distant terrain using the same sky path
     
-    Applied as background where depth is far.
+    Applied as a rendered sky background in mesh-mode terrain views and sampled
+    by the terrain atmosphere path for aerial perspective / fog inscatter.
     """
     
     enabled: bool = False  # Disabled by default

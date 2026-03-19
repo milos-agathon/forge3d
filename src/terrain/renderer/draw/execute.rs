@@ -2,6 +2,78 @@ use super::setup::RenderTargets;
 use super::*;
 
 impl TerrainScene {
+    pub(super) fn blit_background_texture(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        render_targets: &RenderTargets,
+        source_view: &wgpu::TextureView,
+    ) -> Result<()> {
+        let blit_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain.background.blit.bind_group"),
+            layout: &self.blit_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(source_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler_linear),
+                },
+            ],
+        });
+
+        let color_view = render_targets
+            .msaa_view
+            .as_ref()
+            .unwrap_or(&render_targets.internal_view);
+        let resolve_target = if render_targets.msaa_view.is_some() {
+            Some(&render_targets.internal_view)
+        } else {
+            None
+        };
+
+        let msaa_pipeline = if render_targets.sample_count > 1 {
+            Some(Self::create_blit_pipeline(
+                self.device.as_ref(),
+                &self.blit_bind_group_layout,
+                self.color_format,
+                render_targets.sample_count,
+            ))
+        } else {
+            None
+        };
+        let blit_pipeline = msaa_pipeline.as_ref().unwrap_or(&self.blit_pipeline);
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("terrain.background.blit_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: color_view,
+                    resolve_target,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.1,
+                            g: 0.1,
+                            b: 0.15,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            pass.set_pipeline(blit_pipeline);
+            pass.set_bind_group(0, &blit_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(super) fn run_main_pass(
         &self,
@@ -14,6 +86,7 @@ impl TerrainScene {
         fog_bind_group: &wgpu::BindGroup,
         water_reflection_bind_group: &wgpu::BindGroup,
         material_layer_bind_group: &wgpu::BindGroup,
+        preserve_background: bool,
     ) -> Result<()> {
         let pipeline_cache = self
             .pipeline
@@ -45,12 +118,16 @@ impl TerrainScene {
                     view: color_view,
                     resolve_target,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.1,
-                            b: 0.15,
-                            a: 1.0,
-                        }),
+                        load: if preserve_background {
+                            wgpu::LoadOp::Load
+                        } else {
+                            wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.1,
+                                g: 0.1,
+                                b: 0.15,
+                                a: 1.0,
+                            })
+                        },
                         store: wgpu::StoreOp::Store,
                     },
                 })],

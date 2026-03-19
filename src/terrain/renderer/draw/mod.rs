@@ -95,6 +95,19 @@ impl TerrainScene {
             .shadow_bind_group
             .as_ref()
             .unwrap_or(&self.noop_shadow.bind_group);
+        let sky_texture = self.render_sky_texture(
+            &mut encoder,
+            decoded,
+            shadow_setup.view_matrix,
+            shadow_setup.proj_matrix,
+            shadow_setup.eye,
+            render_targets.internal_width,
+            render_targets.internal_height,
+        )?;
+        let sky_view = sky_texture
+            .as_ref()
+            .map(|(_, view)| view)
+            .unwrap_or(&self.sky_fallback_view);
 
         let height_curve_view = lut_texture_uploaded
             .as_ref()
@@ -112,6 +125,7 @@ impl TerrainScene {
             &materials.overlay_buffer,
             height_curve_view,
             height_inputs.water_mask_view_uploaded.as_ref(),
+            sky_view,
             height_ao_computed,
             sun_vis_computed,
             decoded,
@@ -143,6 +157,10 @@ impl TerrainScene {
             &pass_bind_groups.fog,
         )?;
 
+        if let Some((_, background_view)) = sky_texture.as_ref() {
+            self.blit_background_texture(&mut encoder, &render_targets, background_view)?;
+        }
+
         self.run_main_pass(
             &mut encoder,
             params,
@@ -153,6 +171,7 @@ impl TerrainScene {
             &pass_bind_groups.fog,
             &water_reflection_bind_group,
             &pass_bind_groups.material_layer,
+            sky_texture.is_some(),
         )?;
 
         let (final_texture, final_width, final_height) =

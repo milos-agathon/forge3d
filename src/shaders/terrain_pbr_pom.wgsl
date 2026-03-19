@@ -363,28 +363,26 @@ var moment_maps: texture_2d_array<f32>;
 var moment_sampler: sampler;
 
 // ──────────────────────────────────────────────────────────────────────────
-// P2: Atmospheric Fog Uniforms (@group(4))
-// Height-based fog with tunable density and inscatter color.
-// When fog_density = 0.0, fog is a no-op preserving P1 output exactly.
+// P2 + TV1: Shared atmosphere uniforms (@group(4))
+// Carries the legacy height-fog controls plus the resolved terrain sky texture.
+// When sky is disabled and fog_density = 0.0, this path is an exact no-op.
 // ──────────────────────────────────────────────────────────────────────────
 struct FogUniforms {
-    // Fog density coefficient (0.0 = no fog, higher = denser)
-    fog_density: f32,
-    // Height falloff rate (controls how fog thins at higher altitudes)
-    fog_height_falloff: f32,
-    // Base height for fog calculation (world-space Y)
-    fog_base_height: f32,
-    // Camera world-space Y position
-    camera_height: f32,
-    // Inscatter color (linear RGB, typically sky-tinted)
-    fog_inscatter: vec3<f32>,
-    // M3: Aerial perspective strength (0.0 = disabled, 1.0 = full effect)
-    // Controls distance-based desaturation and blue shift
-    aerial_perspective: f32,
+    // x=density, y=height falloff, z=base height, w=camera height
+    params0: vec4<f32>,
+    // rgb=legacy inscatter, w=legacy aerial perspective strength
+    fog_inscatter_aerial: vec4<f32>,
+    // x=sky enabled, y=sky aerial density, z=sky aerial enabled, w=sky sun intensity
+    sky_params0: vec4<f32>,
+    // x=sky sun size, y=sun elevation, z=turbidity, w=sky exposure
+    sky_params1: vec4<f32>,
 }
 
 @group(4) @binding(0)
 var<uniform> fog_uniforms: FogUniforms;
+
+@group(4) @binding(1)
+var sky_atmosphere_tex: texture_2d<f32>;
 
 // ──────────────────────────────────────────────────────────────────────────
 // P4: Water Planar Reflection Uniforms (@group(5))
@@ -412,6 +410,17 @@ var reflection_texture: texture_2d<f32>;
 
 @group(5) @binding(2)
 var reflection_sampler: sampler;
+
+fn sample_atmosphere_sky(screen_pos: vec2<f32>) -> vec3<f32> {
+    if (fog_uniforms.sky_params0.x < 0.5 || water_reflection_uniforms.enable_flags.y > 0.5) {
+        return fog_uniforms.fog_inscatter_aerial.rgb;
+    }
+
+    let dims = textureDimensions(sky_atmosphere_tex, 0);
+    let x = clamp(i32(screen_pos.x), 0, max(i32(dims.x) - 1, 0));
+    let y = clamp(i32(screen_pos.y), 0, max(i32(dims.y) - 1, 0));
+    return textureLoad(sky_atmosphere_tex, vec2<i32>(x, y), 0).rgb;
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // M4: Material Layer Uniforms (@group(6))
@@ -2256,72 +2265,77 @@ fn apply_atmospheric_fog(
     base_color: vec3<f32>,
     world_pos: vec3<f32>,
     camera_pos: vec3<f32>,
+    screen_pos: vec2<f32>,
 ) -> vec3<f32> {
-    // Early-out when fog is disabled (density = 0) for exact no-op
-    let density_raw = fog_uniforms.fog_density;
-    if (density_raw <= 0.0) {
+    let density_raw = fog_uniforms.params0.x;
+    let fog_enabled = density_raw > 0.0;
+    let sky_enabled = fog_uniforms.sky_params0.x > 0.5;
+    let sky_aerial_enabled = sky_enabled && fog_uniforms.sky_params0.z > 0.5;
+    if (!fog_enabled && !sky_aerial_enabled) {
         return base_color;
     }
-    
-    // Quadratic density scaling: makes 0-1 range perceptually useful
-    // density=0.1 → 0.01, density=0.5 → 0.25, density=1.0 → 1.0
-    let density = density_raw * density_raw;
-    
-    // Compute view distance
+
     let to_camera = camera_pos - world_pos;
     let view_distance = length(to_camera);
-    
-    // Height-based fog modulation:
-    // Fog is denser at lower altitudes, thinner at higher altitudes.
-    // Uses exponential falloff from base height.
-    // NOTE: Terrain is Z-up, so world_pos.z is elevation.
-    let height_falloff = fog_uniforms.fog_height_falloff;
-    let base_height = fog_uniforms.fog_base_height;
-    
-    // Compute height factor: 1.0 at base_height, decreasing exponentially above
-    // Fragment elevation relative to base (Z-up coordinate system)
+    let sky_color = sample_atmosphere_sky(screen_pos);
+
+    let height_falloff = fog_uniforms.params0.y;
+    let base_height = fog_uniforms.params0.z;
     let fragment_elevation = max(world_pos.z - base_height, 0.0);
     let height_factor = exp(-height_falloff * fragment_elevation);
-    
-    // Exponential fog extinction with height modulation
-    // Scale factor K converts world units to fog-friendly range
-    // K=0.005 tuned for: density=0.1 subtle, 0.2 moderate, 0.3 strong but visible
-    let extinction = exp(-density * view_distance * height_factor * 0.005);
-    
-    // Inscatter color (fog color seen in distance)
-    let inscatter = fog_uniforms.fog_inscatter;
-    
-    // Mix: at extinction=1 (no fog), result is base_color
-    //      at extinction=0 (full fog), result is inscatter
-    var fog_result = mix(inscatter, base_color, extinction);
-    
-    // ──────────────────────────────────────────────────────────────────────────
-    // M3: Aerial Perspective
-    // Distance-based desaturation and blue shift simulating Rayleigh scattering.
-    // Real atmosphere scatters shorter wavelengths (blue) more than longer (red).
-    // Effect: distant objects appear desaturated and shifted toward blue/gray.
-    // ──────────────────────────────────────────────────────────────────────────
-    let aerial_strength = fog_uniforms.aerial_perspective;
-    if (aerial_strength > 0.0) {
-        // Compute aerial perspective factor based on distance
-        // Use same extinction curve but with separate scaling
-        // K_aerial=0.003 for subtle effect at typical terrain distances
-        let aerial_factor = 1.0 - exp(-density * view_distance * height_factor * 0.003);
-        let aerial_amount = aerial_factor * aerial_strength;
-        
-        // Desaturation: reduce color saturation with distance
-        // Compute luminance (Rec. 709 coefficients)
-        let luma = dot(fog_result, vec3<f32>(0.2126, 0.7152, 0.0722));
-        let desaturated = mix(fog_result, vec3<f32>(luma), aerial_amount * 0.6);
-        
-        // Blue shift: blend toward atmospheric blue with distance
-        // Typical sky/atmosphere color (slightly desaturated blue)
-        let atmosphere_blue = vec3<f32>(0.65, 0.75, 0.9);
-        let blue_shifted = mix(desaturated, atmosphere_blue * luma, aerial_amount * 0.3);
-        
-        fog_result = blue_shifted;
+
+    var fog_result = base_color;
+
+    if (fog_enabled) {
+        let density = density_raw * density_raw;
+        let extinction = exp(-density * view_distance * height_factor * 0.005);
+        let inscatter = select(fog_uniforms.fog_inscatter_aerial.rgb, sky_color, sky_enabled);
+        fog_result = mix(inscatter, fog_result, extinction);
+
+        let fog_aerial_strength = fog_uniforms.fog_inscatter_aerial.w;
+        if (fog_aerial_strength > 0.0) {
+            let aerial_factor = 1.0 - exp(-density * view_distance * height_factor * 0.003);
+            let aerial_amount = aerial_factor * fog_aerial_strength;
+            let luma = dot(fog_result, vec3<f32>(0.2126, 0.7152, 0.0722));
+            let desaturated = mix(fog_result, vec3<f32>(luma), aerial_amount * 0.6);
+            let atmosphere_blue = vec3<f32>(0.65, 0.75, 0.9);
+            fog_result = mix(desaturated, atmosphere_blue * luma, aerial_amount * 0.3);
+        }
     }
-    
+
+    if (sky_aerial_enabled) {
+        let aerial_density = fog_uniforms.sky_params0.y;
+        let sun_intensity = fog_uniforms.sky_params0.w;
+        let sun_size = fog_uniforms.sky_params1.x;
+        let sun_elevation = fog_uniforms.sky_params1.y;
+        let turbidity = fog_uniforms.sky_params1.z;
+        let exposure = fog_uniforms.sky_params1.w;
+        let low_sun = 1.0 - smoothstep(0.18, 0.72, sun_elevation);
+        let haze = clamp((turbidity - 1.0) / 9.0, 0.0, 1.0);
+        let sun_energy = clamp(sun_intensity * (0.5 + sun_size * 0.35), 0.0, 8.0);
+        let aerial_factor = 1.0 - exp(-aerial_density * view_distance * (0.08 + haze * 0.04));
+        let aerial_amount = clamp(
+            aerial_factor * (0.8 + haze * 0.25 + sun_energy * 0.05),
+            0.0,
+            1.0,
+        );
+        let luma = dot(fog_result, vec3<f32>(0.2126, 0.7152, 0.0722));
+        let desaturated = mix(fog_result, vec3<f32>(luma), aerial_amount * (0.4 + haze * 0.15));
+        let warm_tint = mix(
+            vec3<f32>(1.0, 1.0, 1.0),
+            vec3<f32>(1.16, 0.98, 0.82),
+            low_sun * (0.55 + haze * 0.25),
+        );
+        let atmosphere_target = sky_color * (1.0 + sun_energy * 0.04)
+            * mix(vec3<f32>(1.0), warm_tint, low_sun)
+            + vec3<f32>(0.14, 0.07, 0.025) * low_sun * sun_energy * 0.18 * exposure;
+        fog_result = mix(
+            desaturated,
+            atmosphere_target,
+            aerial_amount * (0.34 + low_sun * 0.18 + haze * 0.12),
+        );
+    }
+
     return fog_result;
 }
 
@@ -3646,7 +3660,12 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         
         // P2: Apply atmospheric fog after exposure, before tonemap
         // When fog_density = 0, this is a no-op preserving P1 output
-        shaded = apply_atmospheric_fog(shaded, input.world_position, camera_pos);
+        shaded = apply_atmospheric_fog(
+            shaded,
+            input.world_position,
+            camera_pos,
+            input.clip_position.xy,
+        );
         
         // Use filmic tonemapping for better highlight compression (D1 fix)
         // Filmic curve compresses highlights more aggressively than ACES

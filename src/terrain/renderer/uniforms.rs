@@ -37,23 +37,19 @@ impl OverlayUniforms {
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(super) struct FogUniforms {
-    pub(super) fog_density: f32,
-    pub(super) fog_height_falloff: f32,
-    pub(super) fog_base_height: f32,
-    pub(super) camera_height: f32,
-    pub(super) fog_inscatter: [f32; 3],
-    pub(super) aerial_perspective: f32,
+    pub(super) params0: [f32; 4],
+    pub(super) fog_inscatter_aerial: [f32; 4],
+    pub(super) sky_params0: [f32; 4],
+    pub(super) sky_params1: [f32; 4],
 }
 
 impl FogUniforms {
     pub(super) fn disabled() -> Self {
         Self {
-            fog_density: 0.0,
-            fog_height_falloff: 0.0,
-            fog_base_height: 0.0,
-            camera_height: 0.0,
-            fog_inscatter: [1.0, 1.0, 1.0],
-            aerial_perspective: 0.0,
+            params0: [0.0, 0.0, 0.0, 0.0],
+            fog_inscatter_aerial: [1.0, 1.0, 1.0, 0.0],
+            sky_params0: [0.0, 0.0, 0.0, 0.0],
+            sky_params1: [0.0, 0.0, 0.0, 0.0],
         }
     }
 }

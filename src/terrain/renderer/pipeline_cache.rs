@@ -127,6 +127,7 @@ impl TerrainScene {
         device: &wgpu::Device,
         bind_group_layout: &wgpu::BindGroupLayout,
         color_format: wgpu::TextureFormat,
+        sample_count: u32,
     ) -> wgpu::RenderPipeline {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("terrain.blit.shader"),
@@ -160,7 +161,10 @@ impl TerrainScene {
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: sample_count,
+                ..Default::default()
+            },
             multiview: None,
         })
     }

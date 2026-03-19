@@ -270,11 +270,11 @@ impl Viewer {
             csm_depth_pipeline,
             csm_depth_camera,
             // Sky controls
-            sky_model_id: sky_params_init.model,
-            sky_turbidity: sky_params_init.turbidity,
-            sky_ground_albedo: sky_params_init.ground_albedo,
-            sky_exposure: sky_params_init.exposure,
-            sky_sun_intensity: sky_params_init.sun_intensity,
+            sky_model_id: sky_params_init.model_pad[0],
+            sky_turbidity: sky_params_init.sun_direction_turbidity[3],
+            sky_ground_albedo: sky_params_init.ground_albedo_sun_size_sun_intensity_exposure[0],
+            sky_exposure: sky_params_init.ground_albedo_sun_size_sun_intensity_exposure[3],
+            sky_sun_intensity: sky_params_init.ground_albedo_sun_size_sun_intensity_exposure[2],
             // HUD
             hud_enabled: true,
             hud,
@@ -317,13 +317,9 @@ impl Viewer {
 /// Read sky parameters from environment variables
 fn read_sky_env_params() -> SkyUniforms {
     let mut params = SkyUniforms {
-        sun_direction: [0.3, 0.8, 0.5],
-        turbidity: 2.5,
-        ground_albedo: 0.2,
-        model: 1,
-        sun_intensity: 20.0,
-        exposure: 1.0,
-        _pad: [0.0; 4],
+        sun_direction_turbidity: [0.3, 0.8, 0.5, 2.5],
+        ground_albedo_sun_size_sun_intensity_exposure: [0.2, 1.0, 20.0, 1.0],
+        model_pad: [1, 0, 0, 0],
     };
 
     if let Ok(model_str) = std::env::var("FORGE3D_SKY_MODEL") {
@@ -331,7 +327,7 @@ fn read_sky_env_params() -> SkyUniforms {
             .trim()
             .to_ascii_lowercase()
             .replace(['-', '_', ' '], "");
-        params.model = match key.as_str() {
+        params.model_pad[0] = match key.as_str() {
             "preetham" => 0,
             "hosekwilkie" => 1,
             _ => 1,
@@ -339,22 +335,22 @@ fn read_sky_env_params() -> SkyUniforms {
     }
     if let Ok(v) = std::env::var("FORGE3D_SKY_TURBIDITY") {
         if let Ok(f) = v.parse::<f32>() {
-            params.turbidity = f.clamp(1.0, 10.0);
+            params.sun_direction_turbidity[3] = f.clamp(1.0, 10.0);
         }
     }
     if let Ok(v) = std::env::var("FORGE3D_SKY_GROUND") {
         if let Ok(f) = v.parse::<f32>() {
-            params.ground_albedo = f.clamp(0.0, 1.0);
+            params.ground_albedo_sun_size_sun_intensity_exposure[0] = f.clamp(0.0, 1.0);
         }
     }
     if let Ok(v) = std::env::var("FORGE3D_SKY_EXPOSURE") {
         if let Ok(f) = v.parse::<f32>() {
-            params.exposure = f.max(0.0);
+            params.ground_albedo_sun_size_sun_intensity_exposure[3] = f.max(0.0);
         }
     }
     if let Ok(v) = std::env::var("FORGE3D_SKY_INTENSITY") {
         if let Ok(f) = v.parse::<f32>() {
-            params.sun_intensity = f.max(0.0);
+            params.ground_albedo_sun_size_sun_intensity_exposure[2] = f.max(0.0);
         }
     }
 

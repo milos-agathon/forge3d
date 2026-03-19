@@ -20,6 +20,7 @@ impl TerrainScene {
         overlay_buffer: &wgpu::Buffer,
         height_curve_view: &wgpu::TextureView,
         water_mask_view_uploaded: Option<&wgpu::TextureView>,
+        sky_view: &wgpu::TextureView,
         height_ao_computed: bool,
         sun_vis_computed: bool,
         decoded: &crate::terrain::render_params::DecodedTerrainSettings,
@@ -149,13 +150,41 @@ impl TerrainScene {
         } else {
             decoded.fog.base_height
         };
+        let sky_enabled = decoded.sky.enabled;
+        let sky_aerial_enabled = sky_enabled && decoded.sky.aerial_perspective;
         let fog_uniforms = FogUniforms {
-            fog_density: decoded.fog.density,
-            fog_height_falloff: decoded.fog.height_falloff,
-            fog_base_height,
-            camera_height: eye_y,
-            fog_inscatter: decoded.fog.inscatter,
-            aerial_perspective: decoded.fog.aerial_perspective,
+            params0: [
+                decoded.fog.density,
+                decoded.fog.height_falloff,
+                fog_base_height,
+                eye_y,
+            ],
+            fog_inscatter_aerial: [
+                decoded.fog.inscatter[0],
+                decoded.fog.inscatter[1],
+                decoded.fog.inscatter[2],
+                if sky_enabled {
+                    0.0
+                } else {
+                    decoded.fog.aerial_perspective
+                },
+            ],
+            sky_params0: [
+                if sky_enabled { 1.0 } else { 0.0 },
+                if sky_aerial_enabled {
+                    decoded.sky.aerial_density.max(0.0)
+                } else {
+                    0.0
+                },
+                if sky_aerial_enabled { 1.0 } else { 0.0 },
+                decoded.sky.sun_intensity.max(0.0),
+            ],
+            sky_params1: [
+                decoded.sky.sun_size.max(0.0),
+                decoded.light.direction[2].max(0.0),
+                decoded.sky.turbidity.clamp(1.0, 10.0),
+                decoded.sky.sky_exposure.max(0.0),
+            ],
         };
         self.queue.write_buffer(
             &self.fog_uniform_buffer,
@@ -165,10 +194,16 @@ impl TerrainScene {
         let fog = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("terrain.fog.bind_group"),
             layout: &self.fog_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: self.fog_uniform_buffer.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.fog_uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(sky_view),
+                },
+            ],
         });
 
         let materials = &decoded.materials;

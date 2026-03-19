@@ -29,6 +29,7 @@ pub struct SkyParams {
     pub model_id: u32,
     pub turbidity: f32,
     pub ground_albedo: f32,
+    pub sun_size: f32,
     pub exposure: f32,
     pub sun_intensity: f32,
 }
@@ -63,13 +64,19 @@ pub fn update_sky_params(
         .normalize();
 
     let sky_uniforms = SkyUniforms {
-        sun_direction: [sun_dir_ws.x, sun_dir_ws.y, sun_dir_ws.z],
-        turbidity: params.turbidity.clamp(1.0, 10.0),
-        ground_albedo: params.ground_albedo.clamp(0.0, 1.0),
-        model: params.model_id,
-        sun_intensity: params.sun_intensity.max(0.0),
-        exposure: params.exposure.max(0.0),
-        _pad: [0.0; 4],
+        sun_direction_turbidity: [
+            sun_dir_ws.x,
+            sun_dir_ws.y,
+            sun_dir_ws.z,
+            params.turbidity.clamp(1.0, 10.0),
+        ],
+        ground_albedo_sun_size_sun_intensity_exposure: [
+            params.ground_albedo.clamp(0.0, 1.0),
+            params.sun_size.max(0.0),
+            params.sun_intensity.max(0.0),
+            params.exposure.max(0.0),
+        ],
+        model_pad: [params.model_id, 0, 0, 0],
     };
     queue.write_buffer(sky_params_buf, 0, bytemuck::bytes_of(&sky_uniforms));
 }

@@ -15,6 +15,13 @@ impl TerrainScene {
         let base_resources = create_base_init_resources(device.as_ref(), queue.as_ref())?;
         let sampler_linear = base_resources.sampler_linear;
         let height_curve_lut_sampler = base_resources.height_curve_lut_sampler;
+        let atmosphere_resources =
+            create_atmosphere_init_resources(device.as_ref(), queue.as_ref());
+        let sky_bind_group_layout0 = atmosphere_resources.sky_bind_group_layout0;
+        let sky_bind_group_layout1 = atmosphere_resources.sky_bind_group_layout1;
+        let sky_pipeline = atmosphere_resources.sky_pipeline;
+        let sky_fallback_texture = atmosphere_resources.sky_fallback_texture;
+        let sky_fallback_view = atmosphere_resources.sky_fallback_view;
         let height_curve_identity_texture = base_resources.height_curve_identity_texture;
         let height_curve_identity_view = base_resources.height_curve_identity_view;
         let water_mask_fallback_texture = base_resources.water_mask_fallback_texture;
@@ -103,7 +110,7 @@ impl TerrainScene {
         );
 
         let blit_pipeline =
-            Self::create_blit_pipeline(device.as_ref(), &blit_bind_group_layout, color_format);
+            Self::create_blit_pipeline(device.as_ref(), &blit_bind_group_layout, color_format, 1);
 
         let accumulation_resources = create_accumulation_init_resources(device.as_ref());
         let accumulation_bind_group_layout = accumulation_resources.accumulation_bind_group_layout;
@@ -157,6 +164,11 @@ impl TerrainScene {
             blit_bind_group_layout,
             blit_pipeline,
             sampler_linear,
+            sky_bind_group_layout0,
+            sky_bind_group_layout1,
+            sky_pipeline,
+            sky_fallback_texture,
+            sky_fallback_view,
             height_curve_identity_texture,
             height_curve_identity_view,
             water_mask_fallback_texture,

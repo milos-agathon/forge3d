@@ -11,6 +11,7 @@ pub(in crate::terrain::renderer) struct RenderTargets {
     pub(in crate::terrain::renderer) internal_width: u32,
     pub(in crate::terrain::renderer) internal_height: u32,
     pub(in crate::terrain::renderer) needs_scaling: bool,
+    pub(in crate::terrain::renderer) sample_count: u32,
 }
 
 impl TerrainScene {
@@ -184,6 +185,7 @@ impl TerrainScene {
             internal_width,
             internal_height,
             needs_scaling,
+            sample_count: effective_msaa,
         })
     }
 }

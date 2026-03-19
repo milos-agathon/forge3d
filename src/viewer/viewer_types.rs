@@ -9,13 +9,9 @@ use glam::{Mat3, Mat4, Vec2, Vec3};
 #[repr(C, align(16))]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct SkyUniforms {
-    pub sun_direction: [f32; 3],
-    pub turbidity: f32,
-    pub ground_albedo: f32,
-    pub model: u32, // 0=Preetham, 1=Hosek-Wilkie
-    pub sun_intensity: f32,
-    pub exposure: f32,
-    pub _pad: [f32; 4],
+    pub sun_direction_turbidity: [f32; 4],
+    pub ground_albedo_sun_size_sun_intensity_exposure: [f32; 4],
+    pub model_pad: [u32; 4], // x=model (0=Preetham, 1=Hosek-Wilkie)
 }
 
 /// Std140-compatible packed layout for VolumetricUniforms

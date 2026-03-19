@@ -29,6 +29,7 @@ use crate::lighting::types::{Light, LightType};
 use crate::lighting::LightBuffer;
 
 mod aov;
+mod atmosphere;
 mod bind_groups;
 mod constructor;
 mod core;
@@ -46,6 +47,7 @@ mod water_reflection;
 
 pub use self::core::{TerrainRenderer, TerrainScene, ViewerTerrainData};
 
+use self::atmosphere::create_atmosphere_init_resources;
 use self::bind_groups::create_base_bind_group_layouts;
 use self::core::{
     IblUniforms, NoopShadow, OverlayBinding, PipelineCache, MATERIAL_LAYER_CAPACITY,
