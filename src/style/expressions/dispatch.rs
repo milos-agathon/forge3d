@@ -23,7 +23,9 @@ fn evaluate_array_expression(arr: &[Value], ctx: &EvalContext) -> Option<Value> 
         "has" => property::eval_has(arr, ctx),
         "at" => property::eval_at(arr, ctx),
         "length" => property::eval_length(arr, ctx),
-        "interpolate" | "interpolate-hcl" | "interpolate-lab" => control::eval_interpolate(arr, ctx),
+        "interpolate" | "interpolate-hcl" | "interpolate-lab" => {
+            control::eval_interpolate(arr, ctx)
+        }
         "step" => control::eval_step(arr, ctx),
         "match" => control::eval_match(arr, ctx),
         "case" => control::eval_case(arr, ctx),

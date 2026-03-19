@@ -145,9 +145,9 @@ pub mod uv; // UV unwrap helpers (planar, spherical)
 pub mod textures {}
 pub mod animation; // Feature C: Camera animation and keyframe interpolation
 pub mod bundle; // Scene bundle (.forge3d) for portable scene packages
-pub mod license; // Ed25519 offline license signature verification
 pub mod export;
 pub mod labels; // Screen-space text labels with MSDF rendering
+pub mod license; // Ed25519 offline license signature verification
 pub mod p5;
 pub mod passes;
 pub mod picking; // Feature picking and inspection system

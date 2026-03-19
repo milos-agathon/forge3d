@@ -8,9 +8,11 @@ impl DualSourceOITRenderer {
         additional_bind_group_layouts: &[&wgpu::BindGroupLayout],
     ) -> Result<(), String> {
         match self.get_operating_mode() {
-            DualSourceOITMode::DualSource => {
-                self.create_true_dual_source_pipeline(device, vertex_buffers, additional_bind_group_layouts)
-            }
+            DualSourceOITMode::DualSource => self.create_true_dual_source_pipeline(
+                device,
+                vertex_buffers,
+                additional_bind_group_layouts,
+            ),
             DualSourceOITMode::WBOITFallback => Ok(()),
             _ => Ok(()),
         }

@@ -1,8 +1,8 @@
 use glam::{Mat4, Vec2, Vec3};
 use std::borrow::Cow;
 use wgpu::{
-    vertex_attr_array, BindGroup, BindGroupLayout, Buffer, BufferAddress, ComputePipeline,
-    Device, Queue, RenderPipeline, Sampler, Texture, TextureFormat, TextureView,
+    vertex_attr_array, BindGroup, BindGroupLayout, Buffer, BufferAddress, ComputePipeline, Device,
+    Queue, RenderPipeline, Sampler, Texture, TextureFormat, TextureView,
 };
 
 use super::types::*;

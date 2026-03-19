@@ -97,12 +97,7 @@ impl DualSourceOITRenderer {
         }
     }
 
-    pub fn resize(
-        &mut self,
-        device: &wgpu::Device,
-        width: u32,
-        height: u32,
-    ) -> Result<(), String> {
+    pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) -> Result<(), String> {
         if self.width != width || self.height != height {
             self.create_textures(device, width, height)?;
         }

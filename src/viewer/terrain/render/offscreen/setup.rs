@@ -177,12 +177,7 @@ impl ViewerTerrainScene {
         let uniforms = TerrainUniforms {
             view_proj: view_proj.to_cols_array_2d(),
             sun_dir: [sun_dir.x, sun_dir.y, sun_dir.z, 0.0],
-            terrain_params: [
-                domain.0,
-                h_range,
-                terrain_width,
-                shader_z_scale,
-            ],
+            terrain_params: [domain.0, h_range, terrain_width, shader_z_scale],
             lighting: [
                 terrain.sun_intensity,
                 terrain.ambient,

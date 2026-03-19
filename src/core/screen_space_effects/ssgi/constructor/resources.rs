@@ -55,13 +55,28 @@ pub(super) fn create_textures(
         height,
         TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
     );
-    let (ssgi_composited, ssgi_composited_view) = rgba8_texture(device, "ssgi_composited", width, height);
+    let (ssgi_composited, ssgi_composited_view) =
+        rgba8_texture(device, "ssgi_composited", width, height);
 
     let history_usage =
         TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::COPY_SRC;
     let scene_history = [
-        scene_history_texture(device, "ssgi_scene_history_a", width, height, material_format, history_usage),
-        scene_history_texture(device, "ssgi_scene_history_b", width, height, material_format, history_usage),
+        scene_history_texture(
+            device,
+            "ssgi_scene_history_a",
+            width,
+            height,
+            material_format,
+            history_usage,
+        ),
+        scene_history_texture(
+            device,
+            "ssgi_scene_history_b",
+            width,
+            height,
+            material_format,
+            history_usage,
+        ),
     ];
     let scene_history_views = [
         scene_history[0].create_view(&TextureViewDescriptor::default()),

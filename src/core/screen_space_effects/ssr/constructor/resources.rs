@@ -62,11 +62,7 @@ pub(super) fn create_buffers(device: &Device) -> ConstructorBuffers {
     }
 }
 
-pub(super) fn create_textures(
-    device: &Device,
-    width: u32,
-    height: u32,
-) -> ConstructorResources {
+pub(super) fn create_textures(device: &Device, width: u32, height: u32) -> ConstructorResources {
     let (ssr_spec_texture, ssr_spec_view) =
         rgba16_texture(device, "p5.ssr.spec", width, height, true);
     let (ssr_final_texture, ssr_final_view) =
@@ -75,8 +71,7 @@ pub(super) fn create_textures(
         rgba16_texture(device, "p5.ssr.history", width, height, false);
     let (ssr_filtered_texture, ssr_filtered_view) =
         rgba16_texture(device, "p5.ssr.filtered", width, height, true);
-    let (ssr_hit_texture, ssr_hit_view) =
-        rgba16_texture(device, "p5.ssr.hit", width, height, true);
+    let (ssr_hit_texture, ssr_hit_view) = rgba16_texture(device, "p5.ssr.hit", width, height, true);
     let (ssr_composited_texture, ssr_composited_view) =
         rgba8_texture(device, "p5.ssr.composited", width, height);
 
@@ -167,12 +162,7 @@ fn rgba16_texture(
     (texture, view)
 }
 
-fn rgba8_texture(
-    device: &Device,
-    label: &str,
-    width: u32,
-    height: u32,
-) -> (Texture, TextureView) {
+fn rgba8_texture(device: &Device, label: &str, width: u32, height: u32) -> (Texture, TextureView) {
     let texture = device.create_texture(&TextureDescriptor {
         label: Some(label),
         size: Extent3d {
@@ -184,7 +174,9 @@ fn rgba8_texture(
         sample_count: 1,
         dimension: TextureDimension::D2,
         format: TextureFormat::Rgba8Unorm,
-        usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
+        usage: TextureUsages::STORAGE_BINDING
+            | TextureUsages::TEXTURE_BINDING
+            | TextureUsages::COPY_SRC,
         view_formats: &[],
     });
     let view = texture.create_view(&TextureViewDescriptor::default());

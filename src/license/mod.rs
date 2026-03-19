@@ -4,7 +4,7 @@
 //! secure signing pipeline and is never shipped in source or binary form.
 //! Verification happens entirely offline — no network calls.
 
-use ed25519_dalek::{Signature, VerifyingKey, Verifier};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
 /// Embedded Ed25519 public key used to verify license signatures.
 ///
@@ -12,10 +12,8 @@ use ed25519_dalek::{Signature, VerifyingKey, Verifier};
 /// The corresponding private key must be kept in a secure offline signing
 /// environment.
 const PUBLIC_KEY_BYTES: [u8; 32] = [
-    0x9a, 0x99, 0x5d, 0x11, 0xc2, 0xda, 0x9d, 0xf6,
-    0xb7, 0x34, 0xe7, 0xaa, 0x98, 0xd7, 0x87, 0x7b,
-    0xb3, 0x26, 0x91, 0x09, 0x98, 0x66, 0x7b, 0xef,
-    0x34, 0x9e, 0xb5, 0x1e, 0x16, 0x73, 0x82, 0xf7,
+    0x9a, 0x99, 0x5d, 0x11, 0xc2, 0xda, 0x9d, 0xf6, 0xb7, 0x34, 0xe7, 0xaa, 0x98, 0xd7, 0x87, 0x7b,
+    0xb3, 0x26, 0x91, 0x09, 0x98, 0x66, 0x7b, 0xef, 0x34, 0x9e, 0xb5, 0x1e, 0x16, 0x73, 0x82, 0xf7,
 ];
 
 /// Verify an Ed25519 signature over `message` using the embedded public key.
@@ -23,9 +21,7 @@ const PUBLIC_KEY_BYTES: [u8; 32] = [
 /// Returns `true` when the signature is valid, `false` otherwise.
 /// All error paths (bad key bytes, malformed signature) collapse to `false`.
 pub fn verify_signature(message: &[u8], signature_bytes: &[u8]) -> bool {
-    let Ok(key) = VerifyingKey::from_bytes(
-        &PUBLIC_KEY_BYTES
-    ) else {
+    let Ok(key) = VerifyingKey::from_bytes(&PUBLIC_KEY_BYTES) else {
         return false;
     };
     if signature_bytes.len() != 64 {
@@ -56,12 +52,18 @@ mod tests {
 
     #[test]
     fn rejects_garbage_signature() {
-        assert!(!verify_signature(b"F3D-PRO-forge3d-ci-20991231", &[0u8; 64]));
+        assert!(!verify_signature(
+            b"F3D-PRO-forge3d-ci-20991231",
+            &[0u8; 64]
+        ));
     }
 
     #[test]
     fn rejects_wrong_length() {
-        assert!(!verify_signature(b"F3D-PRO-forge3d-ci-20991231", &[0u8; 32]));
+        assert!(!verify_signature(
+            b"F3D-PRO-forge3d-ci-20991231",
+            &[0u8; 32]
+        ));
     }
 
     #[test]

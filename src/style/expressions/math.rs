@@ -80,11 +80,7 @@ pub(super) fn eval_sqrt(arr: &[Value], ctx: &EvalContext) -> Option<Value> {
     unary_number(arr, ctx, |a| a.sqrt())
 }
 
-fn unary_number(
-    arr: &[Value],
-    ctx: &EvalContext,
-    op: impl FnOnce(f64) -> f64,
-) -> Option<Value> {
+fn unary_number(arr: &[Value], ctx: &EvalContext, op: impl FnOnce(f64) -> f64) -> Option<Value> {
     let a = dispatch::evaluate_expression(arr.get(1)?, ctx)?.as_f64()?;
     Some(Value::Number(serde_json::Number::from_f64(op(a))?))
 }

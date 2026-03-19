@@ -227,10 +227,7 @@ fn storage_buffer_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutE
     }
 }
 
-fn storage_texture_entry(
-    binding: u32,
-    format: wgpu::TextureFormat,
-) -> wgpu::BindGroupLayoutEntry {
+fn storage_texture_entry(binding: u32, format: wgpu::TextureFormat) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::COMPUTE,
@@ -243,10 +240,7 @@ fn storage_texture_entry(
     }
 }
 
-fn texture_view_entry<'a>(
-    binding: u32,
-    view: &'a wgpu::TextureView,
-) -> wgpu::BindGroupEntry<'a> {
+fn texture_view_entry<'a>(binding: u32, view: &'a wgpu::TextureView) -> wgpu::BindGroupEntry<'a> {
     wgpu::BindGroupEntry {
         binding,
         resource: wgpu::BindingResource::TextureView(view),

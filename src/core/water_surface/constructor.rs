@@ -3,10 +3,9 @@ use wgpu::{
     BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry,
     BindingType, BufferBindingType, BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites,
     Extent3d, FilterMode, FragmentState, PipelineLayoutDescriptor, PrimitiveState,
-    PrimitiveTopology, SamplerBindingType, SamplerDescriptor, ShaderModuleDescriptor,
-    ShaderSource, ShaderStages, TextureDescriptor, TextureDimension, TextureSampleType,
-    TextureUsages, TextureViewDescriptor, TextureViewDimension, VertexBufferLayout, VertexState,
-    VertexStepMode,
+    PrimitiveTopology, SamplerBindingType, SamplerDescriptor, ShaderModuleDescriptor, ShaderSource,
+    ShaderStages, TextureDescriptor, TextureDimension, TextureSampleType, TextureUsages,
+    TextureViewDescriptor, TextureViewDimension, VertexBufferLayout, VertexState, VertexStepMode,
 };
 
 impl WaterSurfaceRenderer {
@@ -217,9 +216,7 @@ impl WaterSurfaceRenderer {
                 let world_z = -half_size + y as f32 * step;
                 let u = x as f32 / subdivisions as f32;
                 let v = y as f32 / subdivisions as f32;
-                vertices.extend_from_slice(&[
-                    world_x, 0.0, world_z, u, v, 0.0, 1.0, 0.0,
-                ]);
+                vertices.extend_from_slice(&[world_x, 0.0, world_z, u, v, 0.0, 1.0, 0.0]);
             }
         }
 

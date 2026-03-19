@@ -70,7 +70,9 @@ fn interpolate_values(a: &Value, b: &Value, t: f64) -> Option<Value> {
         (Value::Number(na), Value::Number(nb)) => {
             let va = na.as_f64()?;
             let vb = nb.as_f64()?;
-            Some(Value::Number(serde_json::Number::from_f64(va + (vb - va) * t)?))
+            Some(Value::Number(serde_json::Number::from_f64(
+                va + (vb - va) * t,
+            )?))
         }
         (Value::Array(aa), Value::Array(ab)) if aa.len() == ab.len() => {
             let result: Option<Vec<Value>> = aa
@@ -81,7 +83,10 @@ fn interpolate_values(a: &Value, b: &Value, t: f64) -> Option<Value> {
             result.map(Value::Array)
         }
         (Value::String(sa), Value::String(sb)) => {
-            if let (Some(ca), Some(cb)) = (strings::parse_color_to_array(sa), strings::parse_color_to_array(sb)) {
+            if let (Some(ca), Some(cb)) = (
+                strings::parse_color_to_array(sa),
+                strings::parse_color_to_array(sb),
+            ) {
                 let result: Vec<Value> = ca
                     .iter()
                     .zip(cb.iter())
