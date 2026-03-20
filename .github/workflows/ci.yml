@@ -269,6 +269,9 @@ jobs:
     needs: [build-wheels, terrain-golden-paths]
     runs-on: windows-latest
     if: github.event_name == 'workflow_dispatch' || needs.terrain-golden-paths.outputs.terrain_goldens == 'true'
+    env:
+      # The terrain shader path is not GL-safe on hosted runners; pin a stable backend.
+      WGPU_BACKEND: dx12
 
     steps:
       - uses: actions/checkout@v4
@@ -332,6 +335,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Vulkan runtime (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan1 mesa-vulkan-drivers
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -349,6 +358,9 @@ jobs:
           pip install numpy pillow
 
       - name: "Run example: ${{ matrix.example.name }}"
+        env:
+          # Force terrain examples onto a deterministic backend instead of the hosted runner default.
+          WGPU_BACKEND: ${{ matrix.os == 'windows-latest' && 'dx12' || 'vulkan' }}
         run: python ${{ matrix.example.script }} ${{ matrix.example.args }}
         timeout-minutes: 2
 
