@@ -37,7 +37,7 @@ jobs:
           filters: |
             terrain_goldens:
               - '.github/workflows/ci.yml'
-              - 'src/shaders/*terrain*.wgsl'
+              - 'src/shaders/**/*.wgsl'
               - 'src/terrain/**'
               - 'src/viewer/terrain/**'
               - 'python/forge3d/terrain*.py'

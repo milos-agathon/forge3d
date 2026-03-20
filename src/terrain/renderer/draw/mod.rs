@@ -179,6 +179,20 @@ impl TerrainScene {
             sky_texture.is_some(),
         )?;
 
+        #[cfg(feature = "enable-gpu-instancing")]
+        {
+            let scatter_state = self.build_scatter_render_state(
+                params,
+                decoded,
+                height_inputs.width,
+                height_inputs.height,
+                shadow_setup.view_matrix,
+                shadow_setup.proj_matrix,
+                shadow_setup.eye,
+            );
+            self.render_scatter_pass(&mut encoder, &render_targets, &scatter_state)?;
+        }
+
         let (final_texture, final_width, final_height) =
             self.resolve_output(&mut encoder, params, decoded, render_targets)?;
         self.queue.submit(Some(encoder.finish()));

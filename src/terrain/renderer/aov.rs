@@ -256,7 +256,18 @@ impl TerrainScene {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain.render_pass.aov"),
                 color_attachments: &color_attachments,
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &render_targets.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: if preserve_background {
+                            wgpu::LoadOp::Load
+                        } else {
+                            wgpu::LoadOp::Clear(1.0)
+                        },
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
@@ -291,6 +302,7 @@ impl TerrainScene {
         out_width: u32,
         out_height: u32,
         needs_scaling: bool,
+        renormalize_normals: bool,
         label: &str,
     ) -> Result<wgpu::Texture> {
         if !needs_scaling {
@@ -341,12 +353,11 @@ impl TerrainScene {
                 },
             ],
         });
-        let blit_pipeline = Self::create_blit_pipeline(
-            self.device.as_ref(),
-            &self.blit_bind_group_layout,
-            TERRAIN_AOV_FORMAT,
-            1,
-        );
+        let blit_pipeline = if renormalize_normals {
+            &self.normal_blit_pipeline
+        } else {
+            &self.aov_blit_pipeline
+        };
 
         {
             let mut blit_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -363,7 +374,7 @@ impl TerrainScene {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            blit_pass.set_pipeline(&blit_pipeline);
+            blit_pass.set_pipeline(blit_pipeline);
             blit_pass.set_bind_group(0, &blit_bind_group, &[]);
             blit_pass.draw(0..3, 0..1);
         }
@@ -553,6 +564,20 @@ impl TerrainScene {
             sky_texture.is_some(),
         )?;
 
+        #[cfg(feature = "enable-gpu-instancing")]
+        {
+            let scatter_state = self.build_scatter_render_state(
+                params,
+                decoded,
+                height_inputs.width,
+                height_inputs.height,
+                shadow_setup.view_matrix,
+                shadow_setup.proj_matrix,
+                shadow_setup.eye,
+            );
+            self.render_scatter_pass(&mut encoder, &render_targets, &scatter_state)?;
+        }
+
         let needs_scaling = render_targets.needs_scaling;
         let (final_texture, final_width, final_height) =
             self.resolve_output(&mut encoder, params, decoded, render_targets)?;
@@ -565,6 +590,7 @@ impl TerrainScene {
             final_width,
             final_height,
             needs_scaling,
+            false,
             "terrain.aov.albedo.resolved",
         )?;
         let normal_texture = self.resolve_aux_output(
@@ -575,6 +601,7 @@ impl TerrainScene {
             final_width,
             final_height,
             needs_scaling,
+            true,
             "terrain.aov.normal.resolved",
         )?;
         let depth_texture = self.resolve_aux_output(
@@ -585,6 +612,7 @@ impl TerrainScene {
             final_width,
             final_height,
             needs_scaling,
+            false,
             "terrain.aov.depth.resolved",
         )?;
 

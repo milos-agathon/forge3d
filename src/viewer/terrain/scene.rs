@@ -185,10 +185,18 @@ pub struct ViewerTerrainScene {
     pub(super) velocity_view: Option<wgpu::TextureView>,
     pub(super) velocity_pipeline: Option<wgpu::ComputePipeline>,
     pub(super) velocity_bind_group_layout: Option<wgpu::BindGroupLayout>,
+    #[cfg(feature = "enable-gpu-instancing")]
+    pub(super) scatter_renderer: crate::render::mesh_instanced::MeshInstancedRenderer,
+    #[cfg(feature = "enable-gpu-instancing")]
+    pub(super) scatter_batches: Vec<crate::terrain::scatter::TerrainScatterBatch>,
+    #[cfg(feature = "enable-gpu-instancing")]
+    pub(super) scatter_last_frame_stats: crate::terrain::scatter::TerrainScatterFrameStats,
 }
 
 mod core;
 mod overlays;
 mod pbr_compute;
 mod pipeline_init;
+#[cfg(feature = "enable-gpu-instancing")]
+pub(in crate::viewer::terrain) mod scatter;
 mod terrain_load;

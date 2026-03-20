@@ -69,6 +69,68 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_set_terrain_scatter() {
+        let json = r#"{
+            "cmd":"set_terrain_scatter",
+            "batches":[
+                {
+                    "name":"trees",
+                    "color":[0.2,0.6,0.3,1.0],
+                    "max_draw_distance":180.0,
+                    "transforms":[[1.0,0.0,0.0,3.0,0.0,1.0,0.0,4.0,0.0,0.0,1.0,5.0,0.0,0.0,0.0,1.0]],
+                    "levels":[
+                        {
+                            "positions":[[0.0,0.0,0.0],[1.0,0.0,0.0],[0.0,1.0,0.0]],
+                            "normals":[[0.0,1.0,0.0],[0.0,1.0,0.0],[0.0,1.0,0.0]],
+                            "indices":[0,1,2],
+                            "max_distance":90.0
+                        }
+                    ]
+                }
+            ]
+        }"#;
+        let req = parse_ipc_request(json).unwrap();
+        match &req {
+            IpcRequest::SetTerrainScatter { batches } => {
+                assert_eq!(batches.len(), 1);
+                assert_eq!(batches[0].name.as_deref(), Some("trees"));
+                assert_eq!(batches[0].transforms.len(), 1);
+                assert_eq!(batches[0].levels.len(), 1);
+                assert_eq!(batches[0].levels[0].indices, vec![0, 1, 2]);
+            }
+            _ => panic!("Expected SetTerrainScatter"),
+        }
+
+        let cmd = ipc_request_to_viewer_cmd(&req).unwrap().unwrap();
+        match cmd {
+            crate::viewer::viewer_enums::ViewerCmd::SetTerrainScatter { batches } => {
+                assert_eq!(batches.len(), 1);
+                assert_eq!(batches[0].name.as_deref(), Some("trees"));
+                assert_eq!(batches[0].transforms.len(), 1);
+                assert_eq!(batches[0].levels.len(), 1);
+                assert_eq!(batches[0].levels[0].mesh.indices, vec![0, 1, 2]);
+            }
+            _ => panic!("Expected ViewerCmd::SetTerrainScatter"),
+        }
+    }
+
+    #[test]
+    fn test_parse_clear_terrain_scatter() {
+        let json = r#"{"cmd":"clear_terrain_scatter"}"#;
+        let req = parse_ipc_request(json).unwrap();
+        match &req {
+            IpcRequest::ClearTerrainScatter => {}
+            _ => panic!("Expected ClearTerrainScatter"),
+        }
+
+        let cmd = ipc_request_to_viewer_cmd(&req).unwrap().unwrap();
+        match cmd {
+            crate::viewer::viewer_enums::ViewerCmd::ClearTerrainScatter => {}
+            _ => panic!("Expected ViewerCmd::ClearTerrainScatter"),
+        }
+    }
+
+    #[test]
     fn test_parse_set_point_cloud_camera_params() {
         let json = r#"{"cmd":"set_point_cloud_params","phi":0.6,"theta":0.5,"radius":1.4}"#;
         let req = parse_ipc_request(json).unwrap();

@@ -139,6 +139,45 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             }
             true
         }
+        ViewerCmd::SetTerrainScatter { batches } => {
+            #[cfg(feature = "enable-gpu-instancing")]
+            {
+                if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
+                    match terrain_viewer.set_scatter_batches_from_configs(batches) {
+                        Ok(()) => {
+                            println!("[terrain] scatter batches set: {}", batches.len());
+                        }
+                        Err(e) => eprintln!("[terrain] Failed to set scatter batches: {e:#}"),
+                    }
+                } else {
+                    eprintln!("[terrain] Load terrain before setting scatter batches");
+                }
+            }
+            #[cfg(not(feature = "enable-gpu-instancing"))]
+            {
+                let _ = batches;
+                eprintln!(
+                    "[terrain] Scatter batches require Cargo feature 'enable-gpu-instancing'"
+                );
+            }
+            true
+        }
+        ViewerCmd::ClearTerrainScatter => {
+            #[cfg(feature = "enable-gpu-instancing")]
+            {
+                if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
+                    terrain_viewer.clear_scatter_batches();
+                    println!("[terrain] scatter batches cleared");
+                }
+            }
+            #[cfg(not(feature = "enable-gpu-instancing"))]
+            {
+                eprintln!(
+                    "[terrain] Scatter batches require Cargo feature 'enable-gpu-instancing'"
+                );
+            }
+            true
+        }
         ViewerCmd::SetTerrainPbr {
             enabled,
             hdr_path,

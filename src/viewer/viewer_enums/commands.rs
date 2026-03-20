@@ -3,7 +3,8 @@ use crate::cli::args::GiVizMode;
 use super::{
     ViewerDenoiseConfig, ViewerDofConfig, ViewerHeightAoConfig, ViewerLensEffectsConfig,
     ViewerMaterialLayerConfig, ViewerMotionBlurConfig, ViewerSkyConfig, ViewerSunVisConfig,
-    ViewerTonemapConfig, ViewerVectorOverlayConfig, ViewerVolumetricsConfig,
+    ViewerTerrainScatterBatchConfig, ViewerTonemapConfig, ViewerVectorOverlayConfig,
+    ViewerVolumetricsConfig,
 };
 
 /// Viewer command enum for input parsing.
@@ -70,6 +71,8 @@ pub enum ViewerCmd {
         ambient: Option<f32>, zscale: Option<f32>, shadow: Option<f32>,
         background: Option<[f32; 3]>, water_level: Option<f32>, water_color: Option<[f32; 3]>,
     },
+    SetTerrainScatter { batches: Vec<ViewerTerrainScatterBatchConfig> },
+    ClearTerrainScatter,
     GetTerrainParams,
     SetTerrainPbr {
         enabled: Option<bool>, hdr_path: Option<String>, ibl_intensity: Option<f32>,

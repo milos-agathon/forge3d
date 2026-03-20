@@ -43,7 +43,7 @@ pub use weld::{weld_mesh, WeldOptions, WeldResult};
 
 // Re-export Python bindings
 #[cfg(feature = "extension-module")]
-pub use mesh_python::{map_geometry_err, mesh_from_python, mesh_to_python};
+pub use mesh_python::{map_geometry_err, mesh_from_python, mesh_from_python_dict, mesh_to_python};
 #[cfg(feature = "extension-module")]
 pub use py_advanced::{
     geometry_attach_tangents_py, geometry_displace_heightmap_py, geometry_displace_procedural_py,

@@ -15,6 +15,7 @@ pub use pipeline::TerrainPipeline;
 pub mod scene;
 #[cfg(feature = "extension-module")]
 pub use scene::TerrainScene;
+pub mod scatter;
 
 // E1/E3: streaming mosaics
 pub mod stream;

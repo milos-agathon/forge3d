@@ -101,6 +101,18 @@ impl ViewerTerrainScene {
             multiview: None,
         });
 
+        #[cfg(feature = "enable-gpu-instancing")]
+        // Match the offscreen terrain scatter composition mode.
+        let scatter_renderer =
+            crate::render::mesh_instanced::MeshInstancedRenderer::new_with_depth_state(
+                &device,
+                target_format,
+                Some(wgpu::TextureFormat::Depth32Float),
+                1,
+                wgpu::CompareFunction::LessEqual,
+                false,
+            );
+
         Ok(Self {
             device,
             queue,
@@ -161,6 +173,12 @@ impl ViewerTerrainScene {
             velocity_view: None,
             velocity_pipeline: None,
             velocity_bind_group_layout: None,
+            #[cfg(feature = "enable-gpu-instancing")]
+            scatter_renderer,
+            #[cfg(feature = "enable-gpu-instancing")]
+            scatter_batches: Vec::new(),
+            #[cfg(feature = "enable-gpu-instancing")]
+            scatter_last_frame_stats: crate::terrain::scatter::TerrainScatterFrameStats::default(),
         })
     }
 

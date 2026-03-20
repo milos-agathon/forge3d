@@ -73,55 +73,97 @@ impl ViewerTerrainScene {
         state: &SnapshotRenderState,
         has_vector_overlays: bool,
     ) {
-        let terrain = self.terrain.as_ref().unwrap();
-        let bg = terrain.background_color;
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("terrain_viewer.snapshot_pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: color_view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: bg[0] as f64,
-                        g: bg[1] as f64,
-                        b: bg[2] as f64,
-                        a: 1.0,
-                    }),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: depth_view,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
+        #[cfg(feature = "enable-gpu-instancing")]
+        let mut scatter_batches = std::mem::take(&mut self.scatter_batches);
 
-        if state.use_pbr {
-            if let Some(ref pbr_bind_group) = self.pbr_bind_group {
-                pass.set_pipeline(self.pbr_pipeline.as_ref().unwrap());
-                pass.set_bind_group(0, pbr_bind_group, &[]);
+        {
+            let terrain = self.terrain.as_ref().unwrap();
+            let bg = terrain.background_color;
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("terrain_viewer.snapshot_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: bg[0] as f64,
+                            g: bg[1] as f64,
+                            b: bg[2] as f64,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            if state.use_pbr {
+                if let Some(ref pbr_bind_group) = self.pbr_bind_group {
+                    pass.set_pipeline(self.pbr_pipeline.as_ref().unwrap());
+                    pass.set_bind_group(0, pbr_bind_group, &[]);
+                } else {
+                    pass.set_pipeline(&self.pipeline);
+                    pass.set_bind_group(0, &terrain.bind_group, &[]);
+                }
             } else {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &terrain.bind_group, &[]);
             }
-        } else {
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &terrain.bind_group, &[]);
+
+            pass.set_vertex_buffer(0, terrain.vertex_buffer.slice(..));
+            pass.set_index_buffer(terrain.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..terrain.index_count, 0, 0..1);
         }
 
-        pass.set_vertex_buffer(0, terrain.vertex_buffer.slice(..));
-        pass.set_index_buffer(terrain.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..terrain.index_count, 0, 0..1);
+        #[cfg(feature = "enable-gpu-instancing")]
+        let scatter_result = self.render_scatter_pass(
+            encoder,
+            color_view,
+            depth_view,
+            &mut scatter_batches,
+            state.use_pbr,
+            state.view_mat,
+            state.proj,
+            state.eye,
+            state.terrain_width,
+            state.h_range,
+            [-state.sun_dir.x, -state.sun_dir.y, -state.sun_dir.z],
+            state.vo_lighting[0],
+        );
 
         if has_vector_overlays && !self.oit_enabled {
             if let Some(ref stack) = self.vector_overlay_stack {
                 if stack.pipelines_ready() && stack.bind_group.is_some() {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("terrain_viewer.snapshot_overlay_pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: color_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: depth_view,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        }),
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
                     let layer_count = stack.visible_layer_count();
                     let highlight_color = [1.0, 0.8, 0.0, 0.5];
                     for i in 0..layer_count {
@@ -137,6 +179,21 @@ impl ViewerTerrainScene {
                             },
                         );
                     }
+                }
+            }
+        }
+
+        #[cfg(feature = "enable-gpu-instancing")]
+        {
+            self.scatter_batches = scatter_batches;
+            match scatter_result {
+                Ok(stats) => {
+                    self.scatter_last_frame_stats = stats;
+                }
+                Err(err) => {
+                    self.scatter_last_frame_stats =
+                        crate::terrain::scatter::TerrainScatterFrameStats::default();
+                    eprintln!("[terrain_scatter] snapshot render failed: {err:#}");
                 }
             }
         }

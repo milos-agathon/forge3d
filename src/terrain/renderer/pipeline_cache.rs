@@ -1,6 +1,55 @@
 use super::*;
+use crate::terrain::renderer::core::TERRAIN_DEPTH_FORMAT;
 
 impl TerrainScene {
+    fn create_fullscreen_blit_pipeline(
+        device: &wgpu::Device,
+        bind_group_layout: &wgpu::BindGroupLayout,
+        color_format: wgpu::TextureFormat,
+        sample_count: u32,
+        pipeline_label: &'static str,
+        shader_label: &'static str,
+        shader_source: &'static str,
+        depth_stencil: Option<wgpu::DepthStencilState>,
+    ) -> wgpu::RenderPipeline {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(shader_label),
+            source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("terrain.blit.pipeline_layout"),
+            bind_group_layouts: &[bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(pipeline_label),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil,
+            multisample: wgpu::MultisampleState {
+                count: sample_count,
+                ..Default::default()
+            },
+            multiview: None,
+        })
+    }
+
     /// Preprocess terrain shader by resolving #include directives
     /// WGSL doesn't have a preprocessor, so we manually expand includes
     pub(super) fn preprocess_terrain_shader() -> String {
@@ -114,7 +163,13 @@ impl TerrainScene {
                 })],
             }),
             primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: TERRAIN_DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: sample_count,
                 ..Default::default()
@@ -129,44 +184,60 @@ impl TerrainScene {
         color_format: wgpu::TextureFormat,
         sample_count: u32,
     ) -> wgpu::RenderPipeline {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("terrain.blit.shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/terrain_blit.wgsl").into(),
-            ),
-        });
+        Self::create_fullscreen_blit_pipeline(
+            device,
+            bind_group_layout,
+            color_format,
+            sample_count,
+            "terrain.blit.pipeline",
+            "terrain.blit.shader",
+            include_str!("../../shaders/terrain_blit.wgsl"),
+            None,
+        )
+    }
 
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("terrain.blit.pipeline_layout"),
-            bind_group_layouts: &[bind_group_layout],
-            push_constant_ranges: &[],
-        });
-
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("terrain.blit.pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: color_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
+    pub(super) fn create_depth_blit_pipeline(
+        device: &wgpu::Device,
+        bind_group_layout: &wgpu::BindGroupLayout,
+        color_format: wgpu::TextureFormat,
+        sample_count: u32,
+    ) -> wgpu::RenderPipeline {
+        // This pass clears depth for the terrain scene and draws only color, so it needs a
+        // depth-compatible pipeline that never overwrites the cleared depth buffer.
+        Self::create_fullscreen_blit_pipeline(
+            device,
+            bind_group_layout,
+            color_format,
+            sample_count,
+            "terrain.blit.depth.pipeline",
+            "terrain.blit.depth.shader",
+            include_str!("../../shaders/terrain_blit.wgsl"),
+            Some(wgpu::DepthStencilState {
+                format: TERRAIN_DEPTH_FORMAT,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
             }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: sample_count,
-                ..Default::default()
-            },
-            multiview: None,
-        })
+        )
+    }
+
+    pub(super) fn create_normal_blit_pipeline(
+        device: &wgpu::Device,
+        bind_group_layout: &wgpu::BindGroupLayout,
+        color_format: wgpu::TextureFormat,
+        sample_count: u32,
+    ) -> wgpu::RenderPipeline {
+        Self::create_fullscreen_blit_pipeline(
+            device,
+            bind_group_layout,
+            color_format,
+            sample_count,
+            "terrain.blit.normal.pipeline",
+            "terrain.blit.normal.shader",
+            include_str!("../../shaders/terrain_normal_blit.wgsl"),
+            None,
+        )
     }
 
     /// M1: Create AOV-enabled render pipeline with multiple render targets
@@ -247,7 +318,13 @@ impl TerrainScene {
                 ],
             }),
             primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: TERRAIN_DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: sample_count,
                 ..Default::default()

@@ -5,11 +5,7 @@
 use super::array_convert::{read_vec2, read_vec3, read_vec4, to_vec2, to_vec3, to_vec4};
 use super::{GeometryResult, MeshBuffers};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
-use pyo3::{
-    exceptions::PyValueError,
-    prelude::*,
-    types::{PyAnyMethods, PyDict},
-};
+use pyo3::{exceptions::PyValueError, prelude::*, types::PyDict};
 
 /// Convert MeshBuffers to Python dict
 pub fn mesh_to_python<'py>(py: Python<'py>, mesh: &MeshBuffers) -> PyResult<PyObject> {
@@ -49,6 +45,11 @@ pub fn mesh_to_python<'py>(py: Python<'py>, mesh: &MeshBuffers) -> PyResult<PyOb
 
 /// Convert Python dict to MeshBuffers
 pub fn mesh_from_python(mesh: &Bound<'_, PyDict>) -> PyResult<MeshBuffers> {
+    mesh_from_python_dict(mesh.as_gil_ref())
+}
+
+/// Convert a borrowed PyDict to MeshBuffers.
+pub fn mesh_from_python_dict(mesh: &PyDict) -> PyResult<MeshBuffers> {
     let positions_obj = mesh
         .get_item("positions")?
         .ok_or_else(|| PyValueError::new_err("mesh dict missing 'positions'"))?;

@@ -128,11 +128,11 @@ impl Scene {
                 if self.mesh_instanced_renderer.is_some() && !self.instanced_batches.is_empty() {
                     let view = self.scene.view;
                     let proj = self.scene.proj;
-                    for batch in &self.instanced_batches {
-                        self.mesh_instanced_renderer
-                            .as_ref()
-                            .unwrap()
-                            .draw_batch_params(
+                    if let Some(renderer) = self.mesh_instanced_renderer.as_mut() {
+                        renderer.reset_draw_batch_uniforms();
+                        for batch in &self.instanced_batches {
+                            renderer.draw_batch_params(
+                                &g.device,
                                 &mut rp,
                                 &g.queue,
                                 view,
@@ -146,6 +146,7 @@ impl Scene {
                                 batch.index_count,
                                 batch.instance_count,
                             );
+                        }
                     }
                 }
             }

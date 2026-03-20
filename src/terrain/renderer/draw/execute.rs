@@ -34,7 +34,7 @@ impl TerrainScene {
         };
 
         let msaa_pipeline = if render_targets.sample_count > 1 {
-            Some(Self::create_blit_pipeline(
+            Some(Self::create_depth_blit_pipeline(
                 self.device.as_ref(),
                 &self.blit_bind_group_layout,
                 self.color_format,
@@ -43,7 +43,9 @@ impl TerrainScene {
         } else {
             None
         };
-        let blit_pipeline = msaa_pipeline.as_ref().unwrap_or(&self.blit_pipeline);
+        let blit_pipeline = msaa_pipeline
+            .as_ref()
+            .unwrap_or(&self.background_blit_pipeline);
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -61,7 +63,14 @@ impl TerrainScene {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &render_targets.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
@@ -131,7 +140,18 @@ impl TerrainScene {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &render_targets.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: if preserve_background {
+                            wgpu::LoadOp::Load
+                        } else {
+                            wgpu::LoadOp::Clear(1.0)
+                        },
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });

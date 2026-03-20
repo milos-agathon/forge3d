@@ -13,6 +13,7 @@ pub use commands::ViewerCmd;
 pub use config::{
     ViewerDenoiseConfig, ViewerDofConfig, ViewerHeightAoConfig, ViewerLensEffectsConfig,
     ViewerMaterialLayerConfig, ViewerMotionBlurConfig, ViewerSkyConfig, ViewerSunVisConfig,
-    ViewerTonemapConfig, ViewerVectorOverlayConfig, ViewerVolumetricsConfig,
+    ViewerTerrainScatterBatchConfig, ViewerTerrainScatterLevelConfig, ViewerTonemapConfig,
+    ViewerVectorOverlayConfig, ViewerVolumetricsConfig,
 };
 pub use modes::{parse_gi_viz_mode_token, CaptureKind, FogMode, VizMode};

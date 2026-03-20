@@ -12,6 +12,130 @@ pub struct AovFrame {
     height: u32,
 }
 
+#[cfg(feature = "images")]
+fn extend_rgba_channels(
+    channels: &mut Vec<exr_write::ExrChannelData>,
+    prefix: &str,
+    data: &[f32],
+) -> anyhow::Result<()> {
+    let expected_pixels = data.len() / 4;
+    anyhow::ensure!(
+        data.len() == expected_pixels * 4,
+        "expected RGBA buffer for EXR export"
+    );
+    let mut r = Vec::with_capacity(expected_pixels);
+    let mut g = Vec::with_capacity(expected_pixels);
+    let mut b = Vec::with_capacity(expected_pixels);
+    let mut a = Vec::with_capacity(expected_pixels);
+    for px in data.chunks_exact(4) {
+        r.push(px[0]);
+        g.push(px[1]);
+        b.push(px[2]);
+        a.push(px[3]);
+    }
+    channels.extend([
+        exr_write::ExrChannelData {
+            name: format!("{prefix}.R"),
+            data: r,
+            quantize_linearly: false,
+        },
+        exr_write::ExrChannelData {
+            name: format!("{prefix}.G"),
+            data: g,
+            quantize_linearly: false,
+        },
+        exr_write::ExrChannelData {
+            name: format!("{prefix}.B"),
+            data: b,
+            quantize_linearly: false,
+        },
+        exr_write::ExrChannelData {
+            name: format!("{prefix}.A"),
+            data: a,
+            quantize_linearly: true,
+        },
+    ]);
+    Ok(())
+}
+
+#[cfg(feature = "images")]
+fn extend_rgb_channels(
+    channels: &mut Vec<exr_write::ExrChannelData>,
+    prefix: &str,
+    data: &[f32],
+    suffixes: [&str; 3],
+    quantize_linearly: bool,
+) -> anyhow::Result<()> {
+    let expected_pixels = data.len() / 4;
+    anyhow::ensure!(
+        data.len() == expected_pixels * 4,
+        "expected RGBA buffer for EXR export"
+    );
+    let mut c0 = Vec::with_capacity(expected_pixels);
+    let mut c1 = Vec::with_capacity(expected_pixels);
+    let mut c2 = Vec::with_capacity(expected_pixels);
+    for px in data.chunks_exact(4) {
+        c0.push(px[0]);
+        c1.push(px[1]);
+        c2.push(px[2]);
+    }
+    channels.extend([
+        exr_write::ExrChannelData {
+            name: format!("{prefix}.{}", suffixes[0]),
+            data: c0,
+            quantize_linearly,
+        },
+        exr_write::ExrChannelData {
+            name: format!("{prefix}.{}", suffixes[1]),
+            data: c1,
+            quantize_linearly,
+        },
+        exr_write::ExrChannelData {
+            name: format!("{prefix}.{}", suffixes[2]),
+            data: c2,
+            quantize_linearly,
+        },
+    ]);
+    Ok(())
+}
+
+#[cfg(feature = "images")]
+fn extend_scalar_channel(
+    channels: &mut Vec<exr_write::ExrChannelData>,
+    prefix: &str,
+    data: &[f32],
+    suffix: &str,
+) {
+    channels.push(exr_write::ExrChannelData {
+        name: format!("{prefix}.{suffix}"),
+        data: data.to_vec(),
+        quantize_linearly: true,
+    });
+}
+
+#[cfg(feature = "images")]
+fn build_terrain_exr_channels(
+    beauty: &[f32],
+    albedo: Option<&[f32]>,
+    normal: Option<&[f32]>,
+    depth: Option<&[f32]>,
+) -> anyhow::Result<Vec<exr_write::ExrChannelData>> {
+    let mut channels = Vec::new();
+    extend_rgba_channels(&mut channels, "beauty", beauty)?;
+
+    if let Some(rgba) = albedo {
+        extend_rgb_channels(&mut channels, "albedo", rgba, ["R", "G", "B"], false)?;
+    }
+    if let Some(rgba) = normal {
+        extend_rgb_channels(&mut channels, "normal", rgba, ["X", "Y", "Z"], true)?;
+    }
+    if let Some(values) = depth {
+        extend_scalar_channel(&mut channels, "depth", values, "Z");
+    }
+
+    Ok(channels)
+}
+
 #[cfg(feature = "extension-module")]
 impl AovFrame {
     pub(crate) fn new(
@@ -71,10 +195,7 @@ impl AovFrame {
         Ok(rgba.chunks_exact(4).map(|px| px[0]).collect())
     }
 
-    fn rgba_to_rgb_array(
-        &self,
-        rgba: &[f32],
-    ) -> anyhow::Result<ndarray::Array3<f32>> {
+    fn rgba_to_rgb_array(&self, rgba: &[f32]) -> anyhow::Result<ndarray::Array3<f32>> {
         let mut rgb = Vec::with_capacity((self.width * self.height * 3) as usize);
         for px in rgba.chunks_exact(4) {
             rgb.extend_from_slice(&px[..3]);
@@ -83,10 +204,7 @@ impl AovFrame {
             .map_err(|_| anyhow::anyhow!("failed to reshape RGBA buffer into RGB array"))
     }
 
-    fn encode_rgb_png(
-        &self,
-        rgb: impl Iterator<Item = [f32; 3]>,
-    ) -> Vec<u8> {
+    fn encode_rgb_png(&self, rgb: impl Iterator<Item = [f32; 3]>) -> Vec<u8> {
         let mut bytes = Vec::with_capacity((self.width * self.height * 4) as usize);
         for [r, g, b] in rgb {
             bytes.push((r.clamp(0.0, 1.0) * 255.0).round() as u8);
@@ -100,107 +218,6 @@ impl AovFrame {
     fn write_png_bytes(&self, path: &str, data: &[u8]) -> PyResult<()> {
         image_write::write_png_rgba8(Path::new(path), data, self.width, self.height)
             .map_err(|err| PyRuntimeError::new_err(format!("failed to write PNG: {err:#}")))
-    }
-
-    #[cfg(feature = "images")]
-    fn extend_rgba_channels(
-        channels: &mut Vec<exr_write::ExrChannelData>,
-        prefix: &str,
-        data: &[f32],
-    ) -> anyhow::Result<()> {
-        let expected_pixels = data.len() / 4;
-        anyhow::ensure!(
-            data.len() == expected_pixels * 4,
-            "expected RGBA buffer for EXR export"
-        );
-        let mut r = Vec::with_capacity(expected_pixels);
-        let mut g = Vec::with_capacity(expected_pixels);
-        let mut b = Vec::with_capacity(expected_pixels);
-        let mut a = Vec::with_capacity(expected_pixels);
-        for px in data.chunks_exact(4) {
-            r.push(px[0]);
-            g.push(px[1]);
-            b.push(px[2]);
-            a.push(px[3]);
-        }
-        channels.extend([
-            exr_write::ExrChannelData {
-                name: format!("{prefix}.R"),
-                data: r,
-                quantize_linearly: false,
-            },
-            exr_write::ExrChannelData {
-                name: format!("{prefix}.G"),
-                data: g,
-                quantize_linearly: false,
-            },
-            exr_write::ExrChannelData {
-                name: format!("{prefix}.B"),
-                data: b,
-                quantize_linearly: false,
-            },
-            exr_write::ExrChannelData {
-                name: format!("{prefix}.A"),
-                data: a,
-                quantize_linearly: true,
-            },
-        ]);
-        Ok(())
-    }
-
-    #[cfg(feature = "images")]
-    fn extend_rgb_channels(
-        channels: &mut Vec<exr_write::ExrChannelData>,
-        prefix: &str,
-        data: &[f32],
-        suffixes: [&str; 3],
-        quantize_linearly: bool,
-    ) -> anyhow::Result<()> {
-        let expected_pixels = data.len() / 4;
-        anyhow::ensure!(
-            data.len() == expected_pixels * 4,
-            "expected RGBA buffer for EXR export"
-        );
-        let mut c0 = Vec::with_capacity(expected_pixels);
-        let mut c1 = Vec::with_capacity(expected_pixels);
-        let mut c2 = Vec::with_capacity(expected_pixels);
-        for px in data.chunks_exact(4) {
-            c0.push(px[0]);
-            c1.push(px[1]);
-            c2.push(px[2]);
-        }
-        channels.extend([
-            exr_write::ExrChannelData {
-                name: format!("{prefix}.{}", suffixes[0]),
-                data: c0,
-                quantize_linearly,
-            },
-            exr_write::ExrChannelData {
-                name: format!("{prefix}.{}", suffixes[1]),
-                data: c1,
-                quantize_linearly,
-            },
-            exr_write::ExrChannelData {
-                name: format!("{prefix}.{}", suffixes[2]),
-                data: c2,
-                quantize_linearly,
-            },
-        ]);
-        Ok(())
-    }
-
-    #[cfg(feature = "images")]
-    fn extend_scalar_channel(
-        channels: &mut Vec<exr_write::ExrChannelData>,
-        prefix: &str,
-        data: &[f32],
-        suffix: &str,
-    ) {
-        channels.push(exr_write::ExrChannelData {
-            name: format!("{prefix}.{suffix}"),
-            data: data.to_vec(),
-            quantize_linearly: true,
-        });
     }
 }
 
@@ -278,13 +295,10 @@ impl AovFrame {
         let rgba = self
             .read_normal_data()
             .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
-        let png = self.encode_rgb_png(rgba.chunks_exact(4).map(|px| {
-            [
-                px[0] * 0.5 + 0.5,
-                px[1] * 0.5 + 0.5,
-                px[2] * 0.5 + 0.5,
-            ]
-        }));
+        let png = self.encode_rgb_png(
+            rgba.chunks_exact(4)
+                .map(|px| [px[0] * 0.5 + 0.5, px[1] * 0.5 + 0.5, px[2] * 0.5 + 0.5]),
+        );
         self.write_png_bytes(path, &png)
     }
 
@@ -330,34 +344,40 @@ impl AovFrame {
             .read_rgba_f32()
             .map_err(|err| PyRuntimeError::new_err(format!("beauty readback failed: {err:#}")))?;
 
-        let mut channels = Vec::new();
-        Self::extend_rgba_channels(&mut channels, "beauty", &beauty)
-            .map_err(|err| PyRuntimeError::new_err(format!("EXR channel build failed: {err:#}")))?;
-
-        if let Some(texture) = self.albedo_texture.as_ref() {
-            let rgba = self.read_texture_rgba_f32(texture).map_err(|err| {
-                PyRuntimeError::new_err(format!("albedo readback failed: {err:#}"))
-            })?;
-            Self::extend_rgb_channels(&mut channels, "albedo", &rgba, ["R", "G", "B"], false)
-                .map_err(|err| {
-                    PyRuntimeError::new_err(format!("EXR channel build failed: {err:#}"))
-                })?;
-        }
-        if let Some(texture) = self.normal_texture.as_ref() {
-            let rgba = self.read_texture_rgba_f32(texture).map_err(|err| {
-                PyRuntimeError::new_err(format!("normal readback failed: {err:#}"))
-            })?;
-            Self::extend_rgb_channels(&mut channels, "normal", &rgba, ["X", "Y", "Z"], true)
-                .map_err(|err| {
-                    PyRuntimeError::new_err(format!("EXR channel build failed: {err:#}"))
-                })?;
-        }
-        if self.depth_texture.is_some() {
-            let depth = self.read_depth_data().map_err(|err| {
-                PyRuntimeError::new_err(format!("depth readback failed: {err:#}"))
-            })?;
-            Self::extend_scalar_channel(&mut channels, "depth", &depth, "Z");
-        }
+        let albedo = self
+            .albedo_texture
+            .as_ref()
+            .map(|texture| {
+                self.read_texture_rgba_f32(texture).map_err(|err| {
+                    PyRuntimeError::new_err(format!("albedo readback failed: {err:#}"))
+                })
+            })
+            .transpose()?;
+        let normal = self
+            .normal_texture
+            .as_ref()
+            .map(|texture| {
+                self.read_texture_rgba_f32(texture).map_err(|err| {
+                    PyRuntimeError::new_err(format!("normal readback failed: {err:#}"))
+                })
+            })
+            .transpose()?;
+        let depth = self
+            .depth_texture
+            .as_ref()
+            .map(|_| {
+                self.read_depth_data().map_err(|err| {
+                    PyRuntimeError::new_err(format!("depth readback failed: {err:#}"))
+                })
+            })
+            .transpose()?;
+        let channels = build_terrain_exr_channels(
+            &beauty,
+            albedo.as_deref(),
+            normal.as_deref(),
+            depth.as_deref(),
+        )
+        .map_err(|err| PyRuntimeError::new_err(format!("EXR channel build failed: {err:#}")))?;
 
         exr_write::write_exr_f32_channels(Path::new(path), self.width, self.height, channels)
             .map_err(|err| PyRuntimeError::new_err(format!("failed to write EXR: {err:#}")))?;
@@ -380,5 +400,78 @@ impl AovFrame {
             self.normal_texture.is_some(),
             self.depth_texture.is_some()
         )
+    }
+}
+
+#[cfg(all(test, feature = "images"))]
+mod tests {
+    use super::*;
+    use exr::prelude::{read_first_flat_layer_from_file, FlatSamples};
+    use std::collections::BTreeMap;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_path(name: &str) -> std::path::PathBuf {
+        let mut path = std::env::temp_dir();
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before unix epoch")
+            .as_nanos();
+        path.push(format!(
+            "forge3d_{name}_{}_{}.exr",
+            std::process::id(),
+            nonce
+        ));
+        path
+    }
+
+    fn flat_f32_channels(path: &Path) -> (usize, usize, BTreeMap<String, Vec<f32>>) {
+        let image = read_first_flat_layer_from_file(path).expect("round-trip EXR should load");
+        let width = image.layer_data.size.width();
+        let height = image.layer_data.size.height();
+        let channels = image
+            .layer_data
+            .channel_data
+            .list
+            .into_iter()
+            .map(|channel| {
+                let samples = match channel.sample_data {
+                    FlatSamples::F32(samples) => samples,
+                    other => panic!("expected f32 samples, got {other:?}"),
+                };
+                (channel.name.to_string(), samples)
+            })
+            .collect();
+        (width, height, channels)
+    }
+
+    #[test]
+    fn terrain_exr_channel_round_trip_preserves_names_and_values() {
+        let beauty = vec![
+            0.1, 0.2, 0.3, 1.0, 0.4, 0.5, 0.6, 0.75, 0.7, 0.8, 0.9, 0.5, 1.0, 0.0, 0.25, 0.125,
+        ];
+        let albedo = vec![
+            0.9, 0.1, 0.2, 0.0, 0.8, 0.2, 0.3, 0.0, 0.7, 0.3, 0.4, 0.0, 0.6, 0.4, 0.5, 0.0,
+        ];
+        let normal = vec![
+            0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0,
+        ];
+        let depth = vec![0.1, 0.3, 0.6, 0.9];
+
+        let channels =
+            build_terrain_exr_channels(&beauty, Some(&albedo), Some(&normal), Some(&depth))
+                .expect("channel assembly should succeed");
+        let expected_channels: BTreeMap<String, Vec<f32>> = channels
+            .iter()
+            .map(|channel| (channel.name.clone(), channel.data.clone()))
+            .collect();
+
+        let path = unique_temp_path("terrain_aov_channels");
+        exr_write::write_exr_f32_channels(&path, 2, 2, channels).expect("EXR write should succeed");
+
+        let (width, height, actual_channels) = flat_f32_channels(&path);
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!((width, height), (2, 2));
+        assert_eq!(actual_channels, expected_channels);
     }
 }

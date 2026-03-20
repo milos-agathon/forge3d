@@ -1,3 +1,5 @@
+use crate::geometry::MeshBuffers;
+
 /// Heightfield ray-traced AO configuration for viewer
 #[derive(Debug, Clone, Default)]
 pub struct ViewerHeightAoConfig {
@@ -146,4 +148,19 @@ impl Default for ViewerSkyConfig {
             sky_exposure: 1.0,
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ViewerTerrainScatterLevelConfig {
+    pub mesh: MeshBuffers,
+    pub max_distance: Option<f32>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ViewerTerrainScatterBatchConfig {
+    pub name: Option<String>,
+    pub color: [f32; 4],
+    pub max_draw_distance: Option<f32>,
+    pub transforms: Vec<[f32; 16]>,
+    pub levels: Vec<ViewerTerrainScatterLevelConfig>,
 }

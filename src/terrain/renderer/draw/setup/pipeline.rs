@@ -1,4 +1,5 @@
 use super::*;
+use crate::terrain::renderer::core::TERRAIN_DEPTH_FORMAT;
 
 pub(in crate::terrain::renderer) struct RenderTargets {
     pub(in crate::terrain::renderer) internal_texture: wgpu::Texture,
@@ -6,6 +7,9 @@ pub(in crate::terrain::renderer) struct RenderTargets {
     #[allow(dead_code)]
     pub(in crate::terrain::renderer) msaa_texture: Option<wgpu::Texture>,
     pub(in crate::terrain::renderer) msaa_view: Option<wgpu::TextureView>,
+    #[allow(dead_code)]
+    pub(in crate::terrain::renderer) depth_texture: wgpu::Texture,
+    pub(in crate::terrain::renderer) depth_view: wgpu::TextureView,
     pub(in crate::terrain::renderer) out_width: u32,
     pub(in crate::terrain::renderer) out_height: u32,
     pub(in crate::terrain::renderer) internal_width: u32,
@@ -145,6 +149,22 @@ impl TerrainScene {
             .as_ref()
             .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()));
 
+        let depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.depth.render_target"),
+            size: wgpu::Extent3d {
+                width: internal_width,
+                height: internal_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: effective_msaa,
+            dimension: wgpu::TextureDimension::D2,
+            format: TERRAIN_DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
         let color_attachment_sample_count = if effective_msaa > 1 {
             effective_msaa
         } else {
@@ -155,12 +175,12 @@ impl TerrainScene {
         log_msaa_debug(
             &self.adapter,
             self.color_format,
-            None,
+            Some(TERRAIN_DEPTH_FORMAT),
             requested_msaa,
             effective_msaa,
             color_attachment_sample_count,
             resolve_sample_count,
-            None,
+            Some(effective_msaa),
             effective_msaa,
         );
 
@@ -170,7 +190,7 @@ impl TerrainScene {
             color_attachment_sample_count,
             has_resolve_target: effective_msaa > 1,
             resolve_sample_count,
-            depth_sample_count: None,
+            depth_sample_count: Some(effective_msaa),
             readback_sample_count: 1,
         };
         assert_msaa_invariants(&invariants, self.color_format)?;
@@ -180,6 +200,8 @@ impl TerrainScene {
             internal_view,
             msaa_texture,
             msaa_view,
+            depth_texture,
+            depth_view,
             out_width,
             out_height,
             internal_width,

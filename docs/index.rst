@@ -36,6 +36,14 @@ workflows for overlays, point clouds, map plates, buildings, and bundles.
 
 .. toctree::
    :maxdepth: 1
+   :caption: Terrain Workflows
+
+   terrain-tv1-atmosphere
+   terrain-tv2-aovs
+   terrain-tv3-scatter
+
+.. toctree::
+   :maxdepth: 1
    :caption: Product Notes
 
    pro-boundary-notes

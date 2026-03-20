@@ -11,6 +11,7 @@ No actual viewer window is opened in these tests.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import threading
@@ -27,9 +28,11 @@ from forge3d.viewer import (
     ViewerHandle,
     ViewerError,
     _READY_PATTERN,
+    _find_viewer_binary,
     _prepare_terrain_path,
     open_viewer_async,
 )
+import forge3d.viewer as viewer_module
 
 
 class TestReadyLineParsing:
@@ -162,6 +165,39 @@ class TestCommandFormatting:
         json_str = json.dumps(cmd)
         parsed = json.loads(json_str)
         assert parsed["cmd"] == "close"
+
+    def test_set_terrain_scatter_format(self):
+        """set_terrain_scatter command is JSON-safe and preserves nested mesh payloads."""
+        cmd = {
+            "cmd": "set_terrain_scatter",
+            "batches": [
+                {
+                    "name": "trees",
+                    "color": [0.2, 0.6, 0.3, 1.0],
+                    "max_draw_distance": 180.0,
+                    "transforms": [[1.0, 0.0, 0.0, 3.0, 0.0, 1.0, 0.0, 4.0, 0.0, 0.0, 1.0, 5.0, 0.0, 0.0, 0.0, 1.0]],
+                    "levels": [
+                        {
+                            "positions": [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                            "normals": [[0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0]],
+                            "indices": [0, 1, 2],
+                            "max_distance": 90.0,
+                        }
+                    ],
+                }
+            ],
+        }
+        parsed = json.loads(json.dumps(cmd))
+        assert parsed["cmd"] == "set_terrain_scatter"
+        assert parsed["batches"][0]["name"] == "trees"
+        assert parsed["batches"][0]["transforms"][0][3] == 3.0
+        assert parsed["batches"][0]["levels"][0]["indices"] == [0, 1, 2]
+
+    def test_clear_terrain_scatter_format(self):
+        """clear_terrain_scatter command is formatted correctly."""
+        cmd = {"cmd": "clear_terrain_scatter"}
+        parsed = json.loads(json.dumps(cmd))
+        assert parsed["cmd"] == "clear_terrain_scatter"
 
     def test_set_transform_format(self):
         """set_transform command is formatted correctly."""
@@ -325,6 +361,37 @@ class TestViewerHandleValidation:
         for path in cleanup_paths:
             path.unlink(missing_ok=True)
 
+    def test_find_viewer_binary_prefers_newest_build(self, tmp_path, monkeypatch):
+        """The helper picks the newest built viewer binary instead of blindly preferring release."""
+        root = tmp_path
+        module_path = root / "python" / "forge3d" / "viewer.py"
+        module_path.parent.mkdir(parents=True)
+        module_path.write_text("# test module path\n", encoding="utf-8")
+
+        suffix = ".exe" if sys.platform == "win32" else ""
+        release_bin = root / "target" / "release" / f"interactive_viewer{suffix}"
+        debug_bin = root / "target" / "debug" / f"interactive_viewer{suffix}"
+        release_bin.parent.mkdir(parents=True)
+        debug_bin.parent.mkdir(parents=True)
+        release_bin.write_text("release", encoding="utf-8")
+        debug_bin.write_text("debug", encoding="utf-8")
+
+        now = time.time()
+        older = now - 60.0
+        newer = now
+        release_ns = int(older * 1_000_000_000)
+        debug_ns = int(newer * 1_000_000_000)
+        release_bin.touch()
+        debug_bin.touch()
+        original_module_file = viewer_module.__file__
+        monkeypatch.setattr(viewer_module, "__file__", str(module_path))
+        try:
+            os.utime(release_bin, ns=(release_ns, release_ns))
+            os.utime(debug_bin, ns=(debug_ns, debug_ns))
+            assert _find_viewer_binary() == str(debug_bin)
+        finally:
+            monkeypatch.setattr(viewer_module, "__file__", original_module_file)
+
 
 class TestViewerHandleHelpers:
     """Test higher-level ViewerHandle helper behavior without a live viewer."""
@@ -338,6 +405,27 @@ class TestViewerHandleHelpers:
         handle.set_z_scale(0.15)
 
         assert sent == [{"cmd": "set_terrain", "zscale": 0.15}]
+
+    def test_set_terrain_scatter_uses_viewer_ipc(self):
+        """set_terrain_scatter forwards the expected batch payload."""
+        handle = ViewerHandle.__new__(ViewerHandle)
+        sent: list[dict[str, Any]] = []
+        handle._send_command = lambda cmd: sent.append(cmd) or {"ok": True}  # type: ignore[attr-defined]
+
+        batches = [{"name": "trees", "transforms": [[1.0] * 16], "levels": []}]
+        handle.set_terrain_scatter(batches)
+
+        assert sent == [{"cmd": "set_terrain_scatter", "batches": batches}]
+
+    def test_clear_terrain_scatter_uses_viewer_ipc(self):
+        """clear_terrain_scatter forwards the clear command."""
+        handle = ViewerHandle.__new__(ViewerHandle)
+        sent: list[dict[str, Any]] = []
+        handle._send_command = lambda cmd: sent.append(cmd) or {"ok": True}  # type: ignore[attr-defined]
+
+        handle.clear_terrain_scatter()
+
+        assert sent == [{"cmd": "clear_terrain_scatter"}]
 
     def test_snapshot_waits_for_file_creation(self, tmp_path):
         """snapshot waits for the file to be written instead of sleeping blindly."""

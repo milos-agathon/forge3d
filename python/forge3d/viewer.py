@@ -344,6 +344,14 @@ class ViewerHandle:
     def set_z_scale(self, value: float) -> None:
         """Set terrain z-scale (height exaggeration). Only applies to terrain scenes."""
         self._send_command({"cmd": "set_terrain", "zscale": float(value)})
+
+    def set_terrain_scatter(self, batches: List[Dict[str, Any]]) -> None:
+        """Upload terrain scatter batches through the viewer IPC surface."""
+        self._send_command({"cmd": "set_terrain_scatter", "batches": batches})
+
+    def clear_terrain_scatter(self) -> None:
+        """Clear all terrain scatter batches from the active terrain scene."""
+        self._send_command({"cmd": "clear_terrain_scatter"})
     
     def set_orbit_camera(
         self,
@@ -357,7 +365,8 @@ class ViewerHandle:
         Args:
             phi_deg: Azimuth angle in degrees (horizontal rotation)
             theta_deg: Elevation angle in degrees (vertical angle from horizon)
-            radius: Distance from target/center
+            radius: Distance from target/center. For terrain scenes this is expressed in the
+                viewer's terrain-width world units, not DEM resolution meters.
             fov_deg: Optional field of view in degrees
         """
         cmd: Dict[str, Any] = {
@@ -506,16 +515,17 @@ def _find_viewer_binary() -> str:
     # Try to find in cargo target directory
     # Path: python/forge3d/viewer.py -> python/forge3d -> python -> forge3d (repo root)
     cargo_target = Path(__file__).parent.parent.parent / "target"
-    
-    # Check release first, then debug
-    for profile in ["release", "debug"]:
-        if sys.platform == "win32":
-            binary = cargo_target / profile / "interactive_viewer.exe"
-        else:
-            binary = cargo_target / profile / "interactive_viewer"
+
+    suffix = ".exe" if sys.platform == "win32" else ""
+    candidates = []
+    for profile in ("release", "debug"):
+        binary = cargo_target / profile / f"interactive_viewer{suffix}"
         if binary.exists():
-            return str(binary)
-    
+            candidates.append(binary)
+    if candidates:
+        newest = max(candidates, key=lambda path: path.stat().st_mtime_ns)
+        return str(newest)
+
     # Try PATH
     import shutil
     path_binary = shutil.which("interactive_viewer")

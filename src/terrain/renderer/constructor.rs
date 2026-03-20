@@ -1,3 +1,5 @@
+#[cfg(feature = "enable-gpu-instancing")]
+use super::core::TERRAIN_DEPTH_FORMAT;
 use super::*;
 
 impl TerrainScene {
@@ -111,11 +113,41 @@ impl TerrainScene {
 
         let blit_pipeline =
             Self::create_blit_pipeline(device.as_ref(), &blit_bind_group_layout, color_format, 1);
+        let aov_blit_pipeline = Self::create_blit_pipeline(
+            device.as_ref(),
+            &blit_bind_group_layout,
+            wgpu::TextureFormat::Rgba16Float,
+            1,
+        );
+        let background_blit_pipeline = Self::create_depth_blit_pipeline(
+            device.as_ref(),
+            &blit_bind_group_layout,
+            color_format,
+            1,
+        );
+        let normal_blit_pipeline = Self::create_normal_blit_pipeline(
+            device.as_ref(),
+            &blit_bind_group_layout,
+            wgpu::TextureFormat::Rgba16Float,
+            1,
+        );
 
         let accumulation_resources = create_accumulation_init_resources(device.as_ref());
         let accumulation_bind_group_layout = accumulation_resources.accumulation_bind_group_layout;
         let accumulation_pipeline = accumulation_resources.accumulation_pipeline;
         let accumulation_params_buffer = accumulation_resources.accumulation_params_buffer;
+        #[cfg(feature = "enable-gpu-instancing")]
+        // Terrain scatter is composited after the terrain pass. Keep the shared instancing
+        // renderer reusable, but avoid inheriting terrain-depth mismatches into this path.
+        let scatter_renderer =
+            crate::render::mesh_instanced::MeshInstancedRenderer::new_with_depth_state(
+                device.as_ref(),
+                color_format,
+                Some(TERRAIN_DEPTH_FORMAT),
+                1,
+                wgpu::CompareFunction::Always,
+                false,
+            );
 
         let noop_shadow =
             Self::create_noop_shadow(device.as_ref(), queue.as_ref(), &shadow_bind_group_layout)?;
@@ -163,6 +195,9 @@ impl TerrainScene {
             ibl_bind_group_layout,
             blit_bind_group_layout,
             blit_pipeline,
+            aov_blit_pipeline,
+            background_blit_pipeline,
+            normal_blit_pipeline,
             sampler_linear,
             sky_bind_group_layout0,
             sky_bind_group_layout1,
@@ -235,6 +270,14 @@ impl TerrainScene {
             aov_pipeline: Mutex::new(None),
             aov_pipeline_sample_count: Mutex::new(1),
             dof_renderer: Mutex::new(None),
+            #[cfg(feature = "enable-gpu-instancing")]
+            scatter_renderer,
+            #[cfg(feature = "enable-gpu-instancing")]
+            scatter_renderer_sample_count: 1,
+            #[cfg(feature = "enable-gpu-instancing")]
+            scatter_batches: Vec::new(),
+            #[cfg(feature = "enable-gpu-instancing")]
+            scatter_last_frame_stats: crate::terrain::scatter::TerrainScatterFrameStats::default(),
             viewer_heightmap: None,
         })
     }

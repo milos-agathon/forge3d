@@ -8,8 +8,8 @@ use super::defaults::{
 };
 use super::payloads::{
     IpcDenoiseConfig, IpcDofConfig, IpcHeightAoConfig, IpcLensEffectsConfig,
-    IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcSkyConfig, IpcSunVisConfig, IpcTonemapConfig,
-    IpcVectorOverlayConfig, IpcVolumetricsConfig,
+    IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcSkyConfig, IpcSunVisConfig,
+    IpcTerrainScatterBatch, IpcTonemapConfig, IpcVectorOverlayConfig, IpcVolumetricsConfig,
 };
 
 #[rustfmt::skip]
@@ -39,6 +39,8 @@ pub enum IpcRequest {
         #[serde(default)] shadow: Option<f32>, #[serde(default)] background: Option<[f32; 3]>, #[serde(default)] water_level: Option<f32>,
         #[serde(default)] water_color: Option<[f32; 3]>,
     },
+    SetTerrainScatter { #[serde(default)] batches: Vec<IpcTerrainScatterBatch> },
+    ClearTerrainScatter,
     GetTerrainParams,
     SetTerrainPbr {
         #[serde(default)] enabled: Option<bool>, #[serde(default)] hdr_path: Option<String>, #[serde(default)] ibl_intensity: Option<f32>,

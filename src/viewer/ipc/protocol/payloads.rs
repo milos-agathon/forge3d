@@ -184,6 +184,32 @@ pub struct IpcSkyConfig {
     pub sky_exposure: Option<f32>,
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcTerrainScatterLevel {
+    #[serde(default)]
+    pub positions: Vec<[f32; 3]>,
+    #[serde(default)]
+    pub normals: Vec<[f32; 3]>,
+    #[serde(default)]
+    pub indices: Vec<u32>,
+    #[serde(default)]
+    pub max_distance: Option<f32>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcTerrainScatterBatch {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub color: Option<[f32; 4]>,
+    #[serde(default)]
+    pub max_draw_distance: Option<f32>,
+    #[serde(default)]
+    pub transforms: Vec<[f32; 16]>,
+    #[serde(default)]
+    pub levels: Vec<IpcTerrainScatterLevel>,
+}
+
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct ViewerStats {
     pub vb_ready: bool,

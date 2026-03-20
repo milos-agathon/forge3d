@@ -348,8 +348,16 @@ class TestAovRendering:
         assert frame.size == (80, 64)
         assert aov_frame.size == frame.size
         assert aov_frame.albedo().shape == (64, 80, 3)
-        assert aov_frame.normal().shape == (64, 80, 3)
+        normal = aov_frame.normal()
+        assert normal.shape == (64, 80, 3)
         assert aov_frame.depth().shape == (64, 80)
+
+        normal_lengths = np.linalg.norm(normal, axis=-1)
+        valid_lengths = normal_lengths[normal_lengths > 1e-3]
+        assert valid_lengths.size > 0
+        assert float(valid_lengths.mean()) == pytest.approx(1.0, abs=3e-2)
+        assert np.percentile(valid_lengths, 5) > 0.9
+        assert np.percentile(valid_lengths, 95) < 1.1
 
     def test_render_with_aov_respects_channel_selection(
         self, renderer_setup, simple_heightmap

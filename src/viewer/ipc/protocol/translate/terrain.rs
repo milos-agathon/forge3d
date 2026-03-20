@@ -1,13 +1,15 @@
 use crate::viewer::viewer_enums::{
     ViewerCmd, ViewerDenoiseConfig, ViewerDofConfig, ViewerHeightAoConfig, ViewerLensEffectsConfig,
     ViewerMaterialLayerConfig, ViewerMotionBlurConfig, ViewerSkyConfig, ViewerSunVisConfig,
-    ViewerTonemapConfig, ViewerVectorOverlayConfig, ViewerVolumetricsConfig,
+    ViewerTerrainScatterBatchConfig, ViewerTerrainScatterLevelConfig, ViewerTonemapConfig,
+    ViewerVectorOverlayConfig, ViewerVolumetricsConfig,
 };
 
 use super::super::payloads::{
     IpcDenoiseConfig, IpcDofConfig, IpcHeightAoConfig, IpcLensEffectsConfig,
-    IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcSkyConfig, IpcSunVisConfig, IpcTonemapConfig,
-    IpcVectorOverlayConfig, IpcVolumetricsConfig,
+    IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcSkyConfig, IpcSunVisConfig,
+    IpcTerrainScatterBatch, IpcTerrainScatterLevel, IpcTonemapConfig, IpcVectorOverlayConfig,
+    IpcVolumetricsConfig,
 };
 use super::super::request::IpcRequest;
 
@@ -64,6 +66,10 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             water_color: *water_color,
         }),
         IpcRequest::GetTerrainParams => Some(ViewerCmd::GetTerrainParams),
+        IpcRequest::SetTerrainScatter { batches } => Some(ViewerCmd::SetTerrainScatter {
+            batches: batches.iter().map(map_terrain_scatter_batch).collect(),
+        }),
+        IpcRequest::ClearTerrainScatter => Some(ViewerCmd::ClearTerrainScatter),
         IpcRequest::SetTerrainPbr {
             enabled,
             hdr_path,
@@ -242,5 +248,32 @@ fn map_sky(config: &IpcSkyConfig) -> ViewerSkyConfig {
         sun_intensity: config.sun_intensity.unwrap_or(1.0),
         aerial_perspective: config.aerial_perspective.unwrap_or(true),
         sky_exposure: config.sky_exposure.unwrap_or(1.0),
+    }
+}
+
+fn map_terrain_scatter_batch(config: &IpcTerrainScatterBatch) -> ViewerTerrainScatterBatchConfig {
+    ViewerTerrainScatterBatchConfig {
+        name: config.name.clone(),
+        color: config.color.unwrap_or([0.85, 0.85, 0.85, 1.0]),
+        max_draw_distance: config.max_draw_distance,
+        transforms: config.transforms.clone(),
+        levels: config
+            .levels
+            .iter()
+            .map(map_terrain_scatter_level)
+            .collect(),
+    }
+}
+
+fn map_terrain_scatter_level(config: &IpcTerrainScatterLevel) -> ViewerTerrainScatterLevelConfig {
+    ViewerTerrainScatterLevelConfig {
+        mesh: crate::geometry::MeshBuffers {
+            positions: config.positions.clone(),
+            normals: config.normals.clone(),
+            uvs: Vec::new(),
+            tangents: Vec::new(),
+            indices: config.indices.clone(),
+        },
+        max_distance: config.max_distance,
     }
 }

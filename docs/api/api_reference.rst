@@ -96,6 +96,7 @@ workflow above and some are thin wrappers over native functionality:
 * ``forge3d.path_tracing`` for the deterministic CPU path-tracing fallback
 * ``forge3d.sdf`` for SDF scene construction and hybrid rendering helpers
 * ``forge3d.style`` and ``forge3d.vector`` for style/vector processing
+* ``forge3d.terrain_scatter`` for deterministic terrain population and viewer/offscreen scatter uploads
 * ``forge3d.lighting`` and ``forge3d.animation`` for lower-level utilities
 * ``forge3d.terrain_pbr_pom`` for the terrain PBR/POM rendering workflow
 
@@ -103,5 +104,8 @@ Related Pages
 -------------
 
 * :doc:`../quickstart`
+* :doc:`../terrain-tv1-atmosphere`
+* :doc:`../terrain-tv2-aovs`
+* :doc:`../terrain-tv3-scatter`
 * :doc:`../tutorials/index`
 * :doc:`../gallery/index`

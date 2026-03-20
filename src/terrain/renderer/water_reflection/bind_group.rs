@@ -81,6 +81,10 @@ impl TerrainScene {
                 .water_reflection_view
                 .lock()
                 .map_err(|_| anyhow!("water_reflection_view mutex poisoned"))?;
+            let reflection_depth_guard = self
+                .water_reflection_depth_view
+                .lock()
+                .map_err(|_| anyhow!("water_reflection_depth_view mutex poisoned"))?;
             let reflection_pass_water_bind_group =
                 self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("terrain.reflection_pass.water_bind_group"),
@@ -129,7 +133,14 @@ impl TerrainScene {
                             store: wgpu::StoreOp::Store,
                         },
                     })],
-                    depth_stencil_attachment: None,
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &*reflection_depth_guard,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
@@ -152,6 +163,7 @@ impl TerrainScene {
             }
 
             drop(light_buffer_guard);
+            drop(reflection_depth_guard);
             drop(reflection_view_guard);
 
             log::info!(

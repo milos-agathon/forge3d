@@ -15,6 +15,9 @@ pub struct TerrainScene {
     pub(super) ibl_bind_group_layout: wgpu::BindGroupLayout,
     pub(super) blit_bind_group_layout: wgpu::BindGroupLayout,
     pub(super) blit_pipeline: wgpu::RenderPipeline,
+    pub(super) aov_blit_pipeline: wgpu::RenderPipeline,
+    pub(super) background_blit_pipeline: wgpu::RenderPipeline,
+    pub(super) normal_blit_pipeline: wgpu::RenderPipeline,
     pub(super) sampler_linear: wgpu::Sampler,
     pub(super) sky_bind_group_layout0: wgpu::BindGroupLayout,
     pub(super) sky_bind_group_layout1: wgpu::BindGroupLayout,
@@ -85,6 +88,14 @@ pub struct TerrainScene {
     pub(super) aov_pipeline: Mutex<Option<wgpu::RenderPipeline>>,
     pub(super) aov_pipeline_sample_count: Mutex<u32>,
     pub(super) dof_renderer: Mutex<Option<crate::core::dof::DofRenderer>>,
+    #[cfg(feature = "enable-gpu-instancing")]
+    pub(super) scatter_renderer: crate::render::mesh_instanced::MeshInstancedRenderer,
+    #[cfg(feature = "enable-gpu-instancing")]
+    pub(super) scatter_renderer_sample_count: u32,
+    #[cfg(feature = "enable-gpu-instancing")]
+    pub(super) scatter_batches: Vec<crate::terrain::scatter::TerrainScatterBatch>,
+    #[cfg(feature = "enable-gpu-instancing")]
+    pub(super) scatter_last_frame_stats: crate::terrain::scatter::TerrainScatterFrameStats,
     #[cfg(feature = "enable-renderer-config")]
     pub(super) config: Arc<Mutex<crate::render::params::RendererConfig>>,
     pub(super) viewer_heightmap: Option<ViewerTerrainData>,
@@ -138,6 +149,7 @@ pub(super) struct PipelineCache {
 
 pub(super) const TERRAIN_DEFAULT_CASCADE_SPLITS: [f32; 4] = [50.0, 200.0, 800.0, 3000.0];
 pub(super) const MATERIAL_LAYER_CAPACITY: usize = 4;
+pub(super) const TERRAIN_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Pod, Zeroable)]

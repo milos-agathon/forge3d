@@ -39,6 +39,8 @@ mod msaa;
 mod pipeline_cache;
 mod py_api;
 mod resources;
+#[cfg(feature = "enable-gpu-instancing")]
+mod scatter;
 mod shadows;
 mod uniforms;
 mod upload;

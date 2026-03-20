@@ -6,6 +6,21 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-03-20
+
+### Added
+- Added terrain workflow documentation pages for the first three terrain-visualization epics:
+  - TV1 terrain atmosphere path parity
+  - TV2 terrain AOV and multi-channel EXR export
+  - TV3 terrain scatter and population
+- Added the `forge3d.terrain_scatter` Python workflow to the published docs spine and API reference.
+- Added terrain scatter upload, viewer IPC wiring, and renderer stats/memory-report surfaces for terrain-native population workflows.
+- Added terrain AOV multi-channel EXR export coverage and a dedicated TV2 example path in CI.
+
+### Changed
+- Bumped the package version to `1.14.0`.
+- Promoted the TV1-TV3 terrain workflows into the main documentation navigation so they ship as first-class public docs instead of notes/examples only.
+
 ## [1.13.1] - 2026-03-19
 
 ### Fixed
