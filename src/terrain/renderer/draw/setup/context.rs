@@ -12,7 +12,8 @@ pub(in crate::terrain::renderer) struct UploadedHeightInputs {
 }
 
 pub(in crate::terrain::renderer) struct PreparedMaterials {
-    pub(in crate::terrain::renderer) gpu_materials: Arc<crate::render::material_set::GpuMaterialSet>,
+    pub(in crate::terrain::renderer) gpu_materials:
+        Arc<crate::render::material_set::GpuMaterialSet>,
     pub(in crate::terrain::renderer) shading_buffer: wgpu::Buffer,
     pub(in crate::terrain::renderer) overlay_buffer: wgpu::Buffer,
     pub(in crate::terrain::renderer) overlay_binding: OverlayBinding,

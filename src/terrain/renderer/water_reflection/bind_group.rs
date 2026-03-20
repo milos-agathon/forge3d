@@ -1,5 +1,5 @@
-use super::*;
 use super::uniforms::{compute_mirrored_view_matrix, mul_mat4, WaterReflectionUniforms};
+use super::*;
 
 impl TerrainScene {
     #[allow(clippy::too_many_arguments)]

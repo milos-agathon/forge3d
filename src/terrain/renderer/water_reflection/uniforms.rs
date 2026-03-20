@@ -74,10 +74,7 @@ pub(in crate::terrain::renderer) fn compute_mirrored_view_matrix(
     mul_mat4(view_matrix, reflect)
 }
 
-pub(in crate::terrain::renderer) fn mul_mat4(
-    a: [[f32; 4]; 4],
-    b: [[f32; 4]; 4],
-) -> [[f32; 4]; 4] {
+pub(in crate::terrain::renderer) fn mul_mat4(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
     let mut result = [[0.0f32; 4]; 4];
     for i in 0..4 {
         for j in 0..4 {

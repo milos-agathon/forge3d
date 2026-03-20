@@ -1,6 +1,4 @@
-use super::{
-    types::CullingUniforms, CullableInstance, IndirectDrawCommand, IndirectRenderer,
-};
+use super::{types::CullingUniforms, CullableInstance, IndirectDrawCommand, IndirectRenderer};
 use crate::core::error::RenderError;
 use wgpu::util::DeviceExt;
 
