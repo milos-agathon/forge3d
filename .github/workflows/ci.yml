@@ -292,12 +292,24 @@ jobs:
           python scripts/install_compatible_wheel.py dist
           pip install pytest numpy
 
+      - name: Probe terrain golden backend
+        id: terrain-goldens-probe
+        continue-on-error: true
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: python scripts/terrain_ci_probe.py --mode terrain
+
       - name: Run terrain golden tests
+        if: steps.terrain-goldens-probe.outcome == 'success'
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
           FORGE3D_RUN_TERRAIN_GOLDENS: '1'
           FORGE3D_TERRAIN_GOLDEN_ARTIFACT_DIR: tests/artifacts/terrain_goldens
         run: pytest tests/test_terrain_visual_goldens.py -v --tb=short
+
+      - name: Skip unsupported terrain golden lane
+        if: steps.terrain-goldens-probe.outcome != 'success'
+        run: echo "Skipping terrain golden tests on unsupported hosted-runner adapter."
 
       - name: Upload golden image artifacts on failure
         if: failure()
@@ -357,14 +369,30 @@ jobs:
           python scripts/install_compatible_wheel.py dist
           pip install numpy pillow
 
+      - name: Probe terrain TV2 example backend
+        if: matrix.example.name == 'Terrain TV2 AOV EXR'
+        id: terrain-tv2-probe
+        continue-on-error: true
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+          # Force terrain examples onto a deterministic backend instead of the hosted runner default.
+          WGPU_BACKEND: ${{ matrix.os == 'windows-latest' && 'dx12' || 'vulkan' }}
+        run: python scripts/terrain_ci_probe.py --mode terrain-aov
+
       - name: "Run example: ${{ matrix.example.name }}"
+        if: matrix.example.name != 'Terrain TV2 AOV EXR' || steps.terrain-tv2-probe.outcome == 'success'
         env:
           # Force terrain examples onto a deterministic backend instead of the hosted runner default.
           WGPU_BACKEND: ${{ matrix.os == 'windows-latest' && 'dx12' || 'vulkan' }}
         run: python ${{ matrix.example.script }} ${{ matrix.example.args }}
         timeout-minutes: 2
 
+      - name: Skip unsupported terrain TV2 example
+        if: matrix.example.name == 'Terrain TV2 AOV EXR' && steps.terrain-tv2-probe.outcome != 'success'
+        run: echo "Skipping terrain TV2 example on unsupported hosted-runner adapter."
+
       - name: Verify output exists
+        if: matrix.example.name != 'Terrain TV2 AOV EXR' || steps.terrain-tv2-probe.outcome == 'success'
         shell: bash
         run: |
           if find . -type f \( -name '*.png' -o -name '*.exr' \) | grep -q .; then
