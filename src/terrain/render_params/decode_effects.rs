@@ -23,16 +23,11 @@ pub(super) fn parse_fog_settings(params: &Bound<'_, PyAny>) -> FogSettingsNative
             .getattr("base_height")
             .and_then(|v| v.extract())
             .unwrap_or(0.0);
-        let aerial_perspective: f32 = fog
-            .getattr("aerial_perspective")
-            .and_then(|v| v.extract())
-            .unwrap_or(0.0);
         FogSettingsNative {
             density,
             height_falloff,
             base_height,
             inscatter,
-            aerial_perspective,
         }
     } else {
         FogSettingsNative::default()

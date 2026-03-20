@@ -364,14 +364,14 @@ var moment_sampler: sampler;
 
 // ──────────────────────────────────────────────────────────────────────────
 // P2 + TV1: Shared atmosphere uniforms (@group(4))
-// Carries the legacy height-fog controls plus the resolved terrain sky texture.
+// Carries the height-fog controls plus the resolved terrain sky texture.
 // When sky is disabled and fog_density = 0.0, this path is an exact no-op.
 // ──────────────────────────────────────────────────────────────────────────
 struct FogUniforms {
     // x=density, y=height falloff, z=base height, w=camera height
     params0: vec4<f32>,
-    // rgb=legacy inscatter, w=legacy aerial perspective strength
-    fog_inscatter_aerial: vec4<f32>,
+    // rgb=fog inscatter tint, w=padding
+    fog_inscatter: vec4<f32>,
     // x=sky enabled, y=sky aerial density, z=sky aerial enabled, w=sky sun intensity
     sky_params0: vec4<f32>,
     // x=sky sun size, y=sun elevation, z=turbidity, w=sky exposure
@@ -413,7 +413,7 @@ var reflection_sampler: sampler;
 
 fn sample_atmosphere_sky(screen_pos: vec2<f32>) -> vec3<f32> {
     if (fog_uniforms.sky_params0.x < 0.5 || water_reflection_uniforms.enable_flags.y > 0.5) {
-        return fog_uniforms.fog_inscatter_aerial.rgb;
+        return fog_uniforms.fog_inscatter.rgb;
     }
 
     let dims = textureDimensions(sky_atmosphere_tex, 0);
@@ -2289,18 +2289,8 @@ fn apply_atmospheric_fog(
     if (fog_enabled) {
         let density = density_raw * density_raw;
         let extinction = exp(-density * view_distance * height_factor * 0.005);
-        let inscatter = select(fog_uniforms.fog_inscatter_aerial.rgb, sky_color, sky_enabled);
+        let inscatter = select(fog_uniforms.fog_inscatter.rgb, sky_color, sky_enabled);
         fog_result = mix(inscatter, fog_result, extinction);
-
-        let fog_aerial_strength = fog_uniforms.fog_inscatter_aerial.w;
-        if (fog_aerial_strength > 0.0) {
-            let aerial_factor = 1.0 - exp(-density * view_distance * height_factor * 0.003);
-            let aerial_amount = aerial_factor * fog_aerial_strength;
-            let luma = dot(fog_result, vec3<f32>(0.2126, 0.7152, 0.0722));
-            let desaturated = mix(fog_result, vec3<f32>(luma), aerial_amount * 0.6);
-            let atmosphere_blue = vec3<f32>(0.65, 0.75, 0.9);
-            fog_result = mix(desaturated, atmosphere_blue * luma, aerial_amount * 0.3);
-        }
     }
 
     if (sky_aerial_enabled) {

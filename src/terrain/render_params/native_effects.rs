@@ -9,9 +9,6 @@ pub struct FogSettingsNative {
     pub base_height: f32,
     /// Inscatter color (linear RGB, typically sky-tinted)
     pub inscatter: [f32; 3],
-    /// M3: Aerial perspective strength (0.0 = disabled, 1.0 = full effect)
-    /// Controls distance-based desaturation and blue shift (Rayleigh scattering)
-    pub aerial_perspective: f32,
 }
 
 #[cfg(feature = "extension-module")]
@@ -22,7 +19,6 @@ impl Default for FogSettingsNative {
             height_falloff: 0.0,
             base_height: 0.0,
             inscatter: [1.0, 1.0, 1.0],
-            aerial_perspective: 0.0, // Disabled by default
         }
     }
 }

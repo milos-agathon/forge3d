@@ -159,15 +159,11 @@ impl TerrainScene {
                 fog_base_height,
                 eye_y,
             ],
-            fog_inscatter_aerial: [
+            fog_inscatter: [
                 decoded.fog.inscatter[0],
                 decoded.fog.inscatter[1],
                 decoded.fog.inscatter[2],
-                if sky_enabled {
-                    0.0
-                } else {
-                    decoded.fog.aerial_perspective
-                },
+                0.0,
             ],
             sky_params0: [
                 if sky_enabled { 1.0 } else { 0.0 },

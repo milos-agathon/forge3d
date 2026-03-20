@@ -59,53 +59,57 @@ class AtmospherePreset:
     title: str
     light_elevation_deg: float
     light_azimuth_deg: float
+    direct_sun_intensity: float
     sky: SkySettings
 
 
 PRESETS = (
     AtmospherePreset(
         name="clear",
-        title="Clear / low haze",
-        light_elevation_deg=28.0,
+        title="Clear alpine air",
+        light_elevation_deg=35.0,
         light_azimuth_deg=135.0,
+        direct_sun_intensity=1.75,
         sky=SkySettings(
             enabled=True,
-            turbidity=1.5,
-            ground_albedo=0.20,
-            sun_intensity=1.2,
-            sun_size=1.0,
-            aerial_density=1.0,
-            sky_exposure=1.0,
+            turbidity=2.1,
+            ground_albedo=0.18,
+            sun_intensity=1.0,
+            sun_size=0.95,
+            aerial_density=0.70,
+            sky_exposure=0.90,
         ),
     ),
     AtmospherePreset(
         name="hazy",
-        title="Hazy / strong aerial perspective",
-        light_elevation_deg=28.0,
+        title="Warm haze / aerial perspective",
+        light_elevation_deg=35.0,
         light_azimuth_deg=135.0,
+        direct_sun_intensity=1.05,
         sky=SkySettings(
             enabled=True,
-            turbidity=8.0,
-            ground_albedo=0.45,
-            sun_intensity=1.2,
-            sun_size=1.0,
-            aerial_density=3.0,
-            sky_exposure=0.95,
+            turbidity=4.6,
+            ground_albedo=0.22,
+            sun_intensity=1.0,
+            sun_size=1.15,
+            aerial_density=1.35,
+            sky_exposure=0.84,
         ),
     ),
     AtmospherePreset(
         name="low_sun",
-        title="Low sun / warm atmosphere",
-        light_elevation_deg=6.0,
+        title="Low sun / evening relief",
+        light_elevation_deg=12.0,
         light_azimuth_deg=135.0,
+        direct_sun_intensity=2.2,
         sky=SkySettings(
             enabled=True,
-            turbidity=3.0,
-            ground_albedo=0.35,
-            sun_intensity=2.5,
-            sun_size=2.0,
-            aerial_density=2.0,
-            sky_exposure=1.05,
+            turbidity=3.2,
+            ground_albedo=0.22,
+            sun_intensity=1.8,
+            sun_size=1.7,
+            aerial_density=1.10,
+            sky_exposure=0.92,
         ),
     ),
 )
@@ -164,7 +168,7 @@ def _load_dem(path: Path, max_dim: int) -> tuple[object, np.ndarray]:
             data = data[..., 0]
         dem = f3dio.load_dem_from_array(data)
 
-    heightmap = np.flipud(np.asarray(dem.data, dtype=np.float32)).copy()
+    heightmap = np.asarray(dem.data, dtype=np.float32).copy()
     return dem, _downsample_heightmap(heightmap, max_dim)
 
 
@@ -203,11 +207,14 @@ def _make_colormap(domain: tuple[float, float]) -> f3d.Colormap1D:
     lo, hi = domain
     span = max(hi - lo, 1e-6)
     stops = (
-        (lo + 0.00 * span, "#0b2f18"),
-        (lo + 0.25 * span, "#3d6b2f"),
-        (lo + 0.55 * span, "#85754a"),
-        (lo + 0.82 * span, "#c8c0a3"),
-        (lo + 1.00 * span, "#f1f4fb"),
+        (lo + 0.00 * span, "#233d23"),
+        (lo + 0.10 * span, "#3f5a31"),
+        (lo + 0.26 * span, "#5c7242"),
+        (lo + 0.44 * span, "#7f8058"),
+        (lo + 0.62 * span, "#927357"),
+        (lo + 0.78 * span, "#bca891"),
+        (lo + 0.92 * span, "#ddd8cc"),
+        (lo + 1.00 * span, "#f6f7fb"),
     )
     return f3d.Colormap1D.from_stops(stops=stops, domain=domain)
 
@@ -215,11 +222,11 @@ def _make_colormap(domain: tuple[float, float]) -> f3d.Colormap1D:
 def _build_shadow_settings(max_distance: float) -> ShadowSettings:
     return ShadowSettings(
         enabled=True,
-        technique="PCF",
-        resolution=1024,
-        cascades=2,
+        technique="PCSS",
+        resolution=2048,
+        cascades=3,
         max_distance=max_distance,
-        softness=1.0,
+        softness=1.5,
         intensity=0.8,
         slope_scale_bias=0.001,
         depth_bias=0.0005,
@@ -231,6 +238,12 @@ def _build_shadow_settings(max_distance: float) -> ShadowSettings:
     )
 
 
+def _resolve_camera_radius(terrain_span: float, radius_scale: float, cam_radius: float | None) -> float:
+    if cam_radius is not None:
+        return max(float(cam_radius), 1.0)
+    return max(float(terrain_span) * float(radius_scale), 1.0)
+
+
 def _build_native_params(
     *,
     size_px: tuple[int, int],
@@ -240,6 +253,8 @@ def _build_native_params(
     preset: AtmospherePreset,
     cam_phi_deg: float,
     cam_theta_deg: float,
+    cam_fov_deg: float,
+    cam_radius: float | None,
     radius_scale: float,
     z_scale: float,
     msaa: int,
@@ -253,16 +268,16 @@ def _build_native_params(
         z_scale=z_scale,
         exposure=1.0,
         domain=domain,
-        albedo_mode="colormap",
-        colormap_strength=1.0,
+        albedo_mode="mix",
+        colormap_strength=0.35,
         ibl_enabled=False,
         light_azimuth_deg=preset.light_azimuth_deg,
         light_elevation_deg=preset.light_elevation_deg,
-        sun_intensity=2.5,
-        cam_radius=terrain_span * radius_scale,
+        sun_intensity=preset.direct_sun_intensity,
+        cam_radius=_resolve_camera_radius(terrain_span, radius_scale, cam_radius),
         cam_phi_deg=cam_phi_deg,
         cam_theta_deg=cam_theta_deg,
-        fov_y_deg=42.0,
+        fov_y_deg=cam_fov_deg,
         camera_mode="mesh",
         clip=(0.1, clip_far),
         overlays=[overlay],
@@ -288,6 +303,12 @@ def _render_variant(
         target=None,
     )
     return frame.to_numpy()
+
+
+def _orient_output_image(image: np.ndarray) -> np.ndarray:
+    # The offline mesh renderer currently lands 180 deg out from the
+    # interactive viewer's screen-space orientation for this demo setup.
+    return np.ascontiguousarray(np.rot90(image, 2))
 
 
 def _make_contact_sheet(images: list[np.ndarray], labels: list[str]) -> np.ndarray:
@@ -339,10 +360,17 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--size", type=int, nargs=2, default=(1280, 720), metavar=("WIDTH", "HEIGHT"))
     parser.add_argument("--max-dem-size", type=int, default=1536, help="Downsample DEM if its longest edge exceeds this size.")
-    parser.add_argument("--cam-phi", type=float, default=225.0, help="Camera azimuth in degrees.")
-    parser.add_argument("--cam-theta", type=float, default=62.0, help="Camera polar angle in degrees.")
-    parser.add_argument("--radius-scale", type=float, default=0.92, help="Camera distance as a fraction of terrain span.")
-    parser.add_argument("--z-scale", type=float, default=1.45, help="Terrain vertical exaggeration.")
+    parser.add_argument("--cam-phi", type=float, default=300.0, help="Camera azimuth in degrees.")
+    parser.add_argument("--cam-theta", type=float, default=40.0, help="Camera polar angle in degrees.")
+    parser.add_argument("--cam-fov", type=float, default=30.0, help="Vertical field of view in degrees.")
+    parser.add_argument(
+        "--cam-radius",
+        type=float,
+        default=None,
+        help="Absolute camera distance in world units. Defaults to terrain_span * radius_scale.",
+    )
+    parser.add_argument("--radius-scale", type=float, default=1.10, help="Fallback camera distance as a fraction of terrain span.")
+    parser.add_argument("--z-scale", type=float, default=0.10, help="Terrain vertical exaggeration.")
     parser.add_argument("--msaa", type=int, choices=[1, 4, 8], default=1, help="MSAA sample count.")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Directory for rendered PNGs.")
     return parser.parse_args()
@@ -362,13 +390,17 @@ def main() -> int:
         fallback=f3dio.infer_dem_domain(dem, fallback=(0.0, 1.0)),
     )
     colormap = _make_colormap(domain)
-    overlay = f3d.OverlayLayer.from_colormap1d(colormap, strength=1.0, domain=domain)
+    overlay = f3d.OverlayLayer.from_colormap1d(colormap, strength=0.85, domain=domain)
 
     presets = [preset for preset in PRESETS if args.variant in ("all", preset.name)]
 
     session = f3d.Session(window=False)
     renderer = f3d.TerrainRenderer(session)
-    material_set = f3d.MaterialSet.terrain_default()
+    material_set = f3d.MaterialSet.terrain_default(
+        triplanar_scale=4.5,
+        normal_strength=1.2,
+        blend_sharpness=4.5,
+    )
 
     with tempfile.TemporaryDirectory(prefix="forge3d-tv1-") as temp_dir:
         hdr_path = Path(temp_dir) / "neutral.hdr"
@@ -392,11 +424,14 @@ def main() -> int:
                 preset=preset,
                 cam_phi_deg=float(args.cam_phi),
                 cam_theta_deg=float(args.cam_theta),
+                cam_fov_deg=float(args.cam_fov),
+                cam_radius=None if args.cam_radius is None else float(args.cam_radius),
                 radius_scale=float(args.radius_scale),
                 z_scale=float(args.z_scale),
                 msaa=int(args.msaa),
             )
             image = _render_variant(renderer, material_set, ibl, heightmap, native_params)
+            image = _orient_output_image(image)
             output_path = args.output_dir / f"{args.dem}_tv1_{preset.name}.png"
             f3d.numpy_to_png(output_path, image)
             images.append(image)

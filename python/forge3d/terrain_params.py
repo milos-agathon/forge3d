@@ -170,22 +170,16 @@ class FogSettings:
     
     Height-based exponential fog applied after PBR, before tonemap.
     When density = 0.0, fog is disabled (no-op for P1 compatibility).
-    When SkySettings.enabled=True, terrain inscatter/aerial tint is derived from
-    the sky path rather than a separate hardcoded terrain-only atmosphere color.
     
     base_height: World-space Z coordinate below which fog is at full density.
                  Should be set to the minimum terrain elevation (in world units).
                  If None, will be auto-computed from terrain bounds.
-    
-    aerial_perspective: M3 feature - distance-based desaturation and blue shift
-                       simulating Rayleigh scattering. 0.0 = disabled, 1.0 = full effect.
     """
 
     density: float = 0.0  # 0.0 = disabled
     height_falloff: float = 0.0
     base_height: Optional[float] = None  # None = auto from terrain min height
     inscatter: Tuple[float, float, float] = (1.0, 1.0, 1.0)
-    aerial_perspective: float = 0.0  # M3: 0.0 = disabled, 1.0 = full effect
 
     def __post_init__(self) -> None:
         if self.density < 0.0:
@@ -197,8 +191,6 @@ class FogSettings:
         for c in self.inscatter:
             if not 0.0 <= c <= 1.0:
                 raise ValueError("inscatter components must be in [0, 1]")
-        if not 0.0 <= self.aerial_perspective <= 1.0:
-            raise ValueError("aerial_perspective must be in [0, 1]")
 
 
 @dataclass
@@ -860,7 +852,7 @@ class SkySettings:
     - Aerial perspective for distant terrain using the same sky path
     
     Applied as a rendered sky background in mesh-mode terrain views and sampled
-    by the terrain atmosphere path for aerial perspective / fog inscatter.
+    by the terrain atmosphere path for aerial perspective and fog inscatter tint.
     """
     
     enabled: bool = False  # Disabled by default

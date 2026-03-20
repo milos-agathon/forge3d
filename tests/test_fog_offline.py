@@ -73,7 +73,7 @@ class TestFogConfig:
         assert fog.height_falloff == 0.0
         assert fog.base_height is None
         assert fog.inscatter == (1.0, 1.0, 1.0)
-        assert fog.aerial_perspective == 0.0
+        assert not hasattr(fog, "aerial_perspective")
 
     def test_fog_enabled_with_density(self):
         """Test enabling fog with custom density."""
@@ -87,16 +87,6 @@ class TestFogConfig:
         assert fog.height_falloff == 0.01
         assert fog.base_height == 1000.0
         assert fog.inscatter == (0.8, 0.85, 0.9)
-
-    def test_fog_with_aerial_perspective(self):
-        """Test fog with aerial perspective enabled."""
-        fog = FogSettings(
-            density=0.15,
-            height_falloff=0.02,
-            aerial_perspective=0.5,
-        )
-        assert fog.density == 0.15
-        assert fog.aerial_perspective == 0.5
 
     def test_fog_density_validation(self):
         """Test that negative density raises error."""
@@ -115,12 +105,10 @@ class TestFogConfig:
         with pytest.raises(ValueError, match="inscatter components must be in"):
             FogSettings(inscatter=(1.5, 0.5, 0.5))  # Out of range
 
-    def test_fog_aerial_perspective_validation(self):
-        """Test that aerial_perspective outside [0, 1] raises error."""
-        with pytest.raises(ValueError, match="aerial_perspective must be in"):
-            FogSettings(aerial_perspective=1.5)
-        with pytest.raises(ValueError, match="aerial_perspective must be in"):
-            FogSettings(aerial_perspective=-0.1)
+    def test_fog_rejects_legacy_aerial_perspective_argument(self):
+        """Test that terrain fog no longer accepts a separate aerial knob."""
+        with pytest.raises(TypeError):
+            FogSettings(aerial_perspective=0.5)
 
 
 class TestFogInTerrainParams:
@@ -146,7 +134,6 @@ class TestFogInTerrainParams:
             density=0.1,
             height_falloff=0.01,
             inscatter=(0.7, 0.8, 0.9),
-            aerial_perspective=0.3,
         )
         params = make_terrain_params_config(
             size_px=(256, 256),
@@ -160,11 +147,11 @@ class TestFogInTerrainParams:
         )
         assert params.fog is not None
         assert params.fog.density == 0.1
-        assert params.fog.aerial_perspective == 0.3
+        assert not hasattr(params.fog, "aerial_perspective")
 
 
-class TestAerialPerspectiveLogic:
-    """Tests for aerial perspective algorithm (unit tests)."""
+class TestAtmosphericContrastLogic:
+    """Tests for atmospheric color-shift helper logic (unit tests)."""
 
     def test_desaturation_logic(self):
         """Test that desaturation reduces color saturation."""
@@ -299,14 +286,13 @@ class TestFogRendering:
                 density=0.1,
                 height_falloff=0.01,
                 inscatter=(0.8, 0.85, 0.9),
-                aerial_perspective=0.5,
             ),
         )
         assert params.fog.density == 0.1
-        assert params.fog.aerial_perspective == 0.5
+        assert not hasattr(params.fog, "aerial_perspective")
 
-    def test_aerial_perspective_params(self):
-        """Test aerial perspective parameter passing."""
+    def test_fog_params_do_not_expose_aerial_perspective(self):
+        """Test that fog parameter plumbing no longer exposes aerial perspective."""
         params = make_terrain_params_config(
             size_px=(256, 256),
             render_scale=1.0,
@@ -317,10 +303,9 @@ class TestFogRendering:
             domain=(1000.0, 2000.0),
             fog=FogSettings(
                 density=0.15,
-                aerial_perspective=0.8,
             ),
         )
-        assert params.fog.aerial_perspective == 0.8
+        assert not hasattr(params.fog, "aerial_perspective")
 
 
 if __name__ == "__main__":

@@ -257,6 +257,32 @@ def test_sky_parameters_change_output(terrain_sky_env, base_kwargs, variant_kwar
     assert _mean_abs_diff(base, variant) > 0.15, f"{label} change is not observable enough to be trustworthy"
 
 
+def test_sky_aerial_density_changes_output(terrain_sky_env):
+    renderer, material_set, ibl, heightmap, overlay = terrain_sky_env
+
+    low_haze = _render_scene(
+        renderer,
+        material_set,
+        ibl,
+        heightmap,
+        overlay,
+        sky=SkySettings(enabled=True, turbidity=3.0, aerial_density=0.25, sun_intensity=1.5),
+        light_elevation_deg=12.0,
+    )
+    high_haze = _render_scene(
+        renderer,
+        material_set,
+        ibl,
+        heightmap,
+        overlay,
+        sky=SkySettings(enabled=True, turbidity=3.0, aerial_density=4.0, sun_intensity=1.5),
+        light_elevation_deg=12.0,
+    )
+
+    assert _image_hash(low_haze) != _image_hash(high_haze), "Sky aerial density is still dead plumbing in the terrain renderer"
+    assert _mean_abs_diff(low_haze, high_haze) > 0.12
+
+
 def test_clear_hazy_low_sun_regression_scenes(terrain_sky_env):
     renderer, material_set, ibl, heightmap, overlay = terrain_sky_env
 

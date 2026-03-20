@@ -1,5 +1,9 @@
 # O1: Subsystem Map
 
+Historical audit note: this document started as a pre-TV1 capability map. For current
+terrain fog/sky ownership semantics, treat
+`docs/notes/terrain_atmosphere_semantics.md` as authoritative.
+
 | Subsystem | File Path(s) | Key Symbols | Notes |
 |-----------|--------------|-------------|-------|
 | **Terrain Offline Entry** | `python/forge3d/terrain_demo.py`, `python/forge3d/terrain_pbr_pom.py` | [run()](cci:1:python/forge3d/terrain_demo.py:739:0-1109:12), [render_terrain_pbr_pom()](cci:1:src/terrain/renderer.rs:747:4-787:5) | Python entry point, wraps native TerrainRenderer |
@@ -28,7 +32,7 @@
 |------------|--------|---------------------------|-------------------|--------------|
 | **F1: Color Mgmt / Tonemap** | **PRESENT** | `src/core/tonemap.rs` [TonemapProcessor](cci:2:src/core/tonemap.rs:10:0-21:1); `src/shaders/postprocess_tonemap.wgsl` ACES/Reinhard/Uncharted2; `src/core/hdr_types.rs` `ToneMappingOperator` | [exposure](cci:1:src/core/tonemap.rs:157:4-160:5), [gamma](cci:1:src/terrain/render_params.rs:1117:4-1120:5), `tone_mapping` operator via [HdrConfig](cci:2:src/core/hdr_types.rs:42:0-50:1) | **No white balance**; **no LUT support** in shader; tonemap operator not exposed to Python terrain API—only hardcoded Reinhard in terrain path |
 | **F2: Accumulation AA** | **ABSENT** | No accumulation buffer found; no subpixel jitter; no sample averaging | None | **Complete implementation needed**: camera jitter, HDR accumulation buffer, configurable sample count |
-| **F3: Atmosphere/Fog** | **PARTIAL** | `src/viewer/init/fog_init.rs` [FogResources](cci:2:src/viewer/init/fog_init.rs:8:0-40:1); `src/shaders/volumetric.wgsl` height fog + HG phase; `src/terrain/render_params.rs:202-227` [FogSettingsNative](cci:2:src/terrain/render_params.rs:205:0-214:1) | `fog.density`, `fog.height_falloff`, `fog.inscatter` via Python | **Interactive viewer only**—not wired to offline [TerrainRenderer](cci:2:src/terrain/renderer.rs:148:0-150:1); no aerial perspective (distance-based desaturation); god-rays shadow sampling TODO in shader |
+| **F3: Atmosphere/Fog** | **PARTIAL** | `src/viewer/init/fog_init.rs` [FogResources](cci:2:src/viewer/init/fog_init.rs:8:0-40:1); `src/shaders/volumetric.wgsl` height fog + HG phase; `docs/notes/terrain_atmosphere_semantics.md`; `tests/test_terrain_sky_parity.py` | `fog.density`, `fog.height_falloff`, `fog.inscatter`, plus terrain `sky.*` haze controls via Python | Offline terrain now has height fog plus sky-owned aerial perspective and parity tests; viewer volumetrics/god-rays remain a separate path with their own TODOs |
 | **F4: Bloom/Glare** | **PARTIAL** | `src/core/bloom.rs` [BloomEffect](cci:2:src/core/bloom.rs:50:0-71:1); shaders exist at [bloom_brightpass.wgsl](cci:7:src/shaders/bloom_brightpass.wgsl:0:0-0:0), [bloom_blur_h.wgsl](cci:7:src/shaders/bloom_blur_h.wgsl:0:0-0:0), [bloom_blur_v.wgsl](cci:7:src/shaders/bloom_blur_v.wgsl:0:0-0:0) | `threshold`, `softness`, `strength`, `radius` in [BloomConfig](cci:2:src/core/bloom.rs:13:0-18:1) | **execute() is stub** (line 327-332: "placeholder implementation"); not integrated into terrain offline path; no glare streaks |
 | **F5: Specular AA** | **PRESENT** | `src/shaders/terrain_pbr_pom.wgsl:2380-2414` Toksvig-like variance→roughness; `src/terrain/renderer.rs:4604-4654` `spec_aa_enabled`, `specaa_sigma_scale` | `VF_SPEC_AA_ENABLED` env var, `VF_SPECAA_SIGMA_SCALE` env var | Effectively disabled (threshold=1.0 in beauty mode); roughness-to-mip mapping present in IBL prefilter; **no LEAN/aniso variants** |
 | **F6: Water Material** | **PRESENT** | `src/core/water_surface.rs` [WaterSurfaceParams](cci:2:src/core/water_surface.rs:30:0-64:1); `src/shaders/water_surface.wgsl`; `src/terrain/renderer.rs:100-110` planar reflections | `reflection.enabled`, `fresnel_power`, `wave_strength`, `shore_atten_width` in Python | P4 water with env + planar reflections; **SSR not integrated for water**; foam partial |
@@ -45,7 +49,7 @@
 
 3. **F7 Terrain Layering (PARTIAL)**: Only height-based layers. Missing slope/aspect/curvature-driven snow, rock, wetness. High visual impact for terrain realism.
 
-4. **F3 Atmosphere (PARTIAL)**: Fog exists in interactive viewer but not wired to offline path. Missing aerial perspective (distance-based desaturation/blue shift). Medium effort.
+4. **F3 Atmosphere (PARTIAL)**: Terrain fog/sky parity is now wired for offline terrain, but viewer volumetrics/god-rays remain a separate path. Medium effort for broader atmosphere unification.
 
 5. **F8 Vector Overlays (PARTIAL)**: No depth-correct draping—vectors render screen-space only. For cartographic quality, vectors must respect terrain occlusion with halos.
 
@@ -136,16 +140,21 @@
 **Files touched/added**:
 - `src/terrain/renderer.rs` — wire [FogResources](cci:2:src/viewer/init/fog_init.rs:8:0-40:1) into offline render
 - `src/shaders/terrain_pbr_pom.wgsl` — add aerial perspective distance-based desaturation
-- `python/forge3d/terrain_params.py` — expose `fog.aerial_perspective_strength`
+- `docs/notes/terrain_atmosphere_semantics.md` — authoritative terrain fog/sky ownership note
 
-**Deliverables**:
+Status update:
+- Terrain sky parity landed via TV1.1/TV1.2/TV1.3.
+- Terrain aerial perspective now derives from `SkySettings`, not `FogSettings`.
+- The remaining F3 gap is broader viewer/offline volumetric parity, not terrain haze ownership.
+
+**Delivered for terrain parity**:
 - Height fog working in offline terrain renders
-- Aerial perspective: distance-based desaturation + blue shift
-- Test: `tests/test_fog_offline.py` with depth-varying scene
+- Sky-owned aerial perspective working in offline terrain renders
+- Tests: `tests/test_fog_offline.py` and `tests/test_terrain_sky_parity.py`
 
 **Acceptance Criteria**:
 - `fog.density=0` identical to baseline
-- `fog.density=0.01` produces visible haze: distant pixels desaturated (saturation < 0.7× foreground)
+- Sky haze controls (`sky.aerial_density`, `sky.turbidity`) produce observable terrain output differences
 - Fog integrates with shadows (god-rays optional, deferred if perf issue)
 
 **Risks & Mitigations**:
@@ -278,7 +287,7 @@ I've completed the comprehensive audit of forge3d for Blender-like offline rende
 |---------|--------|
 | F1: Color Management/Tonemap | **PRESENT** (missing LUT, white balance) |
 | F2: Accumulation AA | **ABSENT** (complete implementation needed) |
-| F3: Atmosphere/Fog | **PARTIAL** (viewer-only, needs offline wiring) |
+| F3: Atmosphere/Fog | **PARTIAL** (terrain parity landed; broader volumetric parity remains) |
 | F4: Bloom/Glare | **PARTIAL** (stub implementation) |
 | F5: Specular AA | **PRESENT** (Toksvig in shader) |
 | F6: Water Material | **PRESENT** (P4 planar reflections working) |
@@ -289,7 +298,7 @@ I've completed the comprehensive audit of forge3d for Blender-like offline rende
 1. **Accumulation AA** — completely missing, highest impact
 2. **Bloom** — stub implementation, needs completion
 3. **Terrain Material Layering** — no slope/aspect-driven materials
-4. **Atmosphere** — not wired to offline path
+4. **Atmosphere** — terrain parity landed, but broader volumetric/viewer-path unification remains
 5. **Vector Draping** — no depth-correct terrain occlusion
 
 **Plan**: 7 milestones with explicit files, deliverables, acceptance criteria (SSIM/PSNR metrics), and risks. All features opt-in to preserve existing baselines per AGENTS.md rules.

@@ -38,7 +38,7 @@ impl OverlayUniforms {
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(super) struct FogUniforms {
     pub(super) params0: [f32; 4],
-    pub(super) fog_inscatter_aerial: [f32; 4],
+    pub(super) fog_inscatter: [f32; 4],
     pub(super) sky_params0: [f32; 4],
     pub(super) sky_params1: [f32; 4],
 }
@@ -47,7 +47,7 @@ impl FogUniforms {
     pub(super) fn disabled() -> Self {
         Self {
             params0: [0.0, 0.0, 0.0, 0.0],
-            fog_inscatter_aerial: [1.0, 1.0, 1.0, 0.0],
+            fog_inscatter: [1.0, 1.0, 1.0, 0.0],
             sky_params0: [0.0, 0.0, 0.0, 0.0],
             sky_params1: [0.0, 0.0, 0.0, 0.0],
         }
