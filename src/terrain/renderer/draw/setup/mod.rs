@@ -3,4 +3,4 @@ use super::*;
 mod context;
 mod pipeline;
 
-pub(super) use pipeline::RenderTargets;
+pub(in crate::terrain::renderer) use pipeline::RenderTargets;

@@ -7,11 +7,44 @@ on:
     branches: [main, develop]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pull-requests: read
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
+  # ============================================================================
+  # Terrain Visual Change Detection
+  # ============================================================================
+  terrain-golden-paths:
+    name: Terrain Golden Paths
+    runs-on: ubuntu-latest
+    outputs:
+      terrain_goldens: ${{ steps.filter.outputs.terrain_goldens }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect terrain visual changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            terrain_goldens:
+              - '.github/workflows/ci.yml'
+              - 'src/shaders/*terrain*.wgsl'
+              - 'src/terrain/**'
+              - 'src/viewer/terrain/**'
+              - 'python/forge3d/terrain*.py'
+              - 'examples/terrain*.py'
+              - 'tests/test_terrain_visual_goldens.py'
+              - 'tests/golden/terrain/**'
+
   # ============================================================================
   # Rust Tests (cargo test)
   # ============================================================================
@@ -229,16 +262,13 @@ jobs:
             bash -lc "python -m pip install -U pip pytest && python /workspace/scripts/install_compatible_wheel.py /workspace/dist && FORGE3D_NO_BOOTSTRAP=1 pytest tests/test_install_smoke.py -v --tb=short"
 
   # ============================================================================
-  # Golden Image Tests
+  # Terrain Golden Image Tests
   # ============================================================================
   test-golden-images:
-    name: Golden Images (${{ matrix.os }})
-    needs: build-wheels
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest]  # Skip macOS for golden images (no GPU in CI)
+    name: Terrain Goldens
+    needs: [build-wheels, terrain-golden-paths]
+    runs-on: windows-latest
+    if: github.event_name == 'workflow_dispatch' || needs.terrain-golden-paths.outputs.terrain_goldens == 'true'
 
     steps:
       - uses: actions/checkout@v4
@@ -251,26 +281,27 @@ jobs:
       - name: Download wheel artifact
         uses: actions/download-artifact@v4
         with:
-          name: wheels-${{ runner.os == 'Windows' && 'windows' || 'linux' }}
+          name: wheels-windows
           path: dist/
 
-      - name: Install wheel
-        run: python scripts/install_compatible_wheel.py dist
+      - name: Install wheel and test dependencies
+        run: |
+          python scripts/install_compatible_wheel.py dist
+          pip install pytest numpy
 
-      - name: Generate golden images
-        run: python scripts/generate_golden_images.py --output-dir tests/golden
-        continue-on-error: true
-
-      - name: Run golden image tests
-        run: cargo test --test golden_images -- --ignored --test-threads=1
-        continue-on-error: true
+      - name: Run terrain golden tests
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+          FORGE3D_RUN_TERRAIN_GOLDENS: '1'
+          FORGE3D_TERRAIN_GOLDEN_ARTIFACT_DIR: tests/artifacts/terrain_goldens
+        run: pytest tests/test_terrain_visual_goldens.py -v --tb=short
 
       - name: Upload golden image artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: golden-image-diffs-${{ matrix.os }}
-          path: tests/golden/diff/
+          name: terrain-golden-diffs
+          path: tests/artifacts/terrain_goldens/
 
   # ============================================================================
   # Example Sanity Tests (640×360 renders within 90s)
@@ -291,6 +322,9 @@ jobs:
           - name: "Terrain Single Tile"
             script: "examples/terrain_single_tile.py"
             args: ""
+          - name: "Terrain TV2 AOV EXR"
+            script: "examples/terrain_tv2_aov_exr_demo.py"
+            args: "--width 640 --height 360 --max-dem-size 384"
           - name: "PNG NumPy Roundtrip"
             script: "examples/png_numpy_roundtrip.py"
             args: ""
@@ -321,11 +355,10 @@ jobs:
       - name: Verify output exists
         shell: bash
         run: |
-          # Check that at least one PNG was created
-          if ls *.png 1> /dev/null 2>&1; then
-            echo "✓ PNG output found"
+          if find . -type f \( -name '*.png' -o -name '*.exr' \) | grep -q .; then
+            echo "✓ Render artifact found"
           else
-            echo "✗ No PNG output found"
+            echo "✗ No render artifact found"
             exit 1
           fi
 
@@ -372,17 +405,19 @@ jobs:
   # ============================================================================
   ci-success:
     name: CI Success
-    needs: [test-rust, build-wheels, test-python, test-python-linux-arm, build-docs]
+    needs: [terrain-golden-paths, test-rust, build-wheels, test-python, test-python-linux-arm, test-golden-images, build-docs]
     runs-on: ubuntu-latest
     if: always()
 
     steps:
       - name: Check all jobs succeeded
         run: |
-          if [ "${{ needs.test-rust.result }}" != "success" ] || \
+          if [ "${{ needs.terrain-golden-paths.result }}" != "success" ] || \
+             [ "${{ needs.test-rust.result }}" != "success" ] || \
              [ "${{ needs.build-wheels.result }}" != "success" ] || \
              [ "${{ needs.test-python.result }}" != "success" ] || \
              [ "${{ needs.test-python-linux-arm.result }}" != "success" ] || \
+             { [ "${{ needs.test-golden-images.result }}" != "success" ] && [ "${{ needs.test-golden-images.result }}" != "skipped" ]; } || \
              [ "${{ needs.build-docs.result }}" != "success" ]; then
             echo "❌ CI failed"
             exit 1

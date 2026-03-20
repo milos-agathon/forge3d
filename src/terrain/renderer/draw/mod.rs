@@ -3,6 +3,8 @@ use super::*;
 mod execute;
 mod setup;
 
+pub(in crate::terrain::renderer) use setup::RenderTargets;
+
 impl TerrainScene {
     pub(crate) fn render_internal(
         &mut self,
@@ -152,9 +154,12 @@ impl TerrainScene {
             &materials.overlay_buffer,
             height_curve_view,
             height_inputs.water_mask_view_uploaded.as_ref(),
+            height_ao_computed,
+            sun_vis_computed,
             &ibl_bind_group,
             shadow_bind_group,
             &pass_bind_groups.fog,
+            &pass_bind_groups.material_layer,
         )?;
 
         if let Some((_, background_view)) = sky_texture.as_ref() {

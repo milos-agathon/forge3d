@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import struct
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -94,6 +95,16 @@ def _require_native_exr(tmp_path: Path):
     return native
 
 
+def _create_test_hdr(path: str, width: int = 8, height: int = 4) -> None:
+    with open(path, "wb") as f:
+        f.write(b"#?RADIANCE\n")
+        f.write(b"FORMAT=32-bit_rle_rgbe\n\n")
+        f.write(f"-Y {height} +X {width}\n".encode())
+        for _ in range(height):
+            for _ in range(width):
+                f.write(bytes([128, 128, 128, 128]))
+
+
 def test_numpy_to_exr_beauty_channels(tmp_path: Path) -> None:
     native = _require_native_exr(tmp_path)
     path = tmp_path / "beauty.exr"
@@ -171,3 +182,69 @@ def test_save_aovs_exr_channels(tmp_path: Path) -> None:
     channels, width, height = _read_exr_header(depth_path)
     assert (width, height) == (4, 3)
     assert set(channels) == {"depth.Z"}
+
+
+def test_terrain_aov_save_exr_channels(tmp_path: Path) -> None:
+    _require_native_exr(tmp_path)
+
+    try:
+        import forge3d as f3d
+        from forge3d.terrain_params import make_terrain_params_config
+    except Exception:
+        pytest.skip("forge3d terrain bindings not available")
+
+    if not f3d.has_gpu():
+        pytest.skip("GPU-backed runtime required")
+
+    height_y, height_x = np.mgrid[0:64, 0:64].astype(np.float32)
+    heightmap = (
+        np.sin(height_x / 6.0) * 16.0
+        + np.cos(height_y / 9.0) * 10.0
+        + height_x * 0.8
+        + height_y * 0.5
+        + 20.0
+    ).astype(np.float32)
+
+    session = f3d.Session(window=False)
+    renderer = f3d.TerrainRenderer(session)
+    material_set = f3d.MaterialSet.terrain_default()
+
+    with tempfile.NamedTemporaryFile(suffix=".hdr", delete=False) as tmp:
+        tmp.close()
+        _create_test_hdr(tmp.name)
+        ibl = f3d.IBL.from_hdr(tmp.name, intensity=1.0)
+    Path(tmp.name).unlink()
+
+    config = make_terrain_params_config(
+        size_px=(72, 64),
+        render_scale=1.25,
+        terrain_span=160.0,
+        msaa_samples=4,
+        z_scale=1.3,
+        exposure=1.0,
+        domain=(0.0, 120.0),
+    )
+    params = f3d.TerrainRenderParams(config)
+
+    beauty_frame, aov_frame = renderer.render_with_aov(
+        material_set, ibl, params, heightmap
+    )
+
+    path = tmp_path / "terrain_multichannel.exr"
+    aov_frame.save_exr(str(path), beauty_frame)
+
+    channels, width, height = _read_exr_header(path)
+    assert (width, height) == (72, 64)
+    assert set(channels) == {
+        "beauty.R",
+        "beauty.G",
+        "beauty.B",
+        "beauty.A",
+        "albedo.R",
+        "albedo.G",
+        "albedo.B",
+        "normal.X",
+        "normal.Y",
+        "normal.Z",
+        "depth.Z",
+    }

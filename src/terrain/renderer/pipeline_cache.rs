@@ -206,7 +206,7 @@ impl TerrainScene {
         // M1: AOV pipeline with 4 color targets
         // Target 0: Beauty (tonemapped color)
         // Target 1: Albedo (base color before lighting)
-        // Target 2: Normal (world-space normals encoded to [0,1])
+        // Target 2: Normal (normalized world-space normal, signed float)
         // Target 3: Depth (linear depth normalized)
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("terrain_pbr_pom.aov.pipeline"),
@@ -226,21 +226,21 @@ impl TerrainScene {
                         blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
-                    // Target 1: Albedo (Rgba8Unorm for storage efficiency)
+                    // Target 1: Albedo
                     Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        format: wgpu::TextureFormat::Rgba16Float,
                         blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
-                    // Target 2: Normal (Rgba8Unorm, normals encoded to [0,1])
+                    // Target 2: Normal
                     Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        format: wgpu::TextureFormat::Rgba16Float,
                         blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
-                    // Target 3: Depth (Rgba8Unorm for compatibility, could use R32Float)
+                    // Target 3: Depth
                     Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        format: wgpu::TextureFormat::Rgba16Float,
                         blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     }),

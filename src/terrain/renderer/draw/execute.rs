@@ -2,7 +2,7 @@ use super::setup::RenderTargets;
 use super::*;
 
 impl TerrainScene {
-    pub(super) fn blit_background_texture(
+    pub(in crate::terrain::renderer) fn blit_background_texture(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         render_targets: &RenderTargets,
@@ -157,7 +157,7 @@ impl TerrainScene {
         Ok(())
     }
 
-    pub(super) fn resolve_output(
+    pub(in crate::terrain::renderer) fn resolve_output(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         params: &crate::terrain::render_params::TerrainRenderParams,

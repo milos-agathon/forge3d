@@ -39,6 +39,52 @@ impl Frame {
             self.format,
         )
     }
+
+    pub(crate) fn read_rgba_f32(&self) -> anyhow::Result<Vec<f32>> {
+        match self.format {
+            wgpu::TextureFormat::Rgba8Unorm
+            | wgpu::TextureFormat::Rgba8UnormSrgb
+            | wgpu::TextureFormat::Bgra8Unorm
+            | wgpu::TextureFormat::Bgra8UnormSrgb => {
+                let data = self.read_tight_bytes()?;
+                let mut rgba = Vec::with_capacity(data.len());
+                for px in data.chunks_exact(4) {
+                    match self.format {
+                        wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb => {
+                            rgba.push(px[2] as f32 / 255.0);
+                            rgba.push(px[1] as f32 / 255.0);
+                            rgba.push(px[0] as f32 / 255.0);
+                            rgba.push(px[3] as f32 / 255.0);
+                        }
+                        _ => {
+                            rgba.push(px[0] as f32 / 255.0);
+                            rgba.push(px[1] as f32 / 255.0);
+                            rgba.push(px[2] as f32 / 255.0);
+                            rgba.push(px[3] as f32 / 255.0);
+                        }
+                    }
+                }
+                Ok(rgba)
+            }
+            wgpu::TextureFormat::Rgba16Float => crate::core::hdr::read_hdr_texture(
+                &self.device,
+                &self.queue,
+                &self.texture,
+                self.width,
+                self.height,
+                self.format,
+            )
+            .map_err(anyhow::Error::msg),
+            other => Err(anyhow::anyhow!(
+                "unsupported texture format for float readback: {:?}",
+                other
+            )),
+        }
+    }
+
+    pub(crate) fn dimensions(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
 }
 
 #[cfg(feature = "extension-module")]

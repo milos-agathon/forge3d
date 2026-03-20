@@ -22,9 +22,12 @@ impl TerrainScene {
         overlay_buffer: &wgpu::Buffer,
         height_curve_view: &wgpu::TextureView,
         water_mask_view_uploaded: Option<&wgpu::TextureView>,
+        height_ao_computed: bool,
+        sun_vis_computed: bool,
         ibl_bind_group: &wgpu::BindGroup,
         shadow_bind_group: &wgpu::BindGroup,
         fog_bind_group: &wgpu::BindGroup,
+        material_layer_bind_group: &wgpu::BindGroup,
     ) -> Result<wgpu::BindGroup> {
         let reflection_settings = &decoded.reflection;
         self.ensure_reflection_texture_size(internal_width, internal_height)?;
@@ -47,75 +50,21 @@ impl TerrainScene {
                         usage: wgpu::BufferUsages::UNIFORM,
                     });
 
-            let reflection_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("terrain.reflection.bind_group"),
-                layout: &self.bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: reflection_uniform_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(heightmap_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler_linear),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::TextureView(material_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Sampler(material_sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: shading_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::TextureView(colormap_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: wgpu::BindingResource::Sampler(colormap_sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 8,
-                        resource: overlay_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 9,
-                        resource: wgpu::BindingResource::TextureView(height_curve_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 10,
-                        resource: wgpu::BindingResource::Sampler(&self.height_curve_lut_sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 11,
-                        resource: wgpu::BindingResource::TextureView(
-                            water_mask_view_uploaded.unwrap_or(&self.water_mask_fallback_view),
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 12,
-                        resource: wgpu::BindingResource::TextureView(
-                            self.ao_debug_view
-                                .as_ref()
-                                .or(self.coarse_ao_view.as_ref())
-                                .unwrap_or(&self.ao_debug_fallback_view),
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Sampler(&self.ao_debug_sampler),
-                    },
-                ],
-            });
+            let reflection_bind_group = self.create_terrain_main_bind_group(
+                "terrain.reflection.bind_group",
+                &reflection_uniform_buffer,
+                heightmap_view,
+                material_view,
+                material_sampler,
+                shading_buffer,
+                colormap_view,
+                colormap_sampler,
+                overlay_buffer,
+                height_curve_view,
+                water_mask_view_uploaded,
+                height_ao_computed,
+                sun_vis_computed,
+            )?;
 
             let reflection_pass_water_uniforms = WaterReflectionUniforms::for_reflection_pass(
                 reflection_settings.water_plane_height,
@@ -192,6 +141,7 @@ impl TerrainScene {
                 pass.set_bind_group(3, shadow_bind_group, &[]);
                 pass.set_bind_group(4, fog_bind_group, &[]);
                 pass.set_bind_group(5, &reflection_pass_water_bind_group, &[]);
+                pass.set_bind_group(6, material_layer_bind_group, &[]);
                 let vertex_count = if params.camera_mode.to_lowercase() == "mesh" {
                     let grid_size: u32 = 512;
                     6 * (grid_size - 1) * (grid_size - 1)

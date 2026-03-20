@@ -306,7 +306,7 @@ impl TerrainScene {
 
         let camera_mode = if is_mesh_mode { 1.0 } else { 0.0 };
         let grid_size = 512.0;
-        uniforms.extend_from_slice(&[camera_mode, grid_size, 0.0, 0.0]);
+        uniforms.extend_from_slice(&[camera_mode, grid_size, params.clip.0, params.clip.1]);
 
         Ok(uniforms)
     }
@@ -337,7 +337,7 @@ impl TerrainScene {
 
         let camera_mode = if is_mesh_mode { 1.0 } else { 0.0 };
         let grid_size = 512.0;
-        uniforms.extend_from_slice(&[camera_mode, grid_size, 0.0, 0.0]);
+        uniforms.extend_from_slice(&[camera_mode, grid_size, params.clip.0, params.clip.1]);
 
         uniforms
     }

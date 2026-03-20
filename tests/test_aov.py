@@ -142,7 +142,10 @@ class TestAovRendering:
     @pytest.fixture
     def simple_heightmap(self):
         """Create a simple test heightmap."""
-        return np.random.rand(64, 64).astype(np.float32) * 100.0
+        y, x = np.mgrid[0:64, 0:64].astype(np.float32)
+        ridge = np.sin(x / 7.0) * 18.0 + np.cos(y / 11.0) * 12.0
+        slope = x * 0.9 + y * 0.4
+        return ridge + slope + 25.0
 
     @pytest.fixture
     def renderer_setup(self):
@@ -164,6 +167,9 @@ class TestAovRendering:
         self, renderer_setup, simple_heightmap
     ):
         """render_with_aov should return (Frame, AovFrame) tuple."""
+        assert hasattr(f3d, "Frame")
+        assert hasattr(f3d, "AovFrame")
+
         renderer, material_set, env_maps = renderer_setup
         config = make_terrain_params_config(
             size_px=(64, 64),
@@ -274,3 +280,101 @@ class TestAovRendering:
         
         # Check dimensions match the requested size
         assert aov_frame.size == (128, 64)
+
+    def test_aov_numpy_outputs_are_real_and_normalized(
+        self, renderer_setup, simple_heightmap
+    ):
+        """AOV numpy accessors should return populated, non-placeholder data."""
+        renderer, material_set, env_maps = renderer_setup
+        config = make_terrain_params_config(
+            size_px=(96, 64),
+            render_scale=1.0,
+            terrain_span=180.0,
+            msaa_samples=1,
+            z_scale=1.4,
+            exposure=1.0,
+            domain=(0.0, 120.0),
+        )
+        params = f3d.TerrainRenderParams(config)
+
+        frame, aov_frame = renderer.render_with_aov(
+            material_set, env_maps, params, simple_heightmap
+        )
+
+        beauty = frame.to_numpy()
+        albedo = aov_frame.albedo()
+        normal = aov_frame.normal()
+        depth = aov_frame.depth()
+
+        assert beauty.shape == (64, 96, 4)
+        assert albedo.shape == (64, 96, 3)
+        assert normal.shape == (64, 96, 3)
+        assert depth.shape == (64, 96)
+
+        assert np.isfinite(albedo).all()
+        assert np.isfinite(normal).all()
+        assert np.isfinite(depth).all()
+
+        assert float(albedo.max() - albedo.min()) > 0.01
+        assert float(depth.max() - depth.min()) > 1e-4
+        assert float(depth.min()) >= 0.0
+        assert float(depth.max()) <= 1.0
+
+        normal_lengths = np.linalg.norm(normal, axis=-1)
+        assert float(normal_lengths.mean()) == pytest.approx(1.0, abs=2e-2)
+        assert np.percentile(normal_lengths, 5) > 0.9
+        assert np.percentile(normal_lengths, 95) < 1.1
+
+    def test_aov_outputs_match_beauty_size_after_scaling_and_msaa(
+        self, renderer_setup, simple_heightmap
+    ):
+        """AOV outputs should resolve to the same size as the beauty frame."""
+        renderer, material_set, env_maps = renderer_setup
+        config = make_terrain_params_config(
+            size_px=(80, 64),
+            render_scale=1.5,
+            terrain_span=140.0,
+            msaa_samples=4,
+            z_scale=1.2,
+            exposure=1.0,
+            domain=(0.0, 120.0),
+        )
+        params = f3d.TerrainRenderParams(config)
+
+        frame, aov_frame = renderer.render_with_aov(
+            material_set, env_maps, params, simple_heightmap
+        )
+
+        assert frame.size == (80, 64)
+        assert aov_frame.size == frame.size
+        assert aov_frame.albedo().shape == (64, 80, 3)
+        assert aov_frame.normal().shape == (64, 80, 3)
+        assert aov_frame.depth().shape == (64, 80)
+
+    def test_render_with_aov_respects_channel_selection(
+        self, renderer_setup, simple_heightmap
+    ):
+        """Per-channel AOV settings should control which attachments are returned."""
+        renderer, material_set, env_maps = renderer_setup
+        config = make_terrain_params_config(
+            size_px=(64, 64),
+            render_scale=1.0,
+            terrain_span=100.0,
+            msaa_samples=1,
+            z_scale=1.0,
+            exposure=1.0,
+            domain=(0.0, 100.0),
+            aov=AovSettings(enabled=True, albedo=True, normal=False, depth=True),
+        )
+        params = f3d.TerrainRenderParams(config)
+
+        _, aov_frame = renderer.render_with_aov(
+            material_set, env_maps, params, simple_heightmap
+        )
+
+        assert aov_frame.has_albedo is True
+        assert aov_frame.has_normal is False
+        assert aov_frame.has_depth is True
+
+        with pytest.raises(RuntimeError, match="Normal AOV not available"):
+            aov_frame.normal()

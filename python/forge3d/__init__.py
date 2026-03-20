@@ -62,6 +62,8 @@ if _NATIVE_MODULE is not None:
         "OverlayLayer",
         "TerrainRenderParams",
         "TerrainRenderer",
+        "Frame",
+        "AovFrame",
         "Light",
         "Atmosphere",
         "open_viewer",
@@ -365,6 +367,8 @@ __all__ = [
     "OverlayLayer",
     "TerrainRenderParams",
     "TerrainRenderer",
+    "Frame",
+    "AovFrame",
     # P0.3/M2: Sun ephemeris
     "SunPosition",
     "sun_position",

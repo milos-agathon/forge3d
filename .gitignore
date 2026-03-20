@@ -244,6 +244,9 @@ __pycache__/
 
 # Whitelist doc/gallery images that must be in the repo
 !docs/assets/highres.png
+!tests/golden/
+!tests/golden/terrain/
+!tests/golden/terrain/*.png
 !docs/gallery/images/*.png
 !docs/gallery/images/*.jpg
 !docs/gallery/thumbs/*.png

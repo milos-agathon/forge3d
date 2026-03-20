@@ -147,7 +147,8 @@ struct TerrainUniforms {
     proj : mat4x4<f32>,
     sun_exposure : vec4<f32>,
     spacing_h_exag : vec4<f32>,
-    // x=camera_mode (0=screen, 1=mesh), y=grid_size (for mesh mode), z=unused, w=unused
+    // x=camera_mode (0=screen, 1=mesh), y=grid_size (for mesh mode),
+    // z=clip_near, w=clip_far
     camera_mode_params : vec4<f32>,
 };
 
@@ -1085,7 +1086,7 @@ struct FragmentOutput {
     // M1: AOV outputs (only written when AOV pipeline is active)
     // These are optional MRT targets - when not bound, writes are ignored
     @location(1) aov_albedo : vec4<f32>,   // Base color before lighting (RGB) + alpha
-    @location(2) aov_normal : vec4<f32>,   // World-space normal remapped to [0,1] (RGB) + alpha
+    @location(2) aov_normal : vec4<f32>,   // Normalized world-space normal (RGB) + alpha
     @location(3) aov_depth : vec4<f32>,    // Linear depth normalized to [0,1] (R) + padding
 };
 
@@ -3787,20 +3788,20 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     // Store the raw albedo value used in shading
     out.aov_albedo = vec4<f32>(albedo, 1.0);
 
-    // AOV Normal: World-space normal remapped from [-1,1] to [0,1] for storage
-    // Use the shading normal (height_normal) after any perturbation
-    let normal_encoded = height_normal * 0.5 + 0.5;
-    out.aov_normal = vec4<f32>(normal_encoded, 1.0);
+    // AOV Normal: Normalized world-space shading normal in signed float space
+    out.aov_normal = vec4<f32>(normalize(shading_normal), 1.0);
 
     // AOV Depth: Linear view-space depth normalized to [0,1] based on clip planes
     // Compute view-space position to get linear depth
     let view_pos_for_depth = u_terrain.view * vec4<f32>(input.world_position, 1.0);
     let linear_depth = -view_pos_for_depth.z;  // Negate because view space is -Z forward
-    // Normalize to [0,1] using near/far planes from projection matrix
-    // Extract near/far from projection matrix (perspective: proj[2][2] and proj[3][2])
-    // For WebGPU RH perspective: proj[2][2] = -far/(far-near), proj[3][2] = -far*near/(far-near)
-    // Approximate normalization: clamp to reasonable range [0.1, 10000]
-    let depth_normalized = clamp(linear_depth / 10000.0, 0.0, 1.0);
+    let clip_near = max(u_terrain.camera_mode_params.z, 1e-5);
+    let clip_far = max(u_terrain.camera_mode_params.w, clip_near + 1e-5);
+    let depth_normalized = clamp(
+        (linear_depth - clip_near) / max(clip_far - clip_near, 1e-5),
+        0.0,
+        1.0
+    );
     out.aov_depth = vec4<f32>(depth_normalized, depth_normalized, depth_normalized, 1.0);
 
     return out;

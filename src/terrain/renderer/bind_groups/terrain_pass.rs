@@ -8,8 +8,9 @@ pub(in crate::terrain::renderer) struct TerrainPassBindGroups {
 
 impl TerrainScene {
     #[allow(clippy::too_many_arguments)]
-    pub(in crate::terrain::renderer) fn create_terrain_pass_bind_groups(
+    pub(in crate::terrain::renderer) fn create_terrain_main_bind_group(
         &self,
+        label: &'static str,
         uniform_buffer: &wgpu::Buffer,
         heightmap_view: &wgpu::TextureView,
         material_view: &wgpu::TextureView,
@@ -20,14 +21,9 @@ impl TerrainScene {
         overlay_buffer: &wgpu::Buffer,
         height_curve_view: &wgpu::TextureView,
         water_mask_view_uploaded: Option<&wgpu::TextureView>,
-        sky_view: &wgpu::TextureView,
         height_ao_computed: bool,
         sun_vis_computed: bool,
-        decoded: &crate::terrain::render_params::DecodedTerrainSettings,
-        height_min: f32,
-        height_exag: f32,
-        eye_y: f32,
-    ) -> Result<TerrainPassBindGroups> {
+    ) -> Result<wgpu::BindGroup> {
         let height_ao_sample_guard = self
             .height_ao_sample_view
             .lock()
@@ -37,8 +33,8 @@ impl TerrainScene {
             .lock()
             .map_err(|_| anyhow!("sun_vis_sample_view mutex poisoned"))?;
 
-        let main = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("terrain_pbr_pom.bind_group"),
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(label),
             layout: &self.bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -144,6 +140,46 @@ impl TerrainScene {
         });
         drop(sun_vis_sample_guard);
         drop(height_ao_sample_guard);
+
+        Ok(bind_group)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::terrain::renderer) fn create_terrain_pass_bind_groups(
+        &self,
+        uniform_buffer: &wgpu::Buffer,
+        heightmap_view: &wgpu::TextureView,
+        material_view: &wgpu::TextureView,
+        material_sampler: &wgpu::Sampler,
+        shading_buffer: &wgpu::Buffer,
+        colormap_view: &wgpu::TextureView,
+        colormap_sampler: &wgpu::Sampler,
+        overlay_buffer: &wgpu::Buffer,
+        height_curve_view: &wgpu::TextureView,
+        water_mask_view_uploaded: Option<&wgpu::TextureView>,
+        sky_view: &wgpu::TextureView,
+        height_ao_computed: bool,
+        sun_vis_computed: bool,
+        decoded: &crate::terrain::render_params::DecodedTerrainSettings,
+        height_min: f32,
+        height_exag: f32,
+        eye_y: f32,
+    ) -> Result<TerrainPassBindGroups> {
+        let main = self.create_terrain_main_bind_group(
+            "terrain_pbr_pom.bind_group",
+            uniform_buffer,
+            heightmap_view,
+            material_view,
+            material_sampler,
+            shading_buffer,
+            colormap_view,
+            colormap_sampler,
+            overlay_buffer,
+            height_curve_view,
+            water_mask_view_uploaded,
+            height_ao_computed,
+            sun_vis_computed,
+        )?;
 
         let fog_base_height = if decoded.fog.base_height <= 0.0 {
             height_min * height_exag
