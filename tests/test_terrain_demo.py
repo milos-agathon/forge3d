@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 import forge3d as f3d
+from _terrain_runtime import terrain_rendering_available
 from forge3d.terrain_params import (
     ClampSettings,
     IblSettings,
@@ -204,17 +205,8 @@ def test_terrain_demo_build_renderer_config_minimal() -> None:
 # GPU-dependent tests below (will be skipped in CPU-only CI)
 # ============================================================================
 
-required_symbols = (
-    "TerrainRenderer",
-    "TerrainRenderParams",
-    "MaterialSet",
-    "IBL",
-    "Colormap1D",
-    "OverlayLayer",
-)
-
-if not f3d.has_gpu() or not all(hasattr(f3d, name) for name in required_symbols):
-    pytest.skip("Terrain demo requires GPU-backed forge3d module", allow_module_level=True)
+if not terrain_rendering_available():
+    pytest.skip("Terrain demo requires a terrain-capable hardware-backed forge3d runtime", allow_module_level=True)
 
 
 def test_terrain_demo_synthetic_render(tmp_path: Path) -> None:

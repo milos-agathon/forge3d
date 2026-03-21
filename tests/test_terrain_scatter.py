@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 import forge3d as f3d
+from _terrain_runtime import terrain_rendering_available
 from forge3d.geometry import MeshBuffers
 from forge3d.terrain_params import make_terrain_params_config
 from forge3d.terrain_scatter import (
@@ -327,9 +328,12 @@ class TestBatchSerialization:
         assert viewer.calls[1] == ("clear", None)
 
 
+_TERRAIN_RUNTIME_AVAILABLE = terrain_rendering_available()
+
+
 @pytest.mark.skipif(
     not (
-        f3d.has_gpu()
+        _TERRAIN_RUNTIME_AVAILABLE
         and hasattr(f3d, "Session")
         and hasattr(f3d, "TerrainRenderer")
         and hasattr(f3d.TerrainRenderer, "set_scatter_batches")

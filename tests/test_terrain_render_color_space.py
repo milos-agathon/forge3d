@@ -3,20 +3,13 @@
 
 import numpy as np
 import pytest
+from _terrain_runtime import terrain_rendering_available
 
 forge3d = pytest.importorskip("forge3d")
 
-_REQUIRED_SYMBOLS = (
-    "Session",
-    "TerrainRenderer",
-    "MaterialSet",
-    "IBL",
-    "TerrainRenderParams",
-)
-
-if not forge3d.has_gpu() or not all(hasattr(forge3d, name) for name in _REQUIRED_SYMBOLS):
+if not terrain_rendering_available():
     pytest.skip(
-        "Terrain color-space tests require a GPU-backed forge3d runtime",
+        "Terrain color-space tests require a terrain-capable hardware-backed forge3d runtime",
         allow_module_level=True,
     )
 
@@ -41,9 +34,17 @@ def test_terrain_render_no_horizontal_banding():
         pytest.skip("HDR file not available for testing")
 
     # Create rendering params with full configuration
-    from forge3d import (TerrainRenderParamsConfig, LightSettings, IblSettings,
-                          ShadowSettings, TriplanarSettings, PomSettings,
-                          LodSettings, SamplingSettings, ClampSettings)
+    from forge3d import (
+        TerrainRenderParamsConfig,
+        LightSettings,
+        IblSettings,
+        ShadowSettings,
+        TriplanarSettings,
+        PomSettings,
+        LodSettings,
+        SamplingSettings,
+        ClampSettings,
+    )
     config = TerrainRenderParamsConfig(
         size_px=(512, 512),
         render_scale=1.0,
@@ -125,9 +126,17 @@ def test_terrain_render_color_space_correct():
     except Exception:
         pytest.skip("HDR file not available")
 
-    from forge3d import (TerrainRenderParamsConfig, LightSettings, IblSettings,
-                          ShadowSettings, TriplanarSettings, PomSettings,
-                          LodSettings, SamplingSettings, ClampSettings)
+    from forge3d import (
+        TerrainRenderParamsConfig,
+        LightSettings,
+        IblSettings,
+        ShadowSettings,
+        TriplanarSettings,
+        PomSettings,
+        LodSettings,
+        SamplingSettings,
+        ClampSettings,
+    )
     config = TerrainRenderParamsConfig(
         size_px=(256, 256),
         render_scale=1.0,
@@ -193,9 +202,17 @@ def test_terrain_render_non_aligned_dimensions():
     except Exception:
         pytest.skip("HDR file not available")
 
-    from forge3d import (TerrainRenderParamsConfig, LightSettings, IblSettings,
-                          ShadowSettings, TriplanarSettings, PomSettings,
-                          LodSettings, SamplingSettings, ClampSettings)
+    from forge3d import (
+        TerrainRenderParamsConfig,
+        LightSettings,
+        IblSettings,
+        ShadowSettings,
+        TriplanarSettings,
+        PomSettings,
+        LodSettings,
+        SamplingSettings,
+        ClampSettings,
+    )
     config = TerrainRenderParamsConfig(
         size_px=(253, 251),  # Odd primes to stress padding
         render_scale=1.0,

@@ -189,12 +189,13 @@ def test_terrain_aov_save_exr_channels(tmp_path: Path) -> None:
 
     try:
         import forge3d as f3d
+        from _terrain_runtime import terrain_rendering_available
         from forge3d.terrain_params import make_terrain_params_config
     except Exception:
         pytest.skip("forge3d terrain bindings not available")
 
-    if not f3d.has_gpu():
-        pytest.skip("GPU-backed runtime required")
+    if not terrain_rendering_available():
+        pytest.skip("terrain-capable hardware-backed forge3d runtime required")
 
     height_y, height_x = np.mgrid[0:64, 0:64].astype(np.float32)
     heightmap = (
