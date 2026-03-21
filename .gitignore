@@ -4,6 +4,9 @@ docs/prompt.md
 CLAUDE.md
 AGENTS.md
 
+# Git worktrees
+.worktrees/
+
 # License signing keys (NEVER commit private keys)
 forge3d_license.key
 *.key
