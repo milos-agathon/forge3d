@@ -6,6 +6,11 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.15.1] - 2026-03-21
+
+### Fixed
+- Hardened the TV4 GPU test gating so generic hosted-runner Python jobs skip the new terrain-heavy tests unless the current adapter is verified as terrain-render-capable. This keeps the dedicated probed terrain lanes authoritative while restoring green CI for the release branch.
+
 ## [1.15.0] - 2026-03-21
 
 ### Added

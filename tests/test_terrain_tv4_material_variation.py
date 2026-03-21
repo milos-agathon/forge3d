@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 import forge3d as f3d
+from _terrain_runtime import terrain_rendering_available
 from forge3d.terrain_params import (
     MaterialLayerSettings,
     MaterialNoiseSettings,
@@ -56,8 +57,7 @@ def test_material_noise_settings_round_trip_defaults() -> None:
     assert materials.variation.wetness_macro_amplitude == pytest.approx(0.0)
 
 
-REQUIRED_SYMBOLS = ("TerrainRenderer", "TerrainRenderParams", "OverlayLayer", "MaterialSet", "IBL")
-GPU_AVAILABLE = f3d.has_gpu() and all(hasattr(f3d, name) for name in REQUIRED_SYMBOLS)
+GPU_AVAILABLE = terrain_rendering_available()
 
 
 def _create_test_hdr(path: str, width: int = 8, height: int = 4) -> None:

@@ -12,11 +12,11 @@ import numpy as np
 import pytest
 
 import forge3d as f3d
+from _terrain_runtime import terrain_rendering_available
 
 
-REQUIRED_SYMBOLS = ("TerrainRenderer", "TerrainRenderParams", "OverlayLayer", "MaterialSet", "IBL")
-if not f3d.has_gpu() or not all(hasattr(f3d, name) for name in REQUIRED_SYMBOLS):
-    pytest.skip("TV4 example test requires GPU-backed forge3d module", allow_module_level=True)
+if not terrain_rendering_available():
+    pytest.skip("TV4 example test requires a terrain-capable hardware-backed forge3d runtime", allow_module_level=True)
 
 
 def _load_module_by_path(path: Path) -> types.ModuleType:
