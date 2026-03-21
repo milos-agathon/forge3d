@@ -33,7 +33,7 @@ use native_lighting::{
     ClampSettingsNative, LightSettingsNative, LodSettingsNative, PomSettingsNative,
     SamplingSettingsNative, ShadowSettingsNative, TriplanarSettingsNative,
 };
-use native_material::{DetailSettingsNative, MaterialLayerSettingsNative};
+use native_material::{DetailSettingsNative, MaterialLayerSettingsNative, MaterialNoiseSettingsNative};
 use native_overlays::VectorOverlaySettingsNative;
 use native_postfx::{
     AovSettingsNative, DenoiseMethodNative, DenoiseSettingsNative, DofMethodNative,

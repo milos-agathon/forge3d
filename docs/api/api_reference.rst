@@ -107,5 +107,6 @@ Related Pages
 * :doc:`../terrain-tv1-atmosphere`
 * :doc:`../terrain-tv2-aovs`
 * :doc:`../terrain-tv3-scatter`
+* :doc:`../terrain-tv4-material-variation`
 * :doc:`../tutorials/index`
 * :doc:`../gallery/index`

@@ -1,5 +1,36 @@
 #[cfg(feature = "extension-module")]
 #[derive(Clone)]
+pub struct MaterialNoiseSettingsNative {
+    pub macro_scale: f32,
+    pub detail_scale: f32,
+    pub octaves: u32,
+    pub snow_macro_amplitude: f32,
+    pub snow_detail_amplitude: f32,
+    pub rock_macro_amplitude: f32,
+    pub rock_detail_amplitude: f32,
+    pub wetness_macro_amplitude: f32,
+    pub wetness_detail_amplitude: f32,
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for MaterialNoiseSettingsNative {
+    fn default() -> Self {
+        Self {
+            macro_scale: 3.5,
+            detail_scale: 18.0,
+            octaves: 4,
+            snow_macro_amplitude: 0.0,
+            snow_detail_amplitude: 0.0,
+            rock_macro_amplitude: 0.0,
+            rock_detail_amplitude: 0.0,
+            wetness_macro_amplitude: 0.0,
+            wetness_detail_amplitude: 0.0,
+        }
+    }
+}
+
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
 pub struct MaterialLayerSettingsNative {
     // Snow layer
     pub snow_enabled: bool,
@@ -20,6 +51,8 @@ pub struct MaterialLayerSettingsNative {
     pub wetness_enabled: bool,
     pub wetness_strength: f32,
     pub wetness_slope_influence: f32,
+    // TV4: Procedural variation controls shared across terrain material layers.
+    pub variation: MaterialNoiseSettingsNative,
 }
 
 #[cfg(feature = "extension-module")]
@@ -42,6 +75,7 @@ impl Default for MaterialLayerSettingsNative {
             wetness_enabled: false,
             wetness_strength: 0.3,
             wetness_slope_influence: 0.5,
+            variation: MaterialNoiseSettingsNative::default(),
         }
     }
 }

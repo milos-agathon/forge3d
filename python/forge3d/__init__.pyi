@@ -15,6 +15,8 @@ from .terrain_params import (
     HeightAoSettings,
     SunVisibilitySettings,
     DetailSettings,
+    MaterialNoiseSettings,
+    MaterialLayerSettings,
     TriplanarSettings,
     PomSettings,
     LodSettings,

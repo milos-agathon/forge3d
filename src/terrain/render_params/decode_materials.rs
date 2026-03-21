@@ -4,6 +4,8 @@ pub(super) fn parse_material_layer_settings(
     params: &Bound<'_, PyAny>,
 ) -> MaterialLayerSettingsNative {
     if let Ok(materials) = params.getattr("materials") {
+        let variation = materials.getattr("variation").ok();
+
         let snow_enabled: bool = materials
             .getattr("snow_enabled")
             .and_then(|v| v.extract())
@@ -80,6 +82,53 @@ pub(super) fn parse_material_layer_settings(
             .getattr("wetness_slope_influence")
             .and_then(|v| v.extract())
             .unwrap_or(0.5);
+        let variation = MaterialNoiseSettingsNative {
+            macro_scale: variation
+                .as_ref()
+                .and_then(|v| v.getattr("macro_scale").ok())
+                .and_then(|v| v.extract().ok())
+                .unwrap_or(3.5),
+            detail_scale: variation
+                .as_ref()
+                .and_then(|v| v.getattr("detail_scale").ok())
+                .and_then(|v| v.extract().ok())
+                .unwrap_or(18.0),
+            octaves: variation
+                .as_ref()
+                .and_then(|v| v.getattr("octaves").ok())
+                .and_then(|v| v.extract().ok())
+                .unwrap_or(4),
+            snow_macro_amplitude: variation
+                .as_ref()
+                .and_then(|v| v.getattr("snow_macro_amplitude").ok())
+                .and_then(|v| v.extract().ok())
+                .unwrap_or(0.0),
+            snow_detail_amplitude: variation
+                .as_ref()
+                .and_then(|v| v.getattr("snow_detail_amplitude").ok())
+                .and_then(|v| v.extract().ok())
+                .unwrap_or(0.0),
+            rock_macro_amplitude: variation
+                .as_ref()
+                .and_then(|v| v.getattr("rock_macro_amplitude").ok())
+                .and_then(|v| v.extract().ok())
+                .unwrap_or(0.0),
+            rock_detail_amplitude: variation
+                .as_ref()
+                .and_then(|v| v.getattr("rock_detail_amplitude").ok())
+                .and_then(|v| v.extract().ok())
+                .unwrap_or(0.0),
+            wetness_macro_amplitude: variation
+                .as_ref()
+                .and_then(|v| v.getattr("wetness_macro_amplitude").ok())
+                .and_then(|v| v.extract().ok())
+                .unwrap_or(0.0),
+            wetness_detail_amplitude: variation
+                .as_ref()
+                .and_then(|v| v.getattr("wetness_detail_amplitude").ok())
+                .and_then(|v| v.extract().ok())
+                .unwrap_or(0.0),
+        };
 
         MaterialLayerSettingsNative {
             snow_enabled,
@@ -98,6 +147,7 @@ pub(super) fn parse_material_layer_settings(
             wetness_enabled,
             wetness_strength,
             wetness_slope_influence,
+            variation,
         }
     } else {
         MaterialLayerSettingsNative::default()

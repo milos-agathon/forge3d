@@ -239,6 +239,13 @@ impl TerrainScene {
         });
 
         let materials = &decoded.materials;
+        let variation = &materials.variation;
+        let variation_enabled = variation.snow_macro_amplitude > 0.0
+            || variation.snow_detail_amplitude > 0.0
+            || variation.rock_macro_amplitude > 0.0
+            || variation.rock_detail_amplitude > 0.0
+            || variation.wetness_macro_amplitude > 0.0
+            || variation.wetness_detail_amplitude > 0.0;
         let deg_to_rad = std::f32::consts::PI / 180.0;
         let material_layer_uniforms = MaterialLayerUniforms {
             snow_params0: [
@@ -275,6 +282,30 @@ impl TerrainScene {
                 materials.wetness_strength,
                 materials.wetness_slope_influence,
                 if materials.wetness_enabled { 1.0 } else { 0.0 },
+                0.0,
+            ],
+            variation_params0: [
+                variation.macro_scale,
+                variation.detail_scale,
+                variation.octaves.clamp(1, 8) as f32,
+                if variation_enabled { 1.0 } else { 0.0 },
+            ],
+            snow_variation: [
+                variation.snow_macro_amplitude,
+                variation.snow_detail_amplitude,
+                0.0,
+                0.0,
+            ],
+            rock_variation: [
+                variation.rock_macro_amplitude,
+                variation.rock_detail_amplitude,
+                0.0,
+                0.0,
+            ],
+            wetness_variation: [
+                variation.wetness_macro_amplitude,
+                variation.wetness_detail_amplitude,
+                0.0,
                 0.0,
             ],
         };

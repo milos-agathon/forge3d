@@ -340,6 +340,9 @@ jobs:
           - name: "Terrain TV2 AOV EXR"
             script: "examples/terrain_tv2_aov_exr_demo.py"
             args: "--width 640 --height 360 --max-dem-size 384"
+          - name: "Terrain TV4 Material Variation"
+            script: "examples/terrain_tv4_material_variation_demo.py"
+            args: "--width 640 --height 360 --max-dem-size 384"
           - name: "PNG NumPy Roundtrip"
             script: "examples/png_numpy_roundtrip.py"
             args: ""
@@ -370,29 +373,29 @@ jobs:
           pip install numpy pillow
 
       - name: Probe terrain TV2 example backend
-        if: matrix.example.name == 'Terrain TV2 AOV EXR'
+        if: matrix.example.name == 'Terrain TV2 AOV EXR' || matrix.example.name == 'Terrain TV4 Material Variation'
         id: terrain-tv2-probe
         continue-on-error: true
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
           # Force terrain examples onto a deterministic backend instead of the hosted runner default.
           WGPU_BACKEND: ${{ matrix.os == 'windows-latest' && 'dx12' || 'vulkan' }}
-        run: python scripts/terrain_ci_probe.py --mode terrain-aov
+        run: python scripts/terrain_ci_probe.py --mode ${{ matrix.example.name == 'Terrain TV2 AOV EXR' && 'terrain-aov' || 'terrain' }}
 
       - name: "Run example: ${{ matrix.example.name }}"
-        if: matrix.example.name != 'Terrain TV2 AOV EXR' || steps.terrain-tv2-probe.outcome == 'success'
+        if: ((matrix.example.name != 'Terrain TV2 AOV EXR') && (matrix.example.name != 'Terrain TV4 Material Variation')) || steps.terrain-tv2-probe.outcome == 'success'
         env:
           # Force terrain examples onto a deterministic backend instead of the hosted runner default.
           WGPU_BACKEND: ${{ matrix.os == 'windows-latest' && 'dx12' || 'vulkan' }}
         run: python ${{ matrix.example.script }} ${{ matrix.example.args }}
         timeout-minutes: 2
 
-      - name: Skip unsupported terrain TV2 example
-        if: matrix.example.name == 'Terrain TV2 AOV EXR' && steps.terrain-tv2-probe.outcome != 'success'
-        run: echo "Skipping terrain TV2 example on unsupported hosted-runner adapter."
+      - name: Skip unsupported terrain example
+        if: (matrix.example.name == 'Terrain TV2 AOV EXR' || matrix.example.name == 'Terrain TV4 Material Variation') && steps.terrain-tv2-probe.outcome != 'success'
+        run: echo "Skipping terrain example on unsupported hosted-runner adapter."
 
       - name: Verify output exists
-        if: matrix.example.name != 'Terrain TV2 AOV EXR' || steps.terrain-tv2-probe.outcome == 'success'
+        if: ((matrix.example.name != 'Terrain TV2 AOV EXR') && (matrix.example.name != 'Terrain TV4 Material Variation')) || steps.terrain-tv2-probe.outcome == 'success'
         shell: bash
         run: |
           if find . -type f \( -name '*.png' -o -name '*.exr' \) | grep -q .; then

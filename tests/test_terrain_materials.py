@@ -13,6 +13,7 @@ import pytest
 try:
     import forge3d
     from forge3d.terrain_params import (
+        MaterialNoiseSettings,
         TerrainRenderParams,
         MaterialLayerSettings,
         make_terrain_params_config,
@@ -65,6 +66,28 @@ class TestMaterialLayerConfig:
         materials = MaterialLayerSettings()
         assert materials.wetness_strength == 0.3
         assert materials.wetness_slope_influence == 0.5
+
+    def test_variation_defaults(self):
+        """TV4: material variation defaults should be zero-regression."""
+        variation = MaterialNoiseSettings()
+        assert variation.macro_scale == 3.5
+        assert variation.detail_scale == 18.0
+        assert variation.octaves == 4
+        assert variation.snow_macro_amplitude == 0.0
+        assert variation.rock_macro_amplitude == 0.0
+        assert variation.wetness_detail_amplitude == 0.0
+
+    def test_materials_embed_variation_defaults(self):
+        """TV4: MaterialLayerSettings should always carry a variation block."""
+        materials = MaterialLayerSettings()
+        assert isinstance(materials.variation, MaterialNoiseSettings)
+        assert materials.variation.snow_macro_amplitude == 0.0
+        assert materials.variation.rock_detail_amplitude == 0.0
+
+    def test_top_level_reexports(self):
+        """TV4: material config types should be re-exported like other terrain settings."""
+        assert getattr(forge3d, "MaterialNoiseSettings", None) is MaterialNoiseSettings
+        assert getattr(forge3d, "MaterialLayerSettings", None) is MaterialLayerSettings
 
     def test_snow_enabled(self):
         """Test enabling snow layer with custom settings."""
@@ -135,6 +158,20 @@ class TestMaterialLayerConfig:
         """Test that wetness_strength outside [0, 1] raises error."""
         with pytest.raises(ValueError, match="wetness_strength must be in"):
             MaterialLayerSettings(wetness_strength=1.5)
+
+    def test_material_noise_octaves_validation(self):
+        """TV4: octave count is intentionally bounded."""
+        with pytest.raises(ValueError, match="octaves must be in"):
+            MaterialNoiseSettings(octaves=0)
+        with pytest.raises(ValueError, match="octaves must be in"):
+            MaterialNoiseSettings(octaves=9)
+
+    def test_material_noise_amplitude_validation(self):
+        """TV4: per-layer noise amplitudes stay within [0, 1]."""
+        with pytest.raises(ValueError, match="snow_macro_amplitude must be in"):
+            MaterialNoiseSettings(snow_macro_amplitude=-0.1)
+        with pytest.raises(ValueError, match="wetness_detail_amplitude must be in"):
+            MaterialNoiseSettings(wetness_detail_amplitude=1.1)
 
     def test_snow_color_validation(self):
         """Test that invalid snow_color raises error."""
@@ -221,6 +258,38 @@ class TestMaterialLayerInTerrainParams:
         assert params.materials.snow_enabled is True
         assert params.materials.rock_enabled is True
         assert params.materials.wetness_enabled is True
+
+    def test_terrain_params_with_variation_controls(self):
+        """TV4: Terrain params should preserve nested variation settings."""
+        materials = MaterialLayerSettings(
+            snow_enabled=True,
+            rock_enabled=True,
+            wetness_enabled=True,
+            variation=MaterialNoiseSettings(
+                macro_scale=4.5,
+                detail_scale=24.0,
+                octaves=5,
+                snow_macro_amplitude=0.2,
+                rock_detail_amplitude=0.3,
+                wetness_macro_amplitude=0.1,
+            ),
+        )
+        params = make_terrain_params_config(
+            size_px=(256, 256),
+            render_scale=1.0,
+            terrain_span=1000.0,
+            msaa_samples=1,
+            z_scale=1.0,
+            exposure=1.0,
+            domain=(1000.0, 3000.0),
+            materials=materials,
+        )
+        assert params.materials.variation.macro_scale == 4.5
+        assert params.materials.variation.detail_scale == 24.0
+        assert params.materials.variation.octaves == 5
+        assert params.materials.variation.snow_macro_amplitude == 0.2
+        assert params.materials.variation.rock_detail_amplitude == 0.3
+        assert params.materials.variation.wetness_macro_amplitude == 0.1
 
 
 class TestTerrainAttributeLogic:

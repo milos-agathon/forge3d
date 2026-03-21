@@ -46,6 +46,8 @@
 // P4 spec: Include unified IBL evaluator (group(2) bindings)
 // Note: lighting_ibl.wgsl defines PI, so we don't redefine it here
 #include "lighting_ibl.wgsl"
+// TV4.1: Shared terrain-noise helpers for detail normals and terrain material variation.
+#include "terrain_noise.wgsl"
 
 // P2-05: Optional BRDF dispatch flag (default: false = use calculate_pbr_brdf for current look)
 // Set to true to enable eval_brdf dispatch, allowing BRDF model switching on terrain
@@ -441,10 +443,25 @@ struct MaterialLayerUniforms {
     rock_color: vec4<f32>,
     // Wetness layer: vec4(strength, slope_influence, enabled, _pad)
     wetness_params: vec4<f32>,
+    // TV4: vec4(macro_scale, detail_scale, octaves, variation_enabled)
+    variation_params0: vec4<f32>,
+    // TV4 per-layer amplitudes: vec4(macro_amp, detail_amp, _pad, _pad)
+    snow_variation: vec4<f32>,
+    rock_variation: vec4<f32>,
+    wetness_variation: vec4<f32>,
 }
 
 @group(6) @binding(0)
 var<uniform> material_layer_uniforms: MaterialLayerUniforms;
+
+struct TerrainMaterialNoise {
+    snow_macro: f32,
+    snow_detail: f32,
+    rock_macro: f32,
+    rock_detail: f32,
+    wetness_macro: f32,
+    wetness_detail: f32,
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // M4: Terrain attribute computation (slope, aspect)
@@ -479,12 +496,51 @@ fn compute_terrain_attributes(world_normal: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(slope, aspect, curvature_proxy, 0.0);
 }
 
+fn default_material_noise() -> TerrainMaterialNoise {
+    return TerrainMaterialNoise(0.5, 0.5, 0.5, 0.5, 0.5, 0.5);
+}
+
+fn sample_material_noise(terrain_uv: vec2<f32>, height_norm: f32) -> TerrainMaterialNoise {
+    let macro_scale = max(material_layer_uniforms.variation_params0.x, 0.001);
+    let detail_scale = max(material_layer_uniforms.variation_params0.y, 0.001);
+    let octaves = i32(material_layer_uniforms.variation_params0.z + 0.5);
+
+    let macro_coords = vec3<f32>(terrain_uv * macro_scale, height_norm * 1.7);
+    let detail_coords = vec3<f32>(terrain_uv * detail_scale, height_norm * 3.1);
+    let detail_octaves = min(octaves + 1, TERRAIN_NOISE_MAX_OCTAVES);
+
+    return TerrainMaterialNoise(
+        terrain_fbm(macro_coords + vec3<f32>(0.0, 0.0, 0.0), octaves),
+        terrain_fbm(detail_coords + vec3<f32>(17.3, 9.1, 3.7), detail_octaves),
+        terrain_ridged_fbm(macro_coords + vec3<f32>(31.7, 5.2, 11.9), octaves),
+        1.0 - terrain_cellular_distance(detail_coords + vec3<f32>(2.1, 13.4, 7.6)),
+        1.0 - terrain_cellular_distance(macro_coords + vec3<f32>(19.5, 23.1, 5.7)),
+        terrain_fbm(detail_coords + vec3<f32>(41.0, 17.0, 29.0), detail_octaves),
+    );
+}
+
+fn apply_material_variation(
+    base_weight: f32,
+    macro_noise: f32,
+    detail_noise: f32,
+    macro_amplitude: f32,
+    detail_amplitude: f32,
+) -> f32 {
+    let macro_delta = (macro_noise - 0.5) * 2.0 * macro_amplitude;
+    let detail_delta = (detail_noise - 0.5) * 2.0 * detail_amplitude;
+    // Keep most of the variation near material transitions so zero-regression
+    // defaults are preserved and full-coverage regions do not become noisy speckle.
+    let transition_boost = 0.35 + 0.65 * (1.0 - abs(base_weight * 2.0 - 1.0));
+    return clamp(base_weight + (macro_delta + detail_delta) * transition_boost, 0.0, 1.0);
+}
+
 /// M4: Apply snow layer blending based on altitude, slope, and aspect
 fn apply_snow_layer(
     base_albedo: vec3<f32>,
     base_roughness: f32,
     world_pos: vec3<f32>,
     terrain_attrs: vec4<f32>,
+    material_noise: TerrainMaterialNoise,
 ) -> vec3<f32> {
     let snow_enabled = material_layer_uniforms.snow_params1.z;
     if (snow_enabled < 0.5) {
@@ -515,7 +571,13 @@ fn apply_snow_layer(
     let aspect_factor = mix(1.0, 0.5 + 0.5 * south_factor, aspect_influence);
     
     // Combined snow weight
-    let snow_weight = altitude_factor * slope_factor * aspect_factor;
+    let snow_weight = apply_material_variation(
+        altitude_factor * slope_factor * aspect_factor,
+        material_noise.snow_macro,
+        material_noise.snow_detail,
+        material_layer_uniforms.snow_variation.x,
+        material_layer_uniforms.snow_variation.y,
+    );
     
     // Blend to snow color
     let snow_color = material_layer_uniforms.snow_color.rgb;
@@ -527,6 +589,7 @@ fn apply_rock_layer(
     base_albedo: vec3<f32>,
     base_roughness: f32,
     terrain_attrs: vec4<f32>,
+    material_noise: TerrainMaterialNoise,
 ) -> vec3<f32> {
     let rock_enabled = material_layer_uniforms.rock_params.w;
     if (rock_enabled < 0.5) {
@@ -538,7 +601,13 @@ fn apply_rock_layer(
     // Rock exposed on steep slopes
     let slope_min = material_layer_uniforms.rock_params.x;
     let slope_blend = material_layer_uniforms.rock_params.y;
-    let rock_weight = clamp((slope - slope_min) / max(slope_blend, 0.001), 0.0, 1.0);
+    let rock_weight = apply_material_variation(
+        clamp((slope - slope_min) / max(slope_blend, 0.001), 0.0, 1.0),
+        material_noise.rock_macro,
+        material_noise.rock_detail,
+        material_layer_uniforms.rock_variation.x,
+        material_layer_uniforms.rock_variation.y,
+    );
     
     let rock_color = material_layer_uniforms.rock_color.rgb;
     return mix(base_albedo, rock_color, rock_weight);
@@ -548,6 +617,7 @@ fn apply_rock_layer(
 fn apply_wetness_layer(
     base_albedo: vec3<f32>,
     terrain_attrs: vec4<f32>,
+    material_noise: TerrainMaterialNoise,
 ) -> vec3<f32> {
     let wetness_enabled = material_layer_uniforms.wetness_params.z;
     if (wetness_enabled < 0.5) {
@@ -563,7 +633,13 @@ fn apply_wetness_layer(
     
     // Flat areas (low slope) are wetter
     let flat_factor = 1.0 - clamp(slope / (3.14159265 * 0.25), 0.0, 1.0);
-    let wetness_factor = flat_factor * slope_influence;
+    let wetness_factor = apply_material_variation(
+        flat_factor * slope_influence,
+        material_noise.wetness_macro,
+        material_noise.wetness_detail,
+        material_layer_uniforms.wetness_variation.x,
+        material_layer_uniforms.wetness_variation.y,
+    );
     
     // Darken by wetness
     let darkening = 1.0 - wetness_factor * strength;
@@ -1544,40 +1620,6 @@ fn build_tbn(normal : vec3<f32>) -> mat3x3<f32> {
 // - Procedural albedo brightness noise (±10%) using stable world-space coords
 // ──────────────────────────────────────────────────────────────────────────
 
-/// Simple hash function for procedural noise (stable, no texture needed)
-fn hash31(p: vec3<f32>) -> f32 {
-    var p3 = fract(p * 0.1031);
-    p3 = p3 + dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
-}
-
-/// 3D value noise for smooth procedural patterns
-fn value_noise(p: vec3<f32>) -> f32 {
-    let i = floor(p);
-    let f = fract(p);
-    // Smooth interpolation
-    let u = f * f * (3.0 - 2.0 * f);
-    
-    // 8 corner samples
-    let n000 = hash31(i + vec3<f32>(0.0, 0.0, 0.0));
-    let n100 = hash31(i + vec3<f32>(1.0, 0.0, 0.0));
-    let n010 = hash31(i + vec3<f32>(0.0, 1.0, 0.0));
-    let n110 = hash31(i + vec3<f32>(1.0, 1.0, 0.0));
-    let n001 = hash31(i + vec3<f32>(0.0, 0.0, 1.0));
-    let n101 = hash31(i + vec3<f32>(1.0, 0.0, 1.0));
-    let n011 = hash31(i + vec3<f32>(0.0, 1.0, 1.0));
-    let n111 = hash31(i + vec3<f32>(1.0, 1.0, 1.0));
-    
-    // Trilinear interpolation
-    let x0 = mix(n000, n100, u.x);
-    let x1 = mix(n010, n110, u.x);
-    let x2 = mix(n001, n101, u.x);
-    let x3 = mix(n011, n111, u.x);
-    let y0 = mix(x0, x1, u.y);
-    let y1 = mix(x2, x3, u.y);
-    return mix(y0, y1, u.z);
-}
-
 /// Generate procedural detail normal in tangent space using gradient noise
 /// Returns a tangent-space normal that can be blended with the base normal
 fn procedural_detail_normal(world_pos: vec3<f32>, scale: f32) -> vec3<f32> {
@@ -1585,9 +1627,9 @@ fn procedural_detail_normal(world_pos: vec3<f32>, scale: f32) -> vec3<f32> {
     
     // Sample noise at offset positions to compute gradient
     let eps = 0.1;
-    let nx = value_noise(p + vec3<f32>(eps, 0.0, 0.0)) - value_noise(p - vec3<f32>(eps, 0.0, 0.0));
-    let ny = value_noise(p + vec3<f32>(0.0, eps, 0.0)) - value_noise(p - vec3<f32>(0.0, eps, 0.0));
-    let nz = value_noise(p + vec3<f32>(0.0, 0.0, eps)) - value_noise(p - vec3<f32>(0.0, 0.0, eps));
+    let nx = terrain_value_noise(p + vec3<f32>(eps, 0.0, 0.0)) - terrain_value_noise(p - vec3<f32>(eps, 0.0, 0.0));
+    let ny = terrain_value_noise(p + vec3<f32>(0.0, eps, 0.0)) - terrain_value_noise(p - vec3<f32>(0.0, eps, 0.0));
+    let nz = terrain_value_noise(p + vec3<f32>(0.0, 0.0, eps)) - terrain_value_noise(p - vec3<f32>(0.0, 0.0, eps));
     
     // Convert gradient to tangent-space normal perturbation
     // Scale controls how strong the perturbation is
@@ -1627,7 +1669,7 @@ fn calculate_detail_fade(view_distance: f32, fade_start: f32, fade_end: f32) -> 
 fn procedural_albedo_noise(world_pos: vec3<f32>, noise_amplitude: f32) -> f32 {
     // Use a different frequency than detail normals to avoid correlation
     let noise_scale = 0.7; // World-space frequency for albedo noise
-    let noise = value_noise(world_pos * noise_scale);
+    let noise = terrain_value_noise(world_pos * noise_scale);
     // Map [0,1] noise to [-amplitude, +amplitude] and add to 1.0
     return 1.0 + (noise - 0.5) * 2.0 * noise_amplitude;
 }
@@ -2748,12 +2790,22 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     if (!is_water) {
         // Compute terrain attributes from stable geometric normal
         let terrain_attrs = compute_terrain_attributes(base_normal);
+        var material_noise = default_material_noise();
+        if (material_layer_uniforms.variation_params0.w > 0.5) {
+            material_noise = sample_material_noise(uv, height_norm);
+        }
         
         // Apply material layers in order: wetness (darkening) -> rock -> snow
         // Order matters: snow on top, then rock, then wetness darkening at base
-        albedo = apply_wetness_layer(albedo, terrain_attrs);
-        albedo = apply_rock_layer(albedo, roughness, terrain_attrs);
-        albedo = apply_snow_layer(albedo, roughness, input.world_position, terrain_attrs);
+        albedo = apply_wetness_layer(albedo, terrain_attrs, material_noise);
+        albedo = apply_rock_layer(albedo, roughness, terrain_attrs, material_noise);
+        albedo = apply_snow_layer(
+            albedo,
+            roughness,
+            input.world_position,
+            terrain_attrs,
+            material_noise,
+        );
     }
     
     occlusion = clamp(occlusion, u_shading.clamp2.x, u_shading.clamp2.y);

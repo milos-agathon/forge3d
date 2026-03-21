@@ -4,7 +4,7 @@
 # RELEVANT FILES: python/forge3d/__init__.py, tests/test_terrain_params.py, src/session.rs, src/colormap1d.rs
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Sequence
 
 import numpy as np
@@ -360,17 +360,62 @@ class DetailSettings:
 
 
 @dataclass
+class MaterialNoiseSettings:
+    """TV4: Bounded procedural variation controls for terrain material layers.
+
+    Coordinates are evaluated in normalized terrain UV space so the controls remain
+    stable across DEMs with very different real-world extents.
+
+    ``macro_scale`` controls low-frequency breakup, ``detail_scale`` controls
+    higher-frequency breakup, and ``octaves`` bounds FBM/ridged FBM cost.
+    Per-layer amplitudes default to zero, which preserves the pre-TV4 material output.
+    """
+
+    macro_scale: float = 3.5
+    detail_scale: float = 18.0
+    octaves: int = 4
+    snow_macro_amplitude: float = 0.0
+    snow_detail_amplitude: float = 0.0
+    rock_macro_amplitude: float = 0.0
+    rock_detail_amplitude: float = 0.0
+    wetness_macro_amplitude: float = 0.0
+    wetness_detail_amplitude: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.macro_scale <= 0.0:
+            raise ValueError("macro_scale must be > 0")
+        if self.detail_scale <= 0.0:
+            raise ValueError("detail_scale must be > 0")
+        if not 1 <= int(self.octaves) <= 8:
+            raise ValueError("octaves must be in [1, 8]")
+        self.octaves = int(self.octaves)
+
+        for name, value in [
+            ("snow_macro_amplitude", self.snow_macro_amplitude),
+            ("snow_detail_amplitude", self.snow_detail_amplitude),
+            ("rock_macro_amplitude", self.rock_macro_amplitude),
+            ("rock_detail_amplitude", self.rock_detail_amplitude),
+            ("wetness_macro_amplitude", self.wetness_macro_amplitude),
+            ("wetness_detail_amplitude", self.wetness_detail_amplitude),
+        ]:
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(f"{name} must be in [0, 1]")
+
+
+@dataclass
 class MaterialLayerSettings:
     """M4: Terrain material layering configuration.
-    
+
     Provides slope/aspect/altitude-driven material blending for realistic terrain:
     - Snow: deposits on high-altitude, low-slope areas (south-facing receives less)
     - Rock: exposed on steep slopes (>45°)
     - Wetness: darkening in concave areas (placeholder: based on slope curvature)
-    
-    When all layers are disabled (default), output is identical to baseline.
+
+    TV4 extends this with bounded procedural variation controls. Those controls live
+    under ``variation`` and default to zero amplitudes so the existing material
+    layering output remains unchanged until explicitly enabled.
     """
-    
+
     # Snow layer settings
     snow_enabled: bool = False
     snow_altitude_min: float = 2000.0  # Minimum altitude for snow (world units)
@@ -392,6 +437,8 @@ class MaterialLayerSettings:
     wetness_enabled: bool = False
     wetness_strength: float = 0.3  # Darkening strength (0-1)
     wetness_slope_influence: float = 0.5  # How much slope affects wetness
+    # TV4: Procedural variation controls shared across snow/rock/wetness.
+    variation: MaterialNoiseSettings = field(default_factory=MaterialNoiseSettings)
 
     def __post_init__(self) -> None:
         if self.snow_altitude_blend <= 0.0:
@@ -420,6 +467,8 @@ class MaterialLayerSettings:
             raise ValueError("wetness_strength must be in [0, 1]")
         if not 0.0 <= self.wetness_slope_influence <= 1.0:
             raise ValueError("wetness_slope_influence must be in [0, 1]")
+        if not isinstance(self.variation, MaterialNoiseSettings):
+            raise ValueError("variation must be a MaterialNoiseSettings instance")
 
 
 @dataclass
@@ -1718,6 +1767,7 @@ __all__ = [
     "HeightAoSettings",
     "SunVisibilitySettings",
     "DetailSettings",
+    "MaterialNoiseSettings",
     "MaterialLayerSettings",
     "VectorOverlaySettings",
     "TonemapSettings",

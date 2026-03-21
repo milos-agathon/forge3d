@@ -63,6 +63,10 @@ pub(super) struct MaterialLayerUniforms {
     pub(super) rock_params: [f32; 4],
     pub(super) rock_color: [f32; 4],
     pub(super) wetness_params: [f32; 4],
+    pub(super) variation_params0: [f32; 4],
+    pub(super) snow_variation: [f32; 4],
+    pub(super) rock_variation: [f32; 4],
+    pub(super) wetness_variation: [f32; 4],
 }
 
 impl MaterialLayerUniforms {
@@ -74,6 +78,10 @@ impl MaterialLayerUniforms {
             rock_params: [0.785, 0.175, 0.8, 0.0],
             rock_color: [0.35, 0.32, 0.28, 0.0],
             wetness_params: [0.3, 0.5, 0.0, 0.0],
+            variation_params0: [3.5, 18.0, 4.0, 0.0],
+            snow_variation: [0.0, 0.0, 0.0, 0.0],
+            rock_variation: [0.0, 0.0, 0.0, 0.0],
+            wetness_variation: [0.0, 0.0, 0.0, 0.0],
         }
     }
 }

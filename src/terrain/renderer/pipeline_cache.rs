@@ -86,6 +86,8 @@ impl TerrainScene {
 
         // Load lighting_ibl.wgsl (no includes)
         let lighting_ibl = include_str!("../../shaders/lighting_ibl.wgsl");
+        // Load shared terrain noise helpers
+        let terrain_noise = include_str!("../../shaders/terrain_noise.wgsl");
 
         // Load main terrain shader and strip includes
         // Shader version: 2024-01-water-blue-fix
@@ -94,7 +96,7 @@ impl TerrainScene {
 
         // Concatenate in dependency order
         format!(
-            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
             lights,
             brdf_common,
             brdf_lambert,
@@ -109,6 +111,7 @@ impl TerrainScene {
             brdf_dispatch,
             lighting,
             lighting_ibl,
+            terrain_noise,
             terrain
         )
     }

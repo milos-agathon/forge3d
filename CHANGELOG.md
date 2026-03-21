@@ -6,6 +6,18 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-03-21
+
+### Added
+- Added the public TV4 terrain workflow documentation page and linked it from the main docs spine and API reference.
+- Added a shared terrain-noise shader unit for terrain material variation and existing terrain detail-noise callsites.
+- Added bounded TV4 terrain material variation controls through `MaterialNoiseSettings` and `MaterialLayerSettings.variation`.
+- Added a real-DEM TV4 example plus regression coverage for shared noise wiring, zero-regression defaults, visible snow/rock/wetness variation output, and the TV4 render-time budget.
+- Added a CI example lane for the TV4 terrain material variation demo.
+
+### Changed
+- Bumped the package version to `1.15.0`.
+
 ## [1.14.0] - 2026-03-20
 
 ### Added
