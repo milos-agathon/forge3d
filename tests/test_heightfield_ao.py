@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 import forge3d as f3d
+from _terrain_runtime import terrain_rendering_available
 from forge3d.terrain_params import (
     ClampSettings,
     HeightAoSettings,
@@ -23,11 +24,8 @@ from forge3d.terrain_params import (
     TriplanarSettings,
 )
 
-if not f3d.has_gpu() or not all(
-    hasattr(f3d, name)
-    for name in ("TerrainRenderer", "TerrainRenderParams", "OverlayLayer", "MaterialSet", "IBL")
-):
-    pytest.skip("Heightfield AO tests require GPU-backed native module", allow_module_level=True)
+if not terrain_rendering_available():
+    pytest.skip("Heightfield AO tests require a terrain-capable hardware-backed forge3d runtime", allow_module_level=True)
 
 
 def _create_test_hdr(path: str, width: int = 8, height: int = 4) -> None:

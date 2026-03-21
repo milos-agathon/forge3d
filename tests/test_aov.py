@@ -13,6 +13,7 @@ from forge3d.terrain_params import (
     TerrainRenderParams,
     make_terrain_params_config,
 )
+from _terrain_runtime import terrain_rendering_available
 
 try:
     import forge3d as f3d
@@ -23,16 +24,8 @@ except ImportError:
 if not HAS_NATIVE:
     pytest.skip("AOV tests require GPU-backed native module", allow_module_level=True)
 
-_REQUIRED_SYMBOLS = (
-    "Session",
-    "TerrainRenderer",
-    "MaterialSet",
-    "IBL",
-    "TerrainRenderParams",
-)
-
-if not f3d.has_gpu() or not all(hasattr(f3d, name) for name in _REQUIRED_SYMBOLS):
-    pytest.skip("AOV tests require a GPU-backed forge3d runtime", allow_module_level=True)
+if not terrain_rendering_available():
+    pytest.skip("AOV tests require a terrain-capable hardware-backed forge3d runtime", allow_module_level=True)
 
 
 def _create_test_hdr(path: str, width: int = 8, height: int = 4) -> None:
