@@ -100,11 +100,9 @@ impl TerrainScatterBatch {
         }
         validate_level_specs(&levels)?;
         validate_transforms(transforms_rowmajor)?;
-        let max_draw_distance = validate_optional_distance(
-            max_draw_distance,
-            "terrain scatter max_draw_distance",
-        )?
-        .unwrap_or(f32::INFINITY);
+        let max_draw_distance =
+            validate_optional_distance(max_draw_distance, "terrain scatter max_draw_distance")?
+                .unwrap_or(f32::INFINITY);
 
         let gpu_levels = levels
             .into_iter()
@@ -285,9 +283,9 @@ pub fn accumulate_frame_stats(
 
 fn validate_optional_distance(value: Option<f32>, label: &str) -> Result<Option<f32>> {
     match value {
-        Some(distance) if !distance.is_finite() || distance <= 0.0 => {
-            Err(anyhow!("{label} must be a positive finite float when provided"))
-        }
+        Some(distance) if !distance.is_finite() || distance <= 0.0 => Err(anyhow!(
+            "{label} must be a positive finite float when provided"
+        )),
         Some(distance) => Ok(Some(distance)),
         None => Ok(None),
     }
@@ -568,17 +566,11 @@ mod tests {
     fn pack_preserves_uniform_instance_proportions() {
         // Instance with uniform scale=5 at position (10, 20, 30)
         let row_major = [
-            5.0, 0.0, 0.0, 10.0,
-            0.0, 5.0, 0.0, 20.0,
-            0.0, 0.0, 5.0, 30.0,
-            0.0, 0.0, 0.0, 1.0,
+            5.0, 0.0, 0.0, 10.0, 0.0, 5.0, 0.0, 20.0, 0.0, 0.0, 5.0, 30.0, 0.0, 0.0, 0.0, 1.0,
         ];
         // Non-uniform render_from_contract: scale_xy=3 for X/Z, 1.0 for Y (swapped to Z)
         let render_from_contract = Mat4::from_cols_array(&[
-            3.0, 0.0, 0.0, 0.0,
-            0.0, 0.0, 1.0, 0.0,
-            0.0, 3.0, 0.0, 0.0,
-            -50.0, -50.0, -10.0, 1.0,
+            3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 3.0, 0.0, 0.0, -50.0, -50.0, -10.0, 1.0,
         ]);
         let instance_scale = 3.0_f32; // matches scale_xy
 

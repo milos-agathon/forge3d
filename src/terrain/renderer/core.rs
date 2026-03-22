@@ -85,6 +85,15 @@ pub struct TerrainScene {
     pub(super) accumulation_params_buffer: wgpu::Buffer,
     pub(super) material_layer_bind_group_layout: wgpu::BindGroupLayout,
     pub(super) material_layer_uniform_buffer: wgpu::Buffer,
+    pub(super) probe_grid_uniform_buffer: wgpu::Buffer,
+    pub(super) probe_ssbo: wgpu::Buffer,
+    pub(super) probe_grid_uniform_alloc_bytes: u64,
+    pub(super) probe_ssbo_alloc_bytes: u64,
+    pub(super) probe_grid_uniform_bytes: u64,
+    pub(super) probe_ssbo_bytes: u64,
+    pub(super) probe_cache_key: Option<u64>,
+    pub(super) probe_cached_grid: Option<crate::terrain::probes::ProbeGridDesc>,
+    pub(super) probe_cached_data: Vec<crate::terrain::probes::GpuProbeData>,
     pub(super) aov_pipeline: Mutex<Option<wgpu::RenderPipeline>>,
     pub(super) aov_pipeline_sample_count: Mutex<u32>,
     pub(super) dof_renderer: Mutex<Option<crate::core::dof::DofRenderer>>,
@@ -158,4 +167,16 @@ pub(super) struct IblUniforms {
     pub(super) sin_theta: f32,
     pub(super) cos_theta: f32,
     pub(super) specular_mip_count: f32,
+}
+
+impl Drop for TerrainScene {
+    fn drop(&mut self) {
+        let tracker = crate::core::memory_tracker::global_tracker();
+        if self.probe_grid_uniform_alloc_bytes > 0 {
+            tracker.free_buffer_allocation(self.probe_grid_uniform_alloc_bytes, false);
+        }
+        if self.probe_ssbo_alloc_bytes > 0 {
+            tracker.free_buffer_allocation(self.probe_ssbo_alloc_bytes, false);
+        }
+    }
 }

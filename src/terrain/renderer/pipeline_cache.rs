@@ -88,6 +88,7 @@ impl TerrainScene {
         let lighting_ibl = include_str!("../../shaders/lighting_ibl.wgsl");
         // Load shared terrain noise helpers
         let terrain_noise = include_str!("../../shaders/terrain_noise.wgsl");
+        let terrain_probes = include_str!("../../shaders/terrain_probes.wgsl");
 
         // Load main terrain shader and strip includes
         // Shader version: 2024-01-water-blue-fix
@@ -96,7 +97,7 @@ impl TerrainScene {
 
         // Concatenate in dependency order
         format!(
-            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
             lights,
             brdf_common,
             brdf_lambert,
@@ -112,6 +113,7 @@ impl TerrainScene {
             lighting,
             lighting_ibl,
             terrain_noise,
+            terrain_probes,
             terrain
         )
     }
@@ -143,7 +145,7 @@ impl TerrainScene {
                 &shadow_bind_group_layout, // @group(3): shadows (bindings 0-4)
                 fog_bind_group_layout,     // @group(4): fog (binding 0)
                 water_reflection_bind_group_layout, // @group(5): water reflections (bindings 0-2)
-                material_layer_bind_group_layout, // @group(6): material layers (binding 0)
+                material_layer_bind_group_layout, // @group(6): material layers + probes
             ],
             push_constant_ranges: &[],
         });

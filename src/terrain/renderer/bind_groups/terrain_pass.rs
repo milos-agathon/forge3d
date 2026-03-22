@@ -317,10 +317,20 @@ impl TerrainScene {
         let material_layer = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("terrain.material_layer.bind_group"),
             layout: &self.material_layer_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: self.material_layer_uniform_buffer.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.material_layer_uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self.probe_grid_uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.probe_ssbo.as_entire_binding(),
+                },
+            ],
         });
 
         Ok(TerrainPassBindGroups {

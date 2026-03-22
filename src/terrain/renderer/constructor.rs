@@ -84,6 +84,24 @@ impl TerrainScene {
                 contents: bytemuck::bytes_of(&MaterialLayerUniforms::disabled()),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
+        let probe_grid_uniform_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.probes.grid_uniform_buffer"),
+                contents: bytemuck::bytes_of(
+                    &crate::terrain::probes::ProbeGridUniformsGpu::disabled(),
+                ),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+        let probe_ssbo_init = [crate::terrain::probes::GpuProbeData::zeroed()];
+        let probe_ssbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("terrain.probes.ssbo"),
+            contents: bytemuck::cast_slice(&probe_ssbo_init),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+        let probe_grid_uniform_alloc_bytes =
+            std::mem::size_of::<crate::terrain::probes::ProbeGridUniformsGpu>() as u64;
+        let probe_ssbo_alloc_bytes =
+            std::mem::size_of::<crate::terrain::probes::GpuProbeData>() as u64;
 
         let pipeline = Self::create_render_pipeline(
             device.as_ref(),
@@ -181,6 +199,10 @@ impl TerrainScene {
         let shadow_depth_pipeline =
             Self::create_shadow_depth_pipeline(device.as_ref(), &shadow_depth_bind_group_layout);
 
+        let tracker = crate::core::memory_tracker::global_tracker();
+        tracker.track_buffer_allocation(probe_grid_uniform_alloc_bytes, false);
+        tracker.track_buffer_allocation(probe_ssbo_alloc_bytes, false);
+
         let pipeline_cache = PipelineCache {
             sample_count: 1,
             pipeline,
@@ -265,6 +287,15 @@ impl TerrainScene {
             accumulation_params_buffer,
             material_layer_bind_group_layout,
             material_layer_uniform_buffer,
+            probe_grid_uniform_buffer,
+            probe_ssbo,
+            probe_grid_uniform_alloc_bytes,
+            probe_ssbo_alloc_bytes,
+            probe_grid_uniform_bytes: 0,
+            probe_ssbo_bytes: 0,
+            probe_cache_key: None,
+            probe_cached_grid: None,
+            probe_cached_data: Vec::new(),
             #[cfg(feature = "enable-renderer-config")]
             config: Arc::new(Mutex::new(crate::render::params::RendererConfig::default())),
             aov_pipeline: Mutex::new(None),

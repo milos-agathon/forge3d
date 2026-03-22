@@ -300,6 +300,25 @@ impl TerrainRenderer {
         Ok(dict.into())
     }
 
+    #[pyo3(signature = ())]
+    pub fn get_probe_memory_report(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = pyo3::types::PyDict::new(py);
+        let probe_stride = std::mem::size_of::<crate::terrain::probes::GpuProbeData>() as u64;
+        let probe_count = if probe_stride > 0 {
+            self.scene.probe_ssbo_bytes / probe_stride
+        } else {
+            0
+        };
+        dict.set_item("probe_count", probe_count)?;
+        dict.set_item("grid_uniform_bytes", self.scene.probe_grid_uniform_bytes)?;
+        dict.set_item("probe_ssbo_bytes", self.scene.probe_ssbo_bytes)?;
+        dict.set_item(
+            "total_bytes",
+            self.scene.probe_grid_uniform_bytes + self.scene.probe_ssbo_bytes,
+        )?;
+        Ok(dict.into())
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "TerrainRenderer(features={:?})",

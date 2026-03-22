@@ -16,7 +16,10 @@ impl TerrainScene {
         } else {
             env_debug_mode
         };
-        let debug_mode_f = if (100..=113).contains(&debug_mode) || (40..=42).contains(&debug_mode) {
+        let debug_mode_f = if (100..=113).contains(&debug_mode)
+            || (40..=42).contains(&debug_mode)
+            || (50..=51).contains(&debug_mode)
+        {
             debug_mode as f32
         } else {
             debug_mode.clamp(0, 33) as f32

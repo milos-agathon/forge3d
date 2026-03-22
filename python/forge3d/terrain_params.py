@@ -311,6 +311,39 @@ class SunVisibilitySettings:
 
 
 @dataclass
+class ProbeSettings:
+    """TV5: Irradiance probe configuration for terrain scenes."""
+
+    enabled: bool = False
+    grid_dims: Tuple[int, int] = (8, 8)
+    origin: Optional[Tuple[float, float]] = None
+    spacing: Optional[Tuple[float, float]] = None
+    height_offset: float = 5.0
+    ray_count: int = 64
+    fallback_blend_distance: Optional[float] = None
+    sky_color: Tuple[float, float, float] = (0.6, 0.75, 1.0)
+    sky_intensity: float = 1.0
+
+    def __post_init__(self) -> None:
+        if self.enabled:
+            cols, rows = self.grid_dims
+            if cols < 1 or rows < 1:
+                raise ValueError("grid_dims must be >= (1, 1)")
+            if cols * rows > 4096:
+                raise ValueError("grid_dims product must be <= 4096 (probe count limit)")
+            if self.ray_count < 1:
+                raise ValueError("ray_count must be >= 1")
+            if self.spacing is not None and (self.spacing[0] <= 0.0 or self.spacing[1] <= 0.0):
+                raise ValueError("spacing must be > 0 when provided")
+            if self.fallback_blend_distance is not None and self.fallback_blend_distance < 0.0:
+                raise ValueError("fallback_blend_distance must be >= 0")
+            if len(self.sky_color) != 3:
+                raise ValueError("sky_color must be (R, G, B)")
+            if self.sky_intensity < 0.0:
+                raise ValueError("sky_intensity must be >= 0")
+
+
+@dataclass
 class DetailSettings:
     """P6: Micro-detail configuration for close-range surface enhancement.
     
@@ -1361,6 +1394,8 @@ class TerrainRenderParams:
     height_ao: Optional[HeightAoSettings] = None
     # Heightfield ray-traced sun visibility (defaults to disabled for backward compatibility)
     sun_visibility: Optional[SunVisibilitySettings] = None
+    # TV5: Local irradiance probes (defaults to disabled for backward compatibility)
+    probes: Optional[ProbeSettings] = None
     # P6.1: Color space correctness toggles (defaults to False for P5 compatibility)
     colormap_srgb: bool = False  # Use Rgba8UnormSrgb for colormap texture (correct sampling)
     output_srgb_eotf: bool = False  # Use exact linear_to_srgb() instead of pow-gamma
@@ -1415,6 +1450,9 @@ class TerrainRenderParams:
         # Default sun_visibility to disabled if not provided
         if self.sun_visibility is None:
             self.sun_visibility = SunVisibilitySettings()
+        # TV5: Default probes to disabled if not provided
+        if self.probes is None:
+            self.probes = ProbeSettings()
         # M2: Default bloom to disabled if not provided
         if self.bloom is None:
             self.bloom = BloomSettings()
@@ -1593,6 +1631,7 @@ def make_terrain_params_config(
     detail: Optional[DetailSettings] = None,
     height_ao: Optional[HeightAoSettings] = None,
     sun_visibility: Optional[SunVisibilitySettings] = None,
+    probes: Optional[ProbeSettings] = None,
     aa_samples: int = 1,  # M1: Accumulation AA sample count (1 = no AA)
     aa_seed: Optional[int] = None,  # M1: Accumulation AA seed for determinism
     bloom: Optional[BloomSettings] = None,  # M2: Bloom post-processing
@@ -1737,6 +1776,7 @@ def make_terrain_params_config(
         detail=detail,
         height_ao=height_ao,
         sun_visibility=sun_visibility,
+        probes=probes,
         camera_mode=str(camera_mode),
         debug_mode=int(debug_mode),
         aa_samples=int(aa_samples),
@@ -1766,6 +1806,7 @@ __all__ = [
     "BloomSettings",
     "HeightAoSettings",
     "SunVisibilitySettings",
+    "ProbeSettings",
     "DetailSettings",
     "MaterialNoiseSettings",
     "MaterialLayerSettings",

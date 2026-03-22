@@ -37,6 +37,7 @@ mod draw;
 mod height_ao;
 mod msaa;
 mod pipeline_cache;
+mod probes;
 mod py_api;
 mod resources;
 #[cfg(feature = "enable-gpu-instancing")]

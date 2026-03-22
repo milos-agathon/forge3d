@@ -3,6 +3,7 @@ use super::*;
 pub(in crate::terrain::renderer) struct UploadedHeightInputs {
     pub(in crate::terrain::renderer) width: u32,
     pub(in crate::terrain::renderer) height: u32,
+    pub(in crate::terrain::renderer) heightmap_data: Vec<f32>,
     #[allow(dead_code)]
     pub(in crate::terrain::renderer) heightmap_texture: wgpu::Texture,
     pub(in crate::terrain::renderer) heightmap_view: wgpu::TextureView,
@@ -107,6 +108,7 @@ impl TerrainScene {
         Ok(UploadedHeightInputs {
             width: width as u32,
             height: height as u32,
+            heightmap_data,
             heightmap_texture,
             heightmap_view,
             water_mask_texture,

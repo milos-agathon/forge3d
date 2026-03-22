@@ -14,6 +14,7 @@ from .terrain_params import (
     ReflectionSettings,
     HeightAoSettings,
     SunVisibilitySettings,
+    ProbeSettings,
     DetailSettings,
     MaterialNoiseSettings,
     MaterialLayerSettings,
@@ -503,6 +504,7 @@ class TerrainRenderer:
     def clear_scatter_batches(self) -> None: ...
     def get_scatter_stats(self) -> Dict[str, Any]: ...
     def get_scatter_memory_report(self) -> Dict[str, Any]: ...
+    def get_probe_memory_report(self) -> Dict[str, Any]: ...
 
 # --- SDF types (P0.3) ---
 

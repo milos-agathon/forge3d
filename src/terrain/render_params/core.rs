@@ -25,6 +25,7 @@ pub struct DecodedTerrainSettings {
     pub denoise: DenoiseSettingsNative,
     pub volumetrics: VolumetricsSettingsNative,
     pub sky: SkySettingsNative,
+    pub probes: ProbeSettingsNative,
 }
 
 /// Terrain render parameter wrapper used by the native renderer.

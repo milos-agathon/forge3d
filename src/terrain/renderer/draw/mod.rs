@@ -18,6 +18,19 @@ impl TerrainScene {
         self.prepare_frame_lighting(decoded)?;
 
         let height_inputs = self.upload_height_inputs(heightmap, water_mask)?;
+        let probe_world_span = if params.camera_mode.to_lowercase() == "mesh" {
+            params.terrain_span.max(1e-3)
+        } else {
+            1.0
+        };
+        super::probes::prepare_probes(
+            self,
+            &decoded.probes,
+            probe_world_span,
+            &height_inputs.heightmap_data,
+            (height_inputs.width, height_inputs.height),
+            params.z_scale,
+        );
         let materials = self.prepare_material_context(material_set, params, decoded)?;
 
         let uniforms = self.build_uniforms(

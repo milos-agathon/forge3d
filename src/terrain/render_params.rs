@@ -16,11 +16,13 @@ mod decode_effects;
 mod decode_lighting;
 mod decode_materials;
 mod decode_postfx;
+mod decode_probes;
 mod native_effects;
 mod native_lighting;
 mod native_material;
 mod native_overlays;
 mod native_postfx;
+mod native_probes;
 mod parse;
 mod private_impl;
 mod py_api;
@@ -33,13 +35,16 @@ use native_lighting::{
     ClampSettingsNative, LightSettingsNative, LodSettingsNative, PomSettingsNative,
     SamplingSettingsNative, ShadowSettingsNative, TriplanarSettingsNative,
 };
-use native_material::{DetailSettingsNative, MaterialLayerSettingsNative, MaterialNoiseSettingsNative};
+use native_material::{
+    DetailSettingsNative, MaterialLayerSettingsNative, MaterialNoiseSettingsNative,
+};
 use native_overlays::VectorOverlaySettingsNative;
 use native_postfx::{
     AovSettingsNative, DenoiseMethodNative, DenoiseSettingsNative, DofMethodNative,
     DofQualityNative, DofSettingsNative, LensEffectsSettingsNative, MotionBlurSettingsNative,
     SkySettingsNative, TonemapSettingsNative, VolumetricsModeNative, VolumetricsSettingsNative,
 };
+pub(crate) use native_probes::ProbeSettingsNative;
 
 pub use core::{DecodedTerrainSettings, TerrainRenderParams};
 pub use native_lighting::{AddressModeNative, FilterModeNative};

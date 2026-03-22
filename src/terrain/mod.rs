@@ -86,6 +86,8 @@ pub mod renderer;
 #[cfg(feature = "extension-module")]
 pub use renderer::{TerrainRenderer, TerrainScene as TerrainRendererScene};
 
+pub mod probes;
+
 use numpy::IntoPyArray;
 use pyo3::prelude::*;
 use std::collections::HashSet;

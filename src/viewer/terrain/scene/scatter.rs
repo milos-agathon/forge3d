@@ -72,8 +72,13 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
     let instance_scale = 1.0_f32;
 
     for batch in batches {
-        let (batch_stats, draws) =
-            batch.prepare_draws(device, queue, eye_contract, render_from_contract, instance_scale)?;
+        let (batch_stats, draws) = batch.prepare_draws(
+            device,
+            queue,
+            eye_contract,
+            render_from_contract,
+            instance_scale,
+        )?;
         accumulate_frame_stats(&mut frame_stats, &batch_stats);
 
         for draw in draws {

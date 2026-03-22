@@ -48,6 +48,8 @@
 #include "lighting_ibl.wgsl"
 // TV4.1: Shared terrain-noise helpers for detail normals and terrain material variation.
 #include "terrain_noise.wgsl"
+// TV5: Local irradiance probes.
+#include "terrain_probes.wgsl"
 
 // P2-05: Optional BRDF dispatch flag (default: false = use calculate_pbr_brdf for current look)
 // Set to true to enable eval_brdf dispatch, allowing BRDF model switching on terrain
@@ -143,6 +145,8 @@ const DBG_SHADOW_TECHNIQUE: u32 = 33u; // P6.2: Show shadow technique as color (
 const DBG_VIEW_DEPTH: u32 = 40u;      // View-space depth as grayscale (changes with FOV/theta if perspective works)
 const DBG_NDC_DEPTH: u32 = 41u;       // NDC depth (clip.z/clip.w) as grayscale
 const DBG_VIEW_POS_XYZ: u32 = 42u;    // View-space position encoded as RGB (normalized to [0,1])
+const DBG_PROBE_IRRADIANCE: u32 = 50u; // Raw probe irradiance contribution
+const DBG_PROBE_WEIGHT: u32 = 51u;     // Probe blend weight
 
 struct TerrainUniforms {
     view : mat4x4<f32>,
@@ -2965,6 +2969,12 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     
     // Also compute split IBL for PBR debug modes (diffuse/specular separation)
     let ibl_split = eval_ibl_split(rotated_normal, rotated_view, ibl_albedo, metallic, roughness, f0);
+    let probe_result = sample_probe_irradiance(input.world_position, shading_normal);
+    let kS_ibl = ibl_split.fresnel;
+    let kD_ibl = (vec3<f32>(1.0) - kS_ibl) * (1.0 - metallic);
+    let global_diffuse = ibl_split.diffuse;
+    let probe_diffuse = kD_ibl * ibl_albedo * probe_result.irradiance;
+    let blended_diffuse = mix(global_diffuse, probe_diffuse, probe_result.weight);
     
     // Apply IBL intensity and occlusion (no artificial boost - proper split-sum should work)
     // For water, don't apply occlusion to IBL (water surface is exposed to sky)
@@ -2976,12 +2986,12 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     }
     // Apply shadow to IBL diffuse (shadowed areas receive less ambient light)
     // But keep specular unaffected (sky reflections should still be visible)
-    let ibl_diffuse_with_shadow = ibl_split.diffuse * shadow_factor;
+    let ibl_diffuse_with_shadow = blended_diffuse * shadow_factor;
     let ibl_with_shadow = ibl_diffuse_with_shadow + ibl_split.specular;
     ibl_contrib = ibl_with_shadow * u_ibl.intensity * ibl_occlusion;
     
     // Scale split components by intensity and occlusion for debug output
-    let ibl_diffuse_scaled = ibl_split.diffuse * u_ibl.intensity * ibl_occlusion * shadow_factor;
+    let ibl_diffuse_scaled = blended_diffuse * u_ibl.intensity * ibl_occlusion * shadow_factor;
     let ibl_specular_scaled = ibl_split.specular * u_ibl.intensity * ibl_occlusion;
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -3367,6 +3377,13 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         // NDC depth is in [0,1] for wgpu/WebGPU
         out.color = vec4<f32>(vec3<f32>(ndc_z), 1.0);
         return out;
+    } else if (debug_mode == DBG_PROBE_IRRADIANCE) {
+        let mapped = tonemap_aces(max(probe_result.irradiance * probe_result.weight, vec3<f32>(0.0)));
+        out.color = vec4<f32>(linear_to_srgb(mapped), 1.0);
+        return out;
+    } else if (debug_mode == DBG_PROBE_WEIGHT) {
+        out.color = vec4<f32>(vec3<f32>(probe_result.weight), 1.0);
+        return out;
     } else if (debug_mode == DBG_SHADOW_TECHNIQUE) {
         // MODE 33: Shadow Technique Visualization
         // Red = HARD (0), Green = PCF (1), Blue = PCSS (2)
@@ -3678,7 +3695,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             // P3-S1: IBL term adds minimal fill light
             // Reduced to allow deeper shadows while preventing pitch-black
             // D2 fix: Remove warm bias - reference has cooler neutrality
-            let ibl_diffuse_biased = ibl_split.diffuse;
+            let ibl_diffuse_biased = blended_diffuse;
             let ibl_diffuse_factor = length(ibl_diffuse_biased) * u_ibl.intensity;
             let ibl_term = ibl_diffuse_factor * AMBIENT_FLOOR * 0.35;
             
