@@ -847,7 +847,7 @@ class DenoiseSettings:
     edge_stopping: float = 1.0  # Edge-stopping strength (0 = none, 1 = strong)
     
     def __post_init__(self) -> None:
-        valid_methods = ("atrous", "bilateral", "none")
+        valid_methods = ("atrous", "bilateral", "oidn", "none")
         if self.method not in valid_methods:
             raise ValueError(f"method must be one of {valid_methods}")
         if self.iterations < 1:
@@ -867,6 +867,37 @@ class DenoiseSettings:
     def uses_guidance(self) -> bool:
         """Returns True if denoiser uses normal/depth guidance."""
         return (self.sigma_normal > 0.001 or self.sigma_depth > 0.001) and self.method == "atrous"
+
+
+@dataclass
+class OfflineQualitySettings:
+    """TV12: Offline accumulation and adaptive sampling policy.
+
+    Does NOT duplicate aa_samples/aa_seed (use existing params) or
+    denoiser selection (use DenoiseSettings.method).
+    """
+    enabled: bool = False
+    adaptive: bool = False
+    target_variance: float = 0.001
+    max_samples: int = 64
+    min_samples: int = 4
+    batch_size: int = 4
+    tile_size: int = 16
+    convergence_ratio: float = 0.95
+
+    def __post_init__(self) -> None:
+        if self.max_samples < 1:
+            raise ValueError("max_samples must be >= 1")
+        if self.min_samples < 1:
+            raise ValueError("min_samples must be >= 1")
+        if self.batch_size < 1:
+            raise ValueError("batch_size must be >= 1")
+        if self.tile_size < 1:
+            raise ValueError("tile_size must be >= 1")
+        if self.convergence_ratio < 0.0 or self.convergence_ratio > 1.0:
+            raise ValueError("convergence_ratio must be in [0.0, 1.0]")
+        if self.target_variance < 0.0:
+            raise ValueError("target_variance must be >= 0.0")
 
 
 @dataclass
@@ -1425,6 +1456,8 @@ class TerrainRenderParams:
     lens_effects: Optional[LensEffectsSettings] = None
     # M5: Denoise settings
     denoise: Optional[DenoiseSettings] = None
+    # TV12: Offline accumulation and adaptive sampling policy
+    offline: Optional[OfflineQualitySettings] = None
     # M6: Volumetrics settings
     volumetrics: Optional[VolumetricsSettings] = None
     # M6: Sky settings
@@ -1643,6 +1676,7 @@ def make_terrain_params_config(
     motion_blur: Optional[MotionBlurSettings] = None,  # M4: Motion blur settings
     lens_effects: Optional[LensEffectsSettings] = None,  # M5: Lens effects settings
     denoise: Optional[DenoiseSettings] = None,  # M5: Denoise settings
+    offline: Optional[OfflineQualitySettings] = None,  # TV12: Offline quality settings
     volumetrics: Optional[VolumetricsSettings] = None,  # M6: Volumetrics settings
     sky: Optional[SkySettings] = None,  # M6: Sky settings
     overlay: Optional[OverlaySettings] = None,  # Overlay settings (lit texture overlays)
@@ -1790,6 +1824,7 @@ def make_terrain_params_config(
         motion_blur=motion_blur,
         lens_effects=lens_effects,
         denoise=denoise,
+        offline=offline,
         volumetrics=volumetrics,
         sky=sky,
         overlay=overlay,
@@ -1817,6 +1852,7 @@ __all__ = [
     "MotionBlurSettings",
     "LensEffectsSettings",
     "DenoiseSettings",
+    "OfflineQualitySettings",
     "VolumetricsSettings",
     "SkySettings",
     "OverlayBlendMode",
