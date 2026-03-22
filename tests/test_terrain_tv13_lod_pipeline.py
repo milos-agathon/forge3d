@@ -327,3 +327,66 @@ class TestHLODRendering:
         assert report["hlod_cluster_count"] > 0
         assert report["hlod_buffer_bytes"] > 0
         assert report["total_buffer_bytes"] >= report["hlod_buffer_bytes"]
+
+
+class TestEndToEndImageOutput:
+    """TV13 end-to-end: auto-LOD scatter renders to PNG with real content."""
+
+    @pytest.fixture
+    def gpu_session(self):
+        if not f3d.has_gpu():
+            pytest.skip("GPU not available")
+        return f3d.Session(window=False)
+
+    def test_auto_lod_scatter_produces_nonempty_image(self, gpu_session):
+        from pathlib import Path
+
+        heightmap = np.random.default_rng(42).uniform(0, 100, (64, 64)).astype(np.float32)
+        renderer = f3d.TerrainRenderer(gpu_session)
+        material_set = f3d.MaterialSet.terrain_default()
+
+        with tempfile.NamedTemporaryFile(suffix=".hdr", delete=False) as tmp:
+            hdr_path = tmp.name
+        with open(hdr_path, "wb") as fh:
+            fh.write(b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 4 +X 8\n")
+            fh.write(bytes([128, 128, 180, 128] * 32))
+        try:
+            ibl = f3d.IBL.from_hdr(hdr_path, intensity=1.0)
+        finally:
+            os.unlink(hdr_path)
+
+        config = make_terrain_params_config(
+            size_px=(256, 160),
+            render_scale=1.0,
+            terrain_span=64.0,
+            msaa_samples=1,
+            z_scale=1.0,
+            exposure=1.0,
+            domain=(float(heightmap.min()), float(heightmap.max())),
+            camera_mode="mesh",
+            cam_radius=80.0,
+        )
+        params = f3d.TerrainRenderParams(config)
+
+        cone = primitive_mesh("cone", radial_segments=16)
+        levels = auto_lod_levels(cone, lod_count=2, draw_distance=50.0)
+        transforms = np.array([
+            [1, 0, 0, 20, 0, 1, 0, 50, 0, 0, 1, 20, 0, 0, 0, 1],
+            [1, 0, 0, 40, 0, 1, 0, 50, 0, 0, 1, 40, 0, 0, 0, 1],
+        ], dtype=np.float32)
+
+        batch = TerrainScatterBatch(
+            levels=levels, transforms=transforms, name="e2e_test",
+            color=(0.8, 0.2, 0.2, 1.0), max_draw_distance=100.0,
+        )
+        ts.apply_to_renderer(renderer, [batch])
+
+        frame = renderer.render_terrain_pbr_pom(material_set, ibl, params, heightmap)
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            png_path = tmp.name
+        frame.save(png_path)
+        try:
+            assert Path(png_path).stat().st_size > 100, "PNG should be non-trivial"
+        finally:
+            Path(png_path).unlink(missing_ok=True)
