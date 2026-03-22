@@ -63,6 +63,7 @@ if _NATIVE_MODULE is not None:
         "TerrainRenderParams",
         "TerrainRenderer",
         "Frame",
+        "HdrFrame",
         "AovFrame",
         "Light",
         "Atmosphere",
@@ -372,6 +373,7 @@ __all__ = [
     "TerrainRenderParams",
     "TerrainRenderer",
     "Frame",
+    "HdrFrame",
     "AovFrame",
     # P0.3/M2: Sun ephemeris
     "SunPosition",

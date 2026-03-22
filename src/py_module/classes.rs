@@ -26,6 +26,7 @@ pub(crate) fn register_py_classes(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::lighting::py_bindings::PySunPosition>()?;
     m.add_class::<AovFrame>()?;
     m.add_class::<Frame>()?;
+    m.add_class::<HdrFrame>()?;
     m.add_class::<PySdfPrimitive>()?;
     m.add_class::<PySdfScene>()?;
     m.add_class::<PySdfSceneBuilder>()?;
