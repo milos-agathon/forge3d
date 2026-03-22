@@ -1,9 +1,12 @@
 #![cfg(feature = "enable-gpu-instancing")]
 
+use std::collections::HashMap;
+
 use anyhow::{anyhow, Result};
 use glam::{Mat4, Vec3};
 
 use crate::core::resource_tracker::{register_buffer, ResourceHandle};
+use crate::geometry::simplify_mesh;
 use crate::geometry::MeshBuffers;
 use crate::render::mesh_instanced::VertexPN;
 
@@ -13,12 +16,22 @@ pub struct TerrainScatterLevelSpec {
     pub max_distance: Option<f32>,
 }
 
+#[derive(Debug, Clone)]
+pub struct HlodConfig {
+    pub hlod_distance: f32,
+    pub cluster_radius: f32,
+    pub simplify_ratio: f32,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct TerrainScatterBatchStats {
     pub total_instances: u32,
     pub visible_instances: u32,
     pub culled_instances: u32,
     pub lod_instance_counts: Vec<u32>,
+    pub hlod_cluster_draws: u32,
+    pub hlod_covered_instances: u32,
+    pub effective_draws: u32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -29,6 +42,9 @@ pub struct TerrainScatterFrameStats {
     pub visible_instances: u32,
     pub culled_instances: u32,
     pub lod_instance_counts: Vec<u32>,
+    pub hlod_cluster_draws: u32,
+    pub hlod_covered_instances: u32,
+    pub effective_draws: u32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -39,11 +55,16 @@ pub struct TerrainScatterMemoryReport {
     pub vertex_buffer_bytes: u64,
     pub index_buffer_bytes: u64,
     pub instance_buffer_bytes: u64,
+    pub hlod_cluster_count: u32,
+    pub hlod_buffer_bytes: u64,
 }
 
 impl TerrainScatterMemoryReport {
     pub fn total_buffer_bytes(&self) -> u64 {
-        self.vertex_buffer_bytes + self.index_buffer_bytes + self.instance_buffer_bytes
+        self.vertex_buffer_bytes
+            + self.index_buffer_bytes
+            + self.instance_buffer_bytes
+            + self.hlod_buffer_bytes
     }
 }
 
@@ -71,6 +92,25 @@ struct ScatterInstanceBuffer {
     _handle: ResourceHandle,
 }
 
+struct GpuHlodCluster {
+    vbuf: wgpu::Buffer,
+    ibuf: wgpu::Buffer,
+    index_count: u32,
+    center: Vec3,
+    radius: f32,
+    vertex_buffer_bytes: u64,
+    index_buffer_bytes: u64,
+    _vertex_handle: ResourceHandle,
+    _index_handle: ResourceHandle,
+}
+
+struct HlodCache {
+    clusters: Vec<GpuHlodCluster>,
+    instance_to_cluster: Vec<Option<usize>>,
+    hlod_distance: f32,
+    total_buffer_bytes: u64,
+}
+
 pub struct TerrainScatterBatch {
     pub name: Option<String>,
     pub color: [f32; 4],
@@ -80,6 +120,9 @@ pub struct TerrainScatterBatch {
     positions: Vec<[f32; 3]>,
     instance_buffers: Vec<Option<ScatterInstanceBuffer>>,
     last_stats: TerrainScatterBatchStats,
+    hlod_cache: Option<HlodCache>,
+    hlod_config: Option<HlodConfig>,
+    hlod_source_mesh: Option<MeshBuffers>,
 }
 
 impl TerrainScatterBatch {
@@ -91,6 +134,7 @@ impl TerrainScatterBatch {
         color: [f32; 4],
         max_draw_distance: Option<f32>,
         name: Option<String>,
+        hlod_config: Option<HlodConfig>,
     ) -> Result<Self> {
         if levels.is_empty() {
             return Err(anyhow!("terrain scatter requires at least one LOD level"));
@@ -104,11 +148,37 @@ impl TerrainScatterBatch {
             validate_optional_distance(max_draw_distance, "terrain scatter max_draw_distance")?
                 .unwrap_or(f32::INFINITY);
 
+        // Extract coarsest LOD mesh BEFORE consuming levels (for HLOD rebuild)
+        let hlod_source_mesh = if hlod_config.is_some() {
+            Some(levels.last().unwrap().mesh.clone())
+        } else {
+            None
+        };
+
         let gpu_levels = levels
             .into_iter()
             .map(|spec| build_gpu_level(device, queue, spec))
             .collect::<Result<Vec<_>>>()?;
         let level_count = gpu_levels.len();
+
+        let positions = extract_positions(transforms_rowmajor);
+
+        let hlod_cache = if let Some(ref config) = hlod_config {
+            if let Some(ref source_mesh) = hlod_source_mesh {
+                Some(build_hlod_cache(
+                    device,
+                    queue,
+                    source_mesh,
+                    transforms_rowmajor,
+                    &positions,
+                    config,
+                )?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         Ok(Self {
             name,
@@ -116,13 +186,21 @@ impl TerrainScatterBatch {
             max_draw_distance,
             levels: gpu_levels,
             transforms_rowmajor: transforms_rowmajor.to_vec(),
-            positions: extract_positions(transforms_rowmajor),
+            positions,
             instance_buffers: std::iter::repeat_with(|| None).take(level_count).collect(),
             last_stats: TerrainScatterBatchStats::default(),
+            hlod_cache,
+            hlod_config,
+            hlod_source_mesh,
         })
     }
 
-    pub fn update_transforms(&mut self, transforms_rowmajor: &[[f32; 16]]) -> Result<()> {
+    pub fn update_transforms(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        transforms_rowmajor: &[[f32; 16]],
+    ) -> Result<()> {
         if transforms_rowmajor.is_empty() {
             return Err(anyhow!("terrain scatter requires at least one transform"));
         }
@@ -133,6 +211,21 @@ impl TerrainScatterBatch {
             .extend_from_slice(transforms_rowmajor);
         self.positions = extract_positions(transforms_rowmajor);
         self.last_stats = TerrainScatterBatchStats::default();
+
+        // Rebuild HLOD cache when config+source mesh are present
+        if let (Some(ref config), Some(ref source_mesh)) =
+            (&self.hlod_config, &self.hlod_source_mesh)
+        {
+            self.hlod_cache = Some(build_hlod_cache(
+                device,
+                queue,
+                source_mesh,
+                transforms_rowmajor,
+                &self.positions,
+                config,
+            )?);
+        }
+
         Ok(())
     }
 
@@ -162,6 +255,45 @@ impl TerrainScatterBatch {
         self.levels.len()
     }
 
+    pub fn hlod_active_clusters(&self, eye_contract: Vec3) -> Vec<usize> {
+        let cache = match &self.hlod_cache {
+            Some(c) => c,
+            None => return Vec::new(),
+        };
+        cache
+            .clusters
+            .iter()
+            .enumerate()
+            .filter(|(_, cluster)| {
+                let dist = eye_contract.distance(cluster.center) - cluster.radius;
+                dist > cache.hlod_distance && dist < self.max_draw_distance
+            })
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    pub fn hlod_cluster_vbuf(&self, idx: usize) -> Option<&wgpu::Buffer> {
+        self.hlod_cache
+            .as_ref()
+            .and_then(|c| c.clusters.get(idx))
+            .map(|cluster| &cluster.vbuf)
+    }
+
+    pub fn hlod_cluster_ibuf(&self, idx: usize) -> Option<&wgpu::Buffer> {
+        self.hlod_cache
+            .as_ref()
+            .and_then(|c| c.clusters.get(idx))
+            .map(|cluster| &cluster.ibuf)
+    }
+
+    pub fn hlod_cluster_index_count(&self, idx: usize) -> u32 {
+        self.hlod_cache
+            .as_ref()
+            .and_then(|c| c.clusters.get(idx))
+            .map(|cluster| cluster.index_count)
+            .unwrap_or(0)
+    }
+
     pub fn prepare_draws(
         &mut self,
         device: &wgpu::Device,
@@ -177,10 +309,40 @@ impl TerrainScatterBatch {
             ..Default::default()
         };
 
-        for (transform, position) in self.transforms_rowmajor.iter().zip(self.positions.iter()) {
+        // Determine which HLOD clusters are active
+        let cluster_active: Vec<bool> = if let Some(ref cache) = self.hlod_cache {
+            cache
+                .clusters
+                .iter()
+                .map(|cluster| {
+                    let dist = eye_contract.distance(cluster.center) - cluster.radius;
+                    dist > cache.hlod_distance && dist < self.max_draw_distance
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        for (i, (transform, position)) in self
+            .transforms_rowmajor
+            .iter()
+            .zip(self.positions.iter())
+            .enumerate()
+        {
             let dist = eye_contract.distance(Vec3::new(position[0], position[1], position[2]));
             if dist > self.max_draw_distance {
                 continue;
+            }
+
+            // Check if this instance is covered by an active HLOD cluster
+            if let Some(ref cache) = self.hlod_cache {
+                if let Some(Some(cluster_idx)) = cache.instance_to_cluster.get(i) {
+                    if *cluster_idx < cluster_active.len() && cluster_active[*cluster_idx] {
+                        stats.hlod_covered_instances += 1;
+                        stats.visible_instances += 1;
+                        continue;
+                    }
+                }
             }
 
             let level_index = select_level_index(&self.levels, dist);
@@ -192,6 +354,9 @@ impl TerrainScatterBatch {
         stats.culled_instances = stats
             .total_instances
             .saturating_sub(stats.visible_instances);
+
+        // Count active HLOD clusters
+        stats.hlod_cluster_draws = cluster_active.iter().filter(|&&a| a).count() as u32;
 
         let mut draws = Vec::new();
         for (level_index, transforms) in per_level.iter().enumerate() {
@@ -215,6 +380,8 @@ impl TerrainScatterBatch {
             });
         }
 
+        stats.effective_draws = draws.len() as u32 + stats.hlod_cluster_draws;
+
         self.last_stats = stats.clone();
         Ok((stats, draws))
     }
@@ -236,6 +403,11 @@ impl TerrainScatterBatch {
             report.instance_buffer_bytes += buffer.bytes;
         }
 
+        if let Some(ref cache) = self.hlod_cache {
+            report.hlod_cluster_count = cache.clusters.len() as u32;
+            report.hlod_buffer_bytes = cache.total_buffer_bytes;
+        }
+
         report
     }
 }
@@ -250,6 +422,8 @@ pub fn summarize_memory(batches: &[TerrainScatterBatch]) -> TerrainScatterMemory
         report.vertex_buffer_bytes += batch_report.vertex_buffer_bytes;
         report.index_buffer_bytes += batch_report.index_buffer_bytes;
         report.instance_buffer_bytes += batch_report.instance_buffer_bytes;
+        report.hlod_cluster_count += batch_report.hlod_cluster_count;
+        report.hlod_buffer_bytes += batch_report.hlod_buffer_bytes;
     }
     report
 }
@@ -265,6 +439,9 @@ pub fn accumulate_frame_stats(
     stats.total_instances += batch_stats.total_instances;
     stats.visible_instances += batch_stats.visible_instances;
     stats.culled_instances += batch_stats.culled_instances;
+    stats.hlod_cluster_draws += batch_stats.hlod_cluster_draws;
+    stats.hlod_covered_instances += batch_stats.hlod_covered_instances;
+    stats.effective_draws += batch_stats.effective_draws;
 
     if stats.lod_instance_counts.len() < batch_stats.lod_instance_counts.len() {
         stats
@@ -280,6 +457,191 @@ pub fn accumulate_frame_stats(
         *dst += *src;
     }
 }
+
+// ---------------------------------------------------------------------------
+// HLOD build logic
+// ---------------------------------------------------------------------------
+
+fn grid_cell_key(pos: &[f32; 3], cell_size: f32) -> (i32, i32, i32) {
+    (
+        (pos[0] / cell_size).floor() as i32,
+        (pos[1] / cell_size).floor() as i32,
+        (pos[2] / cell_size).floor() as i32,
+    )
+}
+
+fn build_hlod_cache(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    source_mesh: &MeshBuffers,
+    transforms_rowmajor: &[[f32; 16]],
+    positions: &[[f32; 3]],
+    config: &HlodConfig,
+) -> Result<HlodCache> {
+    // Step 1: Hash instances into grid cells
+    let mut cells: HashMap<(i32, i32, i32), Vec<usize>> = HashMap::new();
+    for (i, pos) in positions.iter().enumerate() {
+        let key = grid_cell_key(pos, config.cluster_radius);
+        cells.entry(key).or_default().push(i);
+    }
+
+    let mut instance_to_cluster: Vec<Option<usize>> = vec![None; transforms_rowmajor.len()];
+    let mut clusters = Vec::new();
+    let mut total_buffer_bytes = 0u64;
+
+    for (_cell_key, instance_indices) in &cells {
+        if instance_indices.len() < 2 {
+            // Cells with 1 instance: leave as individual draw
+            continue;
+        }
+
+        let cluster_idx = clusters.len();
+
+        // Merge geometry: bake transforms into vertices of coarsest LOD mesh
+        let mut merged = MeshBuffers::with_capacity(
+            source_mesh.positions.len() * instance_indices.len(),
+            source_mesh.indices.len() * instance_indices.len(),
+        );
+
+        let mut center_sum = Vec3::ZERO;
+        for &inst_idx in instance_indices {
+            let m = row_major_to_mat4(transforms_rowmajor[inst_idx]);
+            let vertex_offset = merged.positions.len() as u32;
+
+            // Bake transform into positions
+            for pos in &source_mesh.positions {
+                let p = Vec3::new(pos[0], pos[1], pos[2]);
+                let tp = m.transform_point3(p);
+                merged.positions.push([tp.x, tp.y, tp.z]);
+            }
+
+            // Bake transform into normals (use inverse transpose for correct normal transform)
+            let normal_mat = m.inverse().transpose();
+            if !source_mesh.normals.is_empty() {
+                for normal in &source_mesh.normals {
+                    let n = Vec3::new(normal[0], normal[1], normal[2]);
+                    let tn = normal_mat.transform_vector3(n).normalize_or_zero();
+                    merged.normals.push([tn.x, tn.y, tn.z]);
+                }
+            }
+
+            // Offset indices
+            for idx in &source_mesh.indices {
+                merged.indices.push(idx + vertex_offset);
+            }
+
+            center_sum += Vec3::new(
+                positions[inst_idx][0],
+                positions[inst_idx][1],
+                positions[inst_idx][2],
+            );
+            instance_to_cluster[inst_idx] = Some(cluster_idx);
+        }
+
+        let center = center_sum / instance_indices.len() as f32;
+
+        // Compute radius: max distance from center to any instance position
+        let radius = instance_indices
+            .iter()
+            .map(|&i| {
+                Vec3::new(positions[i][0], positions[i][1], positions[i][2]).distance(center)
+            })
+            .fold(0.0f32, f32::max)
+            + config.cluster_radius * 0.5;
+
+        // Simplify the merged mesh
+        let simplified = simplify_mesh(&merged, config.simplify_ratio).map_err(|e| {
+            anyhow!(
+                "HLOD cluster simplification failed: {}",
+                e.message()
+            )
+        })?;
+
+        // Upload to GPU
+        let vertices: Vec<VertexPN> = simplified
+            .positions
+            .iter()
+            .enumerate()
+            .map(|(index, position)| VertexPN {
+                position: *position,
+                normal: simplified
+                    .normals
+                    .get(index)
+                    .copied()
+                    .unwrap_or([0.0, 1.0, 0.0]),
+            })
+            .collect();
+
+        let vertex_buffer_bytes = (vertices.len() * std::mem::size_of::<VertexPN>()) as u64;
+        let index_buffer_bytes =
+            (simplified.indices.len() * std::mem::size_of::<u32>()) as u64;
+
+        if vertex_buffer_bytes == 0 || index_buffer_bytes == 0 {
+            // Degenerate cluster after simplification — skip
+            for &inst_idx in instance_indices {
+                instance_to_cluster[inst_idx] = None;
+            }
+            continue;
+        }
+
+        let vertex_handle = register_buffer(
+            vertex_buffer_bytes,
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let index_handle = register_buffer(
+            index_buffer_bytes,
+            wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+        );
+
+        let vbuf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("terrain.scatter.hlod.vertex_buffer"),
+            size: vertex_buffer_bytes,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let ibuf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("terrain.scatter.hlod.index_buffer"),
+            size: index_buffer_bytes,
+            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        queue.write_buffer(&vbuf, 0, bytemuck::cast_slice(&vertices));
+        queue.write_buffer(&ibuf, 0, bytemuck::cast_slice(&simplified.indices));
+
+        total_buffer_bytes += vertex_buffer_bytes + index_buffer_bytes;
+
+        clusters.push(GpuHlodCluster {
+            vbuf,
+            ibuf,
+            index_count: simplified.indices.len() as u32,
+            center,
+            radius,
+            vertex_buffer_bytes,
+            index_buffer_bytes,
+            _vertex_handle: vertex_handle,
+            _index_handle: index_handle,
+        });
+    }
+
+    Ok(HlodCache {
+        clusters,
+        instance_to_cluster,
+        hlod_distance: config.hlod_distance,
+        total_buffer_bytes,
+    })
+}
+
+/// Pack a single identity instance transform for HLOD cluster drawing.
+/// The HLOD geometry is already in contract space, so we just apply
+/// render_from_contract as the instance transform.
+pub fn pack_hlod_identity_instance(render_from_contract: Mat4) -> [f32; 16] {
+    render_from_contract.to_cols_array()
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 fn validate_optional_distance(value: Option<f32>, label: &str) -> Result<Option<f32>> {
     match value {
@@ -542,6 +904,7 @@ mod tests {
                 visible_instances: 3,
                 culled_instances: 1,
                 lod_instance_counts: vec![2, 1],
+                ..Default::default()
             },
         );
         accumulate_frame_stats(
@@ -551,6 +914,7 @@ mod tests {
                 visible_instances: 1,
                 culled_instances: 1,
                 lod_instance_counts: vec![0, 0, 1],
+                ..Default::default()
             },
         );
 
@@ -656,5 +1020,45 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("positive finite"));
+    }
+
+    #[test]
+    fn hlod_stats_fields_default_to_zero() {
+        let stats = TerrainScatterBatchStats::default();
+        assert_eq!(stats.hlod_cluster_draws, 0);
+        assert_eq!(stats.hlod_covered_instances, 0);
+        assert_eq!(stats.effective_draws, 0);
+    }
+
+    #[test]
+    fn memory_report_includes_hlod_in_total() {
+        let report = TerrainScatterMemoryReport {
+            vertex_buffer_bytes: 10,
+            index_buffer_bytes: 20,
+            instance_buffer_bytes: 30,
+            hlod_buffer_bytes: 40,
+            ..Default::default()
+        };
+        assert_eq!(report.total_buffer_bytes(), 100);
+    }
+
+    #[test]
+    fn accumulate_frame_stats_includes_hlod() {
+        let mut frame = TerrainScatterFrameStats::default();
+        accumulate_frame_stats(
+            &mut frame,
+            &TerrainScatterBatchStats {
+                total_instances: 10,
+                visible_instances: 5,
+                culled_instances: 2,
+                lod_instance_counts: vec![3, 2],
+                hlod_cluster_draws: 2,
+                hlod_covered_instances: 3,
+                effective_draws: 5,
+            },
+        );
+        assert_eq!(frame.hlod_cluster_draws, 2);
+        assert_eq!(frame.hlod_covered_instances, 3);
+        assert_eq!(frame.effective_draws, 5);
     }
 }
