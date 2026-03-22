@@ -569,6 +569,73 @@ def mask_density_transforms(
     return np.ascontiguousarray(np.vstack(transforms).astype(np.float32))
 
 
+def auto_lod_levels(
+    mesh,  # MeshBuffers from forge3d.geometry
+    *,
+    lod_count: int = 3,
+    lod_distances: list[float | None] | None = None,
+    ratios: list[float] | None = None,
+    draw_distance: float | None = None,
+    min_triangles: int = 8,
+) -> list[TerrainScatterLevel]:
+    """Generate LOD levels from one high-detail mesh."""
+    from forge3d.geometry import generate_lod_chain
+
+    if lod_count < 1:
+        raise ValueError("lod_count must be >= 1")
+
+    # Resolve ratios
+    if ratios is None:
+        ratios = [1.0]
+        for i in range(1, lod_count):
+            ratios.append(max(0.25 ** i, 0.01))
+    if len(ratios) != lod_count:
+        raise ValueError(f"ratios length ({len(ratios)}) must equal lod_count ({lod_count})")
+
+    # Generate LOD chain
+    chain = generate_lod_chain(mesh, ratios, min_triangles=min_triangles)
+    actual_count = len(chain)
+
+    # Resolve distances
+    if lod_distances is not None:
+        if len(lod_distances) != lod_count:
+            raise ValueError(
+                f"lod_distances length ({len(lod_distances)}) must equal lod_count ({lod_count})"
+            )
+        distances = list(lod_distances[:actual_count])
+    elif draw_distance is not None:
+        geo_ratio = 0.33
+        distances = []
+        for i in range(actual_count):
+            if i == actual_count - 1:
+                distances.append(None)
+            else:
+                d = draw_distance * geo_ratio ** (actual_count - 1 - i)
+                distances.append(float(d))
+    else:
+        default_dists = [30.0, 100.0, 300.0, 600.0, 1000.0]
+        distances = []
+        for i in range(actual_count):
+            if i == actual_count - 1:
+                distances.append(None)
+            elif i < len(default_dists):
+                distances.append(default_dists[i])
+            else:
+                distances.append(None)
+
+    # Ensure final is open-ended
+    if distances and distances[-1] is not None:
+        distances[-1] = None
+
+    # Build levels
+    levels = []
+    for i, lod_mesh in enumerate(chain):
+        max_dist = distances[i] if i < len(distances) else None
+        levels.append(TerrainScatterLevel(mesh=lod_mesh, max_distance=max_dist))
+
+    return levels
+
+
 def serialize_batches_for_native(batches: Iterable[TerrainScatterBatch]) -> list[dict[str, Any]]:
     return [batch.to_native_dict() for batch in batches]
 
@@ -607,6 +674,7 @@ __all__ = [
     "TerrainScatterSource",
     "apply_to_renderer",
     "apply_to_viewer",
+    "auto_lod_levels",
     "bilinear_sample",
     "clear_renderer",
     "clear_viewer",

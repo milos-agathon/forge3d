@@ -22,6 +22,11 @@ if not NATIVE_AVAILABLE:
 ts = f3d.terrain_scatter
 
 from forge3d.geometry import MeshBuffers, primitive_mesh, simplify_mesh, generate_lod_chain
+from forge3d.terrain_scatter import (
+    TerrainScatterBatch,
+    TerrainScatterLevel,
+    auto_lod_levels,
+)
 
 
 class TestSimplifyMesh:
@@ -75,3 +80,50 @@ class TestGenerateLodChain:
         sphere = primitive_mesh("sphere")
         with pytest.raises(ValueError, match="descending"):
             generate_lod_chain(sphere, [1.0, 0.5, 0.7])
+
+
+class TestAutoLodLevels:
+    """TV13.2 — auto_lod_levels generates scatter LOD levels from one mesh."""
+
+    def test_default_three_levels(self):
+        sphere = primitive_mesh("sphere", rings=16, radial_segments=32)
+        levels = auto_lod_levels(sphere, lod_count=3, draw_distance=300.0)
+        assert len(levels) >= 2
+        assert all(isinstance(l, TerrainScatterLevel) for l in levels)
+        assert levels[-1].max_distance is None
+        if len(levels) >= 2:
+            assert levels[0].max_distance is not None
+
+    def test_explicit_distances(self):
+        sphere = primitive_mesh("sphere", rings=16, radial_segments=32)
+        levels = auto_lod_levels(
+            sphere,
+            lod_count=3,
+            lod_distances=[50.0, 150.0, None],
+        )
+        assert levels[0].max_distance == 50.0
+        assert levels[1].max_distance == 150.0
+        assert levels[-1].max_distance is None
+
+    def test_explicit_ratios(self):
+        sphere = primitive_mesh("sphere", rings=16, radial_segments=32)
+        levels = auto_lod_levels(
+            sphere,
+            lod_count=3,
+            ratios=[1.0, 0.3, 0.05],
+            draw_distance=200.0,
+        )
+        assert levels[0].mesh.triangle_count >= levels[1].mesh.triangle_count
+
+    def test_feeds_into_scatter_batch(self):
+        cone = primitive_mesh("cone", radial_segments=32)
+        levels = auto_lod_levels(cone, lod_count=2, draw_distance=100.0)
+        transforms = np.array([
+            [1, 0, 0, 5, 0, 1, 0, 0, 0, 0, 1, 5, 0, 0, 0, 1],
+        ], dtype=np.float32)
+        batch = TerrainScatterBatch(
+            levels=levels,
+            transforms=transforms,
+            name="auto_lod_test",
+        )
+        assert batch.instance_count == 1
