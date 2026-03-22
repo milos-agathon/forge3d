@@ -9,9 +9,9 @@
 
 ## 1. Problem
 
-The terrain shadow depth pass computes one terrain-covering light matrix and reuses it for every cascade (`src/viewer/terrain/render/shadow.rs:56`, `:89`, `:143`). Although the surrounding architecture is cascade-shaped — split generation exists in `src/core/cascade_split.rs:74` and `:123`, and the pass iterates per-cascade views — every cascade renders the same shadow coverage. The result is shadow shimmer and swimming when the camera pans across large terrains, and visible banding at cascade transition boundaries.
+The terrain renderer shadow depth pass (`src/terrain/renderer/shadows/render.rs`) computes one terrain-covering light matrix at `:96` and reuses it for every cascade at `:117`. Although the surrounding architecture is cascade-shaped — split generation exists in `src/core/cascade_split.rs:74` and `:123`, per-cascade near/far distances are stored at `render.rs:113-114`, and the pass iterates per-cascade draw calls at `:129` — every cascade receives the same `light_view_proj`. The result is shadow shimmer and swimming when the camera pans across large terrains, and visible banding at cascade transition boundaries.
 
-The existing stabilization (texel-grid snapping in `pipeline_init.rs`) is insufficient because it operates on a shared matrix rather than per-cascade domains, and the fixed 512-vertex shadow depth grid lacks the spatial granularity to benefit from page-based allocation.
+The existing stabilization (texel-grid snapping in `pipeline_init.rs`) is insufficient because it operates on a shared matrix rather than per-cascade domains, and the fixed 1024-vertex shadow depth grid (`SHADOW_GRID_RES` at `render.rs:126`) lacks the spatial granularity to benefit from page-based allocation.
 
 **Value proposition:** Eliminate terrain shadow shimmer/swim and cascade-transition artifacts through page-based shadow allocation on stable per-cascade light-space domains, building toward a C-ready architecture for future demand-driven resolution scaling.
 
@@ -67,7 +67,7 @@ struct ShadowPage {
 
 Modeled on the VT `TileCache` LRU pattern in `src/core/tile_cache/cache.rs` — used as a design pattern, not a drop-in dependency. The shadow page cache is a separate, shadow-specific implementation.
 
-- **Page table** (GPU storage buffer): maps `(cascade, page_x, page_y)` → atlas slot index, or a not-resident sentinel.
+- **Page table** (GPU storage buffer): maps `(cascade, page_x, page_y)` → atlas slot index, or a not-resident sentinel. Since per-cascade grids may have different `pages_x × pages_y` dimensions, the flat page table uses **prefix-sum offsets**: cascade `i` starts at offset `sum(pages_x[j] * pages_y[j] for j < i)`. The `PagedShadowUniforms` stores per-cascade `page_table_offset` values so the shader computes `page_index = page_table_offset[cascade] + page_y * pages_x[cascade] + page_x`. This avoids fixed-stride waste when cascade grids differ in size.
 - **Resident page pool**: a single `Depth32Float` atlas texture. Atlas dimensions sized to fit `(budget - fixed_overhead) / page_tile_bytes` pages. Slots assigned by LRU eviction.
 - **Budget partitioning**: `shadow_page_budget_mb` is total paged-shadow backend memory. Fixed bytes are reserved first for page table buffer, upload staging, and bookkeeping. The remainder goes to the resident page pool. A 128 MiB budget is a user override, not the default.
 - **Stats** (queryable from Python):
@@ -157,10 +157,15 @@ fn sample_shadow_paged(world_pos: vec3f, normal: vec3f, cascade_idx: u32) -> f32
     let page_x = clamp(u32(light_uv.x * pages.x), 0u, paged_uniforms.pages_x[cascade_idx] - 1u);
     let page_y = clamp(u32(light_uv.y * pages.y), 0u, paged_uniforms.pages_y[cascade_idx] - 1u);
 
-    // 4. Page table lookup
-    let entry = page_table[page_index(cascade_idx, page_x, page_y)];
+    // 4. Page table lookup (prefix-sum offset per cascade)
+    let idx = paged_uniforms.page_table_offset[cascade_idx]
+            + page_y * paged_uniforms.pages_x[cascade_idx] + page_x;
+    let entry = page_table[idx];
     if (entry.atlas_offset_x == PAGE_NOT_RESIDENT) {
-        return 0.5; // deterministic fallback — should not occur in normal frames
+        // Diagnostic: saturated magenta (1,0,1) when SHADOW_DEBUG_PAGES is active,
+        // otherwise return 0.5 to make allocator bugs visually obvious and
+        // metrically detectable in stability tests (neither 0 nor 1).
+        return 0.5;
     }
 
     // 5. Compute atlas UV with guard band clamping
@@ -344,7 +349,9 @@ Validation enforced in both Python (`validate_for_terrain`) and Rust (`native_li
 
 | Component | Location |
 |---|---|
-| Shadow depth pass (shared matrix bug) | `src/viewer/terrain/render/shadow.rs:56, :89, :143` |
+| Terrain renderer shadow depth pass (shared matrix bug) | `src/terrain/renderer/shadows/render.rs:96, :117, :126` |
+| Terrain shadow param carrier | `src/terrain/render_params/native_lighting.rs:78` |
+| Terrain shadow param decoder | `src/terrain/render_params/decode_lighting.rs:146` |
 | Cascade split generation | `src/core/cascade_split.rs:74, :123` |
 | VT cache/LRU pattern reference | `src/core/tile_cache/cache.rs` |
 | VT feedback buffer pattern reference | `src/core/feedback_buffer.rs:78` |
