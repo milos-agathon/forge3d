@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 import forge3d as f3d
+from _terrain_runtime import terrain_rendering_available
 from forge3d.terrain_params import (
     MaterialLayerSettings,
     PomSettings,
@@ -32,6 +33,9 @@ def test_terrain_shader_declares_tv10_subsurface_support() -> None:
         "evaluate_terrain_subsurface(",
     ):
         assert token in source, f"{token} missing from terrain TV10 shader path"
+
+
+GPU_AVAILABLE = terrain_rendering_available()
 
 
 def _create_test_hdr(path: str, width: int = 8, height: int = 4) -> None:
@@ -190,26 +194,27 @@ def _diff_stats(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
 
 @pytest.fixture(scope="module")
 def tv10_render_env():
+    if not GPU_AVAILABLE:
+        pytest.skip("TV10 rendering tests require GPU-backed forge3d module")
+
+    session = f3d.Session(window=False)
+    renderer = f3d.TerrainRenderer(session)
+    material_set = f3d.MaterialSet.terrain_default()
+    overlay = _build_overlay()
+    heightmap = _build_heightmap()
+
+    with tempfile.NamedTemporaryFile(suffix=".hdr", delete=False) as tmp:
+        tmp.close()
+        _create_test_hdr(tmp.name)
+        ibl = f3d.IBL.from_hdr(tmp.name, intensity=1.0)
+
     try:
-        session = f3d.Session(window=False)
-        renderer = f3d.TerrainRenderer(session)
-        material_set = f3d.MaterialSet.terrain_default()
-        overlay = _build_overlay()
-        heightmap = _build_heightmap()
-
-        with tempfile.NamedTemporaryFile(suffix=".hdr", delete=False) as tmp:
-            tmp.close()
-            _create_test_hdr(tmp.name)
-            ibl = f3d.IBL.from_hdr(tmp.name, intensity=1.0)
-
-        try:
-            yield renderer, material_set, ibl, heightmap, overlay
-        finally:
-            Path(tmp.name).unlink(missing_ok=True)
-    except Exception as exc:
-        pytest.skip(f"TV10 rendering tests require GPU-backed forge3d module: {exc}")
+        yield renderer, material_set, ibl, heightmap, overlay
+    finally:
+        Path(tmp.name).unlink(missing_ok=True)
 
 
+@pytest.mark.skipif(not GPU_AVAILABLE, reason="TV10 rendering tests require GPU-backed forge3d module")
 class TestTerrainSubsurfaceRendering:
     def test_zero_strength_ignores_subsurface_colors(self, tv10_render_env) -> None:
         renderer, material_set, ibl, heightmap, overlay = tv10_render_env
