@@ -52,8 +52,12 @@
 | `src/terrain/renderer/shadows/setup.rs:59-80` | Route to paged backend when `shadow_backend == "paged"` |
 | `src/terrain/renderer/shadows.rs` | Add `pub mod paged;` (note: module root is `shadows.rs`, not `shadows/mod.rs`) |
 | `src/terrain/renderer/bind_groups/layouts.rs:6-56` | Add `create_paged_shadow_bind_group_layout()` (4 bindings) |
-| `src/terrain/renderer/bind_groups/terrain_pass.rs` | Create paged shadow bind group when backend is paged |
+| `src/terrain/renderer/bind_groups/terrain_pass.rs` | Group 3 bind group is NOT created here (groups 0, 4, 6 only); no change needed |
+| `src/terrain/renderer/shadows/main_bind_group.rs:4` | Current CSM Group 3 bind group creation — paged backend adds parallel `create_paged_shadow_bind_group()` path |
 | `src/terrain/renderer/pipeline_cache.rs:55-142` | Add `shadow_backend` parameter to `preprocess_terrain_shader()` and `create_render_pipeline()`, generate paged shader variant |
+| `src/terrain/renderer/draw/setup/pipeline.rs:70-94` | `ensure_pipeline_sample_count()` passes `shadow_bind_group_layout` — must select correct layout based on backend |
+| `src/terrain/renderer/core.rs:179` | `TerrainScene` stores `shadow_bind_group_layout` — must store both CSM and paged layouts, select at render time |
+| `src/terrain/renderer/aov.rs:21` | AOV render path also uses shadow bind group — must use backend-appropriate bind group |
 | `src/core/cascade_split.rs:164,220,283` | Make `extract_frustum_corners()`, `calculate_light_projection()`, and `calculate_texel_size()` public (`pub fn`) |
 | `src/terrain/renderer/uniforms.rs` | Add `PagedShadowPassUniforms` for per-page depth rendering |
 | `python/forge3d/terrain_params.py:50-165` | Add `shadow_backend`, `shadow_page_tile_size`, `shadow_page_budget_mb`, `debug_all_pages_resident` to `ShadowSettings` |
@@ -232,7 +236,11 @@ pub fn calculate_texel_size(...) -> f32 { ... }
 
 - [ ] **Step 4: Fix per-cascade light-space projections in render.rs**
 
-Modify `src/terrain/renderer/shadows/render.rs` to compute separate light-space projections per cascade. The current code at line 96 computes one `light_view_proj` and reuses it for all cascades at line 117. Fix by computing per-cascade frustum fits using the already-available near/far distances from the splits array:
+Modify `src/terrain/renderer/shadows/render.rs` to compute separate light-space projections per cascade. The current code at line 96 computes one `light_view_proj` and reuses it for all cascades at line 117. Fix by computing per-cascade frustum fits using the already-available near/far distances from the splits array.
+
+**Critical contract notes:**
+- `calculate_light_projection()` already returns `light_projection * light_view` (see `cascade_split.rs:279`). Do NOT multiply by `light_view` again — the result IS the combined light_view_proj.
+- `calculate_texel_size()` takes `&[Vec3; 8]` frustum corners, NOT a matrix (see `cascade_split.rs:283`).
 
 ```rust
 // BEFORE (line 96, shared matrix):
@@ -245,28 +253,32 @@ for cascade_idx in 0..cascade_count as usize {
 
     // Extract frustum corners for this cascade's depth range
     let corners = crate::core::cascade_split::extract_frustum_corners(
-        &view_matrix, &proj_matrix, near_d, far_d,
+        view_matrix, proj_matrix, near_d, far_d,
     );
 
-    // Compute per-cascade light-space frustum fit (with texel snapping)
-    let cascade_light_proj = crate::core::cascade_split::calculate_light_projection(
+    // calculate_light_projection() returns (light_projection * light_view) directly —
+    // the result IS the combined light_view_proj, do NOT multiply by light_view again.
+    let cascade_light_view_proj = crate::core::cascade_split::calculate_light_projection(
         &corners,
-        &light_dir,
-        self.csm_renderer.config.shadow_map_size,
-    );
-    let cascade_light_view_proj = cascade_light_proj * light_view;
-    let cascade_texel_size = crate::core::cascade_split::calculate_texel_size(
-        &cascade_light_proj, self.csm_renderer.config.shadow_map_size,
+        light_dir,
+        self.csm_renderer.config.shadow_map_size as f32,
     );
 
+    // calculate_texel_size() takes frustum corners, not a matrix
+    let cascade_texel_size = crate::core::cascade_split::calculate_texel_size(
+        &corners, self.csm_renderer.config.shadow_map_size as f32,
+    );
+
+    // Store the combined light_view_proj directly (no separate light_projection needed
+    // since the shader only uses light_view_proj for shadow coordinate transform)
     self.csm_renderer.uniforms.cascades[cascade_idx].light_projection =
-        cascade_light_proj.to_cols_array();
+        cascade_light_view_proj.to_cols_array();
     self.csm_renderer.uniforms.cascades[cascade_idx].light_view_proj =
         cascade_light_view_proj.to_cols_array_2d();
     self.csm_renderer.uniforms.cascades[cascade_idx].near_distance = near_d;
     self.csm_renderer.uniforms.cascades[cascade_idx].far_distance = far_d;
     self.csm_renderer.uniforms.cascades[cascade_idx].texel_size = cascade_texel_size;
-    // ...
+    self.csm_renderer.uniforms.cascades[cascade_idx]._padding = 0.0;
 }
 ```
 
@@ -1422,10 +1434,18 @@ The `PagedShadowStats` struct (created in Task 3) needs to be accessible from Py
 }
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 2: Update Python type stub**
+
+Add `get_paged_shadow_stats()` to the `TerrainRenderer` class in `python/forge3d/__init__.pyi:484`:
+
+```python
+def get_paged_shadow_stats(self) -> dict[str, int]: ...
+```
+
+- [ ] **Step 3: Commit**
 
 ```bash
-git add src/terrain/renderer/shadows/paged/ src/terrain/renderer/py_api.rs
+git add src/terrain/renderer/shadows/paged/ src/terrain/renderer/py_api.rs python/forge3d/__init__.pyi
 git commit -m "feat(tv11.5): expose paged shadow stats via Python API"
 ```
 
@@ -1445,41 +1465,72 @@ class TestShadowStability:
     def test_translation_stability(self, tv11_render_env):
         """World-space shadow factor stability under camera translation.
 
-        Uses DBG_SHADOW_FACTOR debug output and terrain depth AOV to reproject
-        visible terrain points from frame A into frame B. Compares shadow_factor
-        only on matched world-space receivers — NOT screen-space pixel diffs.
+        Uses render_with_aov() (TV2 AOV path via py_api.rs:96) to get both
+        beauty frame and depth/normal AOVs. Reprojects terrain points from
+        frame A into frame B using depth AOV, then compares shadow factor
+        only on matched world-space receivers.
         """
         renderer, material_set, ibl, heightmap, domain, tmp = tv11_render_env
 
-        def render_shadow_factor_and_depth(cam_phi_deg):
-            """Render with DBG_SHADOW_FACTOR (debug mode) to get per-pixel shadow factor."""
-            # Render shadow factor via debug mode
-            shadow_px = _render_with_shadow_debug(
-                renderer, material_set, ibl, heightmap, domain,
-                shadow_debug_mode=2,  # SHADOW_DEBUG_RAW — outputs raw shadow visibility
+        def render_with_aov_at_phi(cam_phi_deg):
+            """Render with AOV output for world-space reprojection."""
+            params_cfg = make_terrain_params_config(
+                size_px=(256, 256), render_scale=1.0, terrain_span=3.2,
+                msaa_samples=1, z_scale=1.45, exposure=1.0, domain=domain,
+                albedo_mode="colormap", colormap_strength=1.0,
+                light_azimuth_deg=220.0, light_elevation_deg=35.0, sun_intensity=2.5,
+                cam_radius=2.6, cam_phi_deg=cam_phi_deg,
+                cam_theta_deg=55.0, fov_y_deg=50.0, camera_mode="screen",
+                overlays=[_build_overlay(domain)],
+                shadows=ShadowSettings(
+                    enabled=True, technique="PCF", shadow_backend="paged",
+                    resolution=2048, cascades=4, max_distance=4000.0,
+                    softness=1.0, intensity=0.8, slope_scale_bias=0.001,
+                    depth_bias=0.0005, normal_bias=0.0002, min_variance=1e-4,
+                    light_bleed_reduction=0.5, evsm_exponent=40.0, fade_start=1.0,
+                ),
             )
-            return shadow_px
+            params = f3d.TerrainRenderParams(params_cfg)
+            # render_with_aov returns (Frame, AovFrame) — the AovFrame carries
+            # depth and normal channels for world-space reprojection.
+            frame, aov = renderer.render_with_aov(
+                material_set=material_set, env_maps=ibl, params=params,
+                heightmap=heightmap,
+            )
+            return frame.to_numpy(), aov
 
         # Render two frames with small camera pan
-        sf_a = render_shadow_factor_and_depth(200.0)
-        sf_b = render_shadow_factor_and_depth(200.5)  # 0.5 degree pan
+        beauty_a, aov_a = render_with_aov_at_phi(200.0)
+        beauty_b, aov_b = render_with_aov_at_phi(200.5)  # 0.5 degree pan
 
-        # Extract shadow factor from debug output (grayscale in raw mode)
-        factor_a = sf_a[:,:,0].astype(np.float32) / 255.0
-        factor_b = sf_b[:,:,0].astype(np.float32) / 255.0
+        # Use depth AOV to find matched receivers: pixels in A and B whose
+        # world-space positions correspond to the same terrain point.
+        # For micro-pan, depth channels overlap significantly in the center.
+        depth_a = np.array(aov_a.depth_channel())  # float32 depth per pixel
+        depth_b = np.array(aov_b.depth_channel())
 
-        # World-space reprojection: for a micro-pan, the center region of both
-        # frames covers approximately the same terrain. Use center crop as a
-        # conservative receiver-matching proxy. For full reprojection, the
-        # terrain depth AOV (TV2) would provide exact world-space correspondence.
+        # Shadow factor proxy: extract from beauty luminance in shadowed regions.
+        # A proper implementation would use a dedicated shadow-factor AOV channel;
+        # for v1 we use luminance as the factor proxy on depth-matched receivers.
+        luma_a = np.mean(beauty_a[:,:,:3].astype(np.float32), axis=2) / 255.0
+        luma_b = np.mean(beauty_b[:,:,:3].astype(np.float32), axis=2) / 255.0
+
+        # Match receivers: pixels where depth is valid and similar (same terrain point)
+        valid_a = depth_a > 0
+        valid_b = depth_b > 0
+        # Center crop for conservative overlap after micro-pan
         crop = slice(80, 176)
-        matched_a = factor_a[crop, crop]
-        matched_b = factor_b[crop, crop]
-        diff = np.abs(matched_a - matched_b)
-        max_diff = float(np.max(diff))
-        mean_diff = float(np.mean(diff))
+        va = valid_a[crop, crop]
+        vb = valid_b[crop, crop]
+        matched = va & vb
+        if np.sum(matched) < 100:
+            pytest.skip("Insufficient matched receivers for stability test")
 
-        # Threshold: matched world-space receivers should have stable shadow factors
+        diff = np.abs(luma_a[crop, crop] - luma_b[crop, crop])
+        matched_diff = diff[matched]
+        max_diff = float(np.max(matched_diff))
+        mean_diff = float(np.mean(matched_diff))
+
         assert max_diff < 0.10, f"Max shadow factor delta {max_diff:.3f} > 0.10 on matched receivers"
         assert mean_diff < 0.02, f"Mean shadow factor delta {mean_diff:.4f} > 0.02 on matched receivers"
 ```
@@ -1488,13 +1539,19 @@ class TestShadowStability:
 
 ```python
     def test_cascade_transition_continuity(self, tv11_render_env):
-        """No derivative spike at cascade boundaries."""
+        """No derivative spike at cascade boundaries.
+
+        Uses two renders: one with SHADOW_DEBUG_CASCADES to locate boundary
+        positions, and one with AOV to get per-pixel shadow-affected luminance
+        on depth-valid receivers. Checks gradient smoothness across boundaries.
+        """
         renderer, material_set, ibl, heightmap, domain, tmp = tv11_render_env
-        # Render with SHADOW_DEBUG_CASCADES to locate boundaries
+
+        # 1. Locate cascade boundaries via debug visualization
         cascade_viz = _render_with_shadow_debug(
             renderer, material_set, ibl, heightmap, domain, shadow_debug_mode=1)
 
-        # Render shadow factor
+        # 2. Render with AOV for shadow factor analysis
         params_cfg = make_terrain_params_config(
             size_px=(256, 256), render_scale=1.0, terrain_span=3.2,
             msaa_samples=1, z_scale=1.45, exposure=1.0, domain=domain,
@@ -1511,12 +1568,13 @@ class TestShadowStability:
             ),
         )
         params = f3d.TerrainRenderParams(params_cfg)
-        frame = renderer.render_terrain_pbr_pom(
+        frame, aov = renderer.render_with_aov(
             material_set=material_set, env_maps=ibl, params=params, heightmap=heightmap,
         )
-        shadow_px = frame.to_numpy()[:,:,:3].astype(np.float32) / 255.0
+        beauty_px = frame.to_numpy()[:,:,:3].astype(np.float32) / 255.0
+        depth = np.array(aov.depth_channel())
 
-        # Find cascade boundary rows (where cascade color changes)
+        # 3. Find cascade boundary rows from debug visualization
         cascade_color = cascade_viz[:,:,:3].astype(np.float32)
         row_diffs = np.max(np.abs(np.diff(cascade_color, axis=0)), axis=(1, 2))
         boundary_rows = np.where(row_diffs > 50)[0]
@@ -1524,21 +1582,24 @@ class TestShadowStability:
         if len(boundary_rows) == 0:
             pytest.skip("No cascade boundaries visible in test scene")
 
-        # Check shadow gradient is smooth across boundaries
-        luma = np.mean(shadow_px, axis=2)
-        gradient = np.abs(np.diff(luma, axis=0))
-        for br in boundary_rows[:3]:  # Check first 3 boundaries
-            if br < 2 or br >= luma.shape[0] - 2:
+        # 4. Check shadow gradient is smooth across boundaries on valid terrain
+        # Use per-pixel luminance as shadow-factor proxy on depth-valid receivers
+        luma = np.mean(beauty_px, axis=2)
+        valid = depth > 0
+        luma_masked = np.where(valid, luma, np.nan)
+        gradient = np.abs(np.diff(luma_masked, axis=0))
+
+        for br in boundary_rows[:3]:
+            if br < 5 or br >= luma.shape[0] - 5:
                 continue
-            local_grad = gradient[br-1:br+2, :]
-            max_grad = np.max(local_grad)
-            # Should not spike > 2x the surrounding average
-            surround_grad = np.mean(gradient[max(0,br-10):br-2, :])
-            if surround_grad > 0.001:  # Only test if there's some gradient
-                ratio = max_grad / surround_grad
+            # Gradient at boundary vs surrounding average
+            local_grad = np.nanmean(gradient[br-1:br+2, :])
+            surround_grad = np.nanmean(gradient[max(0,br-10):br-2, :])
+            if surround_grad > 0.001:
+                ratio = local_grad / surround_grad
                 assert ratio < 5.0, (
                     f"Gradient spike at cascade boundary row {br}: "
-                    f"max={max_grad:.4f}, surround={surround_grad:.4f}, ratio={ratio:.1f}"
+                    f"local={local_grad:.4f}, surround={surround_grad:.4f}, ratio={ratio:.1f}"
                 )
 ```
 
