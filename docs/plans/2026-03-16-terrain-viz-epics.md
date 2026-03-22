@@ -284,9 +284,9 @@ That is the correct terrain backlog. Everything else from the Blender and Unreal
 
 ---
 
-## 13. Implementation Status Snapshot (2026-03-21)
+## 13. Implementation Status Snapshot (2026-03-22)
 
-Source audit of `main` branch and active worktrees as of commit `48083fc`.
+Source audit of `main` branch as of commit `8653a6f`.
 
 | Epic | Status | Evidence |
 |---|---|---|
@@ -294,7 +294,7 @@ Source audit of `main` branch and active worktrees as of commit `48083fc`.
 | **TV2 - Terrain Output and Compositing Foundation** | **Shipped** | `src/terrain/renderer/aov.rs` (702 lines) populates albedo/normal/depth MRTs. Multi-channel EXR export via `build_terrain_exr_channels()`. Commit `d833137`. |
 | **TV3 - Terrain Scatter and Population** | **Shipped** | `src/terrain/scatter.rs` implements seeded random, grid+jitter, and mask-density placement with slope filters, distance culling, and LOD selection. Memory tracked via `TerrainScatterMemoryReport`. Commit `d341097`. |
 | **TV4 - Terrain Material Variation Upgrade** | **Shipped** | `src/shaders/terrain_noise.wgsl` (108 lines) extracts shared noise module with FBM, ridged FBM, and cellular distance. Python controls exposed. Commit `e580d8a`. |
-| **TV5 - Local Probe Lighting for Terrain Scenes** | **In progress** | Probe baker, GPU types, and `SHL2` in `src/terrain/probes/` on `main`. Full shader integration (`terrain_probes.wgsl`, fs_main blending, debug modes) in `.worktrees/tv5-probe-lighting/` — 17 commits ahead, not yet merged. |
+| **TV5 - Local Probe Lighting for Terrain Scenes** | **Shipped** | SH L2 irradiance probes with probe baker, GPU types, `SHL2` in `src/terrain/probes/`, and `terrain_probes.wgsl` shader integration (fs_main blending, debug modes). Commit `3c8ac2e`. |
 | **TV6 - Heterogeneous Terrain Volumetrics** | **Partial** | Viewer volumetrics (`viewer_volumetrics.wgsl`) implement height-based exponential fog with Henyey-Greenstein phase and god-rays, but density is height-derived only — no 3D density texture or spatial variation. Terrain renderer defers to sky pass. |
 | **TV7 - Weather Particle Foundation** | **Not started** | No GPU particle emitter, update, or render code in any terrain path. |
 | **TV8 - Coastal / Hydrology Water Upgrade** | **Not started** | `water_surface.wgsl` uses analytic wave composition. No FFT/Tessendorf path. |

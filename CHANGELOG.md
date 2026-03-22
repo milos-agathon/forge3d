@@ -6,6 +6,17 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-03-22
+
+### Added
+- Implemented Epic TV5: Local Probe Lighting for Terrain Scenes — SH L2 irradiance probes for terrain global illumination.
+- Added probe baker, GPU types, and `SHL2` spherical harmonics infrastructure in `src/terrain/probes/`.
+- Added `terrain_probes.wgsl` shader with probe sampling, blending, and debug visualization modes.
+- Added local probe lighting overview documentation page for TV5.
+
+### Changed
+- Bumped the package version to `1.16.0`.
+
 ## [1.15.1] - 2026-03-21
 
 ### Fixed
