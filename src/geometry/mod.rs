@@ -54,9 +54,10 @@ pub use py_advanced::{
 };
 #[cfg(feature = "extension-module")]
 pub use py_bindings::{
-    geometry_extrude_polygon_py, geometry_generate_primitive_py, geometry_transform_bounds_py,
-    geometry_transform_center_py, geometry_transform_flip_axis_py, geometry_transform_scale_py,
-    geometry_transform_swap_axes_py, geometry_validate_mesh_py, geometry_weld_mesh_py,
+    geometry_extrude_polygon_py, geometry_generate_primitive_py, geometry_simplify_mesh_py,
+    geometry_transform_bounds_py, geometry_transform_center_py, geometry_transform_flip_axis_py,
+    geometry_transform_scale_py, geometry_transform_swap_axes_py, geometry_validate_mesh_py,
+    geometry_weld_mesh_py,
 };
 
 /// Shared mesh container used by the geometry module family.
