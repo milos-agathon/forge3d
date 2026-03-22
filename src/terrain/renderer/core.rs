@@ -108,6 +108,20 @@ pub struct TerrainScene {
     #[cfg(feature = "enable-renderer-config")]
     pub(super) config: Arc<Mutex<crate::render::params::RendererConfig>>,
     pub(super) viewer_heightmap: Option<ViewerTerrainData>,
+    /// TV12: Offline accumulation session state (None when no session active)
+    pub(super) offline_state: Mutex<Option<crate::terrain::accumulation::OfflineAccumulationState>>,
+    /// TV12: Offline accumulation compute pipeline (lazy-created)
+    pub(super) offline_accumulate_pipeline: Mutex<Option<wgpu::ComputePipeline>>,
+    pub(super) offline_accumulate_bind_group_layout: Mutex<Option<wgpu::BindGroupLayout>>,
+    /// TV12: Offline resolve compute pipeline (lazy-created)
+    pub(super) offline_resolve_pipeline: Mutex<Option<wgpu::ComputePipeline>>,
+    pub(super) offline_resolve_bind_group_layout: Mutex<Option<wgpu::BindGroupLayout>>,
+    /// TV12: Offline luminance compute pipeline (lazy-created)
+    pub(super) offline_luminance_pipeline: Mutex<Option<wgpu::ComputePipeline>>,
+    pub(super) offline_luminance_bind_group_layout: Mutex<Option<wgpu::BindGroupLayout>>,
+    /// TV12: Offline tonemap compute pipeline (lazy-created)
+    pub(super) offline_tonemap_pipeline: Mutex<Option<wgpu::ComputePipeline>>,
+    pub(super) offline_tonemap_bind_group_layout: Mutex<Option<wgpu::BindGroupLayout>>,
 }
 
 #[allow(dead_code)]

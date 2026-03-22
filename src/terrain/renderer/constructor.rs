@@ -310,6 +310,16 @@ impl TerrainScene {
             #[cfg(feature = "enable-gpu-instancing")]
             scatter_last_frame_stats: crate::terrain::scatter::TerrainScatterFrameStats::default(),
             viewer_heightmap: None,
+            // TV12: Offline accumulation state (lazy-created on first use)
+            offline_state: Mutex::new(None),
+            offline_accumulate_pipeline: Mutex::new(None),
+            offline_accumulate_bind_group_layout: Mutex::new(None),
+            offline_resolve_pipeline: Mutex::new(None),
+            offline_resolve_bind_group_layout: Mutex::new(None),
+            offline_luminance_pipeline: Mutex::new(None),
+            offline_luminance_bind_group_layout: Mutex::new(None),
+            offline_tonemap_pipeline: Mutex::new(None),
+            offline_tonemap_bind_group_layout: Mutex::new(None),
         })
     }
 

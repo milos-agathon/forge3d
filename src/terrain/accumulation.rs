@@ -235,6 +235,176 @@ impl JitterSequence {
     }
 }
 
+/// TV12: Complete offline accumulation session state.
+///
+/// Owns all GPU resources for an active offline render session.
+/// Only one session can be active per TerrainRenderer at a time.
+/// Stores owned GPU resources — no borrowed Python references.
+pub struct OfflineAccumulationState {
+    /// Ping-pong beauty accumulation textures (Rgba32Float)
+    pub beauty_accum: [Texture; 2],
+    pub beauty_views: [TextureView; 2],
+    /// Which ping-pong buffer is the "current" accumulation (0 or 1)
+    pub current_buffer: usize,
+    /// Albedo accumulation (Rgba32Float, additive)
+    pub albedo_accum: Texture,
+    pub albedo_view: TextureView,
+    /// Normal accumulation (Rgba32Float, additive, renormalized at resolve)
+    pub normal_accum: Texture,
+    pub normal_view: TextureView,
+    /// Depth reference (R32Float, single sample from sample 0)
+    pub depth_ref: Texture,
+    pub depth_ref_view: TextureView,
+    /// Scratch HDR render target for each sample (Rgba16Float)
+    pub scratch_beauty: Texture,
+    pub scratch_beauty_view: TextureView,
+    /// Total accumulated samples so far
+    pub total_samples: u32,
+    /// Jitter sequence for camera offsets
+    pub jitter: JitterSequence,
+    /// Image dimensions
+    pub width: u32,
+    pub height: u32,
+    /// TV12.2: Per-tile mean luminance from previous metrics call (temporal convergence)
+    pub prev_tile_means: Vec<f32>,
+    /// Quarter-res luminance texture for metrics
+    pub luminance_texture: Texture,
+    pub luminance_view: TextureView,
+    pub luminance_width: u32,
+    pub luminance_height: u32,
+}
+
+impl OfflineAccumulationState {
+    /// Create a new offline accumulation session.
+    pub fn new(
+        device: &Device,
+        width: u32,
+        height: u32,
+        max_samples: u32,
+        seed: Option<u64>,
+    ) -> Self {
+        let create_rgba32f = |label: &str| {
+            device.create_texture(&TextureDescriptor {
+                label: Some(label),
+                size: Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba32Float,
+                usage: TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::STORAGE_BINDING
+                    | TextureUsages::COPY_SRC,
+                view_formats: &[],
+            })
+        };
+
+        let create_rgba16f = |label: &str| {
+            device.create_texture(&TextureDescriptor {
+                label: Some(label),
+                size: Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba16Float,
+                usage: TextureUsages::RENDER_ATTACHMENT
+                    | TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_SRC,
+                view_formats: &[],
+            })
+        };
+
+        let beauty_a = create_rgba32f("tv12.beauty_accum.a");
+        let beauty_b = create_rgba32f("tv12.beauty_accum.b");
+        let albedo = create_rgba32f("tv12.albedo_accum");
+        let normal = create_rgba32f("tv12.normal_accum");
+        let depth = device.create_texture(&TextureDescriptor {
+            label: Some("tv12.depth_ref"),
+            size: Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::R32Float,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let scratch = create_rgba16f("tv12.scratch_beauty");
+
+        // Quarter-res luminance for convergence metrics
+        let lum_w = (width + 3) / 4;
+        let lum_h = (height + 3) / 4;
+        let luminance = device.create_texture(&TextureDescriptor {
+            label: Some("tv12.luminance"),
+            size: Extent3d {
+                width: lum_w,
+                height: lum_h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::R32Float,
+            usage: TextureUsages::STORAGE_BINDING
+                | TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        let default_view =
+            |t: &Texture| t.create_view(&TextureViewDescriptor::default());
+
+        Self {
+            beauty_views: [default_view(&beauty_a), default_view(&beauty_b)],
+            beauty_accum: [beauty_a, beauty_b],
+            current_buffer: 0,
+            albedo_view: default_view(&albedo),
+            albedo_accum: albedo,
+            normal_view: default_view(&normal),
+            normal_accum: normal,
+            depth_ref_view: default_view(&depth),
+            depth_ref: depth,
+            scratch_beauty_view: default_view(&scratch),
+            scratch_beauty: scratch,
+            total_samples: 0,
+            jitter: JitterSequence::new(max_samples, seed),
+            width,
+            height,
+            prev_tile_means: Vec::new(),
+            luminance_view: default_view(&luminance),
+            luminance_texture: luminance,
+            luminance_width: lum_w,
+            luminance_height: lum_h,
+        }
+    }
+
+    /// Swap ping-pong buffers after accumulation.
+    pub fn swap_buffers(&mut self) {
+        self.current_buffer = 1 - self.current_buffer;
+    }
+
+    /// Index of the buffer that holds the current accumulated sum.
+    pub fn read_buffer_idx(&self) -> usize {
+        self.current_buffer
+    }
+
+    /// Index of the buffer to write the next accumulation result.
+    pub fn write_buffer_idx(&self) -> usize {
+        1 - self.current_buffer
+    }
+}
+
 /// Apply subpixel jitter to projection matrix
 ///
 /// Shifts the projection by a subpixel offset for accumulation AA.
