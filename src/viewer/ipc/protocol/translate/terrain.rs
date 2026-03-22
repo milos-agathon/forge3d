@@ -1,15 +1,16 @@
 use crate::viewer::viewer_enums::{
-    ViewerCmd, ViewerDenoiseConfig, ViewerDofConfig, ViewerHeightAoConfig, ViewerLensEffectsConfig,
-    ViewerMaterialLayerConfig, ViewerMotionBlurConfig, ViewerSkyConfig, ViewerSunVisConfig,
-    ViewerTerrainScatterBatchConfig, ViewerTerrainScatterLevelConfig, ViewerTonemapConfig,
-    ViewerVectorOverlayConfig, ViewerVolumetricsConfig,
+    ViewerCmd, ViewerDenoiseConfig, ViewerDensityVolumeConfig, ViewerDofConfig,
+    ViewerHeightAoConfig, ViewerLensEffectsConfig, ViewerMaterialLayerConfig,
+    ViewerMotionBlurConfig, ViewerSkyConfig, ViewerSunVisConfig, ViewerTerrainScatterBatchConfig,
+    ViewerTerrainScatterLevelConfig, ViewerTonemapConfig, ViewerVectorOverlayConfig,
+    ViewerVolumetricsConfig,
 };
 
 use super::super::payloads::{
-    IpcDenoiseConfig, IpcDofConfig, IpcHeightAoConfig, IpcLensEffectsConfig,
-    IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcSkyConfig, IpcSunVisConfig,
-    IpcTerrainScatterBatch, IpcTerrainScatterLevel, IpcTonemapConfig, IpcVectorOverlayConfig,
-    IpcVolumetricsConfig,
+    IpcDenoiseConfig, IpcDensityVolumeConfig, IpcDofConfig, IpcHeightAoConfig,
+    IpcLensEffectsConfig, IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcSkyConfig,
+    IpcSunVisConfig, IpcTerrainScatterBatch, IpcTerrainScatterLevel, IpcTonemapConfig,
+    IpcVectorOverlayConfig, IpcVolumetricsConfig,
 };
 use super::super::request::IpcRequest;
 
@@ -232,11 +233,38 @@ fn map_volumetrics(config: &IpcVolumetricsConfig) -> ViewerVolumetricsConfig {
         enabled: config.enabled.unwrap_or(false),
         mode: config.mode.clone().unwrap_or_else(|| "uniform".to_string()),
         density: config.density.unwrap_or(0.01),
+        height_falloff: config.height_falloff.unwrap_or(0.1),
         scattering: config.scattering.unwrap_or(0.5),
         absorption: config.absorption.unwrap_or(0.1),
         light_shafts: config.light_shafts.unwrap_or(false),
         shaft_intensity: config.shaft_intensity.unwrap_or(1.0),
+        steps: config.steps.unwrap_or(32),
         half_res: config.half_res.unwrap_or(false),
+        density_volumes: config
+            .density_volumes
+            .iter()
+            .map(map_density_volume)
+            .collect(),
+    }
+}
+
+fn map_density_volume(config: &IpcDensityVolumeConfig) -> ViewerDensityVolumeConfig {
+    ViewerDensityVolumeConfig {
+        preset: config
+            .preset
+            .clone()
+            .unwrap_or_else(|| "valley_fog".to_string()),
+        center: config.center.unwrap_or([0.0, 0.0, 0.0]),
+        size: config.size.unwrap_or([128.0, 64.0, 128.0]),
+        resolution: config.resolution.unwrap_or([64, 32, 64]),
+        density_scale: config.density_scale.unwrap_or(1.0),
+        edge_softness: config.edge_softness.unwrap_or(0.25),
+        noise_strength: config.noise_strength.unwrap_or(0.35),
+        floor_offset: config.floor_offset.unwrap_or(0.0),
+        ceiling: config.ceiling.unwrap_or(0.4),
+        plume_spread: config.plume_spread.unwrap_or(0.35),
+        wind: config.wind.unwrap_or([0.25, 1.0, 0.0]),
+        seed: config.seed.unwrap_or(0),
     }
 }
 

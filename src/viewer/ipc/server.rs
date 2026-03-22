@@ -11,7 +11,8 @@ use super::protocol::{
     ViewerStats,
 };
 use crate::viewer::event_loop::{
-    get_lasso_state, get_pick_events, take_pending_bundle_load, take_pending_bundle_save,
+    get_lasso_state, get_pick_events, get_terrain_volumetrics_report, take_pending_bundle_load,
+    take_pending_bundle_save,
 };
 use crate::viewer::viewer_enums::ViewerCmd;
 
@@ -185,6 +186,13 @@ where
                                     IpcResponse::with_bundle_request(BundleRequest::load(path))
                                 } else {
                                     IpcResponse::with_bundle_request(BundleRequest::none())
+                                }
+                            }
+                            IpcRequest::GetTerrainVolumetricsReport => {
+                                if let Ok(report) = get_terrain_volumetrics_report().lock() {
+                                    IpcResponse::with_terrain_volumetrics_report(report.clone())
+                                } else {
+                                    IpcResponse::error("Failed to lock terrain volumetrics report")
                                 }
                             }
                             _ => match ipc_request_to_viewer_cmd(&req) {

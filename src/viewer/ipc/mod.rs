@@ -6,7 +6,8 @@ mod protocol;
 mod server;
 
 pub use protocol::{
-    ipc_request_to_viewer_cmd, parse_ipc_request, IpcRequest, IpcResponse, ViewerStats,
+    ipc_request_to_viewer_cmd, parse_ipc_request, IpcRequest, IpcResponse,
+    TerrainVolumetricsReport, TerrainVolumetricsVolumeReport, ViewerStats,
 };
 pub use server::{start_ipc_server, IpcServerConfig, IpcServerHandle};
 

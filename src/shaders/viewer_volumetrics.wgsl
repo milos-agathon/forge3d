@@ -18,6 +18,12 @@ struct VolumetricsUniforms {
     screen_dims: vec4<f32>,
     // terrain_width, min_h, z_scale, h_range (16 bytes)
     terrain_params: vec4<f32>,
+    // active_count, has_density_volumes, pad, pad
+    density_volume_count: vec4<f32>,
+    density_volume_min: array<vec4<f32>, 4>,
+    density_volume_inv_size: array<vec4<f32>, 4>,
+    density_volume_atlas_offset: array<vec4<f32>, 4>,
+    density_volume_atlas_scale: array<vec4<f32>, 4>,
 }
 
 @group(0) @binding(0) var<uniform> u: VolumetricsUniforms;
@@ -26,6 +32,8 @@ struct VolumetricsUniforms {
 @group(0) @binding(3) var depth_tex: texture_depth_2d;
 @group(0) @binding(4) var depth_sampler: sampler;
 @group(0) @binding(5) var heightmap_tex: texture_2d<f32>;
+@group(0) @binding(6) var density_volume_tex: texture_3d<f32>;
+@group(0) @binding(7) var density_volume_sampler: sampler;
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -61,6 +69,8 @@ fn get_steps() -> u32 { return u32(u.shaft_params.z); }
 fn get_mode() -> u32 { return u32(u.shaft_params.w); }
 fn get_near() -> f32 { return u.near_far.x; }
 fn get_far() -> f32 { return u.near_far.y; }
+fn get_density_volume_count() -> u32 { return u32(u.density_volume_count.x); }
+fn has_density_volumes() -> bool { return u.density_volume_count.y > 0.5; }
 
 // Helper to get terrain height at world pos (xz)
 fn get_terrain_height(world_pos: vec3<f32>) -> f32 {
@@ -86,16 +96,42 @@ fn get_terrain_height(world_pos: vec3<f32>) -> f32 {
 }
 
 // Height-based fog density
+fn sample_density_volumes(world_pos: vec3<f32>) -> f32 {
+    let active_count = get_density_volume_count();
+    if active_count == 0u {
+        return 0.0;
+    }
+
+    var accumulated = 0.0;
+    for (var i = 0u; i < active_count; i = i + 1u) {
+        let min_corner = u.density_volume_min[i].xyz;
+        let local = (world_pos - min_corner) * u.density_volume_inv_size[i].xyz;
+        if any(local < vec3<f32>(0.0)) || any(local > vec3<f32>(1.0)) {
+            continue;
+        }
+
+        let atlas_uv = local * u.density_volume_atlas_scale[i].xyz
+            + u.density_volume_atlas_offset[i].xyz;
+        accumulated = accumulated + textureSampleLevel(
+            density_volume_tex,
+            density_volume_sampler,
+            atlas_uv,
+            0.0,
+        ).r;
+    }
+    return accumulated;
+}
+
 fn fog_density_at(world_pos: vec3<f32>) -> f32 {
     let density = get_density();
+    var base_density = 0.0;
     if get_mode() == 0u {
         // Uniform fog
-        return density;
+        base_density = density;
     } else {
         // Height-based exponential falloff
         // Use height relative to terrain center (0.5 * terrain height range)
         // This makes fog denser in valleys and thinner at peaks
-        let terrain_width = u.terrain_params.x;
         let z_scale = u.terrain_params.z;
         let h_range = u.terrain_params.w;
         let terrain_max_height = h_range * z_scale;
@@ -105,8 +141,10 @@ fn fog_density_at(world_pos: vec3<f32>) -> f32 {
         
         // Use height_falloff as a meaningful parameter (0.01 = weak falloff, 1.0 = strong)
         let falloff_rate = get_height_falloff() * 5.0;
-        return density * exp(-height_normalized * falloff_rate);
+        base_density = density * exp(-height_normalized * falloff_rate);
     }
+
+    return base_density + sample_density_volumes(world_pos);
 }
 
 // Henyey-Greenstein phase function for anisotropic scattering
@@ -180,14 +218,18 @@ fn estimate_light_shaft_shadow(world_pos: vec3<f32>, sun_dir: vec3<f32>) -> f32 
 
 // Ray march through fog volume with depth-aware termination
 // Returns fog color (rgb) and fog amount (a) for proper compositing
-fn raymarch_fog_with_depth(ray_origin: vec3<f32>, ray_dir: vec3<f32>, scene_dist: f32) -> vec4<f32> {
+fn raymarch_fog_with_depth(
+    ray_origin: vec3<f32>,
+    ray_dir: vec3<f32>,
+    scene_dist: f32,
+    allow_shadows: bool,
+) -> vec4<f32> {
     let steps = get_steps();
     let sun_dir = normalize(u.sun_direction.xyz);
     let scattering = get_scattering();
     let absorption = get_absorption();
     let shaft_intensity = get_shaft_intensity();
     let sun_intensity = get_sun_intensity();
-    let base_density = get_density();
     
     // Use terrain dimensions for proper scale reference
     let terrain_width = u.terrain_params.x;
@@ -197,7 +239,6 @@ fn raymarch_fog_with_depth(ray_origin: vec3<f32>, ray_dir: vec3<f32>, scene_dist
     
     // Reference scale: typical viewing distance as fraction of terrain
     let reference_dist = terrain_width * 0.5;
-    let density_coeff = base_density * 100.0;
     
     // Limit fog distance to scene geometry
     let fog_max_dist = scene_dist;
@@ -248,14 +289,14 @@ fn raymarch_fog_with_depth(ray_origin: vec3<f32>, ray_dir: vec3<f32>, scene_dist
         let pos = ray_origin + ray_dir * t;
         
         // Get local fog density with distance normalization
-        let local_density = fog_density_at(pos) * density_coeff / max(reference_dist, 100.0);
+        let local_density = fog_density_at(pos) * 100.0 / max(reference_dist, 100.0);
         
         if local_density < 0.00001 {
             continue;
         }
         
         // Light shaft shadow estimation (terrain occlusion check)
-        let shadow = estimate_light_shaft_shadow(pos, sun_dir);
+        let shadow = select(1.0, estimate_light_shaft_shadow(pos, sun_dir), allow_shadows);
         
         // ===== 10/10 GOD RAYS =====
         // Multi-component light accumulation for rich, realistic beams
@@ -332,7 +373,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     
     // Get density - if zero, just pass through (baseline preservation)
     let density = get_density();
-    if density < 0.0001 {
+    if density < 0.0001 && !has_density_volumes() {
         return vec4<f32>(scene_color, 1.0);
     }
     
@@ -367,10 +408,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     
     // Use raymarching for proper volumetric effects (especially light shafts)
     let light_shafts = get_light_shafts_enabled();
+    let density_volumes = has_density_volumes();
     
-    if light_shafts {
+    if light_shafts || density_volumes {
         // Full volumetric raymarching with light shafts
-        let vol_result = raymarch_fog_with_depth(camera_pos, ray_dir, scene_dist);
+        let vol_result = raymarch_fog_with_depth(
+            camera_pos,
+            ray_dir,
+            scene_dist,
+            light_shafts || density_volumes,
+        );
         let fog_color = vol_result.rgb;
         let fog_amount = vol_result.a;
         

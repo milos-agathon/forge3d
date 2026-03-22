@@ -4,6 +4,14 @@
 use std::sync::Arc;
 use wgpu;
 
+use crate::viewer::event_loop::update_terrain_volumetrics_report;
+use crate::viewer::ipc::TerrainVolumetricsReport;
+use crate::viewer::terrain::volume_density::{
+    self, build_density_volume_atlas_data, DensityVolumeAtlasGpu, TerrainVolumeContext,
+};
+
+const MAX_DENSITY_VOLUMES: usize = volume_density::MAX_DENSITY_VOLUMES;
+
 /// Uniforms for volumetrics shader (must match viewer_volumetrics.wgsl)
 /// Note: vec3 in WGSL has 16-byte alignment, so we use [f32; 4] for vec3 fields
 #[repr(C)]
@@ -17,6 +25,11 @@ pub struct VolumetricsUniforms {
     pub shaft_params: [f32; 4], // shaft_intensity, light_shafts_enabled, steps, mode; offset 128
     pub screen_dims: [f32; 4],  // width, height, pad, pad; offset 144
     pub terrain_params: [f32; 4], // terrain_size, min_h, h_scale, pad; offset 160
+    pub density_volume_count: [f32; 4],
+    pub density_volume_min: [[f32; 4]; MAX_DENSITY_VOLUMES],
+    pub density_volume_inv_size: [[f32; 4]; MAX_DENSITY_VOLUMES],
+    pub density_volume_atlas_offset: [[f32; 4]; MAX_DENSITY_VOLUMES],
+    pub density_volume_atlas_scale: [[f32; 4]; MAX_DENSITY_VOLUMES],
 }
 
 /// Volumetric fog pass manager
@@ -27,6 +40,11 @@ pub struct VolumetricsPass {
     uniform_buffer: wgpu::Buffer,
     color_sampler: wgpu::Sampler,
     depth_sampler: wgpu::Sampler,
+    fallback_density_volume_texture: Option<wgpu::Texture>,
+    fallback_density_volume_view: Option<wgpu::TextureView>,
+    density_volume_sampler: wgpu::Sampler,
+    density_volume_atlas: Option<DensityVolumeAtlasGpu>,
+    last_report: TerrainVolumetricsReport,
 }
 
 impl VolumetricsPass {
@@ -100,6 +118,23 @@ impl VolumetricsPass {
                     },
                     count: None,
                 },
+                // Optional 3D density volume atlas
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D3,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
 
@@ -171,6 +206,17 @@ impl VolumetricsPass {
             ..Default::default()
         });
 
+        let density_volume_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("volumetrics.density_volume_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
         Self {
             device,
             pipeline,
@@ -178,18 +224,128 @@ impl VolumetricsPass {
             uniform_buffer,
             color_sampler,
             depth_sampler,
+            fallback_density_volume_texture: None,
+            fallback_density_volume_view: None,
+            density_volume_sampler,
+            density_volume_atlas: None,
+            last_report: TerrainVolumetricsReport {
+                memory_budget_bytes: volume_density::DENSITY_VOLUME_MEMORY_BUDGET_BYTES,
+                ..TerrainVolumetricsReport::default()
+            },
         }
+    }
+
+    fn ensure_fallback_density_volume(&mut self) {
+        if self.fallback_density_volume_view.is_some() {
+            return;
+        }
+
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain_viewer.density_volume_fallback"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D3,
+            format: wgpu::TextureFormat::R16Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D3),
+            ..Default::default()
+        });
+        self.fallback_density_volume_texture = Some(texture);
+        self.fallback_density_volume_view = Some(view);
+    }
+
+    fn default_report(
+        &self,
+        config: &super::pbr_renderer::VolumetricsConfig,
+    ) -> TerrainVolumetricsReport {
+        TerrainVolumetricsReport {
+            memory_budget_bytes: volume_density::DENSITY_VOLUME_MEMORY_BUDGET_BYTES,
+            raymarch_steps: config.steps,
+            half_res: config.half_res,
+            ..TerrainVolumetricsReport::default()
+        }
+    }
+
+    fn ensure_density_volume_atlas(
+        &mut self,
+        queue: &wgpu::Queue,
+        heightmap: &[f32],
+        height_dims: (u32, u32),
+        terrain_revision: u64,
+        terrain_params: [f32; 4],
+        config: &super::pbr_renderer::VolumetricsConfig,
+    ) {
+        if config.density_volumes.is_empty() {
+            self.density_volume_atlas = None;
+            self.last_report = self.default_report(config);
+            return;
+        }
+
+        let context = TerrainVolumeContext {
+            heightmap,
+            height_dims,
+            terrain_width: terrain_params[0],
+            domain: (terrain_params[1], terrain_params[1] + terrain_params[3]),
+            z_scale: terrain_params[2],
+            terrain_revision,
+        };
+
+        let Some(data) = build_density_volume_atlas_data(context, &config.density_volumes) else {
+            self.density_volume_atlas = None;
+            self.last_report = self.default_report(config);
+            return;
+        };
+
+        let needs_upload = self
+            .density_volume_atlas
+            .as_ref()
+            .map(|atlas| atlas.fingerprint != data.fingerprint)
+            .unwrap_or(true);
+
+        if needs_upload {
+            self.density_volume_atlas = Some(DensityVolumeAtlasGpu::upload(
+                &self.device,
+                queue,
+                data,
+                config.steps,
+                config.half_res,
+            ));
+        } else if let Some(atlas) = self.density_volume_atlas.as_mut() {
+            atlas.report.raymarch_steps = config.steps;
+            atlas.report.half_res = config.half_res;
+        }
+
+        self.last_report = self
+            .density_volume_atlas
+            .as_ref()
+            .map(|atlas| atlas.report.clone())
+            .unwrap_or_else(|| self.default_report(config));
+    }
+
+    pub fn current_report(&self) -> TerrainVolumetricsReport {
+        self.last_report.clone()
     }
 
     /// Apply volumetric fog to the scene
     #[allow(clippy::too_many_arguments)]
     pub fn apply(
-        &self,
+        &mut self,
         encoder: &mut wgpu::CommandEncoder,
         queue: &wgpu::Queue,
         color_view: &wgpu::TextureView,
         depth_view: &wgpu::TextureView,
         heightmap_view: &wgpu::TextureView,
+        heightmap: &[f32],
+        height_dims: (u32, u32),
+        terrain_revision: u64,
         output_view: &wgpu::TextureView,
         width: u32,
         height: u32,
@@ -208,6 +364,50 @@ impl VolumetricsPass {
             "height" => 1u32,
             _ => 1u32,
         };
+
+        self.ensure_fallback_density_volume();
+        self.ensure_density_volume_atlas(
+            queue,
+            heightmap,
+            height_dims,
+            terrain_revision,
+            terrain_params,
+            config,
+        );
+
+        let mut density_volume_min = [[0.0; 4]; MAX_DENSITY_VOLUMES];
+        let mut density_volume_inv_size = [[0.0; 4]; MAX_DENSITY_VOLUMES];
+        let mut density_volume_atlas_offset = [[0.0; 4]; MAX_DENSITY_VOLUMES];
+        let mut density_volume_atlas_scale = [[0.0; 4]; MAX_DENSITY_VOLUMES];
+
+        if let Some(atlas) = self.density_volume_atlas.as_ref() {
+            for (index, metadata) in atlas.metadata.iter().enumerate() {
+                density_volume_min[index] = [
+                    metadata.min_corner[0],
+                    metadata.min_corner[1],
+                    metadata.min_corner[2],
+                    0.0,
+                ];
+                density_volume_inv_size[index] = [
+                    metadata.inv_size[0],
+                    metadata.inv_size[1],
+                    metadata.inv_size[2],
+                    0.0,
+                ];
+                density_volume_atlas_offset[index] = [
+                    metadata.atlas_offset[0],
+                    metadata.atlas_offset[1],
+                    metadata.atlas_offset[2],
+                    0.0,
+                ];
+                density_volume_atlas_scale[index] = [
+                    metadata.atlas_scale[0],
+                    metadata.atlas_scale[1],
+                    metadata.atlas_scale[2],
+                    0.0,
+                ];
+            }
+        }
 
         let uniforms = VolumetricsUniforms {
             inv_view_proj,
@@ -228,9 +428,34 @@ impl VolumetricsPass {
             ],
             screen_dims: [width as f32, height as f32, 0.0, 0.0],
             terrain_params,
+            density_volume_count: [
+                self.last_report.active_volume_count as f32,
+                if self.last_report.active_volume_count > 0 {
+                    1.0
+                } else {
+                    0.0
+                },
+                0.0,
+                0.0,
+            ],
+            density_volume_min,
+            density_volume_inv_size,
+            density_volume_atlas_offset,
+            density_volume_atlas_scale,
         };
 
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
+
+        let density_volume_view = self
+            .density_volume_atlas
+            .as_ref()
+            .map(|atlas| &atlas.view)
+            .unwrap_or_else(|| self.fallback_density_volume_view.as_ref().unwrap());
+        let density_volume_sampler = self
+            .density_volume_atlas
+            .as_ref()
+            .map(|atlas| &atlas.sampler)
+            .unwrap_or(&self.density_volume_sampler);
 
         // Create bind group
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -261,6 +486,14 @@ impl VolumetricsPass {
                     binding: 5,
                     resource: wgpu::BindingResource::TextureView(heightmap_view),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(density_volume_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::Sampler(density_volume_sampler),
+                },
             ],
         });
 
@@ -283,5 +516,7 @@ impl VolumetricsPass {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
         pass.draw(0..3, 0..1);
+
+        update_terrain_volumetrics_report(self.current_report());
     }
 }

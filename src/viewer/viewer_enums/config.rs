@@ -115,15 +115,35 @@ pub struct ViewerDenoiseConfig {
 
 /// M6: Volumetrics configuration for viewer
 #[derive(Debug, Clone, Default)]
+pub struct ViewerDensityVolumeConfig {
+    pub preset: String,
+    pub center: [f32; 3],
+    pub size: [f32; 3],
+    pub resolution: [u32; 3],
+    pub density_scale: f32,
+    pub edge_softness: f32,
+    pub noise_strength: f32,
+    pub floor_offset: f32,
+    pub ceiling: f32,
+    pub plume_spread: f32,
+    pub wind: [f32; 3],
+    pub seed: u32,
+}
+
+/// M6: Volumetrics configuration for viewer
+#[derive(Debug, Clone, Default)]
 pub struct ViewerVolumetricsConfig {
     pub enabled: bool,
     pub mode: String,
     pub density: f32,
+    pub height_falloff: f32,
     pub scattering: f32,
     pub absorption: f32,
     pub light_shafts: bool,
     pub shaft_intensity: f32,
+    pub steps: u32,
     pub half_res: bool,
+    pub density_volumes: Vec<ViewerDensityVolumeConfig>,
 }
 
 /// M6: Sky configuration for viewer
