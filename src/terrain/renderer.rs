@@ -43,6 +43,7 @@ mod resources;
 #[cfg(feature = "enable-gpu-instancing")]
 mod scatter;
 mod shadows;
+pub mod offline;
 mod uniforms;
 mod upload;
 mod viewer;

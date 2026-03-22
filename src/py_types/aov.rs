@@ -158,6 +158,24 @@ impl AovFrame {
         }
     }
 
+    /// TV12: Create an empty AovFrame (no textures) for offline resolve placeholder.
+    pub(crate) fn new_empty(
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        Self {
+            device,
+            queue,
+            albedo_texture: None,
+            normal_texture: None,
+            depth_texture: None,
+            width,
+            height,
+        }
+    }
+
     fn read_texture_rgba_f32(&self, texture: &wgpu::Texture) -> anyhow::Result<Vec<f32>> {
         crate::core::hdr::read_hdr_texture(
             &self.device,
