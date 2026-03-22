@@ -98,10 +98,28 @@ impl TerrainScene {
             contents: bytemuck::cast_slice(&probe_ssbo_init),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
+        let reflection_probe_grid_uniform_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.reflection_probes.grid_uniform_buffer"),
+                contents: bytemuck::bytes_of(
+                    &crate::terrain::probes::ProbeGridUniformsGpu::disabled(),
+                ),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+        let reflection_probe_ssbo_init = [crate::terrain::probes::GpuReflectionProbeData::zeroed()];
+        let reflection_probe_ssbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("terrain.reflection_probes.ssbo"),
+            contents: bytemuck::cast_slice(&reflection_probe_ssbo_init),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
         let probe_grid_uniform_alloc_bytes =
             std::mem::size_of::<crate::terrain::probes::ProbeGridUniformsGpu>() as u64;
         let probe_ssbo_alloc_bytes =
             std::mem::size_of::<crate::terrain::probes::GpuProbeData>() as u64;
+        let reflection_probe_grid_uniform_alloc_bytes =
+            std::mem::size_of::<crate::terrain::probes::ProbeGridUniformsGpu>() as u64;
+        let reflection_probe_ssbo_alloc_bytes =
+            std::mem::size_of::<crate::terrain::probes::GpuReflectionProbeData>() as u64;
 
         let pipeline = Self::create_render_pipeline(
             device.as_ref(),
@@ -202,6 +220,8 @@ impl TerrainScene {
         let tracker = crate::core::memory_tracker::global_tracker();
         tracker.track_buffer_allocation(probe_grid_uniform_alloc_bytes, false);
         tracker.track_buffer_allocation(probe_ssbo_alloc_bytes, false);
+        tracker.track_buffer_allocation(reflection_probe_grid_uniform_alloc_bytes, false);
+        tracker.track_buffer_allocation(reflection_probe_ssbo_alloc_bytes, false);
 
         let pipeline_cache = PipelineCache {
             sample_count: 1,
@@ -289,13 +309,22 @@ impl TerrainScene {
             material_layer_uniform_buffer,
             probe_grid_uniform_buffer,
             probe_ssbo,
+            reflection_probe_grid_uniform_buffer,
+            reflection_probe_ssbo,
             probe_grid_uniform_alloc_bytes,
             probe_ssbo_alloc_bytes,
+            reflection_probe_grid_uniform_alloc_bytes,
+            reflection_probe_ssbo_alloc_bytes,
             probe_grid_uniform_bytes: 0,
             probe_ssbo_bytes: 0,
+            reflection_probe_grid_uniform_bytes: 0,
+            reflection_probe_ssbo_bytes: 0,
             probe_cache_key: None,
             probe_cached_grid: None,
             probe_cached_data: Vec::new(),
+            reflection_probe_cache_key: None,
+            reflection_probe_cached_grid: None,
+            reflection_probe_cached_data: Vec::new(),
             #[cfg(feature = "enable-renderer-config")]
             config: Arc::new(Mutex::new(crate::render::params::RendererConfig::default())),
             aov_pipeline: Mutex::new(None),

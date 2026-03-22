@@ -344,6 +344,45 @@ class ProbeSettings:
 
 
 @dataclass
+class ReflectionProbeSettings:
+    """TV5.3: Local reflection probe configuration for terrain scenes."""
+
+    enabled: bool = False
+    grid_dims: Tuple[int, int] = (4, 4)
+    origin: Optional[Tuple[float, float]] = None
+    spacing: Optional[Tuple[float, float]] = None
+    height_offset: float = 5.0
+    ray_count: int = 16
+    fallback_blend_distance: Optional[float] = None
+    sky_color: Tuple[float, float, float] = (0.6, 0.75, 1.0)
+    sky_intensity: float = 1.0
+    ground_color: Tuple[float, float, float] = (0.22, 0.18, 0.14)
+    strength: float = 1.0
+
+    def __post_init__(self) -> None:
+        if self.enabled:
+            cols, rows = self.grid_dims
+            if cols < 1 or rows < 1:
+                raise ValueError("grid_dims must be >= (1, 1)")
+            if cols * rows > 256:
+                raise ValueError("grid_dims product must be <= 256 (reflection probe count limit)")
+            if self.ray_count < 1:
+                raise ValueError("ray_count must be >= 1")
+            if self.spacing is not None and (self.spacing[0] <= 0.0 or self.spacing[1] <= 0.0):
+                raise ValueError("spacing must be > 0 when provided")
+            if self.fallback_blend_distance is not None and self.fallback_blend_distance < 0.0:
+                raise ValueError("fallback_blend_distance must be >= 0")
+            if len(self.sky_color) != 3:
+                raise ValueError("sky_color must be (R, G, B)")
+            if len(self.ground_color) != 3:
+                raise ValueError("ground_color must be (R, G, B)")
+            if self.sky_intensity < 0.0:
+                raise ValueError("sky_intensity must be >= 0")
+            if not 0.0 <= self.strength <= 1.0:
+                raise ValueError("strength must be in [0, 1]")
+
+
+@dataclass
 class DetailSettings:
     """P6: Micro-detail configuration for close-range surface enhancement.
     
@@ -1396,6 +1435,8 @@ class TerrainRenderParams:
     sun_visibility: Optional[SunVisibilitySettings] = None
     # TV5: Local irradiance probes (defaults to disabled for backward compatibility)
     probes: Optional[ProbeSettings] = None
+    # TV5.3: Local reflection probes (defaults to disabled for backward compatibility)
+    reflection_probes: Optional[ReflectionProbeSettings] = None
     # P6.1: Color space correctness toggles (defaults to False for P5 compatibility)
     colormap_srgb: bool = False  # Use Rgba8UnormSrgb for colormap texture (correct sampling)
     output_srgb_eotf: bool = False  # Use exact linear_to_srgb() instead of pow-gamma
@@ -1453,6 +1494,9 @@ class TerrainRenderParams:
         # TV5: Default probes to disabled if not provided
         if self.probes is None:
             self.probes = ProbeSettings()
+        # TV5.3: Default reflection probes to disabled if not provided
+        if self.reflection_probes is None:
+            self.reflection_probes = ReflectionProbeSettings()
         # M2: Default bloom to disabled if not provided
         if self.bloom is None:
             self.bloom = BloomSettings()
@@ -1632,6 +1676,7 @@ def make_terrain_params_config(
     height_ao: Optional[HeightAoSettings] = None,
     sun_visibility: Optional[SunVisibilitySettings] = None,
     probes: Optional[ProbeSettings] = None,
+    reflection_probes: Optional[ReflectionProbeSettings] = None,
     aa_samples: int = 1,  # M1: Accumulation AA sample count (1 = no AA)
     aa_seed: Optional[int] = None,  # M1: Accumulation AA seed for determinism
     bloom: Optional[BloomSettings] = None,  # M2: Bloom post-processing
@@ -1777,6 +1822,7 @@ def make_terrain_params_config(
         height_ao=height_ao,
         sun_visibility=sun_visibility,
         probes=probes,
+        reflection_probes=reflection_probes,
         camera_mode=str(camera_mode),
         debug_mode=int(debug_mode),
         aa_samples=int(aa_samples),
@@ -1807,6 +1853,7 @@ __all__ = [
     "HeightAoSettings",
     "SunVisibilitySettings",
     "ProbeSettings",
+    "ReflectionProbeSettings",
     "DetailSettings",
     "MaterialNoiseSettings",
     "MaterialLayerSettings",

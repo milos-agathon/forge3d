@@ -8,7 +8,12 @@ import pytest
 
 import forge3d as f3d
 from _terrain_runtime import terrain_rendering_available
-from forge3d.terrain_params import PomSettings, ProbeSettings, make_terrain_params_config
+from forge3d.terrain_params import (
+    PomSettings,
+    ProbeSettings,
+    ReflectionProbeSettings,
+    make_terrain_params_config,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -73,6 +78,7 @@ def _render_probe_scene(
     overlay,
     *,
     probes: ProbeSettings | None,
+    reflection_probes: ReflectionProbeSettings | None = None,
     debug_mode: int = 0,
     cam_phi_deg: float = 138.0,
     cam_theta_deg: float = 58.0,
@@ -101,6 +107,7 @@ def _render_probe_scene(
         overlays=[overlay],
         pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),
         probes=probes,
+        reflection_probes=reflection_probes,
     )
     native_params = f3d.TerrainRenderParams(params)
     frame = renderer.render_terrain_pbr_pom(
@@ -146,6 +153,17 @@ def test_probe_settings_validation_probe_limit() -> None:
 def test_probe_settings_single_probe_grid() -> None:
     settings = ProbeSettings(enabled=True, grid_dims=(1, 1))
     assert settings.grid_dims == (1, 1)
+
+
+def test_reflection_probe_settings_defaults_disabled() -> None:
+    settings = ReflectionProbeSettings()
+    assert settings.enabled is False
+    assert settings.grid_dims == (4, 4)
+
+
+def test_reflection_probe_settings_validation_probe_limit() -> None:
+    with pytest.raises(ValueError, match="reflection probe count limit"):
+        ReflectionProbeSettings(enabled=True, grid_dims=(17, 17))
 
 
 @pytest.fixture(scope="module")
@@ -335,4 +353,127 @@ class TestTerrainProbeLighting:
         )
 
         assert _mean_abs_diff(base, sky_changed) > 0.20
+        assert _mean_abs_diff(base, dims_changed) > 0.20
+
+    def test_reflection_probe_fallback_pixel_identical(self, probe_render_env) -> None:
+        renderer, material_set, ibl, heightmap, overlay = probe_render_env
+        baseline = _render_probe_scene(
+            renderer,
+            material_set,
+            ibl,
+            heightmap,
+            overlay,
+            probes=ProbeSettings(enabled=False),
+            reflection_probes=None,
+        )
+        disabled = _render_probe_scene(
+            renderer,
+            material_set,
+            ibl,
+            heightmap,
+            overlay,
+            probes=ProbeSettings(enabled=False),
+            reflection_probes=ReflectionProbeSettings(enabled=False),
+        )
+        max_diff = int(np.max(np.abs(baseline.astype(np.int16) - disabled.astype(np.int16))))
+        assert max_diff <= 1, f"Disabled reflection probes regressed baseline output by {max_diff} LSB"
+
+    def test_reflection_probe_memory_tracked(self, probe_render_env) -> None:
+        renderer, material_set, ibl, heightmap, overlay = probe_render_env
+        _render_probe_scene(
+            renderer,
+            material_set,
+            ibl,
+            heightmap,
+            overlay,
+            probes=ProbeSettings(enabled=False),
+            reflection_probes=ReflectionProbeSettings(enabled=True, grid_dims=(4, 4), ray_count=9),
+        )
+        report = renderer.get_probe_memory_report()
+        assert report["reflection_probe_count"] == 16
+        assert report["reflection_grid_uniform_bytes"] == 48
+        assert report["reflection_probe_ssbo_bytes"] == 16 * 112
+        assert report["reflection_total_bytes"] == 48 + 16 * 112
+
+    def test_reflection_probe_valley_darker(self, probe_render_env) -> None:
+        renderer, material_set, ibl, heightmap, overlay = probe_render_env
+        reflection_debug = _render_probe_scene(
+            renderer,
+            material_set,
+            ibl,
+            heightmap,
+            overlay,
+            probes=ProbeSettings(enabled=False),
+            reflection_probes=ReflectionProbeSettings(enabled=True, grid_dims=(6, 6), ray_count=16),
+            debug_mode=52,
+        )
+        valley = _mean_luminance(reflection_debug[96:128, 96:128])
+        ridge = _mean_luminance(reflection_debug[150:182, 96:128])
+        assert ridge > valley * 1.02, (
+            f"Expected exposed ridge reflection probe > valley, got ridge={ridge:.3f}, valley={valley:.3f}"
+        )
+
+    def test_reflection_probe_out_of_bounds_weight_zero(self, probe_render_env) -> None:
+        renderer, material_set, ibl, heightmap, overlay = probe_render_env
+        weight = _render_probe_scene(
+            renderer,
+            material_set,
+            ibl,
+            heightmap,
+            overlay,
+            probes=ProbeSettings(enabled=False),
+            reflection_probes=ReflectionProbeSettings(
+                enabled=True,
+                grid_dims=(2, 2),
+                origin=(-0.15, -0.15),
+                spacing=(0.3, 0.3),
+                fallback_blend_distance=0.18,
+                ray_count=9,
+            ),
+            debug_mode=53,
+        )
+        center = float(np.mean(weight[92:132, 92:132, 0]))
+        corner = float(np.mean(weight[0:24, 0:24, 0]))
+        assert center > 20.0, f"Expected non-zero reflection probe coverage near center, got {center:.2f}"
+        assert corner < 5.0, f"Expected out-of-bounds reflection weight to fall back to zero, got {corner:.2f}"
+
+    def test_reflection_probe_invalidation_triggers(self, probe_render_env) -> None:
+        renderer, material_set, ibl, heightmap, overlay = probe_render_env
+        base = _render_probe_scene(
+            renderer,
+            material_set,
+            ibl,
+            heightmap,
+            overlay,
+            probes=ProbeSettings(enabled=False),
+            reflection_probes=ReflectionProbeSettings(enabled=True, grid_dims=(5, 5), ray_count=9),
+            debug_mode=52,
+        )
+        ground_changed = _render_probe_scene(
+            renderer,
+            material_set,
+            ibl,
+            heightmap,
+            overlay,
+            probes=ProbeSettings(enabled=False),
+            reflection_probes=ReflectionProbeSettings(
+                enabled=True,
+                grid_dims=(5, 5),
+                ray_count=9,
+                ground_color=(0.45, 0.30, 0.18),
+            ),
+            debug_mode=52,
+        )
+        dims_changed = _render_probe_scene(
+            renderer,
+            material_set,
+            ibl,
+            heightmap,
+            overlay,
+            probes=ProbeSettings(enabled=False),
+            reflection_probes=ReflectionProbeSettings(enabled=True, grid_dims=(3, 3), ray_count=9),
+            debug_mode=52,
+        )
+
+        assert _mean_abs_diff(base, ground_changed) > 0.20
         assert _mean_abs_diff(base, dims_changed) > 0.20
