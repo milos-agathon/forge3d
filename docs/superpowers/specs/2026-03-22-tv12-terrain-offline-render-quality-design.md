@@ -122,7 +122,8 @@ Seven methods on `TerrainRenderer`:
 
 ### 3.6 `tonemap_offline_hdr(hdr_frame: HdrFrame) → Frame`
 
-- Runs `postprocess_tonemap.wgsl` on the HDR input using the tonemap settings from the cached params (operator, exposure, white point, gamma, LUT if configured).
+- Applies the **same terrain filmic tonemap curve** used by the live `terrain_pbr_pom.wgsl` path (`tonemap_filmic_terrain()`), not the generic `postprocess_tonemap.wgsl` operators (ACES/Reinhard/etc). This ensures offline output has the same look as the live path. Implemented as a new `tonemap_terrain_offline.wgsl` fullscreen compute shader that reads Rgba16Float HDR input, applies `tonemap_filmic_terrain()` + `linear_to_srgb()`, and writes to Rgba8UnormSrgb output. The terrain filmic curve parameters are extracted from the existing shader to avoid duplication.
+- If the user has configured a `TonemapSettings` operator override (e.g., ACES), the offline path respects it by dispatching the appropriate curve. But the **default** is the terrain filmic curve, matching the live path.
 - Writes to Rgba8UnormSrgb texture → `Frame`.
 - Calls `end_offline_accumulation()` internally to clean up session state.
 - The returned `Frame` is a normal Frame: `save()` writes PNG, `to_numpy()` returns uint8 RGBA.
@@ -208,7 +209,7 @@ This measures whether adding more samples changes the result, not whether the im
 
 ### 5.3 Terrain shader HDR output mode
 
-Add a uniform flag `offline_hdr_output: u32` to `TerrainUniforms` (or pack into an existing padding slot). When set to 1, the fragment shader's final output path changes from:
+Pack `offline_hdr_output` into the existing `OverlayUniforms.params5.w` slot (currently hardcoded to `0.0` at `upload.rs:89`). This avoids changing the `TerrainUniforms` struct layout. The Rust side sets `params5[3] = 1.0` when rendering in offline HDR mode. The WGSL side reads `overlay_uniforms.params5.w`. When set to `> 0.5`, the fragment shader's final output path changes from:
 
 ```wgsl
 let tonemapped = tonemap_filmic_terrain(shaded);
@@ -500,6 +501,7 @@ The following are **explicitly not part of TV12**:
 | `src/shaders/offline_accumulate.wgsl` | New: additive ping-pong accumulation compute shader |
 | `src/shaders/offline_resolve.wgsl` | New: divide-by-N resolve (Rgba32Float→Rgba16Float) + normal renormalization |
 | `src/shaders/offline_luminance.wgsl` | New: quarter-res luminance extraction for convergence metrics |
+| `src/shaders/tonemap_terrain_offline.wgsl` | New: terrain filmic tonemap as fullscreen compute (matches live path) |
 | `src/shaders/terrain_pbr_pom.wgsl` | Read `offline_hdr_output` flag; skip tonemap+sRGB when set |
 | `src/py_types/hdr_frame.rs` | New: `HdrFrame` type with `to_numpy_f32()` and EXR save |
 | `src/py_types/mod.rs` | Register `hdr_frame` module |

@@ -34,6 +34,7 @@
 | `src/shaders/offline_accumulate.wgsl` | New: ping-pong additive accumulation compute shader |
 | `src/shaders/offline_resolve.wgsl` | New: divide-by-N resolve + normal renormalization |
 | `src/shaders/offline_luminance.wgsl` | New: quarter-res luminance for convergence metrics |
+| `src/shaders/tonemap_terrain_offline.wgsl` | New: terrain filmic tonemap as fullscreen compute (matches live path) |
 | `src/terrain/renderer/upload.rs` | Pack `offline_hdr_output` flag into overlay uniforms `params5[3]` |
 | `src/shaders/terrain_pbr_pom.wgsl` | Read `offline_hdr_output` flag; skip tonemap+sRGB when set |
 | `tests/test_tv12_offline_quality.py` | All TV12 tests |
@@ -1094,7 +1095,7 @@ Key implementation notes:
 - `read_accumulation_metrics`: Dispatch `offline_luminance.wgsl` to produce quarter-res luminance map, read back via staging buffer, compute per-tile mean luminance on CPU, compare to `prev_tile_means` for **temporal convergence** (not spatial variance), update `prev_tile_means`.
 - `resolve_offline_hdr`: Dispatch `offline_resolve` compute shader for beauty (Rgba32Float→Rgba16Float)/albedo/normal (with renormalization), copy depth reference. Return `(HdrFrame, AovFrame)` — both own their textures independently.
 - `upload_hdr_frame`: Create Rgba16Float texture, write numpy data via `queue.write_texture`.
-- `tonemap_offline_hdr`: Run existing `postprocess_tonemap.wgsl` on the HdrFrame input, write to Rgba8UnormSrgb texture, create Frame, call `end_offline_accumulation()` internally.
+- `tonemap_offline_hdr`: Run `tonemap_terrain_offline.wgsl` (new shader replicating the terrain filmic curve from `terrain_pbr_pom.wgsl`) on the HdrFrame input, write to Rgba8UnormSrgb texture, create Frame, call `end_offline_accumulation()` internally. Uses the **same tonemap curve** as the live path by default so offline output matches the live look. If the user has configured a `TonemapSettings` override, respect it.
 - `end_offline_accumulation`: Release all offline session resources, set `offline_session_active = false`. Idempotent (no-op when no session active). Called by `tonemap_offline_hdr` automatically, but also available explicitly for cleanup on error or HDR-only export.
 
 Register the module in `src/terrain/renderer/mod.rs`: add `mod offline;`.
