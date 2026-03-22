@@ -53,7 +53,7 @@ begin_offline_accumulation(params, heightmap, material_set, env_maps)
 
 ## 3. Rust GPU Primitives
 
-Six methods on `TerrainRenderer`:
+Seven methods on `TerrainRenderer`:
 
 ### 3.1 `begin_offline_accumulation(params, heightmap, material_set, env_maps)`
 
@@ -65,7 +65,7 @@ Six methods on `TerrainRenderer`:
   - **Depth reference:** One R32Float texture (written once on sample 0, not accumulated).
   - **Per-sample luminance scratch:** One Rgba16Float texture (same size as beauty scratch) used by the variance compute shader to write per-pixel luminance. Read back as part of tile variance computation on CPU.
 - Creates `JitterSequence` from `aa_seed` in params (R2 sequence). Pre-generates `max_samples` offsets when `adaptive=True`, or `aa_samples` offsets when `adaptive=False`. The existing implementation wraps via modulo, so this is safe.
-- Caches all render inputs (material_set, env_maps, heightmap, decoded params) so subsequent calls to `accumulate_batch` do not re-pass them. Same `TerrainRenderParams` type used by `render_terrain_pbr_pom()`.
+- **Caches owned GPU resources**, not borrowed Python references. Specifically: copies the decoded `DecodedTerrainSettings` struct, uploads and owns the heightmap texture + view, creates and owns IBL bind group, creates and owns material bind groups. The Python-side `PyReadonlyArray`, `MaterialSet`, and `IBL` objects are consumed during `begin_offline_accumulation` and not referenced again — all subsequent `accumulate_batch` calls use the cached GPU resources. Same `TerrainRenderParams` type used by `render_terrain_pbr_pom()`.
 - Resets sample count to 0. Clears accumulation textures via `encoder.clear_texture()` (newly allocated textures are zero-initialized by wgpu, but resized/reused textures require explicit clearing).
 - Sets internal flag `offline_session_active = true`.
 
@@ -86,17 +86,20 @@ Six methods on `TerrainRenderer`:
 ### 3.3 `read_accumulation_metrics(target_variance: f32) → OfflineMetrics`
 
 - Errors if no offline session is active.
-- Reads back the current beauty accumulation buffer via a small staging buffer.
-- **CPU-side tile variance computation** (not GPU atomics — WGSL has no `atomicAdd` on `f32`):
-  - Divides the resolved image into tiles of `tile_size × tile_size` pixels.
-  - Per tile: computes luminance variance using Welford's algorithm over the tile's pixels from the current accumulated average (sum / total_samples).
-  - This readback is the resolved average at the current sample count, not the full per-sample history. The cost is one staging buffer copy (~33KB for tile stats, computed from a downsampled luminance map).
+- **Measures temporal convergence, not spatial detail.** The metric tracks how much the per-tile mean luminance changes between consecutive calls, not how much variance exists within a tile. A sharp cliff edge that is fully converged will read as "converged" even though it has high spatial contrast.
+- Implementation:
+  1. Resolve current accumulation to a temporary quarter-resolution luminance buffer: `lum = 0.2126*R + 0.7152*G + 0.0722*B` over `(accum / total_samples)`. This uses a trivial `offline_luminance.wgsl` compute shader writing to a quarter-res R32Float texture.
+  2. Read back the quarter-res luminance via staging buffer. Cost: `(W/4) * (H/4) * 4` bytes (e.g., ~130KB for 1920x1080).
+  3. On CPU: divide into tiles, compute per-tile mean luminance.
+  4. Compare to the **previous call's per-tile means** (stored in `OfflineAccumulationState.prev_tile_means: Vec<f32>`). Per-tile temporal delta: `|current_mean - prev_mean| / max(current_mean, 1e-6)`.
+  5. A tile is "converged" when its temporal delta < `target_variance`.
+  6. Update `prev_tile_means` with current values for the next call.
 - Returns `OfflineMetrics`:
   - `total_samples: u32`
-  - `mean_variance: f32` — average tile variance
-  - `p95_variance: f32` — 95th percentile tile variance
-  - `max_tile_variance: f32` — worst tile (diagnostic only, not used in stopping rule)
-  - `converged_tile_ratio: f32` — fraction of tiles with variance < `target_variance`
+  - `mean_delta: f32` — average per-tile temporal delta
+  - `p95_delta: f32` — 95th percentile temporal delta
+  - `max_tile_delta: f32` — worst tile (diagnostic only, not used in stopping rule)
+  - `converged_tile_ratio: f32` — fraction of tiles with temporal delta < `target_variance`
 
 ### 3.4 `resolve_offline_hdr() → (HdrFrame, AovFrame)`
 
@@ -121,8 +124,16 @@ Six methods on `TerrainRenderer`:
 
 - Runs `postprocess_tonemap.wgsl` on the HDR input using the tonemap settings from the cached params (operator, exposure, white point, gamma, LUT if configured).
 - Writes to Rgba8UnormSrgb texture → `Frame`.
-- Cleans up offline session state: releases accumulation buffers, clears cached render inputs, sets `offline_session_active = false`. The `HdrFrame` passed in (and any previously returned `HdrFrame` from `resolve_offline_hdr()`) survives teardown because it owns its texture independently.
+- Calls `end_offline_accumulation()` internally to clean up session state.
 - The returned `Frame` is a normal Frame: `save()` writes PNG, `to_numpy()` returns uint8 RGBA.
+
+### 3.7 `end_offline_accumulation()`
+
+- Releases all offline session resources: accumulation buffers, cached render inputs, prev_tile_means.
+- Sets `offline_session_active = false`.
+- **Idempotent**: calling it when no session is active is a no-op.
+- This method exists so Python can clean up if it errors during denoise/upload or intentionally stops at HDR/EXR export without tonemapping. `tonemap_offline_hdr()` calls this internally, so the normal path does not require an explicit call.
+- The `HdrFrame` and `AovFrame` returned by `resolve_offline_hdr()` survive teardown because they own their textures independently.
 
 ---
 
@@ -167,18 +178,33 @@ Operation: next = prev + current  (additive; division happens at resolve)
 
 Ping-pong between two textures avoids the ReadWrite storage limitation noted in the existing shader comments.
 
-### 5.2 Tile variance computation (CPU-side)
+### 5.2 `offline_luminance.wgsl` — quarter-res luminance extraction
 
-No GPU variance shader. WGSL does not support `atomicAdd` on `f32`, and the workarounds (float-as-uint bit tricks, workgroup reductions) add complexity without meaningful benefit for an offline quality path.
+Compute shader (8x8 workgroups). Reads the current accumulation buffer, divides by sample count, computes luminance, writes to a quarter-resolution R32Float texture.
 
-Instead, `read_accumulation_metrics()` performs tile variance on the CPU:
+```
+Input:   accumulated (texture_2d<f32>)   — Rgba32Float accumulation buffer
+Output:  luminance (texture_storage_2d<r32float, write>) — quarter-res
+Uniform: { width: u32, height: u32, sample_count: u32, _pad: u32 }
 
-1. Resolve the current accumulation buffer to a temporary HDR average (divide by N).
-2. Read back a **downsampled luminance map** via a staging buffer — either the full resolved average (already needed for the final resolve) or a quarter-resolution luminance computed by a trivial `offline_luminance.wgsl` compute shader that writes `lum = 0.2126*R + 0.7152*G + 0.0722*B` per pixel to a quarter-res R32Float texture.
-3. On the CPU (Rust side), divide the luminance map into tiles and compute per-tile variance using Welford's algorithm.
-4. Return `OfflineMetrics` with sorted tile variances for p95 and ratio computation.
+Per output pixel (at quarter res):
+  avg over 4x4 source pixels of: (accum / sample_count)
+  lum = 0.2126*R + 0.7152*G + 0.0722*B
+  write lum
+```
 
-This keeps the GPU path simple and the convergence logic auditable.
+### 5.3 Convergence metric computation (CPU-side)
+
+`read_accumulation_metrics()` measures **temporal convergence** — how much per-tile mean luminance changes between consecutive calls:
+
+1. Dispatch `offline_luminance.wgsl` to produce quarter-res luminance map.
+2. Read back via staging buffer. Cost: `(W/4) * (H/4) * 4` bytes (~130KB for 1920x1080).
+3. On CPU: divide into tiles, compute per-tile mean luminance.
+4. Compare to `prev_tile_means` (stored in `OfflineAccumulationState`). Per-tile temporal delta: `|current - prev| / max(current, 1e-6)`.
+5. A tile is "converged" when its temporal delta < `target_variance`.
+6. Store current means as `prev_tile_means` for next call.
+
+This measures whether adding more samples changes the result, not whether the image has spatial detail. A sharp cliff edge that is fully converged reads as "converged" (low temporal delta). A noisy flat patch reads as "not converged" (high temporal delta) until it stabilizes.
 
 ### 5.3 Terrain shader HDR output mode
 
@@ -290,9 +316,9 @@ The offline controller logs which denoiser was actually used in `OfflineResult.m
 class OfflineProgress:
     samples_so_far: int
     max_samples: int
-    mean_variance: float
-    p95_variance: float
-    converged_ratio: float
+    mean_delta: float       # Average per-tile temporal delta
+    p95_delta: float        # 95th percentile temporal delta
+    converged_ratio: float  # Fraction of tiles below target_variance
     elapsed_ms: float
 
 @dataclass
@@ -319,64 +345,69 @@ def render_offline(
 ```python
 def render_offline(...):
     renderer.begin_offline_accumulation(params, heightmap, material_set, env_maps)
+    try:
+        total = settings.max_samples if settings.adaptive else params.aa_samples
+        rendered = 0
 
-    total = settings.max_samples if settings.adaptive else params.aa_samples
-    rendered = 0
+        while rendered < total:
+            batch = min(settings.batch_size, total - rendered)
+            result = renderer.accumulate_batch(batch)
+            rendered = result.total_samples
 
-    while rendered < total:
-        batch = min(settings.batch_size, total - rendered)
-        result = renderer.accumulate_batch(batch)
-        rendered = result.total_samples
+            # Single metrics readback per iteration (avoid redundant GPU staging copies)
+            metrics = None
+            if progress_callback or (settings.adaptive and rendered >= settings.min_samples):
+                metrics = renderer.read_accumulation_metrics(settings.target_variance)
 
-        # Single metrics readback per iteration (avoid redundant GPU staging copies)
-        metrics = None
-        if progress_callback or (settings.adaptive and rendered >= settings.min_samples):
-            metrics = renderer.read_accumulation_metrics(settings.target_variance)
+            if progress_callback and metrics is not None:
+                progress_callback(OfflineProgress(
+                    samples_so_far=rendered, max_samples=total,
+                    mean_delta=metrics.mean_delta,
+                    p95_delta=metrics.p95_delta,
+                    converged_ratio=metrics.converged_tile_ratio,
+                    elapsed_ms=result.batch_time_ms,
+                ))
 
-        if progress_callback and metrics is not None:
-            progress_callback(OfflineProgress(
-                samples_so_far=rendered, max_samples=total,
-                mean_variance=metrics.mean_variance,
-                p95_variance=metrics.p95_variance,
-                converged_ratio=metrics.converged_tile_ratio,
-                elapsed_ms=result.batch_time_ms,
-            ))
+            if settings.adaptive and rendered >= settings.min_samples and metrics is not None:
+                if (metrics.converged_tile_ratio >= settings.convergence_ratio
+                        or metrics.p95_delta < settings.target_variance):
+                    break
 
-        if settings.adaptive and rendered >= settings.min_samples and metrics is not None:
-            if (metrics.converged_tile_ratio >= settings.convergence_ratio
-                    or metrics.p95_variance < settings.target_variance):
-                break
+        hdr_frame, aov_frame = renderer.resolve_offline_hdr()
 
-    hdr_frame, aov_frame = renderer.resolve_offline_hdr()
+        # Denoise between resolve and tonemap (operates in linear HDR space)
+        denoiser_used = "none"
+        if params.denoise.enabled and params.denoise.method != "none":
+            method = params.denoise.method
+            if method == "oidn" and not oidn_available():
+                warnings.warn("oidn package not installed; falling back to atrous denoiser")
+                method = "atrous"
 
-    # Denoise between resolve and tonemap (operates in linear HDR space)
-    denoiser_used = "none"
-    if params.denoise.enabled and params.denoise.method != "none":
-        method = params.denoise.method
-        if method == "oidn" and not oidn_available():
-            warnings.warn("oidn package not installed; falling back to atrous denoiser")
-            method = "atrous"
+            beauty_hdr = hdr_frame.to_numpy_f32()[:, :, :3]
+            albedo_np = aov_frame.albedo()   # (H, W, 3) float32
+            normal_np = aov_frame.normal()   # (H, W, 3) float32
 
-        beauty_hdr = hdr_frame.to_numpy_f32()[:, :, :3]
-        albedo_np = aov_frame.albedo()   # (H, W, 3) float32
-        normal_np = aov_frame.normal()   # (H, W, 3) float32
+            if method == "oidn":
+                denoised = oidn_denoise(beauty_hdr, albedo=albedo_np, normal=normal_np)
+                denoiser_used = "oidn"
+            elif method == "atrous":
+                denoised = atrous_denoise(
+                    beauty_hdr, albedo=albedo_np, normal=normal_np,
+                    iterations=params.denoise.iterations,
+                    sigma_color=params.denoise.sigma_color,
+                    sigma_normal=params.denoise.sigma_normal,
+                )
+                denoiser_used = "atrous"
 
-        if method == "oidn":
-            denoised = oidn_denoise(beauty_hdr, albedo=albedo_np, normal=normal_np)
-            denoiser_used = "oidn"
-        elif method == "atrous":
-            denoised = atrous_denoise(
-                beauty_hdr, albedo=albedo_np, normal=normal_np,
-                iterations=params.denoise.iterations,
-                sigma_color=params.denoise.sigma_color,
-                sigma_normal=params.denoise.sigma_normal,
-            )
-            denoiser_used = "atrous"
+            # Re-upload denoised HDR to GPU for tonemapping
+            hdr_frame = renderer.upload_hdr_frame(denoised, hdr_frame.size)
 
-        # Re-upload denoised HDR to GPU for tonemapping
-        hdr_frame = renderer.upload_hdr_frame(denoised, hdr_frame.size)
+        frame = renderer.tonemap_offline_hdr(hdr_frame)
+        # tonemap_offline_hdr calls end_offline_accumulation() internally
 
-    frame = renderer.tonemap_offline_hdr(hdr_frame)
+    except Exception:
+        renderer.end_offline_accumulation()  # Guaranteed cleanup on error
+        raise
 
     return OfflineResult(
         frame=frame,
@@ -385,7 +416,7 @@ def render_offline(...):
         metadata={
             "samples_used": rendered,
             "denoiser_used": denoiser_used,
-            "final_variance": metrics.p95_variance if metrics else None,
+            "final_p95_delta": metrics.p95_delta if metrics else None,
             "converged_ratio": metrics.converged_tile_ratio if metrics else None,
         },
     )
@@ -395,14 +426,16 @@ def render_offline(...):
 
 ## 9. Adaptive Stopping Rule
 
+The metric is **temporal convergence**: how much the per-tile mean luminance changes between consecutive `read_accumulation_metrics()` calls. This measures whether adding more samples changes the result, not whether the image has spatial detail.
+
 The default stopping policy uses **two conditions (OR)**:
 
-1. `converged_tile_ratio >= convergence_ratio` (default 0.95) — at least 95% of tiles have per-tile variance below `target_variance`.
-2. `p95_variance < target_variance` — the 95th percentile tile variance is below threshold.
+1. `converged_tile_ratio >= convergence_ratio` (default 0.95) — at least 95% of tiles have temporal delta below `target_variance`.
+2. `p95_delta < target_variance` — the 95th percentile temporal delta is below threshold.
 
 Either condition being true stops accumulation. This prevents one hot tile from pinning the entire render to `max_samples`.
 
-`max_tile_variance` is reported in `OfflineMetrics` as a diagnostic but does not participate in the stopping decision.
+`max_tile_delta` is reported in `OfflineMetrics` as a diagnostic but does not participate in the stopping decision.
 
 ---
 
@@ -456,14 +489,23 @@ The following are **explicitly not part of TV12**:
 
 | File | Change |
 |------|--------|
-| `src/terrain/accumulation.rs` | Extend with ping-pong buffer pair, CPU tile variance computation, session state flag |
-| `src/terrain/renderer/py_api.rs` | Add 6 new `#[pymethods]`: begin/accumulate/metrics/resolve/upload_hdr/tonemap |
-| `src/terrain/renderer/core.rs` | Add offline state to `TerrainScene`, HDR render target, session guards |
+| `src/terrain/accumulation.rs` | Extend with `OfflineAccumulationState` (ping-pong buffers, cached GPU resources, `prev_tile_means`) |
+| `src/terrain/renderer/offline.rs` | New: all 7 offline `#[pymethods]` on `TerrainRenderer` |
+| `src/terrain/renderer/core.rs` | Add offline state fields to `TerrainScene`, HDR pipeline cache entry, session guards |
+| `src/terrain/renderer/mod.rs` | Register `offline` submodule |
+| `src/terrain/renderer/draw/setup/pipeline.rs` | Support `Rgba16Float` render target for offline HDR output |
+| `src/terrain/renderer/pipeline_cache.rs` | Add HDR pipeline variant keyed by `(color_format, sample_count)` |
+| `src/terrain/renderer/upload.rs` | Pack `offline_hdr_output` flag into overlay uniforms `params5[3]` |
+| `src/terrain/render_params/decode_postfx.rs` | Add `DenoiseMethodNative::Oidn` variant; map `"oidn"` string |
 | `src/shaders/offline_accumulate.wgsl` | New: additive ping-pong accumulation compute shader |
 | `src/shaders/offline_resolve.wgsl` | New: divide-by-N resolve (Rgba32Float→Rgba16Float) + normal renormalization |
-| `src/shaders/terrain_pbr_pom.wgsl` | Add `offline_hdr_output` uniform flag; skip tonemap+sRGB when set |
-| `src/py_types/frame.rs` | Add `HdrFrame` type with `to_numpy_f32()` |
+| `src/shaders/offline_luminance.wgsl` | New: quarter-res luminance extraction for convergence metrics |
+| `src/shaders/terrain_pbr_pom.wgsl` | Read `offline_hdr_output` flag; skip tonemap+sRGB when set |
+| `src/py_types/hdr_frame.rs` | New: `HdrFrame` type with `to_numpy_f32()` and EXR save |
+| `src/py_types/mod.rs` | Register `hdr_frame` module |
+| `src/py_module/classes.rs` | Add `m.add_class::<HdrFrame>()?;` registration |
 | `python/forge3d/__init__.py` | Export `HdrFrame`, `OfflineQualitySettings` |
+| `python/forge3d/__init__.pyi` | Add `HdrFrame` type stub |
 | `python/forge3d/terrain_params.py` | Add `OfflineQualitySettings` dataclass; extend `DenoiseSettings.method` with `'oidn'` |
 | `python/forge3d/offline.py` | New: `render_offline()` controller, `OfflineResult`, `OfflineProgress` |
 | `python/forge3d/denoise_oidn.py` | New: `oidn_available()`, `oidn_denoise()` |
