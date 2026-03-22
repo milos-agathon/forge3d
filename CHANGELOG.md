@@ -6,6 +6,17 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-03-22
+
+### Added
+- Implemented Epic TV10: Terrain Subsurface Materials with per-layer subsurface controls for snow, rock, and wetness terrain layers.
+- Added terrain-side subsurface shader wiring, native uniform/config plumbing, a dedicated TV10 workflow doc page, a real-DEM example, and dedicated runtime plus golden-image coverage.
+
+### Changed
+- Published the TV10 workflow in the main docs navigation and API reference.
+- Extended the terrain golden CI lane to run the new TV10 goldens and hardened the TV10 real-DEM example test to skip on unsupported hosted adapters.
+- Bumped the package version to `1.17.0`.
+
 ## [1.16.0] - 2026-03-22
 
 ### Added

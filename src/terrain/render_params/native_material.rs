@@ -41,16 +41,22 @@ pub struct MaterialLayerSettingsNative {
     pub snow_aspect_influence: f32,
     pub snow_color: [f32; 3],
     pub snow_roughness: f32,
+    pub snow_subsurface_strength: f32,
+    pub snow_subsurface_color: [f32; 3],
     // Rock layer
     pub rock_enabled: bool,
     pub rock_slope_min: f32,   // degrees
     pub rock_slope_blend: f32, // degrees
     pub rock_color: [f32; 3],
     pub rock_roughness: f32,
+    pub rock_subsurface_strength: f32,
+    pub rock_subsurface_color: [f32; 3],
     // Wetness layer
     pub wetness_enabled: bool,
     pub wetness_strength: f32,
     pub wetness_slope_influence: f32,
+    pub wetness_subsurface_strength: f32,
+    pub wetness_subsurface_color: [f32; 3],
     // TV4: Procedural variation controls shared across terrain material layers.
     pub variation: MaterialNoiseSettingsNative,
 }
@@ -67,14 +73,20 @@ impl Default for MaterialLayerSettingsNative {
             snow_aspect_influence: 0.3,
             snow_color: [0.95, 0.95, 0.98],
             snow_roughness: 0.4,
+            snow_subsurface_strength: 0.35,
+            snow_subsurface_color: [0.78, 0.88, 0.98],
             rock_enabled: false,
             rock_slope_min: 45.0,
             rock_slope_blend: 10.0,
             rock_color: [0.35, 0.32, 0.28],
             rock_roughness: 0.8,
+            rock_subsurface_strength: 0.0,
+            rock_subsurface_color: [0.42, 0.36, 0.30],
             wetness_enabled: false,
             wetness_strength: 0.3,
             wetness_slope_influence: 0.5,
+            wetness_subsurface_strength: 0.12,
+            wetness_subsurface_color: [0.40, 0.28, 0.18],
             variation: MaterialNoiseSettingsNative::default(),
         }
     }

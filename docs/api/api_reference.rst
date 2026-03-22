@@ -108,5 +108,6 @@ Related Pages
 * :doc:`../terrain-tv2-aovs`
 * :doc:`../terrain-tv3-scatter`
 * :doc:`../terrain-tv4-material-variation`
+* :doc:`../terrain-tv10-subsurface`
 * :doc:`../tutorials/index`
 * :doc:`../gallery/index`

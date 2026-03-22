@@ -486,6 +486,10 @@ class MaterialLayerSettings:
     TV4 extends this with bounded procedural variation controls. Those controls live
     under ``variation`` and default to zero amplitudes so the existing material
     layering output remains unchanged until explicitly enabled.
+
+    TV10 adds terrain-scale subsurface controls for the snow, rock, and wetness
+    layers. The controls stay per-layer and opt-in via layer enablement, while
+    explicit ``*_subsurface_strength=0.0`` restores the pre-TV10 response.
     """
 
     # Snow layer settings
@@ -497,6 +501,8 @@ class MaterialLayerSettings:
     snow_aspect_influence: float = 0.3  # 0=no aspect effect, 1=full (south-facing less snow)
     snow_color: Tuple[float, float, float] = (0.95, 0.95, 0.98)  # Snow albedo
     snow_roughness: float = 0.4  # Snow surface roughness
+    snow_subsurface_strength: float = 0.35  # TV10: terrain-scale SSS strength
+    snow_subsurface_color: Tuple[float, float, float] = (0.78, 0.88, 0.98)  # TV10: scatter tint
     
     # Rock layer settings
     rock_enabled: bool = False
@@ -504,11 +510,15 @@ class MaterialLayerSettings:
     rock_slope_blend: float = 10.0  # Slope blend range (degrees)
     rock_color: Tuple[float, float, float] = (0.35, 0.32, 0.28)  # Rock albedo
     rock_roughness: float = 0.8  # Rock surface roughness
+    rock_subsurface_strength: float = 0.0  # TV10: rock stays zero by default
+    rock_subsurface_color: Tuple[float, float, float] = (0.42, 0.36, 0.30)  # TV10: warm earth tint
     
     # Wetness layer settings (darkening in concave areas)
     wetness_enabled: bool = False
     wetness_strength: float = 0.3  # Darkening strength (0-1)
     wetness_slope_influence: float = 0.5  # How much slope affects wetness
+    wetness_subsurface_strength: float = 0.12  # TV10: damp soil / vegetation fill
+    wetness_subsurface_color: Tuple[float, float, float] = (0.40, 0.28, 0.18)  # TV10: warm wet-earth tint
     # TV4: Procedural variation controls shared across snow/rock/wetness.
     variation: MaterialNoiseSettings = field(default_factory=MaterialNoiseSettings)
 
@@ -525,7 +535,11 @@ class MaterialLayerSettings:
             raise ValueError("snow_color must be (R, G, B)")
         if not 0.0 <= self.snow_roughness <= 1.0:
             raise ValueError("snow_roughness must be in [0, 1]")
-        
+        if not 0.0 <= self.snow_subsurface_strength <= 1.0:
+            raise ValueError("snow_subsurface_strength must be in [0, 1]")
+        if len(self.snow_subsurface_color) != 3:
+            raise ValueError("snow_subsurface_color must be (R, G, B)")
+
         if not 0.0 <= self.rock_slope_min <= 90.0:
             raise ValueError("rock_slope_min must be in [0, 90]")
         if self.rock_slope_blend <= 0.0:
@@ -534,11 +548,19 @@ class MaterialLayerSettings:
             raise ValueError("rock_color must be (R, G, B)")
         if not 0.0 <= self.rock_roughness <= 1.0:
             raise ValueError("rock_roughness must be in [0, 1]")
-        
+        if not 0.0 <= self.rock_subsurface_strength <= 1.0:
+            raise ValueError("rock_subsurface_strength must be in [0, 1]")
+        if len(self.rock_subsurface_color) != 3:
+            raise ValueError("rock_subsurface_color must be (R, G, B)")
+
         if not 0.0 <= self.wetness_strength <= 1.0:
             raise ValueError("wetness_strength must be in [0, 1]")
         if not 0.0 <= self.wetness_slope_influence <= 1.0:
             raise ValueError("wetness_slope_influence must be in [0, 1]")
+        if not 0.0 <= self.wetness_subsurface_strength <= 1.0:
+            raise ValueError("wetness_subsurface_strength must be in [0, 1]")
+        if len(self.wetness_subsurface_color) != 3:
+            raise ValueError("wetness_subsurface_color must be (R, G, B)")
         if not isinstance(self.variation, MaterialNoiseSettings):
             raise ValueError("variation must be a MaterialNoiseSettings instance")
 

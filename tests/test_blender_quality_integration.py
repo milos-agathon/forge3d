@@ -191,6 +191,7 @@ class TestPresetConfigurations:
         )
         assert params.materials.snow_enabled is True
         assert params.materials.snow_altitude_min == 2500.0
+        assert params.materials.snow_subsurface_strength > 0.0
         assert params.tonemap.temperature == 7000.0
 
     def test_cinematic_preset(self):

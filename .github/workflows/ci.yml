@@ -43,6 +43,7 @@ jobs:
               - 'python/forge3d/terrain*.py'
               - 'examples/terrain*.py'
               - 'tests/test_terrain_visual_goldens.py'
+              - 'tests/test_terrain_tv10_goldens.py'
               - 'tests/golden/terrain/**'
 
   # ============================================================================
@@ -305,7 +306,7 @@ jobs:
           FORGE3D_NO_BOOTSTRAP: '1'
           FORGE3D_RUN_TERRAIN_GOLDENS: '1'
           FORGE3D_TERRAIN_GOLDEN_ARTIFACT_DIR: tests/artifacts/terrain_goldens
-        run: pytest tests/test_terrain_visual_goldens.py -v --tb=short
+        run: pytest tests/test_terrain_visual_goldens.py tests/test_terrain_tv10_goldens.py -v --tb=short
 
       - name: Skip unsupported terrain golden lane
         if: steps.terrain-goldens-probe.outcome != 'success'

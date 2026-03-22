@@ -443,12 +443,18 @@ struct MaterialLayerUniforms {
     snow_params1: vec4<f32>,
     // Snow color (RGB) + padding
     snow_color: vec4<f32>,
+    // TV10: snow subsurface tint (RGB) + strength
+    snow_subsurface: vec4<f32>,
     // Rock layer: vec4(slope_min_rad, slope_blend_rad, roughness, enabled)
     rock_params: vec4<f32>,
     // Rock color (RGB) + padding
     rock_color: vec4<f32>,
+    // TV10: rock subsurface tint (RGB) + strength
+    rock_subsurface: vec4<f32>,
     // Wetness layer: vec4(strength, slope_influence, enabled, _pad)
     wetness_params: vec4<f32>,
+    // TV10: wetness subsurface tint (RGB) + strength
+    wetness_subsurface: vec4<f32>,
     // TV4: vec4(macro_scale, detail_scale, octaves, variation_enabled)
     variation_params0: vec4<f32>,
     // TV4 per-layer amplitudes: vec4(macro_amp, detail_amp, _pad, _pad)
@@ -467,6 +473,17 @@ struct TerrainMaterialNoise {
     rock_detail: f32,
     wetness_macro: f32,
     wetness_detail: f32,
+}
+
+struct TerrainLayerWeights {
+    snow: f32,
+    rock: f32,
+    wetness: f32,
+}
+
+struct TerrainSubsurfaceState {
+    color: vec3<f32>,
+    strength: f32,
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -506,6 +523,14 @@ fn default_material_noise() -> TerrainMaterialNoise {
     return TerrainMaterialNoise(0.5, 0.5, 0.5, 0.5, 0.5, 0.5);
 }
 
+fn zero_terrain_layer_weights() -> TerrainLayerWeights {
+    return TerrainLayerWeights(0.0, 0.0, 0.0);
+}
+
+fn zero_terrain_subsurface_state() -> TerrainSubsurfaceState {
+    return TerrainSubsurfaceState(vec3<f32>(0.0), 0.0);
+}
+
 fn sample_material_noise(terrain_uv: vec2<f32>, height_norm: f32) -> TerrainMaterialNoise {
     let macro_scale = max(material_layer_uniforms.variation_params0.x, 0.001);
     let detail_scale = max(material_layer_uniforms.variation_params0.y, 0.001);
@@ -540,17 +565,14 @@ fn apply_material_variation(
     return clamp(base_weight + (macro_delta + detail_delta) * transition_boost, 0.0, 1.0);
 }
 
-/// M4: Apply snow layer blending based on altitude, slope, and aspect
-fn apply_snow_layer(
-    base_albedo: vec3<f32>,
-    base_roughness: f32,
+fn compute_snow_layer_weight(
     world_pos: vec3<f32>,
     terrain_attrs: vec4<f32>,
     material_noise: TerrainMaterialNoise,
-) -> vec3<f32> {
+) -> f32 {
     let snow_enabled = material_layer_uniforms.snow_params1.z;
     if (snow_enabled < 0.5) {
-        return base_albedo;
+        return 0.0;
     }
     
     let altitude = world_pos.z;
@@ -577,29 +599,22 @@ fn apply_snow_layer(
     let aspect_factor = mix(1.0, 0.5 + 0.5 * south_factor, aspect_influence);
     
     // Combined snow weight
-    let snow_weight = apply_material_variation(
+    return apply_material_variation(
         altitude_factor * slope_factor * aspect_factor,
         material_noise.snow_macro,
         material_noise.snow_detail,
         material_layer_uniforms.snow_variation.x,
         material_layer_uniforms.snow_variation.y,
     );
-    
-    // Blend to snow color
-    let snow_color = material_layer_uniforms.snow_color.rgb;
-    return mix(base_albedo, snow_color, snow_weight);
 }
 
-/// M4: Apply rock layer blending based on slope
-fn apply_rock_layer(
-    base_albedo: vec3<f32>,
-    base_roughness: f32,
+fn compute_rock_layer_weight(
     terrain_attrs: vec4<f32>,
     material_noise: TerrainMaterialNoise,
-) -> vec3<f32> {
+) -> f32 {
     let rock_enabled = material_layer_uniforms.rock_params.w;
     if (rock_enabled < 0.5) {
-        return base_albedo;
+        return 0.0;
     }
     
     let slope = terrain_attrs.x;
@@ -607,49 +622,116 @@ fn apply_rock_layer(
     // Rock exposed on steep slopes
     let slope_min = material_layer_uniforms.rock_params.x;
     let slope_blend = material_layer_uniforms.rock_params.y;
-    let rock_weight = apply_material_variation(
+    return apply_material_variation(
         clamp((slope - slope_min) / max(slope_blend, 0.001), 0.0, 1.0),
         material_noise.rock_macro,
         material_noise.rock_detail,
         material_layer_uniforms.rock_variation.x,
         material_layer_uniforms.rock_variation.y,
     );
-    
-    let rock_color = material_layer_uniforms.rock_color.rgb;
-    return mix(base_albedo, rock_color, rock_weight);
 }
 
-/// M4: Apply wetness darkening based on slope (concavity proxy)
-fn apply_wetness_layer(
-    base_albedo: vec3<f32>,
+fn compute_wetness_layer_weight(
     terrain_attrs: vec4<f32>,
     material_noise: TerrainMaterialNoise,
-) -> vec3<f32> {
+) -> f32 {
     let wetness_enabled = material_layer_uniforms.wetness_params.z;
     if (wetness_enabled < 0.5) {
-        return base_albedo;
+        return 0.0;
     }
     
     let slope = terrain_attrs.x;
-    let curvature = terrain_attrs.z;
-    
     // Wetness accumulates in flat, low areas (simplified: low slope = wet)
-    let strength = material_layer_uniforms.wetness_params.x;
     let slope_influence = material_layer_uniforms.wetness_params.y;
     
     // Flat areas (low slope) are wetter
     let flat_factor = 1.0 - clamp(slope / (3.14159265 * 0.25), 0.0, 1.0);
-    let wetness_factor = apply_material_variation(
+    return apply_material_variation(
         flat_factor * slope_influence,
         material_noise.wetness_macro,
         material_noise.wetness_detail,
         material_layer_uniforms.wetness_variation.x,
         material_layer_uniforms.wetness_variation.y,
     );
-    
-    // Darken by wetness
-    let darkening = 1.0 - wetness_factor * strength;
+}
+
+fn compute_terrain_layer_weights(
+    world_pos: vec3<f32>,
+    terrain_attrs: vec4<f32>,
+    material_noise: TerrainMaterialNoise,
+) -> TerrainLayerWeights {
+    return TerrainLayerWeights(
+        compute_snow_layer_weight(world_pos, terrain_attrs, material_noise),
+        compute_rock_layer_weight(terrain_attrs, material_noise),
+        compute_wetness_layer_weight(terrain_attrs, material_noise),
+    );
+}
+
+/// M4: Apply snow layer blending using the precomputed snow weight.
+fn apply_snow_layer(base_albedo: vec3<f32>, snow_weight: f32) -> vec3<f32> {
+    return mix(base_albedo, material_layer_uniforms.snow_color.rgb, snow_weight);
+}
+
+/// M4: Apply rock layer blending using the precomputed rock weight.
+fn apply_rock_layer(base_albedo: vec3<f32>, rock_weight: f32) -> vec3<f32> {
+    return mix(base_albedo, material_layer_uniforms.rock_color.rgb, rock_weight);
+}
+
+/// M4: Apply wetness darkening using the precomputed wetness weight.
+fn apply_wetness_layer(base_albedo: vec3<f32>, wetness_weight: f32) -> vec3<f32> {
+    let darkening = 1.0 - wetness_weight * material_layer_uniforms.wetness_params.x;
     return base_albedo * darkening;
+}
+
+fn compute_terrain_subsurface_state(layer_weights: TerrainLayerWeights) -> TerrainSubsurfaceState {
+    let snow_contrib = layer_weights.snow * material_layer_uniforms.snow_subsurface.w;
+    let rock_contrib = layer_weights.rock * material_layer_uniforms.rock_subsurface.w;
+    let wetness_contrib = layer_weights.wetness * material_layer_uniforms.wetness_subsurface.w;
+    let total_strength = snow_contrib + rock_contrib + wetness_contrib;
+    if (total_strength <= 0.0001) {
+        return zero_terrain_subsurface_state();
+    }
+
+    let scatter_color = (
+        material_layer_uniforms.snow_subsurface.rgb * snow_contrib +
+        material_layer_uniforms.rock_subsurface.rgb * rock_contrib +
+        material_layer_uniforms.wetness_subsurface.rgb * wetness_contrib
+    ) / total_strength;
+
+    return TerrainSubsurfaceState(scatter_color, clamp(total_strength, 0.0, 1.0));
+}
+
+fn evaluate_terrain_subsurface(
+    state: TerrainSubsurfaceState,
+    normal: vec3<f32>,
+    view_dir: vec3<f32>,
+    light_dir: vec3<f32>,
+    terrain_attrs: vec4<f32>,
+    albedo: vec3<f32>,
+) -> vec3<f32> {
+    if (state.strength <= 0.0001) {
+        return vec3<f32>(0.0);
+    }
+
+    let n_dot_l = dot(normal, light_dir);
+    let lambert = max(n_dot_l, 0.0);
+    let n_dot_v = max(dot(normal, view_dir), 0.0);
+    let wrap = mix(0.0, 0.55, state.strength);
+    let wrapped_lambert = clamp((n_dot_l + wrap) / (1.0 + wrap), 0.0, 1.0);
+    let wrap_diffusion = max(wrapped_lambert - lambert, 0.0);
+    let backscatter = pow(clamp(dot(view_dir, -light_dir), 0.0, 1.0), 3.0) * (1.0 - lambert);
+    let rim = pow(1.0 - n_dot_v, 2.0);
+    let curvature = clamp(
+        (length(dpdx(normal)) + length(dpdy(normal))) * 2.25 +
+        terrain_attrs.z / (3.14159265 * 2.0),
+        0.0,
+        1.0,
+    );
+    let diffusion = wrap_diffusion * (0.70 + 0.30 * curvature)
+        + backscatter * (0.20 + 0.30 * curvature)
+        + rim * 0.12 * state.strength;
+    let scatter_tint = mix(albedo, state.color, 0.75);
+    return scatter_tint * diffusion * state.strength;
 }
 
 // P4: Sample reflection texture with wave-based UV distortion
@@ -2105,6 +2187,7 @@ fn calculate_pbr_brdf_split_roughness(
 fn terrain_to_shading_params(
     roughness: f32,
     metallic: f32,
+    subsurface: f32,
     brdf_model: u32,  // Runtime flag: which BRDF model to use (default BRDF_COOK_TORRANCE_GGX)
 ) -> ShadingParamsGPU {
     var params: ShadingParamsGPU;
@@ -2113,7 +2196,7 @@ fn terrain_to_shading_params(
     params.roughness = roughness;
     params.sheen = 0.0;        // Terrain doesn't use sheen
     params.clearcoat = 0.0;    // Terrain doesn't use clearcoat
-    params.subsurface = 0.0;   // Terrain doesn't use subsurface
+    params.subsurface = subsurface;
     params.anisotropy = 0.0;   // Terrain doesn't use anisotropy
     return params;
 }
@@ -2793,25 +2876,28 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     // Applied after base material but before lighting calculations.
     // When all layers disabled, this is a no-op preserving baseline output.
     // ──────────────────────────────────────────────────────────────────────────
+    var terrain_attrs = vec4<f32>(0.0);
+    var terrain_layer_weights = zero_terrain_layer_weights();
+    var terrain_subsurface = zero_terrain_subsurface_state();
     if (!is_water) {
         // Compute terrain attributes from stable geometric normal
-        let terrain_attrs = compute_terrain_attributes(base_normal);
+        terrain_attrs = compute_terrain_attributes(base_normal);
         var material_noise = default_material_noise();
         if (material_layer_uniforms.variation_params0.w > 0.5) {
             material_noise = sample_material_noise(uv, height_norm);
         }
-        
-        // Apply material layers in order: wetness (darkening) -> rock -> snow
-        // Order matters: snow on top, then rock, then wetness darkening at base
-        albedo = apply_wetness_layer(albedo, terrain_attrs, material_noise);
-        albedo = apply_rock_layer(albedo, roughness, terrain_attrs, material_noise);
-        albedo = apply_snow_layer(
-            albedo,
-            roughness,
+        terrain_layer_weights = compute_terrain_layer_weights(
             input.world_position,
             terrain_attrs,
             material_noise,
         );
+
+        // Apply material layers in order: wetness (darkening) -> rock -> snow
+        // Order matters: snow on top, then rock, then wetness darkening at base
+        albedo = apply_wetness_layer(albedo, terrain_layer_weights.wetness);
+        albedo = apply_rock_layer(albedo, terrain_layer_weights.rock);
+        albedo = apply_snow_layer(albedo, terrain_layer_weights.snow);
+        terrain_subsurface = compute_terrain_subsurface_state(terrain_layer_weights);
     }
     
     occlusion = clamp(occlusion, u_shading.clamp2.x, u_shading.clamp2.y);
@@ -2890,7 +2976,12 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     var lighting: vec3<f32>;
     if (TERRAIN_USE_BRDF_DISPATCH) {
         // Use unified BRDF dispatch (allows model switching) with specular roughness
-        let shading_params = terrain_to_shading_params(specular_roughness, metallic, TERRAIN_BRDF_MODEL);
+        let shading_params = terrain_to_shading_params(
+            specular_roughness,
+            metallic,
+            terrain_subsurface.strength,
+            TERRAIN_BRDF_MODEL,
+        );
         let n_dot_l = max(dot(shading_normal, light_dir), 0.0);
         lighting = eval_brdf(shading_normal, view_dir, light_dir, albedo, shading_params) * n_dot_l;
     } else {
@@ -3720,6 +3811,16 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             let ibl_diffuse_biased = blended_diffuse;
             let ibl_diffuse_factor = length(ibl_diffuse_biased) * u_ibl.intensity;
             let ibl_term = ibl_diffuse_factor * AMBIENT_FLOOR * 0.35;
+            let terrain_subsurface_term = evaluate_terrain_subsurface(
+                terrain_subsurface,
+                shading_normal,
+                view_dir,
+                light_dir,
+                terrain_attrs,
+                albedo,
+            );
+            let terrain_subsurface_lit =
+                terrain_subsurface_term * (sun_intensity * combined_shadow * 0.65 + ibl_term * 0.50);
             
             // P2-S4: lighting_factor = diffuse_lit + ibl_term
             let lighting_factor = diffuse_lit + ibl_term;
@@ -3734,7 +3835,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             let spec_capped = min(spec_contrib, albedo * 0.20);
             
             // Final terrain shading
-            shaded = lit_albedo + spec_capped;
+            shaded = lit_albedo + spec_capped + terrain_subsurface_lit;
         }
         
         let exposure = max(u_shading.light_params.w, 0.0);
