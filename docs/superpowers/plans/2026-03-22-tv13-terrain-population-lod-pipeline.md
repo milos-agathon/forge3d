@@ -1396,6 +1396,7 @@ pub struct TerrainScatterBatchStats {
     pub lod_instance_counts: Vec<u32>,
     pub hlod_cluster_draws: u32,
     pub hlod_covered_instances: u32,
+    pub effective_draws: u32,
 }
 ```
 
@@ -1412,6 +1413,7 @@ pub struct TerrainScatterFrameStats {
     pub lod_instance_counts: Vec<u32>,
     pub hlod_cluster_draws: u32,
     pub hlod_covered_instances: u32,
+    pub effective_draws: u32,
 }
 ```
 
@@ -1442,6 +1444,7 @@ Update `accumulate_frame_stats` to include HLOD fields:
 ```rust
     stats.hlod_cluster_draws += batch_stats.hlod_cluster_draws;
     stats.hlod_covered_instances += batch_stats.hlod_covered_instances;
+    stats.effective_draws += batch_stats.effective_draws;
 ```
 
 - [ ] **Step 3: Add HLOD build functions**
@@ -1762,6 +1765,9 @@ Replace the entire `prepare_draws` method body. The key change: before the per-i
         // --- Count active HLOD cluster draws ---
         stats.hlod_cluster_draws = cluster_active.iter().filter(|&&a| a).count() as u32;
 
+        // effective_draws = individual LOD draws + HLOD cluster draws
+        stats.effective_draws = draws.len() as u32 + stats.hlod_cluster_draws;
+
         self.last_stats = stats.clone();
         Ok((stats, draws))
     }
@@ -1872,6 +1878,7 @@ Add to `src/terrain/scatter.rs` `#[cfg(test)] mod tests`:
         let stats = TerrainScatterBatchStats::default();
         assert_eq!(stats.hlod_cluster_draws, 0);
         assert_eq!(stats.hlod_covered_instances, 0);
+        assert_eq!(stats.effective_draws, 0);
     }
 
     #[test]
@@ -1898,10 +1905,12 @@ Add to `src/terrain/scatter.rs` `#[cfg(test)] mod tests`:
                 lod_instance_counts: vec![3, 2],
                 hlod_cluster_draws: 2,
                 hlod_covered_instances: 3,
+                effective_draws: 5,
             },
         );
         assert_eq!(frame.hlod_cluster_draws, 2);
         assert_eq!(frame.hlod_covered_instances, 3);
+        assert_eq!(frame.effective_draws, 5);
     }
 ```
 
@@ -2167,6 +2176,7 @@ In `get_scatter_stats()`, add the new HLOD fields to the returned dict:
 ```rust
     dict.set_item("hlod_cluster_draws", stats.hlod_cluster_draws)?;
     dict.set_item("hlod_covered_instances", stats.hlod_covered_instances)?;
+    dict.set_item("effective_draws", stats.effective_draws)?;
 ```
 
 Also add HLOD fields to `get_scatter_memory_report()`:
@@ -2176,23 +2186,72 @@ Also add HLOD fields to `get_scatter_memory_report()`:
     dict.set_item("hlod_buffer_bytes", report.hlod_buffer_bytes)?;
 ```
 
-- [ ] **Step 9: Build and run all existing tests**
+- [ ] **Step 9: Add viewer IPC HLOD round-trip test**
+
+In `tests/test_viewer_ipc.py`, add a test to `TestIpcPayloadShapes` that verifies the `set_terrain_scatter` command preserves HLOD config through JSON serialization (matching the existing `test_set_terrain_scatter_format` pattern):
+
+```python
+    def test_set_terrain_scatter_hlod_format(self):
+        """set_terrain_scatter with hlod field round-trips through JSON."""
+        cmd = {
+            "cmd": "set_terrain_scatter",
+            "batches": [
+                {
+                    "name": "trees_hlod",
+                    "color": [0.2, 0.6, 0.3, 1.0],
+                    "max_draw_distance": 300.0,
+                    "transforms": [[1, 0, 0, 3, 0, 1, 0, 0, 0, 0, 1, 5, 0, 0, 0, 1]],
+                    "levels": [
+                        {"positions": [[0, 0, 0]], "normals": [[0, 1, 0]], "indices": [0, 1, 2]},
+                    ],
+                    "hlod": {
+                        "hlod_distance": 100.0,
+                        "cluster_radius": 25.0,
+                        "simplify_ratio": 0.1,
+                    },
+                }
+            ],
+        }
+        parsed = json.loads(json.dumps(cmd))
+        assert parsed["batches"][0]["hlod"]["hlod_distance"] == 100.0
+        assert parsed["batches"][0]["hlod"]["cluster_radius"] == 25.0
+        assert parsed["batches"][0]["hlod"]["simplify_ratio"] == 0.1
+
+    def test_set_terrain_scatter_no_hlod_backward_compat(self):
+        """set_terrain_scatter without hlod field still works (backward compat)."""
+        cmd = {
+            "cmd": "set_terrain_scatter",
+            "batches": [
+                {
+                    "name": "trees",
+                    "transforms": [[1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]],
+                    "levels": [],
+                }
+            ],
+        }
+        parsed = json.loads(json.dumps(cmd))
+        assert "hlod" not in parsed["batches"][0]
+```
+
+- [ ] **Step 10: Build and run all existing tests**
 
 ```bash
 maturin develop --features extension-module,weighted-oit,enable-tbn,enable-gpu-instancing,copc_laz --profile release-lto
 python -m pytest tests/test_terrain_scatter.py -v
 python -m pytest tests/test_api_contracts.py -v
+python -m pytest tests/test_viewer_ipc.py -v
 cargo test --features extension-module,weighted-oit,enable-tbn,enable-gpu-instancing,copc_laz
 ```
 
-Expected: All existing tests still pass (backward compatibility).
+Expected: All existing tests still pass (backward compatibility). New viewer IPC tests pass.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add src/terrain/renderer/scatter.rs src/terrain/renderer/py_api.rs \
     src/viewer/viewer_enums/config.rs src/viewer/ipc/protocol/payloads.rs \
-    src/viewer/ipc/protocol/translate/terrain.rs src/viewer/terrain/scene/scatter.rs
+    src/viewer/ipc/protocol/translate/terrain.rs src/viewer/terrain/scene/scatter.rs \
+    tests/test_viewer_ipc.py
 git commit -m "feat(tv13.3): plumb HLOD config through renderer, viewer, and IPC paths"
 ```
 
@@ -2216,6 +2275,48 @@ class TestHLODRendering:
         if not f3d.has_gpu():
             pytest.skip("GPU not available")
         return f3d.Session(window=False)
+
+    def _create_test_hdr(self, path):
+        """Write a minimal HDR for IBL."""
+        with open(path, "wb") as fh:
+            fh.write(b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 4 +X 8\n")
+            fh.write(bytes([128, 128, 180, 128] * 32))
+
+    def _build_render_context(self, gpu_session):
+        """Build renderer, IBL, params, and heightmap for HLOD tests."""
+        import tempfile, os
+        from forge3d.terrain_params import make_terrain_params_config
+
+        heightmap = np.sin(np.mgrid[0:96, 0:96][1].astype(np.float32) / 7.0) * 8.0 \
+            + np.cos(np.mgrid[0:96, 0:96][0].astype(np.float32) / 9.0) * 6.0 + 25.0
+        heightmap = heightmap.astype(np.float32)
+
+        renderer = f3d.TerrainRenderer(gpu_session)
+        material_set = f3d.MaterialSet.terrain_default()
+
+        with tempfile.NamedTemporaryFile(suffix=".hdr", delete=False) as tmp:
+            hdr_path = tmp.name
+        try:
+            self._create_test_hdr(hdr_path)
+            ibl = f3d.IBL.from_hdr(hdr_path, intensity=1.0)
+        finally:
+            os.unlink(hdr_path)
+
+        config = make_terrain_params_config(
+            size_px=(256, 160),
+            render_scale=1.0,
+            terrain_span=180.0,
+            msaa_samples=4,
+            z_scale=1.4,
+            exposure=1.0,
+            domain=(float(np.min(heightmap)), float(np.max(heightmap))),
+            cam_radius=220.0,
+            cam_phi_deg=138.0,
+            cam_theta_deg=57.0,
+            fov_y_deg=48.0,
+        )
+        params = f3d.TerrainRenderParams(config)
+        return renderer, material_set, ibl, params, heightmap
 
     def _build_dense_scatter(self, hlod=None):
         """Build a scatter batch with many instances for HLOD testing."""
@@ -2243,28 +2344,38 @@ class TestHLODRendering:
         )
 
     def test_hlod_none_preserves_baseline(self, gpu_session):
-        """hlod=None produces zero HLOD stats."""
+        """hlod=None produces zero HLOD stats after rendering a frame."""
+        renderer, material_set, ibl, params, heightmap = self._build_render_context(gpu_session)
         batch = self._build_dense_scatter(hlod=None)
-        renderer = f3d.TerrainRenderer(gpu_session)
         ts.apply_to_renderer(renderer, [batch])
+        # Must render a frame — stats are populated during the render pass
+        renderer.render_terrain_pbr_pom(material_set, ibl, params, heightmap)
         stats = renderer.get_scatter_stats()
         assert stats["hlod_cluster_draws"] == 0
         assert stats["hlod_covered_instances"] == 0
+        assert stats["effective_draws"] > 0  # individual draws still happen
 
-    def test_hlod_renders_without_error(self, gpu_session):
-        """Batch with HLOD policy renders successfully."""
+    def test_hlod_renders_and_reports_stats(self, gpu_session):
+        """Batch with HLOD policy renders successfully and reports HLOD stats."""
+        renderer, material_set, ibl, params, heightmap = self._build_render_context(gpu_session)
         policy = HLODPolicy(hlod_distance=50.0, cluster_radius=15.0, simplify_ratio=0.1)
         batch = self._build_dense_scatter(hlod=policy)
-        renderer = f3d.TerrainRenderer(gpu_session)
         ts.apply_to_renderer(renderer, [batch])
-        # Should not raise
+        # Render a frame to populate stats
+        renderer.render_terrain_pbr_pom(material_set, ibl, params, heightmap)
+        stats = renderer.get_scatter_stats()
+        # At the test camera distance (220), most instances are beyond hlod_distance (50)
+        assert stats["hlod_cluster_draws"] > 0
+        assert stats["hlod_covered_instances"] > 0
+        assert stats["effective_draws"] > 0
 
     def test_hlod_memory_tracked(self, gpu_session):
         """HLOD memory is reported and included in total."""
+        renderer, _, _, _, _ = self._build_render_context(gpu_session)
         policy = HLODPolicy(hlod_distance=50.0, cluster_radius=15.0, simplify_ratio=0.1)
         batch = self._build_dense_scatter(hlod=policy)
-        renderer = f3d.TerrainRenderer(gpu_session)
         ts.apply_to_renderer(renderer, [batch])
+        # Memory report is available after batch upload (no render needed)
         report = renderer.get_scatter_memory_report()
         assert report["hlod_cluster_count"] > 0
         assert report["hlod_buffer_bytes"] > 0
@@ -2383,18 +2494,24 @@ def main():
 
     hdr_path = Path(tempfile.mktemp(suffix=".hdr"))
     _write_preview_hdr(hdr_path)
-    ibl = f3d.IBL(session, str(hdr_path))
+    ibl = f3d.IBL.from_hdr(str(hdr_path), intensity=1.0)
 
+    h_min, h_max = float(heightmap.min()), float(heightmap.max())
+    terrain_span = max(heightmap.shape[0], heightmap.shape[1])
     config = make_terrain_params_config(
-        heightmap=heightmap,
-        camera_mode="mesh",
+        size_px=(512, 320),
+        render_scale=1.0,
+        terrain_span=float(terrain_span),
         msaa_samples=4,
-        pom=PomSettings(enabled=True),
         z_scale=1.8,
-        sun_azimuth=135.0,
-        sun_elevation=35.0,
-        cam_phi=180.0,
-        cam_theta=35.0,
+        exposure=1.0,
+        domain=(h_min, h_max),
+        camera_mode="mesh",
+        light_azimuth_deg=135.0,
+        light_elevation_deg=35.0,
+        cam_phi_deg=180.0,
+        cam_theta_deg=35.0,
+        cam_radius=float(terrain_span) * 0.6,
     )
     params = f3d.TerrainRenderParams(config)
 
@@ -2421,7 +2538,7 @@ def main():
     filters = TerrainScatterFilters(min_slope_deg=0, max_slope_deg=25)
     transforms = ts.grid_jitter_transforms(
         source, spacing=8.0, seed=42, jitter=0.3, filters=filters,
-        yaw_range_deg=360.0, scale_range=(0.3, 0.8), edge_margin=0.05,
+        yaw_range_deg=(0.0, 360.0), scale_range=(0.3, 0.8), edge_margin=0.05,
     )
     print(f"\nPlaced {transforms.shape[0]} instances")
 
@@ -2435,7 +2552,7 @@ def main():
     )
     apply_to_renderer(renderer, [batch_no_hlod])
     frame_baseline = renderer.render_terrain_pbr_pom(
-        material_set=material_set, env_maps=ibl, params=params, heightmap=heightmap,
+        material_set, ibl, params, heightmap,
     )
     baseline_path = args.output_dir / "baseline_auto_lod.png"
     frame_baseline.save(str(baseline_path))
@@ -2459,7 +2576,7 @@ def main():
     )
     apply_to_renderer(renderer, [batch_hlod])
     frame_hlod = renderer.render_terrain_pbr_pom(
-        material_set=material_set, env_maps=ibl, params=params, heightmap=heightmap,
+        material_set, ibl, params, heightmap,
     )
     hlod_path = args.output_dir / "hlod_enabled.png"
     frame_hlod.save(str(hlod_path))
@@ -2515,6 +2632,7 @@ git commit -m "feat(tv13): add terrain_tv13_lod_pipeline_demo.py example with re
 Add to `tests/test_terrain_tv13_lod_pipeline.py`:
 
 ```python
+import os
 import tempfile
 from pathlib import Path
 
@@ -2530,7 +2648,7 @@ class TestEndToEndImageOutput:
 
     def test_auto_lod_scatter_produces_nonempty_image(self, gpu_session):
         """Scatter with auto_lod_levels renders a non-black PNG."""
-        from forge3d.terrain_params import PomSettings, make_terrain_params_config
+        from forge3d.terrain_params import make_terrain_params_config
 
         # Small synthetic heightmap
         heightmap = np.random.default_rng(42).uniform(0, 100, (64, 64)).astype(np.float32)
@@ -2539,15 +2657,26 @@ class TestEndToEndImageOutput:
         material_set = f3d.MaterialSet.terrain_default()
 
         # Minimal HDR for IBL
-        hdr_path = Path(tempfile.mktemp(suffix=".hdr"))
-        with hdr_path.open("wb") as fh:
+        with tempfile.NamedTemporaryFile(suffix=".hdr", delete=False) as tmp:
+            hdr_path = tmp.name
+        with open(hdr_path, "wb") as fh:
             fh.write(b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 4 +X 8\n")
             fh.write(bytes([128, 128, 180, 128] * 32))
-        ibl = f3d.IBL(gpu_session, str(hdr_path))
+        try:
+            ibl = f3d.IBL.from_hdr(hdr_path, intensity=1.0)
+        finally:
+            os.unlink(hdr_path)
 
         config = make_terrain_params_config(
-            heightmap=heightmap, camera_mode="mesh", msaa_samples=1,
-            pom=PomSettings(enabled=False),
+            size_px=(256, 160),
+            render_scale=1.0,
+            terrain_span=64.0,
+            msaa_samples=1,
+            z_scale=1.0,
+            exposure=1.0,
+            domain=(float(heightmap.min()), float(heightmap.max())),
+            camera_mode="mesh",
+            cam_radius=80.0,
         )
         params = f3d.TerrainRenderParams(config)
 
@@ -2567,7 +2696,7 @@ class TestEndToEndImageOutput:
         ts.apply_to_renderer(renderer, [batch])
 
         frame = renderer.render_terrain_pbr_pom(
-            material_set=material_set, env_maps=ibl, params=params, heightmap=heightmap,
+            material_set, ibl, params, heightmap,
         )
 
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
