@@ -119,9 +119,16 @@ from .terrain_params import (
     LodSettings,
     SamplingSettings,
     ClampSettings,
+    OfflineQualitySettings,
 )
 from . import presets
 from . import animation
+
+# -----------------------------------------------------------------------------
+# TV12: Offline render quality pipeline
+# -----------------------------------------------------------------------------
+from .offline import render_offline, OfflineResult, OfflineProgress
+from .denoise_oidn import oidn_available, oidn_denoise
 
 # -----------------------------------------------------------------------------
 # Core rendering API
@@ -398,7 +405,14 @@ __all__ = [
     "LodSettings",
     "SamplingSettings",
     "ClampSettings",
+    "OfflineQualitySettings",
     "presets",
+    # TV12: Offline render quality pipeline
+    "render_offline",
+    "OfflineResult",
+    "OfflineProgress",
+    "oidn_available",
+    "oidn_denoise",
     # Colormaps
     "get_colormap",
     "available_colormaps",
