@@ -13,6 +13,7 @@ mod scene;
 mod shader;
 mod shader_pbr;
 pub mod vector_overlay;
+mod volume_density;
 mod volumetrics;
 
 #[allow(unused_imports)]

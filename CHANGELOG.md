@@ -6,6 +6,15 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-03-22
+
+### Added
+- Implemented Epic TV6: Heterogeneous Terrain Volumetrics with bounded density volumes, viewer IPC wiring, and Python preset constructors for valley fog, plume, and localized haze.
+- Added TV6 documentation, a terrain volumetrics demo, and regression coverage for density-volume config export, viewer IPC reporting, and real-DEM render-budget validation.
+
+### Changed
+- Bumped the package version to `1.18.0`.
+
 ## [1.17.0] - 2026-03-22
 
 ### Added
