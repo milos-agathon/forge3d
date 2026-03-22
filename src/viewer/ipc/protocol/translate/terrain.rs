@@ -262,6 +262,14 @@ fn map_terrain_scatter_batch(config: &IpcTerrainScatterBatch) -> ViewerTerrainSc
             .iter()
             .map(map_terrain_scatter_level)
             .collect(),
+        #[cfg(feature = "enable-gpu-instancing")]
+        hlod_config: config.hlod.as_ref().map(|h| {
+            crate::terrain::scatter::HlodConfig {
+                hlod_distance: h.hlod_distance,
+                cluster_radius: h.cluster_radius,
+                simplify_ratio: h.simplify_ratio,
+            }
+        }),
     }
 }
 

@@ -196,6 +196,13 @@ pub struct IpcTerrainScatterLevel {
     pub max_distance: Option<f32>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct IpcHlodConfig {
+    pub hlod_distance: f32,
+    pub cluster_radius: f32,
+    pub simplify_ratio: f32,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct IpcTerrainScatterBatch {
     #[serde(default)]
@@ -208,6 +215,8 @@ pub struct IpcTerrainScatterBatch {
     pub transforms: Vec<[f32; 16]>,
     #[serde(default)]
     pub levels: Vec<IpcTerrainScatterLevel>,
+    #[serde(default)]
+    pub hlod: Option<IpcHlodConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
