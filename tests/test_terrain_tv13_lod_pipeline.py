@@ -23,6 +23,7 @@ ts = f3d.terrain_scatter
 
 from forge3d.geometry import MeshBuffers, primitive_mesh, simplify_mesh, generate_lod_chain
 from forge3d.terrain_scatter import (
+    HLODPolicy,
     TerrainScatterBatch,
     TerrainScatterLevel,
     auto_lod_levels,
@@ -127,3 +128,98 @@ class TestAutoLodLevels:
             name="auto_lod_test",
         )
         assert batch.instance_count == 1
+
+
+class TestHLODPolicy:
+    """TV13.3 — HLODPolicy dataclass and serialization."""
+
+    def test_hlod_policy_creation(self):
+        policy = HLODPolicy(hlod_distance=200.0, cluster_radius=50.0)
+        assert policy.hlod_distance == 200.0
+        assert policy.cluster_radius == 50.0
+        assert policy.simplify_ratio == 0.1
+
+    def test_hlod_in_native_dict(self):
+        cone = primitive_mesh("cone", radial_segments=16)
+        transforms = np.array([
+            [1, 0, 0, 5, 0, 1, 0, 0, 0, 0, 1, 5, 0, 0, 0, 1],
+        ], dtype=np.float32)
+        policy = HLODPolicy(hlod_distance=100.0, cluster_radius=30.0, simplify_ratio=0.2)
+        batch = TerrainScatterBatch(
+            levels=[TerrainScatterLevel(mesh=cone)],
+            transforms=transforms,
+            hlod=policy,
+            max_draw_distance=500.0,
+        )
+        d = batch.to_native_dict()
+        assert "hlod" in d
+        assert d["hlod"]["hlod_distance"] == 100.0
+        assert d["hlod"]["cluster_radius"] == 30.0
+        assert d["hlod"]["simplify_ratio"] == 0.2
+
+    def test_hlod_none_omitted_from_dict(self):
+        cone = primitive_mesh("cone", radial_segments=16)
+        transforms = np.array([
+            [1, 0, 0, 5, 0, 1, 0, 0, 0, 0, 1, 5, 0, 0, 0, 1],
+        ], dtype=np.float32)
+        batch = TerrainScatterBatch(
+            levels=[TerrainScatterLevel(mesh=cone)],
+            transforms=transforms,
+        )
+        d = batch.to_native_dict()
+        assert d.get("hlod") is None
+
+    def test_hlod_in_viewer_payload(self):
+        cone = primitive_mesh("cone", radial_segments=16)
+        transforms = np.array([
+            [1, 0, 0, 5, 0, 1, 0, 0, 0, 0, 1, 5, 0, 0, 0, 1],
+        ], dtype=np.float32)
+        policy = HLODPolicy(hlod_distance=100.0, cluster_radius=30.0)
+        batch = TerrainScatterBatch(
+            levels=[TerrainScatterLevel(mesh=cone)],
+            transforms=transforms,
+            hlod=policy,
+            max_draw_distance=500.0,
+        )
+        payload = batch.to_viewer_payload()
+        assert "hlod" in payload
+        assert payload["hlod"]["hlod_distance"] == 100.0
+
+    def test_hlod_validation_rejects_bad_params(self):
+        cone = primitive_mesh("cone", radial_segments=16)
+        transforms = np.array([
+            [1, 0, 0, 5, 0, 1, 0, 0, 0, 0, 1, 5, 0, 0, 0, 1],
+        ], dtype=np.float32)
+        with pytest.raises(ValueError, match="hlod_distance"):
+            TerrainScatterBatch(
+                levels=[TerrainScatterLevel(mesh=cone)],
+                transforms=transforms,
+                hlod=HLODPolicy(hlod_distance=500.0, cluster_radius=30.0),
+                max_draw_distance=200.0,
+            )
+
+    def test_hlod_rejects_negative_cluster_radius(self):
+        cone = primitive_mesh("cone", radial_segments=16)
+        transforms = np.array([
+            [1, 0, 0, 5, 0, 1, 0, 0, 0, 0, 1, 5, 0, 0, 0, 1],
+        ], dtype=np.float32)
+        with pytest.raises(ValueError, match="cluster_radius"):
+            TerrainScatterBatch(
+                levels=[TerrainScatterLevel(mesh=cone)],
+                transforms=transforms,
+                hlod=HLODPolicy(hlod_distance=50.0, cluster_radius=-10.0),
+                max_draw_distance=200.0,
+            )
+
+    def test_hlod_rejects_invalid_simplify_ratio(self):
+        cone = primitive_mesh("cone", radial_segments=16)
+        transforms = np.array([
+            [1, 0, 0, 5, 0, 1, 0, 0, 0, 0, 1, 5, 0, 0, 0, 1],
+        ], dtype=np.float32)
+        with pytest.raises(ValueError, match="simplify_ratio"):
+            TerrainScatterBatch(
+                levels=[TerrainScatterLevel(mesh=cone)],
+                transforms=transforms,
+                hlod=HLODPolicy(hlod_distance=50.0, cluster_radius=30.0, simplify_ratio=0.0),
+                max_draw_distance=200.0,
+            )

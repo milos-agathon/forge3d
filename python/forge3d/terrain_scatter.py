@@ -206,6 +206,14 @@ def viewer_orbit_radius(
 
 
 @dataclass(frozen=True)
+class HLODPolicy:
+    """Configuration for HLOD cluster generation."""
+    hlod_distance: float
+    cluster_radius: float
+    simplify_ratio: float = 0.1
+
+
+@dataclass(frozen=True)
 class TerrainScatterLevel:
     mesh: MeshBuffers
     max_distance: float | None = None
@@ -218,6 +226,7 @@ class TerrainScatterBatch:
     name: str | None = None
     color: Sequence[float] = (0.85, 0.85, 0.85, 1.0)
     max_draw_distance: float | None = None
+    hlod: HLODPolicy | None = None
 
     def __post_init__(self) -> None:
         if not self.levels:
@@ -233,13 +242,27 @@ class TerrainScatterBatch:
         _validate_lod_distances(self.levels)
         if self.transforms.shape[0] == 0:
             raise ValueError("TerrainScatterBatch requires at least one transform")
+        if self.hlod is not None:
+            if not isinstance(self.hlod, HLODPolicy):
+                raise ValueError("hlod must be an HLODPolicy instance or None")
+            if self.hlod.hlod_distance <= 0 or not np.isfinite(self.hlod.hlod_distance):
+                raise ValueError("hlod_distance must be a positive finite float")
+            if self.hlod.cluster_radius <= 0 or not np.isfinite(self.hlod.cluster_radius):
+                raise ValueError("cluster_radius must be a positive finite float")
+            if self.hlod.simplify_ratio <= 0 or self.hlod.simplify_ratio > 1.0:
+                raise ValueError("simplify_ratio must be in (0.0, 1.0]")
+            if self.max_draw_distance is not None and self.hlod.hlod_distance >= self.max_draw_distance:
+                raise ValueError(
+                    f"hlod_distance ({self.hlod.hlod_distance}) must be less than "
+                    f"max_draw_distance ({self.max_draw_distance})"
+                )
 
     @property
     def instance_count(self) -> int:
         return int(self.transforms.shape[0])
 
     def to_native_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "name": self.name,
             "color": tuple(self.color),
             "max_draw_distance": self.max_draw_distance,
@@ -252,6 +275,15 @@ class TerrainScatterBatch:
                 for level in self.levels
             ],
         }
+        if self.hlod is not None:
+            d["hlod"] = {
+                "hlod_distance": self.hlod.hlod_distance,
+                "cluster_radius": self.hlod.cluster_radius,
+                "simplify_ratio": self.hlod.simplify_ratio,
+            }
+        else:
+            d["hlod"] = None
+        return d
 
     def to_viewer_payload(self) -> dict[str, Any]:
         levels: list[dict[str, Any]] = []
@@ -268,13 +300,20 @@ class TerrainScatterBatch:
                 }
             )
 
-        return {
+        payload = {
             "name": self.name,
             "color": list(self.color),
             "max_draw_distance": self.max_draw_distance,
             "transforms": self.transforms.tolist(),
             "levels": levels,
         }
+        if self.hlod is not None:
+            payload["hlod"] = {
+                "hlod_distance": self.hlod.hlod_distance,
+                "cluster_radius": self.hlod.cluster_radius,
+                "simplify_ratio": self.hlod.simplify_ratio,
+            }
+        return payload
 
 
 def _passes_filters(
@@ -668,6 +707,7 @@ def clear_viewer(viewer: Any) -> None:
 
 
 __all__ = [
+    "HLODPolicy",
     "TerrainScatterBatch",
     "TerrainScatterFilters",
     "TerrainScatterLevel",
