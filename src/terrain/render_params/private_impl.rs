@@ -74,6 +74,7 @@ impl TerrainRenderParams {
             lambert_contrast: core.lambert_contrast,
             colormap_srgb: core.colormap_srgb,
             output_srgb_eotf: core.output_srgb_eotf,
+            offline_hdr_output: core.offline_hdr_output,
             camera_mode: core.camera_mode,
             debug_mode: core.debug_mode,
             aa_samples: core.aa_samples,

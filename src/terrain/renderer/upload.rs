@@ -86,7 +86,8 @@ impl TerrainScene {
                     detail_normal_strength,
                     detail_albedo_noise,
                 ],
-                params5: [detail_fade_start, detail_fade_end, output_srgb_eotf, 0.0],
+                params5: [detail_fade_start, detail_fade_end, output_srgb_eotf,
+                    if params.offline_hdr_output { 1.0 } else { 0.0 }],
             },
             lut: None,
         };

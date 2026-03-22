@@ -47,6 +47,7 @@ pub struct DenoiseSettingsNative {
 pub enum DenoiseMethodNative {
     Atrous,
     Bilateral,
+    Oidn,
     None,
 }
 

@@ -60,6 +60,8 @@ pub struct TerrainRenderParams {
     pub colormap_srgb: bool,
     /// P6.1: Use exact linear_to_srgb() instead of pow-gamma for output encoding
     pub output_srgb_eotf: bool,
+    /// TV12: Output linear HDR (skip tonemap + sRGB) for offline accumulation
+    pub offline_hdr_output: bool,
     /// P7: Camera projection mode ("screen" = fullscreen triangle, "mesh" = perspective grid)
     pub camera_mode: String,
     /// P7: Debug mode for projection probes (0=normal, 40=view-depth, 41=NDC depth, 42=view-pos XYZ)

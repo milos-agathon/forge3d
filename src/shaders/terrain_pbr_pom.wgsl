@@ -3727,10 +3727,18 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             input.clip_position.xy,
         );
         
-        // Use filmic tonemapping for better highlight compression (D1 fix)
-        // Filmic curve compresses highlights more aggressively than ACES
-        let tonemapped = tonemap_filmic_terrain(shaded);
-        final_color = tonemapped;
+        // TV12: Check offline HDR output mode (packed in params5.w)
+        let offline_hdr = u_overlay.params5.w;
+        if (offline_hdr > 0.5) {
+            // TV12: Output linear HDR (post-exposure, post-fog, pre-tonemap)
+            // No tonemapping, no sRGB encoding — accumulation handles these later
+            final_color = shaded;
+        } else {
+            // Use filmic tonemapping for better highlight compression (D1 fix)
+            // Filmic curve compresses highlights more aggressively than ACES
+            let tonemapped = tonemap_filmic_terrain(shaded);
+            final_color = tonemapped;
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -3838,8 +3846,12 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     //   - false (P5 legacy): pow-gamma approximation via gamma_correct()
     //   - true (P6 correct): exact piecewise linear_to_srgb() EOTF
     let output_srgb_eotf = u_overlay.params5.z > 0.5;
+    let offline_hdr_mode = u_overlay.params5.w > 0.5;
     var encoded_color: vec3<f32>;
-    if (output_srgb_eotf) {
+    if (offline_hdr_mode) {
+        // TV12: HDR output — skip all encoding, write linear float directly
+        encoded_color = final_color;
+    } else if (output_srgb_eotf) {
         // P6: Exact sRGB EOTF - clamp to [0,1] first, then apply exact curve
         encoded_color = linear_to_srgb(clamp(final_color, vec3<f32>(0.0), vec3<f32>(1.0)));
     } else {
