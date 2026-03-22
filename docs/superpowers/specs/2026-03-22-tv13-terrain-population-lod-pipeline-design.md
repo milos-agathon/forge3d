@@ -78,7 +78,7 @@ pub fn geometry_simplify_mesh_py(
 ) -> PyResult<PyObject>
 ```
 
-Registered in `src/py_module/functions/geometry.rs`. Added to the `EXPECTED_GEOMETRY_FUNCTIONS` list in `tests/test_api_contracts.py` (class `TestGeometryFunctions`) as `"geometry_simplify_mesh_py"`.
+Registered in `src/py_module/functions/geometry.rs`. Added to the `GEOMETRY_FUNCTIONS` list in `tests/test_api_contracts.py` (class `TestGeometryFunctionContracts`) as `"geometry_simplify_mesh_py"`.
 
 #### Python: `python/forge3d/geometry.py`
 
@@ -246,7 +246,7 @@ When `hlod_config` is `Some`, the constructor builds the `HlodCache` (spatial cl
     ) -> Result<()>
     ```
 
-    When `hlod_cache` is `None`, the `device`/`queue` params are unused and the method remains as cheap as before. When HLOD is present, rebuild happens immediately (HLOD is a batch-level preprocessing step, not a per-frame operation). This is an internal Rust API change; the Python-side `update_transforms` call already goes through `py_api.rs` which has `device`/`queue` access.
+    When `hlod_cache` is `None`, the `device`/`queue` params are unused and the method remains as cheap as before. When HLOD is present, rebuild happens immediately (HLOD is a batch-level preprocessing step, not a per-frame operation). This is an internal Rust API change; the Python-side surface is batch replacement via `set_scatter_batches()` in `py_api.rs` and `apply_to_renderer()` in `terrain_scatter.py`, both of which reconstruct batches from scratch and already have `device`/`queue` access. There is no separate Python-side `update_transforms` path today.
 
 2. **Separate draw representation** — HLOD clusters are *not* another `TerrainScatterLevelSpec`. Each cluster is a unique merged mesh (baked instance transforms into vertex positions). They use the same shader and vertex format (`VertexPN`) but are drawn as single non-instanced draw calls from their own vertex/index buffers.
 
@@ -371,7 +371,7 @@ When `hlod` is `None`, behavior is identical to pre-TV13 (no HLOD, no extra memo
 | `src/viewer/ipc/protocol/payloads.rs` | Add HLOD fields to `IpcTerrainScatterBatch` |
 | `src/viewer/ipc/protocol/translate/terrain.rs` | Map IPC HLOD payload to `ViewerTerrainScatterBatchConfig.hlod_config` |
 | `python/forge3d/terrain_scatter.py` | `to_viewer_payload()` serializes `HLODPolicy` alongside existing viewer fields |
-| `tests/test_api_contracts.py` | Add `"geometry_simplify_mesh_py"` to `EXPECTED_GEOMETRY_FUNCTIONS` list |
+| `tests/test_api_contracts.py` | Add `"geometry_simplify_mesh_py"` to `GEOMETRY_FUNCTIONS` list in `TestGeometryFunctionContracts` |
 
 ### New test files
 
