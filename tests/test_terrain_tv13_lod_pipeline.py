@@ -20,3 +20,58 @@ if not NATIVE_AVAILABLE:
     )
 
 ts = f3d.terrain_scatter
+
+from forge3d.geometry import MeshBuffers, primitive_mesh, simplify_mesh, generate_lod_chain
+
+
+class TestSimplifyMesh:
+    """TV13.1 — Python simplify_mesh wrapper."""
+
+    def test_simplify_cone_reduces_triangles(self):
+        cone = primitive_mesh("cone", radial_segments=32)
+        simplified = simplify_mesh(cone, 0.5)
+        assert simplified.triangle_count < cone.triangle_count
+        assert simplified.vertex_count > 0
+
+    def test_simplify_preserves_normals(self):
+        sphere = primitive_mesh("sphere", rings=12, radial_segments=24)
+        simplified = simplify_mesh(sphere, 0.5)
+        assert simplified.normals.shape[0] == simplified.positions.shape[0]
+
+    def test_simplify_ratio_one_unchanged(self):
+        box_mesh = primitive_mesh("box")
+        result = simplify_mesh(box_mesh, 1.0)
+        assert result.triangle_count == box_mesh.triangle_count
+
+
+class TestGenerateLodChain:
+    """TV13.1 — LOD chain generation from a single mesh."""
+
+    def test_three_level_chain_decreasing_triangles(self):
+        sphere = primitive_mesh("sphere", rings=16, radial_segments=32)
+        chain = generate_lod_chain(sphere, [1.0, 0.25, 0.07])
+        assert len(chain) >= 2  # at least LOD0 + one simplified
+        assert chain[0].triangle_count == sphere.triangle_count
+        for i in range(1, len(chain)):
+            assert chain[i].triangle_count < chain[i - 1].triangle_count
+
+    def test_min_triangles_floor_drops_levels(self):
+        box_mesh = primitive_mesh("box")  # 12 tris
+        chain = generate_lod_chain(box_mesh, [1.0, 0.01], min_triangles=8)
+        assert len(chain) == 1  # only LOD 0 survives
+
+    def test_deduplication_drops_identical_levels(self):
+        box_mesh = primitive_mesh("box")  # 12 tris
+        chain = generate_lod_chain(box_mesh, [1.0, 0.9, 0.8])
+        for i in range(1, len(chain)):
+            assert chain[i].triangle_count < chain[i - 1].triangle_count
+
+    def test_ratios_must_start_with_one(self):
+        sphere = primitive_mesh("sphere")
+        with pytest.raises(ValueError, match="ratios.*1.0"):
+            generate_lod_chain(sphere, [0.5, 0.25])
+
+    def test_ratios_must_be_descending(self):
+        sphere = primitive_mesh("sphere")
+        with pytest.raises(ValueError, match="descending"):
+            generate_lod_chain(sphere, [1.0, 0.5, 0.7])
