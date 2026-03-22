@@ -2233,7 +2233,85 @@ In `tests/test_viewer_ipc.py`, add a test to `TestIpcPayloadShapes` that verifie
         assert "hlod" not in parsed["batches"][0]
 ```
 
-- [ ] **Step 10: Build and run all existing tests**
+- [ ] **Step 10: Add Rust IPC HLOD parse/translate test**
+
+In `src/viewer/ipc/mod.rs`, add a test after the existing `test_parse_set_terrain_scatter` that verifies the `hlod` field parses and translates correctly:
+
+```rust
+    #[test]
+    fn test_parse_set_terrain_scatter_with_hlod() {
+        let json = r#"{
+            "cmd":"set_terrain_scatter",
+            "batches":[
+                {
+                    "name":"trees_hlod",
+                    "color":[0.2,0.6,0.3,1.0],
+                    "max_draw_distance":300.0,
+                    "transforms":[[1,0,0,3,0,1,0,4,0,0,1,5,0,0,0,1]],
+                    "levels":[
+                        {
+                            "positions":[[0,0,0],[1,0,0],[0,1,0]],
+                            "normals":[[0,1,0],[0,1,0],[0,1,0]],
+                            "indices":[0,1,2],
+                            "max_distance":90.0
+                        }
+                    ],
+                    "hlod":{
+                        "hlod_distance":100.0,
+                        "cluster_radius":25.0,
+                        "simplify_ratio":0.1
+                    }
+                }
+            ]
+        }"#;
+        let req = parse_ipc_request(json).unwrap();
+        match &req {
+            IpcRequest::SetTerrainScatter { batches } => {
+                assert_eq!(batches.len(), 1);
+                let hlod = batches[0].hlod.as_ref().expect("hlod should be present");
+                assert!((hlod.hlod_distance - 100.0).abs() < 1e-6);
+                assert!((hlod.cluster_radius - 25.0).abs() < 1e-6);
+                assert!((hlod.simplify_ratio - 0.1).abs() < 1e-6);
+            }
+            _ => panic!("Expected SetTerrainScatter"),
+        }
+
+        let cmd = ipc_request_to_viewer_cmd(&req).unwrap().unwrap();
+        match cmd {
+            crate::viewer::viewer_enums::ViewerCmd::SetTerrainScatter { batches } => {
+                let hlod = batches[0].hlod_config.as_ref().expect("hlod_config should be present");
+                assert!((hlod.hlod_distance - 100.0).abs() < 1e-6);
+                assert!((hlod.cluster_radius - 25.0).abs() < 1e-6);
+                assert!((hlod.simplify_ratio - 0.1).abs() < 1e-6);
+            }
+            _ => panic!("Expected ViewerCmd::SetTerrainScatter"),
+        }
+    }
+
+    #[test]
+    fn test_parse_set_terrain_scatter_without_hlod_backward_compat() {
+        // Existing payloads without hlod should still parse (hlod defaults to None)
+        let json = r#"{
+            "cmd":"set_terrain_scatter",
+            "batches":[
+                {
+                    "name":"trees",
+                    "transforms":[[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]],
+                    "levels":[]
+                }
+            ]
+        }"#;
+        let req = parse_ipc_request(json).unwrap();
+        match &req {
+            IpcRequest::SetTerrainScatter { batches } => {
+                assert!(batches[0].hlod.is_none());
+            }
+            _ => panic!("Expected SetTerrainScatter"),
+        }
+    }
+```
+
+- [ ] **Step 11: Build and run all existing tests**
 
 ```bash
 maturin develop --features extension-module,weighted-oit,enable-tbn,enable-gpu-instancing,copc_laz --profile release-lto
@@ -2243,15 +2321,15 @@ python -m pytest tests/test_viewer_ipc.py -v
 cargo test --features extension-module,weighted-oit,enable-tbn,enable-gpu-instancing,copc_laz
 ```
 
-Expected: All existing tests still pass (backward compatibility). New viewer IPC tests pass.
+Expected: All existing tests still pass (backward compatibility). New viewer IPC tests pass (both Rust and Python).
 
-- [ ] **Step 11: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
 git add src/terrain/renderer/scatter.rs src/terrain/renderer/py_api.rs \
     src/viewer/viewer_enums/config.rs src/viewer/ipc/protocol/payloads.rs \
     src/viewer/ipc/protocol/translate/terrain.rs src/viewer/terrain/scene/scatter.rs \
-    tests/test_viewer_ipc.py
+    src/viewer/ipc/mod.rs tests/test_viewer_ipc.py
 git commit -m "feat(tv13.3): plumb HLOD config through renderer, viewer, and IPC paths"
 ```
 
@@ -2703,8 +2781,6 @@ class TestEndToEndImageOutput:
             frame.save(tmp.name)
             assert Path(tmp.name).stat().st_size > 100, "PNG should be non-trivial"
             Path(tmp.name).unlink()
-
-        hdr_path.unlink(missing_ok=True)
 ```
 
 - [ ] **Step 2: Run the test**
