@@ -46,6 +46,7 @@ impl TerrainRenderParams {
             volumetrics: parse_volumetrics_settings(&params),
             sky: parse_sky_settings(&params),
             probes: parse_probe_settings(&params),
+            reflection_probes: parse_reflection_probe_settings(&params),
         };
 
         let overlays = extract_overlays(params.getattr("overlays")?.as_gil_ref())?;

@@ -147,6 +147,8 @@ const DBG_NDC_DEPTH: u32 = 41u;       // NDC depth (clip.z/clip.w) as grayscale
 const DBG_VIEW_POS_XYZ: u32 = 42u;    // View-space position encoded as RGB (normalized to [0,1])
 const DBG_PROBE_IRRADIANCE: u32 = 50u; // Raw probe irradiance contribution
 const DBG_PROBE_WEIGHT: u32 = 51u;     // Probe blend weight
+const DBG_REFLECTION_PROBE_COLOR: u32 = 52u; // Raw local reflection probe color
+const DBG_REFLECTION_PROBE_WEIGHT: u32 = 53u; // Local reflection probe blend weight
 
 struct TerrainUniforms {
     view : mat4x4<f32>,
@@ -2963,18 +2965,27 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     
     // Use unified eval_ibl function from lighting_ibl.wgsl (P4 spec)
     var ibl_contrib = eval_ibl(rotated_normal, rotated_view, ibl_albedo, metallic, roughness, f0);
-
-    // Capture pre-occlusion IBL for debug mode (still apply intensity)
-    let ibl_contrib_pre_ao = ibl_contrib * u_ibl.intensity;
     
     // Also compute split IBL for PBR debug modes (diffuse/specular separation)
     let ibl_split = eval_ibl_split(rotated_normal, rotated_view, ibl_albedo, metallic, roughness, f0);
     let probe_result = sample_probe_irradiance(input.world_position, shading_normal);
+    let local_reflection_dir = reflect(-view_dir, shading_normal);
+    let reflection_probe_result = sample_reflection_probe(input.world_position, local_reflection_dir, roughness);
     let kS_ibl = ibl_split.fresnel;
     let kD_ibl = (vec3<f32>(1.0) - kS_ibl) * (1.0 - metallic);
     let global_diffuse = ibl_split.diffuse;
     let probe_diffuse = kD_ibl * ibl_albedo * probe_result.irradiance;
     let blended_diffuse = mix(global_diffuse, probe_diffuse, probe_result.weight);
+    let reflection_brdf_lut = textureSampleLevel(
+        brdfLUT,
+        envSampler,
+        vec2<f32>(ibl_split.n_dot_v, clamp(roughness, 0.0, 1.0)),
+        0.0,
+    ).rg;
+    let local_probe_specular =
+        reflection_probe_result.prefiltered_color
+        * (ibl_split.fresnel * reflection_brdf_lut.x + reflection_brdf_lut.y);
+    let blended_specular = mix(ibl_split.specular, local_probe_specular, reflection_probe_result.weight);
     
     // Apply IBL intensity and occlusion (no artificial boost - proper split-sum should work)
     // For water, don't apply occlusion to IBL (water surface is exposed to sky)
@@ -2987,12 +2998,13 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     // Apply shadow to IBL diffuse (shadowed areas receive less ambient light)
     // But keep specular unaffected (sky reflections should still be visible)
     let ibl_diffuse_with_shadow = blended_diffuse * shadow_factor;
-    let ibl_with_shadow = ibl_diffuse_with_shadow + ibl_split.specular;
+    let ibl_with_shadow = ibl_diffuse_with_shadow + blended_specular;
     ibl_contrib = ibl_with_shadow * u_ibl.intensity * ibl_occlusion;
+    let ibl_contrib_pre_ao = (blended_diffuse + blended_specular) * u_ibl.intensity;
     
     // Scale split components by intensity and occlusion for debug output
     let ibl_diffuse_scaled = blended_diffuse * u_ibl.intensity * ibl_occlusion * shadow_factor;
-    let ibl_specular_scaled = ibl_split.specular * u_ibl.intensity * ibl_occlusion;
+    let ibl_specular_scaled = blended_specular * u_ibl.intensity * ibl_occlusion;
 
     // ──────────────────────────────────────────────────────────────────────────
     // Debug Modes (bypass PBR when debug_mode > 0)
@@ -3383,6 +3395,16 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         return out;
     } else if (debug_mode == DBG_PROBE_WEIGHT) {
         out.color = vec4<f32>(vec3<f32>(probe_result.weight), 1.0);
+        return out;
+    } else if (debug_mode == DBG_REFLECTION_PROBE_COLOR) {
+        let mapped = tonemap_aces(max(
+            reflection_probe_result.prefiltered_color * reflection_probe_result.weight,
+            vec3<f32>(0.0),
+        ));
+        out.color = vec4<f32>(linear_to_srgb(mapped), 1.0);
+        return out;
+    } else if (debug_mode == DBG_REFLECTION_PROBE_WEIGHT) {
+        out.color = vec4<f32>(vec3<f32>(reflection_probe_result.weight), 1.0);
         return out;
     } else if (debug_mode == DBG_SHADOW_TECHNIQUE) {
         // MODE 33: Shadow Technique Visualization

@@ -330,6 +330,16 @@ impl TerrainScene {
                     binding: 2,
                     resource: self.probe_ssbo.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: self
+                        .reflection_probe_grid_uniform_buffer
+                        .as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: self.reflection_probe_ssbo.as_entire_binding(),
+                },
             ],
         });
 

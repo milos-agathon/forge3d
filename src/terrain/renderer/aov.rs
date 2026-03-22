@@ -409,6 +409,14 @@ impl TerrainScene {
             (height_inputs.width, height_inputs.height),
             params.z_scale,
         );
+        super::probes::prepare_reflection_probes(
+            self,
+            &decoded.reflection_probes,
+            probe_world_span,
+            &height_inputs.heightmap_data,
+            (height_inputs.width, height_inputs.height),
+            params.z_scale,
+        );
         let materials = self.prepare_material_context(material_set, params, decoded)?;
 
         let uniforms = self.build_uniforms(
