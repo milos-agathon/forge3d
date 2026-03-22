@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.16.0"
+__version__ = "1.17.0"
 version = __version__
 
 import numpy as np
@@ -127,8 +127,11 @@ from . import animation
 # -----------------------------------------------------------------------------
 # TV12: Offline render quality pipeline
 # -----------------------------------------------------------------------------
-from .offline import render_offline, OfflineResult, OfflineProgress
-from .denoise_oidn import oidn_available, oidn_denoise
+try:
+    from .offline import render_offline, OfflineResult, OfflineProgress
+    from .denoise_oidn import oidn_available, oidn_denoise
+except ImportError:
+    pass  # TV12 offline modules not available (missing dependencies)
 
 # -----------------------------------------------------------------------------
 # Core rendering API
