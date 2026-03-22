@@ -42,11 +42,13 @@ The existing stabilization (texel-grid snapping in `pipeline_init.rs`) is insuff
 
 ### 4.1 Per-Cascade Page Domain Model
 
-Each cascade `i` (0..3) gets:
+Each cascade `i` (0..`cascades-1`, where `cascades` is 1–4 per `ShadowSettings`, default 4) gets:
 
 - A **proper light-space frustum fit** from the existing split generation in `src/core/cascade_split.rs`. The shared-matrix bug in `shadow.rs` is fixed so each cascade computes its own orthographic light-space projection covering only its assigned depth range.
-- A **virtual page grid**: the cascade's light-space AABB divided into `pages_x × pages_y` pages. Non-square cascade AABBs produce non-square grids.
+- A **virtual page grid**: the cascade's light-space AABB divided into `pages_x × pages_y` pages. Non-square cascade AABBs produce non-square grids. The page table indexing function `page_index(cascade_idx, page_x, page_y)` and budget arithmetic handle variable cascade counts, not a hardcoded 4.
 - **Texel-grid snapping**: page boundaries align to a fixed grid in light space. Pages do not shift with the camera — this is the core shimmer fix.
+
+**Note on orthographic projection:** Per-cascade light-space projections are orthographic (directional light). This means `light_pos.z` in clip space equals NDC z directly — no perspective divide is needed for depth comparison.
 
 ### 4.2 Page Representation
 
@@ -181,15 +183,24 @@ Each page is rendered with a guard band of `G` texels on each edge (e.g. G=4 for
 
 ### 5.6 Cascade Transition Integration
 
-Paged sampling plugs into the existing cascade blend path. The current `cascade_blend_range` logic (`terrain_pbr_pom.wgsl:1178`) interpolates shadow factors from two adjacent cascades in the transition zone. The paged variant replaces only the per-cascade sample function — cascade selection and blending are shared code:
+Paged sampling plugs into the existing cascade blend path. The current `cascade_blend_range` logic (`terrain_pbr_pom.wgsl:1178`) interpolates shadow factors from two adjacent cascades in the transition zone only when `cascade_blend_range > 0.0`, the fragment is not in the last cascade, and `view_depth > blend_start`. The paged variant replaces only the per-cascade sample function — cascade selection, early-out conditions, and conditional blending are shared code. The second cascade sample is only taken when blending is actually needed:
 
 ```wgsl
 fn evaluate_terrain_shadow_paged(world_pos: vec3f, normal: vec3f, view_depth: f32) -> f32 {
     let cascade = select_cascade_terrain(view_depth);
     let shadow_a = sample_shadow_paged(world_pos, normal, cascade);
-    let shadow_b = sample_shadow_paged(world_pos, normal, min(cascade + 1u, MAX_CASCADES - 1u));
-    let blend = cascade_blend_factor(view_depth, cascade);
-    return mix(shadow_a, shadow_b, blend);
+
+    // Blend only when near cascade boundary — matches existing CSM blend path
+    let cascade_far = paged_uniforms.cascade_far[cascade];
+    let blend_start = cascade_far - paged_uniforms.cascade_blend_range;
+    if (paged_uniforms.cascade_blend_range > 0.0
+        && cascade < paged_uniforms.cascade_count - 1u
+        && view_depth > blend_start) {
+        let shadow_b = sample_shadow_paged(world_pos, normal, cascade + 1u);
+        let t = (view_depth - blend_start) / (cascade_far - blend_start);
+        return mix(shadow_a, shadow_b, t);
+    }
+    return shadow_a;
 }
 ```
 
@@ -214,6 +225,7 @@ class ShadowSettings:
     resolution: int = 2048               # CSM: per-cascade map size
     shadow_page_tile_size: int = 256     # Paged: tile size in texels
     shadow_page_budget_mb: int = 64      # Paged: total backend memory, cap 256
+    debug_all_pages_resident: bool = False  # Paged: force all pages resident (validation harness)
     cascades: int = 4
     max_distance: float = 3000.0
     # ... existing fields unchanged ...
@@ -266,7 +278,7 @@ The repo has three existing budget layers:
 |---|---|---|
 | Single shadow map | 32 MiB | `src/lighting/shadow_map.rs:110` |
 | Shadow manager | 256 MiB | `src/shadows/manager/types.rs:4` |
-| Global terrain/system | 512 MiB | `terrain_params.py:78`, `config.py:548` |
+| Python shadow memory cap | 512 MiB | `terrain_params.py:78`, `config.py:548` |
 
 TV11 adds `shadow_page_budget_mb` as a self-contained budget for the paged shadow backend:
 
@@ -308,7 +320,7 @@ Same world-space reprojection method as Test 1, but with camera rotation instead
 
 ### 8.3 Validation Harness
 
-`debug_all_pages_resident=true` — available as a manual debug mode to verify page addressing matches repaired CSM output within tolerance. Exercises the full paged pipeline. Not a CI test.
+`debug_all_pages_resident=true` — available as a manual debug mode to verify page addressing matches repaired CSM output within tolerance. Exercises the full paged pipeline. Not a CI test. Exposed as a Python-side field on `ShadowSettings` (default `False`) so it can be set from examples and manual test scripts without Rust-only flags.
 
 ---
 
@@ -316,7 +328,7 @@ Same world-space reprojection method as Test 1, but with camera rotation instead
 
 | Technique | CSM backend | Paged backend v1 |
 |---|---|---|
-| `NONE` | Supported | Supported |
+| `NONE` | Supported | Accepted (no-op: paged backend is not created when `technique="NONE"` because `ShadowSettings.__post_init__` sets `enabled=False`) |
 | `HARD` | Supported | Supported |
 | `PCF` | Supported | Supported |
 | `PCSS` | Supported | Supported |
@@ -337,7 +349,7 @@ Validation enforced in both Python (`validate_for_terrain`) and Rust (`native_li
 | VT cache/LRU pattern reference | `src/core/tile_cache/cache.rs` |
 | VT feedback buffer pattern reference | `src/core/feedback_buffer.rs:78` |
 | Terrain PBR shader (shadow sampling) | `src/shaders/terrain_pbr_pom.wgsl` |
-| Shadow bind group layout | `src/terrain/renderer/bind_groups/layouts.rs:4` |
+| Shadow bind group layout | `src/terrain/renderer/bind_groups/layouts.rs` |
 | Pipeline cache | `src/terrain/renderer/pipeline_cache.rs:55, :142` |
 | Python terrain shadow settings | `python/forge3d/terrain_params.py:50` |
 | Rust terrain shadow decode | `src/terrain/render_params/native_lighting.rs:61` |
