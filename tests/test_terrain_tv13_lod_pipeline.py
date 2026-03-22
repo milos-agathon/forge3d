@@ -7,11 +7,15 @@ Covers:
 """
 from __future__ import annotations
 
+import os
+import tempfile
+
 import numpy as np
 import pytest
 
 import forge3d as f3d
 from forge3d._native import NATIVE_AVAILABLE
+from forge3d.terrain_params import make_terrain_params_config
 
 if not NATIVE_AVAILABLE:
     pytest.skip(
@@ -223,3 +227,103 @@ class TestHLODPolicy:
                 hlod=HLODPolicy(hlod_distance=50.0, cluster_radius=30.0, simplify_ratio=0.0),
                 max_draw_distance=200.0,
             )
+
+
+class TestHLODRendering:
+    """TV13.3 — HLOD rendering integration tests (require GPU)."""
+
+    @pytest.fixture
+    def gpu_session(self):
+        if not f3d.has_gpu():
+            pytest.skip("GPU not available")
+        return f3d.Session(window=False)
+
+    def _create_test_hdr(self, path):
+        with open(path, "wb") as fh:
+            fh.write(b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 4 +X 8\n")
+            fh.write(bytes([128, 128, 180, 128] * 32))
+
+    def _build_render_context(self, gpu_session):
+        heightmap = np.sin(np.mgrid[0:96, 0:96][1].astype(np.float32) / 7.0) * 8.0 \
+            + np.cos(np.mgrid[0:96, 0:96][0].astype(np.float32) / 9.0) * 6.0 + 25.0
+        heightmap = heightmap.astype(np.float32)
+
+        renderer = f3d.TerrainRenderer(gpu_session)
+        material_set = f3d.MaterialSet.terrain_default()
+
+        with tempfile.NamedTemporaryFile(suffix=".hdr", delete=False) as tmp:
+            hdr_path = tmp.name
+        try:
+            self._create_test_hdr(hdr_path)
+            ibl = f3d.IBL.from_hdr(hdr_path, intensity=1.0)
+        finally:
+            os.unlink(hdr_path)
+
+        config = make_terrain_params_config(
+            size_px=(256, 160),
+            render_scale=1.0,
+            terrain_span=180.0,
+            msaa_samples=4,
+            z_scale=1.4,
+            exposure=1.0,
+            domain=(float(np.min(heightmap)), float(np.max(heightmap))),
+            cam_radius=220.0,
+            cam_phi_deg=138.0,
+            cam_theta_deg=57.0,
+            fov_y_deg=48.0,
+        )
+        params = f3d.TerrainRenderParams(config)
+        return renderer, material_set, ibl, params, heightmap
+
+    def _build_dense_scatter(self, hlod=None):
+        cone = primitive_mesh("cone", radial_segments=16)
+        levels = auto_lod_levels(cone, lod_count=2, draw_distance=200.0)
+        transforms = []
+        for x in range(10):
+            for z in range(10):
+                transforms.append([
+                    1, 0, 0, float(x * 5),
+                    0, 1, 0, 0,
+                    0, 0, 1, float(z * 5),
+                    0, 0, 0, 1,
+                ])
+        transforms = np.array(transforms, dtype=np.float32)
+        return TerrainScatterBatch(
+            levels=levels,
+            transforms=transforms,
+            name="dense_scatter",
+            max_draw_distance=500.0,
+            hlod=hlod,
+        )
+
+    def test_hlod_none_preserves_baseline(self, gpu_session):
+        renderer, material_set, ibl, params, heightmap = self._build_render_context(gpu_session)
+        batch = self._build_dense_scatter(hlod=None)
+        ts.apply_to_renderer(renderer, [batch])
+        renderer.render_terrain_pbr_pom(material_set, ibl, params, heightmap)
+        stats = renderer.get_scatter_stats()
+        assert stats["hlod_cluster_draws"] == 0
+        assert stats["hlod_covered_instances"] == 0
+        assert stats["effective_draws"] > 0
+
+    def test_hlod_renders_and_reports_stats(self, gpu_session):
+        renderer, material_set, ibl, params, heightmap = self._build_render_context(gpu_session)
+        policy = HLODPolicy(hlod_distance=50.0, cluster_radius=15.0, simplify_ratio=0.1)
+        batch = self._build_dense_scatter(hlod=policy)
+        ts.apply_to_renderer(renderer, [batch])
+        renderer.render_terrain_pbr_pom(material_set, ibl, params, heightmap)
+        stats = renderer.get_scatter_stats()
+        # Camera at distance 220, most instances beyond hlod_distance 50
+        assert stats["hlod_cluster_draws"] > 0
+        assert stats["hlod_covered_instances"] > 0
+        assert stats["effective_draws"] > 0
+
+    def test_hlod_memory_tracked(self, gpu_session):
+        renderer, _, _, _, _ = self._build_render_context(gpu_session)
+        policy = HLODPolicy(hlod_distance=50.0, cluster_radius=15.0, simplify_ratio=0.1)
+        batch = self._build_dense_scatter(hlod=policy)
+        ts.apply_to_renderer(renderer, [batch])
+        report = renderer.get_scatter_memory_report()
+        assert report["hlod_cluster_count"] > 0
+        assert report["hlod_buffer_bytes"] > 0
+        assert report["total_buffer_bytes"] >= report["hlod_buffer_bytes"]
