@@ -42,6 +42,7 @@ workflows for overlays, point clouds, map plates, buildings, and bundles.
    terrain-tv2-aovs
    terrain-tv3-scatter
    terrain-tv4-material-variation
+   terrain-tv5-probe-lighting
 
 .. toctree::
    :maxdepth: 1
