@@ -78,7 +78,7 @@ pub fn geometry_simplify_mesh_py(
 ) -> PyResult<PyObject>
 ```
 
-Registered in `src/py_module/functions/geometry.rs`. Added to `EXPECTED_FUNCTIONS` in `tests/test_api_contracts.py` as `"geometry_simplify_mesh_py"`.
+Registered in `src/py_module/functions/geometry.rs`. Added to the `EXPECTED_GEOMETRY_FUNCTIONS` list in `tests/test_api_contracts.py` (class `TestGeometryFunctions`) as `"geometry_simplify_mesh_py"`.
 
 #### Python: `python/forge3d/geometry.py`
 
@@ -124,7 +124,7 @@ def auto_lod_levels(
     mesh: MeshBuffers,
     *,
     lod_count: int = 3,
-    lod_distances: list[float] | None = None,
+    lod_distances: list[float | None] | None = None,
     ratios: list[float] | None = None,
     draw_distance: float | None = None,
     min_triangles: int = 8,
@@ -138,10 +138,10 @@ def auto_lod_levels(
     lod_count
         Number of LOD levels to generate (including LOD 0).
     lod_distances
-        Explicit per-level max_distance values. Length must equal lod_count.
-        The final level's distance may be None (open-ended).
-        When omitted, distances are derived from draw_distance using
-        geometric spacing.
+        Explicit per-level max_distance values (list[float | None]).
+        Length must equal lod_count. The final level's distance may be
+        None (open-ended). When omitted, distances are derived from
+        draw_distance using geometric spacing.
     ratios
         Triangle-count ratios for each level. Length must equal lod_count.
         Default: geometric series from 1.0 down (e.g., [1.0, 0.25, 0.07]
@@ -161,10 +161,10 @@ def auto_lod_levels(
     """
 ```
 
-**Distance derivation** when `lod_distances` is not provided:
+**Distance derivation** when `lod_distances` is not provided — geometric spacing:
 
-- If `draw_distance` is given: `distances[i] = draw_distance × (i+1) / lod_count` with final level open-ended.
-- If `draw_distance` is also absent: distances are `[50.0, 150.0, None]` as conservative defaults.
+- If `draw_distance` is given: `distances[i] = draw_distance × ratio^(lod_count - 1 - i)` where `ratio = 0.33`, producing geometrically decreasing thresholds. For 3 levels with `draw_distance=300`: `[~33, ~100, None]`. The final level is always open-ended.
+- If `draw_distance` is also absent: distances are `[30.0, 100.0, None]` as conservative defaults.
 
 **Integration with existing API:**
 
@@ -253,16 +253,33 @@ When `hlod_config` is `Some`, the constructor builds the `HlodCache` (spatial cl
 3. **Clustering algorithm** — spatial grid clustering in contract space:
    - Partition instances into grid cells of size `cluster_radius`.
    - For each cell with ≥ 2 instances, merge instance geometry: transform each instance's mesh vertices by its transform, concatenate into one `MeshBuffers`, then simplify to `simplify_ratio × sum_of_triangle_counts`.
+   - **Source level for HLOD bake:** always uses the *coarsest authored LOD level* (last in the `levels` list), not LOD 0. This minimizes preprocessing cost and memory — HLOD clusters represent distant geometry that would already be at the lowest LOD. If only one level exists, that level is the source.
    - Cells with 1 instance are left as regular instanced draws (not assigned to any cluster).
    - Build `instance_to_cluster: Vec<Option<usize>>` mapping each instance index to its cluster ID (or `None` for unclustered instances).
 
-4. **Runtime selection in `prepare_draws()`** — for each instance:
-   - If `distance > hlod_distance` and `instance_to_cluster[i].is_some()` → skip individual draw (the cluster covers it).
-   - If `distance > hlod_distance` and `instance_to_cluster[i].is_none()` → normal per-instance LOD selection (singleton beyond HLOD range).
-   - If `distance ≤ hlod_distance` → normal per-instance LOD selection (unchanged).
-   - After instance loop: draw each `GpuHlodCluster` whose centroid is within `max_draw_distance` as a single non-instanced draw call.
+4. **Runtime selection in `prepare_draws()`** — cluster-level activation, not per-instance:
 
-5. **Memory tracking** — `HlodCache.total_buffer_bytes` is included in `TerrainScatterMemoryReport.total_buffer_bytes()`. New fields:
+   First pass — determine which HLOD clusters are active this frame:
+   - A cluster is **active** when `eye_distance_to_center - cluster.radius > hlod_distance` (the entire cluster is beyond the HLOD threshold) and `eye_distance_to_center - cluster.radius < max_draw_distance` (not culled).
+   - Build a `cluster_active: Vec<bool>` for this frame.
+
+   Second pass — per-instance loop (unchanged from existing code, plus HLOD skip):
+   - If `instance_to_cluster[i]` maps to an active cluster → skip individual draw.
+   - Otherwise → normal per-instance LOD selection (unchanged behavior for near instances, singletons, and instances in inactive clusters).
+
+   Third pass — draw active HLOD clusters:
+   - Each active `GpuHlodCluster` is drawn as a single non-instanced draw call.
+
+   This avoids double-rendering: a cluster containing both near and far members is only activated when *all* its members are beyond the HLOD threshold (center - radius > hlod_distance). When the eye is close enough that some members would be individually visible, the cluster stays inactive and all its members render individually through normal LOD selection.
+
+5. **Stats tracking** — new fields on `TerrainScatterBatchStats` and `TerrainScatterFrameStats`:
+   - `hlod_cluster_draws: u32` — number of HLOD clusters drawn this frame.
+   - `hlod_covered_instances: u32` — instances suppressed because their cluster was active.
+   - `effective_draws: u32` — `rendered_batches` (individual LOD draws) + `hlod_cluster_draws`.
+
+   These are sufficient to prove HLOD draw reduction in tests: compare `effective_draws` with and without HLOD at the same eye position.
+
+6. **Memory tracking** — `HlodCache.total_buffer_bytes` is included in `TerrainScatterMemoryReport.total_buffer_bytes()`. New fields:
    - `hlod_cluster_count: u32`
    - `hlod_buffer_bytes: u64`
    - `total_buffer_bytes()` is updated to return `vertex + index + instance + hlod_buffer_bytes`.
@@ -349,7 +366,12 @@ When `hlod` is `None`, behavior is identical to pre-TV13 (no HLOD, no extra memo
 | `src/terrain/scatter.rs` | Add `HlodCluster`, `HlodCache`, HLOD build/draw logic, memory tracking |
 | `src/terrain/renderer/scatter.rs` | HLOD cluster draw path in render pass |
 | `src/terrain/renderer/py_api.rs` | Parse HLOD config from Python dict |
-| `tests/test_api_contracts.py` | Add `"geometry_simplify_mesh_py"` to geometry contract list |
+| `src/viewer/terrain/scene/scatter.rs` | Pass `hlod_config` through `set_scatter_batches_from_configs()`, draw HLOD clusters in `render_scatter_batches()` |
+| `src/viewer/viewer_enums/config.rs` | Add `hlod_config: Option<HlodConfig>` to `ViewerTerrainScatterBatchConfig` |
+| `src/viewer/ipc/protocol/payloads.rs` | Add HLOD fields to `IpcTerrainScatterBatch` |
+| `src/viewer/ipc/protocol/translate/terrain.rs` | Map IPC HLOD payload to `ViewerTerrainScatterBatchConfig.hlod_config` |
+| `python/forge3d/terrain_scatter.py` | `to_viewer_payload()` serializes `HLODPolicy` alongside existing viewer fields |
+| `tests/test_api_contracts.py` | Add `"geometry_simplify_mesh_py"` to `EXPECTED_GEOMETRY_FUNCTIONS` list |
 
 ### New test files
 
@@ -403,11 +425,12 @@ When `hlod` is `None`, behavior is identical to pre-TV13 (no HLOD, no extra memo
 
 - **Python integration tests**:
   - Batch with `HLODPolicy` renders without error.
-  - HLOD reduces effective draw count at distance (visible in stats).
-  - HLOD memory is tracked and queryable.
-  - `hlod=None` preserves pre-TV13 behavior exactly.
-  - `to_native_dict()` correctly serializes HLOD policy.
+  - HLOD reduces `effective_draws` compared to same scene without HLOD at a far eye position; `hlod_cluster_draws > 0` and `hlod_covered_instances > 0` in stats.
+  - HLOD memory is tracked and queryable (`hlod_buffer_bytes > 0`, included in `total_buffer_bytes()`).
+  - `hlod=None` preserves pre-TV13 behavior exactly (all new stats fields are 0).
+  - `to_native_dict()` and `to_viewer_payload()` correctly serialize HLOD policy.
   - Invalid `HLODPolicy` (negative `hlod_distance`, `simplify_ratio` out of range, `hlod_distance ≥ max_draw_distance`) raises errors.
+  - Viewer path: `apply_to_viewer()` with HLOD does not error; `set_scatter_batches_from_configs` passes `hlod_config` through.
 
 ### End-to-end
 
