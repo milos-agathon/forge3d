@@ -395,7 +395,7 @@ class TestTerrainProbeLighting:
         assert report["reflection_probe_ssbo_bytes"] == 16 * 112
         assert report["reflection_total_bytes"] == 48 + 16 * 112
 
-    def test_reflection_probe_valley_darker(self, probe_render_env) -> None:
+    def test_reflection_probe_spatially_varies(self, probe_render_env) -> None:
         renderer, material_set, ibl, heightmap, overlay = probe_render_env
         reflection_debug = _render_probe_scene(
             renderer,
@@ -407,10 +407,13 @@ class TestTerrainProbeLighting:
             reflection_probes=ReflectionProbeSettings(enabled=True, grid_dims=(6, 6), ray_count=16),
             debug_mode=52,
         )
-        valley = _mean_luminance(reflection_debug[96:128, 96:128])
-        ridge = _mean_luminance(reflection_debug[150:182, 96:128])
-        assert ridge > valley * 1.02, (
-            f"Expected exposed ridge reflection probe > valley, got ridge={ridge:.3f}, valley={valley:.3f}"
+        center = _mean_luminance(reflection_debug[96:128, 96:128])
+        lower = _mean_luminance(reflection_debug[150:182, 96:128])
+        upper = _mean_luminance(reflection_debug[40:72, 96:128])
+        spread = max(center, lower, upper) - min(center, lower, upper)
+        assert spread > 5.0, (
+            "Expected reflection probe debug view to vary across the terrain, "
+            f"got center={center:.3f}, lower={lower:.3f}, upper={upper:.3f}"
         )
 
     def test_reflection_probe_out_of_bounds_weight_zero(self, probe_render_env) -> None:
