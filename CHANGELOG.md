@@ -6,6 +6,22 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-03-23
+
+### Added
+- Implemented Epic TV13: Terrain Population LOD Pipeline with QEM mesh simplification, auto-generated scatter LOD chains, and HLOD clustering wired through the renderer, viewer, and IPC paths.
+- Added `forge3d.geometry.simplify_mesh()`, `forge3d.geometry.generate_lod_chain()`, `forge3d.terrain_scatter.auto_lod_levels()`, and `forge3d.terrain_scatter.HLODPolicy`.
+- Added TV13 documentation, an end-to-end Mt. Fuji demo, and targeted Rust/Python regression coverage for the new workflow.
+
+### Fixed
+- Hardened TV13 mesh simplification bounds validation so malformed meshes are rejected across all target ratios instead of propagating corrupt data.
+- Corrected HLOD cluster activation bounds to account for mesh extents at per-instance scale, preventing premature activation for large transformed instances.
+- Fixed default auto-LOD ratio generation for `lod_count > 5`.
+- Fixed the TV13 demo import fallback so stale installed `forge3d` wheels are replaced by the repo copy when needed.
+
+### Changed
+- Bumped the package version to `1.17.0`.
+
 ## [1.16.0] - 2026-03-22
 
 ### Added
