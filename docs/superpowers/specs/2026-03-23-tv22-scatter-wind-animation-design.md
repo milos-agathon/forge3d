@@ -51,7 +51,7 @@ class ScatterWindSettings:
     enabled: bool = False
 
     # Global wind field
-    direction_deg: float = 0.0        # Azimuth: 0 = +X, 90 = +Z, positive CCW in contract XZ
+    direction_deg: float = 0.0        # Azimuth: 0 = +X, 90 = +Z in contract XZ (CW viewed from +Y, matches yaw convention)
     speed: float = 1.0                # Sway frequency scalar (>= 0)
 
     # Per-batch deformation
@@ -104,7 +104,7 @@ class TerrainScatterBatch:
 
 ### Serialization
 
-`to_native_dict()` and `to_viewer_payload()` include a `"wind"` key with the settings dict when wind is enabled; omit or pass `None` when disabled. The Rust parser treats a missing or null `"wind"` key as all-zero (no-op).
+`to_native_dict()` and `to_viewer_payload()` always include a `"wind"` key with the settings dict (for debuggability). When wind is disabled, the dict contains default values. The Rust parser treats a missing or null `"wind"` key as all-zero (no-op) for backward compatibility.
 
 ### time_seconds
 
@@ -118,7 +118,7 @@ class TerrainScatterBatch:
 
 ### ScatterWindSettingsNative
 
-Location: `src/terrain/render_params/native_wind.rs`
+Location: `src/terrain/scatter.rs` (co-located with `TerrainScatterBatch` and `ScatterWindUniforms`)
 
 ```rust
 #[derive(Clone, Debug)]
@@ -158,7 +158,7 @@ The GPU-side `TerrainScatterBatch` in `src/terrain/scatter.rs` stores `wind: Sca
 
 ### GpuScatterLevel extension
 
-`mesh_height_max: f32` is computed once in `build_gpu_level` by scanning vertex Y values. A log warning is emitted if `mesh_y_min` deviates from zero by more than 5% of the Y extent.
+`mesh_height_max: f32` is computed once in `build_gpu_level` as `max(vertex.y for all vertices in the mesh)`. A log warning is emitted if `min(vertex.y)` deviates from zero by more than 5% of the mesh Y extent (`max_y - min_y`).
 
 ---
 
@@ -189,6 +189,50 @@ struct ScatterBatchUniforms {
 
 When `length(wind_vec_bounds.xyz) < 1e-6`, the vertex shader skips the entire wind block. Zero cost when wind is disabled.
 
+### draw_batch_params signature extension
+
+The existing `draw_batch_params` in `src/render/mesh_instanced.rs` gains three new `[f32; 4]` parameters for the wind uniform fields:
+
+```rust
+pub fn draw_batch_params<'rp>(
+    &'rp self,
+    _device: &Device,
+    pass: &mut RenderPass<'rp>,
+    queue: &Queue,
+    view: Mat4,
+    proj: Mat4,
+    color: [f32; 4],
+    light_dir: [f32; 3],
+    light_intensity: f32,
+    // --- wind (new) ---
+    wind_phase: [f32; 4],
+    wind_vec_bounds: [f32; 4],
+    wind_bend_fade: [f32; 4],
+    // --- buffers ---
+    vbuf: &'rp Buffer,
+    ibuf: &'rp Buffer,
+    instbuf: &'rp Buffer,
+    index_count: u32,
+    instance_count: u32,
+)
+```
+
+When wind is disabled, callers pass `[0.0; 4]` for all three wind parameters. The Rust struct representation:
+
+```rust
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct ScatterBatchUniforms {
+    view: [[f32; 4]; 4],
+    proj: [[f32; 4]; 4],
+    color: [f32; 4],
+    light_dir_ws: [f32; 4],
+    wind_phase: [f32; 4],
+    wind_vec_bounds: [f32; 4],
+    wind_bend_fade: [f32; 4],
+}
+```
+
 ---
 
 ## 6. CPU-Side Conversion
@@ -206,6 +250,7 @@ pub struct ScatterWindUniforms {
 
 /// Compute shader-ready wind uniform fields.
 ///
+/// Returns all-zero fields when `wind.enabled` is false or `wind.amplitude` is zero.
 /// Batch-constant fields come from `wind` and `time_seconds`.
 /// `mesh_height_max` is per-draw (per LOD level) and must be injected by the caller.
 /// `instance_scale` is used only for fade distance conversion.
@@ -273,7 +318,7 @@ fn vs_main(in: VsIn) -> VsOut {
     // Deterministic sway + gust
     let spatial = dot(pos_ws.xyz, wind_dir_ws) * 0.1;
     let sway = sin(U.wind_phase.x + spatial) * (1.0 - U.wind_phase.w) * wind_amp;
-    let gust = sin(U.wind_phase.y + spatial * 0.37) * U.wind_phase.z;
+    let gust = sin(U.wind_phase.y + spatial * 0.37) * U.wind_phase.z;  // 0.37: decorrelation factor to prevent gust locking with sway
 
     // Displacement in local frame, transformed to world through M
     let wind_dir_local = wind_local / wind_amp;
@@ -343,7 +388,6 @@ Instance `scale_range` affects wind displacement proportionally — a scatter in
 
 | File | Purpose |
 |------|---------|
-| `src/terrain/render_params/native_wind.rs` | `ScatterWindSettingsNative` struct + `Default` |
 | `tests/test_tv22_scatter_wind.py` | Python-side validation, integration, and visual regression tests |
 | `examples/terrain_tv22_scatter_wind_demo.py` | Example using real DEM assets |
 
@@ -356,11 +400,11 @@ Instance `scale_range` affects wind displacement proportionally — a scatter in
 | `python/forge3d/__init__.pyi` | Type stub for `ScatterWindSettings` |
 | `src/render/mesh_instanced.rs` | Rename `SceneUniforms` → `ScatterBatchUniforms`, add wind fields, extend `draw_batch_params` |
 | `src/shaders/mesh_instanced.wgsl` | Rename struct, add wind deformation to `vs_main` |
-| `src/terrain/scatter.rs` | Add `ScatterWindUniforms`, `compute_wind_uniforms`, `mesh_height_max` on `GpuScatterLevel`, wind field on `TerrainScatterBatch` |
+| `src/terrain/scatter.rs` | Add `ScatterWindSettingsNative`, `ScatterWindUniforms`, `compute_wind_uniforms`, `mesh_height_max` on `GpuScatterLevel`, wind field on `TerrainScatterBatch` |
 | `src/terrain/renderer/scatter.rs` | Extend `ScatterRenderState` with `time_seconds`, call `compute_wind_uniforms`, pass wind to `draw_batch_params` |
 | `src/terrain/renderer/py_api.rs` | Parse `"wind"` dict from scatter batch, add `time_seconds` kwarg |
 | `src/viewer/terrain/scene/scatter.rs` | Call shared `compute_wind_uniforms`, pass `time_seconds` from frame loop |
-| `src/terrain/render_params/mod.rs` | Add `native_wind` module |
+| `src/terrain/render_params/mod.rs` | Re-export `ScatterWindSettingsNative` if needed for cross-module access |
 | `tests/test_api_contracts.py` | Add `ScatterWindSettings` to contract surface |
 
 ---
@@ -386,9 +430,12 @@ Instance `scale_range` affects wind displacement proportionally — a scatter in
 - Render a scatter scene with wind enabled, verify non-zero pixel difference from the static baseline (same scene, `time_seconds=0` vs `time_seconds=1`).
 - Render with `wind.enabled=False`, verify pixel-exact match with pre-TV22 baseline.
 - Render with `amplitude=0.0`, verify pixel-exact match with static baseline.
+- Render with `rigidity=1.0`, verify pixel-exact match with static baseline (`(1.0 - rigidity)` zeros out sway).
 - Render at two different `time_seconds` values with the same wind settings, verify different output (animation is happening).
 - Render at the same `time_seconds` twice, verify identical output (determinism).
 - Render at large view-space distance beyond `fade_end`, verify pixel-exact match with static baseline (fade suppresses all motion).
+- Render with `bend_start=0.0` vs `bend_start=0.8` at the same `time_seconds`, verify different output (bend region affects which mesh portion sways).
+- Render with `gust_strength=0.0` vs `gust_strength > 0` at the same `time_seconds`, verify different output (gust adds additional motion).
 
 ### Visual regression
 
