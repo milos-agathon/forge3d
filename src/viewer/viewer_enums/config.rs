@@ -183,4 +183,6 @@ pub struct ViewerTerrainScatterBatchConfig {
     pub max_draw_distance: Option<f32>,
     pub transforms: Vec<[f32; 16]>,
     pub levels: Vec<ViewerTerrainScatterLevelConfig>,
+    #[cfg(feature = "enable-gpu-instancing")]
+    pub hlod_config: Option<crate::terrain::scatter::HlodConfig>,
 }

@@ -250,12 +250,32 @@ impl TerrainRenderer {
                     .push(crate::terrain::scatter::TerrainScatterLevelSpec { mesh, max_distance });
             }
 
+            let hlod_config = batch_dict
+                .get_item("hlod")
+                .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                .filter(|v| !v.is_none())
+                .map(|v| -> PyResult<crate::terrain::scatter::HlodConfig> {
+                    let d = v.downcast::<PyDict>()?;
+                    Ok(crate::terrain::scatter::HlodConfig {
+                        hlod_distance: d.get_item("hlod_distance")?.unwrap().extract()?,
+                        cluster_radius: d.get_item("cluster_radius")?.unwrap().extract()?,
+                        simplify_ratio: d.get_item("simplify_ratio")?.unwrap().extract()?,
+                    })
+                })
+                .transpose()
+                .map_err(|e| {
+                    PyRuntimeError::new_err(format!(
+                        "batch {batch_index}: invalid 'hlod': {e}"
+                    ))
+                })?;
+
             native_batches.push(super::scatter::TerrainScatterUploadBatch {
                 name,
                 color,
                 max_draw_distance,
                 transforms_rowmajor: transforms,
                 levels,
+                hlod_config,
             });
         }
 
@@ -282,6 +302,9 @@ impl TerrainRenderer {
         dict.set_item("visible_instances", stats.visible_instances)?;
         dict.set_item("culled_instances", stats.culled_instances)?;
         dict.set_item("lod_instance_counts", stats.lod_instance_counts)?;
+        dict.set_item("hlod_cluster_draws", stats.hlod_cluster_draws)?;
+        dict.set_item("hlod_covered_instances", stats.hlod_covered_instances)?;
+        dict.set_item("effective_draws", stats.effective_draws)?;
         Ok(dict.into())
     }
 
@@ -296,6 +319,8 @@ impl TerrainRenderer {
         dict.set_item("vertex_buffer_bytes", report.vertex_buffer_bytes)?;
         dict.set_item("index_buffer_bytes", report.index_buffer_bytes)?;
         dict.set_item("instance_buffer_bytes", report.instance_buffer_bytes)?;
+        dict.set_item("hlod_cluster_count", report.hlod_cluster_count)?;
+        dict.set_item("hlod_buffer_bytes", report.hlod_buffer_bytes)?;
         dict.set_item("total_buffer_bytes", report.total_buffer_bytes())?;
         Ok(dict.into())
     }

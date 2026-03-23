@@ -4,7 +4,7 @@ use super::*;
 #[cfg(feature = "enable-gpu-instancing")]
 use crate::terrain::scatter::{
     accumulate_frame_stats, summarize_memory, TerrainScatterBatch, TerrainScatterFrameStats,
-    TerrainScatterLevelSpec, TerrainScatterMemoryReport,
+    TerrainScatterLevelSpec, TerrainScatterMemoryReport, pack_hlod_identity_instance,
 };
 
 #[cfg(feature = "enable-gpu-instancing")]
@@ -46,6 +46,21 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
 
     renderer.reset_draw_batch_uniforms();
     let mut frame_stats = TerrainScatterFrameStats::default();
+    // Pre-create a single HLOD identity instance buffer that lives as long as the pass.
+    let identity_packed = pack_hlod_identity_instance(render_from_contract);
+    let hlod_inst_bytes = (std::mem::size_of::<f32>() * 16) as u64;
+    let hlod_instbuf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("terrain.scatter.hlod.instance_buffer"),
+        size: hlod_inst_bytes,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(
+        &hlod_instbuf,
+        0,
+        bytemuck::cast_slice(&identity_packed),
+    );
+
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("terrain_viewer.scatter_pass"),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -101,6 +116,32 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
                 draw.instance_count,
             );
         }
+
+        // Draw active HLOD clusters
+        let active_clusters = batch.hlod_active_clusters(eye_contract);
+        for cluster_idx in active_clusters {
+            if let (Some(vbuf), Some(ibuf)) = (
+                batch.hlod_cluster_vbuf(cluster_idx),
+                batch.hlod_cluster_ibuf(cluster_idx),
+            ) {
+                let index_count = batch.hlod_cluster_index_count(cluster_idx);
+                renderer.draw_batch_params(
+                    device,
+                    &mut pass,
+                    queue,
+                    view,
+                    proj,
+                    batch.color,
+                    light_dir,
+                    light_intensity,
+                    vbuf,
+                    ibuf,
+                    &hlod_instbuf,
+                    index_count,
+                    1,
+                );
+            }
+        }
     }
 
     drop(pass);
@@ -131,6 +172,7 @@ impl ViewerTerrainScene {
                 batch.color,
                 batch.max_draw_distance,
                 batch.name.clone(),
+                batch.hlod_config.clone(),
             )?);
         }
 
