@@ -470,6 +470,23 @@ fn grid_cell_key(pos: &[f32; 3], cell_size: f32) -> (i32, i32, i32) {
     )
 }
 
+/// Compute the maximum distance from the origin to any vertex in the mesh.
+fn mesh_bounding_radius(mesh: &MeshBuffers) -> f32 {
+    mesh.positions
+        .iter()
+        .map(|p| (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt())
+        .fold(0.0f32, f32::max)
+}
+
+/// Extract the maximum axis scale from a row-major 4x4 transform.
+fn max_instance_scale(row_major: &[f32; 16]) -> f32 {
+    // Row-major layout: col0=(r[0],r[4],r[8]), col1=(r[1],r[5],r[9]), col2=(r[2],r[6],r[10])
+    let sx = (row_major[0] * row_major[0] + row_major[4] * row_major[4] + row_major[8] * row_major[8]).sqrt();
+    let sy = (row_major[1] * row_major[1] + row_major[5] * row_major[5] + row_major[9] * row_major[9]).sqrt();
+    let sz = (row_major[2] * row_major[2] + row_major[6] * row_major[6] + row_major[10] * row_major[10]).sqrt();
+    sx.max(sy).max(sz)
+}
+
 fn build_hlod_cache(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -478,6 +495,8 @@ fn build_hlod_cache(
     positions: &[[f32; 3]],
     config: &HlodConfig,
 ) -> Result<HlodCache> {
+    let base_mesh_radius = mesh_bounding_radius(source_mesh);
+
     // Step 1: Hash instances into grid cells
     let mut cells: HashMap<(i32, i32, i32), Vec<usize>> = HashMap::new();
     for (i, pos) in positions.iter().enumerate() {
@@ -540,14 +559,16 @@ fn build_hlod_cache(
 
         let center = center_sum / instance_indices.len() as f32;
 
-        // Compute radius: max distance from center to any instance position
+        // Compute radius: max distance from center to any instance's furthest
+        // geometry extent, accounting for mesh bounding radius and per-instance scale.
         let radius = instance_indices
             .iter()
             .map(|&i| {
-                Vec3::new(positions[i][0], positions[i][1], positions[i][2]).distance(center)
+                let pos_dist = Vec3::new(positions[i][0], positions[i][1], positions[i][2]).distance(center);
+                let inst_scale = max_instance_scale(&transforms_rowmajor[i]);
+                pos_dist + base_mesh_radius * inst_scale
             })
-            .fold(0.0f32, f32::max)
-            + config.cluster_radius * 0.5;
+            .fold(0.0f32, f32::max);
 
         // Simplify the merged mesh
         let simplified = simplify_mesh(&merged, config.simplify_ratio).map_err(|e| {
@@ -1040,6 +1061,48 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(report.total_buffer_bytes(), 100);
+    }
+
+    #[test]
+    fn mesh_bounding_radius_computes_max_distance_from_origin() {
+        let mesh = crate::geometry::MeshBuffers {
+            positions: vec![
+                [1.0, 0.0, 0.0],
+                [0.0, 2.0, 0.0],
+                [0.0, 0.0, 0.5],
+            ],
+            normals: vec![[0.0, 1.0, 0.0]; 3],
+            indices: vec![0, 1, 2],
+            ..Default::default()
+        };
+        let r = mesh_bounding_radius(&mesh);
+        assert!((r - 2.0).abs() < 1e-5, "radius should be 2.0, got {r}");
+    }
+
+    #[test]
+    fn max_instance_scale_extracts_uniform_scale() {
+        // Identity with scale=5
+        let row = [
+            5.0, 0.0, 0.0, 0.0,
+            0.0, 5.0, 0.0, 0.0,
+            0.0, 0.0, 5.0, 0.0,
+            0.0, 0.0, 0.0, 1.0,
+        ];
+        let s = max_instance_scale(&row);
+        assert!((s - 5.0).abs() < 1e-5, "scale should be 5.0, got {s}");
+    }
+
+    #[test]
+    fn max_instance_scale_extracts_nonuniform_scale() {
+        // scale_x=2, scale_y=7, scale_z=3
+        let row = [
+            2.0, 0.0, 0.0, 0.0,
+            0.0, 7.0, 0.0, 0.0,
+            0.0, 0.0, 3.0, 0.0,
+            0.0, 0.0, 0.0, 1.0,
+        ];
+        let s = max_instance_scale(&row);
+        assert!((s - 7.0).abs() < 1e-5, "scale should be 7.0, got {s}");
     }
 
     #[test]

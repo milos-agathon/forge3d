@@ -53,6 +53,16 @@ class TestSimplifyMesh:
         result = simplify_mesh(box_mesh, 1.0)
         assert result.triangle_count == box_mesh.triangle_count
 
+    def test_simplify_rejects_out_of_bounds_indices(self):
+        mesh = MeshBuffers(
+            positions=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32),
+            normals=np.array([[0, 1, 0], [0, 1, 0], [0, 1, 0]], dtype=np.float32),
+            uvs=np.zeros((3, 2), dtype=np.float32),
+            indices=np.array([[0, 1, 99]], dtype=np.uint32),
+        )
+        with pytest.raises(ValueError, match="out of bounds"):
+            simplify_mesh(mesh, 0.5)
+
 
 class TestGenerateLodChain:
     """TV13.1 — LOD chain generation from a single mesh."""
@@ -119,6 +129,16 @@ class TestAutoLodLevels:
             draw_distance=200.0,
         )
         assert levels[0].mesh.triangle_count >= levels[1].mesh.triangle_count
+
+    def test_lod_count_six_works(self):
+        sphere = primitive_mesh("sphere", rings=16, radial_segments=32)
+        levels = auto_lod_levels(sphere, lod_count=6, draw_distance=600.0)
+        assert len(levels) >= 2, f"Expected at least 2 levels, got {len(levels)}"
+        # Triangle counts should decrease across levels
+        for i in range(1, len(levels)):
+            assert levels[i].mesh.triangle_count <= levels[i - 1].mesh.triangle_count
+        # Last level should be open-ended
+        assert levels[-1].max_distance is None
 
     def test_feeds_into_scatter_batch(self):
         cone = primitive_mesh("cone", radial_segments=32)
@@ -317,6 +337,35 @@ class TestHLODRendering:
         assert stats["hlod_cluster_draws"] > 0
         assert stats["hlod_covered_instances"] > 0
         assert stats["effective_draws"] > 0
+
+    def test_hlod_respects_mesh_extents_and_scale(self, gpu_session):
+        """Large-scale instances should have a large effective cluster radius,
+        preventing HLOD activation when geometry is still close to camera."""
+        renderer, material_set, ibl, params, heightmap = self._build_render_context(gpu_session)
+        box_mesh = primitive_mesh("box")
+        levels = [TerrainScatterLevel(mesh=box_mesh)]
+        # Two boxes at scale 100 placed close together
+        transforms = np.array([
+            [100, 0, 0, 10, 0, 100, 0, 0, 0, 0, 100, 10, 0, 0, 0, 1],
+            [100, 0, 0, 15, 0, 100, 0, 0, 0, 0, 100, 15, 0, 0, 0, 1],
+        ], dtype=np.float32)
+        # hlod_distance=50, but boxes extend ~86 units from origin at scale 100
+        # so the cluster's effective radius should keep HLOD inactive
+        policy = HLODPolicy(hlod_distance=50.0, cluster_radius=20.0, simplify_ratio=0.5)
+        batch = TerrainScatterBatch(
+            levels=levels, transforms=transforms, name="large_scale",
+            max_draw_distance=1000.0, hlod=policy,
+        )
+        ts.apply_to_renderer(renderer, [batch])
+        renderer.render_terrain_pbr_pom(material_set, ibl, params, heightmap)
+        stats = renderer.get_scatter_stats()
+        # With camera at ~220 and cluster radius >> hlod_distance,
+        # HLOD should NOT activate because geometry extends well past the threshold
+        assert stats["hlod_cluster_draws"] == 0, (
+            f"HLOD should not activate for 100x-scale instances near camera, "
+            f"got {stats['hlod_cluster_draws']} cluster draws"
+        )
+        assert stats["hlod_covered_instances"] == 0
 
     def test_hlod_memory_tracked(self, gpu_session):
         renderer, _, _, _, _ = self._build_render_context(gpu_session)

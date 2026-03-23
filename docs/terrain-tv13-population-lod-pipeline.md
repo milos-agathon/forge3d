@@ -27,7 +27,7 @@ Epic TV13 adds automatic mesh simplification, auto-generated LOD chains, and HLO
 - Spatial grid clustering merges distant scatter instances into cheaper aggregate representations
 - Each HLOD cluster is a single non-instanced draw call from its own merged vertex/index buffers
 - Clusters are built once at batch creation time (not per-frame)
-- Runtime selection: clusters activate when the entire cluster is beyond `hlod_distance`; near instances always render individually through normal LOD selection
+- Runtime selection: clusters activate when the entire cluster (including mesh extents at per-instance scale) is beyond `hlod_distance`; near instances always render individually through normal LOD selection
 - New stats fields: `hlod_cluster_draws`, `hlod_covered_instances`, `effective_draws`
 - New memory fields: `hlod_buffer_bytes`, `hlod_cluster_count`
 - Full plumbing through offscreen renderer, interactive viewer, and IPC paths
@@ -242,5 +242,5 @@ Demonstrates:
 2. LOD chain generation from a single cone mesh
 3. `auto_lod_levels()` producing scatter-ready LOD levels
 4. Side-by-side rendering: baseline (no HLOD) vs HLOD-enabled
-5. Stats comparison showing HLOD cluster draws and covered instances
+5. Stats comparison showing HLOD cluster draws, covered instances, and effective draws. Note: the HLOD benefit is most visible at high instance counts — the demo uses a moderate scene to keep runtime short, so `effective_draws` may increase slightly due to HLOD cluster overhead. In production-scale scenes (10k+ instances), HLOD reduces draw-call pressure significantly.
 6. PNG output to `examples/out/terrain_tv13_lod_pipeline/`

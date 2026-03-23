@@ -161,8 +161,18 @@ pub fn simplify_mesh(mesh: &MeshBuffers, target_ratio: f32) -> GeometryResult<Me
         return Ok(mesh.clone());
     }
 
-    let target_tris = ((original_tri_count as f64 * target_ratio as f64).ceil() as usize).max(1);
+    // Validate indices are in bounds
     let vertex_count = mesh.positions.len();
+    for (i, &idx) in mesh.indices.iter().enumerate() {
+        if idx as usize >= vertex_count {
+            return Err(GeometryError::new(format!(
+                "index {} at position {} is out of bounds for {} vertices",
+                idx, i, vertex_count
+            )));
+        }
+    }
+
+    let target_tris = ((original_tri_count as f64 * target_ratio as f64).ceil() as usize).max(1);
     let has_uvs = mesh.uvs.len() == vertex_count;
     let has_tangents = mesh.tangents.len() == vertex_count;
 
@@ -646,5 +656,18 @@ mod tests {
         // Verify it's a valid mesh
         assert_eq!(result.indices.len() % 3, 0);
         assert_eq!(result.normals.len(), result.positions.len());
+    }
+
+    #[test]
+    fn rejects_out_of_bounds_indices() {
+        let mut mesh = generate_unit_box();
+        // Corrupt one index to be out of bounds
+        mesh.indices[0] = 99;
+        let err = simplify_mesh(&mesh, 0.5).unwrap_err();
+        assert!(
+            err.message().contains("out of bounds"),
+            "Error should mention 'out of bounds', got: {}",
+            err.message()
+        );
     }
 }

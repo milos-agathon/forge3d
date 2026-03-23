@@ -623,11 +623,18 @@ def auto_lod_levels(
     if lod_count < 1:
         raise ValueError("lod_count must be >= 1")
 
-    # Resolve ratios
+    # Resolve ratios: geometric series in (0, 1] with guaranteed strict descent.
+    # For N levels, space ratios evenly in log space between 1.0 and a minimum
+    # floor (0.01). E.g. lod_count=6 → [1.0, 0.398, 0.158, 0.063, 0.025, 0.01].
     if ratios is None:
         ratios = [1.0]
-        for i in range(1, lod_count):
-            ratios.append(max(0.25 ** i, 0.01))
+        if lod_count > 1:
+            min_ratio = 0.01
+            for i in range(1, lod_count):
+                # Linearly interpolate the exponent between 0 and log(min_ratio)
+                t = i / (lod_count - 1)
+                r = float(10.0 ** (t * np.log10(min_ratio)))
+                ratios.append(max(r, min_ratio))
     if len(ratios) != lod_count:
         raise ValueError(f"ratios length ({len(ratios)}) must equal lod_count ({lod_count})")
 

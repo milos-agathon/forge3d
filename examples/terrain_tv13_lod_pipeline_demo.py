@@ -22,8 +22,12 @@ def _import_forge3d():
     try:
         import forge3d as f3d
 
+        # Verify TV13 APIs are available; an older installed forge3d may lack them.
+        from forge3d.geometry import simplify_mesh as _check  # noqa: F401
+        from forge3d.terrain_scatter import auto_lod_levels as _check2  # noqa: F401
+
         return f3d
-    except ModuleNotFoundError:
+    except (ModuleNotFoundError, ImportError):
         from _import_shim import ensure_repo_import
 
         ensure_repo_import()
