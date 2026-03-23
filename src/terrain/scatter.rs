@@ -508,7 +508,7 @@ fn build_hlod_cache(
     let mut clusters = Vec::new();
     let mut total_buffer_bytes = 0u64;
 
-    for (_cell_key, instance_indices) in &cells {
+    for instance_indices in cells.values() {
         if instance_indices.len() < 2 {
             // Cells with 1 instance: leave as individual draw
             continue;
