@@ -156,12 +156,8 @@ pub fn simplify_mesh(mesh: &MeshBuffers, target_ratio: f32) -> GeometryResult<Me
         return Err(GeometryError::new("Mesh has no triangles to simplify"));
     }
 
-    // Ratio 1.0 → just clone
-    if (target_ratio - 1.0).abs() < 1e-7 {
-        return Ok(mesh.clone());
-    }
-
-    // Validate indices are in bounds
+    // Validate indices are in bounds — must run before any early return
+    // so that callers can never receive an invalid mesh back unchecked.
     let vertex_count = mesh.positions.len();
     for (i, &idx) in mesh.indices.iter().enumerate() {
         if idx as usize >= vertex_count {
@@ -170,6 +166,11 @@ pub fn simplify_mesh(mesh: &MeshBuffers, target_ratio: f32) -> GeometryResult<Me
                 idx, i, vertex_count
             )));
         }
+    }
+
+    // Ratio 1.0 → just clone (indices already validated above)
+    if (target_ratio - 1.0).abs() < 1e-7 {
+        return Ok(mesh.clone());
     }
 
     let target_tris = ((original_tri_count as f64 * target_ratio as f64).ceil() as usize).max(1);
@@ -661,12 +662,23 @@ mod tests {
     #[test]
     fn rejects_out_of_bounds_indices() {
         let mut mesh = generate_unit_box();
-        // Corrupt one index to be out of bounds
         mesh.indices[0] = 99;
         let err = simplify_mesh(&mesh, 0.5).unwrap_err();
         assert!(
             err.message().contains("out of bounds"),
             "Error should mention 'out of bounds', got: {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_out_of_bounds_indices_at_ratio_one() {
+        let mut mesh = generate_unit_box();
+        mesh.indices[0] = 99;
+        let err = simplify_mesh(&mesh, 1.0).unwrap_err();
+        assert!(
+            err.message().contains("out of bounds"),
+            "ratio=1.0 must still reject OOB indices, got: {}",
             err.message()
         );
     }

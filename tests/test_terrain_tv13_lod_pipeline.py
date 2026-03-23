@@ -53,7 +53,8 @@ class TestSimplifyMesh:
         result = simplify_mesh(box_mesh, 1.0)
         assert result.triangle_count == box_mesh.triangle_count
 
-    def test_simplify_rejects_out_of_bounds_indices(self):
+    @pytest.mark.parametrize("ratio", [0.5, 1.0])
+    def test_simplify_rejects_out_of_bounds_indices(self, ratio):
         mesh = MeshBuffers(
             positions=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=np.float32),
             normals=np.array([[0, 1, 0], [0, 1, 0], [0, 1, 0]], dtype=np.float32),
@@ -61,7 +62,7 @@ class TestSimplifyMesh:
             indices=np.array([[0, 1, 99]], dtype=np.uint32),
         )
         with pytest.raises(ValueError, match="out of bounds"):
-            simplify_mesh(mesh, 0.5)
+            simplify_mesh(mesh, ratio)
 
 
 class TestGenerateLodChain:

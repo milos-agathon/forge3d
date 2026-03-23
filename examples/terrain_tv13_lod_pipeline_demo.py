@@ -19,6 +19,8 @@ import numpy as np
 
 
 def _import_forge3d():
+    import sys
+
     try:
         import forge3d as f3d
 
@@ -28,6 +30,10 @@ def _import_forge3d():
 
         return f3d
     except (ModuleNotFoundError, ImportError):
+        # Purge any stale forge3d entries so the re-import picks up the repo copy.
+        for key in [k for k in sys.modules if k == "forge3d" or k.startswith("forge3d.")]:
+            del sys.modules[key]
+
         from _import_shim import ensure_repo_import
 
         ensure_repo_import()
