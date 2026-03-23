@@ -49,8 +49,8 @@ class VTLayerFamily:
     """Describes one paged terrain material family."""
     family: str                        # "albedo" | "normal" | "mask"
     virtual_size_px: Tuple[int, int] = (4096, 4096)  # family-wide invariant
-    tile_size: int = 256               # content pixels per tile edge
-    tile_border: int = 4               # gutter pixels per tile edge
+    tile_size: int = 248               # content pixels per tile edge
+    tile_border: int = 4               # gutter pixels per tile edge (slot_size = 256)
     fallback: Tuple[float, ...] = (0.5, 0.5, 0.5, 1.0)  # last-resort per-family fallback
 
     def __post_init__(self) -> None:
@@ -192,7 +192,7 @@ VirtualTextureConfig {
     max_mip_levels: actual_mip_count,     // min(requested, full_pyramid)
     atlas_width: settings.atlas_size,
     atlas_height: settings.atlas_size,
-    format: Rgba8UnormSrgb,               // matches existing material format
+    format: Rgba8UnormSrgb,               // matches existing material albedo format (gpu.rs:189)
     use_feedback: settings.use_feedback,
     material_count: registered_material_count,  // array layer count
 }
@@ -327,16 +327,34 @@ struct VTUniforms {
     actual_mip_count: u32,
     content_scale: vec2<f32>,  // tile_size / atlas_size (gradient transform)
     material_count: u32,
-    _pad: u32,
+    max_pages: u32,          // max(pages_x0, pages_y0) for mip selection
+};
+
+// Per-material fallback colors — one vec4 per material_index.
+// Populated from register_material_vt_source() fallback_color values.
+// MAX_VT_MATERIALS is a compile-time cap (e.g. 16).
+const MAX_VT_MATERIALS: u32 = 16u;
+struct VTFallbackColors {
+    colors: array<vec4<f32>, 16>,  // indexed by material_index
 };
 
 @group(6) @binding(3) var<uniform> u_vt : VTUniforms;
-@group(6) @binding(4) var vt_atlas_tex : texture_2d_array<f32>;
-@group(6) @binding(5) var vt_atlas_samp : sampler;   // filtering sampler for atlas only
-@group(6) @binding(6) var vt_page_table_tex : texture_2d<f32>;  // NO sampler — textureLoad only
+@group(6) @binding(4) var<uniform> u_vt_fallback : VTFallbackColors;
+@group(6) @binding(5) var vt_atlas_tex : texture_2d_array<f32>;
+@group(6) @binding(6) var vt_atlas_samp : sampler;   // filtering sampler for atlas only
+@group(6) @binding(7) var vt_page_table_tex : texture_2d<f32>;  // NO sampler — textureLoad only
 ```
 
 Pipeline layout stays at 7 groups (0-6). No group 7.
+
+**VT-disabled bind group strategy**: The `@group(6)` layout always includes VT bindings (3-7) regardless of whether VT is active. When VT is disabled (`u_vt.enabled == 0`), dummy resources are bound:
+- `u_vt`: uniform buffer with `enabled = 0`
+- `u_vt_fallback`: zero-filled uniform buffer
+- `vt_atlas_tex`: 1×1×1 fallback `texture_2d_array` (single-layer, 1px)
+- `vt_atlas_samp`: reuse existing linear sampler
+- `vt_page_table_tex`: 1×1 fallback `texture_2d` (single texel, all zeros)
+
+This matches the existing pattern where `height_ao_fallback_view`, `sun_vis_fallback_view`, and `detail_normal_fallback_view` provide 1×1 dummy textures for disabled features. One pipeline layout, one compiled pipeline — the shader branch on `u_vt.enabled` handles the rest.
 
 ### 6.2 Page table lookup — `textureLoad`, not filtered sampling
 
@@ -378,7 +396,7 @@ fn vt_sample_axis(
     let entry = vt_page_lookup(uv, mip);
     if (entry.z <= 0.0) {
         // Nothing resident — use per-material fallback (from uniform array)
-        return vt_fallback_colors[layer].rgb;
+        return u_vt_fallback.colors[layer].rgb;
     }
     let pages_at_mip = vec2<f32>(vt_pages_at_mip(mip));  // ceil-div, min 1
     let tile_uv = fract(uv * pages_at_mip);
@@ -404,8 +422,11 @@ fn sample_triplanar(
 
     if (u_vt.enabled == 1u) {
         // Compute mip from UV derivatives
+        // Isotropic mip selection using max(pages_x0, pages_y0) for non-square extents.
+        // Anisotropy collapse (max of two derivative lengths) is intentional — the page table
+        // is isotropic, so per-axis mip selection would not improve tile residency decisions.
         let max_deriv = max(length(dpdx_w), length(dpdy_w));
-        let mip = clamp(u32(log2(max_deriv * f32(u_vt.pages_x0))), 0u, u_vt.actual_mip_count - 1u);
+        let mip = clamp(u32(log2(max_deriv * f32(u_vt.max_pages))), 0u, u_vt.actual_mip_count - 1u);
         let cx = vt_sample_axis(uv_x, dpdx_w.yz, dpdy_w.yz, layer_i, mip);
         let cy = vt_sample_axis(uv_y, dpdx_w.xz, dpdy_w.xz, layer_i, mip);
         let cz = vt_sample_axis(uv_z, dpdx_w.xy, dpdy_w.xy, layer_i, mip);
@@ -439,6 +460,9 @@ stats = renderer.get_material_vt_stats()
 #         "budget_utilization": float,
 #         "actual_mip_count": int,
 #         "material_count": int,
+#         "pages_x0": int,
+#         "pages_y0": int,
+#         "coarsest_tiles": int,
 #     }
 # }
 ```
@@ -476,6 +500,24 @@ After tile load/evict, the page table update loop must populate non-resident ent
 
 Atlas texture gains `depth_or_array_layers = material_count`. Upload path writes to the correct array layer per material index.
 
+### 8.6 PageTableEntry shape migration
+
+The existing `PageTableEntry` (`types.rs:34`) has fields `{atlas_u, atlas_v, is_resident, mip_bias}`. This is a **breaking replacement**, not a backwards-compatible extension:
+
+- `is_resident` is superseded by the `scale_u == 0.0` convention (zero scale = nothing resident).
+- `mip_bias` is no longer needed because the shader selects mip explicitly via `textureLoad` at a computed mip level.
+- New fields: `{atlas_u, atlas_v, scale_u, scale_v}` — sub-rect transform for ancestor fallback.
+
+The only current consumer of the old shape is the procedural VT demo code in `load_tile_data()` and `request_tile_load()`. Both must be migrated to write the new entry format.
+
+### 8.7 All @group(6) set_bind_group call sites
+
+Adding VT bindings to @group(6) requires updating **all** call sites that bind this group. Known sites include: `draw/execute.rs`, `aov.rs`, `water_reflection/bind_group.rs`, `offline.rs`. Each must pass the expanded bind group (with VT entries or fallbacks).
+
+### 8.8 VT update is per-logical-frame, not per-accumulation-sample
+
+When used with TV12 offline accumulation, `VirtualTexture::update()` must be called once per logical frame, not once per accumulation sample. The camera does not change between jittered samples of the same frame, so tile residency should not churn. The offline render loop must skip VT update for subsequent samples of the same frame.
+
 ---
 
 ## 9. Test Plan
@@ -490,6 +532,7 @@ Atlas texture gains `depth_or_array_layers = material_count`. Upload path writes
 | 6 | `test_clear_sources_resets_state` | Clearing sources + rendering falls back cleanly |
 | 7 | `test_mixed_virtual_size_rejects` | Registering source with mismatched `virtual_size_px` → `ValueError` |
 | 8 | `test_missing_material_index_rejects` | VT enabled but material_index unregistered → `PyRuntimeError` naming the index |
+| 9 | `test_non_pot_virtual_size_renders` | Non-power-of-two `virtual_size_px` (e.g. 3000×2000) renders correctly — exercises ceil-div paths |
 
 ---
 
@@ -505,7 +548,7 @@ Atlas texture gains `depth_or_array_layers = material_count`. Upload path writes
 - `src/terrain/renderer/virtual_texture.rs` — `TerrainMaterialVT` struct and update logic
 - `src/terrain/render_params/decode_vt.rs` — `parse_vt_settings()`
 - `src/terrain/render_params/native_vt.rs` — `TerrainVTSettingsNative`, `VTLayerFamilyNative`
-- `tests/test_tv20_virtual_texturing.py` — all 8 tests
+- `tests/test_tv20_virtual_texturing.py` — all 9 tests
 - `examples/terrain_tv20_virtual_texturing_demo.py` — demo script
 
 ### Modified files
@@ -515,10 +558,14 @@ Atlas texture gains `depth_or_array_layers = material_count`. Upload path writes
 - `src/terrain/render_params/private_impl.rs` — add `vt` to `DecodedTerrainSettings`
 - `src/terrain/render_params/mod.rs` — module declarations
 - `src/terrain/renderer/py_api.rs` — `register_material_vt_source()`, `clear_material_vt_sources()`, `get_material_vt_stats()`
-- `src/terrain/renderer/bind_groups/layouts.rs` — extend @group(6) layout
-- `src/terrain/renderer/bind_groups/terrain_pass.rs` — create VT bind entries
+- `src/terrain/renderer/bind_groups/layouts.rs` — extend @group(6) layout with bindings 3-7
+- `src/terrain/renderer/bind_groups/terrain_pass.rs` — create VT bind entries + fallback resources
+- `src/terrain/renderer/draw/execute.rs` — updated `set_bind_group(6, ...)` call
+- `src/terrain/renderer/aov.rs` — updated `set_bind_group(6, ...)` call
+- `src/terrain/renderer/offline.rs` — updated `set_bind_group(6, ...)` call, per-frame VT update guard
 - `src/shaders/terrain_pbr_pom.wgsl` — VT uniforms, `textureLoad` page lookup, `vt_sample_axis()`, dual-path `sample_triplanar()`
-- `src/core/virtual_texture/types.rs` — `PageTableEntry` shape change, `tile_border` in config
+- `src/core/virtual_texture/mod.rs` — `VirtualTexture` struct field change (`page_table_data` type)
+- `src/core/virtual_texture/types.rs` — `PageTableEntry` shape replacement, `tile_border` in config
 - `src/core/virtual_texture/constructor.rs` — array layer atlas, per-mip page table init, border support
 - `src/core/virtual_texture/update.rs` — mip convention flip, per-mip page table write, ancestor fallback
 - `src/core/virtual_texture/upload.rs` — border fill, array layer upload
