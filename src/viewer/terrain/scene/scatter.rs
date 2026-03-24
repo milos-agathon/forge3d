@@ -3,8 +3,8 @@ use super::*;
 
 #[cfg(feature = "enable-gpu-instancing")]
 use crate::terrain::scatter::{
-    accumulate_frame_stats, summarize_memory, TerrainScatterBatch, TerrainScatterFrameStats,
-    TerrainScatterLevelSpec, TerrainScatterMemoryReport,
+    accumulate_frame_stats, compute_wind_uniforms, summarize_memory, TerrainScatterBatch,
+    TerrainScatterFrameStats, TerrainScatterLevelSpec, TerrainScatterMemoryReport,
 };
 
 #[cfg(feature = "enable-gpu-instancing")]
@@ -33,6 +33,7 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
     h_range: f32,
     light_dir: [f32; 3],
     light_intensity: f32,
+    elapsed_time: f32,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     renderer: &mut crate::render::mesh_instanced::MeshInstancedRenderer,
@@ -81,10 +82,22 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
         )?;
         accumulate_frame_stats(&mut frame_stats, &batch_stats);
 
+        // Compute batch-constant wind fields
+        let base_wind = compute_wind_uniforms(
+            &batch.wind,
+            elapsed_time,
+            0.0, // placeholder, overridden per-draw
+            instance_scale,
+        );
+
         for draw in draws {
             let Some(instbuf) = batch.level_instbuf(draw.level_index) else {
                 continue;
             };
+            // Inject per-draw mesh_height_max
+            let mut wind = base_wind;
+            wind.wind_vec_bounds[3] = batch.level_mesh_height_max(draw.level_index);
+
             renderer.draw_batch_params(
                 device,
                 &mut pass,
@@ -94,9 +107,9 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
                 batch.color,
                 light_dir,
                 light_intensity,
-                [0.0; 4],
-                [0.0; 4],
-                [0.0; 4],
+                wind.wind_phase,
+                wind.wind_vec_bounds,
+                wind.wind_bend_fade,
                 batch.level_vbuf(draw.level_index),
                 batch.level_ibuf(draw.level_index),
                 instbuf,
@@ -143,6 +156,11 @@ impl ViewerTerrainScene {
         Ok(())
     }
 
+    /// Accumulate elapsed time for scatter wind animation.
+    pub fn tick_scatter_time(&mut self, dt: f32) {
+        self.scatter_elapsed_time += dt;
+    }
+
     pub fn clear_scatter_batches(&mut self) {
         self.scatter_batches.clear();
         self.scatter_last_frame_stats = TerrainScatterFrameStats::default();
@@ -184,6 +202,7 @@ impl ViewerTerrainScene {
             h_range,
             light_dir,
             light_intensity,
+            self.scatter_elapsed_time,
             self.device.as_ref(),
             self.queue.as_ref(),
             &mut self.scatter_renderer,

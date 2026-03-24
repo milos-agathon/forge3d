@@ -191,6 +191,8 @@ pub struct ViewerTerrainScene {
     pub(super) scatter_batches: Vec<crate::terrain::scatter::TerrainScatterBatch>,
     #[cfg(feature = "enable-gpu-instancing")]
     pub(super) scatter_last_frame_stats: crate::terrain::scatter::TerrainScatterFrameStats,
+    /// Accumulated wall-clock time (seconds) for scatter wind animation.
+    pub(super) scatter_elapsed_time: f32,
 }
 
 mod core;
