@@ -19,53 +19,35 @@ import pytest
 f3d = pytest.importorskip("forge3d")
 from _terrain_runtime import terrain_rendering_available
 from forge3d import terrain_scatter as ts
-from forge3d.geometry import MeshBuffers
 from forge3d.terrain_params import make_terrain_params_config
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _trivial_mesh() -> MeshBuffers:
-    """Simple tree-like mesh with y=0 base and y=2 tip."""
-    positions = np.array(
-        [
-            [0.0, 0.0, 0.0],
-            [0.5, 0.0, 0.0],
-            [-0.5, 0.0, 0.0],
-            [0.0, 2.0, 0.0],
-            [0.3, 1.5, 0.0],
-            [-0.3, 1.5, 0.0],
-        ],
-        dtype=np.float32,
-    )
-    normals = np.array(
-        [
-            [0.0, 0.0, 1.0],
-            [0.0, 0.0, 1.0],
-            [0.0, 0.0, 1.0],
-            [0.0, 0.0, 1.0],
-            [0.0, 0.0, 1.0],
-            [0.0, 0.0, 1.0],
-        ],
-        dtype=np.float32,
-    )
-    uvs = np.zeros((6, 2), dtype=np.float32)
-    indices = np.array([[0, 1, 3], [1, 4, 3], [0, 3, 2], [2, 3, 5]], dtype=np.uint32)
-    return MeshBuffers(positions=positions, normals=normals, uvs=uvs, indices=indices)
+def _scatter_mesh() -> MeshBuffers:
+    """Use a cone primitive mesh — large enough to be visible at the test camera distance."""
+    return f3d.geometry.primitive_mesh("cone", radial_segments=10)
+
+
+def _make_heightmap() -> np.ndarray:
+    """Varied heightmap matching the working scatter integration test pattern."""
+    y, x = np.mgrid[0:96, 0:96].astype(np.float32)
+    return np.sin(x / 7.0) * 8.0 + np.cos(y / 9.0) * 6.0 + x * 0.35 + y * 0.15 + 25.0
 
 
 def _make_scatter_source() -> ts.TerrainScatterSource:
-    heightmap = np.ones((64, 64), dtype=np.float32) * 100.0
-    return ts.TerrainScatterSource(heightmap, z_scale=1.0)
+    heightmap = _make_heightmap()
+    return ts.TerrainScatterSource(heightmap, z_scale=1.4)
 
 
-def _place_instances(source: ts.TerrainScatterSource, count: int = 20, seed: int = 42) -> np.ndarray:
+def _place_instances(source: ts.TerrainScatterSource, count: int = 40, seed: int = 42) -> np.ndarray:
     return ts.seeded_random_transforms(
         source,
         count=count,
         seed=seed,
-        scale_range=(0.5, 1.5),
+        scale_range=(3.0, 6.0),
+        filters=ts.TerrainScatterFilters(max_slope_deg=45.0),
     )
 
 
@@ -110,12 +92,17 @@ _CAN_RUN = (
     and hasattr(f3d, "Session")
     and hasattr(f3d, "TerrainRenderer")
     and hasattr(f3d.TerrainRenderer, "set_scatter_batches")
+    and hasattr(f3d.geometry, "primitive_mesh")
 )
 
 
 def _make_gpu_fixtures():
-    """Build Session, TerrainRenderer, MaterialSet, IBL, params, heightmap."""
-    heightmap = np.ones((64, 64), dtype=np.float32) * 100.0
+    """Build Session, TerrainRenderer, MaterialSet, IBL, params, heightmap.
+
+    Uses the same heightmap/camera pattern as TestNativeScatterIntegration
+    in test_terrain_scatter.py to ensure scatter instances are visible.
+    """
+    heightmap = _make_heightmap()
 
     session = f3d.Session(window=False)
     renderer = f3d.TerrainRenderer(session)
@@ -132,12 +119,12 @@ def _make_gpu_fixtures():
     config = make_terrain_params_config(
         size_px=(256, 160),
         render_scale=1.0,
-        terrain_span=120.0,
-        msaa_samples=4,
-        z_scale=1.0,
+        terrain_span=180.0,
+        msaa_samples=1,
+        z_scale=1.4,
         exposure=1.0,
-        domain=(90.0, 110.0),
-        cam_radius=160.0,
+        domain=(float(np.min(heightmap)), float(np.max(heightmap))),
+        cam_radius=220.0,
         cam_phi_deg=138.0,
         cam_theta_deg=57.0,
         fov_y_deg=48.0,
@@ -166,11 +153,11 @@ class TestWindNoOp:
         transforms = _place_instances(source)
 
         batch_static = ts.TerrainScatterBatch(
-            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            levels=[ts.TerrainScatterLevel(mesh=_scatter_mesh())],
             transforms=transforms,
         )
         batch_disabled = ts.TerrainScatterBatch(
-            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            levels=[ts.TerrainScatterLevel(mesh=_scatter_mesh())],
             transforms=transforms,
             wind=ts.ScatterWindSettings(enabled=False, amplitude=5.0),
         )
@@ -185,11 +172,11 @@ class TestWindNoOp:
         transforms = _place_instances(source)
 
         batch_static = ts.TerrainScatterBatch(
-            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            levels=[ts.TerrainScatterLevel(mesh=_scatter_mesh())],
             transforms=transforms,
         )
         batch_zero = ts.TerrainScatterBatch(
-            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            levels=[ts.TerrainScatterLevel(mesh=_scatter_mesh())],
             transforms=transforms,
             wind=ts.ScatterWindSettings(enabled=True, amplitude=0.0),
         )
@@ -204,11 +191,11 @@ class TestWindNoOp:
         transforms = _place_instances(source)
 
         batch_static = ts.TerrainScatterBatch(
-            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            levels=[ts.TerrainScatterLevel(mesh=_scatter_mesh())],
             transforms=transforms,
         )
         batch_rigid = ts.TerrainScatterBatch(
-            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            levels=[ts.TerrainScatterLevel(mesh=_scatter_mesh())],
             transforms=transforms,
             wind=ts.ScatterWindSettings(enabled=True, amplitude=3.0, rigidity=1.0),
         )
@@ -237,13 +224,14 @@ class TestWindAnimation:
         transforms = _place_instances(source)
         wind = ts.ScatterWindSettings(enabled=True, amplitude=2.0, speed=1.0)
         batch = ts.TerrainScatterBatch(
-            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            levels=[ts.TerrainScatterLevel(mesh=_scatter_mesh())],
             transforms=transforms,
             wind=wind,
         )
 
         f0 = _render_frame(renderer, ms, ibl, params, hm, [batch], time_seconds=0.0)
-        f1 = _render_frame(renderer, ms, ibl, params, hm, [batch], time_seconds=1.0)
+        # Avoid t=1.0 with speed=1.0: temporal_phase wraps to exactly 2π → sin(2π+x)==sin(x)
+        f1 = _render_frame(renderer, ms, ibl, params, hm, [batch], time_seconds=0.37)
         assert not np.array_equal(f0, f1), "wind at different times should differ"
 
     def test_same_time_is_deterministic(self, gpu) -> None:
@@ -252,7 +240,7 @@ class TestWindAnimation:
         transforms = _place_instances(source)
         wind = ts.ScatterWindSettings(enabled=True, amplitude=2.0, speed=1.0)
         batch = ts.TerrainScatterBatch(
-            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            levels=[ts.TerrainScatterLevel(mesh=_scatter_mesh())],
             transforms=transforms,
             wind=wind,
         )
@@ -267,12 +255,12 @@ class TestWindAnimation:
         transforms = _place_instances(source)
 
         batch_low = ts.TerrainScatterBatch(
-            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            levels=[ts.TerrainScatterLevel(mesh=_scatter_mesh())],
             transforms=transforms,
             wind=ts.ScatterWindSettings(enabled=True, amplitude=2.0, bend_start=0.0),
         )
         batch_high = ts.TerrainScatterBatch(
-            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            levels=[ts.TerrainScatterLevel(mesh=_scatter_mesh())],
             transforms=transforms,
             wind=ts.ScatterWindSettings(enabled=True, amplitude=2.0, bend_start=0.8),
         )
@@ -287,12 +275,12 @@ class TestWindAnimation:
         transforms = _place_instances(source)
 
         batch_no_gust = ts.TerrainScatterBatch(
-            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            levels=[ts.TerrainScatterLevel(mesh=_scatter_mesh())],
             transforms=transforms,
             wind=ts.ScatterWindSettings(enabled=True, amplitude=2.0, gust_strength=0.0),
         )
         batch_gust = ts.TerrainScatterBatch(
-            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            levels=[ts.TerrainScatterLevel(mesh=_scatter_mesh())],
             transforms=transforms,
             wind=ts.ScatterWindSettings(enabled=True, amplitude=2.0, gust_strength=1.5),
         )
@@ -320,19 +308,22 @@ class TestWindFade:
         renderer, ms, ibl, params, hm = gpu
         source = _make_scatter_source()
 
-        # Place instances at the far corner of the terrain
+        # Place a single instance at the far corner of the terrain
+        h = source.sample_scaled_height(
+            source.height * 0.95, source.width * 0.95
+        )
         far_transform = ts.make_transform_row_major(
-            (source.terrain_width * 0.95, 100.0, source.terrain_width * 0.95),
-            scale=1.0,
+            (source.terrain_width * 0.95, h, source.terrain_width * 0.95),
+            scale=4.0,
         ).reshape(1, 16)
 
         batch_static = ts.TerrainScatterBatch(
-            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            levels=[ts.TerrainScatterLevel(mesh=_scatter_mesh())],
             transforms=far_transform,
         )
         # Wind with fade that ends well before the instance distance
         batch_faded = ts.TerrainScatterBatch(
-            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            levels=[ts.TerrainScatterLevel(mesh=_scatter_mesh())],
             transforms=far_transform,
             wind=ts.ScatterWindSettings(
                 enabled=True,
