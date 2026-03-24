@@ -1,14 +1,14 @@
 // src/shaders/mesh_instanced.wgsl
 // Instanced 3D mesh shader (per-instance transform matrix)
 
-struct SceneUniforms {
+struct ScatterBatchUniforms {
   view: mat4x4<f32>,
   proj: mat4x4<f32>,
   color: vec4<f32>,
   light_dir_ws: vec4<f32>, // xyz: dir, w: intensity
 }
 
-@group(0) @binding(0) var<uniform> U : SceneUniforms;
+@group(0) @binding(0) var<uniform> U : ScatterBatchUniforms;
 
 struct VsIn {
   // Per-vertex attributes

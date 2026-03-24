@@ -19,14 +19,14 @@ const DRAW_BATCH_UNIFORM_SLOT_COUNT: usize = 512;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct SceneUniforms {
+struct ScatterBatchUniforms {
     view: [[f32; 4]; 4],
     proj: [[f32; 4]; 4],
     color: [f32; 4],
     light_dir_ws: [f32; 4], // xyz + intensity
 }
 
-impl Default for SceneUniforms {
+impl Default for ScatterBatchUniforms {
     fn default() -> Self {
         Self {
             view: Mat4::IDENTITY.to_cols_array_2d(),
@@ -46,7 +46,7 @@ pub struct VertexPN {
 
 pub struct MeshInstancedRenderer {
     pipeline: RenderPipeline,
-    uniforms: SceneUniforms,
+    uniforms: ScatterBatchUniforms,
     uniforms_buf: Buffer,
     bind_group_layout: BindGroupLayout,
     bind_group: BindGroup,
@@ -198,10 +198,10 @@ impl MeshInstancedRenderer {
             multiview: None,
         });
 
-        let uniforms = SceneUniforms::default();
+        let uniforms = ScatterBatchUniforms::default();
         let uniforms_buf = device.create_buffer(&BufferDescriptor {
             label: Some("mesh_instanced_uniforms"),
-            size: std::mem::size_of::<SceneUniforms>() as u64,
+            size: std::mem::size_of::<ScatterBatchUniforms>() as u64,
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -219,7 +219,7 @@ impl MeshInstancedRenderer {
         for _ in 0..DRAW_BATCH_UNIFORM_SLOT_COUNT {
             let uniforms_buf = device.create_buffer(&BufferDescriptor {
                 label: Some("mesh_instanced_draw_uniforms"),
-                size: std::mem::size_of::<SceneUniforms>() as u64,
+                size: std::mem::size_of::<ScatterBatchUniforms>() as u64,
                 usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
