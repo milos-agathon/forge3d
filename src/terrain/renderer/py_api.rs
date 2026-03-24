@@ -156,6 +156,122 @@ impl TerrainRenderer {
                     ))
                 })?;
 
+            let terrain_blend = if let Some(blend_any) = batch_dict
+                .get_item("terrain_blend")
+                .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                .filter(|value| !value.is_none())
+            {
+                let blend_dict = blend_any.downcast::<PyDict>().map_err(|_| {
+                    PyRuntimeError::new_err(format!(
+                        "batch {batch_index}: 'terrain_blend' must be a dict"
+                    ))
+                })?;
+                crate::terrain::scatter::TerrainScatterBlendConfig {
+                    enabled: blend_dict
+                        .get_item("enabled")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .filter(|value| !value.is_none())
+                        .map(|value| value.extract::<bool>())
+                        .transpose()
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'terrain_blend.enabled': {e}"
+                            ))
+                        })?
+                        .unwrap_or(false),
+                    bury_depth: blend_dict
+                        .get_item("bury_depth")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .filter(|value| !value.is_none())
+                        .map(|value| value.extract::<f32>())
+                        .transpose()
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'terrain_blend.bury_depth': {e}"
+                            ))
+                        })?
+                        .unwrap_or(0.75),
+                    fade_distance: blend_dict
+                        .get_item("fade_distance")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .filter(|value| !value.is_none())
+                        .map(|value| value.extract::<f32>())
+                        .transpose()
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'terrain_blend.fade_distance': {e}"
+                            ))
+                        })?
+                        .unwrap_or(2.5),
+                }
+            } else {
+                crate::terrain::scatter::TerrainScatterBlendConfig::default()
+            };
+
+            let terrain_contact = if let Some(contact_any) = batch_dict
+                .get_item("terrain_contact")
+                .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                .filter(|value| !value.is_none())
+            {
+                let contact_dict = contact_any.downcast::<PyDict>().map_err(|_| {
+                    PyRuntimeError::new_err(format!(
+                        "batch {batch_index}: 'terrain_contact' must be a dict"
+                    ))
+                })?;
+                crate::terrain::scatter::TerrainScatterContactConfig {
+                    enabled: contact_dict
+                        .get_item("enabled")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .filter(|value| !value.is_none())
+                        .map(|value| value.extract::<bool>())
+                        .transpose()
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'terrain_contact.enabled': {e}"
+                            ))
+                        })?
+                        .unwrap_or(false),
+                    distance: contact_dict
+                        .get_item("distance")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .filter(|value| !value.is_none())
+                        .map(|value| value.extract::<f32>())
+                        .transpose()
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'terrain_contact.distance': {e}"
+                            ))
+                        })?
+                        .unwrap_or(3.0),
+                    strength: contact_dict
+                        .get_item("strength")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .filter(|value| !value.is_none())
+                        .map(|value| value.extract::<f32>())
+                        .transpose()
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'terrain_contact.strength': {e}"
+                            ))
+                        })?
+                        .unwrap_or(0.35),
+                    vertical_weight: contact_dict
+                        .get_item("vertical_weight")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .filter(|value| !value.is_none())
+                        .map(|value| value.extract::<f32>())
+                        .transpose()
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'terrain_contact.vertical_weight': {e}"
+                            ))
+                        })?
+                        .unwrap_or(0.65),
+                }
+            } else {
+                crate::terrain::scatter::TerrainScatterContactConfig::default()
+            };
+
             let transforms_any = batch_dict
                 .get_item("transforms")
                 .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
@@ -273,6 +389,8 @@ impl TerrainRenderer {
                 name,
                 color,
                 max_draw_distance,
+                terrain_blend,
+                terrain_contact,
                 transforms_rowmajor: transforms,
                 levels,
                 hlod_config,

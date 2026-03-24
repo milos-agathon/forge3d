@@ -24,6 +24,8 @@ struct SceneUniforms {
     proj: [[f32; 4]; 4],
     color: [f32; 4],
     light_dir_ws: [f32; 4], // xyz + intensity
+    terrain_blend: [f32; 4],
+    terrain_contact: [f32; 4],
 }
 
 impl Default for SceneUniforms {
@@ -33,6 +35,24 @@ impl Default for SceneUniforms {
             proj: Mat4::IDENTITY.to_cols_array_2d(),
             color: [1.0, 1.0, 1.0, 1.0],
             light_dir_ws: [0.0, -1.0, 0.0, 1.0],
+            terrain_blend: [0.0, 0.75, 2.5, 0.0],
+            terrain_contact: [0.0, 3.0, 0.35, 0.65],
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct TerrainContextUniforms {
+    world_to_uv_scale_bias: [f32; 4],
+    height_to_world: [f32; 4],
+}
+
+impl Default for TerrainContextUniforms {
+    fn default() -> Self {
+        Self {
+            world_to_uv_scale_bias: [0.0, 0.0, 0.0, 0.0],
+            height_to_world: [0.0, 0.0, 0.0, 0.0],
         }
     }
 }
@@ -44,12 +64,24 @@ pub struct VertexPN {
     pub normal: [f32; 3],
 }
 
+pub struct TerrainBlendContext<'a> {
+    pub heightmap_view: &'a wgpu::TextureView,
+    pub world_to_uv_scale_bias: [f32; 4],
+    pub height_to_world: [f32; 4],
+}
+
 pub struct MeshInstancedRenderer {
     pipeline: RenderPipeline,
     uniforms: SceneUniforms,
     uniforms_buf: Buffer,
     bind_group_layout: BindGroupLayout,
     bind_group: BindGroup,
+    terrain_context: TerrainContextUniforms,
+    terrain_context_buf: Buffer,
+    terrain_bind_group_layout: BindGroupLayout,
+    terrain_bind_group: BindGroup,
+    _terrain_fallback_height_texture: wgpu::Texture,
+    terrain_fallback_height_view: wgpu::TextureView,
     per_draw_uniforms: Vec<Buffer>,
     per_draw_bind_groups: Vec<BindGroup>,
     per_draw_cursor: Cell<usize>,
@@ -112,9 +144,36 @@ impl MeshInstancedRenderer {
             }],
         });
 
+        let terrain_bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("mesh_instanced_terrain_bgl"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("mesh_instanced_pl"),
-            bind_group_layouts: &[&bind_group_layout],
+            bind_group_layouts: &[&bind_group_layout, &terrain_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -214,6 +273,44 @@ impl MeshInstancedRenderer {
             }],
         });
 
+        let terrain_context = TerrainContextUniforms::default();
+        let terrain_context_buf = device.create_buffer(&BufferDescriptor {
+            label: Some("mesh_instanced_terrain_uniforms"),
+            size: std::mem::size_of::<TerrainContextUniforms>() as u64,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let terrain_fallback_height_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mesh_instanced_terrain_fallback"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let terrain_fallback_height_view =
+            terrain_fallback_height_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let terrain_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("mesh_instanced_terrain_bg"),
+            layout: &terrain_bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: terrain_context_buf.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&terrain_fallback_height_view),
+                },
+            ],
+        });
+
         let mut per_draw_uniforms = Vec::with_capacity(DRAW_BATCH_UNIFORM_SLOT_COUNT);
         let mut per_draw_bind_groups = Vec::with_capacity(DRAW_BATCH_UNIFORM_SLOT_COUNT);
         for _ in 0..DRAW_BATCH_UNIFORM_SLOT_COUNT {
@@ -241,6 +338,12 @@ impl MeshInstancedRenderer {
             uniforms_buf,
             bind_group_layout,
             bind_group,
+            terrain_context,
+            terrain_context_buf,
+            terrain_bind_group_layout,
+            terrain_bind_group,
+            _terrain_fallback_height_texture: terrain_fallback_height_texture,
+            terrain_fallback_height_view,
             per_draw_uniforms,
             per_draw_bind_groups,
             per_draw_cursor: Cell::new(0),
@@ -264,6 +367,48 @@ impl MeshInstancedRenderer {
     }
     pub fn upload_uniforms(&self, queue: &Queue) {
         queue.write_buffer(&self.uniforms_buf, 0, bytemuck::bytes_of(&self.uniforms));
+    }
+
+    pub fn set_terrain_context(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        context: Option<TerrainBlendContext<'_>>,
+    ) {
+        let (terrain_context, heightmap_view) = match context {
+            Some(context) => (
+                TerrainContextUniforms {
+                    world_to_uv_scale_bias: context.world_to_uv_scale_bias,
+                    height_to_world: context.height_to_world,
+                },
+                context.heightmap_view,
+            ),
+            None => (
+                TerrainContextUniforms::default(),
+                &self.terrain_fallback_height_view,
+            ),
+        };
+
+        self.terrain_context = terrain_context;
+        queue.write_buffer(
+            &self.terrain_context_buf,
+            0,
+            bytemuck::bytes_of(&self.terrain_context),
+        );
+        self.terrain_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("mesh_instanced_terrain_bg"),
+            layout: &self.terrain_bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: self.terrain_context_buf.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(heightmap_view),
+                },
+            ],
+        });
     }
 
     pub fn reset_draw_batch_uniforms(&self) {
@@ -382,6 +527,7 @@ impl MeshInstancedRenderer {
 
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_bind_group(1, &self.terrain_bind_group, &[]);
         pass.set_vertex_buffer(0, vbuf.slice(..));
         pass.set_vertex_buffer(1, inst.slice(..));
         pass.set_index_buffer(ibuf.slice(..), IndexFormat::Uint32);
@@ -410,6 +556,8 @@ impl MeshInstancedRenderer {
         color: [f32; 4],
         light_dir: [f32; 3],
         light_intensity: f32,
+        terrain_blend: [f32; 4],
+        terrain_contact: [f32; 4],
         vbuf: &'rp Buffer,
         ibuf: &'rp Buffer,
         instbuf: &'rp Buffer,
@@ -441,10 +589,13 @@ impl MeshInstancedRenderer {
             light_dir[2],
             light_intensity.max(0.0),
         ];
+        u.terrain_blend = terrain_blend;
+        u.terrain_contact = terrain_contact;
         queue.write_buffer(&self.per_draw_uniforms[slot], 0, bytemuck::bytes_of(&u));
 
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.per_draw_bind_groups[slot], &[]);
+        pass.set_bind_group(1, &self.terrain_bind_group, &[]);
         pass.set_vertex_buffer(0, vbuf.slice(..));
         pass.set_vertex_buffer(1, instbuf.slice(..));
         pass.set_index_buffer(ibuf.slice(..), IndexFormat::Uint32);
@@ -669,6 +820,8 @@ mod tests {
                     color,
                     light_dir,
                     light_intensity,
+                    [0.0, 0.75, 2.5, 0.0],
+                    [0.0, 3.0, 0.35, 0.65],
                     per_draw_renderer.vbuf.as_ref().unwrap(),
                     per_draw_renderer.ibuf.as_ref().unwrap(),
                     per_draw_renderer.instbuf.as_ref().unwrap(),

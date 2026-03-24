@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence
 
 import numpy as np
@@ -30,6 +30,27 @@ def _positive_finite_or_none(value: float | None, *, name: str) -> float | None:
     value = float(value)
     if not np.isfinite(value) or value <= 0.0:
         raise ValueError(f"{name} must be a positive finite float when provided")
+    return value
+
+
+def _non_negative_finite(value: float, *, name: str) -> float:
+    value = float(value)
+    if not np.isfinite(value) or value < 0.0:
+        raise ValueError(f"{name} must be a non-negative finite float")
+    return value
+
+
+def _positive_finite(value: float, *, name: str) -> float:
+    value = float(value)
+    if not np.isfinite(value) or value <= 0.0:
+        raise ValueError(f"{name} must be a positive finite float")
+    return value
+
+
+def _unit_interval(value: float, *, name: str) -> float:
+    value = float(value)
+    if not np.isfinite(value) or value < 0.0 or value > 1.0:
+        raise ValueError(f"{name} must be in [0.0, 1.0]")
     return value
 
 
@@ -219,6 +240,91 @@ class TerrainScatterLevel:
     max_distance: float | None = None
 
 
+@dataclass(frozen=True)
+class TerrainMeshBlendSettings:
+    enabled: bool = False
+    bury_depth: float = 0.75
+    fade_distance: float = 2.5
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "enabled", bool(self.enabled))
+        object.__setattr__(
+            self,
+            "bury_depth",
+            _non_negative_finite(self.bury_depth, name="terrain_blend.bury_depth"),
+        )
+        object.__setattr__(
+            self,
+            "fade_distance",
+            _positive_finite(self.fade_distance, name="terrain_blend.fade_distance"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": bool(self.enabled),
+            "bury_depth": float(self.bury_depth),
+            "fade_distance": float(self.fade_distance),
+        }
+
+
+@dataclass(frozen=True)
+class TerrainContactSettings:
+    enabled: bool = False
+    distance: float = 3.0
+    strength: float = 0.35
+    vertical_weight: float = 0.65
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "enabled", bool(self.enabled))
+        object.__setattr__(
+            self,
+            "distance",
+            _positive_finite(self.distance, name="terrain_contact.distance"),
+        )
+        object.__setattr__(
+            self,
+            "strength",
+            _unit_interval(self.strength, name="terrain_contact.strength"),
+        )
+        object.__setattr__(
+            self,
+            "vertical_weight",
+            _unit_interval(self.vertical_weight, name="terrain_contact.vertical_weight"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": bool(self.enabled),
+            "distance": float(self.distance),
+            "strength": float(self.strength),
+            "vertical_weight": float(self.vertical_weight),
+        }
+
+
+def _coerce_terrain_blend(
+    value: TerrainMeshBlendSettings | dict[str, Any] | None,
+) -> TerrainMeshBlendSettings:
+    if value is None:
+        return TerrainMeshBlendSettings()
+    if isinstance(value, TerrainMeshBlendSettings):
+        return value
+    if isinstance(value, dict):
+        return TerrainMeshBlendSettings(**value)
+    raise TypeError("terrain_blend must be a TerrainMeshBlendSettings or dict")
+
+
+def _coerce_terrain_contact(
+    value: TerrainContactSettings | dict[str, Any] | None,
+) -> TerrainContactSettings:
+    if value is None:
+        return TerrainContactSettings()
+    if isinstance(value, TerrainContactSettings):
+        return value
+    if isinstance(value, dict):
+        return TerrainContactSettings(**value)
+    raise TypeError("terrain_contact must be a TerrainContactSettings or dict")
+
+
 @dataclass
 class TerrainScatterBatch:
     levels: Sequence[TerrainScatterLevel]
@@ -227,6 +333,12 @@ class TerrainScatterBatch:
     color: Sequence[float] = (0.85, 0.85, 0.85, 1.0)
     max_draw_distance: float | None = None
     hlod: HLODPolicy | None = None
+    terrain_blend: TerrainMeshBlendSettings | dict[str, Any] | None = field(
+        default_factory=TerrainMeshBlendSettings
+    )
+    terrain_contact: TerrainContactSettings | dict[str, Any] | None = field(
+        default_factory=TerrainContactSettings
+    )
 
     def __post_init__(self) -> None:
         if not self.levels:
@@ -239,6 +351,8 @@ class TerrainScatterBatch:
             self.max_draw_distance,
             name="max_draw_distance",
         )
+        self.terrain_blend = _coerce_terrain_blend(self.terrain_blend)
+        self.terrain_contact = _coerce_terrain_contact(self.terrain_contact)
         _validate_lod_distances(self.levels)
         if self.transforms.shape[0] == 0:
             raise ValueError("TerrainScatterBatch requires at least one transform")
@@ -266,6 +380,8 @@ class TerrainScatterBatch:
             "name": self.name,
             "color": tuple(self.color),
             "max_draw_distance": self.max_draw_distance,
+            "terrain_blend": self.terrain_blend.to_dict(),
+            "terrain_contact": self.terrain_contact.to_dict(),
             "transforms": self.transforms,
             "levels": [
                 {
@@ -304,6 +420,8 @@ class TerrainScatterBatch:
             "name": self.name,
             "color": list(self.color),
             "max_draw_distance": self.max_draw_distance,
+            "terrain_blend": self.terrain_blend.to_dict(),
+            "terrain_contact": self.terrain_contact.to_dict(),
             "transforms": self.transforms.tolist(),
             "levels": levels,
         }
@@ -716,8 +834,10 @@ def clear_viewer(viewer: Any) -> None:
 __all__ = [
     "HLODPolicy",
     "TerrainScatterBatch",
+    "TerrainContactSettings",
     "TerrainScatterFilters",
     "TerrainScatterLevel",
+    "TerrainMeshBlendSettings",
     "TerrainScatterSource",
     "apply_to_renderer",
     "apply_to_viewer",

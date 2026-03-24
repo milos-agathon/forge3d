@@ -2,6 +2,7 @@ use crate::viewer::viewer_enums::{
     ViewerCmd, ViewerDenoiseConfig, ViewerDensityVolumeConfig, ViewerDofConfig,
     ViewerHeightAoConfig, ViewerLensEffectsConfig, ViewerMaterialLayerConfig,
     ViewerMotionBlurConfig, ViewerSkyConfig, ViewerSunVisConfig, ViewerTerrainScatterBatchConfig,
+    ViewerTerrainScatterBlendConfig, ViewerTerrainScatterContactConfig,
     ViewerTerrainScatterLevelConfig, ViewerTonemapConfig, ViewerVectorOverlayConfig,
     ViewerVolumetricsConfig,
 };
@@ -9,8 +10,8 @@ use crate::viewer::viewer_enums::{
 use super::super::payloads::{
     IpcDenoiseConfig, IpcDensityVolumeConfig, IpcDofConfig, IpcHeightAoConfig,
     IpcLensEffectsConfig, IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcSkyConfig,
-    IpcSunVisConfig, IpcTerrainScatterBatch, IpcTerrainScatterLevel, IpcTonemapConfig,
-    IpcVectorOverlayConfig, IpcVolumetricsConfig,
+    IpcSunVisConfig, IpcTerrainScatterBatch, IpcTerrainScatterBlend, IpcTerrainScatterContact,
+    IpcTerrainScatterLevel, IpcTonemapConfig, IpcVectorOverlayConfig, IpcVolumetricsConfig,
 };
 use super::super::request::IpcRequest;
 
@@ -284,6 +285,16 @@ fn map_terrain_scatter_batch(config: &IpcTerrainScatterBatch) -> ViewerTerrainSc
         name: config.name.clone(),
         color: config.color.unwrap_or([0.85, 0.85, 0.85, 1.0]),
         max_draw_distance: config.max_draw_distance,
+        terrain_blend: config
+            .terrain_blend
+            .as_ref()
+            .map(map_terrain_scatter_blend)
+            .unwrap_or_default(),
+        terrain_contact: config
+            .terrain_contact
+            .as_ref()
+            .map(map_terrain_scatter_contact)
+            .unwrap_or_default(),
         transforms: config.transforms.clone(),
         levels: config
             .levels
@@ -298,6 +309,25 @@ fn map_terrain_scatter_batch(config: &IpcTerrainScatterBatch) -> ViewerTerrainSc
                 simplify_ratio: h.simplify_ratio,
             }
         }),
+    }
+}
+
+fn map_terrain_scatter_blend(config: &IpcTerrainScatterBlend) -> ViewerTerrainScatterBlendConfig {
+    ViewerTerrainScatterBlendConfig {
+        enabled: config.enabled.unwrap_or(false),
+        bury_depth: config.bury_depth.unwrap_or(0.75),
+        fade_distance: config.fade_distance.unwrap_or(2.5),
+    }
+}
+
+fn map_terrain_scatter_contact(
+    config: &IpcTerrainScatterContact,
+) -> ViewerTerrainScatterContactConfig {
+    ViewerTerrainScatterContactConfig {
+        enabled: config.enabled.unwrap_or(false),
+        distance: config.distance.unwrap_or(3.0),
+        strength: config.strength.unwrap_or(0.35),
+        vertical_weight: config.vertical_weight.unwrap_or(0.65),
     }
 }
 

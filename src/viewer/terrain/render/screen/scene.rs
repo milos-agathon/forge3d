@@ -87,23 +87,27 @@ impl ViewerTerrainScene {
         }
 
         #[cfg(feature = "enable-gpu-instancing")]
-        let scatter_result = render_scatter_batches(
-            encoder,
-            render_target,
-            depth_view,
-            &mut scatter_batches,
-            flags.use_pbr,
-            state.view_mat,
-            state.proj,
-            state.eye,
-            state.terrain_width,
-            state.h_range,
-            [-state.sun_dir.x, -state.sun_dir.y, -state.sun_dir.z],
-            state.vo_lighting[0],
-            self.device.as_ref(),
-            self.queue.as_ref(),
-            &mut self.scatter_renderer,
-        );
+        let scatter_result = {
+            let terrain = self.terrain.as_ref().unwrap();
+            render_scatter_batches(
+                encoder,
+                render_target,
+                depth_view,
+                &mut scatter_batches,
+                state.view_mat,
+                state.proj,
+                state.eye,
+                &terrain.heightmap_view,
+                state.terrain_width,
+                terrain.domain.0,
+                terrain.z_scale,
+                [-state.sun_dir.x, -state.sun_dir.y, -state.sun_dir.z],
+                state.vo_lighting[0],
+                self.device.as_ref(),
+                self.queue.as_ref(),
+                &mut self.scatter_renderer,
+            )
+        };
 
         if has_vector_overlays && !self.oit_enabled {
             if let Some(ref stack) = self.vector_overlay_stack {

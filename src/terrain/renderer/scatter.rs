@@ -6,7 +6,8 @@ use crate::terrain::renderer::core::TERRAIN_DEPTH_FORMAT;
 
 use crate::terrain::scatter::{
     accumulate_frame_stats, summarize_memory, HlodConfig, TerrainScatterBatch,
-    TerrainScatterFrameStats, TerrainScatterLevelSpec, TerrainScatterMemoryReport,
+    TerrainScatterBlendConfig, TerrainScatterContactConfig, TerrainScatterFrameStats,
+    TerrainScatterLevelSpec, TerrainScatterMemoryReport,
 };
 
 pub(super) struct ScatterRenderState {
@@ -17,12 +18,16 @@ pub(super) struct ScatterRenderState {
     pub(super) instance_scale: f32,
     pub(super) light_dir: [f32; 3],
     pub(super) light_intensity: f32,
+    pub(super) terrain_world_to_uv_scale_bias: [f32; 4],
+    pub(super) terrain_height_to_world: [f32; 4],
 }
 
 pub(super) struct TerrainScatterUploadBatch {
     pub(super) name: Option<String>,
     pub(super) color: [f32; 4],
     pub(super) max_draw_distance: Option<f32>,
+    pub(super) terrain_blend: TerrainScatterBlendConfig,
+    pub(super) terrain_contact: TerrainScatterContactConfig,
     pub(super) transforms_rowmajor: Vec<[f32; 16]>,
     pub(super) levels: Vec<TerrainScatterLevelSpec>,
     pub(super) hlod_config: Option<HlodConfig>,
@@ -44,6 +49,8 @@ impl TerrainScene {
                 batch.max_draw_distance,
                 batch.name,
                 batch.hlod_config,
+                batch.terrain_blend,
+                batch.terrain_contact,
             )?);
         }
 
@@ -78,6 +85,7 @@ impl TerrainScene {
         let terrain_width = heightmap_width.max(heightmap_height).max(1) as f32;
         let terrain_span = params.terrain_span.max(1e-3);
         let scale_xy = terrain_span / terrain_width;
+        let height_mid = 0.5 * (decoded.clamp.height_range.0 + decoded.clamp.height_range.1);
         let centered_z_offset =
             -0.5 * (decoded.clamp.height_range.1 - decoded.clamp.height_range.0) * params.z_scale;
 
@@ -113,6 +121,8 @@ impl TerrainScene {
             instance_scale: scale_xy,
             light_dir: decoded.light.direction,
             light_intensity: decoded.light.intensity,
+            terrain_world_to_uv_scale_bias: [1.0 / terrain_span, 1.0 / terrain_span, 0.5, 0.5],
+            terrain_height_to_world: [params.z_scale, -height_mid * params.z_scale, 0.0, 0.0],
         }
     }
 
@@ -120,6 +130,7 @@ impl TerrainScene {
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         render_targets: &RenderTargets,
+        heightmap_view: &wgpu::TextureView,
         state: &ScatterRenderState,
     ) -> Result<()> {
         if self.scatter_batches.is_empty() {
@@ -143,6 +154,15 @@ impl TerrainScene {
         let queue = self.queue.as_ref();
         let renderer = &mut self.scatter_renderer;
         renderer.reset_draw_batch_uniforms();
+        renderer.set_terrain_context(
+            device,
+            queue,
+            Some(crate::render::mesh_instanced::TerrainBlendContext {
+                heightmap_view,
+                world_to_uv_scale_bias: state.terrain_world_to_uv_scale_bias,
+                height_to_world: state.terrain_height_to_world,
+            }),
+        );
         let mut frame_stats = TerrainScatterFrameStats::default();
         // Pre-create a single HLOD identity instance buffer that lives as long as the pass.
         let identity_packed =
@@ -205,6 +225,8 @@ impl TerrainScene {
                     batch.color,
                     state.light_dir,
                     state.light_intensity,
+                    batch.terrain_blend.uniform(),
+                    batch.terrain_contact.uniform(),
                     batch.level_vbuf(draw.level_index),
                     batch.level_ibuf(draw.level_index),
                     instbuf,
@@ -231,6 +253,8 @@ impl TerrainScene {
                         batch.color,
                         state.light_dir,
                         state.light_intensity,
+                        batch.terrain_blend.uniform(),
+                        batch.terrain_contact.uniform(),
                         vbuf,
                         ibuf,
                         &hlod_instbuf,

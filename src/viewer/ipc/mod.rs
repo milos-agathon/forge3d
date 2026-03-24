@@ -78,6 +78,8 @@ mod tests {
                     "name":"trees",
                     "color":[0.2,0.6,0.3,1.0],
                     "max_draw_distance":180.0,
+                    "terrain_blend":{"enabled":true,"bury_depth":0.5,"fade_distance":2.0},
+                    "terrain_contact":{"enabled":true,"distance":1.5,"strength":0.3,"vertical_weight":0.75},
                     "transforms":[[1.0,0.0,0.0,3.0,0.0,1.0,0.0,4.0,0.0,0.0,1.0,5.0,0.0,0.0,0.0,1.0]],
                     "levels":[
                         {
@@ -95,6 +97,10 @@ mod tests {
             IpcRequest::SetTerrainScatter { batches } => {
                 assert_eq!(batches.len(), 1);
                 assert_eq!(batches[0].name.as_deref(), Some("trees"));
+                assert_eq!(
+                    batches[0].terrain_blend.as_ref().unwrap().enabled,
+                    Some(true)
+                );
                 assert_eq!(batches[0].transforms.len(), 1);
                 assert_eq!(batches[0].levels.len(), 1);
                 assert_eq!(batches[0].levels[0].indices, vec![0, 1, 2]);
@@ -107,6 +113,8 @@ mod tests {
             crate::viewer::viewer_enums::ViewerCmd::SetTerrainScatter { batches } => {
                 assert_eq!(batches.len(), 1);
                 assert_eq!(batches[0].name.as_deref(), Some("trees"));
+                assert!(batches[0].terrain_blend.enabled);
+                assert_eq!(batches[0].terrain_contact.vertical_weight, 0.75);
                 assert_eq!(batches[0].transforms.len(), 1);
                 assert_eq!(batches[0].levels.len(), 1);
                 assert_eq!(batches[0].levels[0].mesh.indices, vec![0, 1, 2]);

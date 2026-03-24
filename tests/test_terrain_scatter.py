@@ -12,8 +12,10 @@ from forge3d.geometry import MeshBuffers
 from forge3d.terrain_params import make_terrain_params_config
 from forge3d.terrain_scatter import (
     TerrainScatterBatch,
+    TerrainContactSettings,
     TerrainScatterFilters,
     TerrainScatterLevel,
+    TerrainMeshBlendSettings,
     TerrainScatterSource,
     apply_to_renderer,
     apply_to_viewer,
@@ -215,6 +217,20 @@ class TestFiltersAndContract:
 
 
 class TestBatchSerialization:
+    def test_blend_settings_validate_inputs(self) -> None:
+        with pytest.raises(ValueError, match="terrain_blend.bury_depth"):
+            TerrainMeshBlendSettings(enabled=True, bury_depth=-0.1)
+        with pytest.raises(ValueError, match="terrain_blend.fade_distance"):
+            TerrainMeshBlendSettings(enabled=True, fade_distance=0.0)
+
+    def test_contact_settings_validate_inputs(self) -> None:
+        with pytest.raises(ValueError, match="terrain_contact.distance"):
+            TerrainContactSettings(enabled=True, distance=0.0)
+        with pytest.raises(ValueError, match="terrain_contact.strength"):
+            TerrainContactSettings(enabled=True, strength=1.5)
+        with pytest.raises(ValueError, match="terrain_contact.vertical_weight"):
+            TerrainContactSettings(enabled=True, vertical_weight=-0.1)
+
     def test_batch_rejects_non_finite_transforms(self) -> None:
         mesh = _simple_mesh()
         transforms = np.eye(4, dtype=np.float32).reshape(1, 16)
@@ -279,6 +295,13 @@ class TestBatchSerialization:
             name="trees",
             color=(0.2, 0.6, 0.3, 1.0),
             max_draw_distance=140.0,
+            terrain_blend=TerrainMeshBlendSettings(enabled=True, bury_depth=1.0, fade_distance=3.5),
+            terrain_contact=TerrainContactSettings(
+                enabled=True,
+                distance=2.0,
+                strength=0.4,
+                vertical_weight=0.8,
+            ),
             transforms=transforms,
             levels=[TerrainScatterLevel(mesh=mesh, max_distance=80.0)],
         )
@@ -288,9 +311,31 @@ class TestBatchSerialization:
 
         assert native["transforms"].shape == (2, 16)
         assert native["levels"][0]["mesh"]["positions"].shape == (3, 3)
+        assert native["terrain_blend"]["enabled"] is True
+        assert native["terrain_blend"]["fade_distance"] == pytest.approx(3.5)
+        assert native["terrain_contact"]["vertical_weight"] == pytest.approx(0.8)
         assert viewer["transforms"][1][3] == pytest.approx(3.0)
+        assert viewer["terrain_blend"]["bury_depth"] == pytest.approx(1.0)
+        assert viewer["terrain_contact"]["strength"] == pytest.approx(0.4)
         assert viewer["levels"][0]["positions"][2] == [0.0, 1.0, 0.0]
         assert viewer["levels"][0]["indices"] == [0, 1, 2]
+
+    def test_batch_accepts_dict_style_tv21_settings(self) -> None:
+        mesh = _simple_mesh()
+        batch = TerrainScatterBatch(
+            transforms=np.eye(4, dtype=np.float32).reshape(1, 16),
+            levels=[TerrainScatterLevel(mesh=mesh)],
+            terrain_blend={"enabled": True, "bury_depth": 0.5, "fade_distance": 1.5},
+            terrain_contact={
+                "enabled": True,
+                "distance": 1.25,
+                "strength": 0.2,
+                "vertical_weight": 0.7,
+            },
+        )
+        assert batch.terrain_blend.enabled is True
+        assert batch.terrain_blend.fade_distance == pytest.approx(1.5)
+        assert batch.terrain_contact.distance == pytest.approx(1.25)
 
     def test_apply_helpers_use_expected_commands(self) -> None:
         mesh = _simple_mesh()
