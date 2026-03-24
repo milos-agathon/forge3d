@@ -46,6 +46,30 @@ pub struct ProbeIrradianceSet {
     pub probes: Vec<SHL2>,
 }
 
+pub const REFLECTION_FACE_COUNT: usize = 6;
+
+/// Low-resolution local reflection data for one placed probe.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReflectionProbe {
+    pub faces: [[f32; 3]; REFLECTION_FACE_COUNT],
+    pub average: [f32; 3],
+}
+
+impl Default for ReflectionProbe {
+    fn default() -> Self {
+        Self {
+            faces: [[0.0; 3]; REFLECTION_FACE_COUNT],
+            average: [0.0; 3],
+        }
+    }
+}
+
+/// One reflection payload per resolved probe.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReflectionProbeSet {
+    pub probes: Vec<ReflectionProbe>,
+}
+
 /// Probe system errors.
 #[derive(Debug, thiserror::Error)]
 pub enum ProbeError {

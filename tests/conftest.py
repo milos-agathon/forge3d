@@ -1,11 +1,16 @@
 # Ensure `import forge3d` works from a fresh clone:
 # 1) Put repo/python on sys.path so the package is importable without prior install.
-# 2) If the native extension is missing, auto-build once via maturin develop --release.
+# 2) If the native extension is missing, auto-build once.
+#    - In a virtualenv we use `maturin develop --release`.
+#    - Outside a virtualenv we build a wheel and extract `_forge3d` into
+#      `python/forge3d/` so the repo-local package can import it.
 # Set FORGE3D_NO_BOOTSTRAP=1 to disable autobuild (e.g., in CI with preinstalled wheel).
 import importlib
 import os
+import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -30,6 +35,10 @@ def _install_maturin():
     subprocess.run([sys.executable, "-m", "pip", "install", "-U", "maturin"], check=True)
 
 
+def _in_virtualenv() -> bool:
+    return sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+
+
 def _maturin_develop():
     repo = _repo_root()
     env = os.environ.copy()
@@ -39,6 +48,63 @@ def _maturin_develop():
         env=env,
         check=True,
     )
+
+
+def _maturin_build_wheel() -> Path:
+    repo = _repo_root()
+    out_dir = repo / "dist-test"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    subprocess.run(
+        ["maturin", "build", "--profile", "release-lto", "-o", str(out_dir)],
+        cwd=str(repo),
+        env=env,
+        check=True,
+    )
+    wheels = sorted(out_dir.glob("forge3d-*.whl"), key=lambda path: path.stat().st_mtime)
+    if not wheels:
+        raise RuntimeError("maturin build produced no forge3d wheel")
+    return wheels[-1]
+
+
+def _extract_native_from_wheel(wheel_path: Path) -> Path:
+    pkg_dir = _repo_root() / "python" / "forge3d"
+    native_members: list[str] = []
+    with zipfile.ZipFile(wheel_path) as wheel:
+        for name in wheel.namelist():
+            if name.startswith("forge3d/_forge3d") and Path(name).suffix.lower() in {".pyd", ".so", ".dylib"}:
+                native_members.append(name)
+        if not native_members:
+            raise RuntimeError(f"No native forge3d extension found in {wheel_path.name}")
+        native_member = sorted(native_members)[0]
+        destination = pkg_dir / Path(native_member).name
+        with wheel.open(native_member) as src, destination.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
+    return destination
+
+
+def _clear_forge3d_modules() -> None:
+    for name in list(sys.modules):
+        if name == "forge3d" or name.startswith("forge3d."):
+            sys.modules.pop(name, None)
+
+
+def _native_runtime_ready(module) -> bool:
+    native = importlib.import_module("forge3d._native")
+    return bool(getattr(native, "NATIVE_AVAILABLE", False)) and all(
+        hasattr(module, name) for name in ("Session", "TerrainRenderer", "MaterialSet", "IBL")
+    )
+
+
+def _bootstrap_native_extension() -> str:
+    _install_maturin()
+    if _in_virtualenv():
+        _maturin_develop()
+        return "maturin develop"
+
+    wheel_path = _maturin_build_wheel()
+    native_path = _extract_native_from_wheel(wheel_path)
+    return f"maturin build ({wheel_path.name} -> {native_path.name})"
 
 
 def _needs_build_from_exc(exc: BaseException) -> bool:
@@ -179,21 +245,36 @@ def pytest_sessionstart(session):
         return
 
     _ensure_python_path()
+    needs_bootstrap = False
     try:
         import forge3d  # noqa: F401
-        return
+
+        if _native_runtime_ready(forge3d):
+            return
+        needs_bootstrap = True
     except Exception as exc:
         if not _needs_build_from_exc(exc):
             raise
-        try:
-            _install_maturin()
-            _maturin_develop()
-            importlib.invalidate_caches()
-            _ensure_python_path()
-            import forge3d  # noqa: F401
-            print("forge3d bootstrap: built via maturin", flush=True)
-        except Exception as build_exc:
-            raise RuntimeError(
-                "forge3d bootstrap failed. Ensure Rust toolchain and (on Windows) "
-                f"MSVC Build Tools are installed. Original error: {build_exc}"
-            ) from build_exc
+        needs_bootstrap = True
+
+    if not needs_bootstrap:
+        return
+
+    _clear_forge3d_modules()
+    _ensure_python_path()
+
+    try:
+        mode = _bootstrap_native_extension()
+        importlib.invalidate_caches()
+        _clear_forge3d_modules()
+        _ensure_python_path()
+        import forge3d
+
+        if not _native_runtime_ready(forge3d):
+            raise RuntimeError("forge3d bootstrap built the extension but native runtime is still unavailable")
+        print(f"forge3d bootstrap: built via {mode}", flush=True)
+    except Exception as build_exc:
+        raise RuntimeError(
+            "forge3d bootstrap failed. Ensure Rust toolchain and (on Windows) "
+            f"MSVC Build Tools are installed. Original error: {build_exc}"
+        ) from build_exc

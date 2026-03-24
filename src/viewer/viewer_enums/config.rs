@@ -117,15 +117,35 @@ pub struct ViewerDenoiseConfig {
 
 /// M6: Volumetrics configuration for viewer
 #[derive(Debug, Clone, Default)]
+pub struct ViewerDensityVolumeConfig {
+    pub preset: String,
+    pub center: [f32; 3],
+    pub size: [f32; 3],
+    pub resolution: [u32; 3],
+    pub density_scale: f32,
+    pub edge_softness: f32,
+    pub noise_strength: f32,
+    pub floor_offset: f32,
+    pub ceiling: f32,
+    pub plume_spread: f32,
+    pub wind: [f32; 3],
+    pub seed: u32,
+}
+
+/// M6: Volumetrics configuration for viewer
+#[derive(Debug, Clone, Default)]
 pub struct ViewerVolumetricsConfig {
     pub enabled: bool,
     pub mode: String,
     pub density: f32,
+    pub height_falloff: f32,
     pub scattering: f32,
     pub absorption: f32,
     pub light_shafts: bool,
     pub shaft_intensity: f32,
+    pub steps: u32,
     pub half_res: bool,
+    pub density_volumes: Vec<ViewerDensityVolumeConfig>,
 }
 
 /// M6: Sky configuration for viewer
@@ -158,13 +178,52 @@ pub struct ViewerTerrainScatterLevelConfig {
     pub max_distance: Option<f32>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ViewerTerrainScatterBlendConfig {
+    pub enabled: bool,
+    pub bury_depth: f32,
+    pub fade_distance: f32,
+}
+
+impl Default for ViewerTerrainScatterBlendConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bury_depth: 0.75,
+            fade_distance: 2.5,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ViewerTerrainScatterContactConfig {
+    pub enabled: bool,
+    pub distance: f32,
+    pub strength: f32,
+    pub vertical_weight: f32,
+}
+
+impl Default for ViewerTerrainScatterContactConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            distance: 3.0,
+            strength: 0.35,
+            vertical_weight: 0.65,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ViewerTerrainScatterBatchConfig {
     pub name: Option<String>,
     pub color: [f32; 4],
     pub max_draw_distance: Option<f32>,
+    pub terrain_blend: ViewerTerrainScatterBlendConfig,
+    pub terrain_contact: ViewerTerrainScatterContactConfig,
     pub transforms: Vec<[f32; 16]>,
     pub levels: Vec<ViewerTerrainScatterLevelConfig>,
     #[cfg(feature = "enable-gpu-instancing")]
     pub wind: ScatterWindSettingsNative,
+    pub hlod_config: Option<crate::terrain::scatter::HlodConfig>,
 }

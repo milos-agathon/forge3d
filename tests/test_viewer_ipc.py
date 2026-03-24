@@ -166,6 +166,13 @@ class TestCommandFormatting:
         parsed = json.loads(json_str)
         assert parsed["cmd"] == "close"
 
+    def test_get_terrain_volumetrics_report_format(self):
+        """get_terrain_volumetrics_report command is formatted correctly."""
+        cmd = {"cmd": "get_terrain_volumetrics_report"}
+        parsed = json.loads(json.dumps(cmd))
+        assert parsed["cmd"] == "get_terrain_volumetrics_report"
+        assert len(parsed) == 1
+
     def test_set_terrain_scatter_format(self):
         """set_terrain_scatter command is JSON-safe and preserves nested mesh payloads."""
         cmd = {
@@ -175,6 +182,13 @@ class TestCommandFormatting:
                     "name": "trees",
                     "color": [0.2, 0.6, 0.3, 1.0],
                     "max_draw_distance": 180.0,
+                    "terrain_blend": {"enabled": True, "bury_depth": 0.5, "fade_distance": 2.0},
+                    "terrain_contact": {
+                        "enabled": True,
+                        "distance": 1.5,
+                        "strength": 0.3,
+                        "vertical_weight": 0.75,
+                    },
                     "transforms": [[1.0, 0.0, 0.0, 3.0, 0.0, 1.0, 0.0, 4.0, 0.0, 0.0, 1.0, 5.0, 0.0, 0.0, 0.0, 1.0]],
                     "levels": [
                         {
@@ -203,6 +217,8 @@ class TestCommandFormatting:
         parsed = json.loads(json.dumps(cmd))
         assert parsed["cmd"] == "set_terrain_scatter"
         assert parsed["batches"][0]["name"] == "trees"
+        assert parsed["batches"][0]["terrain_blend"]["enabled"] is True
+        assert parsed["batches"][0]["terrain_contact"]["vertical_weight"] == 0.75
         assert parsed["batches"][0]["transforms"][0][3] == 3.0
         assert parsed["batches"][0]["levels"][0]["indices"] == [0, 1, 2]
         wind = parsed["batches"][0]["wind"]
@@ -496,6 +512,30 @@ class TestViewerHandleHelpers:
         assert out.exists()
         assert out.read_bytes() == b"png"
         assert elapsed >= 0.15
+
+    def test_get_terrain_volumetrics_report_returns_payload(self):
+        """The helper returns the decoded terrain volumetrics report."""
+        handle = ViewerHandle.__new__(ViewerHandle)
+        handle._send_command = lambda cmd: {  # type: ignore[attr-defined]
+            "ok": True,
+            "terrain_volumetrics_report": {
+                "active_volume_count": 1,
+                "texture_bytes": 4096,
+            },
+        }
+
+        report = handle.get_terrain_volumetrics_report()
+
+        assert report["active_volume_count"] == 1
+        assert report["texture_bytes"] == 4096
+
+    def test_get_terrain_volumetrics_report_requires_payload(self):
+        """Missing terrain volumetrics report data raises ViewerError."""
+        handle = ViewerHandle.__new__(ViewerHandle)
+        handle._send_command = lambda cmd: {"ok": True}  # type: ignore[attr-defined]
+
+        with pytest.raises(ViewerError, match="returned no report data"):
+            handle.get_terrain_volumetrics_report()
 
 
 class TestNDJSONProtocol:

@@ -1,4 +1,6 @@
 use super::*;
+use crate::viewer::event_loop::update_terrain_volumetrics_report;
+use crate::viewer::ipc::TerrainVolumetricsReport;
 
 impl ViewerTerrainScene {
     pub fn load_terrain(&mut self, path: &str) -> Result<()> {
@@ -148,10 +150,12 @@ impl ViewerTerrainScene {
             ],
         });
 
+        self.terrain_revision_counter = self.terrain_revision_counter.wrapping_add(1);
         self.terrain = Some(ViewerTerrainData {
             heightmap,
             dimensions: (width, height),
             domain: (min_h, max_h),
+            revision: self.terrain_revision_counter,
             heightmap_texture,
             heightmap_view,
             vertex_buffer,
@@ -173,6 +177,7 @@ impl ViewerTerrainScene {
             water_level: -999999.0,
             water_color: [0.2, 0.4, 0.6],
         });
+        update_terrain_volumetrics_report(TerrainVolumetricsReport::default());
 
         println!(
             "[terrain] Loaded {}x{} DEM, domain: {:.1}..{:.1}",

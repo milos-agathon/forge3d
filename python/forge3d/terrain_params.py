@@ -4,7 +4,7 @@
 # RELEVANT FILES: python/forge3d/__init__.py, tests/test_terrain_params.py, src/session.rs, src/colormap1d.rs
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import List, Optional, Tuple, Sequence
 
 import numpy as np
@@ -344,6 +344,45 @@ class ProbeSettings:
 
 
 @dataclass
+class ReflectionProbeSettings:
+    """TV5.3: Local reflection probe configuration for terrain scenes."""
+
+    enabled: bool = False
+    grid_dims: Tuple[int, int] = (4, 4)
+    origin: Optional[Tuple[float, float]] = None
+    spacing: Optional[Tuple[float, float]] = None
+    height_offset: float = 5.0
+    ray_count: int = 16
+    fallback_blend_distance: Optional[float] = None
+    sky_color: Tuple[float, float, float] = (0.6, 0.75, 1.0)
+    sky_intensity: float = 1.0
+    ground_color: Tuple[float, float, float] = (0.22, 0.18, 0.14)
+    strength: float = 1.0
+
+    def __post_init__(self) -> None:
+        if self.enabled:
+            cols, rows = self.grid_dims
+            if cols < 1 or rows < 1:
+                raise ValueError("grid_dims must be >= (1, 1)")
+            if cols * rows > 256:
+                raise ValueError("grid_dims product must be <= 256 (reflection probe count limit)")
+            if self.ray_count < 1:
+                raise ValueError("ray_count must be >= 1")
+            if self.spacing is not None and (self.spacing[0] <= 0.0 or self.spacing[1] <= 0.0):
+                raise ValueError("spacing must be > 0 when provided")
+            if self.fallback_blend_distance is not None and self.fallback_blend_distance < 0.0:
+                raise ValueError("fallback_blend_distance must be >= 0")
+            if len(self.sky_color) != 3:
+                raise ValueError("sky_color must be (R, G, B)")
+            if len(self.ground_color) != 3:
+                raise ValueError("ground_color must be (R, G, B)")
+            if self.sky_intensity < 0.0:
+                raise ValueError("sky_intensity must be >= 0")
+            if not 0.0 <= self.strength <= 1.0:
+                raise ValueError("strength must be in [0, 1]")
+
+
+@dataclass
 class DetailSettings:
     """P6: Micro-detail configuration for close-range surface enhancement.
     
@@ -447,6 +486,10 @@ class MaterialLayerSettings:
     TV4 extends this with bounded procedural variation controls. Those controls live
     under ``variation`` and default to zero amplitudes so the existing material
     layering output remains unchanged until explicitly enabled.
+
+    TV10 adds terrain-scale subsurface controls for the snow, rock, and wetness
+    layers. The controls stay per-layer and opt-in via layer enablement, while
+    explicit ``*_subsurface_strength=0.0`` restores the pre-TV10 response.
     """
 
     # Snow layer settings
@@ -458,6 +501,8 @@ class MaterialLayerSettings:
     snow_aspect_influence: float = 0.3  # 0=no aspect effect, 1=full (south-facing less snow)
     snow_color: Tuple[float, float, float] = (0.95, 0.95, 0.98)  # Snow albedo
     snow_roughness: float = 0.4  # Snow surface roughness
+    snow_subsurface_strength: float = 0.35  # TV10: terrain-scale SSS strength
+    snow_subsurface_color: Tuple[float, float, float] = (0.78, 0.88, 0.98)  # TV10: scatter tint
     
     # Rock layer settings
     rock_enabled: bool = False
@@ -465,11 +510,15 @@ class MaterialLayerSettings:
     rock_slope_blend: float = 10.0  # Slope blend range (degrees)
     rock_color: Tuple[float, float, float] = (0.35, 0.32, 0.28)  # Rock albedo
     rock_roughness: float = 0.8  # Rock surface roughness
+    rock_subsurface_strength: float = 0.0  # TV10: rock stays zero by default
+    rock_subsurface_color: Tuple[float, float, float] = (0.42, 0.36, 0.30)  # TV10: warm earth tint
     
     # Wetness layer settings (darkening in concave areas)
     wetness_enabled: bool = False
     wetness_strength: float = 0.3  # Darkening strength (0-1)
     wetness_slope_influence: float = 0.5  # How much slope affects wetness
+    wetness_subsurface_strength: float = 0.12  # TV10: damp soil / vegetation fill
+    wetness_subsurface_color: Tuple[float, float, float] = (0.40, 0.28, 0.18)  # TV10: warm wet-earth tint
     # TV4: Procedural variation controls shared across snow/rock/wetness.
     variation: MaterialNoiseSettings = field(default_factory=MaterialNoiseSettings)
 
@@ -486,7 +535,11 @@ class MaterialLayerSettings:
             raise ValueError("snow_color must be (R, G, B)")
         if not 0.0 <= self.snow_roughness <= 1.0:
             raise ValueError("snow_roughness must be in [0, 1]")
-        
+        if not 0.0 <= self.snow_subsurface_strength <= 1.0:
+            raise ValueError("snow_subsurface_strength must be in [0, 1]")
+        if len(self.snow_subsurface_color) != 3:
+            raise ValueError("snow_subsurface_color must be (R, G, B)")
+
         if not 0.0 <= self.rock_slope_min <= 90.0:
             raise ValueError("rock_slope_min must be in [0, 90]")
         if self.rock_slope_blend <= 0.0:
@@ -495,11 +548,19 @@ class MaterialLayerSettings:
             raise ValueError("rock_color must be (R, G, B)")
         if not 0.0 <= self.rock_roughness <= 1.0:
             raise ValueError("rock_roughness must be in [0, 1]")
-        
+        if not 0.0 <= self.rock_subsurface_strength <= 1.0:
+            raise ValueError("rock_subsurface_strength must be in [0, 1]")
+        if len(self.rock_subsurface_color) != 3:
+            raise ValueError("rock_subsurface_color must be (R, G, B)")
+
         if not 0.0 <= self.wetness_strength <= 1.0:
             raise ValueError("wetness_strength must be in [0, 1]")
         if not 0.0 <= self.wetness_slope_influence <= 1.0:
             raise ValueError("wetness_slope_influence must be in [0, 1]")
+        if not 0.0 <= self.wetness_subsurface_strength <= 1.0:
+            raise ValueError("wetness_subsurface_strength must be in [0, 1]")
+        if len(self.wetness_subsurface_color) != 3:
+            raise ValueError("wetness_subsurface_color must be (R, G, B)")
         if not isinstance(self.variation, MaterialNoiseSettings):
             raise ValueError("variation must be a MaterialNoiseSettings instance")
 
@@ -870,6 +931,149 @@ class DenoiseSettings:
 
 
 @dataclass
+class DensityVolumeSettings:
+    """TV6: Bounded heterogeneous density volume for terrain viewer volumetrics.
+
+    Coordinates are expressed in terrain-viewer world units:
+    - ``center.x`` / ``center.z`` live in the terrain XY plane
+    - ``center.y`` lives in the exaggerated terrain height space used by the viewer
+
+    The preset controls how the 3D density texture is generated:
+    - ``valley_fog`` hugs terrain and fills low areas inside the volume bounds
+    - ``plume`` creates a rising, wind-tilted column suitable for smoke or ash
+    - ``localized_haze`` creates a soft ellipsoidal atmospheric pocket
+    """
+
+    preset: str = "valley_fog"
+    center: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    size: Tuple[float, float, float] = (128.0, 64.0, 128.0)
+    resolution: Tuple[int, int, int] = (64, 32, 64)
+    density_scale: float = 1.0
+    edge_softness: float = 0.25
+    noise_strength: float = 0.35
+    floor_offset: float = 0.0
+    ceiling: float = 0.4
+    plume_spread: float = 0.35
+    wind: Tuple[float, float, float] = (0.25, 1.0, 0.0)
+    seed: int = 0
+
+    VALID_PRESETS = {"valley_fog", "plume", "localized_haze"}
+    MAX_ACTIVE_VOLUMES = 4
+    MAX_RESOLUTION_AXIS = 96
+
+    def __post_init__(self) -> None:
+        if self.preset not in self.VALID_PRESETS:
+            raise ValueError(f"preset must be one of {sorted(self.VALID_PRESETS)}")
+        if len(self.center) != 3:
+            raise ValueError("center must be (x, y, z)")
+        if len(self.size) != 3:
+            raise ValueError("size must be (x, y, z)")
+        if len(self.resolution) != 3:
+            raise ValueError("resolution must be (x, y, z)")
+        if len(self.wind) != 3:
+            raise ValueError("wind must be (x, y, z)")
+
+        for axis, value in zip(("x", "y", "z"), self.size):
+            if value <= 0.0:
+                raise ValueError(f"size.{axis} must be > 0")
+
+        for axis, value in zip(("x", "y", "z"), self.resolution):
+            if not 8 <= int(value) <= self.MAX_RESOLUTION_AXIS:
+                raise ValueError(
+                    f"resolution.{axis} must be in [8, {self.MAX_RESOLUTION_AXIS}]"
+                )
+
+        if self.density_scale < 0.0:
+            raise ValueError("density_scale must be >= 0")
+        if not 0.0 <= self.edge_softness <= 1.0:
+            raise ValueError("edge_softness must be in [0.0, 1.0]")
+        if not 0.0 <= self.noise_strength <= 1.0:
+            raise ValueError("noise_strength must be in [0.0, 1.0]")
+        if not 0.0 <= self.ceiling <= 1.0:
+            raise ValueError("ceiling must be in [0.0, 1.0]")
+        if not 0.05 <= self.plume_spread <= 2.0:
+            raise ValueError("plume_spread must be in [0.05, 2.0]")
+        if self.seed < 0:
+            raise ValueError("seed must be >= 0")
+
+
+def valley_fog_volume(
+    *,
+    center: Tuple[float, float, float],
+    size: Tuple[float, float, float],
+    resolution: Tuple[int, int, int] = (64, 32, 64),
+    density_scale: float = 1.0,
+    edge_softness: float = 0.25,
+    noise_strength: float = 0.35,
+    floor_offset: float = 4.0,
+    ceiling: float = 0.42,
+    seed: int = 0,
+) -> DensityVolumeSettings:
+    return DensityVolumeSettings(
+        preset="valley_fog",
+        center=center,
+        size=size,
+        resolution=resolution,
+        density_scale=density_scale,
+        edge_softness=edge_softness,
+        noise_strength=noise_strength,
+        floor_offset=floor_offset,
+        ceiling=ceiling,
+        seed=seed,
+    )
+
+
+def plume_volume(
+    *,
+    center: Tuple[float, float, float],
+    size: Tuple[float, float, float],
+    resolution: Tuple[int, int, int] = (48, 80, 48),
+    density_scale: float = 1.0,
+    edge_softness: float = 0.18,
+    noise_strength: float = 0.5,
+    plume_spread: float = 0.45,
+    wind: Tuple[float, float, float] = (0.35, 1.0, -0.1),
+    seed: int = 0,
+) -> DensityVolumeSettings:
+    return DensityVolumeSettings(
+        preset="plume",
+        center=center,
+        size=size,
+        resolution=resolution,
+        density_scale=density_scale,
+        edge_softness=edge_softness,
+        noise_strength=noise_strength,
+        plume_spread=plume_spread,
+        wind=wind,
+        seed=seed,
+    )
+
+
+def localized_haze_volume(
+    *,
+    center: Tuple[float, float, float],
+    size: Tuple[float, float, float],
+    resolution: Tuple[int, int, int] = (48, 32, 48),
+    density_scale: float = 0.8,
+    edge_softness: float = 0.35,
+    noise_strength: float = 0.25,
+    ceiling: float = 0.65,
+    seed: int = 0,
+) -> DensityVolumeSettings:
+    return DensityVolumeSettings(
+        preset="localized_haze",
+        center=center,
+        size=size,
+        resolution=resolution,
+        density_scale=density_scale,
+        edge_softness=edge_softness,
+        noise_strength=noise_strength,
+        ceiling=ceiling,
+        seed=seed,
+    )
+
+
+@dataclass
 class VolumetricsSettings:
     """M6: Volumetric fog and light shafts configuration.
     
@@ -879,6 +1083,10 @@ class VolumetricsSettings:
     - Shadow-aware volumetric lighting
     
     Applied after depth, before tonemapping.
+
+    TV6 extends this with optional bounded 3D density volumes. When
+    ``density_volumes`` is populated the viewer samples those localized density
+    fields in the same volumetric pass used by legacy fog modes.
     """
     
     enabled: bool = False  # Disabled by default
@@ -902,6 +1110,7 @@ class VolumetricsSettings:
     # Performance
     use_shadows: bool = True      # Use shadow map for volumetrics
     half_res: bool = False        # Render at half resolution
+    density_volumes: Tuple[DensityVolumeSettings, ...] = field(default_factory=tuple)
     
     def __post_init__(self) -> None:
         valid_modes = ("uniform", "height", "exponential")
@@ -917,11 +1126,36 @@ class VolumetricsSettings:
             raise ValueError("phase_g must be in [-1.0, 1.0]")
         if self.shaft_samples < 8 or self.shaft_samples > 128:
             raise ValueError("shaft_samples must be in [8, 128]")
+        if len(self.density_volumes) > DensityVolumeSettings.MAX_ACTIVE_VOLUMES:
+            raise ValueError(
+                f"density_volumes supports at most {DensityVolumeSettings.MAX_ACTIVE_VOLUMES} active entries"
+            )
     
     @property
     def has_light_shafts(self) -> bool:
         """Returns True if light shafts are enabled."""
         return self.light_shafts and self.shaft_intensity > 0.001
+
+    @property
+    def uses_density_volumes(self) -> bool:
+        """Returns True when localized 3D density volumes are configured."""
+        return len(self.density_volumes) > 0
+
+    def to_viewer_dict(self) -> dict:
+        """Convert to the terrain-viewer IPC payload shape."""
+        return {
+            "enabled": self.enabled,
+            "mode": self.mode,
+            "density": self.density,
+            "height_falloff": self.height_falloff,
+            "scattering": self.scattering,
+            "absorption": self.absorption,
+            "light_shafts": self.light_shafts,
+            "shaft_intensity": self.shaft_intensity,
+            "steps": self.shaft_samples,
+            "half_res": self.half_res,
+            "density_volumes": [asdict(volume) for volume in self.density_volumes],
+        }
 
 
 @dataclass
@@ -1396,6 +1630,8 @@ class TerrainRenderParams:
     sun_visibility: Optional[SunVisibilitySettings] = None
     # TV5: Local irradiance probes (defaults to disabled for backward compatibility)
     probes: Optional[ProbeSettings] = None
+    # TV5.3: Local reflection probes (defaults to disabled for backward compatibility)
+    reflection_probes: Optional[ReflectionProbeSettings] = None
     # P6.1: Color space correctness toggles (defaults to False for P5 compatibility)
     colormap_srgb: bool = False  # Use Rgba8UnormSrgb for colormap texture (correct sampling)
     output_srgb_eotf: bool = False  # Use exact linear_to_srgb() instead of pow-gamma
@@ -1453,6 +1689,9 @@ class TerrainRenderParams:
         # TV5: Default probes to disabled if not provided
         if self.probes is None:
             self.probes = ProbeSettings()
+        # TV5.3: Default reflection probes to disabled if not provided
+        if self.reflection_probes is None:
+            self.reflection_probes = ReflectionProbeSettings()
         # M2: Default bloom to disabled if not provided
         if self.bloom is None:
             self.bloom = BloomSettings()
@@ -1632,6 +1871,7 @@ def make_terrain_params_config(
     height_ao: Optional[HeightAoSettings] = None,
     sun_visibility: Optional[SunVisibilitySettings] = None,
     probes: Optional[ProbeSettings] = None,
+    reflection_probes: Optional[ReflectionProbeSettings] = None,
     aa_samples: int = 1,  # M1: Accumulation AA sample count (1 = no AA)
     aa_seed: Optional[int] = None,  # M1: Accumulation AA seed for determinism
     bloom: Optional[BloomSettings] = None,  # M2: Bloom post-processing
@@ -1777,6 +2017,7 @@ def make_terrain_params_config(
         height_ao=height_ao,
         sun_visibility=sun_visibility,
         probes=probes,
+        reflection_probes=reflection_probes,
         camera_mode=str(camera_mode),
         debug_mode=int(debug_mode),
         aa_samples=int(aa_samples),
@@ -1807,6 +2048,7 @@ __all__ = [
     "HeightAoSettings",
     "SunVisibilitySettings",
     "ProbeSettings",
+    "ReflectionProbeSettings",
     "DetailSettings",
     "MaterialNoiseSettings",
     "MaterialLayerSettings",
@@ -1817,8 +2059,12 @@ __all__ = [
     "MotionBlurSettings",
     "LensEffectsSettings",
     "DenoiseSettings",
+    "DensityVolumeSettings",
     "VolumetricsSettings",
     "SkySettings",
+    "valley_fog_volume",
+    "plume_volume",
+    "localized_haze_volume",
     "OverlayBlendMode",
     "OverlayLayerConfig",
     "OverlaySettings",

@@ -42,6 +42,7 @@ pub enum IpcRequest {
     SetTerrainScatter { #[serde(default)] batches: Vec<IpcTerrainScatterBatch> },
     ClearTerrainScatter,
     GetTerrainParams,
+    GetTerrainVolumetricsReport,
     SetTerrainPbr {
         #[serde(default)] enabled: Option<bool>, #[serde(default)] hdr_path: Option<String>, #[serde(default)] ibl_intensity: Option<f32>,
         #[serde(default)] shadow_technique: Option<String>, #[serde(default)] shadow_map_res: Option<u32>, #[serde(default)] exposure: Option<f32>,

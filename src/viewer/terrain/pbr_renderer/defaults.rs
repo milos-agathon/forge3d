@@ -1,7 +1,7 @@
 use super::types::{
-    DenoiseConfig, DofConfig, HeightAoConfig, LensEffectsConfig, MaterialLayerConfig,
-    MotionBlurConfig, SunVisConfig, TonemapConfig, VectorOverlayConfig, ViewerTerrainPbrConfig,
-    VolumetricsConfig,
+    DenoiseConfig, DensityVolumeConfig, DofConfig, HeightAoConfig, LensEffectsConfig,
+    MaterialLayerConfig, MotionBlurConfig, SunVisConfig, TonemapConfig, VectorOverlayConfig,
+    ViewerTerrainPbrConfig, VolumetricsConfig,
 };
 use crate::viewer::terrain::overlay::OverlayConfig;
 
@@ -116,6 +116,7 @@ impl Default for VolumetricsConfig {
             shaft_intensity: 1.0,
             steps: 32,
             half_res: false,
+            density_volumes: Vec::<DensityVolumeConfig>::new(),
         }
     }
 }

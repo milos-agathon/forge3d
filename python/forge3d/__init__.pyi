@@ -15,6 +15,7 @@ from .terrain_params import (
     HeightAoSettings,
     SunVisibilitySettings,
     ProbeSettings,
+    ReflectionProbeSettings,
     DetailSettings,
     MaterialNoiseSettings,
     MaterialLayerSettings,

@@ -32,6 +32,14 @@ impl TerrainScene {
             (height_inputs.width, height_inputs.height),
             params.z_scale,
         );
+        super::probes::prepare_reflection_probes(
+            self,
+            &decoded.reflection_probes,
+            probe_world_span,
+            &height_inputs.heightmap_data,
+            (height_inputs.width, height_inputs.height),
+            params.z_scale,
+        );
         let materials = self.prepare_material_context(material_set, params, decoded)?;
 
         let uniforms = self.build_uniforms(
@@ -205,7 +213,12 @@ impl TerrainScene {
                 shadow_setup.eye,
                 time_seconds,
             );
-            self.render_scatter_pass(&mut encoder, &render_targets, &scatter_state)?;
+            self.render_scatter_pass(
+                &mut encoder,
+                &render_targets,
+                &height_inputs.heightmap_view,
+                &scatter_state,
+            )?;
         }
 
         let (final_texture, final_width, final_height) =

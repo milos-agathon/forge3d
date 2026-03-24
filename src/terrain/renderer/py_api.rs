@@ -158,6 +158,122 @@ impl TerrainRenderer {
                     ))
                 })?;
 
+            let terrain_blend = if let Some(blend_any) = batch_dict
+                .get_item("terrain_blend")
+                .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                .filter(|value| !value.is_none())
+            {
+                let blend_dict = blend_any.downcast::<PyDict>().map_err(|_| {
+                    PyRuntimeError::new_err(format!(
+                        "batch {batch_index}: 'terrain_blend' must be a dict"
+                    ))
+                })?;
+                crate::terrain::scatter::TerrainScatterBlendConfig {
+                    enabled: blend_dict
+                        .get_item("enabled")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .filter(|value| !value.is_none())
+                        .map(|value| value.extract::<bool>())
+                        .transpose()
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'terrain_blend.enabled': {e}"
+                            ))
+                        })?
+                        .unwrap_or(false),
+                    bury_depth: blend_dict
+                        .get_item("bury_depth")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .filter(|value| !value.is_none())
+                        .map(|value| value.extract::<f32>())
+                        .transpose()
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'terrain_blend.bury_depth': {e}"
+                            ))
+                        })?
+                        .unwrap_or(0.75),
+                    fade_distance: blend_dict
+                        .get_item("fade_distance")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .filter(|value| !value.is_none())
+                        .map(|value| value.extract::<f32>())
+                        .transpose()
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'terrain_blend.fade_distance': {e}"
+                            ))
+                        })?
+                        .unwrap_or(2.5),
+                }
+            } else {
+                crate::terrain::scatter::TerrainScatterBlendConfig::default()
+            };
+
+            let terrain_contact = if let Some(contact_any) = batch_dict
+                .get_item("terrain_contact")
+                .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                .filter(|value| !value.is_none())
+            {
+                let contact_dict = contact_any.downcast::<PyDict>().map_err(|_| {
+                    PyRuntimeError::new_err(format!(
+                        "batch {batch_index}: 'terrain_contact' must be a dict"
+                    ))
+                })?;
+                crate::terrain::scatter::TerrainScatterContactConfig {
+                    enabled: contact_dict
+                        .get_item("enabled")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .filter(|value| !value.is_none())
+                        .map(|value| value.extract::<bool>())
+                        .transpose()
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'terrain_contact.enabled': {e}"
+                            ))
+                        })?
+                        .unwrap_or(false),
+                    distance: contact_dict
+                        .get_item("distance")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .filter(|value| !value.is_none())
+                        .map(|value| value.extract::<f32>())
+                        .transpose()
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'terrain_contact.distance': {e}"
+                            ))
+                        })?
+                        .unwrap_or(3.0),
+                    strength: contact_dict
+                        .get_item("strength")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .filter(|value| !value.is_none())
+                        .map(|value| value.extract::<f32>())
+                        .transpose()
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'terrain_contact.strength': {e}"
+                            ))
+                        })?
+                        .unwrap_or(0.35),
+                    vertical_weight: contact_dict
+                        .get_item("vertical_weight")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .filter(|value| !value.is_none())
+                        .map(|value| value.extract::<f32>())
+                        .transpose()
+                        .map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'terrain_contact.vertical_weight': {e}"
+                            ))
+                        })?
+                        .unwrap_or(0.65),
+                }
+            } else {
+                crate::terrain::scatter::TerrainScatterContactConfig::default()
+            };
+
             let transforms_any = batch_dict
                 .get_item("transforms")
                 .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
@@ -306,13 +422,75 @@ impl TerrainRenderer {
                 PyRuntimeError::new_err(format!("batch {batch_index}: {e}"))
             })?;
 
+            let hlod_config = batch_dict
+                .get_item("hlod")
+                .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                .filter(|value| !value.is_none())
+                .map(|value| -> PyResult<crate::terrain::scatter::HlodConfig> {
+                    let d = value.downcast::<PyDict>().map_err(|_| {
+                        PyRuntimeError::new_err(format!(
+                            "batch {batch_index}: 'hlod' must be a dict"
+                        ))
+                    })?;
+                    let hlod_distance = d
+                        .get_item("hlod_distance")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .ok_or_else(|| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: 'hlod.hlod_distance' is required"
+                            ))
+                        })?;
+                    let cluster_radius = d
+                        .get_item("cluster_radius")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .ok_or_else(|| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: 'hlod.cluster_radius' is required"
+                            ))
+                        })?;
+                    let simplify_ratio = d
+                        .get_item("simplify_ratio")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .ok_or_else(|| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: 'hlod.simplify_ratio' is required"
+                            ))
+                        })?;
+                    Ok(crate::terrain::scatter::HlodConfig {
+                        hlod_distance: hlod_distance.extract().map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'hlod.hlod_distance': {e}"
+                            ))
+                        })?,
+                        cluster_radius: cluster_radius.extract().map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'hlod.cluster_radius': {e}"
+                            ))
+                        })?,
+                        simplify_ratio: simplify_ratio.extract().map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'hlod.simplify_ratio': {e}"
+                            ))
+                        })?,
+                    })
+                })
+                .transpose()
+                .map_err(|e| {
+                    PyRuntimeError::new_err(format!(
+                        "batch {batch_index}: invalid 'hlod': {e}"
+                    ))
+                })?;
+
             native_batches.push(super::scatter::TerrainScatterUploadBatch {
                 name,
                 color,
                 max_draw_distance,
+                terrain_blend,
+                terrain_contact,
                 transforms_rowmajor: transforms,
                 levels,
                 wind,
+                hlod_config,
             });
         }
 
@@ -339,6 +517,9 @@ impl TerrainRenderer {
         dict.set_item("visible_instances", stats.visible_instances)?;
         dict.set_item("culled_instances", stats.culled_instances)?;
         dict.set_item("lod_instance_counts", stats.lod_instance_counts)?;
+        dict.set_item("hlod_cluster_draws", stats.hlod_cluster_draws)?;
+        dict.set_item("hlod_covered_instances", stats.hlod_covered_instances)?;
+        dict.set_item("effective_draws", stats.effective_draws)?;
         Ok(dict.into())
     }
 
@@ -353,6 +534,8 @@ impl TerrainRenderer {
         dict.set_item("vertex_buffer_bytes", report.vertex_buffer_bytes)?;
         dict.set_item("index_buffer_bytes", report.index_buffer_bytes)?;
         dict.set_item("instance_buffer_bytes", report.instance_buffer_bytes)?;
+        dict.set_item("hlod_cluster_count", report.hlod_cluster_count)?;
+        dict.set_item("hlod_buffer_bytes", report.hlod_buffer_bytes)?;
         dict.set_item("total_buffer_bytes", report.total_buffer_bytes())?;
         Ok(dict.into())
     }
@@ -361,18 +544,36 @@ impl TerrainRenderer {
     pub fn get_probe_memory_report(&self, py: Python<'_>) -> PyResult<PyObject> {
         let dict = pyo3::types::PyDict::new(py);
         let probe_stride = std::mem::size_of::<crate::terrain::probes::GpuProbeData>() as u64;
+        let reflection_probe_stride =
+            std::mem::size_of::<crate::terrain::probes::GpuReflectionProbeData>() as u64;
         let probe_count = if probe_stride > 0 {
             self.scene.probe_ssbo_bytes / probe_stride
         } else {
             0
         };
+        let reflection_probe_count = if reflection_probe_stride > 0 {
+            self.scene.reflection_probe_ssbo_bytes / reflection_probe_stride
+        } else {
+            0
+        };
+        let diffuse_total = self.scene.probe_grid_uniform_bytes + self.scene.probe_ssbo_bytes;
+        let reflection_total =
+            self.scene.reflection_probe_grid_uniform_bytes + self.scene.reflection_probe_ssbo_bytes;
         dict.set_item("probe_count", probe_count)?;
         dict.set_item("grid_uniform_bytes", self.scene.probe_grid_uniform_bytes)?;
         dict.set_item("probe_ssbo_bytes", self.scene.probe_ssbo_bytes)?;
+        dict.set_item("reflection_probe_count", reflection_probe_count)?;
         dict.set_item(
-            "total_bytes",
-            self.scene.probe_grid_uniform_bytes + self.scene.probe_ssbo_bytes,
+            "reflection_grid_uniform_bytes",
+            self.scene.reflection_probe_grid_uniform_bytes,
         )?;
+        dict.set_item(
+            "reflection_probe_ssbo_bytes",
+            self.scene.reflection_probe_ssbo_bytes,
+        )?;
+        dict.set_item("diffuse_total_bytes", diffuse_total)?;
+        dict.set_item("reflection_total_bytes", reflection_total)?;
+        dict.set_item("total_bytes", diffuse_total + reflection_total)?;
         Ok(dict.into())
     }
 

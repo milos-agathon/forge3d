@@ -5,10 +5,14 @@ Tests the volumetrics and sky settings configuration.
 import pytest
 
 from forge3d.terrain_params import (
+    DensityVolumeSettings,
     VolumetricsSettings,
     SkySettings,
     TerrainRenderParams,
+    localized_haze_volume,
     make_terrain_params_config,
+    plume_volume,
+    valley_fog_volume,
 )
 
 
@@ -27,6 +31,8 @@ class TestVolumetricsSettings:
         assert settings.light_shafts is False
         assert settings.use_shadows is True
         assert settings.half_res is False
+        assert settings.density_volumes == ()
+        assert settings.uses_density_volumes is False
 
     def test_volumetrics_settings_enabled(self):
         """VolumetricsSettings can be enabled with custom parameters."""
@@ -112,6 +118,82 @@ class TestVolumetricsSettings:
 
         settings = VolumetricsSettings(light_shafts=True, shaft_intensity=1.0)
         assert settings.has_light_shafts is True
+
+    def test_volumetrics_density_volumes_validate_and_export_for_viewer(self):
+        """VolumetricsSettings enforces TV6 limits and exports viewer IPC payloads."""
+        fog = valley_fog_volume(center=(32.0, 18.0, 40.0), size=(64.0, 24.0, 72.0), seed=3)
+        settings = VolumetricsSettings(
+            enabled=True,
+            mode="height",
+            light_shafts=True,
+            shaft_samples=48,
+            density_volumes=(fog,),
+        )
+
+        assert settings.uses_density_volumes is True
+        viewer_payload = settings.to_viewer_dict()
+        assert viewer_payload["steps"] == 48
+        assert viewer_payload["density_volumes"][0]["preset"] == "valley_fog"
+        assert viewer_payload["density_volumes"][0]["seed"] == 3
+
+        too_many = tuple(
+            DensityVolumeSettings(center=(float(i), 0.0, 0.0))
+            for i in range(DensityVolumeSettings.MAX_ACTIVE_VOLUMES + 1)
+        )
+        with pytest.raises(ValueError, match="supports at most"):
+            VolumetricsSettings(density_volumes=too_many)
+
+
+class TestDensityVolumeSettings:
+    """Tests for TV6 density volume configuration."""
+
+    def test_density_volume_settings_default(self):
+        """DensityVolumeSettings should expose a stable bounded default."""
+        settings = DensityVolumeSettings()
+        assert settings.preset == "valley_fog"
+        assert settings.center == (0.0, 0.0, 0.0)
+        assert settings.size == (128.0, 64.0, 128.0)
+        assert settings.resolution == (64, 32, 64)
+        assert settings.density_scale == 1.0
+        assert settings.wind == (0.25, 1.0, 0.0)
+
+    def test_density_volume_settings_validation(self):
+        """DensityVolumeSettings validates preset, bounds, and seed."""
+        with pytest.raises(ValueError, match="preset must be one of"):
+            DensityVolumeSettings(preset="steam")
+        with pytest.raises(ValueError, match=r"size.x must be > 0"):
+            DensityVolumeSettings(size=(0.0, 64.0, 64.0))
+        with pytest.raises(ValueError, match=r"resolution.x must be in \[8, 96\]"):
+            DensityVolumeSettings(resolution=(4, 32, 32))
+        with pytest.raises(ValueError, match="seed must be >= 0"):
+            DensityVolumeSettings(seed=-1)
+
+    def test_density_volume_helper_constructors(self):
+        """TV6 helper constructors should stamp the correct preset wiring."""
+        fog = valley_fog_volume(center=(50.0, 12.0, 60.0), size=(180.0, 48.0, 180.0), seed=7)
+        assert fog.preset == "valley_fog"
+        assert fog.floor_offset == 4.0
+        assert fog.seed == 7
+
+        plume = plume_volume(
+            center=(64.0, 120.0, 64.0),
+            size=(56.0, 220.0, 56.0),
+            plume_spread=0.55,
+            wind=(0.4, 1.0, -0.2),
+        )
+        assert plume.preset == "plume"
+        assert plume.plume_spread == 0.55
+        assert plume.wind == (0.4, 1.0, -0.2)
+
+        haze = localized_haze_volume(
+            center=(72.0, 80.0, 44.0),
+            size=(96.0, 40.0, 96.0),
+            ceiling=0.7,
+            density_scale=0.9,
+        )
+        assert haze.preset == "localized_haze"
+        assert haze.ceiling == 0.7
+        assert haze.density_scale == 0.9
 
 
 class TestSkySettings:

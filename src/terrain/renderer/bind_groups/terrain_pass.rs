@@ -266,6 +266,12 @@ impl TerrainScene {
                 materials.snow_color[2],
                 0.0,
             ],
+            snow_subsurface: [
+                materials.snow_subsurface_color[0],
+                materials.snow_subsurface_color[1],
+                materials.snow_subsurface_color[2],
+                materials.snow_subsurface_strength,
+            ],
             rock_params: [
                 materials.rock_slope_min * deg_to_rad,
                 materials.rock_slope_blend * deg_to_rad,
@@ -278,11 +284,23 @@ impl TerrainScene {
                 materials.rock_color[2],
                 0.0,
             ],
+            rock_subsurface: [
+                materials.rock_subsurface_color[0],
+                materials.rock_subsurface_color[1],
+                materials.rock_subsurface_color[2],
+                materials.rock_subsurface_strength,
+            ],
             wetness_params: [
                 materials.wetness_strength,
                 materials.wetness_slope_influence,
                 if materials.wetness_enabled { 1.0 } else { 0.0 },
                 0.0,
+            ],
+            wetness_subsurface: [
+                materials.wetness_subsurface_color[0],
+                materials.wetness_subsurface_color[1],
+                materials.wetness_subsurface_color[2],
+                materials.wetness_subsurface_strength,
             ],
             variation_params0: [
                 variation.macro_scale,
@@ -329,6 +347,16 @@ impl TerrainScene {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: self.probe_ssbo.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: self
+                        .reflection_probe_grid_uniform_buffer
+                        .as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: self.reflection_probe_ssbo.as_entire_binding(),
                 },
             ],
         });

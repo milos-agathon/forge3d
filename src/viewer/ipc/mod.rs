@@ -6,7 +6,8 @@ mod protocol;
 mod server;
 
 pub use protocol::{
-    ipc_request_to_viewer_cmd, parse_ipc_request, IpcRequest, IpcResponse, ViewerStats,
+    ipc_request_to_viewer_cmd, parse_ipc_request, IpcRequest, IpcResponse,
+    TerrainVolumetricsReport, TerrainVolumetricsVolumeReport, ViewerStats,
 };
 pub use server::{start_ipc_server, IpcServerConfig, IpcServerHandle};
 
@@ -77,6 +78,8 @@ mod tests {
                     "name":"trees",
                     "color":[0.2,0.6,0.3,1.0],
                     "max_draw_distance":180.0,
+                    "terrain_blend":{"enabled":true,"bury_depth":0.5,"fade_distance":2.0},
+                    "terrain_contact":{"enabled":true,"distance":1.5,"strength":0.3,"vertical_weight":0.75},
                     "transforms":[[1.0,0.0,0.0,3.0,0.0,1.0,0.0,4.0,0.0,0.0,1.0,5.0,0.0,0.0,0.0,1.0]],
                     "levels":[
                         {
@@ -94,6 +97,10 @@ mod tests {
             IpcRequest::SetTerrainScatter { batches } => {
                 assert_eq!(batches.len(), 1);
                 assert_eq!(batches[0].name.as_deref(), Some("trees"));
+                assert_eq!(
+                    batches[0].terrain_blend.as_ref().unwrap().enabled,
+                    Some(true)
+                );
                 assert_eq!(batches[0].transforms.len(), 1);
                 assert_eq!(batches[0].levels.len(), 1);
                 assert_eq!(batches[0].levels[0].indices, vec![0, 1, 2]);
@@ -106,6 +113,8 @@ mod tests {
             crate::viewer::viewer_enums::ViewerCmd::SetTerrainScatter { batches } => {
                 assert_eq!(batches.len(), 1);
                 assert_eq!(batches[0].name.as_deref(), Some("trees"));
+                assert!(batches[0].terrain_blend.enabled);
+                assert_eq!(batches[0].terrain_contact.vertical_weight, 0.75);
                 assert_eq!(batches[0].transforms.len(), 1);
                 assert_eq!(batches[0].levels.len(), 1);
                 assert_eq!(batches[0].levels[0].mesh.indices, vec![0, 1, 2]);
@@ -241,5 +250,99 @@ mod tests {
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains(r#""ok":false"#));
         assert!(json.contains("test error"));
+    }
+
+    #[cfg(feature = "enable-gpu-instancing")]
+    #[test]
+    fn test_parse_set_terrain_scatter_with_hlod() {
+        let json = r#"{
+            "cmd":"set_terrain_scatter",
+            "batches":[
+                {
+                    "name":"trees",
+                    "color":[0.2,0.6,0.3,1.0],
+                    "max_draw_distance":180.0,
+                    "transforms":[[1.0,0.0,0.0,3.0,0.0,1.0,0.0,4.0,0.0,0.0,1.0,5.0,0.0,0.0,0.0,1.0]],
+                    "levels":[
+                        {
+                            "positions":[[0.0,0.0,0.0],[1.0,0.0,0.0],[0.0,1.0,0.0]],
+                            "normals":[[0.0,1.0,0.0],[0.0,1.0,0.0],[0.0,1.0,0.0]],
+                            "indices":[0,1,2],
+                            "max_distance":90.0
+                        }
+                    ],
+                    "hlod":{
+                        "hlod_distance":100.0,
+                        "cluster_radius":25.0,
+                        "simplify_ratio":0.5
+                    }
+                }
+            ]
+        }"#;
+        let req = parse_ipc_request(json).unwrap();
+        match &req {
+            IpcRequest::SetTerrainScatter { batches } => {
+                assert_eq!(batches.len(), 1);
+                let hlod = batches[0].hlod.as_ref().expect("hlod should be present");
+                assert_eq!(hlod.hlod_distance, 100.0);
+                assert_eq!(hlod.cluster_radius, 25.0);
+                assert_eq!(hlod.simplify_ratio, 0.5);
+            }
+            _ => panic!("Expected SetTerrainScatter"),
+        }
+
+        let cmd = ipc_request_to_viewer_cmd(&req).unwrap().unwrap();
+        match cmd {
+            crate::viewer::viewer_enums::ViewerCmd::SetTerrainScatter { batches } => {
+                assert_eq!(batches.len(), 1);
+                let hlod_config = batches[0]
+                    .hlod_config
+                    .as_ref()
+                    .expect("hlod_config should be present");
+                assert_eq!(hlod_config.hlod_distance, 100.0);
+                assert_eq!(hlod_config.cluster_radius, 25.0);
+                assert_eq!(hlod_config.simplify_ratio, 0.5);
+            }
+            _ => panic!("Expected ViewerCmd::SetTerrainScatter"),
+        }
+    }
+
+    #[cfg(feature = "enable-gpu-instancing")]
+    #[test]
+    fn test_parse_set_terrain_scatter_without_hlod_backward_compat() {
+        let json = r#"{
+            "cmd":"set_terrain_scatter",
+            "batches":[
+                {
+                    "name":"rocks",
+                    "transforms":[[1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0]],
+                    "levels":[
+                        {
+                            "positions":[[0.0,0.0,0.0],[1.0,0.0,0.0],[0.0,1.0,0.0]],
+                            "indices":[0,1,2]
+                        }
+                    ]
+                }
+            ]
+        }"#;
+        let req = parse_ipc_request(json).unwrap();
+        match &req {
+            IpcRequest::SetTerrainScatter { batches } => {
+                assert_eq!(batches.len(), 1);
+                assert!(batches[0].hlod.is_none(), "hlod should be None when omitted");
+            }
+            _ => panic!("Expected SetTerrainScatter"),
+        }
+
+        let cmd = ipc_request_to_viewer_cmd(&req).unwrap().unwrap();
+        match cmd {
+            crate::viewer::viewer_enums::ViewerCmd::SetTerrainScatter { batches } => {
+                assert!(
+                    batches[0].hlod_config.is_none(),
+                    "hlod_config should be None when omitted"
+                );
+            }
+            _ => panic!("Expected ViewerCmd::SetTerrainScatter"),
+        }
     }
 }

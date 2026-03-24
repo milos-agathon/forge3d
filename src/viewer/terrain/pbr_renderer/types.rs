@@ -114,6 +114,22 @@ pub struct MotionBlurConfig {
 }
 
 #[derive(Debug, Clone)]
+pub struct DensityVolumeConfig {
+    pub preset: String,
+    pub center: [f32; 3],
+    pub size: [f32; 3],
+    pub resolution: [u32; 3],
+    pub density_scale: f32,
+    pub edge_softness: f32,
+    pub noise_strength: f32,
+    pub floor_offset: f32,
+    pub ceiling: f32,
+    pub plume_spread: f32,
+    pub wind: [f32; 3],
+    pub seed: u32,
+}
+
+#[derive(Debug, Clone)]
 pub struct VolumetricsConfig {
     pub enabled: bool,
     pub mode: String,
@@ -125,6 +141,13 @@ pub struct VolumetricsConfig {
     pub shaft_intensity: f32,
     pub steps: u32,
     pub half_res: bool,
+    pub density_volumes: Vec<DensityVolumeConfig>,
+}
+
+impl VolumetricsConfig {
+    pub fn is_effectively_enabled(&self) -> bool {
+        self.enabled && (self.density > 0.0001 || !self.density_volumes.is_empty())
+    }
 }
 
 #[derive(Debug, Clone)]

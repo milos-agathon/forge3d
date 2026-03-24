@@ -5,6 +5,7 @@
 use std::collections::VecDeque;
 use std::sync::{Mutex, OnceLock};
 
+use super::super::ipc::TerrainVolumetricsReport;
 use super::super::ipc::ViewerStats;
 use super::super::viewer_enums::ViewerCmd;
 use crate::picking::PickEvent;
@@ -56,6 +57,19 @@ pub fn update_ipc_transform_stats(transform_version: u64, transform_is_identity:
     if let Ok(mut stats) = get_ipc_stats().lock() {
         stats.transform_version = transform_version;
         stats.transform_is_identity = transform_is_identity;
+    }
+}
+
+/// Global terrain heterogeneous-volumetrics report for IPC queries.
+static TERRAIN_VOLUMETRICS_REPORT: OnceLock<Mutex<TerrainVolumetricsReport>> = OnceLock::new();
+
+pub fn get_terrain_volumetrics_report() -> &'static Mutex<TerrainVolumetricsReport> {
+    TERRAIN_VOLUMETRICS_REPORT.get_or_init(|| Mutex::new(TerrainVolumetricsReport::default()))
+}
+
+pub fn update_terrain_volumetrics_report(report: TerrainVolumetricsReport) {
+    if let Ok(mut current) = get_terrain_volumetrics_report().lock() {
+        *current = report;
     }
 }
 

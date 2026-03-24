@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.17.0"
+__version__ = "1.19.0"
 version = __version__
 
 import numpy as np
@@ -110,6 +110,7 @@ from .terrain_params import (
     HeightAoSettings,
     SunVisibilitySettings,
     ProbeSettings,
+    ReflectionProbeSettings,
     DetailSettings,
     MaterialNoiseSettings,
     MaterialLayerSettings,
@@ -389,6 +390,7 @@ __all__ = [
     "HeightAoSettings",
     "SunVisibilitySettings",
     "ProbeSettings",
+    "ReflectionProbeSettings",
     "DetailSettings",
     "MaterialNoiseSettings",
     "MaterialLayerSettings",

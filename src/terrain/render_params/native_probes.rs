@@ -28,3 +28,38 @@ impl Default for ProbeSettingsNative {
         }
     }
 }
+
+#[cfg(feature = "extension-module")]
+#[derive(Clone, Debug)]
+pub struct ReflectionProbeSettingsNative {
+    pub enabled: bool,
+    pub grid_dims: (u32, u32),
+    pub origin: Option<(f32, f32)>,
+    pub spacing: Option<(f32, f32)>,
+    pub height_offset: f32,
+    pub ray_count: u32,
+    pub fallback_blend_distance: Option<f32>,
+    pub sky_color: [f32; 3],
+    pub sky_intensity: f32,
+    pub ground_color: [f32; 3],
+    pub strength: f32,
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for ReflectionProbeSettingsNative {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            grid_dims: (4, 4),
+            origin: None,
+            spacing: None,
+            height_offset: 5.0,
+            ray_count: 16,
+            fallback_blend_distance: None,
+            sky_color: [0.6, 0.75, 1.0],
+            sky_intensity: 1.0,
+            ground_color: [0.22, 0.18, 0.14],
+            strength: 1.0,
+        }
+    }
+}

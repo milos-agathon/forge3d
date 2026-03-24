@@ -17,20 +17,19 @@ impl ViewerTerrainScene {
         let mut out_tex = color_tex;
         let mut out_view = color_view;
 
-        let needs_volumetrics =
-            self.pbr_config.volumetrics.enabled && self.pbr_config.volumetrics.density > 0.0001;
+        let needs_volumetrics = self.pbr_config.volumetrics.is_effectively_enabled();
         if needs_volumetrics {
             if self.volumetrics_pass.is_none() {
                 self.init_volumetrics_pass();
             }
 
-            if let Some(ref vol_pass) = self.volumetrics_pass {
-                let (vol_output_tex, vol_output_view) = self.create_snapshot_color_target(
-                    "terrain_viewer.snapshot_vol_output",
-                    target_format,
-                    width,
-                    height,
-                );
+            let (vol_output_tex, vol_output_view) = self.create_snapshot_color_target(
+                "terrain_viewer.snapshot_vol_output",
+                target_format,
+                width,
+                height,
+            );
+            if let Some(ref mut vol_pass) = self.volumetrics_pass {
                 let terrain = self.terrain.as_ref().unwrap();
                 let cam_radius = terrain.cam_radius;
                 let terrain_sun_intensity = terrain.sun_intensity;
@@ -41,6 +40,9 @@ impl ViewerTerrainScene {
                     &out_view,
                     depth_view,
                     &terrain.heightmap_view,
+                    &terrain.heightmap,
+                    terrain.dimensions,
+                    terrain.revision,
                     &vol_output_view,
                     width,
                     height,

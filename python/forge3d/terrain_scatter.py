@@ -33,6 +33,27 @@ def _positive_finite_or_none(value: float | None, *, name: str) -> float | None:
     return value
 
 
+def _non_negative_finite(value: float, *, name: str) -> float:
+    value = float(value)
+    if not np.isfinite(value) or value < 0.0:
+        raise ValueError(f"{name} must be a non-negative finite float")
+    return value
+
+
+def _positive_finite(value: float, *, name: str) -> float:
+    value = float(value)
+    if not np.isfinite(value) or value <= 0.0:
+        raise ValueError(f"{name} must be a positive finite float")
+    return value
+
+
+def _unit_interval(value: float, *, name: str) -> float:
+    value = float(value)
+    if not np.isfinite(value) or value < 0.0 or value > 1.0:
+        raise ValueError(f"{name} must be in [0.0, 1.0]")
+    return value
+
+
 def _validate_lod_distances(levels: Sequence["TerrainScatterLevel"]) -> None:
     previous_max_distance = 0.0
     for index, level in enumerate(levels):
@@ -262,9 +283,102 @@ def viewer_orbit_radius(
 
 
 @dataclass(frozen=True)
+class HLODPolicy:
+    """Configuration for HLOD cluster generation."""
+    hlod_distance: float
+    cluster_radius: float
+    simplify_ratio: float = 0.1
+
+
+@dataclass(frozen=True)
 class TerrainScatterLevel:
     mesh: MeshBuffers
     max_distance: float | None = None
+
+
+@dataclass(frozen=True)
+class TerrainMeshBlendSettings:
+    enabled: bool = False
+    bury_depth: float = 0.75
+    fade_distance: float = 2.5
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "enabled", bool(self.enabled))
+        object.__setattr__(
+            self,
+            "bury_depth",
+            _non_negative_finite(self.bury_depth, name="terrain_blend.bury_depth"),
+        )
+        object.__setattr__(
+            self,
+            "fade_distance",
+            _positive_finite(self.fade_distance, name="terrain_blend.fade_distance"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": bool(self.enabled),
+            "bury_depth": float(self.bury_depth),
+            "fade_distance": float(self.fade_distance),
+        }
+
+
+@dataclass(frozen=True)
+class TerrainContactSettings:
+    enabled: bool = False
+    distance: float = 3.0
+    strength: float = 0.35
+    vertical_weight: float = 0.65
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "enabled", bool(self.enabled))
+        object.__setattr__(
+            self,
+            "distance",
+            _positive_finite(self.distance, name="terrain_contact.distance"),
+        )
+        object.__setattr__(
+            self,
+            "strength",
+            _unit_interval(self.strength, name="terrain_contact.strength"),
+        )
+        object.__setattr__(
+            self,
+            "vertical_weight",
+            _unit_interval(self.vertical_weight, name="terrain_contact.vertical_weight"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": bool(self.enabled),
+            "distance": float(self.distance),
+            "strength": float(self.strength),
+            "vertical_weight": float(self.vertical_weight),
+        }
+
+
+def _coerce_terrain_blend(
+    value: TerrainMeshBlendSettings | dict[str, Any] | None,
+) -> TerrainMeshBlendSettings:
+    if value is None:
+        return TerrainMeshBlendSettings()
+    if isinstance(value, TerrainMeshBlendSettings):
+        return value
+    if isinstance(value, dict):
+        return TerrainMeshBlendSettings(**value)
+    raise TypeError("terrain_blend must be a TerrainMeshBlendSettings or dict")
+
+
+def _coerce_terrain_contact(
+    value: TerrainContactSettings | dict[str, Any] | None,
+) -> TerrainContactSettings:
+    if value is None:
+        return TerrainContactSettings()
+    if isinstance(value, TerrainContactSettings):
+        return value
+    if isinstance(value, dict):
+        return TerrainContactSettings(**value)
+    raise TypeError("terrain_contact must be a TerrainContactSettings or dict")
 
 
 @dataclass
@@ -275,6 +389,13 @@ class TerrainScatterBatch:
     color: Sequence[float] = (0.85, 0.85, 0.85, 1.0)
     max_draw_distance: float | None = None
     wind: ScatterWindSettings = field(default_factory=ScatterWindSettings)
+    hlod: HLODPolicy | None = None
+    terrain_blend: TerrainMeshBlendSettings | dict[str, Any] | None = field(
+        default_factory=TerrainMeshBlendSettings
+    )
+    terrain_contact: TerrainContactSettings | dict[str, Any] | None = field(
+        default_factory=TerrainContactSettings
+    )
 
     def __post_init__(self) -> None:
         if not self.levels:
@@ -287,6 +408,8 @@ class TerrainScatterBatch:
             self.max_draw_distance,
             name="max_draw_distance",
         )
+        self.terrain_blend = _coerce_terrain_blend(self.terrain_blend)
+        self.terrain_contact = _coerce_terrain_contact(self.terrain_contact)
         _validate_lod_distances(self.levels)
         if self.transforms.shape[0] == 0:
             raise ValueError("TerrainScatterBatch requires at least one transform")
@@ -294,6 +417,20 @@ class TerrainScatterBatch:
             raise TypeError(
                 f"wind must be a ScatterWindSettings instance, got {type(self.wind).__name__}"
             )
+        if self.hlod is not None:
+            if not isinstance(self.hlod, HLODPolicy):
+                raise ValueError("hlod must be an HLODPolicy instance or None")
+            if self.hlod.hlod_distance <= 0 or not np.isfinite(self.hlod.hlod_distance):
+                raise ValueError("hlod_distance must be a positive finite float")
+            if self.hlod.cluster_radius <= 0 or not np.isfinite(self.hlod.cluster_radius):
+                raise ValueError("cluster_radius must be a positive finite float")
+            if self.hlod.simplify_ratio <= 0 or self.hlod.simplify_ratio > 1.0:
+                raise ValueError("simplify_ratio must be in (0.0, 1.0]")
+            if self.max_draw_distance is not None and self.hlod.hlod_distance >= self.max_draw_distance:
+                raise ValueError(
+                    f"hlod_distance ({self.hlod.hlod_distance}) must be less than "
+                    f"max_draw_distance ({self.max_draw_distance})"
+                )
 
     @property
     def instance_count(self) -> int:
@@ -315,10 +452,12 @@ class TerrainScatterBatch:
         }
 
     def to_native_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "name": self.name,
             "color": tuple(self.color),
             "max_draw_distance": self.max_draw_distance,
+            "terrain_blend": self.terrain_blend.to_dict(),
+            "terrain_contact": self.terrain_contact.to_dict(),
             "transforms": self.transforms,
             "levels": [
                 {
@@ -329,6 +468,15 @@ class TerrainScatterBatch:
             ],
             "wind": self._wind_dict(),
         }
+        if self.hlod is not None:
+            d["hlod"] = {
+                "hlod_distance": self.hlod.hlod_distance,
+                "cluster_radius": self.hlod.cluster_radius,
+                "simplify_ratio": self.hlod.simplify_ratio,
+            }
+        else:
+            d["hlod"] = None
+        return d
 
     def to_viewer_payload(self) -> dict[str, Any]:
         levels: list[dict[str, Any]] = []
@@ -345,14 +493,23 @@ class TerrainScatterBatch:
                 }
             )
 
-        return {
+        payload = {
             "name": self.name,
             "color": list(self.color),
             "max_draw_distance": self.max_draw_distance,
+            "terrain_blend": self.terrain_blend.to_dict(),
+            "terrain_contact": self.terrain_contact.to_dict(),
             "transforms": self.transforms.tolist(),
             "levels": levels,
             "wind": self._wind_dict(),
         }
+        if self.hlod is not None:
+            payload["hlod"] = {
+                "hlod_distance": self.hlod.hlod_distance,
+                "cluster_radius": self.hlod.cluster_radius,
+                "simplify_ratio": self.hlod.simplify_ratio,
+            }
+        return payload
 
 
 def _passes_filters(
@@ -647,6 +804,80 @@ def mask_density_transforms(
     return np.ascontiguousarray(np.vstack(transforms).astype(np.float32))
 
 
+def auto_lod_levels(
+    mesh,  # MeshBuffers from forge3d.geometry
+    *,
+    lod_count: int = 3,
+    lod_distances: list[float | None] | None = None,
+    ratios: list[float] | None = None,
+    draw_distance: float | None = None,
+    min_triangles: int = 8,
+) -> list[TerrainScatterLevel]:
+    """Generate LOD levels from one high-detail mesh."""
+    from forge3d.geometry import generate_lod_chain
+
+    if lod_count < 1:
+        raise ValueError("lod_count must be >= 1")
+
+    # Resolve ratios: geometric series in (0, 1] with guaranteed strict descent.
+    # For N levels, space ratios evenly in log space between 1.0 and a minimum
+    # floor (0.01). E.g. lod_count=6 → [1.0, 0.398, 0.158, 0.063, 0.025, 0.01].
+    if ratios is None:
+        ratios = [1.0]
+        if lod_count > 1:
+            min_ratio = 0.01
+            for i in range(1, lod_count):
+                # Linearly interpolate the exponent between 0 and log(min_ratio)
+                t = i / (lod_count - 1)
+                r = float(10.0 ** (t * np.log10(min_ratio)))
+                ratios.append(max(r, min_ratio))
+    if len(ratios) != lod_count:
+        raise ValueError(f"ratios length ({len(ratios)}) must equal lod_count ({lod_count})")
+
+    # Generate LOD chain
+    chain = generate_lod_chain(mesh, ratios, min_triangles=min_triangles)
+    actual_count = len(chain)
+
+    # Resolve distances
+    if lod_distances is not None:
+        if len(lod_distances) != lod_count:
+            raise ValueError(
+                f"lod_distances length ({len(lod_distances)}) must equal lod_count ({lod_count})"
+            )
+        distances = list(lod_distances[:actual_count])
+    elif draw_distance is not None:
+        geo_ratio = 0.33
+        distances = []
+        for i in range(actual_count):
+            if i == actual_count - 1:
+                distances.append(None)
+            else:
+                d = draw_distance * geo_ratio ** (actual_count - 1 - i)
+                distances.append(float(d))
+    else:
+        default_dists = [30.0, 100.0, 300.0, 600.0, 1000.0]
+        distances = []
+        for i in range(actual_count):
+            if i == actual_count - 1:
+                distances.append(None)
+            elif i < len(default_dists):
+                distances.append(default_dists[i])
+            else:
+                distances.append(None)
+
+    # Ensure final is open-ended
+    if distances and distances[-1] is not None:
+        distances[-1] = None
+
+    # Build levels
+    levels = []
+    for i, lod_mesh in enumerate(chain):
+        max_dist = distances[i] if i < len(distances) else None
+        levels.append(TerrainScatterLevel(mesh=lod_mesh, max_distance=max_dist))
+
+    return levels
+
+
 def serialize_batches_for_native(batches: Iterable[TerrainScatterBatch]) -> list[dict[str, Any]]:
     return [batch.to_native_dict() for batch in batches]
 
@@ -680,12 +911,16 @@ def clear_viewer(viewer: Any) -> None:
 
 __all__ = [
     "ScatterWindSettings",
+    "HLODPolicy",
     "TerrainScatterBatch",
+    "TerrainContactSettings",
     "TerrainScatterFilters",
     "TerrainScatterLevel",
+    "TerrainMeshBlendSettings",
     "TerrainScatterSource",
     "apply_to_renderer",
     "apply_to_viewer",
+    "auto_lod_levels",
     "bilinear_sample",
     "clear_renderer",
     "clear_viewer",

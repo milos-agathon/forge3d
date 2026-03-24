@@ -5,8 +5,9 @@ use super::*;
 use crate::terrain::renderer::core::TERRAIN_DEPTH_FORMAT;
 
 use crate::terrain::scatter::{
-    accumulate_frame_stats, compute_wind_uniforms, summarize_memory, ScatterWindSettingsNative,
-    TerrainScatterBatch, TerrainScatterFrameStats, TerrainScatterLevelSpec,
+    accumulate_frame_stats, compute_wind_uniforms, summarize_memory, HlodConfig,
+    ScatterWindSettingsNative, TerrainScatterBatch, TerrainScatterBlendConfig,
+    TerrainScatterContactConfig, TerrainScatterFrameStats, TerrainScatterLevelSpec,
     TerrainScatterMemoryReport,
 };
 
@@ -19,15 +20,20 @@ pub(super) struct ScatterRenderState {
     pub(super) light_dir: [f32; 3],
     pub(super) light_intensity: f32,
     pub(super) time_seconds: f32,
+    pub(super) terrain_world_to_uv_scale_bias: [f32; 4],
+    pub(super) terrain_height_to_world: [f32; 4],
 }
 
 pub(super) struct TerrainScatterUploadBatch {
     pub(super) name: Option<String>,
     pub(super) color: [f32; 4],
     pub(super) max_draw_distance: Option<f32>,
+    pub(super) terrain_blend: TerrainScatterBlendConfig,
+    pub(super) terrain_contact: TerrainScatterContactConfig,
     pub(super) transforms_rowmajor: Vec<[f32; 16]>,
     pub(super) levels: Vec<TerrainScatterLevelSpec>,
     pub(super) wind: ScatterWindSettingsNative,
+    pub(super) hlod_config: Option<HlodConfig>,
 }
 
 impl TerrainScene {
@@ -46,6 +52,9 @@ impl TerrainScene {
                 batch.max_draw_distance,
                 batch.name,
                 batch.wind,
+                batch.hlod_config,
+                batch.terrain_blend,
+                batch.terrain_contact,
             )?);
         }
 
@@ -81,6 +90,7 @@ impl TerrainScene {
         let terrain_width = heightmap_width.max(heightmap_height).max(1) as f32;
         let terrain_span = params.terrain_span.max(1e-3);
         let scale_xy = terrain_span / terrain_width;
+        let height_mid = 0.5 * (decoded.clamp.height_range.0 + decoded.clamp.height_range.1);
         let centered_z_offset =
             -0.5 * (decoded.clamp.height_range.1 - decoded.clamp.height_range.0) * params.z_scale;
 
@@ -117,6 +127,8 @@ impl TerrainScene {
             light_dir: decoded.light.direction,
             light_intensity: decoded.light.intensity,
             time_seconds,
+            terrain_world_to_uv_scale_bias: [1.0 / terrain_span, 1.0 / terrain_span, 0.5, 0.5],
+            terrain_height_to_world: [params.z_scale, -height_mid * params.z_scale, 0.0, 0.0],
         }
     }
 
@@ -124,6 +136,7 @@ impl TerrainScene {
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         render_targets: &RenderTargets,
+        heightmap_view: &wgpu::TextureView,
         state: &ScatterRenderState,
     ) -> Result<()> {
         if self.scatter_batches.is_empty() {
@@ -147,7 +160,31 @@ impl TerrainScene {
         let queue = self.queue.as_ref();
         let renderer = &mut self.scatter_renderer;
         renderer.reset_draw_batch_uniforms();
+        renderer.set_terrain_context(
+            device,
+            queue,
+            Some(crate::render::mesh_instanced::TerrainBlendContext {
+                heightmap_view,
+                world_to_uv_scale_bias: state.terrain_world_to_uv_scale_bias,
+                height_to_world: state.terrain_height_to_world,
+            }),
+        );
         let mut frame_stats = TerrainScatterFrameStats::default();
+        // Pre-create a single HLOD identity instance buffer that lives as long as the pass.
+        let identity_packed =
+            crate::terrain::scatter::pack_hlod_identity_instance(state.render_from_contract);
+        let hlod_inst_bytes = (std::mem::size_of::<f32>() * 16) as u64;
+        let hlod_instbuf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("terrain.scatter.hlod.instance_buffer"),
+            size: hlod_inst_bytes,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(
+            &hlod_instbuf,
+            0,
+            bytemuck::cast_slice(&identity_packed),
+        );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("terrain.scatter.render_pass"),
@@ -209,12 +246,46 @@ impl TerrainScene {
                     wind.wind_phase,
                     wind.wind_vec_bounds,
                     wind.wind_bend_fade,
+                    batch.terrain_blend.uniform(),
+                    batch.terrain_contact.uniform(),
                     batch.level_vbuf(draw.level_index),
                     batch.level_ibuf(draw.level_index),
                     instbuf,
                     batch.level_index_count(draw.level_index),
                     draw.instance_count,
                 );
+            }
+
+            // Draw active HLOD clusters as single-instance draws with identity transform
+            // (geometry is already baked into world space).
+            let active_clusters = batch.hlod_active_clusters(state.eye_contract);
+            for cluster_idx in active_clusters {
+                if let (Some(vbuf), Some(ibuf)) = (
+                    batch.hlod_cluster_vbuf(cluster_idx),
+                    batch.hlod_cluster_ibuf(cluster_idx),
+                ) {
+                    let index_count = batch.hlod_cluster_index_count(cluster_idx);
+                    renderer.draw_batch_params(
+                        device,
+                        &mut pass,
+                        queue,
+                        state.view,
+                        state.proj,
+                        batch.color,
+                        state.light_dir,
+                        state.light_intensity,
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
+                        batch.terrain_blend.uniform(),
+                        batch.terrain_contact.uniform(),
+                        vbuf,
+                        ibuf,
+                        &hlod_instbuf,
+                        index_count,
+                        1,
+                    );
+                }
             }
         }
 

@@ -1,4 +1,6 @@
 use super::*;
+use crate::viewer::event_loop::update_terrain_volumetrics_report;
+use crate::viewer::ipc::TerrainVolumetricsReport;
 
 impl ViewerTerrainScene {
     pub fn new(
@@ -173,6 +175,7 @@ impl ViewerTerrainScene {
             velocity_view: None,
             velocity_pipeline: None,
             velocity_bind_group_layout: None,
+            terrain_revision_counter: 0,
             #[cfg(feature = "enable-gpu-instancing")]
             scatter_renderer,
             #[cfg(feature = "enable-gpu-instancing")]
@@ -333,15 +336,38 @@ impl ViewerTerrainScene {
         }
 
         if let Some(v) = volumetrics {
+            let density_volumes = v
+                .density_volumes
+                .iter()
+                .map(
+                    |volume| crate::viewer::terrain::pbr_renderer::DensityVolumeConfig {
+                        preset: volume.preset.clone(),
+                        center: volume.center,
+                        size: volume.size,
+                        resolution: volume.resolution,
+                        density_scale: volume.density_scale,
+                        edge_softness: volume.edge_softness,
+                        noise_strength: volume.noise_strength,
+                        floor_offset: volume.floor_offset,
+                        ceiling: volume.ceiling,
+                        plume_spread: volume.plume_spread,
+                        wind: volume.wind,
+                        seed: volume.seed,
+                    },
+                )
+                .collect::<Vec<_>>();
             self.pbr_config.apply_volumetrics(
                 v.enabled,
                 &v.mode,
                 v.density,
+                v.height_falloff,
                 v.scattering,
                 v.absorption,
                 v.light_shafts,
                 v.shaft_intensity,
+                v.steps,
                 v.half_res,
+                &density_volumes,
             );
         }
 
@@ -354,6 +380,11 @@ impl ViewerTerrainScene {
         }
         if self.pbr_config.denoise.enabled {
             self.init_denoise_pass();
+        }
+        if !self.pbr_config.volumetrics.is_effectively_enabled()
+            || self.pbr_config.volumetrics.density_volumes.is_empty()
+        {
+            update_terrain_volumetrics_report(TerrainVolumetricsReport::default());
         }
 
         println!(

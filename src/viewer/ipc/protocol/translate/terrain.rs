@@ -1,15 +1,18 @@
 use crate::viewer::viewer_enums::{
-    ViewerCmd, ViewerDenoiseConfig, ViewerDofConfig, ViewerHeightAoConfig, ViewerLensEffectsConfig,
-    ViewerMaterialLayerConfig, ViewerMotionBlurConfig, ViewerSkyConfig, ViewerSunVisConfig,
-    ViewerTerrainScatterBatchConfig, ViewerTerrainScatterLevelConfig, ViewerTonemapConfig,
-    ViewerVectorOverlayConfig, ViewerVolumetricsConfig,
+    ViewerCmd, ViewerDenoiseConfig, ViewerDensityVolumeConfig, ViewerDofConfig,
+    ViewerHeightAoConfig, ViewerLensEffectsConfig, ViewerMaterialLayerConfig,
+    ViewerMotionBlurConfig, ViewerSkyConfig, ViewerSunVisConfig, ViewerTerrainScatterBatchConfig,
+    ViewerTerrainScatterBlendConfig, ViewerTerrainScatterContactConfig,
+    ViewerTerrainScatterLevelConfig, ViewerTonemapConfig, ViewerVectorOverlayConfig,
+    ViewerVolumetricsConfig,
 };
 
 use super::super::payloads::{
-    IpcDenoiseConfig, IpcDofConfig, IpcHeightAoConfig, IpcLensEffectsConfig,
-    IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcScatterWind, IpcSkyConfig, IpcSunVisConfig,
-    IpcTerrainScatterBatch, IpcTerrainScatterLevel, IpcTonemapConfig, IpcVectorOverlayConfig,
-    IpcVolumetricsConfig,
+    IpcDenoiseConfig, IpcDensityVolumeConfig, IpcDofConfig, IpcHeightAoConfig,
+    IpcLensEffectsConfig, IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcScatterWind,
+    IpcSkyConfig, IpcSunVisConfig, IpcTerrainScatterBatch, IpcTerrainScatterBlend,
+    IpcTerrainScatterContact, IpcTerrainScatterLevel, IpcTonemapConfig,
+    IpcVectorOverlayConfig, IpcVolumetricsConfig,
 };
 use super::super::request::IpcRequest;
 
@@ -236,11 +239,38 @@ fn map_volumetrics(config: &IpcVolumetricsConfig) -> ViewerVolumetricsConfig {
         enabled: config.enabled.unwrap_or(false),
         mode: config.mode.clone().unwrap_or_else(|| "uniform".to_string()),
         density: config.density.unwrap_or(0.01),
+        height_falloff: config.height_falloff.unwrap_or(0.1),
         scattering: config.scattering.unwrap_or(0.5),
         absorption: config.absorption.unwrap_or(0.1),
         light_shafts: config.light_shafts.unwrap_or(false),
         shaft_intensity: config.shaft_intensity.unwrap_or(1.0),
+        steps: config.steps.unwrap_or(32),
         half_res: config.half_res.unwrap_or(false),
+        density_volumes: config
+            .density_volumes
+            .iter()
+            .map(map_density_volume)
+            .collect(),
+    }
+}
+
+fn map_density_volume(config: &IpcDensityVolumeConfig) -> ViewerDensityVolumeConfig {
+    ViewerDensityVolumeConfig {
+        preset: config
+            .preset
+            .clone()
+            .unwrap_or_else(|| "valley_fog".to_string()),
+        center: config.center.unwrap_or([0.0, 0.0, 0.0]),
+        size: config.size.unwrap_or([128.0, 64.0, 128.0]),
+        resolution: config.resolution.unwrap_or([64, 32, 64]),
+        density_scale: config.density_scale.unwrap_or(1.0),
+        edge_softness: config.edge_softness.unwrap_or(0.25),
+        noise_strength: config.noise_strength.unwrap_or(0.35),
+        floor_offset: config.floor_offset.unwrap_or(0.0),
+        ceiling: config.ceiling.unwrap_or(0.4),
+        plume_spread: config.plume_spread.unwrap_or(0.35),
+        wind: config.wind.unwrap_or([0.25, 1.0, 0.0]),
+        seed: config.seed.unwrap_or(0),
     }
 }
 
@@ -263,6 +293,16 @@ fn map_terrain_scatter_batch(
         name: config.name.clone(),
         color: config.color.unwrap_or([0.85, 0.85, 0.85, 1.0]),
         max_draw_distance: config.max_draw_distance,
+        terrain_blend: config
+            .terrain_blend
+            .as_ref()
+            .map(map_terrain_scatter_blend)
+            .unwrap_or_default(),
+        terrain_contact: config
+            .terrain_contact
+            .as_ref()
+            .map(map_terrain_scatter_contact)
+            .unwrap_or_default(),
         transforms: config.transforms.clone(),
         levels: config
             .levels
@@ -278,6 +318,13 @@ fn map_terrain_scatter_batch(
             })
             .transpose()?
             .unwrap_or_default(),
+        hlod_config: config.hlod.as_ref().map(|h| {
+            crate::terrain::scatter::HlodConfig {
+                hlod_distance: h.hlod_distance,
+                cluster_radius: h.cluster_radius,
+                simplify_ratio: h.simplify_ratio,
+            }
+        }),
     })
 }
 
@@ -300,6 +347,25 @@ fn map_scatter_wind(
     };
     settings.validate().map_err(|e| e.to_string())?;
     Ok(settings)
+}
+
+fn map_terrain_scatter_blend(config: &IpcTerrainScatterBlend) -> ViewerTerrainScatterBlendConfig {
+    ViewerTerrainScatterBlendConfig {
+        enabled: config.enabled.unwrap_or(false),
+        bury_depth: config.bury_depth.unwrap_or(0.75),
+        fade_distance: config.fade_distance.unwrap_or(2.5),
+    }
+}
+
+fn map_terrain_scatter_contact(
+    config: &IpcTerrainScatterContact,
+) -> ViewerTerrainScatterContactConfig {
+    ViewerTerrainScatterContactConfig {
+        enabled: config.enabled.unwrap_or(false),
+        distance: config.distance.unwrap_or(3.0),
+        strength: config.strength.unwrap_or(0.35),
+        vertical_weight: config.vertical_weight.unwrap_or(0.65),
+    }
 }
 
 fn map_terrain_scatter_level(config: &IpcTerrainScatterLevel) -> ViewerTerrainScatterLevelConfig {

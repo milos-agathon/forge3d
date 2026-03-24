@@ -79,6 +79,10 @@ pub(super) fn register_geometry_py_functions(m: &Bound<'_, PyModule>) -> PyResul
         crate::geometry::geometry_subdivide_adaptive_py,
         m
     )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::geometry::geometry_simplify_mesh_py,
+        m
+    )?)?;
 
     m.add_function(wrap_pyfunction!(
         crate::render::instancing::geometry_instance_mesh_py,
