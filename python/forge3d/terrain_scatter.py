@@ -102,6 +102,43 @@ def make_transform_row_major(
 
 
 @dataclass(frozen=True)
+class ScatterWindSettings:
+    """Per-batch wind animation controls for scatter vegetation."""
+
+    enabled: bool = False
+    direction_deg: float = 0.0
+    speed: float = 1.0
+    amplitude: float = 0.0
+    rigidity: float = 0.5
+    bend_start: float = 0.0
+    bend_extent: float = 1.0
+    gust_strength: float = 0.0
+    gust_frequency: float = 0.3
+    fade_start: float = 0.0
+    fade_end: float = 0.0
+
+    def __post_init__(self) -> None:
+        if float(self.speed) < 0.0:
+            raise ValueError("speed must be >= 0")
+        if float(self.amplitude) < 0.0:
+            raise ValueError("amplitude must be >= 0")
+        if not (0.0 <= float(self.rigidity) <= 1.0):
+            raise ValueError("rigidity must be in [0, 1]")
+        if not (0.0 <= float(self.bend_start) <= 1.0):
+            raise ValueError("bend_start must be in [0, 1]")
+        if float(self.bend_extent) <= 0.0:
+            raise ValueError("bend_extent must be > 0")
+        if float(self.gust_strength) < 0.0:
+            raise ValueError("gust_strength must be >= 0")
+        if float(self.gust_frequency) < 0.0:
+            raise ValueError("gust_frequency must be >= 0")
+        if float(self.fade_start) < 0.0:
+            raise ValueError("fade_start must be >= 0")
+        if float(self.fade_end) < 0.0:
+            raise ValueError("fade_end must be >= 0")
+
+
+@dataclass(frozen=True)
 class TerrainScatterFilters:
     min_slope_deg: float | None = None
     max_slope_deg: float | None = None
@@ -601,6 +638,7 @@ def clear_viewer(viewer: Any) -> None:
 
 
 __all__ = [
+    "ScatterWindSettings",
     "TerrainScatterBatch",
     "TerrainScatterFilters",
     "TerrainScatterLevel",

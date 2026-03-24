@@ -10,6 +10,7 @@ import forge3d as f3d
 from _terrain_runtime import terrain_rendering_available
 from forge3d.geometry import MeshBuffers
 from forge3d.terrain_params import make_terrain_params_config
+from forge3d import terrain_scatter as ts
 from forge3d.terrain_scatter import (
     TerrainScatterBatch,
     TerrainScatterFilters,
@@ -478,3 +479,68 @@ def test_viewer_snapshot_scatter_changes_pixels(tmp_path) -> None:
     scattered = np.asarray(pillow.open(scatter_path))
     changed_pixels = np.count_nonzero(np.any(baseline != scattered, axis=-1))
     assert changed_pixels > 250
+
+
+class TestScatterWindSettings:
+    """Tests for ScatterWindSettings dataclass."""
+
+    def test_defaults(self):
+        s = ts.ScatterWindSettings()
+        assert s.enabled is False
+        assert s.direction_deg == 0.0
+        assert s.speed == 1.0
+        assert s.amplitude == 0.0
+        assert s.rigidity == 0.5
+        assert s.bend_start == 0.0
+        assert s.bend_extent == 1.0
+        assert s.gust_strength == 0.0
+        assert s.gust_frequency == 0.3
+        assert s.fade_start == 0.0
+        assert s.fade_end == 0.0
+
+    def test_enabled_with_amplitude(self):
+        s = ts.ScatterWindSettings(enabled=True, amplitude=2.0)
+        assert s.enabled is True
+        assert s.amplitude == 2.0
+
+    def test_speed_rejects_negative(self):
+        with pytest.raises(ValueError, match="speed"):
+            ts.ScatterWindSettings(speed=-1.0)
+
+    def test_amplitude_rejects_negative(self):
+        with pytest.raises(ValueError, match="amplitude"):
+            ts.ScatterWindSettings(amplitude=-0.1)
+
+    def test_rigidity_rejects_out_of_range(self):
+        with pytest.raises(ValueError, match="rigidity"):
+            ts.ScatterWindSettings(rigidity=1.5)
+        with pytest.raises(ValueError, match="rigidity"):
+            ts.ScatterWindSettings(rigidity=-0.1)
+
+    def test_bend_start_rejects_out_of_range(self):
+        with pytest.raises(ValueError, match="bend_start"):
+            ts.ScatterWindSettings(bend_start=-0.1)
+        with pytest.raises(ValueError, match="bend_start"):
+            ts.ScatterWindSettings(bend_start=1.1)
+
+    def test_bend_extent_rejects_non_positive(self):
+        with pytest.raises(ValueError, match="bend_extent"):
+            ts.ScatterWindSettings(bend_extent=0.0)
+        with pytest.raises(ValueError, match="bend_extent"):
+            ts.ScatterWindSettings(bend_extent=-1.0)
+
+    def test_gust_strength_rejects_negative(self):
+        with pytest.raises(ValueError, match="gust_strength"):
+            ts.ScatterWindSettings(gust_strength=-1.0)
+
+    def test_gust_frequency_rejects_negative(self):
+        with pytest.raises(ValueError, match="gust_frequency"):
+            ts.ScatterWindSettings(gust_frequency=-1.0)
+
+    def test_fade_start_rejects_negative(self):
+        with pytest.raises(ValueError, match="fade_start"):
+            ts.ScatterWindSettings(fade_start=-1.0)
+
+    def test_fade_end_rejects_negative(self):
+        with pytest.raises(ValueError, match="fade_end"):
+            ts.ScatterWindSettings(fade_end=-1.0)
