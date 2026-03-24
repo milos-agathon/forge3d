@@ -4,8 +4,9 @@
 
 use super::mesh_python::{map_geometry_err, mesh_from_python, mesh_to_python};
 use super::{
-    extrude_polygon_with_options, generate_primitive, transform, validate_mesh, weld_mesh,
-    ExtrudeOptions, MeshBuffers, MeshValidationIssue, PrimitiveParams, PrimitiveType, WeldOptions,
+    extrude_polygon_with_options, generate_primitive, simplify_mesh, transform, validate_mesh,
+    weld_mesh, ExtrudeOptions, MeshBuffers, MeshValidationIssue, PrimitiveParams, PrimitiveType,
+    WeldOptions,
 };
 use glam::Vec3;
 use numpy::{PyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
@@ -275,4 +276,15 @@ pub fn geometry_transform_bounds_py(
     let mesh_buffers = mesh_from_python(mesh)?;
     Ok(transform::compute_bounds(&mesh_buffers)
         .map(|(min, max)| ((min.x, min.y, min.z), (max.x, max.y, max.z))))
+}
+
+#[pyfunction]
+pub fn geometry_simplify_mesh_py(
+    py: Python<'_>,
+    mesh: &Bound<'_, PyDict>,
+    target_ratio: f32,
+) -> PyResult<PyObject> {
+    let mesh_buffers = mesh_from_python(mesh)?;
+    let simplified = map_geometry_err(simplify_mesh(&mesh_buffers, target_ratio))?;
+    mesh_to_python(py, &simplified)
 }

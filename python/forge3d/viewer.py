@@ -12,6 +12,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -161,6 +162,7 @@ class ViewerHandle:
         self._timeout = timeout
         self._socket: Optional[socket.socket] = None
         self._cleanup_paths = list(cleanup_paths or [])
+        self._stdout_drain_thread: Optional[threading.Thread] = None
         self._connect()
     
     def _connect(self) -> None:
@@ -216,6 +218,14 @@ class ViewerHandle:
         if stats is None:
             raise ViewerError("get_stats returned no stats data")
         return stats
+
+    def get_terrain_volumetrics_report(self) -> Dict[str, Any]:
+        """Get the latest terrain heterogeneous-volumetrics memory report."""
+        response = self._send_command({"cmd": "get_terrain_volumetrics_report"})
+        report = response.get("terrain_volumetrics_report")
+        if report is None:
+            raise ViewerError("get_terrain_volumetrics_report returned no report data")
+        return report
     
     def load_obj(self, path: Union[str, Path]) -> None:
         """Load an OBJ file into the viewer."""
@@ -632,14 +642,28 @@ def open_viewer_async(
         if actual_port is None:
             process.terminate()
             raise ViewerError(f"Timed out waiting for viewer READY line after {timeout}s")
-        
-        return ViewerHandle(
+
+        stdout_thread: Optional[threading.Thread] = None
+        if process.stdout is not None:
+            def _drain_stdout() -> None:
+                try:
+                    for _ in process.stdout:
+                        pass
+                except Exception:
+                    pass
+
+            stdout_thread = threading.Thread(target=_drain_stdout, daemon=True)
+            stdout_thread.start()
+
+        handle = ViewerHandle(
             process,
             ipc_host,
             actual_port,
             timeout=timeout,
             cleanup_paths=cleanup_paths,
         )
+        handle._stdout_drain_thread = stdout_thread
+        return handle
     except Exception:
         _cleanup_paths(cleanup_paths)
         raise

@@ -295,6 +295,7 @@ Source audit of `main` branch as of commit `8653a6f`.
 | **TV3 - Terrain Scatter and Population** | **Shipped** | `src/terrain/scatter.rs` implements seeded random, grid+jitter, and mask-density placement with slope filters, distance culling, and LOD selection. Memory tracked via `TerrainScatterMemoryReport`. Commit `d341097`. |
 | **TV4 - Terrain Material Variation Upgrade** | **Shipped** | `src/shaders/terrain_noise.wgsl` (108 lines) extracts shared noise module with FBM, ridged FBM, and cellular distance. Python controls exposed. Commit `e580d8a`. |
 | **TV5 - Local Probe Lighting for Terrain Scenes** | **Shipped** | SH L2 irradiance probes with probe baker, GPU types, `SHL2` in `src/terrain/probes/`, and `terrain_probes.wgsl` shader integration (fs_main blending, debug modes). Commit `3c8ac2e`. |
+| **TV13 - Terrain Population LOD Pipeline** | **Shipped** | QEM mesh simplification in `src/geometry/simplify.rs`, auto-LOD chain generation via `generate_lod_chain()` and `auto_lod_levels()`, HLOD spatial clustering with merged proxy meshes in `src/terrain/scatter.rs`. Stats (`hlod_cluster_draws`, `hlod_covered_instances`, `effective_draws`) and memory tracking (`hlod_buffer_bytes`) plumbed through renderer, viewer, and IPC paths. Branch `epic-13`. |
 | **TV6 - Heterogeneous Terrain Volumetrics** | **Partial** | Viewer volumetrics (`viewer_volumetrics.wgsl`) implement height-based exponential fog with Henyey-Greenstein phase and god-rays, but density is height-derived only — no 3D density texture or spatial variation. Terrain renderer defers to sky pass. |
 | **TV7 - Weather Particle Foundation** | **Not started** | No GPU particle emitter, update, or render code in any terrain path. |
 | **TV8 - Coastal / Hydrology Water Upgrade** | **Not started** | `water_surface.wgsl` uses analytic wave composition. No FFT/Tessendorf path. |
@@ -304,7 +305,7 @@ Source audit of `main` branch as of commit `8653a6f`.
 
 ## 14. Cross-Report Addendum: Additional Terrain-Relevant Gaps
 
-The original TV1-TV9 backlog was derived from a first-pass Blender comparison and the Unreal report's terrain-adjacent sections. Now that TV1-TV4 are shipped and TV5 is in progress, a second pass against `docs/plans/forge3d_vs_unreal_gap_analysis.md` reveals five additional terrain-visualization gaps that meet the selection rules in §2 and are not covered by any existing epic.
+The original TV1-TV9 backlog was derived from a first-pass Blender comparison and the Unreal report's terrain-adjacent sections. Now that TV1-TV4 and TV10 are shipped and TV5 is in progress, a second pass against `docs/plans/forge3d_vs_unreal_gap_analysis.md` reveals the remaining terrain-visualization gaps that still meet the selection rules in §2 and are not covered by already-shipped work.
 
 ### 14.1 Selection Methodology
 
@@ -319,7 +320,7 @@ Each candidate was evaluated against:
 
 | Feature | Blender / Unreal reference | Verified repo status | Feasibility | Desirability | Decision |
 |---|---|---|---|---|---|
-| **Terrain subsurface materials (snow/ice/earth SSS)** | Blender: Cycles SSS for natural materials; Unreal: Subsurface Profile shading model (§1.2) | **Partial.** `BrdfModel::Subsurface` enum exists, `subsurface` parameter wired through `MaterialShading`, but dispatches to Disney Principled fallback. `terrain_pbr_pom.wgsl` does not consume subsurface parameters. No screen-space diffusion pass in terrain pipeline. | F2 | High | **Build** |
+| **Terrain subsurface materials (snow/ice/earth SSS)** | Blender: Cycles SSS for natural materials; Unreal: Subsurface Profile shading model (§1.2) | **Shipped.** TV10 adds per-layer terrain subsurface controls in `python/forge3d/terrain_params.py`, native/uniform plumbing in `src/terrain/render_params/` and `src/terrain/renderer/`, bounded shader support in `src/shaders/terrain_pbr_pom.wgsl`, and docs/example/golden coverage. | F2 | High | **Shipped** |
 | **Terrain shadow quality (VSM integration)** | Unreal: Virtual Shadow Maps (§2.2); Blender: CSM cascade quality is a known terrain limitation | **Partial.** `ShadowTechnique::VSM` and `EVSM` variants exist in `src/lighting/shadow.rs`. Terrain renderer uses CSM only. `page_table.rs` provides the page-table pattern VSM would reuse. | F2-F3 | Medium-High | **Build** |
 | **Terrain offline render quality (adaptive sampling + denoiser)** | Blender: adaptive sampling + OIDN; Unreal: movie render queue quality passes (§12.2) | **Partial.** Path tracer with ReSTIR, importance sampling, and A-trous denoiser exists. No adaptive sampling scheduler. No OIDN or production-grade learned denoiser. Existing A-trous is edge-aware but not terrain-optimized. Deferral condition ("after terrain export foundation lands") is now satisfied — TV2 shipped. | F2 | Medium-High | **Build** |
 | **Terrain population LOD pipeline** | Blender: modifier-stack mesh simplification; Unreal: auto LOD generation + HLOD (§3.2, §11.2) | **Missing for scatter.** TV3's scatter system is shipped but requires users to provide LOD levels manually. No automatic mesh simplification (quadric error metrics). No HLOD merging for distant terrain objects. `src/geometry/` has subdivision but not simplification. | F2 | Medium-High | **Build** |
@@ -331,17 +332,19 @@ Each candidate was evaluated against:
 
 ### Epic TV10 - Terrain Subsurface Materials
 
+**Status:** Shipped in `1.17.0`.
+
 **Why this is in scope:** Snow, glacial ice, wet earth, and dense vegetation all exhibit subsurface light transport. Blender's Cycles renders these materials with dedicated SSS; Unreal's Subsurface Profile shading model handles the same cases. Forge3D's `subsurface` material parameter already flows through `MaterialShading` but is not consumed by the terrain PBR shader. With TV4 (material variation) shipped, the material layer system now distinguishes snow, rock, and wetness layers — each of which would directly benefit from terrain-specific SSS.
 
 **Feasibility:** F2
 **Estimate:** 12-20 pd
-**Priority:** P1
+**Priority:** P1 (completed)
 
-| Task | Scope | Definition of done |
+| Deliverable | Scope | Shipped outcome |
 |---|---|---|
-| **TV10.1 Wire subsurface parameters into terrain PBR shader** | Extend `terrain_pbr_pom.wgsl` to read the existing `subsurface` parameter from the material uniform and use it in the lighting accumulation. This is not a full screen-space diffusion pass — it is a per-pixel pre-integrated SSS approximation (wrap lighting + curvature-based diffusion estimate) suitable for terrain-scale materials. | Snow and ice material layers show visibly different light transport from rock and soil at the same lighting conditions; setting `subsurface` to 0.0 produces pixel-identical output to the current baseline; the approximation does not require a separate full-screen post-pass. |
-| **TV10.2 Add per-layer subsurface controls to terrain material config** | Expose `subsurface_strength` and `subsurface_color` per material layer (snow, rock, wetness) in the Python terrain params config, with sane defaults that improve alpine scenes out of the box. | Each TV4 material layer independently controls subsurface strength; default snow layer has non-zero subsurface; default rock layer has zero subsurface; Python API documents the parameter semantics and valid ranges. |
-| **TV10.3 Add terrain SSS regression tests** | Add golden-image and config-level tests that verify terrain SSS output changes when expected and does not regress baseline scenes. | At least 2 terrain golden scenes compare SSS-on vs SSS-off for snow-covered terrain; one test verifies that `subsurface=0.0` preserves the pre-TV10 baseline image within tolerance. |
+| **TV10.1 Wire subsurface parameters into terrain PBR shader** | Extend `terrain_pbr_pom.wgsl` to read terrain-layer subsurface state inside the terrain lighting accumulation. The shipped path stays terrain-first: a bounded per-pixel approximation built from wrap lighting, backscatter, and curvature-weighted diffusion. | Snow and wet terrain layers now show visibly different light transport from rock under the same lighting conditions, while explicit zero-strength subsurface remains pixel-stable against the pre-TV10 baseline. No full-screen post-pass was added. |
+| **TV10.2 Add per-layer subsurface controls to terrain material config** | Expose `subsurface_strength` and `subsurface_color` per material layer (snow, rock, wetness) in the Python terrain params config, with defaults that improve alpine scenes out of the box without forcing the feature on when layers are disabled. | `MaterialLayerSettings` now preserves independent per-layer subsurface values; snow defaults to a non-zero terrain subsurface response, rock stays neutral by default, and the public docs page records the parameter semantics and valid ranges. |
+| **TV10.3 Add terrain SSS regression tests** | Add config-level, runtime render, and golden-image coverage that verifies terrain SSS output changes when expected and does not regress the zero-strength baseline. | TV10 ships with dedicated config/API tests, runtime render tests across two lighting setups, a real-DEM demo for Mount Rainier and Gore Range, and three dedicated goldens that lock both SSS-on scenes and the zero-strength baseline. |
 
 ### Epic TV11 - Terrain Shadow Quality (VSM Integration)
 
@@ -417,6 +420,7 @@ Each candidate was evaluated against:
 | TV2 - Terrain Output and Compositing Foundation | **Shipped** |
 | TV3 - Terrain Scatter and Population | **Shipped** |
 | TV4 - Terrain Material Variation Upgrade | **Shipped** |
+| TV10 - Terrain Subsurface Materials | **Shipped** |
 
 ### Active terrain backlog
 
@@ -431,11 +435,10 @@ Each candidate was evaluated against:
 
 | Epic | Low | High |
 |---|---:|---:|
-| TV10 - Terrain Subsurface Materials | 12 pd | 20 pd |
 | TV11 - Terrain Shadow Quality (VSM Integration) | 22 pd | 38 pd |
 | TV12 - Terrain Offline Render Quality | 18 pd | 30 pd |
 | TV13 - Terrain Population LOD Pipeline | 16 pd | 28 pd |
-| **Total new backlog** | **68 pd** | **116 pd** |
+| **Total new backlog** | **56 pd** | **96 pd** |
 
 ### Conditional terrain backlog (updated)
 
@@ -452,10 +455,10 @@ Each candidate was evaluated against:
 | Category | Low | High |
 |---|---:|---:|
 | Active original (TV5-TV7) | 73 pd | 125 pd |
-| New build (TV10-TV13) | 68 pd | 116 pd |
-| **Total build backlog** | **141 pd** | **241 pd** |
+| New build (TV11-TV13) | 56 pd | 96 pd |
+| **Total build backlog** | **129 pd** | **221 pd** |
 | Conditional (TV8-TV9, TV14-TV15) | 75 pd | 133 pd |
-| **Total including conditional** | **216 pd** | **374 pd** |
+| **Total including conditional** | **204 pd** | **354 pd** |
 
 ---
 
@@ -464,7 +467,7 @@ Each candidate was evaluated against:
 | Phase | Epics | Reason |
 |---|---|---|
 | **Phase 1** *(shipped)* | TV1, TV2, TV3, TV4 | Terrain-path correctness, output, population, and material foundations. **Complete.** |
-| **Phase 2** *(active)* | TV5, TV10 | Local probe lighting (in progress) and terrain subsurface materials extend Phase 1's material and lighting work. TV10 is a natural companion to TV4's shipped material layers. |
+| **Phase 2** *(active)* | TV5 | Local probe lighting remains the only open item in this phase now that TV10 is shipped. |
 | **Phase 3** | TV6, TV11, TV13 | Heterogeneous volumetrics, shadow quality, and population LOD. These improve the visible quality of terrain scenes that already have atmosphere (TV1), population (TV3), and probes (TV5). |
 | **Phase 4** | TV7, TV12 | Weather particles and offline render quality. These are the final terrain-image quality features before the core terrain rendering story is complete. |
 | **Conditional branch** | TV8, TV9, TV14, TV15 | Only if coastal/hydrology, color-managed pipelines, flow visualization, or close-range displacement become explicit product requirements. |
@@ -473,9 +476,9 @@ Each candidate was evaluated against:
 
 ## 19. Addendum Bottom-Line Assessment
 
-With TV1-TV4 shipped and TV5 in progress, the remaining terrain-visualization gap against Blender and Unreal has narrowed to four categories:
+With TV1-TV4 and TV10 shipped, and TV5 still in progress, the remaining terrain-visualization gap against Blender and Unreal has narrowed to four categories:
 
-1. **Terrain material realism** — subsurface scattering for snow/ice/earth (TV10) and probe-quality local lighting (TV5, in progress).
+1. **Terrain material realism** — probe-quality local lighting (TV5, in progress).
 2. **Terrain shadow and atmosphere quality** — VSM shadow integration (TV11), heterogeneous volumetrics (TV6), and weather particles (TV7).
 3. **Terrain output quality** — adaptive sampling and production denoiser for offline renders (TV12), now unblocked by TV2.
 4. **Terrain population at scale** — automatic LOD generation and HLOD merging for scatter objects (TV13), extending TV3.
@@ -622,7 +625,7 @@ After TV5-TV15, the highest-value remaining terrain gaps are no longer only abou
 
 The honest priority order is:
 
-1. **Finish image-quality fundamentals already on the board**: TV5, TV10, TV11, TV12, TV13.
+1. **Finish image-quality fundamentals already on the board**: TV5, TV11, TV12, TV13.
 2. **Add scene variants and camera rigs next**: TV16 and TV17 are the most leverage-heavy workflow additions and have the lowest scope risk.
 3. **Add a bounded delivery queue before any broad editor ambitions**: TV18 closes a real Blender/Unreal workflow gap without dragging Forge3D into full editor scope.
 4. **Keep collaboration review-only**: TV19 is worthwhile, but only as synchronized review state on top of the existing viewer protocol, not as replication or gameplay infrastructure.

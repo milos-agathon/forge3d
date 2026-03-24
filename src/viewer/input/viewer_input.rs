@@ -278,6 +278,7 @@ impl Viewer {
         if terrain_active {
             if let Some(ref mut tv) = self.terrain_viewer {
                 tv.handle_keys(forward, right, up);
+                tv.tick_scatter_time(dt);
             }
         } else if pc_active {
             if let Some(ref mut pc) = self.point_cloud {

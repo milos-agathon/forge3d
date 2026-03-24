@@ -1,23 +1,27 @@
 // src/shaders/mesh_instanced.wgsl
 // Instanced 3D mesh shader (per-instance transform matrix)
 
-struct SceneUniforms {
+struct ScatterBatchUniforms {
   view: mat4x4<f32>,
   proj: mat4x4<f32>,
   color: vec4<f32>,
   light_dir_ws: vec4<f32>, // xyz: dir, w: intensity
-  terrain_blend: vec4<f32>, // enabled, blend_distance, contact_strength, contact_distance
+  wind_phase: vec4<f32>,
+  wind_vec_bounds: vec4<f32>,
+  wind_bend_fade: vec4<f32>,
+  terrain_blend: vec4<f32>, // x=enabled, y=bury_depth, z=fade_distance
+  terrain_contact: vec4<f32>, // x=enabled, y=distance, z=strength, w=vertical_weight
 }
 
-@group(0) @binding(0) var<uniform> U : SceneUniforms;
-@group(1) @binding(0) var terrain_height_tex: texture_2d<f32>;
+@group(0) @binding(0) var<uniform> U : ScatterBatchUniforms;
 
-struct TerrainBlendContext {
-  uv_scale_bias: vec4<f32>, // scale.xy, bias.xy
-  height_decode: vec4<f32>, // min, max, z_scale, axis_mode
+struct TerrainContextUniforms {
+  world_to_uv_scale_bias: vec4<f32>, // xy=scale, zw=bias
+  height_to_world: vec4<f32>, // x=scale, y=bias
 }
 
-@group(1) @binding(1) var<uniform> T : TerrainBlendContext;
+@group(1) @binding(0) var<uniform> T : TerrainContextUniforms;
+@group(1) @binding(1) var height_tex : texture_2d<f32>;
 
 struct VsIn {
   // Per-vertex attributes
@@ -32,121 +36,99 @@ struct VsIn {
 
 struct VsOut {
   @builtin(position) pos: vec4<f32>,
-  @location(0) world_pos: vec3<f32>,
-  @location(1) n_ws: vec3<f32>,
+  @location(0) n_ws: vec3<f32>,
+  @location(1) world_pos: vec3<f32>,
 }
 
 @vertex
 fn vs_main(in: VsIn) -> VsOut {
   var out: VsOut;
   let M = mat4x4<f32>(in.i_m0, in.i_m1, in.i_m2, in.i_m3);
-  let pos_ws = M * vec4<f32>(in.position, 1.0);
-  let n_ws = normalize((M * vec4<f32>(in.normal, 0.0)).xyz);
+  var pos_ws = M * vec4<f32>(in.position, 1.0);
+  var n_ws = normalize((M * vec4<f32>(in.normal, 0.0)).xyz);
+
+  let wind_local = U.wind_vec_bounds.xyz;
+  let wind_amp = length(wind_local);
+
+  if (wind_amp > 1e-6) {
+    // Bend weight from mesh-local normalized Y height
+    let norm_h = clamp(in.position.y / max(U.wind_vec_bounds.w, 1e-4), 0.0, 1.0);
+    let bend_weight = smoothstep(
+      U.wind_bend_fade.x,
+      U.wind_bend_fade.x + U.wind_bend_fade.y,
+      norm_h
+    );
+
+    // Wind direction in world space (for spatial phase variety)
+    let wind_dir_ws = normalize((M * vec4<f32>(wind_local, 0.0)).xyz);
+
+    // Deterministic sway + gust
+    let spatial = dot(pos_ws.xyz, wind_dir_ws) * 0.1;
+    let sway = sin(U.wind_phase.x + spatial) * (1.0 - U.wind_phase.w) * wind_amp;
+    let gust = sin(U.wind_phase.y + spatial * 0.37) * U.wind_phase.z;  // 0.37: decorrelation
+
+    // Displacement in local frame, transformed to world through M
+    let wind_dir_local = wind_local / wind_amp;
+    let disp_local = wind_dir_local * (sway + gust) * bend_weight;
+    var disp_ws = (M * vec4<f32>(disp_local, 0.0)).xyz;
+
+    // Distance fade (view-space distance)
+    let fade_start = U.wind_bend_fade.z;
+    let fade_end = U.wind_bend_fade.w;
+    if (fade_end > fade_start) {
+      let view_pos = U.view * pos_ws;
+      let view_dist = length(view_pos.xyz);
+      disp_ws *= 1.0 - smoothstep(fade_start, fade_end, view_dist);
+    }
+
+    pos_ws = vec4<f32>(pos_ws.xyz + disp_ws, 1.0);
+
+    // Cheap normal tilt
+    let tilt = length(disp_ws) * 0.3;
+    let up_ws = normalize(in.i_m1.xyz);
+    n_ws = normalize(n_ws + wind_dir_ws * tilt * max(dot(n_ws, up_ws), 0.0));
+  }
+
   out.pos = U.proj * U.view * pos_ws;
-  out.world_pos = pos_ws.xyz;
   out.n_ws = n_ws;
+  out.world_pos = pos_ws.xyz;
   return out;
 }
 
-fn terrain_blend_enabled() -> bool {
-  return U.terrain_blend.x > 0.5;
+fn saturate(value: f32) -> f32 {
+  return clamp(value, 0.0, 1.0);
 }
 
-fn terrain_axis_mode() -> u32 {
-  return u32(T.height_decode.w + 0.5);
-}
-
-fn terrain_up_axis() -> vec3<f32> {
-  if (terrain_axis_mode() == 1u) {
-    return vec3<f32>(0.0, 0.0, 1.0);
-  }
-  return vec3<f32>(0.0, 1.0, 0.0);
-}
-
-fn terrain_horizontal(world_pos: vec3<f32>) -> vec2<f32> {
-  if (terrain_axis_mode() == 1u) {
-    return world_pos.xy;
-  }
-  return vec2<f32>(world_pos.x, world_pos.z);
-}
-
-fn terrain_up_value(world_pos: vec3<f32>) -> f32 {
-  if (terrain_axis_mode() == 1u) {
-    return world_pos.z;
-  }
-  return world_pos.y;
+fn load_height(pixel: vec2<i32>) -> f32 {
+  let dims_u = textureDimensions(height_tex, 0);
+  let dims = vec2<i32>(i32(dims_u.x), i32(dims_u.y));
+  let clamped = clamp(pixel, vec2<i32>(0, 0), max(dims - vec2<i32>(1, 1), vec2<i32>(0, 0)));
+  return textureLoad(height_tex, clamped, 0).r;
 }
 
 fn sample_height_bilinear(uv: vec2<f32>) -> f32 {
-  let dims_u = textureDimensions(terrain_height_tex);
-  let dims = vec2<i32>(i32(dims_u.x), i32(dims_u.y));
-  let max_texel = dims - vec2<i32>(1, 1);
-  let dims_f = vec2<f32>(f32(dims_u.x), f32(dims_u.y));
-  let max_texel_f = vec2<f32>(f32(max_texel.x), f32(max_texel.y));
-  let pixel = clamp(uv * dims_f - vec2<f32>(0.5, 0.5), vec2<f32>(0.0), max_texel_f);
-
-  let p0 = vec2<i32>(i32(floor(pixel.x)), i32(floor(pixel.y)));
-  let p1 = min(p0 + vec2<i32>(1, 1), max_texel);
-  let frac = fract(pixel);
-
-  let h00 = textureLoad(terrain_height_tex, p0, 0).r;
-  let h10 = textureLoad(terrain_height_tex, vec2<i32>(p1.x, p0.y), 0).r;
-  let h01 = textureLoad(terrain_height_tex, vec2<i32>(p0.x, p1.y), 0).r;
-  let h11 = textureLoad(terrain_height_tex, p1, 0).r;
-
-  let top = mix(h00, h10, frac.x);
-  let bottom = mix(h01, h11, frac.x);
-  return mix(top, bottom, frac.y);
+  let dims_u = textureDimensions(height_tex, 0);
+  let dims = vec2<f32>(f32(dims_u.x), f32(dims_u.y));
+  let max_index = max(dims - vec2<f32>(1.0, 1.0), vec2<f32>(1.0, 1.0));
+  let coord = clamp(uv, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0)) * max_index;
+  let base = vec2<i32>(i32(floor(coord.x)), i32(floor(coord.y)));
+  let frac = fract(coord);
+  let h00 = load_height(base);
+  let h10 = load_height(base + vec2<i32>(1, 0));
+  let h01 = load_height(base + vec2<i32>(0, 1));
+  let h11 = load_height(base + vec2<i32>(1, 1));
+  let hx0 = mix(h00, h10, frac.x);
+  let hx1 = mix(h01, h11, frac.x);
+  return mix(hx0, hx1, frac.y);
 }
 
-fn terrain_world_position(world_pos: vec3<f32>) -> vec4<f32> {
-  let horiz = terrain_horizontal(world_pos);
-  let uv = horiz * T.uv_scale_bias.xy + T.uv_scale_bias.zw;
-  if (any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0))) {
-    return vec4<f32>(0.0, 0.0, 0.0, 0.0);
-  }
-
-  let h_raw = sample_height_bilinear(uv);
-  let h_min = T.height_decode.x;
-  let h_max = T.height_decode.y;
-  let z_scale = T.height_decode.z;
-  if (terrain_axis_mode() == 1u) {
-    let h_center = 0.5 * (h_min + h_max);
-    return vec4<f32>(horiz.x, horiz.y, (h_raw - h_center) * z_scale, 1.0);
-  }
-  return vec4<f32>(horiz.x, (h_raw - h_min) * z_scale, horiz.y, 1.0);
-}
-
-fn compute_terrain_blend(world_pos: vec3<f32>, normal_ws: vec3<f32>) -> vec2<f32> {
-  if (!terrain_blend_enabled()) {
-    return vec2<f32>(1.0, 1.0);
-  }
-
-  let terrain_world = terrain_world_position(world_pos);
-  if (terrain_world.w < 0.5) {
-    return vec2<f32>(1.0, 1.0);
-  }
-
-  let blend_distance = max(U.terrain_blend.y, 1e-4);
-  let mesh_up = terrain_up_value(world_pos);
-  let terrain_up = terrain_up_value(terrain_world.xyz);
-  let height_gap = max(mesh_up - terrain_up, 0.0);
-  let height_factor = smoothstep(0.0, blend_distance, height_gap);
-
-  let mesh_view = U.view * vec4<f32>(world_pos, 1.0);
-  let terrain_view = U.view * terrain_world;
-  let depth_gap = abs(mesh_view.z - terrain_view.z);
-  let depth_factor = smoothstep(0.0, blend_distance, depth_gap);
-
-  let up_axis = terrain_up_axis();
-  let up_alignment = dot(normalize(normal_ws), up_axis);
-  let side_gate = 1.0 - smoothstep(0.35, 0.85, up_alignment);
-  let alpha_factor = mix(1.0, height_factor * depth_factor, side_gate);
-
-  let contact_distance = max(U.terrain_blend.w, 1e-4);
-  let contact_mask = 1.0 - smoothstep(0.0, contact_distance, height_gap);
-  let contact_factor = 1.0 - clamp(U.terrain_blend.z, 0.0, 1.0) * contact_mask;
-  return vec2<f32>(alpha_factor, contact_factor);
+fn terrain_height_delta(world_pos: vec3<f32>) -> f32 {
+  let uv = vec2<f32>(
+    world_pos.x * T.world_to_uv_scale_bias.x + T.world_to_uv_scale_bias.z,
+    world_pos.z * T.world_to_uv_scale_bias.y + T.world_to_uv_scale_bias.w
+  );
+  let terrain_height = sample_height_bilinear(uv) * T.height_to_world.x + T.height_to_world.y;
+  return world_pos.y - terrain_height;
 }
 
 @fragment
@@ -156,11 +138,29 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   let ndotl = max(dot(n, -l), 0.0);
   let intensity = max(U.light_dir_ws.w, 0.0);
   let base = U.color.rgb;
-  let blend = compute_terrain_blend(in.world_pos, n);
-  let lit = base * (0.2 + 0.7 * ndotl * intensity) * blend.y;
-  let alpha = U.color.a * blend.x;
+  let height_delta = terrain_height_delta(in.world_pos);
+
+  var alpha = U.color.a;
+  if (U.terrain_blend.x > 0.5) {
+    let bury_depth = max(U.terrain_blend.y, 1e-4);
+    let fade_distance = max(U.terrain_blend.z, 1e-4);
+    alpha = alpha * smoothstep(-bury_depth, fade_distance, height_delta);
+  }
+
   if (alpha <= 1e-3) {
     discard;
   }
-  return vec4<f32>(lit, alpha);
+
+  let lit = base * (0.2 + 0.7 * ndotl * intensity);
+  var contact = 0.0;
+  if (U.terrain_contact.x > 0.5) {
+    let contact_distance = max(U.terrain_contact.y, 1e-4);
+    let strength = saturate(U.terrain_contact.z);
+    let vertical_weight = saturate(U.terrain_contact.w);
+    let proximity = 1.0 - smoothstep(0.0, contact_distance, abs(height_delta));
+    let side_factor = mix(1.0, saturate(1.0 - abs(n.y)), vertical_weight);
+    contact = proximity * side_factor * strength;
+  }
+  let shaded = lit * (1.0 - contact);
+  return vec4<f32>(shaded, alpha);
 }

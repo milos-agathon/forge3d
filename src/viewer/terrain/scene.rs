@@ -62,6 +62,7 @@ pub struct ViewerTerrainData {
     pub heightmap: Vec<f32>,
     pub dimensions: (u32, u32),
     pub domain: (f32, f32),
+    pub revision: u64,
     pub heightmap_texture: wgpu::Texture,
     pub heightmap_view: wgpu::TextureView,
     pub vertex_buffer: wgpu::Buffer,
@@ -185,12 +186,15 @@ pub struct ViewerTerrainScene {
     pub(super) velocity_view: Option<wgpu::TextureView>,
     pub(super) velocity_pipeline: Option<wgpu::ComputePipeline>,
     pub(super) velocity_bind_group_layout: Option<wgpu::BindGroupLayout>,
+    pub(super) terrain_revision_counter: u64,
     #[cfg(feature = "enable-gpu-instancing")]
     pub(super) scatter_renderer: crate::render::mesh_instanced::MeshInstancedRenderer,
     #[cfg(feature = "enable-gpu-instancing")]
     pub(super) scatter_batches: Vec<crate::terrain::scatter::TerrainScatterBatch>,
     #[cfg(feature = "enable-gpu-instancing")]
     pub(super) scatter_last_frame_stats: crate::terrain::scatter::TerrainScatterFrameStats,
+    /// Accumulated wall-clock time (seconds) for scatter wind animation.
+    pub(super) scatter_elapsed_time: f32,
 }
 
 mod core;

@@ -391,6 +391,7 @@ impl TerrainScene {
         params: &render_params::TerrainRenderParams,
         heightmap: numpy::PyReadonlyArray2<'_, f32>,
         water_mask: Option<numpy::PyReadonlyArray2<'_, f32>>,
+        time_seconds: f32,
     ) -> Result<(crate::Frame, crate::AovFrame)> {
         let decoded = params.decoded();
         self.prepare_frame_lighting(decoded)?;
@@ -602,6 +603,7 @@ impl TerrainScene {
                 shadow_setup.view_matrix,
                 shadow_setup.proj_matrix,
                 shadow_setup.eye,
+                time_seconds,
             );
             self.render_scatter_pass(
                 &mut encoder,

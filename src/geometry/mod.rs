@@ -17,6 +17,7 @@ mod thick_polyline;
 mod transform;
 pub mod transforms;
 mod validate;
+mod simplify;
 mod weld;
 
 // Python bindings modules (extension-module only)
@@ -39,6 +40,7 @@ pub use subdivision::subdivide_triangles;
 pub use thick_polyline::geometry_generate_thick_polyline_py;
 pub use transform::{center_to_target, compute_bounds, flip_axis, scale_about_pivot, swap_axes};
 pub use validate::{validate_mesh, MeshStats, MeshValidationIssue, MeshValidationReport};
+pub use simplify::simplify_mesh;
 pub use weld::{weld_mesh, WeldOptions, WeldResult};
 
 // Re-export Python bindings
@@ -52,9 +54,10 @@ pub use py_advanced::{
 };
 #[cfg(feature = "extension-module")]
 pub use py_bindings::{
-    geometry_extrude_polygon_py, geometry_generate_primitive_py, geometry_transform_bounds_py,
-    geometry_transform_center_py, geometry_transform_flip_axis_py, geometry_transform_scale_py,
-    geometry_transform_swap_axes_py, geometry_validate_mesh_py, geometry_weld_mesh_py,
+    geometry_extrude_polygon_py, geometry_generate_primitive_py, geometry_simplify_mesh_py,
+    geometry_transform_bounds_py, geometry_transform_center_py, geometry_transform_flip_axis_py,
+    geometry_transform_scale_py, geometry_transform_swap_axes_py, geometry_validate_mesh_py,
+    geometry_weld_mesh_py,
 };
 
 /// Shared mesh container used by the geometry module family.

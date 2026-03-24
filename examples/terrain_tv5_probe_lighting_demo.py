@@ -23,7 +23,12 @@ def _import_forge3d():
 
 f3d = _import_forge3d()
 f3dio = f3d.io
-from forge3d.terrain_params import PomSettings, ProbeSettings, make_terrain_params_config
+from forge3d.terrain_params import (
+    PomSettings,
+    ProbeSettings,
+    ReflectionProbeSettings,
+    make_terrain_params_config,
+)
 
 
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "out" / "terrain_tv5_probe_lighting"
@@ -99,6 +104,7 @@ def _build_params(
     z_scale: float,
     overlay,
     probes: ProbeSettings | None,
+    reflection_probes: ReflectionProbeSettings | None,
     debug_mode: int = 0,
 ):
     config = make_terrain_params_config(
@@ -125,6 +131,7 @@ def _build_params(
         overlays=[overlay],
         pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),
         probes=probes,
+        reflection_probes=reflection_probes,
     )
     return f3d.TerrainRenderParams(config)
 
@@ -161,6 +168,11 @@ def render_demo(
         hdr_path.unlink(missing_ok=True)
 
     enabled_probes = ProbeSettings(enabled=True, grid_dims=(6, 6), ray_count=48)
+    enabled_reflection_probes = ReflectionProbeSettings(
+        enabled=True,
+        grid_dims=(4, 4),
+        ray_count=16,
+    )
 
     probes_off = renderer.render_terrain_pbr_pom(
         material_set=material_set,
@@ -173,6 +185,7 @@ def render_demo(
             z_scale=z_scale,
             overlay=overlay,
             probes=ProbeSettings(enabled=False),
+            reflection_probes=ReflectionProbeSettings(enabled=False),
         ),
         heightmap=heightmap,
     )
@@ -187,6 +200,7 @@ def render_demo(
             z_scale=z_scale,
             overlay=overlay,
             probes=enabled_probes,
+            reflection_probes=enabled_reflection_probes,
         ),
         heightmap=heightmap,
     )
@@ -201,6 +215,7 @@ def render_demo(
             z_scale=z_scale,
             overlay=overlay,
             probes=enabled_probes,
+            reflection_probes=enabled_reflection_probes,
             debug_mode=50,
         ),
         heightmap=heightmap,
@@ -216,7 +231,24 @@ def render_demo(
             z_scale=z_scale,
             overlay=overlay,
             probes=enabled_probes,
+            reflection_probes=enabled_reflection_probes,
             debug_mode=51,
+        ),
+        heightmap=heightmap,
+    )
+    reflection_probe_color = renderer.render_terrain_pbr_pom(
+        material_set=material_set,
+        env_maps=ibl,
+        params=_build_params(
+            width=width,
+            height=height,
+            terrain_span=terrain_span,
+            domain=domain,
+            z_scale=z_scale,
+            overlay=overlay,
+            probes=enabled_probes,
+            reflection_probes=enabled_reflection_probes,
+            debug_mode=52,
         ),
         heightmap=heightmap,
     )
@@ -225,12 +257,14 @@ def render_demo(
     on_path = output_dir / "terrain_tv5_probes_on.png"
     irradiance_path = output_dir / "terrain_tv5_probe_irradiance.png"
     weight_path = output_dir / "terrain_tv5_probe_weight.png"
+    reflection_color_path = output_dir / "terrain_tv5_reflection_probe_color.png"
     comparison_path = output_dir / "terrain_tv5_probe_comparison.png"
 
     probes_off.save(str(off_path))
     probes_on.save(str(on_path))
     probe_irradiance.save(str(irradiance_path))
     probe_weight.save(str(weight_path))
+    reflection_probe_color.save(str(reflection_color_path))
     comparison = _compose_comparison(probes_off.to_numpy(), probes_on.to_numpy())
     f3d.numpy_to_png(comparison_path, comparison)
 
@@ -239,6 +273,7 @@ def render_demo(
         "on_path": str(on_path),
         "irradiance_path": str(irradiance_path),
         "weight_path": str(weight_path),
+        "reflection_color_path": str(reflection_color_path),
         "comparison_path": str(comparison_path),
         "memory_report": renderer.get_probe_memory_report(),
         "terrain_span": terrain_span,
@@ -272,6 +307,7 @@ def main() -> int:
     print(f"Wrote {result['on_path']}")
     print(f"Wrote {result['irradiance_path']}")
     print(f"Wrote {result['weight_path']}")
+    print(f"Wrote {result['reflection_color_path']}")
     print(f"Wrote {result['comparison_path']}")
     return 0
 

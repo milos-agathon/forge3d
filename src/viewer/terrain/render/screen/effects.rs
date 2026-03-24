@@ -77,7 +77,7 @@ impl ViewerTerrainScene {
         }
 
         if flags.needs_volumetrics {
-            if let Some(ref vol_pass) = self.volumetrics_pass {
+            if let Some(ref mut vol_pass) = self.volumetrics_pass {
                 let terrain = self.terrain.as_ref().unwrap();
                 let depth_view = self.depth_view.as_ref().unwrap();
                 let color_input = self
@@ -99,6 +99,9 @@ impl ViewerTerrainScene {
                     color_input,
                     depth_view,
                     &terrain.heightmap_view,
+                    &terrain.heightmap,
+                    terrain.dimensions,
+                    terrain.revision,
                     vol_output,
                     width,
                     height,

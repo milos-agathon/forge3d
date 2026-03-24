@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
 ## [Unreleased]
+### Added
+- Completed Epic TV22 scatter wind animation across the terrain renderer and interactive viewer workflows.
+- Added regression coverage for `render_with_aov(..., time_seconds=...)` and an opt-in live viewer wind path covering viewer time accumulation and camera updates.
+
+### Fixed
+- Viewer IPC now rejects invalid terrain scatter wind payloads instead of silently replacing them with defaults.
+- Hardened the terrain scatter Python contract so invalid `wind` objects fail fast before serialization.
+
+## [1.19.0] - 2026-03-23
+
+### Added
+- Implemented Epic TV13: Terrain Population LOD Pipeline with QEM mesh simplification, auto-generated scatter LOD chains, and HLOD clustering wired through the renderer, viewer, and IPC paths.
+- Added `forge3d.geometry.simplify_mesh()`, `forge3d.geometry.generate_lod_chain()`, `forge3d.terrain_scatter.auto_lod_levels()`, and `forge3d.terrain_scatter.HLODPolicy`.
+- Added TV13 documentation, an end-to-end Mt. Fuji demo, and targeted Rust/Python regression coverage for the new workflow.
+
+### Fixed
+- Hardened TV13 mesh simplification bounds validation so malformed meshes are rejected across all target ratios instead of propagating corrupt data.
+- Corrected HLOD cluster activation bounds to account for mesh extents at per-instance scale, preventing premature activation for large transformed instances.
+- Fixed default auto-LOD ratio generation for `lod_count > 5`.
+- Fixed the TV13 demo import fallback so stale installed `forge3d` wheels are replaced by the repo copy when needed.
+
+### Changed
+- Bumped the package version to `1.19.0`.
+
+## [1.18.0] - 2026-03-22
+
+### Added
+- Implemented Epic TV6: Heterogeneous Terrain Volumetrics with bounded density volumes, viewer IPC wiring, and Python preset constructors for valley fog, plume, and localized haze.
+- Added TV6 documentation, a terrain volumetrics demo, and regression coverage for density-volume config export, viewer IPC reporting, and real-DEM render-budget validation.
+
+### Changed
+- Bumped the package version to `1.18.0`.
+
+## [1.17.0] - 2026-03-22
+
+### Added
+- Implemented Epic TV10: Terrain Subsurface Materials with per-layer subsurface controls for snow, rock, and wetness terrain layers.
+- Added terrain-side subsurface shader wiring, native uniform/config plumbing, a dedicated TV10 workflow doc page, a real-DEM example, and dedicated runtime plus golden-image coverage.
+
+### Changed
+- Published the TV10 workflow in the main docs navigation and API reference.
+- Extended the terrain golden CI lane to run the new TV10 goldens and hardened the TV10 real-DEM example test to skip on unsupported hosted adapters.
 
 ## [1.20.0] - 2026-03-24
 
