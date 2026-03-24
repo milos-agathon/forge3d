@@ -20,7 +20,7 @@ Top engines solve this with terrain-oriented virtual texturing: only the materia
 
 - VT-backed **albedo** material layer sampling.
 - Layer descriptor contract that accepts **albedo + normal + optional mask** families from day one.
-- `normal` and `mask` families accepted in the contract but raise `NotImplementedError` at decode time.
+- `normal` and `mask` families accepted in the Python contract for forward compatibility; rejected at native decode time (`parse_vt_settings` in Rust) with `NotImplementedError`.
 
 ### Not in v1
 
@@ -57,8 +57,8 @@ class VTLayerFamily:
         VALID_FAMILIES = {"albedo", "normal", "mask"}
         if self.family not in VALID_FAMILIES:
             raise ValueError(f"family must be one of {VALID_FAMILIES}")
-        if self.family != "albedo":
-            raise NotImplementedError(f"family '{self.family}' reserved for v2")
+        # normal/mask are accepted in the Python contract for forward compatibility.
+        # They are rejected at native decode time (parse_vt_settings in Rust), not here.
         if self.tile_size < 16:
             raise ValueError("tile_size must be >= 16")
         if self.tile_border < 0:
@@ -153,11 +153,15 @@ def get_material_vt_stats(self) -> dict: ...
 ```
 
 **Validation at registration:**
-- `virtual_size_px` must match the family's `virtual_size_px`. Mismatch → `ValueError`.
-- `family` must be an active family in the current `TerrainVTSettings`. Unknown → `ValueError`.
+- `family` must be a supported family name (`"albedo"`, `"normal"`, `"mask"`). Unknown → `ValueError`.
+- `virtual_size_px` must be consistent across all sources registered for the same family. Mismatch with a previously registered source in the same family → `ValueError`.
+- Source schema checks (image shape, dtype) happen at registration time.
+- Whether a family is *active* in the current render's `TerrainVTSettings` is **not** checked at registration — VT config lives on `TerrainRenderParams`, not on the renderer. That check moves to render-time.
 
-**Missing material_index handling:**
-When VT is enabled and `render_terrain_pbr_pom()` begins, validation checks that every `material_index` referenced by the material set has a registered source for each active family. Missing index → `PyRuntimeError` naming the missing index. No silent auto-fill.
+**Render-time validation:**
+When VT is enabled and `render_terrain_pbr_pom()` begins:
+- Every active family in `TerrainVTSettings.layers` must have registered sources for every `material_index` referenced by the material set. Missing index → `PyRuntimeError` naming the missing index. No silent auto-fill.
+- Registered sources for families not listed in the current `TerrainVTSettings` are silently ignored (not an error — allows pre-registration before config is finalized).
 
 ---
 
@@ -421,15 +425,26 @@ fn sample_triplanar(
     let layer_i = i32(layer);
 
     if (u_vt.enabled == 1u) {
-        // Compute mip from UV derivatives
-        // Isotropic mip selection using max(pages_x0, pages_y0) for non-square extents.
-        // Anisotropy collapse (max of two derivative lengths) is intentional — the page table
-        // is isotropic, so per-axis mip selection would not improve tile residency decisions.
+        // --- UV mapping: triplanar world-space UVs are repeating (unbounded).
+        // The page table expects [0,1) virtual UVs. Use fract() with negative-safe
+        // wrapping to map repeating triplanar UVs into the virtual texture domain.
+        // This preserves the current repeating-material semantics — the VT tiles
+        // repeat across the terrain surface just like the existing texture array.
+        let vt_uv_x = fract(uv_x % 1.0 + 1.0);  // negative-safe fract
+        let vt_uv_y = fract(uv_y % 1.0 + 1.0);
+        let vt_uv_z = fract(uv_z % 1.0 + 1.0);
+
+        // Mip selection from UV derivatives.
+        // Isotropic: max(pages_x0, pages_y0) for non-square extents.
+        // Anisotropy collapse is intentional — the page table is isotropic.
+        // Clamp the float BEFORE casting to u32 to handle sub-1 derivatives
+        // where log2() returns negative values.
         let max_deriv = max(length(dpdx_w), length(dpdy_w));
-        let mip = clamp(u32(log2(max_deriv * f32(u_vt.max_pages))), 0u, u_vt.actual_mip_count - 1u);
-        let cx = vt_sample_axis(uv_x, dpdx_w.yz, dpdy_w.yz, layer_i, mip);
-        let cy = vt_sample_axis(uv_y, dpdx_w.xz, dpdy_w.xz, layer_i, mip);
-        let cz = vt_sample_axis(uv_z, dpdx_w.xy, dpdy_w.xy, layer_i, mip);
+        let mip_f = clamp(log2(max_deriv * f32(u_vt.max_pages)), 0.0, f32(u_vt.actual_mip_count - 1u));
+        let mip = u32(mip_f);
+        let cx = vt_sample_axis(vt_uv_x, dpdx_w.yz, dpdy_w.yz, layer_i, mip);
+        let cy = vt_sample_axis(vt_uv_y, dpdx_w.xz, dpdy_w.xz, layer_i, mip);
+        let cz = vt_sample_axis(vt_uv_z, dpdx_w.xy, dpdy_w.xy, layer_i, mip);
         return cx * weights.x + cy * weights.y + cz * weights.z;
     }
 
