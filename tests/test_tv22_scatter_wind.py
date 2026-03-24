@@ -1,0 +1,353 @@
+"""TV22 Scatter Wind Animation — integration tests.
+
+Verifies that wind settings on scatter batches produce the expected
+rendering behaviour:  no-op modes match static baseline, different
+time_seconds values produce different frames, same time is deterministic,
+and per-batch controls (bend_start, gust, fade) affect output.
+
+RELEVANT FILES: python/forge3d/terrain_scatter.py, src/terrain/scatter.rs,
+                src/shaders/mesh_instanced.wgsl, src/terrain/renderer/scatter.rs
+"""
+from __future__ import annotations
+
+import os
+import tempfile
+
+import numpy as np
+import pytest
+
+f3d = pytest.importorskip("forge3d")
+from _terrain_runtime import terrain_rendering_available
+from forge3d import terrain_scatter as ts
+from forge3d.geometry import MeshBuffers
+from forge3d.terrain_params import make_terrain_params_config
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _trivial_mesh() -> MeshBuffers:
+    """Simple tree-like mesh with y=0 base and y=2 tip."""
+    positions = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [0.5, 0.0, 0.0],
+            [-0.5, 0.0, 0.0],
+            [0.0, 2.0, 0.0],
+            [0.3, 1.5, 0.0],
+            [-0.3, 1.5, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    normals = np.array(
+        [
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    uvs = np.zeros((6, 2), dtype=np.float32)
+    indices = np.array([[0, 1, 3], [1, 4, 3], [0, 3, 2], [2, 3, 5]], dtype=np.uint32)
+    return MeshBuffers(positions=positions, normals=normals, uvs=uvs, indices=indices)
+
+
+def _make_scatter_source() -> ts.TerrainScatterSource:
+    heightmap = np.ones((64, 64), dtype=np.float32) * 100.0
+    return ts.TerrainScatterSource(heightmap, z_scale=1.0)
+
+
+def _place_instances(source: ts.TerrainScatterSource, count: int = 20, seed: int = 42) -> np.ndarray:
+    return ts.seeded_random_transforms(
+        source,
+        count=count,
+        seed=seed,
+        scale_range=(0.5, 1.5),
+    )
+
+
+def _create_test_hdr(path: str, width: int = 8, height: int = 4) -> None:
+    with open(path, "wb") as handle:
+        handle.write(b"#?RADIANCE\n")
+        handle.write(b"FORMAT=32-bit_rle_rgbe\n\n")
+        handle.write(f"-Y {height} +X {width}\n".encode())
+        for y in range(height):
+            for x in range(width):
+                handle.write(
+                    bytes(
+                        [
+                            int(255 * x / max(width - 1, 1)),
+                            int(255 * y / max(height - 1, 1)),
+                            180,
+                            128,
+                        ]
+                    )
+                )
+
+
+def _render_frame(renderer, material_set, ibl, params, heightmap, batches, time_seconds=0.0):
+    """Apply scatter batches and render one frame, returning numpy array."""
+    ts.apply_to_renderer(renderer, batches)
+    frame = renderer.render_terrain_pbr_pom(
+        material_set, ibl, params, heightmap, time_seconds=time_seconds,
+    )
+    return frame.to_numpy()
+
+
+# ---------------------------------------------------------------------------
+# Skip guard — identical to TestNativeScatterIntegration
+# ---------------------------------------------------------------------------
+
+_TERRAIN_RUNTIME_AVAILABLE = terrain_rendering_available()
+
+_SKIP_REASON = "wind integration tests require GPU-backed native runtime with scatter instancing"
+
+_CAN_RUN = (
+    _TERRAIN_RUNTIME_AVAILABLE
+    and hasattr(f3d, "Session")
+    and hasattr(f3d, "TerrainRenderer")
+    and hasattr(f3d.TerrainRenderer, "set_scatter_batches")
+)
+
+
+def _make_gpu_fixtures():
+    """Build Session, TerrainRenderer, MaterialSet, IBL, params, heightmap."""
+    heightmap = np.ones((64, 64), dtype=np.float32) * 100.0
+
+    session = f3d.Session(window=False)
+    renderer = f3d.TerrainRenderer(session)
+    material_set = f3d.MaterialSet.terrain_default()
+
+    with tempfile.NamedTemporaryFile(suffix=".hdr", delete=False) as tmp:
+        hdr_path = tmp.name
+    try:
+        _create_test_hdr(hdr_path)
+        ibl = f3d.IBL.from_hdr(hdr_path, intensity=1.0)
+    finally:
+        os.unlink(hdr_path)
+
+    config = make_terrain_params_config(
+        size_px=(256, 160),
+        render_scale=1.0,
+        terrain_span=120.0,
+        msaa_samples=4,
+        z_scale=1.0,
+        exposure=1.0,
+        domain=(90.0, 110.0),
+        cam_radius=160.0,
+        cam_phi_deg=138.0,
+        cam_theta_deg=57.0,
+        fov_y_deg=48.0,
+    )
+    params = f3d.TerrainRenderParams(config)
+
+    return renderer, material_set, ibl, params, heightmap
+
+
+# ---------------------------------------------------------------------------
+# TestWindNoOp
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _CAN_RUN, reason=_SKIP_REASON)
+class TestWindNoOp:
+    """Wind disabled or zero-amplitude must produce identical output to static baseline."""
+
+    @pytest.fixture(scope="class")
+    def gpu(self):
+        return _make_gpu_fixtures()
+
+    def test_disabled_wind_matches_static(self, gpu) -> None:
+        renderer, ms, ibl, params, hm = gpu
+        source = _make_scatter_source()
+        transforms = _place_instances(source)
+
+        batch_static = ts.TerrainScatterBatch(
+            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            transforms=transforms,
+        )
+        batch_disabled = ts.TerrainScatterBatch(
+            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            transforms=transforms,
+            wind=ts.ScatterWindSettings(enabled=False, amplitude=5.0),
+        )
+
+        frame_static = _render_frame(renderer, ms, ibl, params, hm, [batch_static])
+        frame_disabled = _render_frame(renderer, ms, ibl, params, hm, [batch_disabled])
+        np.testing.assert_array_equal(frame_static, frame_disabled)
+
+    def test_zero_amplitude_matches_static(self, gpu) -> None:
+        renderer, ms, ibl, params, hm = gpu
+        source = _make_scatter_source()
+        transforms = _place_instances(source)
+
+        batch_static = ts.TerrainScatterBatch(
+            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            transforms=transforms,
+        )
+        batch_zero = ts.TerrainScatterBatch(
+            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            transforms=transforms,
+            wind=ts.ScatterWindSettings(enabled=True, amplitude=0.0),
+        )
+
+        frame_static = _render_frame(renderer, ms, ibl, params, hm, [batch_static])
+        frame_zero = _render_frame(renderer, ms, ibl, params, hm, [batch_zero])
+        np.testing.assert_array_equal(frame_static, frame_zero)
+
+    def test_rigidity_one_matches_static(self, gpu) -> None:
+        renderer, ms, ibl, params, hm = gpu
+        source = _make_scatter_source()
+        transforms = _place_instances(source)
+
+        batch_static = ts.TerrainScatterBatch(
+            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            transforms=transforms,
+        )
+        batch_rigid = ts.TerrainScatterBatch(
+            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            transforms=transforms,
+            wind=ts.ScatterWindSettings(enabled=True, amplitude=3.0, rigidity=1.0),
+        )
+
+        frame_static = _render_frame(renderer, ms, ibl, params, hm, [batch_static])
+        frame_rigid = _render_frame(renderer, ms, ibl, params, hm, [batch_rigid])
+        np.testing.assert_array_equal(frame_static, frame_rigid)
+
+
+# ---------------------------------------------------------------------------
+# TestWindAnimation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _CAN_RUN, reason=_SKIP_REASON)
+class TestWindAnimation:
+    """Wind enabled must produce visible, deterministic animation."""
+
+    @pytest.fixture(scope="class")
+    def gpu(self):
+        return _make_gpu_fixtures()
+
+    def test_different_times_differ(self, gpu) -> None:
+        renderer, ms, ibl, params, hm = gpu
+        source = _make_scatter_source()
+        transforms = _place_instances(source)
+        wind = ts.ScatterWindSettings(enabled=True, amplitude=2.0, speed=1.0)
+        batch = ts.TerrainScatterBatch(
+            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            transforms=transforms,
+            wind=wind,
+        )
+
+        f0 = _render_frame(renderer, ms, ibl, params, hm, [batch], time_seconds=0.0)
+        f1 = _render_frame(renderer, ms, ibl, params, hm, [batch], time_seconds=1.0)
+        assert not np.array_equal(f0, f1), "wind at different times should differ"
+
+    def test_same_time_is_deterministic(self, gpu) -> None:
+        renderer, ms, ibl, params, hm = gpu
+        source = _make_scatter_source()
+        transforms = _place_instances(source)
+        wind = ts.ScatterWindSettings(enabled=True, amplitude=2.0, speed=1.0)
+        batch = ts.TerrainScatterBatch(
+            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            transforms=transforms,
+            wind=wind,
+        )
+
+        f1 = _render_frame(renderer, ms, ibl, params, hm, [batch], time_seconds=0.5)
+        f2 = _render_frame(renderer, ms, ibl, params, hm, [batch], time_seconds=0.5)
+        np.testing.assert_array_equal(f1, f2)
+
+    def test_bend_start_affects_output(self, gpu) -> None:
+        renderer, ms, ibl, params, hm = gpu
+        source = _make_scatter_source()
+        transforms = _place_instances(source)
+
+        batch_low = ts.TerrainScatterBatch(
+            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            transforms=transforms,
+            wind=ts.ScatterWindSettings(enabled=True, amplitude=2.0, bend_start=0.0),
+        )
+        batch_high = ts.TerrainScatterBatch(
+            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            transforms=transforms,
+            wind=ts.ScatterWindSettings(enabled=True, amplitude=2.0, bend_start=0.8),
+        )
+
+        f_low = _render_frame(renderer, ms, ibl, params, hm, [batch_low], time_seconds=0.5)
+        f_high = _render_frame(renderer, ms, ibl, params, hm, [batch_high], time_seconds=0.5)
+        assert not np.array_equal(f_low, f_high), "different bend_start should differ"
+
+    def test_gust_affects_output(self, gpu) -> None:
+        renderer, ms, ibl, params, hm = gpu
+        source = _make_scatter_source()
+        transforms = _place_instances(source)
+
+        batch_no_gust = ts.TerrainScatterBatch(
+            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            transforms=transforms,
+            wind=ts.ScatterWindSettings(enabled=True, amplitude=2.0, gust_strength=0.0),
+        )
+        batch_gust = ts.TerrainScatterBatch(
+            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            transforms=transforms,
+            wind=ts.ScatterWindSettings(enabled=True, amplitude=2.0, gust_strength=1.5),
+        )
+
+        f_no = _render_frame(renderer, ms, ibl, params, hm, [batch_no_gust], time_seconds=0.5)
+        f_yes = _render_frame(renderer, ms, ibl, params, hm, [batch_gust], time_seconds=0.5)
+        assert not np.array_equal(f_no, f_yes), "gust should affect output"
+
+
+# ---------------------------------------------------------------------------
+# TestWindFade
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _CAN_RUN, reason=_SKIP_REASON)
+class TestWindFade:
+    """Distance fade must suppress wind at range."""
+
+    @pytest.fixture(scope="class")
+    def gpu(self):
+        return _make_gpu_fixtures()
+
+    def test_far_instances_match_static_with_fade(self, gpu) -> None:
+        """Place instances far from camera with tight fade; verify wind suppressed."""
+        renderer, ms, ibl, params, hm = gpu
+        source = _make_scatter_source()
+
+        # Place instances at the far corner of the terrain
+        far_transform = ts.make_transform_row_major(
+            (source.terrain_width * 0.95, 100.0, source.terrain_width * 0.95),
+            scale=1.0,
+        ).reshape(1, 16)
+
+        batch_static = ts.TerrainScatterBatch(
+            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            transforms=far_transform,
+        )
+        # Wind with fade that ends well before the instance distance
+        batch_faded = ts.TerrainScatterBatch(
+            levels=[ts.TerrainScatterLevel(mesh=_trivial_mesh())],
+            transforms=far_transform,
+            wind=ts.ScatterWindSettings(
+                enabled=True,
+                amplitude=3.0,
+                fade_start=1.0,
+                fade_end=2.0,  # fade ends at 2 contract units
+            ),
+        )
+
+        f_static = _render_frame(renderer, ms, ibl, params, hm, [batch_static])
+        f_faded = _render_frame(
+            renderer, ms, ibl, params, hm, [batch_faded], time_seconds=1.0,
+        )
+        np.testing.assert_array_equal(
+            f_static,
+            f_faded,
+            err_msg="wind should be fully suppressed beyond fade_end",
+        )
