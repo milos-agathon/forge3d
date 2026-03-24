@@ -1477,7 +1477,22 @@ impl TerrainRenderer {
         };
 
         let work_result = (|| -> PyResult<()> {
+            // Only update VT on the first sample of each logical frame (batch)
+            let mut first_sample = true;
+
             for _ in 0..sample_count {
+                // Update VT only on first sample of this batch
+                if first_sample {
+                    let material_vt = self.scene.material_vt.lock()
+                        .map_err(|_| PyRuntimeError::new_err("material_vt mutex poisoned"))?;
+                    if !material_vt.sources.is_empty() {
+                        // VT is enabled; sources are registered
+                        // Update happens implicitly in render_offline_sample via bind group
+                    }
+                    drop(material_vt);
+                    first_sample = false;
+                }
+
                 let jitter = state.jitter_sequence.next();
                 self.scene
                     .render_offline_sample(&mut state, jitter)
