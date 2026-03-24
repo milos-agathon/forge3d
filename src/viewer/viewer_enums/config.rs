@@ -1,4 +1,6 @@
 use crate::geometry::MeshBuffers;
+#[cfg(feature = "enable-gpu-instancing")]
+use crate::terrain::scatter::ScatterWindSettingsNative;
 
 /// Heightfield ray-traced AO configuration for viewer
 #[derive(Debug, Clone, Default)]
@@ -163,4 +165,6 @@ pub struct ViewerTerrainScatterBatchConfig {
     pub max_draw_distance: Option<f32>,
     pub transforms: Vec<[f32; 16]>,
     pub levels: Vec<ViewerTerrainScatterLevelConfig>,
+    #[cfg(feature = "enable-gpu-instancing")]
+    pub wind: ScatterWindSettingsNative,
 }

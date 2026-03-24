@@ -7,7 +7,7 @@ use crate::viewer::viewer_enums::{
 
 use super::super::payloads::{
     IpcDenoiseConfig, IpcDofConfig, IpcHeightAoConfig, IpcLensEffectsConfig,
-    IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcSkyConfig, IpcSunVisConfig,
+    IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcScatterWind, IpcSkyConfig, IpcSunVisConfig,
     IpcTerrainScatterBatch, IpcTerrainScatterLevel, IpcTonemapConfig, IpcVectorOverlayConfig,
     IpcVolumetricsConfig,
 };
@@ -262,6 +262,29 @@ fn map_terrain_scatter_batch(config: &IpcTerrainScatterBatch) -> ViewerTerrainSc
             .iter()
             .map(map_terrain_scatter_level)
             .collect(),
+        #[cfg(feature = "enable-gpu-instancing")]
+        wind: config
+            .wind
+            .as_ref()
+            .map(map_scatter_wind)
+            .unwrap_or_default(),
+    }
+}
+
+#[cfg(feature = "enable-gpu-instancing")]
+fn map_scatter_wind(w: &IpcScatterWind) -> crate::terrain::scatter::ScatterWindSettingsNative {
+    crate::terrain::scatter::ScatterWindSettingsNative {
+        enabled: w.enabled,
+        direction_deg: w.direction_deg,
+        speed: w.speed,
+        amplitude: w.amplitude,
+        rigidity: w.rigidity,
+        bend_start: w.bend_start,
+        bend_extent: w.bend_extent,
+        gust_strength: w.gust_strength,
+        gust_frequency: w.gust_frequency,
+        fade_start: w.fade_start,
+        fade_end: w.fade_end,
     }
 }
 
