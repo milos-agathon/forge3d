@@ -24,6 +24,9 @@ struct ScatterBatchUniforms {
     proj: [[f32; 4]; 4],
     color: [f32; 4],
     light_dir_ws: [f32; 4], // xyz + intensity
+    wind_phase: [f32; 4],
+    wind_vec_bounds: [f32; 4],
+    wind_bend_fade: [f32; 4],
 }
 
 impl Default for ScatterBatchUniforms {
@@ -33,6 +36,9 @@ impl Default for ScatterBatchUniforms {
             proj: Mat4::IDENTITY.to_cols_array_2d(),
             color: [1.0, 1.0, 1.0, 1.0],
             light_dir_ws: [0.0, -1.0, 0.0, 1.0],
+            wind_phase: [0.0; 4],
+            wind_vec_bounds: [0.0; 4],
+            wind_bend_fade: [0.0; 4],
         }
     }
 }
@@ -410,6 +416,9 @@ impl MeshInstancedRenderer {
         color: [f32; 4],
         light_dir: [f32; 3],
         light_intensity: f32,
+        wind_phase: [f32; 4],
+        wind_vec_bounds: [f32; 4],
+        wind_bend_fade: [f32; 4],
         vbuf: &'rp Buffer,
         ibuf: &'rp Buffer,
         instbuf: &'rp Buffer,
@@ -441,6 +450,9 @@ impl MeshInstancedRenderer {
             light_dir[2],
             light_intensity.max(0.0),
         ];
+        u.wind_phase = wind_phase;
+        u.wind_vec_bounds = wind_vec_bounds;
+        u.wind_bend_fade = wind_bend_fade;
         queue.write_buffer(&self.per_draw_uniforms[slot], 0, bytemuck::bytes_of(&u));
 
         pass.set_pipeline(&self.pipeline);
@@ -669,6 +681,9 @@ mod tests {
                     color,
                     light_dir,
                     light_intensity,
+                    [0.0; 4],
+                    [0.0; 4],
+                    [0.0; 4],
                     per_draw_renderer.vbuf.as_ref().unwrap(),
                     per_draw_renderer.ibuf.as_ref().unwrap(),
                     per_draw_renderer.instbuf.as_ref().unwrap(),
