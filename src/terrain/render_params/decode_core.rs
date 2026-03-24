@@ -25,11 +25,11 @@ pub(super) struct CoreTerrainParams {
     pub lambert_contrast: f32,
     pub colormap_srgb: bool,
     pub output_srgb_eotf: bool,
-    pub offline_hdr_output: bool,
     pub camera_mode: String,
     pub debug_mode: u32,
     pub aa_samples: u32,
     pub aa_seed: Option<u64>,
+    pub terrain_data_revision: Option<u64>,
     pub height_curve_lut: Option<Arc<Vec<f32>>>,
 }
 
@@ -159,11 +159,6 @@ pub(super) fn parse_core_params(params: &Bound<'_, PyAny>) -> PyResult<CoreTerra
         .ok()
         .and_then(|v| v.extract::<bool>().ok())
         .unwrap_or(false);
-    let offline_hdr_output = params
-        .getattr("offline_hdr_output")
-        .ok()
-        .and_then(|v| v.extract::<bool>().ok())
-        .unwrap_or(false);
 
     let camera_mode = params
         .getattr("camera_mode")
@@ -188,6 +183,13 @@ pub(super) fn parse_core_params(params: &Bound<'_, PyAny>) -> PyResult<CoreTerra
             v.extract::<u64>().ok()
         }
     });
+    let terrain_data_revision = match params.getattr("terrain_data_revision").ok() {
+        Some(value) if value.is_none() => None,
+        Some(value) => Some(value.extract::<u64>().map_err(|_| {
+            PyValueError::new_err("terrain_data_revision must be a non-negative integer")
+        })?),
+        None => None,
+    };
 
     let height_curve_lut = if height_curve_mode == "lut" {
         let raw_lut = params.getattr("height_curve_lut")?;
@@ -236,11 +238,11 @@ pub(super) fn parse_core_params(params: &Bound<'_, PyAny>) -> PyResult<CoreTerra
         lambert_contrast,
         colormap_srgb,
         output_srgb_eotf,
-        offline_hdr_output,
         camera_mode,
         debug_mode,
         aa_samples,
         aa_seed,
+        terrain_data_revision,
         height_curve_lut,
     })
 }

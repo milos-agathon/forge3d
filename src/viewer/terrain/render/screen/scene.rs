@@ -86,18 +86,31 @@ impl ViewerTerrainScene {
             pass.draw_indexed(0..terrain.index_count, 0, 0..1);
         }
 
+        let (terrain_heightmap_view, terrain_height_min, terrain_z_scale) = {
+            let terrain = self.terrain.as_ref().unwrap();
+            (
+                terrain
+                    .heightmap_texture
+                    .create_view(&wgpu::TextureViewDescriptor::default()),
+                terrain.domain.0,
+                terrain.z_scale,
+            )
+        };
         #[cfg(feature = "enable-gpu-instancing")]
         let scatter_result = render_scatter_batches(
             encoder,
             render_target,
             depth_view,
+            &terrain_heightmap_view,
             &mut scatter_batches,
             flags.use_pbr,
             state.view_mat,
             state.proj,
             state.eye,
             state.terrain_width,
+            terrain_height_min,
             state.h_range,
+            terrain_z_scale,
             [-state.sun_dir.x, -state.sun_dir.y, -state.sun_dir.z],
             state.vo_lighting[0],
             self.device.as_ref(),

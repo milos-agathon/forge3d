@@ -33,6 +33,20 @@ def _positive_finite_or_none(value: float | None, *, name: str) -> float | None:
     return value
 
 
+def _non_negative_finite(value: float, *, name: str) -> float:
+    value = float(value)
+    if not np.isfinite(value) or value < 0.0:
+        raise ValueError(f"{name} must be a non-negative finite float")
+    return value
+
+
+def _unit_interval(value: float, *, name: str) -> float:
+    value = float(value)
+    if not np.isfinite(value) or value < 0.0 or value > 1.0:
+        raise ValueError(f"{name} must be within [0, 1]")
+    return value
+
+
 def _validate_lod_distances(levels: Sequence["TerrainScatterLevel"]) -> None:
     previous_max_distance = 0.0
     for index, level in enumerate(levels):
@@ -211,6 +225,39 @@ class TerrainScatterLevel:
     max_distance: float | None = None
 
 
+@dataclass(frozen=True)
+class TerrainMeshBlendSettings:
+    enabled: bool = False
+    blend_distance: float = 1.5
+    contact_strength: float = 0.35
+    contact_distance: float = 2.5
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "blend_distance",
+            _positive_finite_or_none(self.blend_distance, name="blend_distance") or 1.5,
+        )
+        object.__setattr__(
+            self,
+            "contact_strength",
+            _unit_interval(self.contact_strength, name="contact_strength"),
+        )
+        object.__setattr__(
+            self,
+            "contact_distance",
+            _non_negative_finite(self.contact_distance, name="contact_distance"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": bool(self.enabled),
+            "blend_distance": float(self.blend_distance),
+            "contact_strength": float(self.contact_strength),
+            "contact_distance": float(self.contact_distance),
+        }
+
+
 @dataclass
 class TerrainScatterBatch:
     levels: Sequence[TerrainScatterLevel]
@@ -218,6 +265,7 @@ class TerrainScatterBatch:
     name: str | None = None
     color: Sequence[float] = (0.85, 0.85, 0.85, 1.0)
     max_draw_distance: float | None = None
+    terrain_blend: TerrainMeshBlendSettings | None = None
 
     def __post_init__(self) -> None:
         if not self.levels:
@@ -230,6 +278,10 @@ class TerrainScatterBatch:
             self.max_draw_distance,
             name="max_draw_distance",
         )
+        if self.terrain_blend is not None and not isinstance(
+            self.terrain_blend, TerrainMeshBlendSettings
+        ):
+            raise TypeError("terrain_blend must be a TerrainMeshBlendSettings instance when provided")
         _validate_lod_distances(self.levels)
         if self.transforms.shape[0] == 0:
             raise ValueError("TerrainScatterBatch requires at least one transform")
@@ -243,6 +295,7 @@ class TerrainScatterBatch:
             "name": self.name,
             "color": tuple(self.color),
             "max_draw_distance": self.max_draw_distance,
+            "terrain_blend": self.terrain_blend.to_dict() if self.terrain_blend is not None else None,
             "transforms": self.transforms,
             "levels": [
                 {
@@ -272,6 +325,7 @@ class TerrainScatterBatch:
             "name": self.name,
             "color": list(self.color),
             "max_draw_distance": self.max_draw_distance,
+            "terrain_blend": self.terrain_blend.to_dict() if self.terrain_blend is not None else None,
             "transforms": self.transforms.tolist(),
             "levels": levels,
         }
@@ -604,6 +658,7 @@ __all__ = [
     "TerrainScatterBatch",
     "TerrainScatterFilters",
     "TerrainScatterLevel",
+    "TerrainMeshBlendSettings",
     "TerrainScatterSource",
     "apply_to_renderer",
     "apply_to_viewer",

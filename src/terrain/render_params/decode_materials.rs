@@ -43,6 +43,19 @@ pub(super) fn parse_material_layer_settings(
             .getattr("snow_roughness")
             .and_then(|v| v.extract())
             .unwrap_or(0.4);
+        let snow_subsurface_strength: f32 = materials
+            .getattr("snow_subsurface_strength")
+            .and_then(|v| v.extract())
+            .unwrap_or(0.0);
+        let snow_subsurface_tint_vec: Vec<f32> = materials
+            .getattr("snow_subsurface_tint")
+            .and_then(|v| v.extract())
+            .unwrap_or_else(|_| vec![1.0, 1.0, 1.0]);
+        let snow_subsurface_tint = [
+            snow_subsurface_tint_vec.first().copied().unwrap_or(1.0),
+            snow_subsurface_tint_vec.get(1).copied().unwrap_or(1.0),
+            snow_subsurface_tint_vec.get(2).copied().unwrap_or(1.0),
+        ];
 
         let rock_enabled: bool = materials
             .getattr("rock_enabled")
@@ -69,6 +82,19 @@ pub(super) fn parse_material_layer_settings(
             .getattr("rock_roughness")
             .and_then(|v| v.extract())
             .unwrap_or(0.8);
+        let rock_subsurface_strength: f32 = materials
+            .getattr("rock_subsurface_strength")
+            .and_then(|v| v.extract())
+            .unwrap_or(0.0);
+        let rock_subsurface_tint_vec: Vec<f32> = materials
+            .getattr("rock_subsurface_tint")
+            .and_then(|v| v.extract())
+            .unwrap_or_else(|_| vec![1.0, 1.0, 1.0]);
+        let rock_subsurface_tint = [
+            rock_subsurface_tint_vec.first().copied().unwrap_or(1.0),
+            rock_subsurface_tint_vec.get(1).copied().unwrap_or(1.0),
+            rock_subsurface_tint_vec.get(2).copied().unwrap_or(1.0),
+        ];
 
         let wetness_enabled: bool = materials
             .getattr("wetness_enabled")
@@ -82,6 +108,19 @@ pub(super) fn parse_material_layer_settings(
             .getattr("wetness_slope_influence")
             .and_then(|v| v.extract())
             .unwrap_or(0.5);
+        let wetness_subsurface_strength: f32 = materials
+            .getattr("wetness_subsurface_strength")
+            .and_then(|v| v.extract())
+            .unwrap_or(0.0);
+        let wetness_subsurface_tint_vec: Vec<f32> = materials
+            .getattr("wetness_subsurface_tint")
+            .and_then(|v| v.extract())
+            .unwrap_or_else(|_| vec![1.0, 1.0, 1.0]);
+        let wetness_subsurface_tint = [
+            wetness_subsurface_tint_vec.first().copied().unwrap_or(1.0),
+            wetness_subsurface_tint_vec.get(1).copied().unwrap_or(1.0),
+            wetness_subsurface_tint_vec.get(2).copied().unwrap_or(1.0),
+        ];
         let variation = MaterialNoiseSettingsNative {
             macro_scale: variation
                 .as_ref()
@@ -139,14 +178,20 @@ pub(super) fn parse_material_layer_settings(
             snow_aspect_influence,
             snow_color,
             snow_roughness,
+            snow_subsurface_strength,
+            snow_subsurface_tint,
             rock_enabled,
             rock_slope_min,
             rock_slope_blend,
             rock_color,
             rock_roughness,
+            rock_subsurface_strength,
+            rock_subsurface_tint,
             wetness_enabled,
             wetness_strength,
             wetness_slope_influence,
+            wetness_subsurface_strength,
+            wetness_subsurface_tint,
             variation,
         }
     } else {

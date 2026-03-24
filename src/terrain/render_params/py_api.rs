@@ -122,12 +122,6 @@ impl TerrainRenderParams {
         self.output_srgb_eotf
     }
 
-    /// TV12: Output linear HDR (skip tonemap + sRGB) for offline accumulation
-    #[getter]
-    pub fn offline_hdr_output(&self) -> bool {
-        self.offline_hdr_output
-    }
-
     /// P7: Camera projection mode ("screen" = fullscreen triangle, "mesh" = perspective grid)
     #[getter]
     pub fn camera_mode(&self) -> &str {
@@ -150,6 +144,11 @@ impl TerrainRenderParams {
     #[getter]
     pub fn aa_seed(&self) -> Option<u64> {
         self.aa_seed
+    }
+
+    #[getter]
+    pub fn terrain_data_revision(&self) -> Option<u64> {
+        self.terrain_data_revision
     }
 
     #[getter]

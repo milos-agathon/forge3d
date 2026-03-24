@@ -1,119 +1,102 @@
-# TV12 — Terrain Offline Render Quality
+# TV12: Terrain Offline Render Quality
 
-Forge3D 1.17.0 adds a deterministic offline terrain rendering pipeline with multi-sample accumulation, adaptive convergence, and optional OIDN denoising.
+Epic TV12 is shipped for deterministic offline terrain accumulation, adaptive sampling, and optional learned denoising through the public Python API.
 
-## Overview
+## What shipped
 
-The offline quality pipeline produces terrain renders that are measurably better than the single-frame interactive path by accumulating multiple jittered samples in HDR space before tonemapping. The system is designed for production-quality terrain output where render time is not the primary constraint.
+- `forge3d.render_offline(...)` drives the offline terrain render loop from Python.
+- `TerrainRenderer` exposes the batch primitives behind that controller:
+  - `begin_offline_accumulation(...)`
+  - `accumulate_batch(...)`
+  - `read_accumulation_metrics(...)`
+  - `resolve_offline_hdr()`
+  - `upload_hdr_frame(...)`
+  - `tonemap_offline_hdr(...)`
+  - `end_offline_accumulation()`
+- `render_offline(..., water_mask=...)` forwards the terrain water mask unchanged so offline renders honor the same water shading inputs as one-shot terrain renders.
+- `HdrFrame` exposes linear HDR readback with `to_numpy_f32()` and `.save(".exr")`.
+- `OfflineQualitySettings` controls adaptive stopping, batching, and convergence policy; `render_offline()` requires `enabled=True` as an explicit opt-in.
+- `begin_offline_accumulation(..., jitter_sequence_samples=...)` optionally overrides the precomputed R2 jitter budget; `render_offline()` passes the full planned sample count automatically.
+- `DenoiseSettings.method` accepts `"none"`, `"atrous"`, and `"oidn"`.
+- When OIDN is requested but unavailable at runtime, the controller warns and falls back to A-trous.
 
-**Three capabilities:**
-
-1. **Deterministic multi-sample accumulation (TV12.1)** — R2 quasi-random jitter sequence produces stable, repeatable output for the same seed. Accumulation happens in Rgba32Float precision.
-
-2. **Adaptive sampling (TV12.2)** — The renderer tracks per-tile temporal convergence (how much the result changes between batches) and stops early when the image stabilizes. Prevents over-sampling uniform regions while spending more on high-frequency detail.
-
-3. **Optional OIDN denoising (TV12.3)** — Intel Open Image Denoise can be applied to the accumulated HDR result before tonemapping, using beauty + albedo + normal as inputs. Falls back to the built-in A-trous denoiser when OIDN is not installed.
-
-## Quick Start
+## Public API
 
 ```python
 import forge3d as f3d
-from forge3d.offline import render_offline
-from forge3d.terrain_params import OfflineQualitySettings, make_terrain_params_config
+from forge3d.terrain_params import (
+    DenoiseSettings,
+    OfflineQualitySettings,
+    make_terrain_params_config,
+)
 
-session = f3d.Session(window=False)
-renderer = f3d.TerrainRenderer(session)
-material_set = f3d.MaterialSet.terrain_default()
-ibl = f3d.IBL.from_hdr("env.hdr", intensity=1.0)
-
-params = f3d.TerrainRenderParams(make_terrain_params_config(
-    size_px=(1920, 1080),
-    render_scale=1.0,
-    terrain_span=5000.0,
-    msaa_samples=1,
+config = make_terrain_params_config(
+    size_px=(1280, 720),
+    terrain_span=4000.0,
     z_scale=1.0,
-    exposure=1.0,
-    domain=(0.0, 3000.0),
-    aa_samples=16,       # Number of accumulation samples
-    aa_seed=42,          # Deterministic seed
-))
+    cam_radius=5200.0,
+    cam_phi_deg=142.0,
+    cam_theta_deg=64.0,
+    aa_samples=16,
+    aa_seed=11,
+    denoise=DenoiseSettings(enabled=True, method="oidn", iterations=2),
+)
 
-settings = OfflineQualitySettings(enabled=True, batch_size=4)
-result = render_offline(renderer, material_set, ibl, params, heightmap, settings=settings)
+params = f3d.TerrainRenderParams(config)
+result = f3d.render_offline(
+    renderer,
+    material_set,
+    ibl,
+    params,
+    heightmap,
+    settings=OfflineQualitySettings(
+        enabled=True,
+        adaptive=True,
+        max_samples=16,
+        min_samples=4,
+        batch_size=4,
+        target_variance=0.002,
+        tile_size=8,
+        convergence_ratio=0.9,
+    ),
+)
 
-result.frame.save("terrain_offline.png")       # Tonemapped PNG
-result.hdr_frame.save("terrain_offline.exr")   # Linear HDR EXR
+result.frame.save("terrain_offline.png")
+result.hdr_frame.save("terrain_offline_hdr.exr")
+result.aov_frame.save_all("out", "terrain_offline")
+print(result.metadata)
 ```
 
-## API Reference
+## Output Contract
 
-### `render_offline(renderer, material_set, env_maps, params, heightmap, *, settings, progress_callback=None)`
+- `OfflineResult.frame` is the final tonemapped `Frame`.
+- `OfflineResult.hdr_frame` is the resolved linear HDR beauty buffer.
+- `OfflineResult.aov_frame` exposes aligned albedo, normal, and depth outputs for the same render.
+- `OfflineResult.metadata` reports the actual sample count, denoiser used, final convergence ratio, and final `p95` delta.
+- `render_offline()` raises `ValueError` if `OfflineQualitySettings.enabled` is left at its default `False`.
+- `method="none"` preserves the resolved HDR beauty unchanged.
+- OIDN guidance images must match the beauty dimensions; the controller rejects mismatched AOVs explicitly.
+- Adaptive early-stop requires both a satisfied threshold and an upward 3-snapshot convergence trend.
 
-High-level controller that runs the full offline pipeline.
+## Notes
 
-**Returns:** `OfflineResult` with:
-- `frame` — Tonemapped `Frame` (uint8 RGBA, PNG-saveable)
-- `hdr_frame` — Linear HDR `HdrFrame` (float32, EXR-saveable)
-- `aov_frame` — `AovFrame` with albedo, normal, depth
-- `metadata` — dict with `samples_used`, `denoiser_used`, `final_p95_delta`, `converged_ratio`
+- The current implementation keeps the user-facing TV12 contract but performs accumulation and convergence analysis on the CPU after HDR sample readback. This favors adapter compatibility over a GPU-only accumulation path.
+- Blocking GPU waits in offline metrics, HDR/AOV numpy readbacks, and HDR EXR saves release the Python GIL so callbacks, signals, and other Python threads are not pinned behind `device.poll(...)`.
+- `HdrFrame.save()` requires an explicit `.exr` suffix; missing or non-EXR extensions fail fast before any GPU readback or file write.
+- Offline accumulation is single-session. Starting a second session or calling one-shot terrain rendering while a session is active raises an error.
+- Adaptive stopping uses an OR rule once the controller has seen three convergence snapshots with an upward trend:
+  - `converged_tile_ratio >= convergence_ratio`
+  - `p95_delta < target_variance`
 
-### `OfflineQualitySettings`
+## Example And Tests
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | bool | False | Enable offline quality pipeline |
-| `adaptive` | bool | False | Enable adaptive sample allocation |
-| `target_variance` | float | 0.001 | Temporal convergence threshold |
-| `max_samples` | int | 64 | Upper bound for adaptive mode |
-| `min_samples` | int | 4 | Minimum before convergence check |
-| `batch_size` | int | 4 | Samples per GPU batch |
-| `tile_size` | int | 16 | Variance tile size in pixels |
-| `convergence_ratio` | float | 0.95 | Fraction of tiles that must converge |
+- Example: `python examples/terrain_tv12_offline_quality_demo.py`
+- Runtime tests: `tests/test_tv12_offline_quality.py`
+- Controller and OIDN tests: `tests/test_tv12_oidn.py`
 
-### `HdrFrame`
+Use the example when you want one command that writes:
 
-Linear HDR texture wrapper (always Rgba16Float).
-
-- `to_numpy_f32() -> np.ndarray` — Returns `(H, W, 4)` float32 array
-- `save(path)` — Saves as EXR (errors on non-.exr extension)
-- `size` — `(width, height)` tuple
-
-### Low-Level Rust Methods on `TerrainRenderer`
-
-For advanced use cases, the batch primitives are exposed directly:
-
-```python
-renderer.begin_offline_accumulation(params, heightmap, material_set, env_maps)
-result = renderer.accumulate_batch(4)       # OfflineBatchResult
-metrics = renderer.read_accumulation_metrics(0.001)  # OfflineMetrics
-hdr, aov = renderer.resolve_offline_hdr()   # (HdrFrame, AovFrame)
-hdr = renderer.upload_hdr_frame(data, size) # Re-upload denoised HDR
-frame = renderer.tonemap_offline_hdr(hdr)   # Frame
-renderer.end_offline_accumulation()         # Explicit cleanup
-```
-
-## Quality Tiering
-
-| `DenoiseSettings.method` | Availability | Quality |
-|--------------------------|-------------|---------|
-| `'none'` | Always | No denoising — raw accumulated result |
-| `'atrous'` | Always | A-trous wavelet denoiser (built-in) |
-| `'oidn'` | Requires `pip install pyoidn` | Intel OIDN learned denoiser |
-
-When `method='oidn'` is requested but OIDN is not installed, the system falls back to `'atrous'` with a warning. The actually-used denoiser is reported in `OfflineResult.metadata['denoiser_used']`.
-
-## Adaptive Convergence
-
-The adaptive sampling metric measures **temporal convergence**, not spatial detail. After each batch, the system computes per-tile mean luminance and compares to the previous batch. When the result stops changing (temporal delta below threshold), the tile is converged.
-
-Stopping rule (two conditions, OR):
-1. `converged_tile_ratio >= convergence_ratio` (default 0.95)
-2. `p95_delta < target_variance`
-
-This means sharp cliff edges converge correctly (they stop changing), while noisy regions get more samples until they stabilize.
-
-## Session Semantics
-
-Only one offline session can be active per renderer. `begin_offline_accumulation()` errors if a session is already active. Normal `render_terrain_pbr_pom()` calls during an active session are blocked.
-
-`tonemap_offline_hdr()` automatically ends the session. `end_offline_accumulation()` provides explicit cleanup for error paths or HDR-only export without tonemapping.
+- a single-sample baseline PNG
+- an offline accumulated PNG
+- resolved albedo, normal, and depth outputs
+- an HDR EXR beauty file when the build includes EXR support

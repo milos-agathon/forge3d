@@ -26,6 +26,7 @@ pub struct DecodedTerrainSettings {
     pub volumetrics: VolumetricsSettingsNative,
     pub sky: SkySettingsNative,
     pub probes: ProbeSettingsNative,
+    pub reflection_probes: ReflectionProbeSettingsNative,
 }
 
 /// Terrain render parameter wrapper used by the native renderer.
@@ -60,8 +61,6 @@ pub struct TerrainRenderParams {
     pub colormap_srgb: bool,
     /// P6.1: Use exact linear_to_srgb() instead of pow-gamma for output encoding
     pub output_srgb_eotf: bool,
-    /// TV12: Output linear HDR (skip tonemap + sRGB) for offline accumulation
-    pub offline_hdr_output: bool,
     /// P7: Camera projection mode ("screen" = fullscreen triangle, "mesh" = perspective grid)
     pub camera_mode: String,
     /// P7: Debug mode for projection probes (0=normal, 40=view-depth, 41=NDC depth, 42=view-pos XYZ)
@@ -70,6 +69,8 @@ pub struct TerrainRenderParams {
     pub aa_samples: u32,
     /// M1: Accumulation AA seed for deterministic jitter (None = default sequence)
     pub aa_seed: Option<u64>,
+    /// Optional caller-provided terrain revision/checksum for cache invalidation.
+    pub terrain_data_revision: Option<u64>,
     pub height_curve_lut: Option<Arc<Vec<f32>>>,
     pub overlays: Vec<Py<crate::core::overlay_layer::OverlayLayer>>,
     pub(crate) light: Py<PyAny>,

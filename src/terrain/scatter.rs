@@ -47,6 +47,25 @@ impl TerrainScatterMemoryReport {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TerrainMeshBlendSettings {
+    pub enabled: bool,
+    pub blend_distance: f32,
+    pub contact_strength: f32,
+    pub contact_distance: f32,
+}
+
+impl Default for TerrainMeshBlendSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            blend_distance: 1.5,
+            contact_strength: 0.35,
+            contact_distance: 2.5,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PreparedScatterDraw {
     pub level_index: usize,
@@ -75,6 +94,7 @@ pub struct TerrainScatterBatch {
     pub name: Option<String>,
     pub color: [f32; 4],
     pub max_draw_distance: f32,
+    pub terrain_blend: TerrainMeshBlendSettings,
     levels: Vec<GpuScatterLevel>,
     transforms_rowmajor: Vec<[f32; 16]>,
     positions: Vec<[f32; 3]>,
@@ -91,6 +111,7 @@ impl TerrainScatterBatch {
         color: [f32; 4],
         max_draw_distance: Option<f32>,
         name: Option<String>,
+        terrain_blend: TerrainMeshBlendSettings,
     ) -> Result<Self> {
         if levels.is_empty() {
             return Err(anyhow!("terrain scatter requires at least one LOD level"));
@@ -103,6 +124,7 @@ impl TerrainScatterBatch {
         let max_draw_distance =
             validate_optional_distance(max_draw_distance, "terrain scatter max_draw_distance")?
                 .unwrap_or(f32::INFINITY);
+        validate_terrain_blend_settings(terrain_blend)?;
 
         let gpu_levels = levels
             .into_iter()
@@ -114,6 +136,7 @@ impl TerrainScatterBatch {
             name,
             color,
             max_draw_distance,
+            terrain_blend,
             levels: gpu_levels,
             transforms_rowmajor: transforms_rowmajor.to_vec(),
             positions: extract_positions(transforms_rowmajor),
@@ -169,6 +192,7 @@ impl TerrainScatterBatch {
         eye_contract: Vec3,
         render_from_contract: Mat4,
         instance_scale: f32,
+        instance_basis_from_contract: Mat4,
     ) -> Result<(TerrainScatterBatchStats, Vec<PreparedScatterDraw>)> {
         let mut per_level = vec![Vec::<[f32; 16]>::new(); self.levels.len()];
         let mut stats = TerrainScatterBatchStats {
@@ -204,7 +228,12 @@ impl TerrainScatterBatch {
                 &mut self.instance_buffers[level_index],
                 transforms.len(),
             )?;
-            let packed = pack_instance_transforms(transforms, render_from_contract, instance_scale);
+            let packed = pack_instance_transforms(
+                transforms,
+                render_from_contract,
+                instance_scale,
+                instance_basis_from_contract,
+            );
             if let Some(instance_buffer) = self.instance_buffers[level_index].as_ref() {
                 queue.write_buffer(&instance_buffer.buffer, 0, bytemuck::cast_slice(&packed));
             }
@@ -291,6 +320,25 @@ fn validate_optional_distance(value: Option<f32>, label: &str) -> Result<Option<
     }
 }
 
+fn validate_terrain_blend_settings(settings: TerrainMeshBlendSettings) -> Result<()> {
+    if !settings.blend_distance.is_finite() || settings.blend_distance <= 0.0 {
+        return Err(anyhow!(
+            "terrain scatter blend_distance must be a positive finite float"
+        ));
+    }
+    if !settings.contact_strength.is_finite() || !(0.0..=1.0).contains(&settings.contact_strength) {
+        return Err(anyhow!(
+            "terrain scatter contact_strength must be within [0, 1]"
+        ));
+    }
+    if !settings.contact_distance.is_finite() || settings.contact_distance < 0.0 {
+        return Err(anyhow!(
+            "terrain scatter contact_distance must be a non-negative finite float"
+        ));
+    }
+    Ok(())
+}
+
 fn validate_level_specs(levels: &[TerrainScatterLevelSpec]) -> Result<()> {
     let mut previous_max_distance = 0.0_f32;
     for (index, level) in levels.iter().enumerate() {
@@ -341,6 +389,7 @@ fn pack_instance_transforms(
     transforms_rowmajor: &[[f32; 16]],
     render_from_contract: Mat4,
     instance_scale: f32,
+    instance_basis_from_contract: Mat4,
 ) -> Vec<f32> {
     let mut packed = Vec::with_capacity(transforms_rowmajor.len() * 16);
     let uniform = Mat4::from_scale(Vec3::splat(instance_scale));
@@ -356,7 +405,8 @@ fn pack_instance_transforms(
             m.z_axis,
             glam::Vec4::new(0.0, 0.0, 0.0, 1.0),
         );
-        let render_mat = Mat4::from_translation(render_pos) * uniform * local;
+        let render_mat =
+            Mat4::from_translation(render_pos) * instance_basis_from_contract * uniform * local;
         packed.extend_from_slice(&render_mat.to_cols_array());
     }
     packed
@@ -573,8 +623,14 @@ mod tests {
             3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 3.0, 0.0, 0.0, -50.0, -50.0, -10.0, 1.0,
         ]);
         let instance_scale = 3.0_f32; // matches scale_xy
+        let instance_basis_from_contract = Mat4::IDENTITY;
 
-        let packed = pack_instance_transforms(&[row_major], render_from_contract, instance_scale);
+        let packed = pack_instance_transforms(
+            &[row_major],
+            render_from_contract,
+            instance_scale,
+            instance_basis_from_contract,
+        );
         let m = Mat4::from_cols_array(packed[..16].try_into().unwrap());
 
         // The three column vectors (local axes) should all have equal length.
@@ -591,6 +647,30 @@ mod tests {
         assert!((m.w_axis.x - pos.x).abs() < 1e-4);
         assert!((m.w_axis.y - pos.y).abs() < 1e-4);
         assert!((m.w_axis.z - pos.z).abs() < 1e-4);
+    }
+
+    #[test]
+    fn pack_can_swap_contract_y_up_into_render_z_up() {
+        let row_major = [
+            1.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 5.0, 0.0, 0.0, 3.0, 7.0, 0.0, 0.0, 0.0, 1.0,
+        ];
+        let render_from_contract = Mat4::IDENTITY;
+        let instance_basis_from_contract = Mat4::from_cols_array(&[
+            1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ]);
+
+        let packed = pack_instance_transforms(
+            &[row_major],
+            render_from_contract,
+            1.0,
+            instance_basis_from_contract,
+        );
+        let m = Mat4::from_cols_array(packed[..16].try_into().unwrap());
+
+        let y_axis = Vec3::new(m.y_axis.x, m.y_axis.y, m.y_axis.z);
+        let z_axis = Vec3::new(m.z_axis.x, m.z_axis.y, m.z_axis.z);
+        assert_eq!(y_axis, Vec3::new(0.0, 0.0, 2.0));
+        assert_eq!(z_axis, Vec3::new(0.0, 3.0, 0.0));
     }
 
     #[test]

@@ -171,6 +171,91 @@ pub fn read_ldr_texture(
     Ok(ldr_data)
 }
 
+/// Read scalar R32Float data from a texture.
+pub fn read_r32_texture(
+    device: &Device,
+    queue: &Queue,
+    texture: &Texture,
+    width: u32,
+    height: u32,
+) -> Result<Vec<f32>, String> {
+    let bpp = 4u32;
+    let unpadded_bytes_per_row = width * bpp;
+    let padded_bytes_per_row = {
+        let alignment = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        ((unpadded_bytes_per_row + alignment - 1) / alignment) * alignment
+    };
+
+    let buffer_size = padded_bytes_per_row * height;
+    let staging_buffer = device.create_buffer(&BufferDescriptor {
+        label: Some("r32_staging_buffer"),
+        size: buffer_size as u64,
+        usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("r32_copy_encoder"),
+    });
+
+    encoder.copy_texture_to_buffer(
+        ImageCopyTexture {
+            texture,
+            mip_level: 0,
+            origin: Origin3d::ZERO,
+            aspect: TextureAspect::All,
+        },
+        wgpu::ImageCopyBuffer {
+            buffer: &staging_buffer,
+            layout: ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(padded_bytes_per_row),
+                rows_per_image: Some(height),
+            },
+        },
+        Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+
+    queue.submit(Some(encoder.finish()));
+    device.poll(wgpu::Maintain::Wait);
+
+    let buffer_slice = staging_buffer.slice(..);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+        sender.send(result).unwrap();
+    });
+    device.poll(wgpu::Maintain::Wait);
+    receiver
+        .recv()
+        .unwrap()
+        .map_err(|e| format!("Buffer mapping failed: {:?}", e))?;
+
+    let data = buffer_slice.get_mapped_range();
+    let mut values = Vec::with_capacity((width * height) as usize);
+
+    for y in 0..height {
+        let row_offset = (y * padded_bytes_per_row) as usize;
+        for x in 0..width {
+            let pixel_offset = row_offset + (x * bpp) as usize;
+            let bytes = [
+                data[pixel_offset],
+                data[pixel_offset + 1],
+                data[pixel_offset + 2],
+                data[pixel_offset + 3],
+            ];
+            values.push(f32::from_le_bytes(bytes));
+        }
+    }
+
+    drop(data);
+    staging_buffer.unmap();
+    Ok(values)
+}
+
 /// Convert raw buffer data to f32 vector based on texture format
 fn convert_to_floats(
     data: &[u8],

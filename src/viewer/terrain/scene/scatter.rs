@@ -24,13 +24,16 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
     encoder: &mut wgpu::CommandEncoder,
     color_view: &wgpu::TextureView,
     depth_view: &wgpu::TextureView,
+    heightmap_view: &wgpu::TextureView,
     batches: &mut [TerrainScatterBatch],
     use_pbr: bool,
     view: glam::Mat4,
     proj: glam::Mat4,
     eye_render: glam::Vec3,
     terrain_width: f32,
+    height_min: f32,
     h_range: f32,
+    z_scale: f32,
     light_dir: [f32; 3],
     light_intensity: f32,
     device: &wgpu::Device,
@@ -45,6 +48,19 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
     let eye_contract = render_from_contract.inverse().transform_point3(eye_render);
 
     renderer.reset_draw_batch_uniforms();
+    renderer.set_terrain_blend_context(
+        device,
+        queue,
+        heightmap_view,
+        crate::render::mesh_instanced::TerrainBlendContext {
+            axis_mode: crate::render::mesh_instanced::TerrainBlendAxis::YUp,
+            uv_scale: [1.0 / terrain_width.max(1e-3), 1.0 / terrain_width.max(1e-3)],
+            uv_bias: [0.0, 0.0],
+            height_min,
+            height_max: height_min + h_range,
+            z_scale,
+        },
+    );
     let mut frame_stats = TerrainScatterFrameStats::default();
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("terrain_viewer.scatter_pass"),
@@ -70,6 +86,7 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
 
     // Viewer uses identity render_from_contract, so instance_scale is 1.0.
     let instance_scale = 1.0_f32;
+    let instance_basis_from_contract = glam::Mat4::IDENTITY;
 
     for batch in batches {
         let (batch_stats, draws) = batch.prepare_draws(
@@ -78,6 +95,7 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
             eye_contract,
             render_from_contract,
             instance_scale,
+            instance_basis_from_contract,
         )?;
         accumulate_frame_stats(&mut frame_stats, &batch_stats);
 
@@ -85,7 +103,7 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
             let Some(instbuf) = batch.level_instbuf(draw.level_index) else {
                 continue;
             };
-            renderer.draw_batch_params(
+            renderer.draw_batch_params_with_terrain(
                 device,
                 &mut pass,
                 queue,
@@ -99,6 +117,12 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
                 instbuf,
                 batch.level_index_count(draw.level_index),
                 draw.instance_count,
+                crate::render::mesh_instanced::TerrainBlendParams {
+                    enabled: batch.terrain_blend.enabled,
+                    blend_distance: batch.terrain_blend.blend_distance,
+                    contact_strength: batch.terrain_blend.contact_strength,
+                    contact_distance: batch.terrain_blend.contact_distance,
+                },
             );
         }
     }
@@ -131,6 +155,7 @@ impl ViewerTerrainScene {
                 batch.color,
                 batch.max_draw_distance,
                 batch.name.clone(),
+                batch.terrain_blend,
             )?);
         }
 
@@ -157,13 +182,16 @@ impl ViewerTerrainScene {
         encoder: &mut wgpu::CommandEncoder,
         color_view: &wgpu::TextureView,
         depth_view: &wgpu::TextureView,
+        heightmap_view: &wgpu::TextureView,
         batches: &mut [TerrainScatterBatch],
         use_pbr: bool,
         view: glam::Mat4,
         proj: glam::Mat4,
         eye_render: glam::Vec3,
         terrain_width: f32,
+        height_min: f32,
         h_range: f32,
+        z_scale: f32,
         light_dir: [f32; 3],
         light_intensity: f32,
     ) -> Result<TerrainScatterFrameStats> {
@@ -171,13 +199,16 @@ impl ViewerTerrainScene {
             encoder,
             color_view,
             depth_view,
+            heightmap_view,
             batches,
             use_pbr,
             view,
             proj,
             eye_render,
             terrain_width,
+            height_min,
             h_range,
+            z_scale,
             light_dir,
             light_intensity,
             self.device.as_ref(),

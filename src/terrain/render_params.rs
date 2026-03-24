@@ -44,7 +44,7 @@ use native_postfx::{
     DofQualityNative, DofSettingsNative, LensEffectsSettingsNative, MotionBlurSettingsNative,
     SkySettingsNative, TonemapSettingsNative, VolumetricsModeNative, VolumetricsSettingsNative,
 };
-pub(crate) use native_probes::ProbeSettingsNative;
+pub(crate) use native_probes::{ProbeSettingsNative, ReflectionProbeSettingsNative};
 
 pub use core::{DecodedTerrainSettings, TerrainRenderParams};
 pub use native_lighting::{AddressModeNative, FilterModeNative};

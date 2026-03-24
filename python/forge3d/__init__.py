@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.17.0"
+__version__ = "1.20.0"
 version = __version__
 
 import numpy as np
@@ -63,8 +63,10 @@ if _NATIVE_MODULE is not None:
         "TerrainRenderParams",
         "TerrainRenderer",
         "Frame",
-        "HdrFrame",
         "AovFrame",
+        "HdrFrame",
+        "OfflineBatchResult",
+        "OfflineMetrics",
         "Light",
         "Atmosphere",
         "open_viewer",
@@ -111,6 +113,7 @@ from .terrain_params import (
     HeightAoSettings,
     SunVisibilitySettings,
     ProbeSettings,
+    ReflectionProbeSettings,
     DetailSettings,
     MaterialNoiseSettings,
     MaterialLayerSettings,
@@ -119,19 +122,15 @@ from .terrain_params import (
     LodSettings,
     SamplingSettings,
     ClampSettings,
+    DenoiseSettings,
     OfflineQualitySettings,
+    VTLayerFamily,
+    TerrainVTSettings,
 )
+from .offline import OfflineProgress, OfflineResult, render_offline
+from .denoise_oidn import oidn_available, oidn_denoise
 from . import presets
 from . import animation
-
-# -----------------------------------------------------------------------------
-# TV12: Offline render quality pipeline
-# -----------------------------------------------------------------------------
-try:
-    from .offline import render_offline, OfflineResult, OfflineProgress
-    from .denoise_oidn import oidn_available, oidn_denoise
-except ImportError:
-    pass  # TV12 offline modules not available (missing dependencies)
 
 # -----------------------------------------------------------------------------
 # Core rendering API
@@ -383,8 +382,8 @@ __all__ = [
     "TerrainRenderParams",
     "TerrainRenderer",
     "Frame",
-    "HdrFrame",
     "AovFrame",
+    "HdrFrame",
     # P0.3/M2: Sun ephemeris
     "SunPosition",
     "sun_position",
@@ -408,14 +407,16 @@ __all__ = [
     "LodSettings",
     "SamplingSettings",
     "ClampSettings",
+    "DenoiseSettings",
     "OfflineQualitySettings",
-    "presets",
-    # TV12: Offline render quality pipeline
-    "render_offline",
-    "OfflineResult",
+    "VTLayerFamily",
+    "TerrainVTSettings",
     "OfflineProgress",
+    "OfflineResult",
+    "render_offline",
     "oidn_available",
     "oidn_denoise",
+    "presets",
     # Colormaps
     "get_colormap",
     "available_colormaps",

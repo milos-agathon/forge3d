@@ -8,8 +8,8 @@ use crate::viewer::viewer_enums::{
 use super::super::payloads::{
     IpcDenoiseConfig, IpcDofConfig, IpcHeightAoConfig, IpcLensEffectsConfig,
     IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcSkyConfig, IpcSunVisConfig,
-    IpcTerrainScatterBatch, IpcTerrainScatterLevel, IpcTonemapConfig, IpcVectorOverlayConfig,
-    IpcVolumetricsConfig,
+    IpcTerrainBlendConfig, IpcTerrainScatterBatch, IpcTerrainScatterLevel, IpcTonemapConfig,
+    IpcVectorOverlayConfig, IpcVolumetricsConfig,
 };
 use super::super::request::IpcRequest;
 
@@ -256,12 +256,29 @@ fn map_terrain_scatter_batch(config: &IpcTerrainScatterBatch) -> ViewerTerrainSc
         name: config.name.clone(),
         color: config.color.unwrap_or([0.85, 0.85, 0.85, 1.0]),
         max_draw_distance: config.max_draw_distance,
+        terrain_blend: config
+            .terrain_blend
+            .as_ref()
+            .map(map_terrain_blend)
+            .unwrap_or_default(),
         transforms: config.transforms.clone(),
         levels: config
             .levels
             .iter()
             .map(map_terrain_scatter_level)
             .collect(),
+    }
+}
+
+fn map_terrain_blend(
+    config: &IpcTerrainBlendConfig,
+) -> crate::terrain::scatter::TerrainMeshBlendSettings {
+    let defaults = crate::terrain::scatter::TerrainMeshBlendSettings::default();
+    crate::terrain::scatter::TerrainMeshBlendSettings {
+        enabled: config.enabled.unwrap_or(defaults.enabled),
+        blend_distance: config.blend_distance.unwrap_or(defaults.blend_distance),
+        contact_strength: config.contact_strength.unwrap_or(defaults.contact_strength),
+        contact_distance: config.contact_distance.unwrap_or(defaults.contact_distance),
     }
 }
 

@@ -1,16 +1,7 @@
-"""TV12: Offline render quality demo.
-
-Renders three outputs from a real DEM (or synthetic fallback):
-  1. Single-sample baseline  (aa_samples=1)
-  2. Multi-sample offline    (aa_samples=N, default 16)
-  3. Multi-sample + atrous denoised
-
-Saves a side-by-side comparison PNG, an HDR EXR from the multi-sample
-resolve, and prints convergence statistics.
-"""
 from __future__ import annotations
 
 import argparse
+import math
 import tempfile
 from pathlib import Path
 
@@ -33,12 +24,14 @@ def _import_forge3d():
 
 f3d = _import_forge3d()
 f3dio = f3d.io
-from forge3d.denoise import atrous_denoise
-from forge3d.terrain_params import PomSettings, make_terrain_params_config
+from forge3d.terrain_params import (
+    DenoiseSettings,
+    OfflineQualitySettings,
+    PomSettings,
+    make_terrain_params_config,
+)
 
-
-DEFAULT_DEM = Path(__file__).resolve().parents[1] / "assets" / "tif" / "dem_rainier.tif"
-DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "out" / "terrain_tv12_offline_quality"
+DEFAULT_DEM = Path(__file__).resolve().parent.parent / "assets" / "tif" / "dem_rainier.tif"
 
 
 def _write_preview_hdr(path: Path, width: int = 8, height: int = 4) -> None:
@@ -50,57 +43,72 @@ def _write_preview_hdr(path: Path, width: int = 8, height: int = 4) -> None:
             for x in range(width):
                 r = int((x / max(width - 1, 1)) * 255)
                 g = int((y / max(height - 1, 1)) * 255)
-                handle.write(bytes([r, g, 180, 128]))
+                handle.write(bytes([r, g, 160, 128]))
 
 
-def _build_synthetic_heightmap(size: int = 256) -> np.ndarray:
-    x = np.linspace(-1.0, 1.0, size, dtype=np.float32)
-    y = np.linspace(-1.0, 1.0, size, dtype=np.float32)
-    xx, yy = np.meshgrid(x, y)
-    bowl = 0.58 * (xx * xx + yy * yy)
-    ridge = 0.22 * np.exp(-((xx - 0.52) ** 2 * 20.0 + (yy + 0.12) ** 2 * 13.0))
-    spur = 0.16 * np.exp(-((xx + 0.40) ** 2 * 28.0 + (yy - 0.30) ** 2 * 20.0))
-    slope = 0.10 * xx
-    heightmap = bowl + ridge + spur + slope
-    heightmap -= float(heightmap.min())
-    heightmap /= max(float(heightmap.max()), 1e-6)
-    return heightmap.astype(np.float32)
+def _downsample_heightmap(heightmap: np.ndarray, max_dim: int) -> np.ndarray:
+    if max_dim <= 0:
+        return np.ascontiguousarray(heightmap)
+    longest = max(int(heightmap.shape[0]), int(heightmap.shape[1]))
+    if longest <= max_dim:
+        return np.ascontiguousarray(heightmap)
+    step = int(math.ceil(longest / max_dim))
+    return np.ascontiguousarray(heightmap[::step, ::step])
 
 
-def _load_heightmap(path: Path | None) -> tuple[np.ndarray, tuple[float, float], float]:
-    if path is None:
-        heightmap = _build_synthetic_heightmap()
-        return heightmap, (0.0, 1.0), 4.0
+def _load_dem(path: Path, max_dim: int) -> tuple[object, np.ndarray]:
+    try:
+        dem = f3dio.load_dem(str(path), fill_nodata_values=True)
+    except ImportError:
+        data: np.ndarray | None = None
+        try:
+            from PIL import Image
 
-    if not path.exists():
-        print(f"DEM not found: {path} -- falling back to synthetic heightmap")
-        heightmap = _build_synthetic_heightmap()
-        return heightmap, (0.0, 1.0), 4.0
+            with Image.open(path) as image:
+                data = np.asarray(image, dtype=np.float32)
+        except ImportError as exc:
+            raise SystemExit(
+                "DEM loading requires rasterio or Pillow. "
+                "Install with `pip install rasterio` or `pip install pillow`."
+            ) from exc
 
-    dem = f3dio.load_dem(str(path), fill_nodata_values=True)
+        if data.ndim == 3:
+            data = data[..., 0]
+        dem = f3dio.load_dem_from_array(data)
+
     heightmap = np.asarray(dem.data, dtype=np.float32).copy()
-    domain = getattr(dem, "domain", (float(np.min(heightmap)), float(np.max(heightmap))))
+    return dem, _downsample_heightmap(heightmap, max_dim)
+
+
+def _terrain_span(dem: object, heightmap: np.ndarray) -> float:
     resolution = getattr(dem, "resolution", None)
-    terrain_span = float(max(heightmap.shape))
     if resolution is not None:
         try:
-            terrain_span = float(
-                max(float(resolution[0]) * heightmap.shape[1], float(resolution[1]) * heightmap.shape[0])
-            )
+            dx = float(resolution[0] or 1.0)
+            dy = float(resolution[1] or 1.0)
+            if dx > 0.0 and dy > 0.0:
+                return max(dx * heightmap.shape[1], dy * heightmap.shape[0])
         except Exception:
             pass
-    return heightmap, (float(domain[0]), float(domain[1])), terrain_span
+    return float(max(heightmap.shape))
+
+
+def _relief_scale(domain: tuple[float, float], terrain_span: float) -> float:
+    relief = max(float(domain[1]) - float(domain[0]), 1e-6)
+    return float(np.clip((terrain_span / relief) * 0.18, 0.1, 10.0))
 
 
 def _make_overlay(domain: tuple[float, float]):
-    lo, hi = domain
+    lo, hi = map(float, domain)
     span = max(hi - lo, 1e-6)
     cmap = f3d.Colormap1D.from_stops(
         stops=[
-            (lo + 0.00 * span, "#153218"),
-            (lo + 0.28 * span, "#3d6730"),
-            (lo + 0.62 * span, "#8b7a53"),
-            (lo + 1.00 * span, "#f3f7fb"),
+            (lo + 0.00 * span, "#17351b"),
+            (lo + 0.18 * span, "#40672c"),
+            (lo + 0.42 * span, "#6f7c41"),
+            (lo + 0.64 * span, "#8f7a4f"),
+            (lo + 0.82 * span, "#bba792"),
+            (lo + 1.00 * span, "#f4f6fb"),
         ],
         domain=(lo, hi),
     )
@@ -113,11 +121,21 @@ def _build_params(
     height: int,
     terrain_span: float,
     domain: tuple[float, float],
-    z_scale: float,
     overlay,
-    aa_samples: int = 1,
-    aa_seed: int | None = None,
+    z_scale: float,
+    aa_samples: int,
+    aa_seed: int,
+    denoise_method: str,
 ):
+    clip_far = max(terrain_span * 4.0, 6000.0)
+    denoise = DenoiseSettings(
+        enabled=denoise_method != "none",
+        method=denoise_method,
+        iterations=2,
+        sigma_color=0.08,
+        sigma_normal=0.1,
+        sigma_depth=0.1,
+    )
     config = make_terrain_params_config(
         size_px=(width, height),
         render_scale=1.0,
@@ -126,88 +144,86 @@ def _build_params(
         z_scale=z_scale,
         exposure=1.0,
         domain=domain,
-        albedo_mode="colormap",
-        colormap_strength=1.0,
+        albedo_mode="mix",
+        colormap_strength=0.4,
         ibl_enabled=True,
-        ibl_intensity=3.0,
-        light_azimuth_deg=136.0,
-        light_elevation_deg=16.0,
-        sun_intensity=0.8,
-        cam_radius=max(terrain_span * 1.5, 6.0),
-        cam_phi_deg=138.0,
-        cam_theta_deg=58.0,
-        fov_y_deg=48.0,
-        camera_mode="screen",
+        light_azimuth_deg=138.0,
+        light_elevation_deg=28.0,
+        sun_intensity=2.5,
+        cam_radius=max(terrain_span * 1.85, 5.0),
+        cam_phi_deg=142.0,
+        cam_theta_deg=64.0,
+        fov_y_deg=52.0,
+        camera_mode="mesh",
+        clip=(0.1, clip_far),
         overlays=[overlay],
         pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),
         aa_samples=aa_samples,
         aa_seed=aa_seed,
+        denoise=denoise,
     )
     return f3d.TerrainRenderParams(config)
 
 
-def _compose_three(left: np.ndarray, center: np.ndarray, right: np.ndarray) -> np.ndarray:
-    divider = np.full((left.shape[0], 8, 4), 255, dtype=np.uint8)
-    divider[..., :3] = 12
-    return np.concatenate([left, divider, center, divider, right], axis=1)
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Render a terrain scene through the TV12 offline accumulation pipeline."
+    )
+    parser.add_argument("--dem", type=Path, default=DEFAULT_DEM, help="Path to a DEM GeoTIFF")
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("terrain_tv12_output"),
+        help="Directory for offline outputs",
+    )
+    parser.add_argument("--width", type=int, default=1280, help="Output width in pixels")
+    parser.add_argument("--height", type=int, default=720, help="Output height in pixels")
+    parser.add_argument(
+        "--max-dem-size",
+        type=int,
+        default=1024,
+        help="Clamp the longest DEM dimension before upload (0 disables downsampling)",
+    )
+    parser.add_argument("--samples", type=int, default=16, help="Offline sample budget")
+    parser.add_argument("--seed", type=int, default=11, help="Deterministic jitter seed")
+    parser.add_argument(
+        "--denoise",
+        choices=("none", "atrous", "bilateral", "oidn"),
+        default="oidn",
+        help="Offline denoiser",
+    )
+    parser.add_argument(
+        "--adaptive",
+        action="store_true",
+        help="Use adaptive stopping instead of a fixed sample count",
+    )
+    parser.add_argument("--batch-size", type=int, default=4, help="Samples per offline batch")
+    parser.add_argument(
+        "--target-variance",
+        type=float,
+        default=0.002,
+        help="Adaptive convergence threshold",
+    )
+    parser.add_argument(
+        "--convergence-ratio",
+        type=float,
+        default=0.9,
+        help="Adaptive converged tile ratio threshold",
+    )
+    args = parser.parse_args()
 
+    dem_path = args.dem.resolve()
+    if not dem_path.exists():
+        raise SystemExit(f"DEM not found: {dem_path}")
 
-def _offline_render(
-    renderer,
-    material_set,
-    ibl,
-    heightmap: np.ndarray,
-    params,
-    aa_samples: int,
-) -> tuple[np.ndarray, np.ndarray, dict]:
-    """Run the offline accumulation pipeline and return (tonemapped_np, hdr_np, stats)."""
-    renderer.begin_offline_accumulation(params, heightmap, material_set, ibl)
-    try:
-        total = 0
-        batch_size = min(4, aa_samples)
-        metrics = None
-        while total < aa_samples:
-            count = min(batch_size, aa_samples - total)
-            batch_result = renderer.accumulate_batch(count)
-            total = batch_result.total_samples
-
-        if aa_samples > 1:
-            metrics = renderer.read_accumulation_metrics(0.001)
-
-        hdr_frame, aov_frame = renderer.resolve_offline_hdr()
-        hdr_np = hdr_frame.to_numpy_f32()
-        frame = renderer.tonemap_offline_hdr(hdr_frame)
-        tonemapped_np = frame.to_numpy()
-    finally:
-        renderer.end_offline_accumulation()
-
-    stats = {
-        "samples": total,
-    }
-    if metrics is not None:
-        stats.update({
-            "mean_delta": metrics.mean_delta,
-            "p95_delta": metrics.p95_delta,
-            "max_tile_delta": metrics.max_tile_delta,
-            "converged_tile_ratio": metrics.converged_tile_ratio,
-        })
-
-    return tonemapped_np, hdr_np, stats
-
-
-def render_demo(
-    *,
-    dem_path: Path | None,
-    output_dir: Path,
-    width: int,
-    height: int,
-    samples: int,
-) -> dict[str, object]:
+    output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    heightmap, domain, terrain_span = _load_heightmap(dem_path)
+    dem, heightmap = _load_dem(dem_path, int(args.max_dem_size))
+    domain = getattr(dem, "domain", (float(np.min(heightmap)), float(np.max(heightmap))))
+    terrain_span = _terrain_span(dem, heightmap)
+    z_scale = _relief_scale(domain, terrain_span)
     overlay = _make_overlay(domain)
-    z_scale = max(terrain_span / max(domain[1] - domain[0], 1e-6) * 0.18, 0.4)
 
     session = f3d.Session(window=False)
     renderer = f3d.TerrainRenderer(session)
@@ -221,129 +237,87 @@ def render_demo(
     finally:
         hdr_path.unlink(missing_ok=True)
 
-    # --- 1. Single-sample baseline ---
-    params_1 = _build_params(
-        width=width, height=height,
-        terrain_span=terrain_span, domain=domain, z_scale=z_scale,
-        overlay=overlay, aa_samples=1, aa_seed=42,
-    )
-    baseline_np, _, baseline_stats = _offline_render(
-        renderer, material_set, ibl, heightmap, params_1, aa_samples=1,
-    )
-
-    # --- 2. Multi-sample offline ---
-    params_n = _build_params(
-        width=width, height=height,
-        terrain_span=terrain_span, domain=domain, z_scale=z_scale,
-        overlay=overlay, aa_samples=samples, aa_seed=42,
-    )
-    multi_np, multi_hdr_np, multi_stats = _offline_render(
-        renderer, material_set, ibl, heightmap, params_n, aa_samples=samples,
-    )
-
-    # --- 3. Multi-sample + atrous denoised ---
-    denoised_hdr = atrous_denoise(
-        multi_hdr_np[:, :, :3],
-        iterations=3,
-        sigma_color=0.1,
-        sigma_normal=0.1,
-    )
-    # Re-upload denoised HDR and tonemap
-    denoised_hdr_rgba = np.zeros((height, width, 4), dtype=np.float32)
-    denoised_hdr_rgba[:, :, :3] = denoised_hdr
-    denoised_hdr_rgba[:, :, 3] = 1.0
-    denoised_hdr_frame = renderer.upload_hdr_frame(denoised_hdr_rgba, (width, height))
-    denoised_frame = renderer.tonemap_offline_hdr(denoised_hdr_frame)
-    denoised_np = denoised_frame.to_numpy()
-
-    # --- Save outputs ---
-    baseline_path = output_dir / "tv12_baseline_1spp.png"
-    multi_path = output_dir / "tv12_multi_{:d}spp.png".format(samples)
-    denoised_path = output_dir / "tv12_denoised_{:d}spp.png".format(samples)
-    comparison_path = output_dir / "tv12_comparison.png"
-    exr_path = output_dir / "tv12_multi_{:d}spp.exr".format(samples)
-
-    f3d.numpy_to_png(baseline_path, baseline_np)
-    f3d.numpy_to_png(multi_path, multi_np)
-    f3d.numpy_to_png(denoised_path, denoised_np)
-
-    comparison = _compose_three(baseline_np, multi_np, denoised_np)
-    f3d.numpy_to_png(comparison_path, comparison)
-
-    # Save HDR EXR from the multi-sample resolve
-    params_exr = _build_params(
-        width=width, height=height,
-        terrain_span=terrain_span, domain=domain, z_scale=z_scale,
-        overlay=overlay, aa_samples=samples, aa_seed=42,
-    )
-    renderer.begin_offline_accumulation(params_exr, heightmap, material_set, ibl)
-    try:
-        renderer.accumulate_batch(samples)
-        hdr_frame, _aov = renderer.resolve_offline_hdr()
-        hdr_frame.save(str(exr_path))
-    finally:
-        renderer.end_offline_accumulation()
-
-    return {
-        "baseline_path": str(baseline_path),
-        "multi_path": str(multi_path),
-        "denoised_path": str(denoised_path),
-        "comparison_path": str(comparison_path),
-        "exr_path": str(exr_path),
-        "baseline_stats": baseline_stats,
-        "multi_stats": multi_stats,
-        "terrain_span": terrain_span,
-        "domain": domain,
-        "z_scale": z_scale,
-        "heightmap_shape": tuple(int(v) for v in heightmap.shape),
-    }
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description="TV12 offline render quality demo")
-    parser.add_argument(
-        "--dem", type=Path, default=DEFAULT_DEM,
-        help="DEM GeoTIFF path (default: assets/tif/dem_rainier.tif)",
-    )
-    parser.add_argument(
-        "--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR,
-        help="Output directory",
-    )
-    parser.add_argument("--width", type=int, default=960, help="Render width")
-    parser.add_argument("--height", type=int, default=960, help="Render height")
-    parser.add_argument("--samples", type=int, default=16, help="Multi-sample count")
-    args = parser.parse_args()
-
-    result = render_demo(
-        dem_path=args.dem,
-        output_dir=args.output_dir.resolve(),
+    baseline_params = _build_params(
         width=int(args.width),
         height=int(args.height),
-        samples=int(args.samples),
+        terrain_span=float(terrain_span),
+        domain=(float(domain[0]), float(domain[1])),
+        overlay=overlay,
+        z_scale=float(z_scale),
+        aa_samples=1,
+        aa_seed=int(args.seed),
+        denoise_method="none",
+    )
+    offline_params = _build_params(
+        width=int(args.width),
+        height=int(args.height),
+        terrain_span=float(terrain_span),
+        domain=(float(domain[0]), float(domain[1])),
+        overlay=overlay,
+        z_scale=float(z_scale),
+        aa_samples=max(int(args.samples), 1),
+        aa_seed=int(args.seed),
+        denoise_method=str(args.denoise),
     )
 
-    print(f"Heightmap: {result['heightmap_shape'][1]}x{result['heightmap_shape'][0]}")
-    print(f"Terrain span: {result['terrain_span']:.2f}")
-    print(f"Domain: {result['domain'][0]:.3f} .. {result['domain'][1]:.3f}")
-    print(f"Z scale: {result['z_scale']:.3f}")
-    print()
-    print("--- Baseline (1 spp) ---")
-    print(f"  Samples: {result['baseline_stats']['samples']}")
-    print()
-    print(f"--- Multi-sample ({args.samples} spp) ---")
-    ms = result["multi_stats"]
-    print(f"  Samples: {ms['samples']}")
-    if "mean_delta" in ms:
-        print(f"  Mean delta:            {ms['mean_delta']:.6f}")
-        print(f"  P95 delta:             {ms['p95_delta']:.6f}")
-        print(f"  Max tile delta:        {ms['max_tile_delta']:.6f}")
-        print(f"  Converged tile ratio:  {ms['converged_tile_ratio']:.4f}")
-    print()
-    print(f"Wrote {result['baseline_path']}")
-    print(f"Wrote {result['multi_path']}")
-    print(f"Wrote {result['denoised_path']}")
-    print(f"Wrote {result['comparison_path']}")
-    print(f"Wrote {result['exr_path']}")
+    baseline = f3d.render_offline(
+        renderer,
+        material_set,
+        ibl,
+        baseline_params,
+        heightmap,
+        settings=OfflineQualitySettings(enabled=True, adaptive=False, batch_size=1),
+    )
+    result = f3d.render_offline(
+        renderer,
+        material_set,
+        ibl,
+        offline_params,
+        heightmap,
+        settings=OfflineQualitySettings(
+            enabled=True,
+            adaptive=bool(args.adaptive),
+            target_variance=float(args.target_variance),
+            max_samples=max(int(args.samples), 1),
+            min_samples=min(4, max(int(args.samples), 1)),
+            batch_size=max(int(args.batch_size), 1),
+            tile_size=8,
+            convergence_ratio=float(args.convergence_ratio),
+        ),
+    )
+
+    baseline_path = output_dir / "terrain_tv12_baseline.png"
+    beauty_path = output_dir / "terrain_tv12_offline.png"
+    hdr_exr_path = output_dir / "terrain_tv12_offline_hdr.exr"
+
+    baseline.frame.save(str(baseline_path))
+    result.frame.save(str(beauty_path))
+    result.aov_frame.save_all(str(output_dir), "terrain_tv12_offline")
+
+    hdr_saved = False
+    try:
+        result.hdr_frame.save(str(hdr_exr_path))
+        hdr_saved = True
+    except RuntimeError as exc:
+        print(f"HDR EXR save unavailable: {exc}")
+
+    print(f"DEM: {dem_path}")
+    print(f"Heightmap: {heightmap.shape[1]}x{heightmap.shape[0]}")
+    print(f"Domain: {float(domain[0]):.3f} .. {float(domain[1]):.3f}")
+    print(f"Terrain span: {terrain_span:.2f}")
+    print(f"Z scale: {z_scale:.4f}")
+    print(f"Samples used: {result.metadata['samples_used']}")
+    print(f"Denoiser used: {result.metadata['denoiser_used']}")
+    print(f"Adaptive: {result.metadata['adaptive']}")
+    print(f"Final converged ratio: {result.metadata['converged_ratio']}")
+    print(f"Final p95 delta: {result.metadata['final_p95_delta']}")
+    print(f"Wrote {baseline_path}")
+    print(f"Wrote {beauty_path}")
+    print(f"Wrote {output_dir / 'terrain_tv12_offline_albedo.png'}")
+    print(f"Wrote {output_dir / 'terrain_tv12_offline_normal.png'}")
+    print(f"Wrote {output_dir / 'terrain_tv12_offline_depth.png'}")
+    if hdr_saved:
+        print(f"Wrote {hdr_exr_path}")
     return 0
 
 

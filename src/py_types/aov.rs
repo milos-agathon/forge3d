@@ -158,24 +158,6 @@ impl AovFrame {
         }
     }
 
-    /// TV12: Create an empty AovFrame (no textures) for offline resolve placeholder.
-    pub(crate) fn new_empty(
-        device: Arc<wgpu::Device>,
-        queue: Arc<wgpu::Queue>,
-        width: u32,
-        height: u32,
-    ) -> Self {
-        Self {
-            device,
-            queue,
-            albedo_texture: None,
-            normal_texture: None,
-            depth_texture: None,
-            width,
-            height,
-        }
-    }
-
     fn read_texture_rgba_f32(&self, texture: &wgpu::Texture) -> anyhow::Result<Vec<f32>> {
         crate::core::hdr::read_hdr_texture(
             &self.device,
@@ -270,8 +252,8 @@ impl AovFrame {
     }
 
     fn albedo<'py>(&self, py: Python<'py>) -> PyResult<&'py numpy::PyArray3<f32>> {
-        let rgba = self
-            .read_albedo_data()
+        let rgba = py
+            .allow_threads(|| self.read_albedo_data())
             .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
         let arr = self
             .rgba_to_rgb_array(&rgba)
@@ -280,8 +262,8 @@ impl AovFrame {
     }
 
     fn normal<'py>(&self, py: Python<'py>) -> PyResult<&'py numpy::PyArray3<f32>> {
-        let rgba = self
-            .read_normal_data()
+        let rgba = py
+            .allow_threads(|| self.read_normal_data())
             .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
         let arr = self
             .rgba_to_rgb_array(&rgba)
@@ -290,8 +272,8 @@ impl AovFrame {
     }
 
     fn depth<'py>(&self, py: Python<'py>) -> PyResult<&'py numpy::PyArray2<f32>> {
-        let data = self
-            .read_depth_data()
+        let data = py
+            .allow_threads(|| self.read_depth_data())
             .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
         let arr =
             ndarray::Array2::from_shape_vec((self.height as usize, self.width as usize), data)

@@ -13,7 +13,7 @@ use wgpu::{
 };
 
 // Re-export types from split modules
-pub use super::hdr_readback::{read_hdr_texture, read_ldr_texture};
+pub use super::hdr_readback::{read_hdr_texture, read_ldr_texture, read_r32_texture};
 pub use super::hdr_tonemapping::apply_cpu_tone_mapping;
 pub use super::hdr_types::{HdrConfig, ToneMappingOperator, ToneMappingUniforms};
 

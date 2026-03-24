@@ -5,8 +5,8 @@ use super::*;
 use crate::terrain::renderer::core::TERRAIN_DEPTH_FORMAT;
 
 use crate::terrain::scatter::{
-    accumulate_frame_stats, summarize_memory, TerrainScatterBatch, TerrainScatterFrameStats,
-    TerrainScatterLevelSpec, TerrainScatterMemoryReport,
+    accumulate_frame_stats, summarize_memory, TerrainMeshBlendSettings, TerrainScatterBatch,
+    TerrainScatterFrameStats, TerrainScatterLevelSpec, TerrainScatterMemoryReport,
 };
 
 pub(super) struct ScatterRenderState {
@@ -15,14 +15,17 @@ pub(super) struct ScatterRenderState {
     pub(super) eye_contract: glam::Vec3,
     pub(super) render_from_contract: glam::Mat4,
     pub(super) instance_scale: f32,
+    pub(super) instance_basis_from_contract: glam::Mat4,
     pub(super) light_dir: [f32; 3],
     pub(super) light_intensity: f32,
+    pub(super) terrain_blend_context: crate::render::mesh_instanced::TerrainBlendContext,
 }
 
 pub(super) struct TerrainScatterUploadBatch {
     pub(super) name: Option<String>,
     pub(super) color: [f32; 4],
     pub(super) max_draw_distance: Option<f32>,
+    pub(super) terrain_blend: TerrainMeshBlendSettings,
     pub(super) transforms_rowmajor: Vec<[f32; 16]>,
     pub(super) levels: Vec<TerrainScatterLevelSpec>,
 }
@@ -42,6 +45,7 @@ impl TerrainScene {
                 batch.color,
                 batch.max_draw_distance,
                 batch.name,
+                batch.terrain_blend,
             )?);
         }
 
@@ -109,8 +113,19 @@ impl TerrainScene {
             eye_contract,
             render_from_contract,
             instance_scale: scale_xy,
+            instance_basis_from_contract: glam::Mat4::from_cols_array(&[
+                1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+            ]),
             light_dir: decoded.light.direction,
             light_intensity: decoded.light.intensity,
+            terrain_blend_context: crate::render::mesh_instanced::TerrainBlendContext {
+                axis_mode: crate::render::mesh_instanced::TerrainBlendAxis::ZUp,
+                uv_scale: [1.0 / terrain_span, 1.0 / terrain_span],
+                uv_bias: [0.5, 0.5],
+                height_min: decoded.clamp.height_range.0,
+                height_max: decoded.clamp.height_range.1,
+                z_scale: params.z_scale,
+            },
         }
     }
 
@@ -118,6 +133,7 @@ impl TerrainScene {
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         render_targets: &RenderTargets,
+        heightmap_view: &wgpu::TextureView,
         state: &ScatterRenderState,
     ) -> Result<()> {
         if self.scatter_batches.is_empty() {
@@ -141,6 +157,12 @@ impl TerrainScene {
         let queue = self.queue.as_ref();
         let renderer = &mut self.scatter_renderer;
         renderer.reset_draw_batch_uniforms();
+        renderer.set_terrain_blend_context(
+            device,
+            queue,
+            heightmap_view,
+            state.terrain_blend_context,
+        );
         let mut frame_stats = TerrainScatterFrameStats::default();
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -172,6 +194,7 @@ impl TerrainScene {
                 state.eye_contract,
                 state.render_from_contract,
                 state.instance_scale,
+                state.instance_basis_from_contract,
             )?;
             accumulate_frame_stats(&mut frame_stats, &batch_stats);
 
@@ -179,7 +202,7 @@ impl TerrainScene {
                 let Some(instbuf) = batch.level_instbuf(draw.level_index) else {
                     continue;
                 };
-                renderer.draw_batch_params(
+                renderer.draw_batch_params_with_terrain(
                     device,
                     &mut pass,
                     queue,
@@ -193,6 +216,12 @@ impl TerrainScene {
                     instbuf,
                     batch.level_index_count(draw.level_index),
                     draw.instance_count,
+                    crate::render::mesh_instanced::TerrainBlendParams {
+                        enabled: batch.terrain_blend.enabled,
+                        blend_distance: batch.terrain_blend.blend_distance,
+                        contact_strength: batch.terrain_blend.contact_strength,
+                        contact_distance: batch.terrain_blend.contact_distance,
+                    },
                 );
             }
         }

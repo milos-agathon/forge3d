@@ -26,7 +26,7 @@ The existing `accumulation_blend.wgsl` overwrites the accumulator rather than pe
 ### 2.2 Pipeline
 
 ```
-begin_offline_accumulation(params, heightmap, material_set, env_maps)
+begin_offline_accumulation(params, heightmap, material_set, env_maps, water_mask=None)
   │
   ├─ loop:
   │    ├─ accumulate_batch(sample_count)        ← GPU renders N jittered samples, blends into HDR accum
@@ -55,16 +55,17 @@ begin_offline_accumulation(params, heightmap, material_set, env_maps)
 
 Seven methods on `TerrainRenderer`:
 
-### 3.1 `begin_offline_accumulation(params, heightmap, material_set, env_maps)`
+### 3.1 `begin_offline_accumulation(params, heightmap, material_set, env_maps, water_mask=None, jitter_sequence_samples=None)`
 
 - Validates no offline session is already active; errors if so.
+- Accepts the same optional `water_mask` input as the one-shot terrain render path and forwards it unchanged into terrain shading.
 - Allocates or resizes:
   - **Beauty accumulation:** Two ping-pong Rgba32Float textures (A and B) for additive accumulation without ReadWrite storage.
   - **Albedo accumulation:** One Rgba32Float texture (additive, divided at resolve).
   - **Normal accumulation:** One Rgba32Float texture (additive, renormalized at resolve).
   - **Depth reference:** One R32Float texture (written once on sample 0, not accumulated).
   - **Per-sample luminance scratch:** One Rgba16Float texture (same size as beauty scratch) used by the variance compute shader to write per-pixel luminance. Read back as part of tile variance computation on CPU.
-- Creates `JitterSequence` from `aa_seed` in params (R2 sequence). Pre-generates `max_samples` offsets when `adaptive=True`, or `aa_samples` offsets when `adaptive=False`. The existing implementation wraps via modulo, so this is safe.
+- Creates `JitterSequence` from `aa_seed` in params (R2 sequence). `render_offline()` passes `jitter_sequence_samples=settings.max_samples` when `adaptive=True`, or `params.aa_samples` when `adaptive=False`, so the pre-generated low-discrepancy sequence covers the full planned budget without wrapping.
 - **Caches owned GPU resources**, not borrowed Python references. Specifically: copies the decoded `DecodedTerrainSettings` struct, uploads and owns the heightmap texture + view, creates and owns IBL bind group, creates and owns material bind groups. The Python-side `PyReadonlyArray`, `MaterialSet`, and `IBL` objects are consumed during `begin_offline_accumulation` and not referenced again — all subsequent `accumulate_batch` calls use the cached GPU resources. Same `TerrainRenderParams` type used by `render_terrain_pbr_pom()`.
 - Resets sample count to 0. Clears accumulation textures via `encoder.clear_texture()` (newly allocated textures are zero-initialized by wgpu, but resized/reused textures require explicit clearing).
 - Sets internal flag `offline_session_active = true`.
@@ -86,14 +87,15 @@ Seven methods on `TerrainRenderer`:
 ### 3.3 `read_accumulation_metrics(target_variance: f32) → OfflineMetrics`
 
 - Errors if no offline session is active.
-- **Measures temporal convergence, not spatial detail.** The metric tracks how much the per-tile mean luminance changes between consecutive calls, not how much variance exists within a tile. A sharp cliff edge that is fully converged will read as "converged" even though it has high spatial contrast.
+- **Measures temporal convergence, not spatial detail.** The metric tracks how much the per-tile mean luminance changes relative to a short history window of prior calls, not how much variance exists within a tile. A sharp cliff edge that is fully converged will read as "converged" even though it has high spatial contrast.
 - Implementation:
   1. Resolve current accumulation to a temporary quarter-resolution luminance buffer: `lum = 0.2126*R + 0.7152*G + 0.0722*B` over `(accum / total_samples)`. This uses a trivial `offline_luminance.wgsl` compute shader writing to a quarter-res R32Float texture.
   2. Read back the quarter-res luminance via staging buffer. Cost: `(W/4) * (H/4) * 4` bytes (e.g., ~130KB for 1920x1080).
   3. On CPU: divide into tiles, compute per-tile mean luminance.
-  4. Compare to the **previous call's per-tile means** (stored in `OfflineAccumulationState.prev_tile_means: Vec<f32>`). Per-tile temporal delta: `|current_mean - prev_mean| / max(current_mean, 1e-6)`.
+  4. Compare to the **average of the compatible prior calls' per-tile means** (stored in `OfflineAccumulationState.prev_tile_mean_history`). Per-tile temporal delta: `|current_mean - history_mean| / max(max(current_mean, history_mean), 1e-4)`.
   5. A tile is "converged" when its temporal delta < `target_variance`.
-  6. Update `prev_tile_means` with current values for the next call.
+  6. Append the current means into the bounded history window for the next call.
+  7. The Python bindings release the GIL while waiting on the staging-buffer readback so `device.poll(...)` does not pin Python callbacks or signals.
 - Returns `OfflineMetrics`:
   - `total_samples: u32`
   - `mean_delta: f32` — average per-tile temporal delta
@@ -122,15 +124,15 @@ Seven methods on `TerrainRenderer`:
 
 ### 3.6 `tonemap_offline_hdr(hdr_frame: HdrFrame) → Frame`
 
-- Applies the **same terrain filmic tonemap curve** used by the live `terrain_pbr_pom.wgsl` path (`tonemap_filmic_terrain()`), not the generic `postprocess_tonemap.wgsl` operators (ACES/Reinhard/etc). This ensures offline output has the same look as the live path. Implemented as a new `tonemap_terrain_offline.wgsl` fullscreen compute shader that reads Rgba16Float HDR input, applies `tonemap_filmic_terrain()` + `linear_to_srgb()`, and writes to Rgba8UnormSrgb output. The terrain filmic curve parameters are extracted from the existing shader to avoid duplication.
+- Applies the **same terrain filmic tonemap curve** used by the live `terrain_pbr_pom.wgsl` path (`tonemap_filmic_terrain()`), not the generic `postprocess_tonemap.wgsl` operators (ACES/Reinhard/etc). This ensures offline output has the same look as the live path. Implemented as a new `tonemap_terrain_offline.wgsl` fullscreen compute shader that reads Rgba16Float HDR input, applies `tonemap_filmic_terrain()` + `linear_to_srgb()`, and writes to Rgba8Unorm output. The terrain filmic curve parameters are extracted from the existing shader to avoid duplication.
 - If the user has configured a `TonemapSettings` operator override (e.g., ACES), the offline path respects it by dispatching the appropriate curve. But the **default** is the terrain filmic curve, matching the live path.
-- Writes to Rgba8UnormSrgb texture → `Frame`.
+- Writes to Rgba8Unorm texture → `Frame`.
 - Calls `end_offline_accumulation()` internally to clean up session state.
 - The returned `Frame` is a normal Frame: `save()` writes PNG, `to_numpy()` returns uint8 RGBA.
 
 ### 3.7 `end_offline_accumulation()`
 
-- Releases all offline session resources: accumulation buffers, cached render inputs, prev_tile_means.
+- Releases all offline session resources: accumulation buffers, cached render inputs, and convergence history.
 - Sets `offline_session_active = false`.
 - **Idempotent**: calling it when no session is active is a no-op.
 - This method exists so Python can clean up if it errors during denoise/upload or intentionally stops at HDR/EXR export without tonemapping. `tonemap_offline_hdr()` calls this internally, so the normal path does not require an explicit call.
@@ -156,7 +158,7 @@ pub struct HdrFrame {
 
 Python methods:
 - `to_numpy_f32() → np.ndarray` — returns `(H, W, 4)` float32 array (linear HDR). Uses existing `read_rgba_f32()` internal path.
-- `save(path: str)` — writes `.exr` only. Errors on other extensions.
+- `save(path: str)` — writes `.exr` only. Errors on missing or non-EXR extensions. Releases the GIL during readback and EXR encode/write.
 - `size → (int, int)`
 
 This is the OIDN handoff point: Python calls `hdr_frame.to_numpy_f32()`, slices `[:,:,:3]` for beauty RGB, and passes to OIDN alongside AOV albedo/normal from `AovFrame`.
@@ -196,14 +198,15 @@ Per output pixel (at quarter res):
 
 ### 5.3 Convergence metric computation (CPU-side)
 
-`read_accumulation_metrics()` measures **temporal convergence** — how much per-tile mean luminance changes between consecutive calls:
+`read_accumulation_metrics()` measures **temporal convergence** — how much per-tile mean luminance changes relative to a short history window of prior calls:
 
 1. Dispatch `offline_luminance.wgsl` to produce quarter-res luminance map.
 2. Read back via staging buffer. Cost: `(W/4) * (H/4) * 4` bytes (~130KB for 1920x1080).
 3. On CPU: divide into tiles, compute per-tile mean luminance.
-4. Compare to `prev_tile_means` (stored in `OfflineAccumulationState`). Per-tile temporal delta: `|current - prev| / max(current, 1e-6)`.
+4. Compare to the average of `prev_tile_mean_history` (stored in `OfflineAccumulationState`). Per-tile temporal delta: `|current - history_mean| / max(max(current, history_mean), 1e-4)`.
 5. A tile is "converged" when its temporal delta < `target_variance`.
-6. Store current means as `prev_tile_means` for next call.
+6. Append current means to the bounded history window for the next call.
+7. Release the Python GIL while waiting on the readback so progress callbacks and interrupts remain responsive.
 
 This measures whether adding more samples changes the result, not whether the image has spatial detail. A sharp cliff edge that is fully converged reads as "converged" (low temporal delta). A noisy flat patch reads as "not converged" (high temporal delta) until it stabilizes.
 
@@ -224,7 +227,7 @@ final_color = shaded;  // post-exposure, post-fog, pre-tonemap, linear HDR
 // no sRGB encoding
 ```
 
-The render target format for offline passes is Rgba16Float instead of Rgba8UnormSrgb.
+The render target format for offline passes is Rgba16Float instead of Rgba8Unorm.
 
 ---
 
@@ -267,12 +270,12 @@ Extend existing `DenoiseSettings.method` (terrain_params.py:838) to accept `'oid
 ```python
 @dataclass
 class DenoiseSettings:
-    enabled: bool = False
-    method: str = "atrous"  # 'atrous', 'bilateral', 'oidn', 'none'
+    enabled: bool = False          # Explicit opt-in; render_offline() raises if False
+    method: str = "atrous"  # 'atrous', 'oidn', 'none'
     # ... existing fields unchanged ...
 ```
 
-The existing `__post_init__` validator (`valid_methods = ("atrous", "bilateral", "none")`) must be updated to include `"oidn"` in the valid set.
+The existing `__post_init__` validator (`valid_methods = ("atrous", "none")`) must be updated to include `"oidn"` in the valid set.
 
 No new `OfflineQualitySettings` dataclass for denoiser selection — it lives in the existing `DenoiseSettings`. Offline-specific settings (adaptive policy, batching) are new:
 
@@ -338,6 +341,7 @@ def render_offline(
     *,
     settings: OfflineQualitySettings,
     progress_callback: Callable[[OfflineProgress], None] | None = None,
+    water_mask: np.ndarray | None = None,
 ) -> OfflineResult:
 ```
 
@@ -345,10 +349,21 @@ def render_offline(
 
 ```python
 def render_offline(...):
-    renderer.begin_offline_accumulation(params, heightmap, material_set, env_maps)
+    if not settings.enabled:
+        raise ValueError("render_offline requires OfflineQualitySettings(enabled=True)")
+
+    total = settings.max_samples if settings.adaptive else params.aa_samples
+    renderer.begin_offline_accumulation(
+        params,
+        heightmap,
+        material_set,
+        env_maps,
+        water_mask=water_mask,
+        jitter_sequence_samples=total,
+    )
     try:
-        total = settings.max_samples if settings.adaptive else params.aa_samples
         rendered = 0
+        metric_history = []
 
         while rendered < total:
             batch = min(settings.batch_size, total - rendered)
@@ -359,6 +374,7 @@ def render_offline(...):
             metrics = None
             if progress_callback or (settings.adaptive and rendered >= settings.min_samples):
                 metrics = renderer.read_accumulation_metrics(settings.target_variance)
+                metric_history.append(metrics)
 
             if progress_callback and metrics is not None:
                 progress_callback(OfflineProgress(
@@ -370,7 +386,11 @@ def render_offline(...):
                 ))
 
             if settings.adaptive and rendered >= settings.min_samples and metrics is not None:
-                if (metrics.converged_tile_ratio >= settings.convergence_ratio
+                has_upward_trend = len(metric_history) >= 3 and (
+                    metric_history[-1].converged_tile_ratio >= metric_history[-3].converged_tile_ratio
+                )
+                if has_upward_trend and (
+                    metrics.converged_tile_ratio >= settings.convergence_ratio
                         or metrics.p95_delta < settings.target_variance):
                     break
 
@@ -427,9 +447,9 @@ def render_offline(...):
 
 ## 9. Adaptive Stopping Rule
 
-The metric is **temporal convergence**: how much the per-tile mean luminance changes between consecutive `read_accumulation_metrics()` calls. This measures whether adding more samples changes the result, not whether the image has spatial detail.
+The metric is **temporal convergence**: how much the per-tile mean luminance changes relative to a short history window of `read_accumulation_metrics()` calls. This measures whether adding more samples changes the result, not whether the image has spatial detail.
 
-The default stopping policy uses **two conditions (OR)**:
+The default stopping policy uses **two conditions (OR)**, but only after the controller has observed an upward 3-snapshot convergence trend:
 
 1. `converged_tile_ratio >= convergence_ratio` (default 0.95) — at least 95% of tiles have temporal delta below `target_variance`.
 2. `p95_delta < target_variance` — the 95th percentile temporal delta is below threshold.
@@ -461,6 +481,8 @@ Either condition being true stops accumulation. This prevents one hot tile from 
 | **Max samples respected** | Adaptive never exceeds `max_samples`. |
 | **Metrics queryable** | `read_accumulation_metrics()` returns valid `OfflineMetrics` with plausible values after each batch. |
 | **Convergence trend** | After `min_samples`, the reported `converged_tile_ratio` is generally non-decreasing (small fluctuations from noisy batches are tolerated; the trend over 3+ batches must be upward). |
+| **Progress callback** | `progress_callback` receives `OfflineProgress` updates whose final values match the returned metadata. |
+| **Cleanup on error** | Exceptions during batching, metrics, resolve, or tonemap release the active offline session. |
 
 ### TV12.3 — OIDN Integration
 
@@ -490,7 +512,7 @@ The following are **explicitly not part of TV12**:
 
 | File | Change |
 |------|--------|
-| `src/terrain/accumulation.rs` | Extend with `OfflineAccumulationState` (ping-pong buffers, cached GPU resources, `prev_tile_means`) |
+| `src/terrain/accumulation.rs` | Extend with `OfflineAccumulationState` (ping-pong buffers, cached GPU resources, convergence history) |
 | `src/terrain/renderer/offline.rs` | New: all 7 offline `#[pymethods]` on `TerrainRenderer` |
 | `src/terrain/renderer/core.rs` | Add offline state fields to `TerrainScene`, HDR pipeline cache entry, session guards |
 | `src/terrain/renderer/mod.rs` | Register `offline` submodule |
