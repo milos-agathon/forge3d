@@ -57,7 +57,7 @@ impl TerrainRenderer {
         self.scene.light_debug_info()
     }
 
-    #[pyo3(signature = (material_set, env_maps, params, heightmap, target=None, water_mask=None))]
+    #[pyo3(signature = (material_set, env_maps, params, heightmap, target=None, water_mask=None, time_seconds=0.0))]
     pub fn render_terrain_pbr_pom<'py>(
         &mut self,
         py: Python<'py>,
@@ -67,6 +67,7 @@ impl TerrainRenderer {
         heightmap: PyReadonlyArray2<'py, f32>,
         target: Option<&Bound<'_, PyAny>>,
         water_mask: Option<PyReadonlyArray2<'py, f32>>,
+        time_seconds: f32,
     ) -> PyResult<Py<crate::Frame>> {
         if target.is_some() {
             return Err(PyRuntimeError::new_err(
@@ -76,13 +77,13 @@ impl TerrainRenderer {
 
         let frame = self
             .scene
-            .render_internal(material_set, env_maps, params, heightmap, water_mask)
+            .render_internal(material_set, env_maps, params, heightmap, water_mask, time_seconds)
             .map_err(|e| PyRuntimeError::new_err(format!("Rendering failed: {:#}", e)))?;
 
         Ok(Py::new(py, frame)?)
     }
 
-    #[pyo3(signature = (material_set, env_maps, params, heightmap, water_mask=None))]
+    #[pyo3(signature = (material_set, env_maps, params, heightmap, water_mask=None, time_seconds=0.0))]
     pub fn render_with_aov<'py>(
         &mut self,
         py: Python<'py>,
@@ -91,10 +92,11 @@ impl TerrainRenderer {
         params: &render_params::TerrainRenderParams,
         heightmap: PyReadonlyArray2<'py, f32>,
         water_mask: Option<PyReadonlyArray2<'py, f32>>,
+        time_seconds: f32,
     ) -> PyResult<(Py<crate::Frame>, Py<crate::AovFrame>)> {
         let (frame, aov_frame) = self
             .scene
-            .render_internal_with_aov(material_set, env_maps, params, heightmap, water_mask)
+            .render_internal_with_aov(material_set, env_maps, params, heightmap, water_mask, time_seconds)
             .map_err(|e| PyRuntimeError::new_err(format!("Rendering with AOV failed: {:#}", e)))?;
 
         Ok((Py::new(py, frame)?, Py::new(py, aov_frame)?))
@@ -250,13 +252,96 @@ impl TerrainRenderer {
                     .push(crate::terrain::scatter::TerrainScatterLevelSpec { mesh, max_distance });
             }
 
+            let wind = match batch_dict
+                .get_item("wind")
+                .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                .filter(|v| !v.is_none())
+            {
+                Some(wind_any) => {
+                    let wind_dict = wind_any.downcast::<PyDict>().map_err(|_| {
+                        PyRuntimeError::new_err(format!(
+                            "batch {batch_index}: 'wind' must be a dict"
+                        ))
+                    })?;
+                    crate::terrain::scatter::ScatterWindSettingsNative {
+                        enabled: wind_dict
+                            .get_item("enabled")
+                            .ok()
+                            .flatten()
+                            .and_then(|v| v.extract().ok())
+                            .unwrap_or(false),
+                        direction_deg: wind_dict
+                            .get_item("direction_deg")
+                            .ok()
+                            .flatten()
+                            .and_then(|v| v.extract().ok())
+                            .unwrap_or(0.0),
+                        speed: wind_dict
+                            .get_item("speed")
+                            .ok()
+                            .flatten()
+                            .and_then(|v| v.extract().ok())
+                            .unwrap_or(1.0),
+                        amplitude: wind_dict
+                            .get_item("amplitude")
+                            .ok()
+                            .flatten()
+                            .and_then(|v| v.extract().ok())
+                            .unwrap_or(0.0),
+                        rigidity: wind_dict
+                            .get_item("rigidity")
+                            .ok()
+                            .flatten()
+                            .and_then(|v| v.extract().ok())
+                            .unwrap_or(0.5),
+                        bend_start: wind_dict
+                            .get_item("bend_start")
+                            .ok()
+                            .flatten()
+                            .and_then(|v| v.extract().ok())
+                            .unwrap_or(0.0),
+                        bend_extent: wind_dict
+                            .get_item("bend_extent")
+                            .ok()
+                            .flatten()
+                            .and_then(|v| v.extract().ok())
+                            .unwrap_or(1.0),
+                        gust_strength: wind_dict
+                            .get_item("gust_strength")
+                            .ok()
+                            .flatten()
+                            .and_then(|v| v.extract().ok())
+                            .unwrap_or(0.0),
+                        gust_frequency: wind_dict
+                            .get_item("gust_frequency")
+                            .ok()
+                            .flatten()
+                            .and_then(|v| v.extract().ok())
+                            .unwrap_or(0.3),
+                        fade_start: wind_dict
+                            .get_item("fade_start")
+                            .ok()
+                            .flatten()
+                            .and_then(|v| v.extract().ok())
+                            .unwrap_or(0.0),
+                        fade_end: wind_dict
+                            .get_item("fade_end")
+                            .ok()
+                            .flatten()
+                            .and_then(|v| v.extract().ok())
+                            .unwrap_or(0.0),
+                    }
+                }
+                None => crate::terrain::scatter::ScatterWindSettingsNative::default(),
+            };
+
             native_batches.push(super::scatter::TerrainScatterUploadBatch {
                 name,
                 color,
                 max_draw_distance,
                 transforms_rowmajor: transforms,
                 levels,
-                wind: crate::terrain::scatter::ScatterWindSettingsNative::default(),
+                wind,
             });
         }
 
