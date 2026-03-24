@@ -125,6 +125,7 @@ pub struct TerrainScene {
     pub(super) scatter_last_frame_stats: crate::terrain::scatter::TerrainScatterFrameStats,
     #[cfg(feature = "enable-renderer-config")]
     pub(super) config: Arc<Mutex<crate::render::params::RendererConfig>>,
+    pub(super) material_vt: Mutex<super::virtual_texture::TerrainMaterialVT>,
     pub(super) viewer_heightmap: Option<ViewerTerrainData>,
 }
 

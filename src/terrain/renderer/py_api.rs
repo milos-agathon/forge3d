@@ -451,6 +451,69 @@ impl TerrainRenderer {
         )
     }
 
+    #[pyo3(text_signature = "(self, material_index, family, image_or_pyramid, virtual_size_px, fallback_color)")]
+    fn register_material_vt_source(
+        &self,
+        material_index: u32,
+        family: String,
+        image_or_pyramid: &Bound<'_, PyAny>,
+        virtual_size_px: (u32, u32),
+        fallback_color: Option<Vec<f32>>,
+    ) -> PyResult<()> {
+        use pyo3::prelude::*;
+
+        // Extract image data from numpy array or bytes
+        let data = if let Ok(arr) = image_or_pyramid.extract::<Vec<u8>>() {
+            arr
+        } else if let Ok(arr_any) = image_or_pyramid.getattr("tobytes") {
+            arr_any.extract::<Vec<u8>>()?
+        } else {
+            return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "image_or_pyramid must be bytes or numpy array",
+            ));
+        };
+
+        // Parse fallback color
+        let fallback = match fallback_color {
+            Some(vec) if vec.len() >= 4 => [vec[0], vec[1], vec[2], vec[3]],
+            _ => [0.5, 0.5, 0.5, 1.0],
+        };
+
+        let mut material_vt = self.scene.material_vt.lock().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to lock material_vt: {}",
+                e
+            ))
+        })?;
+
+        material_vt
+            .register_source(material_index, family, virtual_size_px, data, fallback)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e))
+    }
+
+    #[pyo3(text_signature = "(self)")]
+    fn clear_material_vt_sources(&self) -> PyResult<()> {
+        let mut material_vt = self.scene.material_vt.lock().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to lock material_vt: {}",
+                e
+            ))
+        })?;
+        material_vt.clear_sources();
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "(self)")]
+    fn get_material_vt_stats(&self) -> PyResult<std::collections::HashMap<String, f32>> {
+        let material_vt = self.scene.material_vt.lock().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to lock material_vt: {}",
+                e
+            ))
+        })?;
+        Ok(material_vt.get_stats())
+    }
+
     #[cfg(feature = "enable-renderer-config")]
     pub fn get_config(&self) -> PyResult<String> {
         let config = self

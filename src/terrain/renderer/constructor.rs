@@ -505,6 +505,7 @@ impl TerrainScene {
             scatter_batches: Vec::new(),
             #[cfg(feature = "enable-gpu-instancing")]
             scatter_last_frame_stats: crate::terrain::scatter::TerrainScatterFrameStats::default(),
+            material_vt: Mutex::new(super::virtual_texture::TerrainMaterialVT::new()),
             viewer_heightmap: None,
         })
     }
