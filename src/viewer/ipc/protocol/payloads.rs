@@ -276,7 +276,47 @@ pub struct IpcTerrainScatterBatch {
     #[serde(default)]
     pub levels: Vec<IpcTerrainScatterLevel>,
     #[serde(default)]
+    pub wind: Option<IpcScatterWind>,
     pub hlod: Option<IpcHlodConfig>,
+}
+
+fn default_speed() -> f32 {
+    1.0
+}
+fn default_rigidity() -> f32 {
+    0.5
+}
+fn default_bend_extent() -> f32 {
+    1.0
+}
+fn default_gust_frequency() -> f32 {
+    0.3
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct IpcScatterWind {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub direction_deg: f32,
+    #[serde(default = "default_speed")]
+    pub speed: f32,
+    #[serde(default)]
+    pub amplitude: f32,
+    #[serde(default = "default_rigidity")]
+    pub rigidity: f32,
+    #[serde(default)]
+    pub bend_start: f32,
+    #[serde(default = "default_bend_extent")]
+    pub bend_extent: f32,
+    #[serde(default)]
+    pub gust_strength: f32,
+    #[serde(default = "default_gust_frequency")]
+    pub gust_frequency: f32,
+    #[serde(default)]
+    pub fade_start: f32,
+    #[serde(default)]
+    pub fade_end: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

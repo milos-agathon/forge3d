@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.16.0"
+__version__ = "1.19.0"
 version = __version__
 
 import numpy as np
@@ -151,6 +151,7 @@ from .datasets import (
 from .widgets import ViewerWidget, widgets_available
 from ._license import LicenseError, set_license_key
 from . import terrain_scatter
+from .terrain_scatter import ScatterWindSettings
 
 # -----------------------------------------------------------------------------
 # Fallback Renderer class
@@ -421,6 +422,7 @@ __all__ = [
     "geometry",
     "io",
     "terrain_scatter",
+    "ScatterWindSettings",
     # Interactive viewer
     "open_viewer",
     "open_viewer_async",

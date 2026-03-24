@@ -68,6 +68,145 @@ impl TerrainScatterMemoryReport {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct ScatterWindSettingsNative {
+    pub enabled: bool,
+    pub direction_deg: f32,
+    pub speed: f32,
+    pub amplitude: f32,
+    pub rigidity: f32,
+    pub bend_start: f32,
+    pub bend_extent: f32,
+    pub gust_strength: f32,
+    pub gust_frequency: f32,
+    pub fade_start: f32,
+    pub fade_end: f32,
+}
+
+impl ScatterWindSettingsNative {
+    /// Validate wind settings, returning an error description on failure.
+    /// Called at the native parse boundary (py_api, viewer IPC) so raw
+    /// dict/JSON payloads cannot inject invalid values into shader math.
+    pub fn validate(&self) -> Result<()> {
+        if !self.enabled {
+            return Ok(()); // disabled wind skips all checks
+        }
+        macro_rules! check_finite {
+            ($field:ident) => {
+                if !self.$field.is_finite() {
+                    return Err(anyhow!("wind {}: must be finite", stringify!($field)));
+                }
+            };
+        }
+        check_finite!(direction_deg);
+        check_finite!(speed);
+        check_finite!(amplitude);
+        check_finite!(rigidity);
+        check_finite!(bend_start);
+        check_finite!(bend_extent);
+        check_finite!(gust_strength);
+        check_finite!(gust_frequency);
+        check_finite!(fade_start);
+        check_finite!(fade_end);
+
+        if self.speed < 0.0 {
+            return Err(anyhow!("wind speed must be >= 0"));
+        }
+        if self.amplitude < 0.0 {
+            return Err(anyhow!("wind amplitude must be >= 0"));
+        }
+        if !(0.0..=1.0).contains(&self.rigidity) {
+            return Err(anyhow!("wind rigidity must be in [0, 1]"));
+        }
+        if !(0.0..=1.0).contains(&self.bend_start) {
+            return Err(anyhow!("wind bend_start must be in [0, 1]"));
+        }
+        if self.bend_extent <= 0.0 {
+            return Err(anyhow!("wind bend_extent must be > 0"));
+        }
+        if self.gust_strength < 0.0 {
+            return Err(anyhow!("wind gust_strength must be >= 0"));
+        }
+        if self.gust_frequency < 0.0 {
+            return Err(anyhow!("wind gust_frequency must be >= 0"));
+        }
+        if self.fade_start < 0.0 {
+            return Err(anyhow!("wind fade_start must be >= 0"));
+        }
+        if self.fade_end < 0.0 {
+            return Err(anyhow!("wind fade_end must be >= 0"));
+        }
+        Ok(())
+    }
+}
+
+impl Default for ScatterWindSettingsNative {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            direction_deg: 0.0,
+            speed: 1.0,
+            amplitude: 0.0,
+            rigidity: 0.5,
+            bend_start: 0.0,
+            bend_extent: 1.0,
+            gust_strength: 0.0,
+            gust_frequency: 0.3,
+            fade_start: 0.0,
+            fade_end: 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ScatterWindUniforms {
+    pub wind_phase: [f32; 4],
+    pub wind_vec_bounds: [f32; 4],
+    pub wind_bend_fade: [f32; 4],
+}
+
+/// Compute shader-ready wind uniform fields.
+///
+/// Returns all-zero fields when `wind.enabled` is false or `wind.amplitude` is zero.
+/// `mesh_height_max` is per-draw (per LOD level), injected by the caller.
+/// `instance_scale` is used only for fade distance conversion.
+pub fn compute_wind_uniforms(
+    wind: &ScatterWindSettingsNative,
+    time_seconds: f32,
+    mesh_height_max: f32,
+    instance_scale: f32,
+) -> ScatterWindUniforms {
+    if !wind.enabled || wind.amplitude <= 0.0 {
+        return ScatterWindUniforms::default();
+    }
+
+    let tau = std::f32::consts::TAU;
+    let az = wind.direction_deg.to_radians();
+    let dir_x = az.cos();
+    let dir_z = az.sin();
+
+    ScatterWindUniforms {
+        wind_phase: [
+            time_seconds * wind.speed * tau,         // temporal_phase
+            time_seconds * wind.gust_frequency * tau, // gust_phase
+            wind.gust_strength,                       // gust_strength (contract units)
+            wind.rigidity,                            // rigidity [0,1]
+        ],
+        wind_vec_bounds: [
+            dir_x * wind.amplitude,  // wind_dir.x * amplitude
+            0.0,                     // wind_dir.y (zero, XZ ground plane)
+            dir_z * wind.amplitude,  // wind_dir.z * amplitude
+            mesh_height_max,         // per-draw mesh height
+        ],
+        wind_bend_fade: [
+            wind.bend_start,                      // bend_start [0,1]
+            wind.bend_extent,                     // bend_extent (> 0)
+            wind.fade_start * instance_scale,     // fade_start (approx render-space)
+            wind.fade_end * instance_scale,       // fade_end (approx render-space)
+        ],
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PreparedScatterDraw {
     pub level_index: usize,
@@ -79,6 +218,7 @@ struct GpuScatterLevel {
     ibuf: wgpu::Buffer,
     index_count: u32,
     max_distance: f32,
+    mesh_height_max: f32,
     vertex_buffer_bytes: u64,
     index_buffer_bytes: u64,
     _vertex_handle: ResourceHandle,
@@ -173,6 +313,7 @@ pub struct TerrainScatterBatch {
     pub name: Option<String>,
     pub color: [f32; 4],
     pub max_draw_distance: f32,
+    pub wind: ScatterWindSettingsNative,
     pub terrain_blend: TerrainScatterBlendConfig,
     pub terrain_contact: TerrainScatterContactConfig,
     levels: Vec<GpuScatterLevel>,
@@ -194,6 +335,7 @@ impl TerrainScatterBatch {
         color: [f32; 4],
         max_draw_distance: Option<f32>,
         name: Option<String>,
+        wind: ScatterWindSettingsNative,
         hlod_config: Option<HlodConfig>,
         terrain_blend: TerrainScatterBlendConfig,
         terrain_contact: TerrainScatterContactConfig,
@@ -209,6 +351,7 @@ impl TerrainScatterBatch {
         let max_draw_distance =
             validate_optional_distance(max_draw_distance, "terrain scatter max_draw_distance")?
                 .unwrap_or(f32::INFINITY);
+        wind.validate()?;
         let terrain_blend = validate_blend_config(terrain_blend)?;
         let terrain_contact = validate_contact_config(terrain_contact)?;
 
@@ -248,6 +391,7 @@ impl TerrainScatterBatch {
             name,
             color,
             max_draw_distance,
+            wind,
             terrain_blend,
             terrain_contact,
             levels: gpu_levels,
@@ -319,6 +463,10 @@ impl TerrainScatterBatch {
 
     pub fn level_count(&self) -> usize {
         self.levels.len()
+    }
+
+    pub fn level_mesh_height_max(&self, level_index: usize) -> f32 {
+        self.levels[level_index].mesh_height_max
     }
 
     pub fn hlod_active_clusters(&self, eye_contract: Vec3) -> Vec<usize> {
@@ -891,6 +1039,20 @@ fn build_gpu_level(
         })
         .collect::<Vec<_>>();
 
+    let (y_min, y_max) = vertices.iter().fold(
+        (f32::INFINITY, f32::NEG_INFINITY),
+        |(mn, mx), v| (mn.min(v.position[1]), mx.max(v.position[1])),
+    );
+    let mesh_height_max = y_max;
+    let y_extent = y_max - y_min;
+    if y_extent > 1e-6 && y_min.abs() > 0.05 * y_extent {
+        eprintln!(
+            "[terrain.scatter] warning: mesh y_min={y_min:.3} deviates from zero \
+             by >{:.0}% of y_extent={y_extent:.3}; wind bend weighting may be incorrect",
+            (y_min.abs() / y_extent) * 100.0
+        );
+    }
+
     let vertex_buffer_bytes = (vertices.len() * std::mem::size_of::<VertexPN>()) as u64;
     let index_buffer_bytes = (mesh.indices.len() * std::mem::size_of::<u32>()) as u64;
 
@@ -924,6 +1086,7 @@ fn build_gpu_level(
         ibuf,
         index_count: mesh.indices.len() as u32,
         max_distance: spec.max_distance.unwrap_or(f32::INFINITY),
+        mesh_height_max,
         vertex_buffer_bytes,
         index_buffer_bytes,
         _vertex_handle: vertex_handle,
@@ -1162,6 +1325,123 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("positive finite"));
+    }
+
+    #[test]
+    fn compute_wind_disabled_returns_zeros() {
+        let wind = ScatterWindSettingsNative::default();
+        let u = compute_wind_uniforms(&wind, 1.0, 10.0, 1.0);
+        assert_eq!(u.wind_phase, [0.0; 4]);
+        assert_eq!(u.wind_vec_bounds, [0.0; 4]);
+        assert_eq!(u.wind_bend_fade, [0.0; 4]);
+    }
+
+    #[test]
+    fn compute_wind_zero_amplitude_returns_zeros() {
+        let wind = ScatterWindSettingsNative { enabled: true, amplitude: 0.0, ..Default::default() };
+        let u = compute_wind_uniforms(&wind, 1.0, 10.0, 1.0);
+        assert_eq!(u.wind_vec_bounds[0], 0.0);
+        assert_eq!(u.wind_vec_bounds[2], 0.0);
+    }
+
+    #[test]
+    fn compute_wind_direction_and_amplitude() {
+        let wind = ScatterWindSettingsNative {
+            enabled: true,
+            direction_deg: 0.0,  // +X direction
+            amplitude: 3.0,
+            ..Default::default()
+        };
+        let u = compute_wind_uniforms(&wind, 0.0, 5.0, 2.0);
+        // direction = (cos(0), 0, sin(0)) * 3.0 = (3.0, 0, 0)
+        assert!((u.wind_vec_bounds[0] - 3.0).abs() < 1e-6);
+        assert!((u.wind_vec_bounds[1]).abs() < 1e-6);
+        assert!((u.wind_vec_bounds[2]).abs() < 1e-6);
+        assert!((u.wind_vec_bounds[3] - 5.0).abs() < 1e-6); // mesh_height_max
+    }
+
+    #[test]
+    fn compute_wind_fade_scales_by_instance_scale() {
+        let wind = ScatterWindSettingsNative {
+            enabled: true,
+            amplitude: 1.0,
+            fade_start: 10.0,
+            fade_end: 20.0,
+            ..Default::default()
+        };
+        let u = compute_wind_uniforms(&wind, 0.0, 1.0, 3.0);
+        assert!((u.wind_bend_fade[2] - 30.0).abs() < 1e-6); // 10 * 3
+        assert!((u.wind_bend_fade[3] - 60.0).abs() < 1e-6); // 20 * 3
+    }
+
+    #[test]
+    fn compute_wind_phase_folds_speed() {
+        let wind = ScatterWindSettingsNative {
+            enabled: true,
+            amplitude: 1.0,
+            speed: 2.0,
+            gust_frequency: 0.5,
+            ..Default::default()
+        };
+        let u = compute_wind_uniforms(&wind, 1.0, 1.0, 1.0);
+        let tau = std::f32::consts::TAU;
+        assert!((u.wind_phase[0] - 2.0 * tau).abs() < 1e-4); // time * speed * tau
+        assert!((u.wind_phase[1] - 0.5 * tau).abs() < 1e-4); // time * gust_freq * tau
+    }
+
+    #[test]
+    fn validate_rejects_out_of_range_wind() {
+        let mut wind = ScatterWindSettingsNative {
+            enabled: true,
+            amplitude: 1.0,
+            ..Default::default()
+        };
+        assert!(wind.validate().is_ok());
+
+        wind.rigidity = 1.5;
+        assert!(wind.validate().is_err());
+        wind.rigidity = 0.5;
+
+        wind.bend_extent = 0.0;
+        assert!(wind.validate().is_err());
+        wind.bend_extent = 1.0;
+
+        wind.speed = -1.0;
+        assert!(wind.validate().is_err());
+        wind.speed = 1.0;
+
+        wind.amplitude = f32::INFINITY;
+        assert!(wind.validate().is_err());
+        wind.amplitude = 1.0;
+
+        // Disabled wind skips validation
+        wind.rigidity = 99.0;
+        wind.enabled = false;
+        assert!(wind.validate().is_ok());
+    }
+
+    #[test]
+    fn mesh_height_max_uses_vertex_y_max() {
+        // Vertices: y values [0.0, 1.5, 3.0]
+        let positions = vec![[0.0, 0.0, 0.0], [1.0, 1.5, 0.0], [0.0, 3.0, 1.0]];
+        let y_max = positions.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max);
+        assert!((y_max - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn mesh_y_min_warning_threshold() {
+        // Mesh with y_min=0.5, y_max=3.0, extent=2.5 -> 0.5/2.5 = 20% > 5% -> should warn
+        let y_min = 0.5_f32;
+        let y_max = 3.0_f32;
+        let y_extent = y_max - y_min;
+        let deviates = y_extent > 1e-6 && y_min.abs() > 0.05 * y_extent;
+        assert!(deviates, "y_min=0.5 should trigger the >5% warning");
+
+        // Mesh with y_min=0.01, y_max=3.0, extent=2.99 -> 0.01/2.99 ~ 0.3% < 5% -> no warn
+        let y_min = 0.01_f32;
+        let y_extent = 3.0 - y_min;
+        let deviates = y_extent > 1e-6 && y_min.abs() > 0.05 * y_extent;
+        assert!(!deviates, "y_min=0.01 should not trigger warning");
     }
 
     #[test]

@@ -182,6 +182,7 @@ impl ViewerTerrainScene {
             scatter_batches: Vec::new(),
             #[cfg(feature = "enable-gpu-instancing")]
             scatter_last_frame_stats: crate::terrain::scatter::TerrainScatterFrameStats::default(),
+            scatter_elapsed_time: 0.0,
         })
     }
 

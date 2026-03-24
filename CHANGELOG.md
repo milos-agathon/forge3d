@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
 ## [Unreleased]
+### Added
+- Completed Epic TV22 scatter wind animation across the terrain renderer and interactive viewer workflows.
+- Added regression coverage for `render_with_aov(..., time_seconds=...)` and an opt-in live viewer wind path covering viewer time accumulation and camera updates.
+
+### Fixed
+- Viewer IPC now rejects invalid terrain scatter wind payloads instead of silently replacing them with defaults.
+- Hardened the terrain scatter Python contract so invalid `wind` objects fail fast before serialization.
 
 ## [1.19.0] - 2026-03-23
 
@@ -40,7 +47,6 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ### Changed
 - Published the TV10 workflow in the main docs navigation and API reference.
 - Extended the terrain golden CI lane to run the new TV10 goldens and hardened the TV10 real-DEM example test to skip on unsupported hosted adapters.
-- Bumped the package version to `1.17.0`.
 
 ## [1.16.0] - 2026-03-22
 

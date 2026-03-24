@@ -57,7 +57,7 @@ impl TerrainRenderer {
         self.scene.light_debug_info()
     }
 
-    #[pyo3(signature = (material_set, env_maps, params, heightmap, target=None, water_mask=None))]
+    #[pyo3(signature = (material_set, env_maps, params, heightmap, target=None, water_mask=None, time_seconds=0.0))]
     pub fn render_terrain_pbr_pom<'py>(
         &mut self,
         py: Python<'py>,
@@ -67,6 +67,7 @@ impl TerrainRenderer {
         heightmap: PyReadonlyArray2<'py, f32>,
         target: Option<&Bound<'_, PyAny>>,
         water_mask: Option<PyReadonlyArray2<'py, f32>>,
+        time_seconds: f32,
     ) -> PyResult<Py<crate::Frame>> {
         if target.is_some() {
             return Err(PyRuntimeError::new_err(
@@ -76,13 +77,13 @@ impl TerrainRenderer {
 
         let frame = self
             .scene
-            .render_internal(material_set, env_maps, params, heightmap, water_mask)
+            .render_internal(material_set, env_maps, params, heightmap, water_mask, time_seconds)
             .map_err(|e| PyRuntimeError::new_err(format!("Rendering failed: {:#}", e)))?;
 
         Ok(Py::new(py, frame)?)
     }
 
-    #[pyo3(signature = (material_set, env_maps, params, heightmap, water_mask=None))]
+    #[pyo3(signature = (material_set, env_maps, params, heightmap, water_mask=None, time_seconds=0.0))]
     pub fn render_with_aov<'py>(
         &mut self,
         py: Python<'py>,
@@ -91,10 +92,11 @@ impl TerrainRenderer {
         params: &render_params::TerrainRenderParams,
         heightmap: PyReadonlyArray2<'py, f32>,
         water_mask: Option<PyReadonlyArray2<'py, f32>>,
+        time_seconds: f32,
     ) -> PyResult<(Py<crate::Frame>, Py<crate::AovFrame>)> {
         let (frame, aov_frame) = self
             .scene
-            .render_internal_with_aov(material_set, env_maps, params, heightmap, water_mask)
+            .render_internal_with_aov(material_set, env_maps, params, heightmap, water_mask, time_seconds)
             .map_err(|e| PyRuntimeError::new_err(format!("Rendering with AOV failed: {:#}", e)))?;
 
         Ok((Py::new(py, frame)?, Py::new(py, aov_frame)?))
@@ -366,16 +368,110 @@ impl TerrainRenderer {
                     .push(crate::terrain::scatter::TerrainScatterLevelSpec { mesh, max_distance });
             }
 
+            let wind = match batch_dict
+                .get_item("wind")
+                .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                .filter(|v| !v.is_none())
+            {
+                Some(wind_any) => {
+                    let wind_dict = wind_any.downcast::<PyDict>().map_err(|_| {
+                        PyRuntimeError::new_err(format!(
+                            "batch {batch_index}: 'wind' must be a dict"
+                        ))
+                    })?;
+
+                    // Helper: extract a typed field from a dict, failing with a clear
+                    // message on type mismatch (matching the fail-fast style of the
+                    // rest of set_scatter_batches).  Missing keys use the default.
+                    macro_rules! wind_field {
+                        ($key:expr, $ty:ty, $default:expr) => {
+                            match wind_dict
+                                .get_item($key)
+                                .map_err(|e| PyRuntimeError::new_err(format!(
+                                    "batch {batch_index} wind: {e}"
+                                )))?
+                                .filter(|v| !v.is_none())
+                            {
+                                Some(v) => v.extract::<$ty>().map_err(|e| {
+                                    PyRuntimeError::new_err(format!(
+                                        "batch {batch_index} wind: invalid '{}': {e}", $key
+                                    ))
+                                })?,
+                                None => $default,
+                            }
+                        };
+                    }
+
+                    crate::terrain::scatter::ScatterWindSettingsNative {
+                        enabled: wind_field!("enabled", bool, false),
+                        direction_deg: wind_field!("direction_deg", f32, 0.0),
+                        speed: wind_field!("speed", f32, 1.0),
+                        amplitude: wind_field!("amplitude", f32, 0.0),
+                        rigidity: wind_field!("rigidity", f32, 0.5),
+                        bend_start: wind_field!("bend_start", f32, 0.0),
+                        bend_extent: wind_field!("bend_extent", f32, 1.0),
+                        gust_strength: wind_field!("gust_strength", f32, 0.0),
+                        gust_frequency: wind_field!("gust_frequency", f32, 0.3),
+                        fade_start: wind_field!("fade_start", f32, 0.0),
+                        fade_end: wind_field!("fade_end", f32, 0.0),
+                    }
+                }
+                None => crate::terrain::scatter::ScatterWindSettingsNative::default(),
+            };
+            wind.validate().map_err(|e| {
+                PyRuntimeError::new_err(format!("batch {batch_index}: {e}"))
+            })?;
+
             let hlod_config = batch_dict
                 .get_item("hlod")
                 .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
-                .filter(|v| !v.is_none())
-                .map(|v| -> PyResult<crate::terrain::scatter::HlodConfig> {
-                    let d = v.downcast::<PyDict>()?;
+                .filter(|value| !value.is_none())
+                .map(|value| -> PyResult<crate::terrain::scatter::HlodConfig> {
+                    let d = value.downcast::<PyDict>().map_err(|_| {
+                        PyRuntimeError::new_err(format!(
+                            "batch {batch_index}: 'hlod' must be a dict"
+                        ))
+                    })?;
+                    let hlod_distance = d
+                        .get_item("hlod_distance")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .ok_or_else(|| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: 'hlod.hlod_distance' is required"
+                            ))
+                        })?;
+                    let cluster_radius = d
+                        .get_item("cluster_radius")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .ok_or_else(|| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: 'hlod.cluster_radius' is required"
+                            ))
+                        })?;
+                    let simplify_ratio = d
+                        .get_item("simplify_ratio")
+                        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+                        .ok_or_else(|| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: 'hlod.simplify_ratio' is required"
+                            ))
+                        })?;
                     Ok(crate::terrain::scatter::HlodConfig {
-                        hlod_distance: d.get_item("hlod_distance")?.unwrap().extract()?,
-                        cluster_radius: d.get_item("cluster_radius")?.unwrap().extract()?,
-                        simplify_ratio: d.get_item("simplify_ratio")?.unwrap().extract()?,
+                        hlod_distance: hlod_distance.extract().map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'hlod.hlod_distance': {e}"
+                            ))
+                        })?,
+                        cluster_radius: cluster_radius.extract().map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'hlod.cluster_radius': {e}"
+                            ))
+                        })?,
+                        simplify_ratio: simplify_ratio.extract().map_err(|e| {
+                            PyRuntimeError::new_err(format!(
+                                "batch {batch_index}: invalid 'hlod.simplify_ratio': {e}"
+                            ))
+                        })?,
                     })
                 })
                 .transpose()
@@ -393,6 +489,7 @@ impl TerrainRenderer {
                 terrain_contact,
                 transforms_rowmajor: transforms,
                 levels,
+                wind,
                 hlod_config,
             });
         }

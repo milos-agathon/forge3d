@@ -142,6 +142,7 @@ impl ViewerTerrainScene {
                 terrain.z_scale,
                 [-state.sun_dir.x, -state.sun_dir.y, -state.sun_dir.z],
                 state.vo_lighting[0],
+                self.scatter_elapsed_time,
                 self.device.as_ref(),
                 self.queue.as_ref(),
                 &mut self.scatter_renderer,

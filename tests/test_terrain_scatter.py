@@ -10,6 +10,7 @@ import forge3d as f3d
 from _terrain_runtime import terrain_rendering_available
 from forge3d.geometry import MeshBuffers
 from forge3d.terrain_params import make_terrain_params_config
+from forge3d import terrain_scatter as ts
 from forge3d.terrain_scatter import (
     TerrainScatterBatch,
     TerrainContactSettings,
@@ -372,6 +373,57 @@ class TestBatchSerialization:
         assert viewer.calls[0][0] == "set"
         assert viewer.calls[1] == ("clear", None)
 
+    def test_batch_default_wind_is_disabled(self):
+        batch = TerrainScatterBatch(
+            levels=[TerrainScatterLevel(mesh=_simple_mesh())],
+            transforms=np.eye(4, dtype=np.float32).reshape(1, 16),
+        )
+        assert batch.wind.enabled is False
+        assert batch.wind.amplitude == 0.0
+
+    def test_batch_with_explicit_wind(self):
+        wind = ts.ScatterWindSettings(enabled=True, amplitude=1.5, rigidity=0.3)
+        batch = TerrainScatterBatch(
+            levels=[TerrainScatterLevel(mesh=_simple_mesh())],
+            transforms=np.eye(4, dtype=np.float32).reshape(1, 16),
+            wind=wind,
+        )
+        assert batch.wind.enabled is True
+        assert batch.wind.amplitude == 1.5
+
+    def test_native_dict_includes_wind(self):
+        wind = ts.ScatterWindSettings(enabled=True, amplitude=2.0, direction_deg=45.0)
+        batch = TerrainScatterBatch(
+            levels=[TerrainScatterLevel(mesh=_simple_mesh())],
+            transforms=np.eye(4, dtype=np.float32).reshape(1, 16),
+            wind=wind,
+        )
+        d = batch.to_native_dict()
+        assert "wind" in d
+        assert d["wind"]["enabled"] is True
+        assert d["wind"]["amplitude"] == 2.0
+        assert d["wind"]["direction_deg"] == 45.0
+
+    def test_viewer_payload_includes_wind(self):
+        wind = ts.ScatterWindSettings(enabled=True, amplitude=1.0)
+        batch = TerrainScatterBatch(
+            levels=[TerrainScatterLevel(mesh=_simple_mesh())],
+            transforms=np.eye(4, dtype=np.float32).reshape(1, 16),
+            wind=wind,
+        )
+        p = batch.to_viewer_payload()
+        assert "wind" in p
+        assert p["wind"]["enabled"] is True
+
+    def test_disabled_wind_still_serializes(self):
+        batch = TerrainScatterBatch(
+            levels=[TerrainScatterLevel(mesh=_simple_mesh())],
+            transforms=np.eye(4, dtype=np.float32).reshape(1, 16),
+        )
+        d = batch.to_native_dict()
+        assert "wind" in d
+        assert d["wind"]["enabled"] is False
+
 
 _TERRAIN_RUNTIME_AVAILABLE = terrain_rendering_available()
 
@@ -523,3 +575,120 @@ def test_viewer_snapshot_scatter_changes_pixels(tmp_path) -> None:
     scattered = np.asarray(pillow.open(scatter_path))
     changed_pixels = np.count_nonzero(np.any(baseline != scattered, axis=-1))
     assert changed_pixels > 250
+
+
+class TestScatterWindSettings:
+    """Tests for ScatterWindSettings dataclass."""
+
+    def test_defaults(self):
+        s = ts.ScatterWindSettings()
+        assert s.enabled is False
+        assert s.direction_deg == 0.0
+        assert s.speed == 1.0
+        assert s.amplitude == 0.0
+        assert s.rigidity == 0.5
+        assert s.bend_start == 0.0
+        assert s.bend_extent == 1.0
+        assert s.gust_strength == 0.0
+        assert s.gust_frequency == 0.3
+        assert s.fade_start == 0.0
+        assert s.fade_end == 0.0
+
+    def test_enabled_with_amplitude(self):
+        s = ts.ScatterWindSettings(enabled=True, amplitude=2.0)
+        assert s.enabled is True
+        assert s.amplitude == 2.0
+
+    def test_speed_rejects_negative(self):
+        with pytest.raises(ValueError, match="speed"):
+            ts.ScatterWindSettings(speed=-1.0)
+
+    def test_amplitude_rejects_negative(self):
+        with pytest.raises(ValueError, match="amplitude"):
+            ts.ScatterWindSettings(amplitude=-0.1)
+
+    def test_rigidity_rejects_out_of_range(self):
+        with pytest.raises(ValueError, match="rigidity"):
+            ts.ScatterWindSettings(rigidity=1.5)
+        with pytest.raises(ValueError, match="rigidity"):
+            ts.ScatterWindSettings(rigidity=-0.1)
+
+    def test_bend_start_rejects_out_of_range(self):
+        with pytest.raises(ValueError, match="bend_start"):
+            ts.ScatterWindSettings(bend_start=-0.1)
+        with pytest.raises(ValueError, match="bend_start"):
+            ts.ScatterWindSettings(bend_start=1.1)
+
+    def test_bend_extent_rejects_non_positive(self):
+        with pytest.raises(ValueError, match="bend_extent"):
+            ts.ScatterWindSettings(bend_extent=0.0)
+        with pytest.raises(ValueError, match="bend_extent"):
+            ts.ScatterWindSettings(bend_extent=-1.0)
+
+    def test_gust_strength_rejects_negative(self):
+        with pytest.raises(ValueError, match="gust_strength"):
+            ts.ScatterWindSettings(gust_strength=-1.0)
+
+    def test_gust_frequency_rejects_negative(self):
+        with pytest.raises(ValueError, match="gust_frequency"):
+            ts.ScatterWindSettings(gust_frequency=-1.0)
+
+    def test_fade_start_rejects_negative(self):
+        with pytest.raises(ValueError, match="fade_start"):
+            ts.ScatterWindSettings(fade_start=-1.0)
+
+    def test_fade_end_rejects_negative(self):
+        with pytest.raises(ValueError, match="fade_end"):
+            ts.ScatterWindSettings(fade_end=-1.0)
+
+    def test_numpy_types_normalized_to_python(self):
+        s = ts.ScatterWindSettings(
+            enabled=np.bool_(True),
+            speed=np.float32(2.5),
+            amplitude=np.float64(1.0),
+            direction_deg=np.float32(45.0),
+        )
+        assert type(s.enabled) is bool
+        assert type(s.speed) is float
+        assert type(s.amplitude) is float
+        assert type(s.direction_deg) is float
+
+    def test_numpy_wind_serializes_as_json(self):
+        import json
+        s = ts.ScatterWindSettings(
+            enabled=np.bool_(True),
+            speed=np.float32(2.5),
+            amplitude=np.float64(1.0),
+        )
+        batch = TerrainScatterBatch(
+            levels=[TerrainScatterLevel(mesh=_simple_mesh())],
+            transforms=np.eye(4, dtype=np.float32).reshape(1, 16),
+            wind=s,
+        )
+        payload = batch.to_viewer_payload()
+        # Must not raise TypeError from numpy types
+        json.dumps(payload["wind"])
+
+    def test_non_finite_fields_rejected(self):
+        with pytest.raises(ValueError, match="finite"):
+            ts.ScatterWindSettings(speed=float("inf"))
+        with pytest.raises(ValueError, match="finite"):
+            ts.ScatterWindSettings(amplitude=float("nan"))
+        with pytest.raises(ValueError, match="finite"):
+            ts.ScatterWindSettings(direction_deg=float("-inf"))
+        with pytest.raises(ValueError, match="finite"):
+            ts.ScatterWindSettings(fade_start=float("nan"))
+
+    def test_batch_rejects_invalid_wind_type(self):
+        with pytest.raises(TypeError, match="ScatterWindSettings"):
+            TerrainScatterBatch(
+                levels=[TerrainScatterLevel(mesh=_simple_mesh())],
+                transforms=np.eye(4, dtype=np.float32).reshape(1, 16),
+                wind=None,
+            )
+        with pytest.raises(TypeError, match="ScatterWindSettings"):
+            TerrainScatterBatch(
+                levels=[TerrainScatterLevel(mesh=_simple_mesh())],
+                transforms=np.eye(4, dtype=np.float32).reshape(1, 16),
+                wind={"enabled": True, "amplitude": 1.0},
+            )

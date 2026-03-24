@@ -5,9 +5,10 @@ use super::*;
 use crate::terrain::renderer::core::TERRAIN_DEPTH_FORMAT;
 
 use crate::terrain::scatter::{
-    accumulate_frame_stats, summarize_memory, HlodConfig, TerrainScatterBatch,
-    TerrainScatterBlendConfig, TerrainScatterContactConfig, TerrainScatterFrameStats,
-    TerrainScatterLevelSpec, TerrainScatterMemoryReport,
+    accumulate_frame_stats, compute_wind_uniforms, summarize_memory, HlodConfig,
+    ScatterWindSettingsNative, TerrainScatterBatch, TerrainScatterBlendConfig,
+    TerrainScatterContactConfig, TerrainScatterFrameStats, TerrainScatterLevelSpec,
+    TerrainScatterMemoryReport,
 };
 
 pub(super) struct ScatterRenderState {
@@ -18,6 +19,7 @@ pub(super) struct ScatterRenderState {
     pub(super) instance_scale: f32,
     pub(super) light_dir: [f32; 3],
     pub(super) light_intensity: f32,
+    pub(super) time_seconds: f32,
     pub(super) terrain_world_to_uv_scale_bias: [f32; 4],
     pub(super) terrain_height_to_world: [f32; 4],
 }
@@ -30,6 +32,7 @@ pub(super) struct TerrainScatterUploadBatch {
     pub(super) terrain_contact: TerrainScatterContactConfig,
     pub(super) transforms_rowmajor: Vec<[f32; 16]>,
     pub(super) levels: Vec<TerrainScatterLevelSpec>,
+    pub(super) wind: ScatterWindSettingsNative,
     pub(super) hlod_config: Option<HlodConfig>,
 }
 
@@ -48,6 +51,7 @@ impl TerrainScene {
                 batch.color,
                 batch.max_draw_distance,
                 batch.name,
+                batch.wind,
                 batch.hlod_config,
                 batch.terrain_blend,
                 batch.terrain_contact,
@@ -81,6 +85,7 @@ impl TerrainScene {
         view: glam::Mat4,
         proj: glam::Mat4,
         eye_render: glam::Vec3,
+        time_seconds: f32,
     ) -> ScatterRenderState {
         let terrain_width = heightmap_width.max(heightmap_height).max(1) as f32;
         let terrain_span = params.terrain_span.max(1e-3);
@@ -121,6 +126,7 @@ impl TerrainScene {
             instance_scale: scale_xy,
             light_dir: decoded.light.direction,
             light_intensity: decoded.light.intensity,
+            time_seconds,
             terrain_world_to_uv_scale_bias: [1.0 / terrain_span, 1.0 / terrain_span, 0.5, 0.5],
             terrain_height_to_world: [params.z_scale, -height_mid * params.z_scale, 0.0, 0.0],
         }
@@ -212,10 +218,22 @@ impl TerrainScene {
             )?;
             accumulate_frame_stats(&mut frame_stats, &batch_stats);
 
+            // Compute batch-constant wind fields
+            let base_wind = compute_wind_uniforms(
+                &batch.wind,
+                state.time_seconds,
+                0.0, // placeholder, overridden per-draw
+                state.instance_scale,
+            );
+
             for draw in draws {
                 let Some(instbuf) = batch.level_instbuf(draw.level_index) else {
                     continue;
                 };
+                // Inject per-draw mesh_height_max
+                let mut wind = base_wind;
+                wind.wind_vec_bounds[3] = batch.level_mesh_height_max(draw.level_index);
+
                 renderer.draw_batch_params(
                     device,
                     &mut pass,
@@ -225,6 +243,9 @@ impl TerrainScene {
                     batch.color,
                     state.light_dir,
                     state.light_intensity,
+                    wind.wind_phase,
+                    wind.wind_vec_bounds,
+                    wind.wind_bend_fade,
                     batch.terrain_blend.uniform(),
                     batch.terrain_contact.uniform(),
                     batch.level_vbuf(draw.level_index),
@@ -253,6 +274,9 @@ impl TerrainScene {
                         batch.color,
                         state.light_dir,
                         state.light_intensity,
+                        [0.0; 4],
+                        [0.0; 4],
+                        [0.0; 4],
                         batch.terrain_blend.uniform(),
                         batch.terrain_contact.uniform(),
                         vbuf,

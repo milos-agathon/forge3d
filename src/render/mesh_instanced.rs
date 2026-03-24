@@ -19,22 +19,28 @@ const DRAW_BATCH_UNIFORM_SLOT_COUNT: usize = 512;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct SceneUniforms {
+struct ScatterBatchUniforms {
     view: [[f32; 4]; 4],
     proj: [[f32; 4]; 4],
     color: [f32; 4],
     light_dir_ws: [f32; 4], // xyz + intensity
+    wind_phase: [f32; 4],
+    wind_vec_bounds: [f32; 4],
+    wind_bend_fade: [f32; 4],
     terrain_blend: [f32; 4],
     terrain_contact: [f32; 4],
 }
 
-impl Default for SceneUniforms {
+impl Default for ScatterBatchUniforms {
     fn default() -> Self {
         Self {
             view: Mat4::IDENTITY.to_cols_array_2d(),
             proj: Mat4::IDENTITY.to_cols_array_2d(),
             color: [1.0, 1.0, 1.0, 1.0],
             light_dir_ws: [0.0, -1.0, 0.0, 1.0],
+            wind_phase: [0.0; 4],
+            wind_vec_bounds: [0.0; 4],
+            wind_bend_fade: [0.0; 4],
             terrain_blend: [0.0, 0.75, 2.5, 0.0],
             terrain_contact: [0.0, 3.0, 0.35, 0.65],
         }
@@ -72,7 +78,7 @@ pub struct TerrainBlendContext<'a> {
 
 pub struct MeshInstancedRenderer {
     pipeline: RenderPipeline,
-    uniforms: SceneUniforms,
+    uniforms: ScatterBatchUniforms,
     uniforms_buf: Buffer,
     bind_group_layout: BindGroupLayout,
     bind_group: BindGroup,
@@ -257,10 +263,10 @@ impl MeshInstancedRenderer {
             multiview: None,
         });
 
-        let uniforms = SceneUniforms::default();
+        let uniforms = ScatterBatchUniforms::default();
         let uniforms_buf = device.create_buffer(&BufferDescriptor {
             label: Some("mesh_instanced_uniforms"),
-            size: std::mem::size_of::<SceneUniforms>() as u64,
+            size: std::mem::size_of::<ScatterBatchUniforms>() as u64,
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -316,7 +322,7 @@ impl MeshInstancedRenderer {
         for _ in 0..DRAW_BATCH_UNIFORM_SLOT_COUNT {
             let uniforms_buf = device.create_buffer(&BufferDescriptor {
                 label: Some("mesh_instanced_draw_uniforms"),
-                size: std::mem::size_of::<SceneUniforms>() as u64,
+                size: std::mem::size_of::<ScatterBatchUniforms>() as u64,
                 usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
@@ -556,6 +562,9 @@ impl MeshInstancedRenderer {
         color: [f32; 4],
         light_dir: [f32; 3],
         light_intensity: f32,
+        wind_phase: [f32; 4],
+        wind_vec_bounds: [f32; 4],
+        wind_bend_fade: [f32; 4],
         terrain_blend: [f32; 4],
         terrain_contact: [f32; 4],
         vbuf: &'rp Buffer,
@@ -589,6 +598,9 @@ impl MeshInstancedRenderer {
             light_dir[2],
             light_intensity.max(0.0),
         ];
+        u.wind_phase = wind_phase;
+        u.wind_vec_bounds = wind_vec_bounds;
+        u.wind_bend_fade = wind_bend_fade;
         u.terrain_blend = terrain_blend;
         u.terrain_contact = terrain_contact;
         queue.write_buffer(&self.per_draw_uniforms[slot], 0, bytemuck::bytes_of(&u));
@@ -820,6 +832,9 @@ mod tests {
                     color,
                     light_dir,
                     light_intensity,
+                    [0.0; 4],
+                    [0.0; 4],
+                    [0.0; 4],
                     [0.0, 0.75, 2.5, 0.0],
                     [0.0, 3.0, 0.35, 0.65],
                     per_draw_renderer.vbuf.as_ref().unwrap(),

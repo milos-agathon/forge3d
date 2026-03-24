@@ -3,9 +3,9 @@ use super::*;
 
 #[cfg(feature = "enable-gpu-instancing")]
 use crate::terrain::scatter::{
-    accumulate_frame_stats, summarize_memory, TerrainScatterBatch, TerrainScatterBlendConfig,
-    TerrainScatterContactConfig, TerrainScatterFrameStats, TerrainScatterLevelSpec,
-    TerrainScatterMemoryReport, pack_hlod_identity_instance,
+    accumulate_frame_stats, compute_wind_uniforms, pack_hlod_identity_instance, summarize_memory,
+    TerrainScatterBatch, TerrainScatterBlendConfig, TerrainScatterContactConfig,
+    TerrainScatterFrameStats, TerrainScatterLevelSpec, TerrainScatterMemoryReport,
 };
 
 #[cfg(feature = "enable-gpu-instancing")]
@@ -35,6 +35,7 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
     z_scale: f32,
     light_dir: [f32; 3],
     light_intensity: f32,
+    elapsed_time: f32,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     renderer: &mut crate::render::mesh_instanced::MeshInstancedRenderer,
@@ -112,10 +113,22 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
         )?;
         accumulate_frame_stats(&mut frame_stats, &batch_stats);
 
+        // Compute batch-constant wind fields
+        let base_wind = compute_wind_uniforms(
+            &batch.wind,
+            elapsed_time,
+            0.0, // placeholder, overridden per-draw
+            instance_scale,
+        );
+
         for draw in draws {
             let Some(instbuf) = batch.level_instbuf(draw.level_index) else {
                 continue;
             };
+            // Inject per-draw mesh_height_max
+            let mut wind = base_wind;
+            wind.wind_vec_bounds[3] = batch.level_mesh_height_max(draw.level_index);
+
             renderer.draw_batch_params(
                 device,
                 &mut pass,
@@ -125,6 +138,9 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
                 batch.color,
                 light_dir,
                 light_intensity,
+                wind.wind_phase,
+                wind.wind_vec_bounds,
+                wind.wind_bend_fade,
                 batch.terrain_blend.uniform(),
                 batch.terrain_contact.uniform(),
                 batch.level_vbuf(draw.level_index),
@@ -152,6 +168,9 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
                     batch.color,
                     light_dir,
                     light_intensity,
+                    [0.0; 4],
+                    [0.0; 4],
+                    [0.0; 4],
                     batch.terrain_blend.uniform(),
                     batch.terrain_contact.uniform(),
                     vbuf,
@@ -192,6 +211,7 @@ impl ViewerTerrainScene {
                 batch.color,
                 batch.max_draw_distance,
                 batch.name.clone(),
+                batch.wind.clone(),
                 batch.hlod_config.clone(),
                 TerrainScatterBlendConfig {
                     enabled: batch.terrain_blend.enabled,
@@ -210,6 +230,11 @@ impl ViewerTerrainScene {
         self.scatter_batches = gpu_batches;
         self.scatter_last_frame_stats = TerrainScatterFrameStats::default();
         Ok(())
+    }
+
+    /// Accumulate elapsed time for scatter wind animation.
+    pub fn tick_scatter_time(&mut self, dt: f32) {
+        self.scatter_elapsed_time += dt;
     }
 
     pub fn clear_scatter_batches(&mut self) {
@@ -255,6 +280,7 @@ impl ViewerTerrainScene {
             z_scale,
             light_dir,
             light_intensity,
+            self.scatter_elapsed_time,
             self.device.as_ref(),
             self.queue.as_ref(),
             &mut self.scatter_renderer,
@@ -267,7 +293,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn viewer_render_contract_is_identity() {
+    fn viewer_render_contract_is_identity_for_all_viewer_modes() {
         assert_eq!(viewer_render_from_contract(), glam::Mat4::IDENTITY);
     }
 }
