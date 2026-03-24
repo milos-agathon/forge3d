@@ -397,15 +397,19 @@ Instance `scale_range` affects wind displacement proportionally — a scatter in
 |------|--------|
 | `python/forge3d/terrain_scatter.py` | Add `ScatterWindSettings`, extend `TerrainScatterBatch` |
 | `python/forge3d/__init__.py` | Export `ScatterWindSettings` |
-| `python/forge3d/__init__.pyi` | Type stub for `ScatterWindSettings` |
-| `src/render/mesh_instanced.rs` | Rename `SceneUniforms` → `ScatterBatchUniforms`, add wind fields, extend `draw_batch_params` |
+| `python/forge3d/__init__.pyi` | Type stub for `ScatterWindSettings`; update `render_terrain_pbr_pom` / `render_with_aov` signatures for `time_seconds` |
+| `src/render/mesh_instanced.rs` | Rename `SceneUniforms` → `ScatterBatchUniforms`, add wind fields, extend `draw_batch_params`. **Note:** non-scatter callers (e.g. `src/scene/render_paths/png.rs`) must be updated to pass `[0.0; 4]` for the three new wind parameters. |
 | `src/shaders/mesh_instanced.wgsl` | Rename struct, add wind deformation to `vs_main` |
 | `src/terrain/scatter.rs` | Add `ScatterWindSettingsNative`, `ScatterWindUniforms`, `compute_wind_uniforms`, `mesh_height_max` on `GpuScatterLevel`, wind field on `TerrainScatterBatch` |
 | `src/terrain/renderer/scatter.rs` | Extend `ScatterRenderState` with `time_seconds`, call `compute_wind_uniforms`, pass wind to `draw_batch_params` |
 | `src/terrain/renderer/py_api.rs` | Parse `"wind"` dict from scatter batch, add `time_seconds` kwarg |
 | `src/viewer/terrain/scene/scatter.rs` | Call shared `compute_wind_uniforms`, pass `time_seconds` from frame loop |
-| `src/terrain/render_params/mod.rs` | Re-export `ScatterWindSettingsNative` if needed for cross-module access |
-| `tests/test_api_contracts.py` | Add `ScatterWindSettings` to contract surface |
+| `src/viewer/ipc/protocol/payloads.rs` | Add `wind` field to scatter batch IPC payload struct |
+| `src/viewer/viewer_enums/config.rs` | Add wind settings to viewer scatter config if scatter config struct exists there |
+| `src/viewer/ipc/protocol/translate/terrain.rs` | Parse `wind` from IPC scatter batch payload into native wind settings |
+| `src/scene/render_paths/png.rs` | Update `draw_batch_params` callsite to pass zero wind params |
+| `tests/test_terrain_scatter.py` | Add `ScatterWindSettings` default, validation, and serialization tests |
+| `tests/test_viewer_ipc.py` | Add wind field to viewer scatter IPC round-trip tests |
 
 ---
 
