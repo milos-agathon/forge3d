@@ -140,6 +140,7 @@ struct GpuScatterLevel {
     ibuf: wgpu::Buffer,
     index_count: u32,
     max_distance: f32,
+    mesh_height_max: f32,
     vertex_buffer_bytes: u64,
     index_buffer_bytes: u64,
     _vertex_handle: ResourceHandle,
@@ -245,6 +246,10 @@ impl TerrainScatterBatch {
 
     pub fn level_count(&self) -> usize {
         self.levels.len()
+    }
+
+    pub fn level_mesh_height_max(&self, level_index: usize) -> f32 {
+        self.levels[level_index].mesh_height_max
     }
 
     pub fn prepare_draws(
@@ -472,6 +477,20 @@ fn build_gpu_level(
         })
         .collect::<Vec<_>>();
 
+    let (y_min, y_max) = vertices.iter().fold(
+        (f32::INFINITY, f32::NEG_INFINITY),
+        |(mn, mx), v| (mn.min(v.position[1]), mx.max(v.position[1])),
+    );
+    let mesh_height_max = y_max;
+    let y_extent = y_max - y_min;
+    if y_extent > 1e-6 && y_min.abs() > 0.05 * y_extent {
+        eprintln!(
+            "[terrain.scatter] warning: mesh y_min={y_min:.3} deviates from zero \
+             by >{:.0}% of y_extent={y_extent:.3}; wind bend weighting may be incorrect",
+            (y_min.abs() / y_extent) * 100.0
+        );
+    }
+
     let vertex_buffer_bytes = (vertices.len() * std::mem::size_of::<VertexPN>()) as u64;
     let index_buffer_bytes = (mesh.indices.len() * std::mem::size_of::<u32>()) as u64;
 
@@ -505,6 +524,7 @@ fn build_gpu_level(
         ibuf,
         index_count: mesh.indices.len() as u32,
         max_distance: spec.max_distance.unwrap_or(f32::INFINITY),
+        mesh_height_max,
         vertex_buffer_bytes,
         index_buffer_bytes,
         _vertex_handle: vertex_handle,
@@ -803,5 +823,29 @@ mod tests {
         let tau = std::f32::consts::TAU;
         assert!((u.wind_phase[0] - 2.0 * tau).abs() < 1e-4); // time * speed * tau
         assert!((u.wind_phase[1] - 0.5 * tau).abs() < 1e-4); // time * gust_freq * tau
+    }
+
+    #[test]
+    fn mesh_height_max_uses_vertex_y_max() {
+        // Vertices: y values [0.0, 1.5, 3.0]
+        let positions = vec![[0.0, 0.0, 0.0], [1.0, 1.5, 0.0], [0.0, 3.0, 1.0]];
+        let y_max = positions.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max);
+        assert!((y_max - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn mesh_y_min_warning_threshold() {
+        // Mesh with y_min=0.5, y_max=3.0, extent=2.5 -> 0.5/2.5 = 20% > 5% -> should warn
+        let y_min = 0.5_f32;
+        let y_max = 3.0_f32;
+        let y_extent = y_max - y_min;
+        let deviates = y_extent > 1e-6 && y_min.abs() > 0.05 * y_extent;
+        assert!(deviates, "y_min=0.5 should trigger the >5% warning");
+
+        // Mesh with y_min=0.01, y_max=3.0, extent=2.99 -> 0.01/2.99 ~ 0.3% < 5% -> no warn
+        let y_min = 0.01_f32;
+        let y_extent = 3.0 - y_min;
+        let deviates = y_extent > 1e-6 && y_min.abs() > 0.05 * y_extent;
+        assert!(!deviates, "y_min=0.01 should not trigger warning");
     }
 }
