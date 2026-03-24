@@ -25,9 +25,17 @@ from forge3d.terrain_params import make_terrain_params_config
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _scatter_mesh() -> MeshBuffers:
-    """Use a cone primitive mesh — large enough to be visible at the test camera distance."""
-    return f3d.geometry.primitive_mesh("cone", radial_segments=10)
+def _scatter_mesh():
+    """Cone with y=0 at base (wind expects Y=0 base convention)."""
+    from forge3d.geometry import MeshBuffers
+    mesh = f3d.geometry.primitive_mesh("cone", radial_segments=10)
+    positions = mesh.positions.copy()
+    y_min = positions[:, 1].min()
+    positions[:, 1] -= y_min  # shift so base is at y=0
+    return MeshBuffers(
+        positions=positions, normals=mesh.normals,
+        uvs=mesh.uvs, indices=mesh.indices,
+    )
 
 
 def _make_heightmap() -> np.ndarray:

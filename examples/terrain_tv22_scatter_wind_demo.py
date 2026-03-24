@@ -143,9 +143,19 @@ def _build_scatter_batches(
     source = ts.TerrainScatterSource(heightmap, z_scale=z_scale)
     elevation_span = max(source.max_height - source.min_height, 1e-6)
 
-    # Simple tree mesh: cone with y=0 base, height ~2-3 units.
-    tree_hi = f3d.geometry.primitive_mesh("cone", radial_segments=12)
-    tree_lo = f3d.geometry.primitive_mesh("box")
+    # Tree meshes shifted so y=0 is the base (wind expects Y=0 base convention).
+    from forge3d.geometry import MeshBuffers
+
+    def _shift_base(mesh: MeshBuffers) -> MeshBuffers:
+        positions = mesh.positions.copy()
+        positions[:, 1] -= positions[:, 1].min()
+        return MeshBuffers(
+            positions=positions, normals=mesh.normals,
+            uvs=mesh.uvs, indices=mesh.indices,
+        )
+
+    tree_hi = _shift_base(f3d.geometry.primitive_mesh("cone", radial_segments=12))
+    tree_lo = _shift_base(f3d.geometry.primitive_mesh("box"))
 
     terrain_width = float(source.terrain_width)
     near_dist = terrain_width * 0.45
@@ -172,7 +182,7 @@ def _build_scatter_batches(
     # Wind settings for the vegetation batch.
     wind = ts.ScatterWindSettings(
         enabled=True,
-        amplitude=1.5,
+        amplitude=3.0,
         speed=0.8,
         rigidity=0.3,
         gust_strength=0.5,
@@ -214,7 +224,7 @@ def _build_params(
         size_px=(width, height),
         render_scale=1.0,
         terrain_span=terrain_span,
-        msaa_samples=4,
+        msaa_samples=1,
         z_scale=z_scale,
         exposure=1.0,
         domain=domain,
@@ -224,7 +234,7 @@ def _build_params(
         light_azimuth_deg=138.0,
         light_elevation_deg=28.0,
         sun_intensity=2.4,
-        cam_radius=max(terrain_span * 1.9, 5.0),
+        cam_radius=max(terrain_span * 1.2, 5.0),
         cam_phi_deg=146.0,
         cam_theta_deg=58.0,
         fov_y_deg=50.0,
@@ -340,7 +350,7 @@ def main() -> int:
     print(f"Effective DEM size: {heightmap.shape[1]}x{heightmap.shape[0]}")
     print(f"Terrain span: {terrain_span:.2f}")
     print(f"Z scale: {z_scale:.4f}")
-    print(f"Wind settings: amplitude=1.5, speed=0.8, rigidity=0.3, "
+    print(f"Wind settings: amplitude=3.0, speed=0.8, rigidity=0.3, "
           f"gust_strength=0.5, gust_frequency=0.3")
     print(f"Rendering {len(TIME_STEPS)} frames at time_seconds = {TIME_STEPS}")
     print()
