@@ -328,6 +328,57 @@ class TestBatchSerialization:
         assert viewer.calls[0][0] == "set"
         assert viewer.calls[1] == ("clear", None)
 
+    def test_batch_default_wind_is_disabled(self):
+        batch = TerrainScatterBatch(
+            levels=[TerrainScatterLevel(mesh=_simple_mesh())],
+            transforms=np.eye(4, dtype=np.float32).reshape(1, 16),
+        )
+        assert batch.wind.enabled is False
+        assert batch.wind.amplitude == 0.0
+
+    def test_batch_with_explicit_wind(self):
+        wind = ts.ScatterWindSettings(enabled=True, amplitude=1.5, rigidity=0.3)
+        batch = TerrainScatterBatch(
+            levels=[TerrainScatterLevel(mesh=_simple_mesh())],
+            transforms=np.eye(4, dtype=np.float32).reshape(1, 16),
+            wind=wind,
+        )
+        assert batch.wind.enabled is True
+        assert batch.wind.amplitude == 1.5
+
+    def test_native_dict_includes_wind(self):
+        wind = ts.ScatterWindSettings(enabled=True, amplitude=2.0, direction_deg=45.0)
+        batch = TerrainScatterBatch(
+            levels=[TerrainScatterLevel(mesh=_simple_mesh())],
+            transforms=np.eye(4, dtype=np.float32).reshape(1, 16),
+            wind=wind,
+        )
+        d = batch.to_native_dict()
+        assert "wind" in d
+        assert d["wind"]["enabled"] is True
+        assert d["wind"]["amplitude"] == 2.0
+        assert d["wind"]["direction_deg"] == 45.0
+
+    def test_viewer_payload_includes_wind(self):
+        wind = ts.ScatterWindSettings(enabled=True, amplitude=1.0)
+        batch = TerrainScatterBatch(
+            levels=[TerrainScatterLevel(mesh=_simple_mesh())],
+            transforms=np.eye(4, dtype=np.float32).reshape(1, 16),
+            wind=wind,
+        )
+        p = batch.to_viewer_payload()
+        assert "wind" in p
+        assert p["wind"]["enabled"] is True
+
+    def test_disabled_wind_still_serializes(self):
+        batch = TerrainScatterBatch(
+            levels=[TerrainScatterLevel(mesh=_simple_mesh())],
+            transforms=np.eye(4, dtype=np.float32).reshape(1, 16),
+        )
+        d = batch.to_native_dict()
+        assert "wind" in d
+        assert d["wind"]["enabled"] is False
+
 
 _TERRAIN_RUNTIME_AVAILABLE = terrain_rendering_available()
 

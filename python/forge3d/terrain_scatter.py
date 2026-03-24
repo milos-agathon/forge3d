@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence
 
 import numpy as np
@@ -255,6 +255,7 @@ class TerrainScatterBatch:
     name: str | None = None
     color: Sequence[float] = (0.85, 0.85, 0.85, 1.0)
     max_draw_distance: float | None = None
+    wind: ScatterWindSettings = field(default_factory=ScatterWindSettings)
 
     def __post_init__(self) -> None:
         if not self.levels:
@@ -275,6 +276,21 @@ class TerrainScatterBatch:
     def instance_count(self) -> int:
         return int(self.transforms.shape[0])
 
+    def _wind_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.wind.enabled,
+            "direction_deg": self.wind.direction_deg,
+            "speed": self.wind.speed,
+            "amplitude": self.wind.amplitude,
+            "rigidity": self.wind.rigidity,
+            "bend_start": self.wind.bend_start,
+            "bend_extent": self.wind.bend_extent,
+            "gust_strength": self.wind.gust_strength,
+            "gust_frequency": self.wind.gust_frequency,
+            "fade_start": self.wind.fade_start,
+            "fade_end": self.wind.fade_end,
+        }
+
     def to_native_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
@@ -288,6 +304,7 @@ class TerrainScatterBatch:
                 }
                 for level in self.levels
             ],
+            "wind": self._wind_dict(),
         }
 
     def to_viewer_payload(self) -> dict[str, Any]:
@@ -311,6 +328,7 @@ class TerrainScatterBatch:
             "max_draw_distance": self.max_draw_distance,
             "transforms": self.transforms.tolist(),
             "levels": levels,
+            "wind": self._wind_dict(),
         }
 
 
