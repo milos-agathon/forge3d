@@ -62,6 +62,63 @@ pub struct ScatterWindSettingsNative {
     pub fade_end: f32,
 }
 
+impl ScatterWindSettingsNative {
+    /// Validate wind settings, returning an error description on failure.
+    /// Called at the native parse boundary (py_api, viewer IPC) so raw
+    /// dict/JSON payloads cannot inject invalid values into shader math.
+    pub fn validate(&self) -> Result<()> {
+        if !self.enabled {
+            return Ok(()); // disabled wind skips all checks
+        }
+        macro_rules! check_finite {
+            ($field:ident) => {
+                if !self.$field.is_finite() {
+                    return Err(anyhow!("wind {}: must be finite", stringify!($field)));
+                }
+            };
+        }
+        check_finite!(direction_deg);
+        check_finite!(speed);
+        check_finite!(amplitude);
+        check_finite!(rigidity);
+        check_finite!(bend_start);
+        check_finite!(bend_extent);
+        check_finite!(gust_strength);
+        check_finite!(gust_frequency);
+        check_finite!(fade_start);
+        check_finite!(fade_end);
+
+        if self.speed < 0.0 {
+            return Err(anyhow!("wind speed must be >= 0"));
+        }
+        if self.amplitude < 0.0 {
+            return Err(anyhow!("wind amplitude must be >= 0"));
+        }
+        if !(0.0..=1.0).contains(&self.rigidity) {
+            return Err(anyhow!("wind rigidity must be in [0, 1]"));
+        }
+        if !(0.0..=1.0).contains(&self.bend_start) {
+            return Err(anyhow!("wind bend_start must be in [0, 1]"));
+        }
+        if self.bend_extent <= 0.0 {
+            return Err(anyhow!("wind bend_extent must be > 0"));
+        }
+        if self.gust_strength < 0.0 {
+            return Err(anyhow!("wind gust_strength must be >= 0"));
+        }
+        if self.gust_frequency < 0.0 {
+            return Err(anyhow!("wind gust_frequency must be >= 0"));
+        }
+        if self.fade_start < 0.0 {
+            return Err(anyhow!("wind fade_start must be >= 0"));
+        }
+        if self.fade_end < 0.0 {
+            return Err(anyhow!("wind fade_end must be >= 0"));
+        }
+        Ok(())
+    }
+}
+
 impl Default for ScatterWindSettingsNative {
     fn default() -> Self {
         Self {
@@ -823,6 +880,37 @@ mod tests {
         let tau = std::f32::consts::TAU;
         assert!((u.wind_phase[0] - 2.0 * tau).abs() < 1e-4); // time * speed * tau
         assert!((u.wind_phase[1] - 0.5 * tau).abs() < 1e-4); // time * gust_freq * tau
+    }
+
+    #[test]
+    fn validate_rejects_out_of_range_wind() {
+        let mut wind = ScatterWindSettingsNative {
+            enabled: true,
+            amplitude: 1.0,
+            ..Default::default()
+        };
+        assert!(wind.validate().is_ok());
+
+        wind.rigidity = 1.5;
+        assert!(wind.validate().is_err());
+        wind.rigidity = 0.5;
+
+        wind.bend_extent = 0.0;
+        assert!(wind.validate().is_err());
+        wind.bend_extent = 1.0;
+
+        wind.speed = -1.0;
+        assert!(wind.validate().is_err());
+        wind.speed = 1.0;
+
+        wind.amplitude = f32::INFINITY;
+        assert!(wind.validate().is_err());
+        wind.amplitude = 1.0;
+
+        // Disabled wind skips validation
+        wind.rigidity = 99.0;
+        wind.enabled = false;
+        assert!(wind.validate().is_ok());
     }
 
     #[test]

@@ -290,6 +290,10 @@ class TerrainScatterBatch:
         _validate_lod_distances(self.levels)
         if self.transforms.shape[0] == 0:
             raise ValueError("TerrainScatterBatch requires at least one transform")
+        if not isinstance(self.wind, ScatterWindSettings):
+            raise TypeError(
+                f"wind must be a ScatterWindSettings instance, got {type(self.wind).__name__}"
+            )
 
     @property
     def instance_count(self) -> int:

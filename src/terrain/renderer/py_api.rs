@@ -302,6 +302,9 @@ impl TerrainRenderer {
                 }
                 None => crate::terrain::scatter::ScatterWindSettingsNative::default(),
             };
+            wind.validate().map_err(|e| {
+                PyRuntimeError::new_err(format!("batch {batch_index}: {e}"))
+            })?;
 
             native_batches.push(super::scatter::TerrainScatterUploadBatch {
                 name,

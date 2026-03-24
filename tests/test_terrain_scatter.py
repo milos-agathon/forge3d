@@ -633,3 +633,17 @@ class TestScatterWindSettings:
             ts.ScatterWindSettings(direction_deg=float("-inf"))
         with pytest.raises(ValueError, match="finite"):
             ts.ScatterWindSettings(fade_start=float("nan"))
+
+    def test_batch_rejects_invalid_wind_type(self):
+        with pytest.raises(TypeError, match="ScatterWindSettings"):
+            TerrainScatterBatch(
+                levels=[TerrainScatterLevel(mesh=_simple_mesh())],
+                transforms=np.eye(4, dtype=np.float32).reshape(1, 16),
+                wind=None,
+            )
+        with pytest.raises(TypeError, match="ScatterWindSettings"):
+            TerrainScatterBatch(
+                levels=[TerrainScatterLevel(mesh=_simple_mesh())],
+                transforms=np.eye(4, dtype=np.float32).reshape(1, 16),
+                wind={"enabled": True, "amplitude": 1.0},
+            )

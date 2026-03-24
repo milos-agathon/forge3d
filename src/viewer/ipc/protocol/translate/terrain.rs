@@ -273,7 +273,7 @@ fn map_terrain_scatter_batch(config: &IpcTerrainScatterBatch) -> ViewerTerrainSc
 
 #[cfg(feature = "enable-gpu-instancing")]
 fn map_scatter_wind(w: &IpcScatterWind) -> crate::terrain::scatter::ScatterWindSettingsNative {
-    crate::terrain::scatter::ScatterWindSettingsNative {
+    let settings = crate::terrain::scatter::ScatterWindSettingsNative {
         enabled: w.enabled,
         direction_deg: w.direction_deg,
         speed: w.speed,
@@ -285,7 +285,12 @@ fn map_scatter_wind(w: &IpcScatterWind) -> crate::terrain::scatter::ScatterWindS
         gust_frequency: w.gust_frequency,
         fade_start: w.fade_start,
         fade_end: w.fade_end,
+    };
+    if let Err(e) = settings.validate() {
+        eprintln!("[viewer.ipc] invalid scatter wind settings, using defaults: {e}");
+        return crate::terrain::scatter::ScatterWindSettingsNative::default();
     }
+    settings
 }
 
 fn map_terrain_scatter_level(config: &IpcTerrainScatterLevel) -> ViewerTerrainScatterLevelConfig {
