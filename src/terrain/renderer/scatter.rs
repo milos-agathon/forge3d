@@ -5,8 +5,9 @@ use super::*;
 use crate::terrain::renderer::core::TERRAIN_DEPTH_FORMAT;
 
 use crate::terrain::scatter::{
-    accumulate_frame_stats, summarize_memory, ScatterWindSettingsNative, TerrainScatterBatch,
-    TerrainScatterFrameStats, TerrainScatterLevelSpec, TerrainScatterMemoryReport,
+    accumulate_frame_stats, compute_wind_uniforms, summarize_memory, ScatterWindSettingsNative,
+    TerrainScatterBatch, TerrainScatterFrameStats, TerrainScatterLevelSpec,
+    TerrainScatterMemoryReport,
 };
 
 pub(super) struct ScatterRenderState {
@@ -17,6 +18,7 @@ pub(super) struct ScatterRenderState {
     pub(super) instance_scale: f32,
     pub(super) light_dir: [f32; 3],
     pub(super) light_intensity: f32,
+    pub(super) time_seconds: f32,
 }
 
 pub(super) struct TerrainScatterUploadBatch {
@@ -74,6 +76,7 @@ impl TerrainScene {
         view: glam::Mat4,
         proj: glam::Mat4,
         eye_render: glam::Vec3,
+        time_seconds: f32,
     ) -> ScatterRenderState {
         let terrain_width = heightmap_width.max(heightmap_height).max(1) as f32;
         let terrain_span = params.terrain_span.max(1e-3);
@@ -113,6 +116,7 @@ impl TerrainScene {
             instance_scale: scale_xy,
             light_dir: decoded.light.direction,
             light_intensity: decoded.light.intensity,
+            time_seconds,
         }
     }
 
@@ -177,10 +181,22 @@ impl TerrainScene {
             )?;
             accumulate_frame_stats(&mut frame_stats, &batch_stats);
 
+            // Compute batch-constant wind fields
+            let base_wind = compute_wind_uniforms(
+                &batch.wind,
+                state.time_seconds,
+                0.0, // placeholder, overridden per-draw
+                state.instance_scale,
+            );
+
             for draw in draws {
                 let Some(instbuf) = batch.level_instbuf(draw.level_index) else {
                     continue;
                 };
+                // Inject per-draw mesh_height_max
+                let mut wind = base_wind;
+                wind.wind_vec_bounds[3] = batch.level_mesh_height_max(draw.level_index);
+
                 renderer.draw_batch_params(
                     device,
                     &mut pass,
@@ -190,9 +206,9 @@ impl TerrainScene {
                     batch.color,
                     state.light_dir,
                     state.light_intensity,
-                    [0.0; 4],
-                    [0.0; 4],
-                    [0.0; 4],
+                    wind.wind_phase,
+                    wind.wind_vec_bounds,
+                    wind.wind_bend_fade,
                     batch.level_vbuf(draw.level_index),
                     batch.level_ibuf(draw.level_index),
                     instbuf,
