@@ -176,6 +176,8 @@ class TestPresetConfigurations:
                 snow_enabled=True,
                 snow_altitude_min=2500.0,
                 snow_altitude_blend=300.0,
+                snow_subsurface_strength=0.35,
+                snow_subsurface_tint=(0.78, 0.88, 0.98),
                 rock_enabled=True,
                 rock_slope_min=40.0,
             ),
