@@ -131,6 +131,7 @@ impl ViewerTerrainScene {
                 batch.color,
                 batch.max_draw_distance,
                 batch.name.clone(),
+                crate::terrain::scatter::ScatterWindSettingsNative::default(),
             )?);
         }
 

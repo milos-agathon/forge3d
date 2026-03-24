@@ -47,6 +47,88 @@ impl TerrainScatterMemoryReport {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct ScatterWindSettingsNative {
+    pub enabled: bool,
+    pub direction_deg: f32,
+    pub speed: f32,
+    pub amplitude: f32,
+    pub rigidity: f32,
+    pub bend_start: f32,
+    pub bend_extent: f32,
+    pub gust_strength: f32,
+    pub gust_frequency: f32,
+    pub fade_start: f32,
+    pub fade_end: f32,
+}
+
+impl Default for ScatterWindSettingsNative {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            direction_deg: 0.0,
+            speed: 1.0,
+            amplitude: 0.0,
+            rigidity: 0.5,
+            bend_start: 0.0,
+            bend_extent: 1.0,
+            gust_strength: 0.0,
+            gust_frequency: 0.3,
+            fade_start: 0.0,
+            fade_end: 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ScatterWindUniforms {
+    pub wind_phase: [f32; 4],
+    pub wind_vec_bounds: [f32; 4],
+    pub wind_bend_fade: [f32; 4],
+}
+
+/// Compute shader-ready wind uniform fields.
+///
+/// Returns all-zero fields when `wind.enabled` is false or `wind.amplitude` is zero.
+/// `mesh_height_max` is per-draw (per LOD level), injected by the caller.
+/// `instance_scale` is used only for fade distance conversion.
+pub fn compute_wind_uniforms(
+    wind: &ScatterWindSettingsNative,
+    time_seconds: f32,
+    mesh_height_max: f32,
+    instance_scale: f32,
+) -> ScatterWindUniforms {
+    if !wind.enabled || wind.amplitude <= 0.0 {
+        return ScatterWindUniforms::default();
+    }
+
+    let tau = std::f32::consts::TAU;
+    let az = wind.direction_deg.to_radians();
+    let dir_x = az.cos();
+    let dir_z = az.sin();
+
+    ScatterWindUniforms {
+        wind_phase: [
+            time_seconds * wind.speed * tau,         // temporal_phase
+            time_seconds * wind.gust_frequency * tau, // gust_phase
+            wind.gust_strength,                       // gust_strength (contract units)
+            wind.rigidity,                            // rigidity [0,1]
+        ],
+        wind_vec_bounds: [
+            dir_x * wind.amplitude,  // wind_dir.x * amplitude
+            0.0,                     // wind_dir.y (zero, XZ ground plane)
+            dir_z * wind.amplitude,  // wind_dir.z * amplitude
+            mesh_height_max,         // per-draw mesh height
+        ],
+        wind_bend_fade: [
+            wind.bend_start,                      // bend_start [0,1]
+            wind.bend_extent,                     // bend_extent (> 0)
+            wind.fade_start * instance_scale,     // fade_start (approx render-space)
+            wind.fade_end * instance_scale,       // fade_end (approx render-space)
+        ],
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PreparedScatterDraw {
     pub level_index: usize,
@@ -75,6 +157,7 @@ pub struct TerrainScatterBatch {
     pub name: Option<String>,
     pub color: [f32; 4],
     pub max_draw_distance: f32,
+    pub wind: ScatterWindSettingsNative,
     levels: Vec<GpuScatterLevel>,
     transforms_rowmajor: Vec<[f32; 16]>,
     positions: Vec<[f32; 3]>,
@@ -91,6 +174,7 @@ impl TerrainScatterBatch {
         color: [f32; 4],
         max_draw_distance: Option<f32>,
         name: Option<String>,
+        wind: ScatterWindSettingsNative,
     ) -> Result<Self> {
         if levels.is_empty() {
             return Err(anyhow!("terrain scatter requires at least one LOD level"));
@@ -114,6 +198,7 @@ impl TerrainScatterBatch {
             name,
             color,
             max_draw_distance,
+            wind,
             levels: gpu_levels,
             transforms_rowmajor: transforms_rowmajor.to_vec(),
             positions: extract_positions(transforms_rowmajor),
@@ -656,5 +741,67 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("positive finite"));
+    }
+
+    #[test]
+    fn compute_wind_disabled_returns_zeros() {
+        let wind = ScatterWindSettingsNative::default();
+        let u = compute_wind_uniforms(&wind, 1.0, 10.0, 1.0);
+        assert_eq!(u.wind_phase, [0.0; 4]);
+        assert_eq!(u.wind_vec_bounds, [0.0; 4]);
+        assert_eq!(u.wind_bend_fade, [0.0; 4]);
+    }
+
+    #[test]
+    fn compute_wind_zero_amplitude_returns_zeros() {
+        let wind = ScatterWindSettingsNative { enabled: true, amplitude: 0.0, ..Default::default() };
+        let u = compute_wind_uniforms(&wind, 1.0, 10.0, 1.0);
+        assert_eq!(u.wind_vec_bounds[0], 0.0);
+        assert_eq!(u.wind_vec_bounds[2], 0.0);
+    }
+
+    #[test]
+    fn compute_wind_direction_and_amplitude() {
+        let wind = ScatterWindSettingsNative {
+            enabled: true,
+            direction_deg: 0.0,  // +X direction
+            amplitude: 3.0,
+            ..Default::default()
+        };
+        let u = compute_wind_uniforms(&wind, 0.0, 5.0, 2.0);
+        // direction = (cos(0), 0, sin(0)) * 3.0 = (3.0, 0, 0)
+        assert!((u.wind_vec_bounds[0] - 3.0).abs() < 1e-6);
+        assert!((u.wind_vec_bounds[1]).abs() < 1e-6);
+        assert!((u.wind_vec_bounds[2]).abs() < 1e-6);
+        assert!((u.wind_vec_bounds[3] - 5.0).abs() < 1e-6); // mesh_height_max
+    }
+
+    #[test]
+    fn compute_wind_fade_scales_by_instance_scale() {
+        let wind = ScatterWindSettingsNative {
+            enabled: true,
+            amplitude: 1.0,
+            fade_start: 10.0,
+            fade_end: 20.0,
+            ..Default::default()
+        };
+        let u = compute_wind_uniforms(&wind, 0.0, 1.0, 3.0);
+        assert!((u.wind_bend_fade[2] - 30.0).abs() < 1e-6); // 10 * 3
+        assert!((u.wind_bend_fade[3] - 60.0).abs() < 1e-6); // 20 * 3
+    }
+
+    #[test]
+    fn compute_wind_phase_folds_speed() {
+        let wind = ScatterWindSettingsNative {
+            enabled: true,
+            amplitude: 1.0,
+            speed: 2.0,
+            gust_frequency: 0.5,
+            ..Default::default()
+        };
+        let u = compute_wind_uniforms(&wind, 1.0, 1.0, 1.0);
+        let tau = std::f32::consts::TAU;
+        assert!((u.wind_phase[0] - 2.0 * tau).abs() < 1e-4); // time * speed * tau
+        assert!((u.wind_phase[1] - 0.5 * tau).abs() < 1e-4); // time * gust_freq * tau
     }
 }

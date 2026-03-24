@@ -5,8 +5,8 @@ use super::*;
 use crate::terrain::renderer::core::TERRAIN_DEPTH_FORMAT;
 
 use crate::terrain::scatter::{
-    accumulate_frame_stats, summarize_memory, TerrainScatterBatch, TerrainScatterFrameStats,
-    TerrainScatterLevelSpec, TerrainScatterMemoryReport,
+    accumulate_frame_stats, summarize_memory, ScatterWindSettingsNative, TerrainScatterBatch,
+    TerrainScatterFrameStats, TerrainScatterLevelSpec, TerrainScatterMemoryReport,
 };
 
 pub(super) struct ScatterRenderState {
@@ -25,6 +25,7 @@ pub(super) struct TerrainScatterUploadBatch {
     pub(super) max_draw_distance: Option<f32>,
     pub(super) transforms_rowmajor: Vec<[f32; 16]>,
     pub(super) levels: Vec<TerrainScatterLevelSpec>,
+    pub(super) wind: ScatterWindSettingsNative,
 }
 
 impl TerrainScene {
@@ -42,6 +43,7 @@ impl TerrainScene {
                 batch.color,
                 batch.max_draw_distance,
                 batch.name,
+                batch.wind,
             )?);
         }
 

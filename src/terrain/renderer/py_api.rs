@@ -256,6 +256,7 @@ impl TerrainRenderer {
                 max_draw_distance,
                 transforms_rowmajor: transforms,
                 levels,
+                wind: crate::terrain::scatter::ScatterWindSettingsNative::default(),
             });
         }
 
