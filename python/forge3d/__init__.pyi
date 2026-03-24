@@ -905,6 +905,7 @@ class LabelStyle:
 
 # Interactive viewer wrapper
 from . import terrain_scatter
+from .terrain_scatter import ScatterWindSettings
 from .viewer import ViewerError, ViewerHandle, open_viewer, open_viewer_async, set_msaa
 
 # Bundled datasets and fetch helpers
