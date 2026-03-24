@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 
 import numpy as np
 import pytest
@@ -78,6 +79,11 @@ def _create_test_hdr(path: str, width: int = 8, height: int = 4) -> None:
                 )
 
 
+def _write_heightmap_tiff(path: str, heightmap: np.ndarray) -> None:
+    pillow = pytest.importorskip("PIL.Image")
+    pillow.fromarray(np.ascontiguousarray(heightmap, dtype=np.float32)).save(path, format="TIFF")
+
+
 def _render_frame(renderer, material_set, ibl, params, heightmap, batches, time_seconds=0.0):
     """Apply scatter batches and render one frame, returning numpy array."""
     ts.apply_to_renderer(renderer, batches)
@@ -85,6 +91,17 @@ def _render_frame(renderer, material_set, ibl, params, heightmap, batches, time_
         material_set, ibl, params, heightmap, time_seconds=time_seconds,
     )
     return frame.to_numpy()
+
+
+def _render_frame_with_aov(
+    renderer, material_set, ibl, params, heightmap, batches, time_seconds=0.0,
+):
+    """Apply scatter batches and render one beauty + AOV frame."""
+    ts.apply_to_renderer(renderer, batches)
+    frame, aov_frame = renderer.render_with_aov(
+        material_set, ibl, params, heightmap, time_seconds=time_seconds,
+    )
+    return frame.to_numpy(), aov_frame
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +314,34 @@ class TestWindAnimation:
         f_yes = _render_frame(renderer, ms, ibl, params, hm, [batch_gust], time_seconds=0.5)
         assert not np.array_equal(f_no, f_yes), "gust should affect output"
 
+    def test_render_with_aov_uses_time_seconds(self, gpu) -> None:
+        renderer, ms, ibl, params, hm = gpu
+        source = _make_scatter_source()
+        transforms = _place_instances(source)
+        batch = ts.TerrainScatterBatch(
+            levels=[ts.TerrainScatterLevel(mesh=_scatter_mesh())],
+            transforms=transforms,
+            wind=ts.ScatterWindSettings(
+                enabled=True,
+                amplitude=2.0,
+                speed=1.0,
+                gust_strength=0.75,
+            ),
+        )
+
+        beauty_0, aov_0 = _render_frame_with_aov(
+            renderer, ms, ibl, params, hm, [batch], time_seconds=0.0,
+        )
+        beauty_1, aov_1 = _render_frame_with_aov(
+            renderer, ms, ibl, params, hm, [batch], time_seconds=0.37,
+        )
+
+        assert not np.array_equal(
+            beauty_0,
+            beauty_1,
+        ), "AOV beauty output should animate with time_seconds"
+        assert aov_0.normal().shape == aov_1.normal().shape == (160, 256, 3)
+
 
 # ---------------------------------------------------------------------------
 # TestWindFade
@@ -350,3 +395,98 @@ class TestWindFade:
             f_faded,
             err_msg="wind should be fully suppressed beyond fade_end",
         )
+
+
+@pytest.mark.interactive_viewer
+@pytest.mark.skipif(
+    os.environ.get("RUN_INTERACTIVE_VIEWER_CI") != "1",
+    reason="interactive viewer wind regression is opt-in",
+)
+def test_viewer_wind_uses_viewer_time_and_camera_updates(tmp_path) -> None:
+    if not hasattr(f3d, "open_viewer_async"):
+        pytest.skip("viewer IPC API unavailable")
+
+    heightmap = _make_heightmap()
+    source = ts.TerrainScatterSource(heightmap, z_scale=1.4)
+    terrain_width = source.terrain_width
+    hero_specs = [
+        (terrain_width * 0.35, terrain_width * 0.42, 8.0),
+        (terrain_width * 0.48, terrain_width * 0.50, 9.0),
+        (terrain_width * 0.62, terrain_width * 0.44, 7.5),
+    ]
+    transforms = []
+    for x, z, scale in hero_specs:
+        row, col = source.contract_to_pixel(x, z)
+        y = source.sample_scaled_height(row, col)
+        transforms.append(ts.make_transform_row_major((x, y, z), scale=scale))
+    batch = ts.TerrainScatterBatch(
+        name="viewer_wind",
+        color=(0.22, 0.62, 0.28, 1.0),
+        max_draw_distance=220.0,
+        transforms=np.ascontiguousarray(np.vstack(transforms).astype(np.float32)),
+        levels=[ts.TerrainScatterLevel(mesh=_scatter_mesh(), max_distance=220.0)],
+        wind=ts.ScatterWindSettings(
+            enabled=True,
+            amplitude=5.0,
+            speed=1.2,
+            rigidity=0.2,
+            gust_strength=0.8,
+            fade_end=220.0,
+        ),
+    )
+
+    dem_path = tmp_path / "viewer_wind_dem.tif"
+    snap_a = tmp_path / "viewer_wind_t0.png"
+    snap_b = tmp_path / "viewer_wind_t1.png"
+    snap_c = tmp_path / "viewer_wind_camera.png"
+    _write_heightmap_tiff(str(dem_path), heightmap)
+
+    try:
+        with f3d.open_viewer_async(
+            width=640,
+            height=400,
+            title="Forge3D Scatter Wind Viewer Test",
+            terrain_path=str(dem_path),
+            timeout=60.0,
+        ) as viewer:
+            viewer.set_z_scale(1.4)
+            viewer.set_orbit_camera(
+                phi_deg=146.0,
+                theta_deg=58.0,
+                radius=ts.viewer_orbit_radius(source, scale=1.4),
+                fov_deg=50.0,
+            )
+            viewer.send_ipc(
+                {
+                    "cmd": "set_terrain_sun",
+                    "azimuth_deg": 138.0,
+                    "elevation_deg": 28.0,
+                    "intensity": 2.4,
+                }
+            )
+            ts.apply_to_viewer(viewer, [batch])
+            time.sleep(0.35)
+            viewer.snapshot(str(snap_a), width=640, height=400)
+            time.sleep(0.45)
+            viewer.snapshot(str(snap_b), width=640, height=400)
+            viewer.set_orbit_camera(
+                phi_deg=162.0,
+                theta_deg=52.0,
+                radius=ts.viewer_orbit_radius(source, scale=1.25),
+                fov_deg=50.0,
+            )
+            time.sleep(0.15)
+            viewer.snapshot(str(snap_c), width=640, height=400)
+    except FileNotFoundError:
+        pytest.skip("interactive_viewer binary not found")
+
+    pillow = pytest.importorskip("PIL.Image")
+    frame_a = np.asarray(pillow.open(snap_a))
+    frame_b = np.asarray(pillow.open(snap_b))
+    frame_c = np.asarray(pillow.open(snap_c))
+
+    changed_time = np.count_nonzero(np.any(frame_a != frame_b, axis=-1))
+    changed_camera = np.count_nonzero(np.any(frame_b != frame_c, axis=-1))
+
+    assert changed_time > 40, "viewer wind should animate over wall-clock time"
+    assert changed_camera > 250, "viewer wind path should remain live while camera changes"

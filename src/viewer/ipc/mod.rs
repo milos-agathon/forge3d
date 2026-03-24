@@ -114,6 +114,89 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "enable-gpu-instancing")]
+    #[test]
+    fn test_parse_set_terrain_scatter_preserves_valid_wind() {
+        let json = r#"{
+            "cmd":"set_terrain_scatter",
+            "batches":[
+                {
+                    "name":"trees",
+                    "transforms":[[1.0,0.0,0.0,3.0,0.0,1.0,0.0,4.0,0.0,0.0,1.0,5.0,0.0,0.0,0.0,1.0]],
+                    "levels":[
+                        {
+                            "positions":[[0.0,0.0,0.0],[1.0,0.0,0.0],[0.0,1.0,0.0]],
+                            "normals":[[0.0,1.0,0.0],[0.0,1.0,0.0],[0.0,1.0,0.0]],
+                            "indices":[0,1,2]
+                        }
+                    ],
+                    "wind":{
+                        "enabled":true,
+                        "direction_deg":45.0,
+                        "speed":1.25,
+                        "amplitude":2.0,
+                        "rigidity":0.3,
+                        "bend_start":0.2,
+                        "bend_extent":0.8,
+                        "gust_strength":0.5,
+                        "gust_frequency":0.4,
+                        "fade_start":20.0,
+                        "fade_end":80.0
+                    }
+                }
+            ]
+        }"#;
+        let req = parse_ipc_request(json).unwrap();
+        let cmd = ipc_request_to_viewer_cmd(&req).unwrap().unwrap();
+        match cmd {
+            crate::viewer::viewer_enums::ViewerCmd::SetTerrainScatter { batches } => {
+                assert_eq!(batches.len(), 1);
+                assert!(batches[0].wind.enabled);
+                assert_eq!(batches[0].wind.direction_deg, 45.0);
+                assert_eq!(batches[0].wind.speed, 1.25);
+                assert_eq!(batches[0].wind.amplitude, 2.0);
+                assert_eq!(batches[0].wind.rigidity, 0.3);
+                assert_eq!(batches[0].wind.bend_start, 0.2);
+                assert_eq!(batches[0].wind.bend_extent, 0.8);
+                assert_eq!(batches[0].wind.gust_strength, 0.5);
+                assert_eq!(batches[0].wind.gust_frequency, 0.4);
+                assert_eq!(batches[0].wind.fade_start, 20.0);
+                assert_eq!(batches[0].wind.fade_end, 80.0);
+            }
+            _ => panic!("Expected ViewerCmd::SetTerrainScatter"),
+        }
+    }
+
+    #[cfg(feature = "enable-gpu-instancing")]
+    #[test]
+    fn test_parse_set_terrain_scatter_rejects_invalid_wind() {
+        let json = r#"{
+            "cmd":"set_terrain_scatter",
+            "batches":[
+                {
+                    "name":"trees",
+                    "transforms":[[1.0,0.0,0.0,3.0,0.0,1.0,0.0,4.0,0.0,0.0,1.0,5.0,0.0,0.0,0.0,1.0]],
+                    "levels":[
+                        {
+                            "positions":[[0.0,0.0,0.0],[1.0,0.0,0.0],[0.0,1.0,0.0]],
+                            "normals":[[0.0,1.0,0.0],[0.0,1.0,0.0],[0.0,1.0,0.0]],
+                            "indices":[0,1,2]
+                        }
+                    ],
+                    "wind":{
+                        "enabled":true,
+                        "amplitude":2.0,
+                        "bend_extent":0.0
+                    }
+                }
+            ]
+        }"#;
+        let req = parse_ipc_request(json).unwrap();
+        let err = ipc_request_to_viewer_cmd(&req).unwrap_err();
+        assert!(err.contains("scatter batch 0"));
+        assert!(err.contains("bend_extent"));
+    }
+
     #[test]
     fn test_parse_clear_terrain_scatter() {
         let json = r#"{"cmd":"clear_terrain_scatter"}"#;

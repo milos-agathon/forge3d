@@ -13,29 +13,29 @@ use super::super::payloads::{
 };
 use super::super::request::IpcRequest;
 
-pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
+pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, String> {
     match req {
-        IpcRequest::LoadTerrain { path } => Some(ViewerCmd::LoadTerrain(path.clone())),
+        IpcRequest::LoadTerrain { path } => Ok(Some(ViewerCmd::LoadTerrain(path.clone()))),
         IpcRequest::SetTerrainCamera {
             phi_deg,
             theta_deg,
             radius,
             fov_deg,
-        } => Some(ViewerCmd::SetTerrainCamera {
+        } => Ok(Some(ViewerCmd::SetTerrainCamera {
             phi_deg: *phi_deg,
             theta_deg: *theta_deg,
             radius: *radius,
             fov_deg: *fov_deg,
-        }),
+        })),
         IpcRequest::SetTerrainSun {
             azimuth_deg,
             elevation_deg,
             intensity,
-        } => Some(ViewerCmd::SetTerrainSun {
+        } => Ok(Some(ViewerCmd::SetTerrainSun {
             azimuth_deg: *azimuth_deg,
             elevation_deg: *elevation_deg,
             intensity: *intensity,
-        }),
+        })),
         IpcRequest::SetTerrain {
             phi,
             theta,
@@ -50,7 +50,7 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             background,
             water_level,
             water_color,
-        } => Some(ViewerCmd::SetTerrain {
+        } => Ok(Some(ViewerCmd::SetTerrain {
             phi: *phi,
             theta: *theta,
             radius: *radius,
@@ -64,12 +64,16 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             background: *background,
             water_level: *water_level,
             water_color: *water_color,
-        }),
-        IpcRequest::GetTerrainParams => Some(ViewerCmd::GetTerrainParams),
-        IpcRequest::SetTerrainScatter { batches } => Some(ViewerCmd::SetTerrainScatter {
-            batches: batches.iter().map(map_terrain_scatter_batch).collect(),
-        }),
-        IpcRequest::ClearTerrainScatter => Some(ViewerCmd::ClearTerrainScatter),
+        })),
+        IpcRequest::GetTerrainParams => Ok(Some(ViewerCmd::GetTerrainParams)),
+        IpcRequest::SetTerrainScatter { batches } => Ok(Some(ViewerCmd::SetTerrainScatter {
+            batches: batches
+                .iter()
+                .enumerate()
+                .map(|(batch_index, batch)| map_terrain_scatter_batch(batch, batch_index))
+                .collect::<Result<Vec<_>, _>>()?,
+        })),
+        IpcRequest::ClearTerrainScatter => Ok(Some(ViewerCmd::ClearTerrainScatter)),
         IpcRequest::SetTerrainPbr {
             enabled,
             hdr_path,
@@ -91,7 +95,7 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             volumetrics,
             sky,
             debug_mode,
-        } => Some(ViewerCmd::SetTerrainPbr {
+        } => Ok(Some(ViewerCmd::SetTerrainPbr {
             enabled: *enabled,
             hdr_path: hdr_path.clone(),
             ibl_intensity: *ibl_intensity,
@@ -112,8 +116,8 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             volumetrics: Box::new(volumetrics.as_ref().map(map_volumetrics)),
             sky: sky.as_ref().map(map_sky),
             debug_mode: *debug_mode,
-        }),
-        _ => None,
+        })),
+        _ => Ok(None),
     }
 }
 
@@ -251,8 +255,11 @@ fn map_sky(config: &IpcSkyConfig) -> ViewerSkyConfig {
     }
 }
 
-fn map_terrain_scatter_batch(config: &IpcTerrainScatterBatch) -> ViewerTerrainScatterBatchConfig {
-    ViewerTerrainScatterBatchConfig {
+fn map_terrain_scatter_batch(
+    config: &IpcTerrainScatterBatch,
+    batch_index: usize,
+) -> Result<ViewerTerrainScatterBatchConfig, String> {
+    Ok(ViewerTerrainScatterBatchConfig {
         name: config.name.clone(),
         color: config.color.unwrap_or([0.85, 0.85, 0.85, 1.0]),
         max_draw_distance: config.max_draw_distance,
@@ -266,13 +273,18 @@ fn map_terrain_scatter_batch(config: &IpcTerrainScatterBatch) -> ViewerTerrainSc
         wind: config
             .wind
             .as_ref()
-            .map(map_scatter_wind)
+            .map(|wind| {
+                map_scatter_wind(wind).map_err(|e| format!("scatter batch {batch_index}: {e}"))
+            })
+            .transpose()?
             .unwrap_or_default(),
-    }
+    })
 }
 
 #[cfg(feature = "enable-gpu-instancing")]
-fn map_scatter_wind(w: &IpcScatterWind) -> crate::terrain::scatter::ScatterWindSettingsNative {
+fn map_scatter_wind(
+    w: &IpcScatterWind,
+) -> Result<crate::terrain::scatter::ScatterWindSettingsNative, String> {
     let settings = crate::terrain::scatter::ScatterWindSettingsNative {
         enabled: w.enabled,
         direction_deg: w.direction_deg,
@@ -286,11 +298,8 @@ fn map_scatter_wind(w: &IpcScatterWind) -> crate::terrain::scatter::ScatterWindS
         fade_start: w.fade_start,
         fade_end: w.fade_end,
     };
-    if let Err(e) = settings.validate() {
-        eprintln!("[viewer.ipc] invalid scatter wind settings, using defaults: {e}");
-        return crate::terrain::scatter::ScatterWindSettingsNative::default();
-    }
-    settings
+    settings.validate().map_err(|e| e.to_string())?;
+    Ok(settings)
 }
 
 fn map_terrain_scatter_level(config: &IpcTerrainScatterLevel) -> ViewerTerrainScatterLevelConfig {
