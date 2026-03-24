@@ -253,6 +253,8 @@ impl TerrainScene {
                         batch.color,
                         state.light_dir,
                         state.light_intensity,
+                        batch.terrain_blend.uniform(),
+                        batch.terrain_contact.uniform(),
                         vbuf,
                         ibuf,
                         &hlod_instbuf,

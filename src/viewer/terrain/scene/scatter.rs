@@ -152,6 +152,8 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
                     batch.color,
                     light_dir,
                     light_intensity,
+                    batch.terrain_blend.uniform(),
+                    batch.terrain_contact.uniform(),
                     vbuf,
                     ibuf,
                     &hlod_instbuf,
