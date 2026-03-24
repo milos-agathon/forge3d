@@ -3,12 +3,13 @@ use super::*;
 
 #[cfg(feature = "enable-gpu-instancing")]
 use crate::terrain::scatter::{
-    accumulate_frame_stats, summarize_memory, TerrainScatterBatch, TerrainScatterFrameStats,
-    TerrainScatterLevelSpec, TerrainScatterMemoryReport, pack_hlod_identity_instance,
+    accumulate_frame_stats, summarize_memory, TerrainScatterBatch, TerrainScatterBlendConfig,
+    TerrainScatterContactConfig, TerrainScatterFrameStats, TerrainScatterLevelSpec,
+    TerrainScatterMemoryReport, pack_hlod_identity_instance,
 };
 
 #[cfg(feature = "enable-gpu-instancing")]
-fn viewer_render_from_contract(_use_pbr: bool, _terrain_width: f32, _h_range: f32) -> glam::Mat4 {
+fn viewer_render_from_contract() -> glam::Mat4 {
     // The terrain viewer renders in terrain-width units:
     // x/z cover [0, terrain_width], and both terrain shaders resolve world_y to
     // (height - min_height) * z_scale despite differing uniform formulas.
@@ -25,12 +26,13 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
     color_view: &wgpu::TextureView,
     depth_view: &wgpu::TextureView,
     batches: &mut [TerrainScatterBatch],
-    use_pbr: bool,
     view: glam::Mat4,
     proj: glam::Mat4,
     eye_render: glam::Vec3,
+    heightmap_view: &wgpu::TextureView,
     terrain_width: f32,
-    h_range: f32,
+    terrain_min_height: f32,
+    z_scale: f32,
     light_dir: [f32; 3],
     light_intensity: f32,
     device: &wgpu::Device,
@@ -41,10 +43,24 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
         return Ok(TerrainScatterFrameStats::default());
     }
 
-    let render_from_contract = viewer_render_from_contract(use_pbr, terrain_width, h_range);
+    let render_from_contract = viewer_render_from_contract();
     let eye_contract = render_from_contract.inverse().transform_point3(eye_render);
 
     renderer.reset_draw_batch_uniforms();
+    renderer.set_terrain_context(
+        device,
+        queue,
+        Some(crate::render::mesh_instanced::TerrainBlendContext {
+            heightmap_view,
+            world_to_uv_scale_bias: [
+                1.0 / terrain_width.max(1e-3),
+                1.0 / terrain_width.max(1e-3),
+                0.0,
+                0.0,
+            ],
+            height_to_world: [z_scale, -terrain_min_height * z_scale, 0.0, 0.0],
+        }),
+    );
     let mut frame_stats = TerrainScatterFrameStats::default();
     // Pre-create a single HLOD identity instance buffer that lives as long as the pass.
     let identity_packed = pack_hlod_identity_instance(render_from_contract);
@@ -109,6 +125,8 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
                 batch.color,
                 light_dir,
                 light_intensity,
+                batch.terrain_blend.uniform(),
+                batch.terrain_contact.uniform(),
                 batch.level_vbuf(draw.level_index),
                 batch.level_ibuf(draw.level_index),
                 instbuf,
@@ -173,6 +191,17 @@ impl ViewerTerrainScene {
                 batch.max_draw_distance,
                 batch.name.clone(),
                 batch.hlod_config.clone(),
+                TerrainScatterBlendConfig {
+                    enabled: batch.terrain_blend.enabled,
+                    bury_depth: batch.terrain_blend.bury_depth,
+                    fade_distance: batch.terrain_blend.fade_distance,
+                },
+                TerrainScatterContactConfig {
+                    enabled: batch.terrain_contact.enabled,
+                    distance: batch.terrain_contact.distance,
+                    strength: batch.terrain_contact.strength,
+                    vertical_weight: batch.terrain_contact.vertical_weight,
+                },
             )?);
         }
 
@@ -200,12 +229,13 @@ impl ViewerTerrainScene {
         color_view: &wgpu::TextureView,
         depth_view: &wgpu::TextureView,
         batches: &mut [TerrainScatterBatch],
-        use_pbr: bool,
         view: glam::Mat4,
         proj: glam::Mat4,
         eye_render: glam::Vec3,
+        heightmap_view: &wgpu::TextureView,
         terrain_width: f32,
-        h_range: f32,
+        terrain_min_height: f32,
+        z_scale: f32,
         light_dir: [f32; 3],
         light_intensity: f32,
     ) -> Result<TerrainScatterFrameStats> {
@@ -214,12 +244,13 @@ impl ViewerTerrainScene {
             color_view,
             depth_view,
             batches,
-            use_pbr,
             view,
             proj,
             eye_render,
+            heightmap_view,
             terrain_width,
-            h_range,
+            terrain_min_height,
+            z_scale,
             light_dir,
             light_intensity,
             self.device.as_ref(),
@@ -234,14 +265,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn viewer_render_contract_is_identity_for_all_viewer_modes() {
-        assert_eq!(
-            viewer_render_from_contract(false, 96.0, 1200.0),
-            glam::Mat4::IDENTITY
-        );
-        assert_eq!(
-            viewer_render_from_contract(true, 96.0, 1200.0),
-            glam::Mat4::IDENTITY
-        );
+    fn viewer_render_contract_is_identity() {
+        assert_eq!(viewer_render_from_contract(), glam::Mat4::IDENTITY);
     }
 }

@@ -596,7 +596,12 @@ impl TerrainScene {
                 shadow_setup.proj_matrix,
                 shadow_setup.eye,
             );
-            self.render_scatter_pass(&mut encoder, &render_targets, &scatter_state)?;
+            self.render_scatter_pass(
+                &mut encoder,
+                &render_targets,
+                &height_inputs.heightmap_view,
+                &scatter_state,
+            )?;
         }
 
         let needs_scaling = render_targets.needs_scaling;

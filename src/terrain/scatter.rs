@@ -111,10 +111,70 @@ struct HlodCache {
     total_buffer_bytes: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TerrainScatterBlendConfig {
+    pub enabled: bool,
+    pub bury_depth: f32,
+    pub fade_distance: f32,
+}
+
+impl Default for TerrainScatterBlendConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bury_depth: 0.75,
+            fade_distance: 2.5,
+        }
+    }
+}
+
+impl TerrainScatterBlendConfig {
+    pub fn uniform(self) -> [f32; 4] {
+        [
+            if self.enabled { 1.0 } else { 0.0 },
+            self.bury_depth,
+            self.fade_distance,
+            0.0,
+        ]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TerrainScatterContactConfig {
+    pub enabled: bool,
+    pub distance: f32,
+    pub strength: f32,
+    pub vertical_weight: f32,
+}
+
+impl Default for TerrainScatterContactConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            distance: 3.0,
+            strength: 0.35,
+            vertical_weight: 0.65,
+        }
+    }
+}
+
+impl TerrainScatterContactConfig {
+    pub fn uniform(self) -> [f32; 4] {
+        [
+            if self.enabled { 1.0 } else { 0.0 },
+            self.distance,
+            self.strength,
+            self.vertical_weight,
+        ]
+    }
+}
+
 pub struct TerrainScatterBatch {
     pub name: Option<String>,
     pub color: [f32; 4],
     pub max_draw_distance: f32,
+    pub terrain_blend: TerrainScatterBlendConfig,
+    pub terrain_contact: TerrainScatterContactConfig,
     levels: Vec<GpuScatterLevel>,
     transforms_rowmajor: Vec<[f32; 16]>,
     positions: Vec<[f32; 3]>,
@@ -135,6 +195,8 @@ impl TerrainScatterBatch {
         max_draw_distance: Option<f32>,
         name: Option<String>,
         hlod_config: Option<HlodConfig>,
+        terrain_blend: TerrainScatterBlendConfig,
+        terrain_contact: TerrainScatterContactConfig,
     ) -> Result<Self> {
         if levels.is_empty() {
             return Err(anyhow!("terrain scatter requires at least one LOD level"));
@@ -147,6 +209,8 @@ impl TerrainScatterBatch {
         let max_draw_distance =
             validate_optional_distance(max_draw_distance, "terrain scatter max_draw_distance")?
                 .unwrap_or(f32::INFINITY);
+        let terrain_blend = validate_blend_config(terrain_blend)?;
+        let terrain_contact = validate_contact_config(terrain_contact)?;
 
         // Extract coarsest LOD mesh BEFORE consuming levels (for HLOD rebuild)
         let hlod_source_mesh = if hlod_config.is_some() {
@@ -184,6 +248,8 @@ impl TerrainScatterBatch {
             name,
             color,
             max_draw_distance,
+            terrain_blend,
+            terrain_contact,
             levels: gpu_levels,
             transforms_rowmajor: transforms_rowmajor.to_vec(),
             positions,
@@ -674,6 +740,61 @@ fn validate_optional_distance(value: Option<f32>, label: &str) -> Result<Option<
     }
 }
 
+fn validate_non_negative_finite(value: f32, label: &str) -> Result<f32> {
+    if !value.is_finite() || value < 0.0 {
+        return Err(anyhow!("{label} must be a non-negative finite float"));
+    }
+    Ok(value)
+}
+
+fn validate_positive_finite(value: f32, label: &str) -> Result<f32> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(anyhow!("{label} must be a positive finite float"));
+    }
+    Ok(value)
+}
+
+fn validate_unit_interval(value: f32, label: &str) -> Result<f32> {
+    if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+        return Err(anyhow!("{label} must be in [0.0, 1.0]"));
+    }
+    Ok(value)
+}
+
+fn validate_blend_config(config: TerrainScatterBlendConfig) -> Result<TerrainScatterBlendConfig> {
+    Ok(TerrainScatterBlendConfig {
+        enabled: config.enabled,
+        bury_depth: validate_non_negative_finite(
+            config.bury_depth,
+            "terrain scatter terrain_blend.bury_depth",
+        )?,
+        fade_distance: validate_positive_finite(
+            config.fade_distance,
+            "terrain scatter terrain_blend.fade_distance",
+        )?,
+    })
+}
+
+fn validate_contact_config(
+    config: TerrainScatterContactConfig,
+) -> Result<TerrainScatterContactConfig> {
+    Ok(TerrainScatterContactConfig {
+        enabled: config.enabled,
+        distance: validate_positive_finite(
+            config.distance,
+            "terrain scatter terrain_contact.distance",
+        )?,
+        strength: validate_unit_interval(
+            config.strength,
+            "terrain scatter terrain_contact.strength",
+        )?,
+        vertical_weight: validate_unit_interval(
+            config.vertical_weight,
+            "terrain scatter terrain_contact.vertical_weight",
+        )?,
+    })
+}
+
 fn validate_level_specs(levels: &[TerrainScatterLevelSpec]) -> Result<()> {
     let mut previous_max_distance = 0.0_f32;
     for (index, level) in levels.iter().enumerate() {
@@ -1123,5 +1244,27 @@ mod tests {
         assert_eq!(frame.hlod_cluster_draws, 2);
         assert_eq!(frame.hlod_covered_instances, 3);
         assert_eq!(frame.effective_draws, 5);
+    }
+
+    #[test]
+    fn validate_blend_config_rejects_negative_bury_depth() {
+        let err = validate_blend_config(TerrainScatterBlendConfig {
+            bury_depth: -0.1,
+            ..Default::default()
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("terrain_blend.bury_depth"));
+    }
+
+    #[test]
+    fn validate_contact_config_rejects_out_of_range_strength() {
+        let err = validate_contact_config(TerrainScatterContactConfig {
+            strength: 1.5,
+            ..Default::default()
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("terrain_contact.strength"));
     }
 }

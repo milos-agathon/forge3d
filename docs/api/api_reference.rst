@@ -109,5 +109,6 @@ Related Pages
 * :doc:`../terrain-tv3-scatter`
 * :doc:`../terrain-tv4-material-variation`
 * :doc:`../terrain-tv10-subsurface`
+* :doc:`../terrain-tv21-blending`
 * :doc:`../tutorials/index`
 * :doc:`../gallery/index`

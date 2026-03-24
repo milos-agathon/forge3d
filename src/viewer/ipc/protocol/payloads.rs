@@ -238,6 +238,28 @@ pub struct IpcHlodConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcTerrainScatterBlend {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub bury_depth: Option<f32>,
+    #[serde(default)]
+    pub fade_distance: Option<f32>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcTerrainScatterContact {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub distance: Option<f32>,
+    #[serde(default)]
+    pub strength: Option<f32>,
+    #[serde(default)]
+    pub vertical_weight: Option<f32>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct IpcTerrainScatterBatch {
     #[serde(default)]
     pub name: Option<String>,
@@ -245,6 +267,10 @@ pub struct IpcTerrainScatterBatch {
     pub color: Option<[f32; 4]>,
     #[serde(default)]
     pub max_draw_distance: Option<f32>,
+    #[serde(default)]
+    pub terrain_blend: Option<IpcTerrainScatterBlend>,
+    #[serde(default)]
+    pub terrain_contact: Option<IpcTerrainScatterContact>,
     #[serde(default)]
     pub transforms: Vec<[f32; 16]>,
     #[serde(default)]

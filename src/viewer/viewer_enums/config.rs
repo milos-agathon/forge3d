@@ -176,11 +176,49 @@ pub struct ViewerTerrainScatterLevelConfig {
     pub max_distance: Option<f32>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ViewerTerrainScatterBlendConfig {
+    pub enabled: bool,
+    pub bury_depth: f32,
+    pub fade_distance: f32,
+}
+
+impl Default for ViewerTerrainScatterBlendConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bury_depth: 0.75,
+            fade_distance: 2.5,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ViewerTerrainScatterContactConfig {
+    pub enabled: bool,
+    pub distance: f32,
+    pub strength: f32,
+    pub vertical_weight: f32,
+}
+
+impl Default for ViewerTerrainScatterContactConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            distance: 3.0,
+            strength: 0.35,
+            vertical_weight: 0.65,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ViewerTerrainScatterBatchConfig {
     pub name: Option<String>,
     pub color: [f32; 4],
     pub max_draw_distance: Option<f32>,
+    pub terrain_blend: ViewerTerrainScatterBlendConfig,
+    pub terrain_contact: ViewerTerrainScatterContactConfig,
     pub transforms: Vec<[f32; 16]>,
     pub levels: Vec<ViewerTerrainScatterLevelConfig>,
     #[cfg(feature = "enable-gpu-instancing")]

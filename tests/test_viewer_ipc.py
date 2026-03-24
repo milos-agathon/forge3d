@@ -182,6 +182,13 @@ class TestCommandFormatting:
                     "name": "trees",
                     "color": [0.2, 0.6, 0.3, 1.0],
                     "max_draw_distance": 180.0,
+                    "terrain_blend": {"enabled": True, "bury_depth": 0.5, "fade_distance": 2.0},
+                    "terrain_contact": {
+                        "enabled": True,
+                        "distance": 1.5,
+                        "strength": 0.3,
+                        "vertical_weight": 0.75,
+                    },
                     "transforms": [[1.0, 0.0, 0.0, 3.0, 0.0, 1.0, 0.0, 4.0, 0.0, 0.0, 1.0, 5.0, 0.0, 0.0, 0.0, 1.0]],
                     "levels": [
                         {
@@ -197,6 +204,8 @@ class TestCommandFormatting:
         parsed = json.loads(json.dumps(cmd))
         assert parsed["cmd"] == "set_terrain_scatter"
         assert parsed["batches"][0]["name"] == "trees"
+        assert parsed["batches"][0]["terrain_blend"]["enabled"] is True
+        assert parsed["batches"][0]["terrain_contact"]["vertical_weight"] == 0.75
         assert parsed["batches"][0]["transforms"][0][3] == 3.0
         assert parsed["batches"][0]["levels"][0]["indices"] == [0, 1, 2]
 
