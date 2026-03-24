@@ -46,6 +46,7 @@ impl TerrainRenderParams {
             volumetrics: parse_volumetrics_settings(&params),
             sky: parse_sky_settings(&params),
             probes: parse_probe_settings(&params),
+            reflection_probes: parse_reflection_probe_settings(&params),
         };
 
         let overlays = extract_overlays(params.getattr("overlays")?.as_gil_ref())?;
@@ -78,6 +79,7 @@ impl TerrainRenderParams {
             debug_mode: core.debug_mode,
             aa_samples: core.aa_samples,
             aa_seed: core.aa_seed,
+            terrain_data_revision: core.terrain_data_revision,
             height_curve_lut: core.height_curve_lut,
             overlays,
             light: light.unbind(),

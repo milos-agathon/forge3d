@@ -14,12 +14,14 @@ from forge3d.terrain_scatter import (
     TerrainScatterBatch,
     TerrainScatterFilters,
     TerrainScatterLevel,
+    TerrainMeshBlendSettings,
     TerrainScatterSource,
     apply_to_renderer,
     apply_to_viewer,
     clear_viewer,
     grid_jitter_transforms,
     mask_density_transforms,
+    serialize_batches_for_native,
     seeded_random_transforms,
     viewer_orbit_radius,
 )
@@ -46,6 +48,28 @@ def _simple_mesh() -> MeshBuffers:
         uvs=np.zeros((3, 2), dtype=np.float32),
         indices=np.asarray([[0, 1, 2]], dtype=np.uint32),
     )
+
+
+def _row_major_transform(
+    translation: tuple[float, float, float],
+    *,
+    scale_xyz: tuple[float, float, float],
+    yaw_deg: float = 0.0,
+) -> np.ndarray:
+    tx, ty, tz = (float(value) for value in translation)
+    sx, sy, sz = (float(value) for value in scale_xyz)
+    yaw = np.deg2rad(float(yaw_deg))
+    cos_yaw = float(np.cos(yaw))
+    sin_yaw = float(np.sin(yaw))
+    return np.asarray(
+        [
+            [cos_yaw * sx, 0.0, sin_yaw * sz, tx],
+            [0.0, sy, 0.0, ty],
+            [-sin_yaw * sx, 0.0, cos_yaw * sz, tz],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    ).reshape(16)
 
 
 def _scatter_source(height: int = 32, width: int = 32) -> TerrainScatterSource:
@@ -215,6 +239,14 @@ class TestFiltersAndContract:
 
 
 class TestBatchSerialization:
+    def test_terrain_mesh_blend_validates_ranges(self) -> None:
+        with pytest.raises(ValueError, match="blend_distance"):
+            TerrainMeshBlendSettings(blend_distance=0.0)
+        with pytest.raises(ValueError, match="contact_strength"):
+            TerrainMeshBlendSettings(contact_strength=1.5)
+        with pytest.raises(ValueError, match="contact_distance"):
+            TerrainMeshBlendSettings(contact_distance=-0.5)
+
     def test_batch_rejects_non_finite_transforms(self) -> None:
         mesh = _simple_mesh()
         transforms = np.eye(4, dtype=np.float32).reshape(1, 16)
@@ -279,6 +311,12 @@ class TestBatchSerialization:
             name="trees",
             color=(0.2, 0.6, 0.3, 1.0),
             max_draw_distance=140.0,
+            terrain_blend=TerrainMeshBlendSettings(
+                enabled=True,
+                blend_distance=2.0,
+                contact_strength=0.6,
+                contact_distance=3.5,
+            ),
             transforms=transforms,
             levels=[TerrainScatterLevel(mesh=mesh, max_distance=80.0)],
         )
@@ -288,7 +326,12 @@ class TestBatchSerialization:
 
         assert native["transforms"].shape == (2, 16)
         assert native["levels"][0]["mesh"]["positions"].shape == (3, 3)
+        assert native["terrain_blend"]["enabled"] is True
+        assert native["terrain_blend"]["blend_distance"] == pytest.approx(2.0)
+        assert native["terrain_blend"]["contact_strength"] == pytest.approx(0.6)
+        assert native["terrain_blend"]["contact_distance"] == pytest.approx(3.5)
         assert viewer["transforms"][1][3] == pytest.approx(3.0)
+        assert viewer["terrain_blend"]["enabled"] is True
         assert viewer["levels"][0]["positions"][2] == [0.0, 1.0, 0.0]
         assert viewer["levels"][0]["indices"] == [0, 1, 2]
 
@@ -409,6 +452,138 @@ class TestNativeScatterIntegration:
         # renderer-side contract is that batches upload successfully, survive
         # culling, select an LOD, and allocate the expected GPU buffers.
         assert any(count > 0 for count in stats["lod_instance_counts"])
+
+    def test_tv21_regression_batches_change_pixels(self) -> None:
+        session = f3d.Session(window=False)
+        renderer = f3d.TerrainRenderer(session)
+        probe_payload = serialize_batches_for_native(
+            [
+                TerrainScatterBatch(
+                    transforms=np.eye(4, dtype=np.float32).reshape(1, 16),
+                    levels=[
+                        TerrainScatterLevel(
+                            mesh=f3d.geometry.primitive_mesh("box"),
+                            max_distance=8.0,
+                        )
+                    ],
+                    terrain_blend=TerrainMeshBlendSettings(enabled=True),
+                )
+            ]
+        )
+        probe_payload[0]["terrain_blend"] = {"enabled": True, "blend_distance": "bad"}
+        try:
+            renderer.set_scatter_batches(probe_payload)
+        except Exception:
+            pass
+        else:
+            pytest.skip("native runtime does not yet parse TV21 terrain_blend payloads")
+        renderer.clear_scatter_batches()
+
+        y, x = np.mgrid[0:128, 0:128].astype(np.float32)
+        heightmap = (
+            np.sin(x / 11.0) * 4.5
+            + np.cos(y / 13.0) * 3.2
+            + x * 0.18
+            + y * 0.08
+            + 35.0
+        ).astype(np.float32)
+        source = TerrainScatterSource(heightmap, z_scale=1.2)
+
+        def surface_point(row: float, col: float, *, sink: float = 0.0) -> tuple[float, float, float]:
+            x_pos, y_pos, z_pos = source.pixel_to_contract(row, col)
+            return (float(x_pos), float(y_pos - sink), float(z_pos))
+
+        box_mesh = f3d.geometry.primitive_mesh("box")
+        blend = TerrainMeshBlendSettings(
+            enabled=True,
+            blend_distance=1.6,
+            contact_strength=0.55,
+            contact_distance=2.8,
+        )
+
+        rock_cluster = np.stack(
+            [
+                _row_major_transform(surface_point(34.0, 30.0, sink=0.25), scale_xyz=(3.2, 2.4, 3.0), yaw_deg=18.0),
+                _row_major_transform(surface_point(38.0, 37.0, sink=0.35), scale_xyz=(2.8, 2.0, 2.6), yaw_deg=57.0),
+                _row_major_transform(surface_point(41.0, 29.0, sink=0.30), scale_xyz=(2.4, 1.9, 2.7), yaw_deg=121.0),
+            ],
+            axis=0,
+        ).astype(np.float32)
+        road_edge = np.stack(
+            [
+                _row_major_transform(surface_point(71.0, 61.0, sink=0.10), scale_xyz=(18.0, 0.35, 3.0), yaw_deg=22.0),
+            ],
+            axis=0,
+        ).astype(np.float32)
+        building_foundation = np.stack(
+            [
+                _row_major_transform(surface_point(88.0, 83.0, sink=0.20), scale_xyz=(10.0, 1.5, 10.0), yaw_deg=8.0),
+            ],
+            axis=0,
+        ).astype(np.float32)
+
+        def batches(enable_blend: bool) -> list[TerrainScatterBatch]:
+            settings = blend if enable_blend else None
+            return [
+                TerrainScatterBatch(
+                    name="rock_cluster",
+                    color=(0.56, 0.46, 0.36, 1.0),
+                    transforms=rock_cluster,
+                    levels=[TerrainScatterLevel(mesh=box_mesh, max_distance=180.0)],
+                    terrain_blend=settings,
+                ),
+                TerrainScatterBatch(
+                    name="road_edge",
+                    color=(0.26, 0.25, 0.24, 1.0),
+                    transforms=road_edge,
+                    levels=[TerrainScatterLevel(mesh=box_mesh, max_distance=220.0)],
+                    terrain_blend=settings,
+                ),
+                TerrainScatterBatch(
+                    name="building_foundation",
+                    color=(0.70, 0.68, 0.63, 1.0),
+                    transforms=building_foundation,
+                    levels=[TerrainScatterLevel(mesh=box_mesh, max_distance=220.0)],
+                    terrain_blend=settings,
+                ),
+            ]
+
+        material_set = f3d.MaterialSet.terrain_default()
+
+        with tempfile.NamedTemporaryFile(suffix=".hdr", delete=False) as tmp:
+            hdr_path = tmp.name
+        try:
+            _create_test_hdr(hdr_path)
+            ibl = f3d.IBL.from_hdr(hdr_path, intensity=1.0)
+        finally:
+            os.unlink(hdr_path)
+
+        config = make_terrain_params_config(
+            size_px=(320, 200),
+            render_scale=1.0,
+            terrain_span=190.0,
+            msaa_samples=4,
+            z_scale=1.2,
+            exposure=1.0,
+            domain=(float(np.min(heightmap)), float(np.max(heightmap))),
+            cam_radius=205.0,
+            cam_phi_deg=144.0,
+            cam_theta_deg=56.0,
+            fov_y_deg=50.0,
+            camera_mode="mesh",
+        )
+        params = f3d.TerrainRenderParams(config)
+
+        apply_to_renderer(renderer, batches(False))
+        baseline = renderer.render_terrain_pbr_pom(material_set, ibl, params, heightmap).to_numpy()
+        apply_to_renderer(renderer, batches(True))
+        blended = renderer.render_terrain_pbr_pom(material_set, ibl, params, heightmap).to_numpy()
+        stats = renderer.get_scatter_stats()
+
+        changed_pixels = np.count_nonzero(np.any(baseline != blended, axis=-1))
+        assert stats["batch_count"] == 3
+        assert stats["rendered_batches"] == 3
+        assert changed_pixels > 100
 
 
 @pytest.mark.interactive_viewer

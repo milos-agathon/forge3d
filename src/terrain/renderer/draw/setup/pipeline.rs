@@ -103,6 +103,21 @@ impl TerrainScene {
         requested_msaa: u32,
         effective_msaa: u32,
     ) -> Result<RenderTargets> {
+        self.create_render_targets_for_format(
+            params,
+            requested_msaa,
+            effective_msaa,
+            self.color_format,
+        )
+    }
+
+    pub(in crate::terrain::renderer) fn create_render_targets_for_format(
+        &self,
+        params: &crate::terrain::render_params::TerrainRenderParams,
+        requested_msaa: u32,
+        effective_msaa: u32,
+        color_format: wgpu::TextureFormat,
+    ) -> Result<RenderTargets> {
         let (out_width, out_height) = params.size_px;
         let render_scale = params.render_scale.clamp(0.25, 4.0);
         let internal_width = ((out_width as f32 * render_scale).round().max(1.0)) as u32;
@@ -119,7 +134,7 @@ impl TerrainScene {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: self.color_format,
+            format: color_format,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::COPY_SRC
                 | wgpu::TextureUsages::TEXTURE_BINDING,
@@ -138,7 +153,7 @@ impl TerrainScene {
                 mip_level_count: 1,
                 sample_count: effective_msaa,
                 dimension: wgpu::TextureDimension::D2,
-                format: self.color_format,
+                format: color_format,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                 view_formats: &[],
             }))
@@ -174,7 +189,7 @@ impl TerrainScene {
 
         log_msaa_debug(
             &self.adapter,
-            self.color_format,
+            color_format,
             Some(TERRAIN_DEPTH_FORMAT),
             requested_msaa,
             effective_msaa,
@@ -193,7 +208,7 @@ impl TerrainScene {
             depth_sample_count: Some(effective_msaa),
             readback_sample_count: 1,
         };
-        assert_msaa_invariants(&invariants, self.color_format)?;
+        assert_msaa_invariants(&invariants, color_format)?;
 
         Ok(RenderTargets {
             internal_texture,

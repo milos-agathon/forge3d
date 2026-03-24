@@ -1,9 +1,13 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
 use super::*;
 
 pub(in crate::terrain::renderer) struct UploadedHeightInputs {
     pub(in crate::terrain::renderer) width: u32,
     pub(in crate::terrain::renderer) height: u32,
     pub(in crate::terrain::renderer) heightmap_data: Vec<f32>,
+    pub(in crate::terrain::renderer) terrain_data_hash: u64,
     #[allow(dead_code)]
     pub(in crate::terrain::renderer) heightmap_texture: wgpu::Texture,
     pub(in crate::terrain::renderer) heightmap_view: wgpu::TextureView,
@@ -52,6 +56,7 @@ impl TerrainScene {
         &mut self,
         heightmap: PyReadonlyArray2<f32>,
         water_mask: Option<PyReadonlyArray2<f32>>,
+        terrain_data_revision: Option<u64>,
     ) -> Result<UploadedHeightInputs> {
         let heightmap_array = heightmap.as_array();
         let (height, width) = (heightmap_array.shape()[0], heightmap_array.shape()[1]);
@@ -59,7 +64,26 @@ impl TerrainScene {
             return Err(anyhow!("Heightmap dimensions must be > 0"));
         }
 
-        let heightmap_data: Vec<f32> = heightmap_array.iter().copied().collect();
+        let mut heightmap_data = Vec::with_capacity(width * height);
+        let terrain_data_hash = if let Some(revision) = terrain_data_revision {
+            // Caller-managed revisions let probe preparation skip per-sample hashing.
+            for value in heightmap_array.iter() {
+                heightmap_data.push(*value);
+            }
+            let mut hasher = DefaultHasher::new();
+            (width as u32, height as u32).hash(&mut hasher);
+            revision.hash(&mut hasher);
+            hasher.finish()
+        } else {
+            let mut hasher = DefaultHasher::new();
+            (width as u32, height as u32).hash(&mut hasher);
+            for value in heightmap_array.iter() {
+                let height = *value;
+                heightmap_data.push(height);
+                height.to_bits().hash(&mut hasher);
+            }
+            hasher.finish()
+        };
         let heightmap_texture =
             self.upload_heightmap_texture(width as u32, height as u32, &heightmap_data)?;
         let heightmap_view = heightmap_texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -109,6 +133,7 @@ impl TerrainScene {
             width: width as u32,
             height: height as u32,
             heightmap_data,
+            terrain_data_hash,
             heightmap_texture,
             heightmap_view,
             water_mask_texture,
@@ -121,6 +146,16 @@ impl TerrainScene {
         material_set: &crate::render::material_set::MaterialSet,
         params: &crate::terrain::render_params::TerrainRenderParams,
         decoded: &crate::terrain::render_params::DecodedTerrainSettings,
+    ) -> Result<PreparedMaterials> {
+        self.prepare_material_context_with_mode(material_set, params, decoded, false)
+    }
+
+    pub(in crate::terrain::renderer) fn prepare_material_context_with_mode(
+        &self,
+        material_set: &crate::render::material_set::MaterialSet,
+        params: &crate::terrain::render_params::TerrainRenderParams,
+        decoded: &crate::terrain::render_params::DecodedTerrainSettings,
+        offline_hdr_output: bool,
     ) -> Result<PreparedMaterials> {
         let gpu_materials = material_set
             .gpu(self.device.as_ref(), self.queue.as_ref())
@@ -138,7 +173,7 @@ impl TerrainScene {
                 usage: wgpu::BufferUsages::UNIFORM,
             });
 
-        let overlay_binding = self.extract_overlay_binding(params);
+        let overlay_binding = self.extract_overlay_binding(params, offline_hdr_output);
         self.log_color_debug(params, &overlay_binding);
 
         let overlay_buffer = self

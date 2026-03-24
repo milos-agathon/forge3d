@@ -3,9 +3,15 @@ use wgpu::{Extent3d, ImageCopyTexture, ImageDataLayout, Origin3d, TextureAspect,
 
 impl VirtualTexture {
     /// Load tile data; current implementation generates a procedural tile.
+    ///
+    /// Generates slot_size × slot_size pixels (spec 4.1, 8.4):
+    /// - Border region filled with procedural checkerboard
+    /// - Content region (centered, tile_size × tile_size) filled with per-tile color
     pub(super) fn load_tile_data(&self, tile_id: TileId) -> Result<TileData, String> {
         let tile_size = self.config.tile_size as usize;
-        let pixel_count = tile_size * tile_size;
+        let tile_border = self.config.tile_border as usize;
+        let slot_size = tile_size + 2 * tile_border;
+        let pixel_count = slot_size * slot_size;
         let bytes_per_pixel = match self.config.format {
             TextureFormat::Rgba8Unorm => 4,
             TextureFormat::Rgba8UnormSrgb => 4,
@@ -16,13 +22,27 @@ impl VirtualTexture {
 
         let mut data = vec![0u8; pixel_count * bytes_per_pixel];
 
-        for y in 0..tile_size {
-            for x in 0..tile_size {
-                let pixel_index = (y * tile_size + x) * bytes_per_pixel;
-                let r = ((tile_id.x * tile_size as u32 + x as u32) & 0xFF) as u8;
-                let g = ((tile_id.y * tile_size as u32 + y as u32) & 0xFF) as u8;
-                let b = (tile_id.mip_level * 32) as u8;
-                let a = 255u8;
+        for y in 0..slot_size {
+            for x in 0..slot_size {
+                let pixel_index = (y * slot_size + x) * bytes_per_pixel;
+
+                // Determine if this pixel is in border region or content region
+                let in_border_x = x < tile_border || x >= tile_border + tile_size;
+                let in_border_y = y < tile_border || y >= tile_border + tile_size;
+
+                let (r, g, b, a) = if in_border_x || in_border_y {
+                    // Border: checkerboard pattern
+                    let checker = (((x / 2) + (y / 2)) & 1) as u8;
+                    (128 + checker * 64, 128 + checker * 64, 128 + checker * 64, 255)
+                } else {
+                    // Content region: per-tile color based on tile coordinates and mip
+                    let content_x = x - tile_border;
+                    let content_y = y - tile_border;
+                    let r = ((tile_id.x * tile_size as u32 + content_x as u32) & 0xFF) as u8;
+                    let g = ((tile_id.y * tile_size as u32 + content_y as u32) & 0xFF) as u8;
+                    let b = (tile_id.mip_level * 32) as u8;
+                    (r, g, b, 255)
+                };
 
                 if bytes_per_pixel >= 1 {
                     data[pixel_index] = r;
@@ -42,8 +62,8 @@ impl VirtualTexture {
         Ok(TileData {
             id: tile_id,
             data,
-            width: tile_size as u32,
-            height: tile_size as u32,
+            width: slot_size as u32,
+            height: slot_size as u32,
             format: self.config.format,
         })
     }

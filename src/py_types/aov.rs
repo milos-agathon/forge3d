@@ -252,8 +252,8 @@ impl AovFrame {
     }
 
     fn albedo<'py>(&self, py: Python<'py>) -> PyResult<&'py numpy::PyArray3<f32>> {
-        let rgba = self
-            .read_albedo_data()
+        let rgba = py
+            .allow_threads(|| self.read_albedo_data())
             .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
         let arr = self
             .rgba_to_rgb_array(&rgba)
@@ -262,8 +262,8 @@ impl AovFrame {
     }
 
     fn normal<'py>(&self, py: Python<'py>) -> PyResult<&'py numpy::PyArray3<f32>> {
-        let rgba = self
-            .read_normal_data()
+        let rgba = py
+            .allow_threads(|| self.read_normal_data())
             .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
         let arr = self
             .rgba_to_rgb_array(&rgba)
@@ -272,8 +272,8 @@ impl AovFrame {
     }
 
     fn depth<'py>(&self, py: Python<'py>) -> PyResult<&'py numpy::PyArray2<f32>> {
-        let data = self
-            .read_depth_data()
+        let data = py
+            .allow_threads(|| self.read_depth_data())
             .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err:#}")))?;
         let arr =
             ndarray::Array2::from_shape_vec((self.height as usize, self.width as usize), data)

@@ -18,6 +18,7 @@ pub struct TerrainScene {
     pub(super) aov_blit_pipeline: wgpu::RenderPipeline,
     pub(super) background_blit_pipeline: wgpu::RenderPipeline,
     pub(super) normal_blit_pipeline: wgpu::RenderPipeline,
+    pub(super) offline_compute: OfflineComputeResources,
     pub(super) sampler_linear: wgpu::Sampler,
     pub(super) sky_bind_group_layout0: wgpu::BindGroupLayout,
     pub(super) sky_bind_group_layout1: wgpu::BindGroupLayout,
@@ -77,12 +78,6 @@ pub struct TerrainScene {
     pub(super) water_reflection_size: Mutex<(u32, u32)>,
     pub(super) water_reflection_fallback_view: wgpu::TextureView,
     pub(super) water_reflection_pipeline: wgpu::RenderPipeline,
-    pub(super) accumulation_bind_group_layout: wgpu::BindGroupLayout,
-    pub(super) accumulation_pipeline: wgpu::ComputePipeline,
-    pub(super) accumulation_texture: Mutex<Option<wgpu::Texture>>,
-    pub(super) accumulation_view: Mutex<Option<wgpu::TextureView>>,
-    pub(super) accumulation_size: Mutex<(u32, u32)>,
-    pub(super) accumulation_params_buffer: wgpu::Buffer,
     pub(super) material_layer_bind_group_layout: wgpu::BindGroupLayout,
     pub(super) material_layer_uniform_buffer: wgpu::Buffer,
     pub(super) probe_grid_uniform_buffer: wgpu::Buffer,
@@ -94,9 +89,25 @@ pub struct TerrainScene {
     pub(super) probe_cache_key: Option<u64>,
     pub(super) probe_cached_grid: Option<crate::terrain::probes::ProbeGridDesc>,
     pub(super) probe_cached_data: Vec<crate::terrain::probes::GpuProbeData>,
+    pub(super) reflection_probe_grid_uniform_buffer: wgpu::Buffer,
+    pub(super) reflection_probe_sampler: wgpu::Sampler,
+    pub(super) reflection_probe_fallback_texture: wgpu::Texture,
+    pub(super) reflection_probe_fallback_view: wgpu::TextureView,
+    pub(super) reflection_probe_texture: Option<wgpu::Texture>,
+    pub(super) reflection_probe_view: wgpu::TextureView,
+    pub(super) reflection_probe_grid_uniform_alloc_bytes: u64,
+    pub(super) reflection_probe_grid_uniform_bytes: u64,
+    pub(super) reflection_probe_texture_alloc_bytes: u64,
+    pub(super) reflection_probe_texture_bytes: u64,
+    pub(super) reflection_probe_cache_key: Option<u64>,
+    pub(super) reflection_probe_cached_grid: Option<crate::terrain::probes::ProbeGridDesc>,
+    pub(super) reflection_probe_count: u32,
+    pub(super) reflection_probe_resolution: u32,
+    pub(super) reflection_probe_mip_levels: u32,
     pub(super) aov_pipeline: Mutex<Option<wgpu::RenderPipeline>>,
     pub(super) aov_pipeline_sample_count: Mutex<u32>,
     pub(super) dof_renderer: Mutex<Option<crate::core::dof::DofRenderer>>,
+    pub(super) offline_state: Mutex<Option<OfflineAccumulationState>>,
     #[cfg(feature = "enable-gpu-instancing")]
     pub(super) scatter_renderer: crate::render::mesh_instanced::MeshInstancedRenderer,
     #[cfg(feature = "enable-gpu-instancing")]
@@ -132,6 +143,53 @@ pub struct ViewerTerrainData {
 #[pyclass(module = "forge3d._forge3d", name = "TerrainRenderer")]
 pub struct TerrainRenderer {
     pub(super) scene: TerrainScene,
+}
+
+pub(super) struct OfflineAccumulationState {
+    pub(super) params: crate::terrain::render_params::TerrainRenderParams,
+    pub(super) decoded: crate::terrain::render_params::DecodedTerrainSettings,
+    pub(super) height_inputs: super::draw::UploadedHeightInputs,
+    pub(super) materials: super::draw::PreparedMaterials,
+    pub(super) ibl_bind_group: wgpu::BindGroup,
+    pub(super) height_curve_lut_uploaded: Option<(wgpu::Texture, wgpu::TextureView)>,
+    pub(super) hdr_aov_pipeline: wgpu::RenderPipeline,
+    pub(super) hdr_background_blit_pipeline: wgpu::RenderPipeline,
+    pub(super) render_targets: super::draw::RenderTargets,
+    pub(super) aov_targets: super::aov::TerrainAovTargets,
+    pub(super) beauty_accumulation: crate::terrain::AccumulationBuffer,
+    pub(super) albedo_accumulation: crate::terrain::AccumulationBuffer,
+    pub(super) normal_accumulation: crate::terrain::AccumulationBuffer,
+    pub(super) depth_reference_texture: wgpu::Texture,
+    pub(super) depth_reference_view: wgpu::TextureView,
+    pub(super) luminance_texture: wgpu::Texture,
+    pub(super) luminance_view: wgpu::TextureView,
+    pub(super) luminance_width: u32,
+    pub(super) luminance_height: u32,
+    pub(super) jitter_sequence: crate::terrain::JitterSequence,
+    pub(super) total_samples: u32,
+    pub(super) out_width: u32,
+    pub(super) out_height: u32,
+    pub(super) internal_width: u32,
+    pub(super) internal_height: u32,
+    pub(super) needs_scaling: bool,
+    pub(super) prev_tile_means: Vec<f32>,
+    pub(super) prev_tile_mean_history: Vec<Vec<f32>>,
+    pub(super) prev_tile_size: u32,
+}
+
+pub(super) struct OfflineComputeResources {
+    pub(super) accumulate_bind_group_layout: wgpu::BindGroupLayout,
+    pub(super) accumulate_pipeline: wgpu::ComputePipeline,
+    pub(super) resolve_bind_group_layout: wgpu::BindGroupLayout,
+    pub(super) resolve_pipeline: wgpu::ComputePipeline,
+    pub(super) depth_extract_bind_group_layout: wgpu::BindGroupLayout,
+    pub(super) depth_extract_pipeline: wgpu::ComputePipeline,
+    pub(super) depth_expand_bind_group_layout: wgpu::BindGroupLayout,
+    pub(super) depth_expand_pipeline: wgpu::ComputePipeline,
+    pub(super) luminance_bind_group_layout: wgpu::BindGroupLayout,
+    pub(super) luminance_pipeline: wgpu::ComputePipeline,
+    pub(super) tonemap_bind_group_layout: wgpu::BindGroupLayout,
+    pub(super) tonemap_pipeline: wgpu::ComputePipeline,
 }
 
 #[allow(dead_code)]
@@ -177,6 +235,9 @@ impl Drop for TerrainScene {
         }
         if self.probe_ssbo_alloc_bytes > 0 {
             tracker.free_buffer_allocation(self.probe_ssbo_alloc_bytes, false);
+        }
+        if self.reflection_probe_grid_uniform_alloc_bytes > 0 {
+            tracker.free_buffer_allocation(self.reflection_probe_grid_uniform_alloc_bytes, false);
         }
     }
 }

@@ -46,7 +46,7 @@ pub struct DenoiseSettingsNative {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum DenoiseMethodNative {
     Atrous,
-    Bilateral,
+    Oidn,
     None,
 }
 

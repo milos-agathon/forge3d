@@ -37,9 +37,15 @@ impl TileCache {
         }
     }
 
-    pub fn configure_atlas(&mut self, atlas_width: u32, atlas_height: u32, tile_size: u32) {
+    /// Configure atlas dimensions and slot size (spec 8.4).
+    ///
+    /// # Arguments
+    /// * `atlas_width` - Physical atlas texture width in pixels
+    /// * `atlas_height` - Physical atlas texture height in pixels
+    /// * `slot_size` - Slot size in pixels (tile_size + 2*tile_border)
+    pub fn configure_atlas(&mut self, atlas_width: u32, atlas_height: u32, slot_size: u32) {
         self.atlas_allocator =
-            AtlasAllocator::new_with_dimensions(atlas_width, atlas_height, tile_size);
+            AtlasAllocator::new_with_dimensions(atlas_width, atlas_height, slot_size);
     }
 
     pub fn is_resident(&self, tile_id: &TileId) -> bool {

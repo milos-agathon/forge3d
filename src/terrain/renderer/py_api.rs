@@ -2,6 +2,87 @@ use super::*;
 use crate::terrain::render_params;
 use numpy::PyUntypedArrayMethods;
 
+#[cfg(feature = "enable-gpu-instancing")]
+fn parse_terrain_blend_settings(
+    batch_index: usize,
+    batch_dict: &pyo3::types::PyDict,
+) -> PyResult<crate::terrain::scatter::TerrainMeshBlendSettings> {
+    let defaults = crate::terrain::scatter::TerrainMeshBlendSettings::default();
+    let Some(blend_any) = batch_dict
+        .get_item("terrain_blend")
+        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+    else {
+        return Ok(defaults);
+    };
+    if blend_any.is_none() {
+        return Ok(defaults);
+    }
+    let blend_dict = blend_any.downcast::<pyo3::types::PyDict>().map_err(|_| {
+        PyRuntimeError::new_err(format!(
+            "batch {batch_index}: 'terrain_blend' must be a dict when provided"
+        ))
+    })?;
+
+    let enabled = blend_dict
+        .get_item("enabled")
+        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+        .filter(|value| !value.is_none())
+        .map(|value| value.extract::<bool>())
+        .transpose()
+        .map_err(|e| {
+            PyRuntimeError::new_err(format!(
+                "batch {batch_index}: invalid terrain_blend.enabled: {e}"
+            ))
+        })?
+        .unwrap_or(defaults.enabled);
+
+    let blend_distance = blend_dict
+        .get_item("blend_distance")
+        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+        .filter(|value| !value.is_none())
+        .map(|value| value.extract::<f32>())
+        .transpose()
+        .map_err(|e| {
+            PyRuntimeError::new_err(format!(
+                "batch {batch_index}: invalid terrain_blend.blend_distance: {e}"
+            ))
+        })?
+        .unwrap_or(defaults.blend_distance);
+
+    let contact_strength = blend_dict
+        .get_item("contact_strength")
+        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+        .filter(|value| !value.is_none())
+        .map(|value| value.extract::<f32>())
+        .transpose()
+        .map_err(|e| {
+            PyRuntimeError::new_err(format!(
+                "batch {batch_index}: invalid terrain_blend.contact_strength: {e}"
+            ))
+        })?
+        .unwrap_or(defaults.contact_strength);
+
+    let contact_distance = blend_dict
+        .get_item("contact_distance")
+        .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?
+        .filter(|value| !value.is_none())
+        .map(|value| value.extract::<f32>())
+        .transpose()
+        .map_err(|e| {
+            PyRuntimeError::new_err(format!(
+                "batch {batch_index}: invalid terrain_blend.contact_distance: {e}"
+            ))
+        })?
+        .unwrap_or(defaults.contact_distance);
+
+    Ok(crate::terrain::scatter::TerrainMeshBlendSettings {
+        enabled,
+        blend_distance,
+        contact_strength,
+        contact_distance,
+    })
+}
+
 #[pymethods]
 impl TerrainRenderer {
     #[new]
@@ -68,6 +149,16 @@ impl TerrainRenderer {
         target: Option<&Bound<'_, PyAny>>,
         water_mask: Option<PyReadonlyArray2<'py, f32>>,
     ) -> PyResult<Py<crate::Frame>> {
+        if self
+            .scene
+            .offline_session_active()
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to query offline state: {e:#}")))?
+        {
+            return Err(PyRuntimeError::new_err(
+                "An offline accumulation session is active; call end_offline_accumulation() before one-shot rendering.",
+            ));
+        }
+
         if target.is_some() {
             return Err(PyRuntimeError::new_err(
                 "Custom render targets not yet supported. Use target=None for offscreen rendering.",
@@ -92,6 +183,16 @@ impl TerrainRenderer {
         heightmap: PyReadonlyArray2<'py, f32>,
         water_mask: Option<PyReadonlyArray2<'py, f32>>,
     ) -> PyResult<(Py<crate::Frame>, Py<crate::AovFrame>)> {
+        if self
+            .scene
+            .offline_session_active()
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to query offline state: {e:#}")))?
+        {
+            return Err(PyRuntimeError::new_err(
+                "An offline accumulation session is active; call end_offline_accumulation() before one-shot rendering.",
+            ));
+        }
+
         let (frame, aov_frame) = self
             .scene
             .render_internal_with_aov(material_set, env_maps, params, heightmap, water_mask)
@@ -155,6 +256,7 @@ impl TerrainRenderer {
                         "batch {batch_index}: invalid 'max_draw_distance': {e}"
                     ))
                 })?;
+            let terrain_blend = parse_terrain_blend_settings(batch_index, batch_dict)?;
 
             let transforms_any = batch_dict
                 .get_item("transforms")
@@ -254,6 +356,7 @@ impl TerrainRenderer {
                 name,
                 color,
                 max_draw_distance,
+                terrain_blend,
                 transforms_rowmajor: transforms,
                 levels,
             });
@@ -315,6 +418,28 @@ impl TerrainRenderer {
         dict.set_item(
             "total_bytes",
             self.scene.probe_grid_uniform_bytes + self.scene.probe_ssbo_bytes,
+        )?;
+        Ok(dict.into())
+    }
+
+    #[pyo3(signature = ())]
+    pub fn get_reflection_probe_memory_report(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("probe_count", self.scene.reflection_probe_count)?;
+        dict.set_item("resolution", self.scene.reflection_probe_resolution)?;
+        dict.set_item("mip_levels", self.scene.reflection_probe_mip_levels)?;
+        dict.set_item(
+            "grid_uniform_bytes",
+            self.scene.reflection_probe_grid_uniform_bytes,
+        )?;
+        dict.set_item(
+            "cubemap_texture_bytes",
+            self.scene.reflection_probe_texture_bytes,
+        )?;
+        dict.set_item(
+            "total_bytes",
+            self.scene.reflection_probe_grid_uniform_bytes
+                + self.scene.reflection_probe_texture_bytes,
         )?;
         Ok(dict.into())
     }

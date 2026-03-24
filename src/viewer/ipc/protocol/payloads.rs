@@ -205,9 +205,23 @@ pub struct IpcTerrainScatterBatch {
     #[serde(default)]
     pub max_draw_distance: Option<f32>,
     #[serde(default)]
+    pub terrain_blend: Option<IpcTerrainBlendConfig>,
+    #[serde(default)]
     pub transforms: Vec<[f32; 16]>,
     #[serde(default)]
     pub levels: Vec<IpcTerrainScatterLevel>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcTerrainBlendConfig {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub blend_distance: Option<f32>,
+    #[serde(default)]
+    pub contact_strength: Option<f32>,
+    #[serde(default)]
+    pub contact_distance: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

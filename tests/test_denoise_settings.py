@@ -31,12 +31,12 @@ class TestDenoiseSettings:
         """DenoiseSettings can be enabled with custom parameters."""
         settings = DenoiseSettings(
             enabled=True,
-            method="bilateral",
+            method="oidn",
             iterations=5,
             sigma_color=0.2,
         )
         assert settings.enabled is True
-        assert settings.method == "bilateral"
+        assert settings.method == "oidn"
         assert settings.iterations == 5
         assert settings.sigma_color == 0.2
 
@@ -44,12 +44,14 @@ class TestDenoiseSettings:
         """DenoiseSettings validates method field."""
         # Valid methods
         DenoiseSettings(method="atrous")
-        DenoiseSettings(method="bilateral")
+        DenoiseSettings(method="oidn")
         DenoiseSettings(method="none")
 
         # Invalid method
         with pytest.raises(ValueError, match="method must be one of"):
             DenoiseSettings(method="invalid")
+        with pytest.raises(ValueError, match="method must be one of"):
+            DenoiseSettings(method="bilateral")
 
     def test_denoise_iterations_validation(self):
         """DenoiseSettings validates iterations field."""
@@ -87,10 +89,6 @@ class TestDenoiseSettings:
 
     def test_denoise_uses_guidance_property(self):
         """uses_guidance property returns correct values."""
-        # No guidance (default sigmas but using bilateral)
-        settings = DenoiseSettings(method="bilateral")
-        assert settings.uses_guidance is False
-
         # No guidance (method=none)
         settings = DenoiseSettings(method="none")
         assert settings.uses_guidance is False

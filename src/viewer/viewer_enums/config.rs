@@ -161,6 +161,7 @@ pub struct ViewerTerrainScatterBatchConfig {
     pub name: Option<String>,
     pub color: [f32; 4],
     pub max_draw_distance: Option<f32>,
+    pub terrain_blend: crate::terrain::scatter::TerrainMeshBlendSettings,
     pub transforms: Vec<[f32; 16]>,
     pub levels: Vec<ViewerTerrainScatterLevelConfig>,
 }

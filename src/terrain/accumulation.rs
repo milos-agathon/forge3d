@@ -6,8 +6,8 @@
 //! RELEVANT FILES: src/terrain/renderer.rs, src/terrain/camera.rs
 
 use wgpu::{
-    Buffer, CommandEncoder, Device, Extent3d, Texture, TextureDescriptor, TextureDimension,
-    TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
+    CommandEncoder, Device, Extent3d, Texture, TextureDescriptor, TextureDimension, TextureFormat,
+    TextureUsages, TextureView, TextureViewDescriptor,
 };
 
 /// Accumulation AA configuration
@@ -30,24 +30,28 @@ impl Default for AccumulationConfig {
 
 /// HDR accumulation buffer for multi-sample averaging
 pub struct AccumulationBuffer {
-    /// HDR accumulation texture (Rgba32Float for precision)
-    pub texture: Texture,
-    /// View for accumulation texture
-    pub view: TextureView,
+    /// Ping-pong HDR accumulation textures (Rgba32Float for precision)
+    textures: [Texture; 2],
+    /// Views for the ping-pong textures
+    views: [TextureView; 2],
+    /// Index of the texture containing the current accumulation result
+    current_index: usize,
     /// Sample count buffer for averaging
     pub sample_count: u32,
     /// Buffer dimensions
     pub width: u32,
     pub height: u32,
-    /// Staging buffer for GPU readback of accumulated result
-    staging_buffer: Option<Buffer>,
 }
 
 impl AccumulationBuffer {
-    /// Create a new accumulation buffer
-    pub fn new(device: &Device, width: u32, height: u32) -> Self {
+    fn create_texture(
+        device: &Device,
+        label: &str,
+        width: u32,
+        height: u32,
+    ) -> (Texture, TextureView) {
         let texture = device.create_texture(&TextureDescriptor {
-            label: Some("terrain.accumulation.texture"),
+            label: Some(label),
             size: Extent3d {
                 width,
                 height,
@@ -67,22 +71,33 @@ impl AccumulationBuffer {
         });
 
         let view = texture.create_view(&TextureViewDescriptor {
-            label: Some("terrain.accumulation.view"),
+            label: Some(&format!("{label}.view")),
             ..Default::default()
         });
 
+        (texture, view)
+    }
+
+    /// Create a new accumulation buffer
+    pub fn new(device: &Device, width: u32, height: u32) -> Self {
+        let (texture_a, view_a) =
+            Self::create_texture(device, "terrain.accumulation.texture_a", width, height);
+        let (texture_b, view_b) =
+            Self::create_texture(device, "terrain.accumulation.texture_b", width, height);
+
         Self {
-            texture,
-            view,
+            textures: [texture_a, texture_b],
+            views: [view_a, view_b],
+            current_index: 0,
             sample_count: 0,
             width,
             height,
-            staging_buffer: None,
         }
     }
 
     /// Reset accumulation for a new render
     pub fn reset(&mut self) {
+        self.current_index = 0;
         self.sample_count = 0;
     }
 
@@ -101,7 +116,7 @@ impl AccumulationBuffer {
 
     /// Clear the accumulation buffer
     pub fn clear(&mut self, _encoder: &mut CommandEncoder) {
-        // Clear by writing zeros - we'll use a compute pass or copy from a zero buffer
+        self.current_index = 0;
         self.sample_count = 0;
     }
 
@@ -113,6 +128,31 @@ impl AccumulationBuffer {
     /// Get current sample count
     pub fn current_samples(&self) -> u32 {
         self.sample_count
+    }
+
+    /// Texture containing the current accumulation result.
+    pub fn current_texture(&self) -> &Texture {
+        &self.textures[self.current_index]
+    }
+
+    /// View for the current accumulation texture.
+    pub fn current_view(&self) -> &TextureView {
+        &self.views[self.current_index]
+    }
+
+    /// Texture that should receive the next accumulation pass.
+    pub fn write_texture(&self) -> &Texture {
+        &self.textures[1 - self.current_index]
+    }
+
+    /// View for the texture that should receive the next accumulation pass.
+    pub fn write_view(&self) -> &TextureView {
+        &self.views[1 - self.current_index]
+    }
+
+    /// Swap ping-pong textures after a successful accumulation dispatch.
+    pub fn swap(&mut self) {
+        self.current_index = 1 - self.current_index;
     }
 }
 
@@ -251,11 +291,13 @@ pub fn apply_jitter_to_projection(
     let ndc_jitter_x = (2.0 * jitter_x) / width as f32;
     let ndc_jitter_y = (2.0 * jitter_y) / height as f32;
 
-    // Create translation matrix for jitter
-    // Apply to projection matrix columns [2][0] and [2][1] (NDC offset)
+    // Apply the NDC shift by modifying row 0/1 with a multiple of row 3.
+    // In column-major storage that means offsetting column 2's x/y terms by
+    // the projection matrix's clip-w contribution (typically -1 for RH
+    // perspective projections).
     let mut jittered = proj;
-    jittered.col_mut(2).x += ndc_jitter_x * proj.col(3).w;
-    jittered.col_mut(2).y += ndc_jitter_y * proj.col(3).w;
+    jittered.col_mut(2).x += ndc_jitter_x * proj.col(2).w;
+    jittered.col_mut(2).y += ndc_jitter_y * proj.col(2).w;
 
     jittered
 }
@@ -305,5 +347,29 @@ mod tests {
         let h3 = JitterSequence::halton(1, 3);
         assert!((h2 - 0.5).abs() < 0.001);
         assert!((h3 - 0.333).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_accumulation_buffer_ping_pong_swaps() {
+        let instance = wgpu::Instance::default();
+        let Some(adapter) =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        else {
+            return;
+        };
+        let Ok((device, _)) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
+        else {
+            return;
+        };
+
+        let mut buffer = AccumulationBuffer::new(&device, 4, 4);
+        let first = buffer.current_texture() as *const _;
+        let second = buffer.write_texture() as *const _;
+        assert_ne!(first, second);
+
+        buffer.swap();
+        assert_eq!(buffer.current_texture() as *const _, second);
+        assert_eq!(buffer.write_texture() as *const _, first);
     }
 }

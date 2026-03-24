@@ -258,12 +258,18 @@ impl TerrainScene {
                 materials.snow_aspect_influence,
                 materials.snow_roughness,
                 if materials.snow_enabled { 1.0 } else { 0.0 },
-                0.0,
+                materials.snow_subsurface_strength,
             ],
             snow_color: [
                 materials.snow_color[0],
                 materials.snow_color[1],
                 materials.snow_color[2],
+                0.0,
+            ],
+            snow_sss_tint: [
+                materials.snow_subsurface_tint[0],
+                materials.snow_subsurface_tint[1],
+                materials.snow_subsurface_tint[2],
                 0.0,
             ],
             rock_params: [
@@ -276,12 +282,24 @@ impl TerrainScene {
                 materials.rock_color[0],
                 materials.rock_color[1],
                 materials.rock_color[2],
+                materials.rock_subsurface_strength,
+            ],
+            rock_sss_tint: [
+                materials.rock_subsurface_tint[0],
+                materials.rock_subsurface_tint[1],
+                materials.rock_subsurface_tint[2],
                 0.0,
             ],
             wetness_params: [
                 materials.wetness_strength,
                 materials.wetness_slope_influence,
                 if materials.wetness_enabled { 1.0 } else { 0.0 },
+                materials.wetness_subsurface_strength,
+            ],
+            wetness_sss_tint: [
+                materials.wetness_subsurface_tint[0],
+                materials.wetness_subsurface_tint[1],
+                materials.wetness_subsurface_tint[2],
                 0.0,
             ],
             variation_params0: [
@@ -329,6 +347,20 @@ impl TerrainScene {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: self.probe_ssbo.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: self
+                        .reflection_probe_grid_uniform_buffer
+                        .as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&self.reflection_probe_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(&self.reflection_probe_sampler),
                 },
             ],
         });

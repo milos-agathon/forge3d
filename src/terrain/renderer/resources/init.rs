@@ -11,12 +11,6 @@ pub(in crate::terrain::renderer) struct BaseInitResources {
     pub(in crate::terrain::renderer) detail_normal_sampler: wgpu::Sampler,
 }
 
-pub(in crate::terrain::renderer) struct AccumulationInitResources {
-    pub(in crate::terrain::renderer) accumulation_bind_group_layout: wgpu::BindGroupLayout,
-    pub(in crate::terrain::renderer) accumulation_pipeline: wgpu::ComputePipeline,
-    pub(in crate::terrain::renderer) accumulation_params_buffer: wgpu::Buffer,
-}
-
 pub(in crate::terrain::renderer) fn create_base_init_resources(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -140,76 +134,4 @@ pub(in crate::terrain::renderer) fn create_base_init_resources(
         detail_normal_fallback_view,
         detail_normal_sampler,
     })
-}
-
-pub(in crate::terrain::renderer) fn create_accumulation_init_resources(
-    device: &wgpu::Device,
-) -> AccumulationInitResources {
-    let accumulation_bind_group_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("terrain.accumulation.bind_group_layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::StorageTexture {
-                        access: wgpu::StorageTextureAccess::WriteOnly,
-                        format: wgpu::TextureFormat::Rgba32Float,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-    let accumulation_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("terrain.accumulation.shader"),
-        source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-            "../../../shaders/accumulation_blend.wgsl"
-        ))),
-    });
-    let accumulation_pipeline_layout =
-        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("terrain.accumulation.pipeline_layout"),
-            bind_group_layouts: &[&accumulation_bind_group_layout],
-            push_constant_ranges: &[],
-        });
-    let accumulation_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("terrain.accumulation.pipeline"),
-        layout: Some(&accumulation_pipeline_layout),
-        module: &accumulation_shader,
-        entry_point: "accumulate",
-    });
-    let accumulation_params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("terrain.accumulation.params"),
-        size: 16,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    AccumulationInitResources {
-        accumulation_bind_group_layout,
-        accumulation_pipeline,
-        accumulation_params_buffer,
-    }
 }

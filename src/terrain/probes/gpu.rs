@@ -15,7 +15,29 @@ impl ProbeGridUniformsGpu {
         Self {
             grid_origin: [0.0, 0.0, 0.0, 0.0],
             grid_params: [1.0, 1.0, 1.0, 1.0],
-            blend_params: [1.0, 0.0, 0.0, 0.0],
+            blend_params: [1.0, 1.0, 0.0, 0.0],
+        }
+    }
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct ReflectionProbeGridUniformsGpu {
+    pub grid_origin: [f32; 4],
+    pub grid_params: [f32; 4],
+    pub blend_params: [f32; 4],
+    pub scene_bounds_min: [f32; 4],
+    pub scene_bounds_max: [f32; 4],
+}
+
+impl ReflectionProbeGridUniformsGpu {
+    pub fn disabled() -> Self {
+        Self {
+            grid_origin: [0.0, 0.0, 0.0, 0.0],
+            grid_params: [1.0, 1.0, 1.0, 1.0],
+            blend_params: [1.0, 1.0, 0.0, 0.0],
+            scene_bounds_min: [0.0, 0.0, 0.0, 1.0],
+            scene_bounds_max: [0.0, 0.0, 0.0, 1.0],
         }
     }
 }
@@ -82,6 +104,7 @@ mod tests {
     fn test_probe_gpu_layout_size() {
         assert_eq!(std::mem::size_of::<GpuProbeData>(), 144);
         assert_eq!(std::mem::size_of::<ProbeGridUniformsGpu>(), 48);
+        assert_eq!(std::mem::size_of::<ReflectionProbeGridUniformsGpu>(), 80);
     }
 
     #[test]
