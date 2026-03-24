@@ -491,6 +491,7 @@ class TerrainRenderer:
         heightmap: np.ndarray,
         target: Optional[Any] = ...,
         water_mask: Optional[np.ndarray] = ...,
+        time_seconds: float = ...,
     ) -> Frame: ...
     def render_with_aov(
         self,
@@ -499,6 +500,7 @@ class TerrainRenderer:
         params: TerrainRenderParams,
         heightmap: np.ndarray,
         water_mask: Optional[np.ndarray] = ...,
+        time_seconds: float = ...,
     ) -> Tuple[Frame, AovFrame]: ...
     def set_scatter_batches(self, batches: Sequence[Mapping[str, Any]]) -> None: ...
     def clear_scatter_batches(self) -> None: ...

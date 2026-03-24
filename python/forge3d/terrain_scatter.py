@@ -118,23 +118,42 @@ class ScatterWindSettings:
     fade_end: float = 0.0
 
     def __post_init__(self) -> None:
-        if float(self.speed) < 0.0:
+        # Normalize all fields to plain Python scalars (np.float32 → float, np.bool_ → bool)
+        # so json.dumps in the viewer path does not choke on NumPy types.
+        object.__setattr__(self, "enabled", bool(self.enabled))
+        for _field_name in (
+            "direction_deg", "speed", "amplitude", "rigidity",
+            "bend_start", "bend_extent", "gust_strength", "gust_frequency",
+            "fade_start", "fade_end",
+        ):
+            object.__setattr__(self, _field_name, float(getattr(self, _field_name)))
+
+        # Finite checks for all float fields
+        for _field_name in (
+            "direction_deg", "speed", "amplitude", "rigidity",
+            "bend_start", "bend_extent", "gust_strength", "gust_frequency",
+            "fade_start", "fade_end",
+        ):
+            if not np.isfinite(getattr(self, _field_name)):
+                raise ValueError(f"{_field_name} must be finite")
+
+        if self.speed < 0.0:
             raise ValueError("speed must be >= 0")
-        if float(self.amplitude) < 0.0:
+        if self.amplitude < 0.0:
             raise ValueError("amplitude must be >= 0")
-        if not (0.0 <= float(self.rigidity) <= 1.0):
+        if not (0.0 <= self.rigidity <= 1.0):
             raise ValueError("rigidity must be in [0, 1]")
-        if not (0.0 <= float(self.bend_start) <= 1.0):
+        if not (0.0 <= self.bend_start <= 1.0):
             raise ValueError("bend_start must be in [0, 1]")
-        if float(self.bend_extent) <= 0.0:
+        if self.bend_extent <= 0.0:
             raise ValueError("bend_extent must be > 0")
-        if float(self.gust_strength) < 0.0:
+        if self.gust_strength < 0.0:
             raise ValueError("gust_strength must be >= 0")
-        if float(self.gust_frequency) < 0.0:
+        if self.gust_frequency < 0.0:
             raise ValueError("gust_frequency must be >= 0")
-        if float(self.fade_start) < 0.0:
+        if self.fade_start < 0.0:
             raise ValueError("fade_start must be >= 0")
-        if float(self.fade_end) < 0.0:
+        if self.fade_end < 0.0:
             raise ValueError("fade_end must be >= 0")
 
 

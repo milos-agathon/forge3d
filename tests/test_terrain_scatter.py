@@ -595,3 +595,41 @@ class TestScatterWindSettings:
     def test_fade_end_rejects_negative(self):
         with pytest.raises(ValueError, match="fade_end"):
             ts.ScatterWindSettings(fade_end=-1.0)
+
+    def test_numpy_types_normalized_to_python(self):
+        s = ts.ScatterWindSettings(
+            enabled=np.bool_(True),
+            speed=np.float32(2.5),
+            amplitude=np.float64(1.0),
+            direction_deg=np.float32(45.0),
+        )
+        assert type(s.enabled) is bool
+        assert type(s.speed) is float
+        assert type(s.amplitude) is float
+        assert type(s.direction_deg) is float
+
+    def test_numpy_wind_serializes_as_json(self):
+        import json
+        s = ts.ScatterWindSettings(
+            enabled=np.bool_(True),
+            speed=np.float32(2.5),
+            amplitude=np.float64(1.0),
+        )
+        batch = TerrainScatterBatch(
+            levels=[TerrainScatterLevel(mesh=_simple_mesh())],
+            transforms=np.eye(4, dtype=np.float32).reshape(1, 16),
+            wind=s,
+        )
+        payload = batch.to_viewer_payload()
+        # Must not raise TypeError from numpy types
+        json.dumps(payload["wind"])
+
+    def test_non_finite_fields_rejected(self):
+        with pytest.raises(ValueError, match="finite"):
+            ts.ScatterWindSettings(speed=float("inf"))
+        with pytest.raises(ValueError, match="finite"):
+            ts.ScatterWindSettings(amplitude=float("nan"))
+        with pytest.raises(ValueError, match="finite"):
+            ts.ScatterWindSettings(direction_deg=float("-inf"))
+        with pytest.raises(ValueError, match="finite"):
+            ts.ScatterWindSettings(fade_start=float("nan"))

@@ -263,73 +263,41 @@ impl TerrainRenderer {
                             "batch {batch_index}: 'wind' must be a dict"
                         ))
                     })?;
+
+                    // Helper: extract a typed field from a dict, failing with a clear
+                    // message on type mismatch (matching the fail-fast style of the
+                    // rest of set_scatter_batches).  Missing keys use the default.
+                    macro_rules! wind_field {
+                        ($key:expr, $ty:ty, $default:expr) => {
+                            match wind_dict
+                                .get_item($key)
+                                .map_err(|e| PyRuntimeError::new_err(format!(
+                                    "batch {batch_index} wind: {e}"
+                                )))?
+                                .filter(|v| !v.is_none())
+                            {
+                                Some(v) => v.extract::<$ty>().map_err(|e| {
+                                    PyRuntimeError::new_err(format!(
+                                        "batch {batch_index} wind: invalid '{}': {e}", $key
+                                    ))
+                                })?,
+                                None => $default,
+                            }
+                        };
+                    }
+
                     crate::terrain::scatter::ScatterWindSettingsNative {
-                        enabled: wind_dict
-                            .get_item("enabled")
-                            .ok()
-                            .flatten()
-                            .and_then(|v| v.extract().ok())
-                            .unwrap_or(false),
-                        direction_deg: wind_dict
-                            .get_item("direction_deg")
-                            .ok()
-                            .flatten()
-                            .and_then(|v| v.extract().ok())
-                            .unwrap_or(0.0),
-                        speed: wind_dict
-                            .get_item("speed")
-                            .ok()
-                            .flatten()
-                            .and_then(|v| v.extract().ok())
-                            .unwrap_or(1.0),
-                        amplitude: wind_dict
-                            .get_item("amplitude")
-                            .ok()
-                            .flatten()
-                            .and_then(|v| v.extract().ok())
-                            .unwrap_or(0.0),
-                        rigidity: wind_dict
-                            .get_item("rigidity")
-                            .ok()
-                            .flatten()
-                            .and_then(|v| v.extract().ok())
-                            .unwrap_or(0.5),
-                        bend_start: wind_dict
-                            .get_item("bend_start")
-                            .ok()
-                            .flatten()
-                            .and_then(|v| v.extract().ok())
-                            .unwrap_or(0.0),
-                        bend_extent: wind_dict
-                            .get_item("bend_extent")
-                            .ok()
-                            .flatten()
-                            .and_then(|v| v.extract().ok())
-                            .unwrap_or(1.0),
-                        gust_strength: wind_dict
-                            .get_item("gust_strength")
-                            .ok()
-                            .flatten()
-                            .and_then(|v| v.extract().ok())
-                            .unwrap_or(0.0),
-                        gust_frequency: wind_dict
-                            .get_item("gust_frequency")
-                            .ok()
-                            .flatten()
-                            .and_then(|v| v.extract().ok())
-                            .unwrap_or(0.3),
-                        fade_start: wind_dict
-                            .get_item("fade_start")
-                            .ok()
-                            .flatten()
-                            .and_then(|v| v.extract().ok())
-                            .unwrap_or(0.0),
-                        fade_end: wind_dict
-                            .get_item("fade_end")
-                            .ok()
-                            .flatten()
-                            .and_then(|v| v.extract().ok())
-                            .unwrap_or(0.0),
+                        enabled: wind_field!("enabled", bool, false),
+                        direction_deg: wind_field!("direction_deg", f32, 0.0),
+                        speed: wind_field!("speed", f32, 1.0),
+                        amplitude: wind_field!("amplitude", f32, 0.0),
+                        rigidity: wind_field!("rigidity", f32, 0.5),
+                        bend_start: wind_field!("bend_start", f32, 0.0),
+                        bend_extent: wind_field!("bend_extent", f32, 1.0),
+                        gust_strength: wind_field!("gust_strength", f32, 0.0),
+                        gust_frequency: wind_field!("gust_frequency", f32, 0.3),
+                        fade_start: wind_field!("fade_start", f32, 0.0),
+                        fade_end: wind_field!("fade_end", f32, 0.0),
                     }
                 }
                 None => crate::terrain::scatter::ScatterWindSettingsNative::default(),
