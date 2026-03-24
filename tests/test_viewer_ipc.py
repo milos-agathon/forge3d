@@ -184,6 +184,19 @@ class TestCommandFormatting:
                             "max_distance": 90.0,
                         }
                     ],
+                    "wind": {
+                        "enabled": True,
+                        "direction_deg": 45.0,
+                        "speed": 1.0,
+                        "amplitude": 2.0,
+                        "rigidity": 0.3,
+                        "bend_start": 0.0,
+                        "bend_extent": 1.0,
+                        "gust_strength": 0.5,
+                        "gust_frequency": 0.3,
+                        "fade_start": 100.0,
+                        "fade_end": 200.0,
+                    },
                 }
             ],
         }
@@ -192,6 +205,18 @@ class TestCommandFormatting:
         assert parsed["batches"][0]["name"] == "trees"
         assert parsed["batches"][0]["transforms"][0][3] == 3.0
         assert parsed["batches"][0]["levels"][0]["indices"] == [0, 1, 2]
+        wind = parsed["batches"][0]["wind"]
+        assert wind["enabled"] is True
+        assert wind["direction_deg"] == 45.0
+        assert wind["speed"] == 1.0
+        assert wind["amplitude"] == 2.0
+        assert wind["rigidity"] == 0.3
+        assert wind["bend_start"] == 0.0
+        assert wind["bend_extent"] == 1.0
+        assert wind["gust_strength"] == 0.5
+        assert wind["gust_frequency"] == 0.3
+        assert wind["fade_start"] == 100.0
+        assert wind["fade_end"] == 200.0
 
     def test_clear_terrain_scatter_format(self):
         """clear_terrain_scatter command is formatted correctly."""
@@ -412,7 +437,26 @@ class TestViewerHandleHelpers:
         sent: list[dict[str, Any]] = []
         handle._send_command = lambda cmd: sent.append(cmd) or {"ok": True}  # type: ignore[attr-defined]
 
-        batches = [{"name": "trees", "transforms": [[1.0] * 16], "levels": []}]
+        batches = [
+            {
+                "name": "trees",
+                "transforms": [[1.0] * 16],
+                "levels": [],
+                "wind": {
+                    "enabled": True,
+                    "direction_deg": 45.0,
+                    "speed": 1.0,
+                    "amplitude": 2.0,
+                    "rigidity": 0.3,
+                    "bend_start": 0.0,
+                    "bend_extent": 1.0,
+                    "gust_strength": 0.5,
+                    "gust_frequency": 0.3,
+                    "fade_start": 100.0,
+                    "fade_end": 200.0,
+                },
+            }
+        ]
         handle.set_terrain_scatter(batches)
 
         assert sent == [{"cmd": "set_terrain_scatter", "batches": batches}]
