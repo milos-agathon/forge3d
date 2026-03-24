@@ -36,20 +36,19 @@
 | `src/core/virtual_texture/constructor.rs` | Array-layer atlas, per-mip page table init, border/slot_size |
 | `src/core/virtual_texture/update.rs` | Mip convention flip, per-mip page table write, ancestor fallback |
 | `src/core/virtual_texture/upload.rs` | Border fill, array layer upload, tile_id_to_page_index mip-aware |
+| `src/terrain/render_params.rs` | Add `mod native_vt; mod decode_vt;` and `use` for new native types |
 | `src/terrain/render_params/core.rs` | Add `vt` field to `DecodedTerrainSettings` |
 | `src/terrain/render_params/private_impl.rs` | Call `parse_vt_settings()` |
+| `src/terrain/renderer.rs` | Add `mod virtual_texture;` |
 | `src/terrain/renderer/py_api.rs` | `register_material_vt_source()`, `clear_material_vt_sources()`, `get_material_vt_stats()` |
 | `src/terrain/renderer/core.rs` | Add VT fallback resources + `TerrainMaterialVT` to `TerrainScene` |
 | `src/terrain/renderer/bind_groups/layouts.rs` | Extend @group(6) layout with bindings 3-7 |
 | `src/terrain/renderer/bind_groups/terrain_pass.rs` | Create VT bind entries + fallback resources |
 | `src/terrain/renderer/constructor.rs` | Init VT fallback textures/buffers |
-| `src/terrain/renderer/draw/execute.rs` | No code change (already binds group 6 from `material_layer` bind group) |
-| `src/terrain/renderer/aov.rs` | No code change (same bind group) |
 | `src/terrain/renderer/offline.rs` | Per-frame VT update guard |
-| `src/terrain/renderer/water_reflection/bind_group.rs` | No code change (same bind group) |
 | `src/shaders/terrain_pbr_pom.wgsl` | VT uniforms, `textureLoad` page lookup, `vt_sample_axis()`, dual-path `sample_triplanar()` |
 
-**Key note on bind groups:** The `set_bind_group(6, material_layer_bind_group, &[])` calls at all 4 call sites do NOT need code changes. The bind group is created in `create_terrain_pass_bind_groups()` which returns a `TerrainPassBindGroups.material_layer` that all callers already use. The layout expansion and bind group creation changes happen in `layouts.rs` and `terrain_pass.rs` only.
+**Note — `set_bind_group(6)` call sites audited:** The calls in `draw/execute.rs`, `aov.rs`, `offline.rs`, and `water_reflection/bind_group.rs` all pass `material_layer_bind_group` from `TerrainPassBindGroups.material_layer`, which is created centrally in `create_terrain_pass_bind_groups()`. These callers do NOT need code changes — the layout expansion and bind group creation changes happen in `layouts.rs` and `terrain_pass.rs` only.
 
 ---
 
@@ -129,7 +128,7 @@ Expected: FAIL — `VTLayerFamily` not defined
 
 - [ ] **Step 3: Implement VTLayerFamily, TerrainVTSettings in terrain_params.py**
 
-Add after `OfflineQualitySettings` (~line 928). Add `vt: Optional[TerrainVTSettings] = None` to `TerrainRenderParams`. See spec Section 3.2 for exact code.
+Add before `class TerrainRenderParams` (line 1406). Insert `VTLayerFamily` and `TerrainVTSettings` dataclasses at end of settings section, after the last settings class (e.g. after `SkySettings`). Then add `vt: Optional[TerrainVTSettings] = None` to `TerrainRenderParams`. Also add both classes to the `__all__` list at the bottom of the file. See spec Section 3.2 for exact code.
 
 - [ ] **Step 4: Update __init__.py and __init__.pyi exports**
 
@@ -219,9 +218,20 @@ pub fn children(&self) -> Option<[Self; 4]> {
 }
 ```
 
-- [ ] **Step 3: Update AtlasAllocator for slot_size**
+- [ ] **Step 3: Update AtlasSlot and AtlasAllocator**
 
-In `src/core/tile_cache/allocator.rs`, change `new_with_dimensions` to accept `slot_size` (= `tile_size + 2 * tile_border`). The grid layout uses `slot_size`, not content `tile_size`. UV calculations use `slot_size` for slot origin but content inset is computed by the caller.
+In `src/core/tile_cache/types.rs`, update `AtlasSlot` to remove `mip_bias` (no longer needed — shader selects mip explicitly). The struct becomes:
+
+```rust
+pub struct AtlasSlot {
+    pub atlas_x: u32,
+    pub atlas_y: u32,
+    pub atlas_u: f32,  // slot origin UV (caller offsets by border for content)
+    pub atlas_v: f32,
+}
+```
+
+In `src/core/tile_cache/allocator.rs`, change `new_with_dimensions` to accept `slot_size` (= `tile_size + 2 * tile_border`). The grid layout uses `slot_size`, not content `tile_size`. UV calculations use `slot_size` for slot origin. Update `allocate()` and `deallocate()` to use the new `AtlasSlot` shape (no `mip_bias`).
 
 - [ ] **Step 4: Run existing VT core tests**
 
@@ -374,23 +384,38 @@ pub(super) fn parse_vt_settings(params: &Bound<'_, PyAny>) -> TerrainVTSettingsN
 }
 ```
 
-- [ ] **Step 3: Add `vt` field to DecodedTerrainSettings**
+- [ ] **Step 3: Register new modules in `src/terrain/render_params.rs`**
+
+Add module declarations alongside existing ones (after `mod decode_probes;`):
+
+```rust
+mod decode_vt;
+mod native_vt;
+```
+
+Add `use` statement alongside existing native type imports:
+
+```rust
+use native_vt::{TerrainVTSettingsNative, VTLayerFamilyNative};
+```
+
+- [ ] **Step 4: Add `vt` field to DecodedTerrainSettings**
 
 In `core.rs`, add `pub vt: TerrainVTSettingsNative` to `DecodedTerrainSettings`.
 
-- [ ] **Step 4: Wire parse_vt_settings into private_impl.rs**
+- [ ] **Step 5: Wire parse_vt_settings into private_impl.rs**
 
 In `from_python_params()`, add `vt: parse_vt_settings(&params)` to the `DecodedTerrainSettings` struct literal.
 
-- [ ] **Step 5: Verify compilation**
+- [ ] **Step 6: Verify compilation**
 
 Run: `cargo build --features extension-module 2>&1 | tail -20`
 Expected: Compiles
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/terrain/render_params/
+git add src/terrain/render_params.rs src/terrain/render_params/
 git commit -m "feat(tv20): add native VT settings decode path"
 ```
 
@@ -496,7 +521,15 @@ git commit -m "feat(tv20): add VT sampling path to terrain shader with textureLo
 - Modify: `src/terrain/renderer/core.rs`
 - Modify: `src/terrain/renderer/py_api.rs`
 
-- [ ] **Step 1: Create TerrainMaterialVT struct**
+- [ ] **Step 1: Register new module in `src/terrain/renderer.rs`**
+
+Add after the existing `mod` declarations (e.g. after `mod water_reflection;`):
+
+```rust
+mod virtual_texture;
+```
+
+- [ ] **Step 2: Create TerrainMaterialVT struct**
 
 ```rust
 pub(super) struct VTSource {
@@ -521,37 +554,37 @@ Implement:
 - `stats()` — returns per-family stats dict
 - `load_tile_for_sources()` — extracts tile region from source images for a given TileId, all materials
 
-- [ ] **Step 2: Add TerrainMaterialVT to TerrainScene**
+- [ ] **Step 3: Add TerrainMaterialVT to TerrainScene**
 
 In `core.rs`, add `pub(super) material_vt: Mutex<TerrainMaterialVT>`.
 
-- [ ] **Step 3: Add PyMethods for source registration**
+- [ ] **Step 4: Add PyMethods for source registration**
 
 In `py_api.rs`, add:
 - `register_material_vt_source()` — validates family name, schema, virtual_size consistency; stores into `material_vt`
 - `clear_material_vt_sources()` — clears stored sources
 - `get_material_vt_stats()` — returns Python dict from `material_vt.stats()`
 
-- [ ] **Step 4: Add render-time VT validation**
+- [ ] **Step 5: Add render-time VT validation**
 
 In the render path (before bind group creation), check: if decoded VT settings are enabled, validate all material indices have registered sources. If not → `PyRuntimeError`.
 
-- [ ] **Step 5: Wire VT update into render path**
+- [ ] **Step 6: Wire VT update into render path**
 
 Before `create_terrain_pass_bind_groups()`, if VT is enabled:
 1. Call `material_vt.ensure_initialized(device, queue, decoded.vt, material_count)`
 2. Call `material_vt.update(device, queue, camera_info)`
 3. Pass real atlas/page_table views to bind group creation instead of fallbacks
 
-- [ ] **Step 6: Verify compilation**
+- [ ] **Step 7: Verify compilation**
 
 Run: `cargo build --features extension-module 2>&1 | tail -20`
 Expected: Compiles
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/terrain/renderer/virtual_texture.rs src/terrain/renderer/core.rs src/terrain/renderer/py_api.rs
+git add src/terrain/renderer.rs src/terrain/renderer/virtual_texture.rs src/terrain/renderer/core.rs src/terrain/renderer/py_api.rs
 git commit -m "feat(tv20): TerrainMaterialVT with source registration, tile loading, render-time validation"
 ```
 
