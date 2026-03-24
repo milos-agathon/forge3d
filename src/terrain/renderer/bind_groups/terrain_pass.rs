@@ -362,6 +362,27 @@ impl TerrainScene {
                     binding: 5,
                     resource: wgpu::BindingResource::Sampler(&self.reflection_probe_sampler),
                 },
+                // VT bindings (fallback)
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: self.vt_uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: self.vt_fallback_uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: wgpu::BindingResource::TextureView(&self.vt_atlas_fallback_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: wgpu::BindingResource::Sampler(&self.vt_atlas_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: wgpu::BindingResource::TextureView(&self.vt_page_table_fallback_view),
+                },
             ],
         });
 

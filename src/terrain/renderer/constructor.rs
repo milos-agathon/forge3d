@@ -84,6 +84,110 @@ impl TerrainScene {
                 contents: bytemuck::bytes_of(&MaterialLayerUniforms::disabled()),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
+
+        // VT fallback resources
+        let vt_atlas_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("vt_atlas_fallback"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        let vt_atlas_fallback_view = vt_atlas_fallback_texture.create_view(&Default::default());
+
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &vt_atlas_fallback_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[255, 255, 255, 255],
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: None,
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let vt_page_table_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("vt_page_table_fallback"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        let vt_page_table_fallback_view = vt_page_table_fallback_texture.create_view(&Default::default());
+
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &vt_page_table_fallback_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[0.0_f32, 0.0, 0.0, 0.0]
+                .iter()
+                .flat_map(|f| f.to_le_bytes())
+                .collect::<Vec<_>>(),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(16),
+                rows_per_image: None,
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let vt_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vt_uniforms"),
+            size: 32,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let vt_fallback_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vt_fallback_colors"),
+            size: 256,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let vt_atlas_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("vt_atlas_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
         let probe_grid_uniform_buffer =
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.probes.grid_uniform_buffer"),
@@ -356,6 +460,13 @@ impl TerrainScene {
             water_reflection_pipeline,
             material_layer_bind_group_layout,
             material_layer_uniform_buffer,
+            vt_uniform_buffer,
+            vt_fallback_uniform_buffer,
+            vt_atlas_fallback_texture,
+            vt_atlas_fallback_view,
+            vt_page_table_fallback_texture,
+            vt_page_table_fallback_view,
+            vt_atlas_sampler,
             probe_grid_uniform_buffer,
             probe_ssbo,
             probe_grid_uniform_alloc_bytes,
