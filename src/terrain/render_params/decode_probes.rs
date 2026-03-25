@@ -92,20 +92,38 @@ pub(super) fn parse_reflection_probe_settings(
             .getattr("height_offset")
             .and_then(|v| v.extract())
             .unwrap_or(5.0);
+        let resolution: u32 = probes
+            .getattr("resolution")
+            .and_then(|v| v.extract())
+            .unwrap_or(16);
         let ray_count: u32 = probes
             .getattr("ray_count")
             .and_then(|v| v.extract())
-            .unwrap_or(16);
-        let fallback_blend_distance: Option<f32> = probes
-            .getattr("fallback_blend_distance")
-            .ok()
-            .and_then(|v| v.extract().ok());
-        let sky_color = extract_rgb3(&probes, "sky_color", [0.6, 0.75, 1.0]);
-        let sky_intensity: f32 = probes
+            .unwrap_or(64);
+        let trace_steps: u32 = probes
+            .getattr("trace_steps")
+            .and_then(|v| v.extract())
+            .unwrap_or(192);
+        let trace_refine_steps: u32 = probes
+            .getattr("trace_refine_steps")
+            .and_then(|v| v.extract())
+            .unwrap_or(5);
+        let fallback_blend_distance =
+            probes
+                .getattr("fallback_blend_distance")
+                .ok()
+                .and_then(|value| {
+                    if let Ok(single) = value.extract::<f32>() {
+                        Some((single, single))
+                    } else {
+                        value.extract::<(f32, f32)>().ok()
+                    }
+                });
+        let _unused_sky_color = extract_rgb3(&probes, "sky_color", [0.6, 0.75, 1.0]);
+        let _unused_sky_intensity: f32 = probes
             .getattr("sky_intensity")
             .and_then(|v| v.extract())
             .unwrap_or(1.0);
-        let ground_color = extract_rgb3(&probes, "ground_color", [0.22, 0.18, 0.14]);
         let strength: f32 = probes
             .getattr("strength")
             .and_then(|v| v.extract())
@@ -117,11 +135,11 @@ pub(super) fn parse_reflection_probe_settings(
             origin,
             spacing,
             height_offset,
+            resolution,
             ray_count,
+            trace_steps,
+            trace_refine_steps,
             fallback_blend_distance,
-            sky_color,
-            sky_intensity,
-            ground_color,
             strength,
         }
     } else {

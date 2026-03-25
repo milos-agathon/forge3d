@@ -261,7 +261,7 @@ pub(super) fn parse_denoise_settings(params: &Bound<'_, PyAny>) -> DenoiseSettin
                     .and_then(|v| v.extract())
                     .unwrap_or(false),
                 method: match method_str.as_str() {
-                    "bilateral" => DenoiseMethodNative::Bilateral,
+                    "oidn" => DenoiseMethodNative::Oidn,
                     "none" => DenoiseMethodNative::None,
                     _ => DenoiseMethodNative::Atrous,
                 },

@@ -48,6 +48,17 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - Published the TV10 workflow in the main docs navigation and API reference.
 - Extended the terrain golden CI lane to run the new TV10 goldens and hardened the TV10 real-DEM example test to skip on unsupported hosted adapters.
 
+## [1.20.0] - 2026-03-24
+
+### Added
+- Implemented Epic TV12 terrain offline render quality with deterministic offline accumulation, adaptive sampling, HDR resolve/export, aligned terrain AOV support, and optional OIDN denoising through the public Python API.
+- Added the TV12 public docs page, example workflow, offline controller, HDR frame binding, native offline shaders/passes, and regression coverage for architecture, controller behavior, and runtime image quality.
+- Added the adjacent terrain renderer updates required by the shipped TV12 path, including depth/readback plumbing, terrain data revision handling, reflection-probe terrain integration, and terrain-scatter blend controls that share the same renderer surface.
+
+### Changed
+- Tightened the offline contract so `render_offline()` requires explicit `OfflineQualitySettings(enabled=True)`, adaptive jitter budgeting covers the full planned sample budget, and `HdrFrame.save()` requires an explicit `.exr` suffix while releasing the GIL during export.
+- Bumped the package version to `1.20.0`.
+
 ## [1.16.0] - 2026-03-22
 
 ### Added

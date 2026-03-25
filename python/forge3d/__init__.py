@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.19.0"
+__version__ = "1.20.0"
 version = __version__
 
 import numpy as np
@@ -64,6 +64,9 @@ if _NATIVE_MODULE is not None:
         "TerrainRenderer",
         "Frame",
         "AovFrame",
+        "HdrFrame",
+        "OfflineBatchResult",
+        "OfflineMetrics",
         "Light",
         "Atmosphere",
         "open_viewer",
@@ -119,7 +122,13 @@ from .terrain_params import (
     LodSettings,
     SamplingSettings,
     ClampSettings,
+    DenoiseSettings,
+    OfflineQualitySettings,
+    VTLayerFamily,
+    TerrainVTSettings,
 )
+from .offline import OfflineProgress, OfflineResult, render_offline
+from .denoise_oidn import oidn_available, oidn_denoise
 from . import presets
 from . import animation
 
@@ -151,7 +160,6 @@ from .datasets import (
 from .widgets import ViewerWidget, widgets_available
 from ._license import LicenseError, set_license_key
 from . import terrain_scatter
-from .terrain_scatter import ScatterWindSettings
 
 # -----------------------------------------------------------------------------
 # Fallback Renderer class
@@ -375,6 +383,7 @@ __all__ = [
     "TerrainRenderer",
     "Frame",
     "AovFrame",
+    "HdrFrame",
     # P0.3/M2: Sun ephemeris
     "SunPosition",
     "sun_position",
@@ -390,7 +399,6 @@ __all__ = [
     "HeightAoSettings",
     "SunVisibilitySettings",
     "ProbeSettings",
-    "ReflectionProbeSettings",
     "DetailSettings",
     "MaterialNoiseSettings",
     "MaterialLayerSettings",
@@ -399,6 +407,15 @@ __all__ = [
     "LodSettings",
     "SamplingSettings",
     "ClampSettings",
+    "DenoiseSettings",
+    "OfflineQualitySettings",
+    "VTLayerFamily",
+    "TerrainVTSettings",
+    "OfflineProgress",
+    "OfflineResult",
+    "render_offline",
+    "oidn_available",
+    "oidn_denoise",
     "presets",
     # Colormaps
     "get_colormap",
@@ -422,7 +439,6 @@ __all__ = [
     "geometry",
     "io",
     "terrain_scatter",
-    "ScatterWindSettings",
     # Interactive viewer
     "open_viewer",
     "open_viewer_async",

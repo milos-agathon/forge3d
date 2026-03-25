@@ -7,7 +7,6 @@
 import hashlib
 import numpy as np
 import pytest
-from pathlib import Path
 
 # Try to import forge3d - skip tests if not available
 try:
@@ -64,6 +63,34 @@ def compute_ssim_simple(img1: np.ndarray, img2: np.ndarray) -> float:
            ((mu_a ** 2 + mu_b ** 2 + C1) * (sigma_a_sq + sigma_b_sq + C2))
     
     return float(ssim)
+
+
+def _halton(index: int, base: int) -> float:
+    result = 0.0
+    f = 1.0 / float(base)
+    while index > 0:
+        result += f * float(index % base)
+        index //= base
+        f /= float(base)
+    return result
+
+
+def _r2_offsets(count: int, seed: int | None = None) -> list[tuple[float, float]]:
+    if count <= 1:
+        return [(0.0, 0.0)]
+
+    phi2 = 1.32471795724474602596
+    alpha1 = 1.0 / phi2
+    alpha2 = 1.0 / (phi2 * phi2)
+    start = float(seed or 0) * 0.5
+
+    offsets: list[tuple[float, float]] = []
+    for i in range(count):
+        n = float(i) + start
+        x = (n * alpha1) % 1.0
+        y = (n * alpha2) % 1.0
+        offsets.append((x - 0.5, y - 0.5))
+    return offsets
 
 
 @pytest.fixture
@@ -192,18 +219,19 @@ class TestJitterSequence:
 
     def test_r2_sequence_bounds(self):
         """Test that R2 jitter sequence values are in [-0.5, 0.5]."""
-        # This tests the Python-side validation that the Rust JitterSequence
-        # should produce values in the expected range
-        # Actual values come from Rust, but we verify the contract here
-        pass  # Implemented in Rust tests
+        offsets = _r2_offsets(32, seed=7)
+
+        assert len(offsets) == 32
+        for x, y in offsets:
+            assert -0.5 <= x <= 0.5, f"x={x} out of range"
+            assert -0.5 <= y <= 0.5, f"y={y} out of range"
 
     def test_halton_sequence_first_values(self):
         """Test known values of Halton sequence."""
-        # Halton(1, base=2) = 0.5
-        # Halton(1, base=3) ≈ 0.333
-        # Halton(2, base=2) = 0.25
-        # Halton(2, base=3) ≈ 0.667
-        pass  # Implemented in Rust tests
+        assert _halton(1, 2) == pytest.approx(0.5, abs=1e-6)
+        assert _halton(1, 3) == pytest.approx(1.0 / 3.0, abs=1e-6)
+        assert _halton(2, 2) == pytest.approx(0.25, abs=1e-6)
+        assert _halton(2, 3) == pytest.approx(2.0 / 3.0, abs=1e-6)
 
 
 @pytest.mark.skipif(not FORGE3D_AVAILABLE, reason="forge3d not installed")

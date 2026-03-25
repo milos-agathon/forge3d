@@ -5,6 +5,7 @@ impl TerrainScene {
     pub(super) fn extract_overlay_binding(
         &self,
         params: &render_params::TerrainRenderParams,
+        offline_hdr_output: bool,
     ) -> OverlayBinding {
         let overlays = params.overlays();
         let env_debug_mode = std::env::var("VF_COLOR_DEBUG_MODE")
@@ -73,6 +74,7 @@ impl TerrainScene {
         let detail_fade_start = detail.fade_start.max(0.0);
         let detail_fade_end = detail.fade_end.max(detail_fade_start + 1.0);
         let output_srgb_eotf = if params.output_srgb_eotf { 1.0 } else { 0.0 };
+        let offline_hdr_flag = if offline_hdr_output { 1.0 } else { 0.0 };
 
         let mut binding = OverlayBinding {
             uniform: OverlayUniforms {
@@ -86,7 +88,12 @@ impl TerrainScene {
                     detail_normal_strength,
                     detail_albedo_noise,
                 ],
-                params5: [detail_fade_start, detail_fade_end, output_srgb_eotf, 0.0],
+                params5: [
+                    detail_fade_start,
+                    detail_fade_end,
+                    output_srgb_eotf,
+                    offline_hdr_flag,
+                ],
             },
             lut: None,
         };
@@ -269,49 +276,10 @@ impl TerrainScene {
         _terrain_width: f32,
         _terrain_height: f32,
     ) -> Result<Vec<f32>> {
-        let phi_rad = params.cam_phi_deg.to_radians();
-        let theta_rad = params.cam_theta_deg.to_radians();
-
-        let eye_x = params.cam_target[0] + params.cam_radius * theta_rad.sin() * phi_rad.cos();
-        let eye_y = params.cam_target[1] + params.cam_radius * theta_rad.cos();
-        let eye_z = params.cam_target[2] + params.cam_radius * theta_rad.sin() * phi_rad.sin();
-
-        let eye = glam::Vec3::new(eye_x, eye_y, eye_z);
-        let target = glam::Vec3::from_array(params.cam_target);
-        let up = glam::Vec3::Y;
-
-        let view = glam::Mat4::look_at_rh(eye, target, up);
-        let aspect = params.size_px.0 as f32 / params.size_px.1 as f32;
-        let proj = glam::Mat4::perspective_rh(
-            params.fov_y_deg.to_radians(),
-            aspect,
-            params.clip.0,
-            params.clip.1,
-        );
-
-        let mut uniforms = Vec::with_capacity(48);
-        uniforms.extend_from_slice(&view.to_cols_array());
-        uniforms.extend_from_slice(&proj.to_cols_array());
-        uniforms.extend_from_slice(&[
-            decoded.light.direction[0],
-            decoded.light.direction[1],
-            decoded.light.direction[2],
-            decoded.light.intensity,
-        ]);
-
-        let is_mesh_mode = params.camera_mode.to_lowercase() == "mesh";
-        let spacing = if is_mesh_mode {
-            params.terrain_span.max(1e-3)
-        } else {
-            1.0
-        };
-        uniforms.extend_from_slice(&[spacing, spacing, params.z_scale, params.render_scale]);
-
-        let camera_mode = if is_mesh_mode { 1.0 } else { 0.0 };
-        let grid_size = 512.0;
-        uniforms.extend_from_slice(&[camera_mode, grid_size, params.clip.0, params.clip.1]);
-
-        Ok(uniforms)
+        let (_eye, view, proj) = Self::build_camera_matrices(params);
+        Ok(Self::build_uniforms_with_matrices(
+            params, decoded, view, proj,
+        ))
     }
 
     pub(super) fn build_uniforms_with_matrices(
@@ -343,6 +311,30 @@ impl TerrainScene {
         uniforms.extend_from_slice(&[camera_mode, grid_size, params.clip.0, params.clip.1]);
 
         uniforms
+    }
+
+    pub(super) fn build_camera_matrices(
+        params: &render_params::TerrainRenderParams,
+    ) -> (glam::Vec3, glam::Mat4, glam::Mat4) {
+        let phi_rad = params.cam_phi_deg.to_radians();
+        let theta_rad = params.cam_theta_deg.to_radians();
+
+        let eye_x = params.cam_target[0] + params.cam_radius * theta_rad.sin() * phi_rad.cos();
+        let eye_y = params.cam_target[1] + params.cam_radius * theta_rad.cos();
+        let eye_z = params.cam_target[2] + params.cam_radius * theta_rad.sin() * phi_rad.sin();
+
+        let eye = glam::Vec3::new(eye_x, eye_y, eye_z);
+        let target = glam::Vec3::from_array(params.cam_target);
+        let up = glam::Vec3::Y;
+        let view = glam::Mat4::look_at_rh(eye, target, up);
+        let aspect = params.size_px.0 as f32 / params.size_px.1 as f32;
+        let proj = glam::Mat4::perspective_rh(
+            params.fov_y_deg.to_radians(),
+            aspect,
+            params.clip.0,
+            params.clip.1,
+        );
+        (eye, view, proj)
     }
 
     pub(super) fn build_shading_uniforms(

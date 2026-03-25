@@ -46,27 +46,38 @@ pub struct ProbeIrradianceSet {
     pub probes: Vec<SHL2>,
 }
 
-pub const REFLECTION_FACE_COUNT: usize = 6;
+pub const REFLECTION_PROBE_FACE_COUNT: usize = 6;
 
-/// Low-resolution local reflection data for one placed probe.
+/// One cubemap mip payload for a reflection probe.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ReflectionProbe {
-    pub faces: [[f32; 3]; REFLECTION_FACE_COUNT],
-    pub average: [f32; 3],
+pub struct ReflectionProbeMip {
+    pub size: u32,
+    /// Face-major RGBA texels: 6 * size * size entries.
+    pub texels: Vec<[f32; 4]>,
 }
 
-impl Default for ReflectionProbe {
-    fn default() -> Self {
-        Self {
-            faces: [[0.0; 3]; REFLECTION_FACE_COUNT],
-            average: [0.0; 3],
-        }
+impl ReflectionProbeMip {
+    pub fn face_texels(&self, face_index: usize) -> &[[f32; 4]] {
+        let face_len = (self.size * self.size) as usize;
+        let start = face_index * face_len;
+        let end = start + face_len;
+        &self.texels[start..end]
     }
 }
 
-/// One reflection payload per resolved probe.
+/// Low-resolution local reflection cubemap data for one placed probe.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReflectionProbe {
+    pub position_ws: [f32; 3],
+    pub average: [f32; 3],
+    pub mips: Vec<ReflectionProbeMip>,
+}
+
+/// One reflection cubemap payload per resolved probe.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReflectionProbeSet {
+    pub resolution: u32,
+    pub mip_level_count: u32,
     pub probes: Vec<ReflectionProbe>,
 }
 

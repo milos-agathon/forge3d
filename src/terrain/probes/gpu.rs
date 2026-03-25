@@ -1,8 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 
-use crate::terrain::probes::types::{
-    ProbeIrradianceSet, ReflectionProbe, ReflectionProbeSet, SHL2,
-};
+use crate::terrain::probes::types::{ProbeIrradianceSet, SHL2};
 
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -17,7 +15,29 @@ impl ProbeGridUniformsGpu {
         Self {
             grid_origin: [0.0, 0.0, 0.0, 0.0],
             grid_params: [1.0, 1.0, 1.0, 1.0],
-            blend_params: [1.0, 0.0, 0.0, 0.0],
+            blend_params: [1.0, 1.0, 0.0, 0.0],
+        }
+    }
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct ReflectionProbeGridUniformsGpu {
+    pub grid_origin: [f32; 4],
+    pub grid_params: [f32; 4],
+    pub blend_params: [f32; 4],
+    pub scene_bounds_min: [f32; 4],
+    pub scene_bounds_max: [f32; 4],
+}
+
+impl ReflectionProbeGridUniformsGpu {
+    pub fn disabled() -> Self {
+        Self {
+            grid_origin: [0.0, 0.0, 0.0, 0.0],
+            grid_params: [1.0, 1.0, 1.0, 1.0],
+            blend_params: [1.0, 1.0, 0.0, 0.0],
+            scene_bounds_min: [0.0, 0.0, 0.0, 1.0],
+            scene_bounds_max: [0.0, 0.0, 0.0, 1.0],
         }
     }
 }
@@ -72,59 +92,8 @@ impl GpuProbeData {
     }
 }
 
-#[repr(C, align(16))]
-#[derive(Clone, Copy, Debug, Pod, Zeroable)]
-pub struct GpuReflectionProbeData {
-    pub pos_x: [f32; 4],
-    pub neg_x: [f32; 4],
-    pub pos_y: [f32; 4],
-    pub neg_y: [f32; 4],
-    pub pos_z: [f32; 4],
-    pub neg_z: [f32; 4],
-    pub average: [f32; 4],
-}
-
-impl GpuReflectionProbeData {
-    pub fn zeroed() -> Self {
-        <Self as Zeroable>::zeroed()
-    }
-
-    pub fn from_reflection_probe(probe: &ReflectionProbe) -> Self {
-        Self {
-            pos_x: [probe.faces[0][0], probe.faces[0][1], probe.faces[0][2], 0.0],
-            neg_x: [probe.faces[1][0], probe.faces[1][1], probe.faces[1][2], 0.0],
-            pos_y: [probe.faces[2][0], probe.faces[2][1], probe.faces[2][2], 0.0],
-            neg_y: [probe.faces[3][0], probe.faces[3][1], probe.faces[3][2], 0.0],
-            pos_z: [probe.faces[4][0], probe.faces[4][1], probe.faces[4][2], 0.0],
-            neg_z: [probe.faces[5][0], probe.faces[5][1], probe.faces[5][2], 0.0],
-            average: [probe.average[0], probe.average[1], probe.average[2], 0.0],
-        }
-    }
-
-    pub fn to_reflection_probe(&self) -> ReflectionProbe {
-        ReflectionProbe {
-            faces: [
-                [self.pos_x[0], self.pos_x[1], self.pos_x[2]],
-                [self.neg_x[0], self.neg_x[1], self.neg_x[2]],
-                [self.pos_y[0], self.pos_y[1], self.pos_y[2]],
-                [self.neg_y[0], self.neg_y[1], self.neg_y[2]],
-                [self.pos_z[0], self.pos_z[1], self.pos_z[2]],
-                [self.neg_z[0], self.neg_z[1], self.neg_z[2]],
-            ],
-            average: [self.average[0], self.average[1], self.average[2]],
-        }
-    }
-}
-
 pub fn pack_probes_for_upload(set: &ProbeIrradianceSet) -> Vec<GpuProbeData> {
     set.probes.iter().map(GpuProbeData::from_sh).collect()
-}
-
-pub fn pack_reflection_probes_for_upload(set: &ReflectionProbeSet) -> Vec<GpuReflectionProbeData> {
-    set.probes
-        .iter()
-        .map(GpuReflectionProbeData::from_reflection_probe)
-        .collect()
 }
 
 #[cfg(test)]
@@ -135,7 +104,7 @@ mod tests {
     fn test_probe_gpu_layout_size() {
         assert_eq!(std::mem::size_of::<GpuProbeData>(), 144);
         assert_eq!(std::mem::size_of::<ProbeGridUniformsGpu>(), 48);
-        assert_eq!(std::mem::size_of::<GpuReflectionProbeData>(), 112);
+        assert_eq!(std::mem::size_of::<ReflectionProbeGridUniformsGpu>(), 80);
     }
 
     #[test]
@@ -164,24 +133,5 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn test_reflection_probe_packing_roundtrip() {
-        let probe = ReflectionProbe {
-            faces: [
-                [0.1, 0.2, 0.3],
-                [0.4, 0.5, 0.6],
-                [0.7, 0.8, 0.9],
-                [1.0, 1.1, 1.2],
-                [1.3, 1.4, 1.5],
-                [1.6, 1.7, 1.8],
-            ],
-            average: [0.85, 0.95, 1.05],
-        };
-
-        let gpu = GpuReflectionProbeData::from_reflection_probe(&probe);
-        let roundtrip = gpu.to_reflection_probe();
-        assert_eq!(roundtrip, probe);
     }
 }

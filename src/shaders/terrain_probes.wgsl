@@ -1,12 +1,25 @@
-// TV5: Local irradiance and reflection probe bindings and helpers.
+// TV24: Local irradiance + local reflection probes for terrain scenes.
 
 struct ProbeGridUniforms {
     // xy = world origin, z = height offset, w = enabled
     grid_origin: vec4<f32>,
     // x = spacing_x, y = spacing_y, z = dims_x, w = dims_y
     grid_params: vec4<f32>,
-    // x = fallback blend distance, y = probe count, z = feature strength, w = pad
+    // xy = edge blend distance, z = feature strength, w = probe count
     blend_params: vec4<f32>,
+}
+
+struct ReflectionProbeGridUniforms {
+    // xy = world origin, z = height offset, w = enabled
+    grid_origin: vec4<f32>,
+    // x = spacing_x, y = spacing_y, z = dims_x, w = dims_y
+    grid_params: vec4<f32>,
+    // xy = edge blend distance, z = feature strength, w = probe count
+    blend_params: vec4<f32>,
+    // xyz = scene bounds min, w = cubemap face resolution
+    scene_bounds_min: vec4<f32>,
+    // xyz = scene bounds max, w = mip count
+    scene_bounds_max: vec4<f32>,
 }
 
 struct GpuProbeData {
@@ -19,16 +32,6 @@ struct GpuProbeData {
     sh_b_01: vec4<f32>,
     sh_b_23: vec4<f32>,
     sh_b_4: vec4<f32>,
-}
-
-struct GpuReflectionProbeData {
-    pos_x: vec4<f32>,
-    neg_x: vec4<f32>,
-    pos_y: vec4<f32>,
-    neg_y: vec4<f32>,
-    pos_z: vec4<f32>,
-    neg_z: vec4<f32>,
-    average: vec4<f32>,
 }
 
 struct ProbeIrradianceResult {
@@ -58,10 +61,13 @@ var<uniform> probe_grid: ProbeGridUniforms;
 var<storage, read> probe_data: array<GpuProbeData>;
 
 @group(6) @binding(3)
-var<uniform> reflection_probe_grid: ProbeGridUniforms;
+var<uniform> reflection_probe_grid: ReflectionProbeGridUniforms;
 
 @group(6) @binding(4)
-var<storage, read> reflection_probe_data: array<GpuReflectionProbeData>;
+var reflection_probe_tex: texture_2d_array<f32>;
+
+@group(6) @binding(5)
+var reflection_probe_samp: sampler;
 
 fn evaluate_sh_l2(n: vec3<f32>, probe: GpuProbeData) -> vec3<f32> {
     let Y00 = 0.282095;
@@ -84,30 +90,35 @@ fn evaluate_sh_l2(n: vec3<f32>, probe: GpuProbeData) -> vec3<f32> {
     return max(result, vec3<f32>(0.0));
 }
 
-fn compute_probe_grid_blend(grid: ProbeGridUniforms, world_pos: vec3<f32>) -> ProbeGridBlend {
+fn compute_probe_grid_blend(
+    grid_origin: vec4<f32>,
+    grid_params: vec4<f32>,
+    blend_params: vec4<f32>,
+    world_pos: vec3<f32>,
+) -> ProbeGridBlend {
     var blend: ProbeGridBlend;
     blend.idx00 = 0u;
     blend.idx10 = 0u;
     blend.idx01 = 0u;
     blend.idx11 = 0u;
-    blend.frac = vec2<f32>(0.0, 0.0);
+    blend.frac = vec2<f32>(0.0);
     blend.weight = 0.0;
     blend.valid = 0.0;
 
-    if (grid.grid_origin.w < 0.5) {
+    if (grid_origin.w < 0.5) {
         return blend;
     }
 
-    let dims = vec2<u32>(u32(grid.grid_params.z), u32(grid.grid_params.w));
+    let dims = vec2<u32>(u32(grid_params.z), u32(grid_params.w));
     if (dims.x == 0u || dims.y == 0u) {
         return blend;
     }
 
-    let spacing = max(grid.grid_params.xy, vec2<f32>(1e-6, 1e-6));
-    let grid_uv = (world_pos.xy - grid.grid_origin.xy) / spacing;
+    let spacing = max(grid_params.xy, vec2<f32>(1e-6));
+    let grid_uv = (world_pos.xy - grid_origin.xy) / spacing;
     let grid_extent = vec2<f32>(f32(dims.x - 1u), f32(dims.y - 1u));
 
-    var i0 = vec2<u32>(0u, 0u);
+    var i0 = vec2<u32>(0u);
     if (dims.x > 1u) {
         let clamped_x = clamp(grid_uv.x, 0.0, grid_extent.x);
         let base_x = min(u32(floor(clamped_x)), dims.x - 1u);
@@ -131,17 +142,19 @@ fn compute_probe_grid_blend(grid: ProbeGridUniforms, world_pos: vec3<f32>) -> Pr
     blend.idx01 = i1.y * dims.x + i0.x;
     blend.idx11 = i1.y * dims.x + i1.x;
 
-    let fallback_dist = max(grid.blend_params.x, 1e-6);
-    var dist_x = fallback_dist + 1.0;
-    var dist_y = fallback_dist + 1.0;
+    let blend_dist = max(blend_params.xy, vec2<f32>(1e-6));
+    var weight_x = 1.0;
+    var weight_y = 1.0;
     if (dims.x > 1u) {
-        dist_x = min(grid_uv.x, grid_extent.x - grid_uv.x) * spacing.x;
+        let dist_x = min(grid_uv.x, grid_extent.x - grid_uv.x) * spacing.x;
+        weight_x = clamp(dist_x / blend_dist.x, 0.0, 1.0);
     }
     if (dims.y > 1u) {
-        dist_y = min(grid_uv.y, grid_extent.y - grid_uv.y) * spacing.y;
+        let dist_y = min(grid_uv.y, grid_extent.y - grid_uv.y) * spacing.y;
+        weight_y = clamp(dist_y / blend_dist.y, 0.0, 1.0);
     }
-    let dist_to_edge = min(dist_x, dist_y);
-    blend.weight = clamp(dist_to_edge / fallback_dist, 0.0, 1.0);
+
+    blend.weight = min(weight_x, weight_y);
     blend.valid = 1.0;
     return blend;
 }
@@ -151,7 +164,12 @@ fn sample_probe_irradiance(world_pos: vec3<f32>, normal: vec3<f32>) -> ProbeIrra
     result.irradiance = vec3<f32>(0.0);
     result.weight = 0.0;
 
-    let blend = compute_probe_grid_blend(probe_grid, world_pos);
+    let blend = compute_probe_grid_blend(
+        probe_grid.grid_origin,
+        probe_grid.grid_params,
+        probe_grid.blend_params,
+        world_pos,
+    );
     if (blend.valid < 0.5) {
         return result;
     }
@@ -165,33 +183,144 @@ fn sample_probe_irradiance(world_pos: vec3<f32>, normal: vec3<f32>) -> ProbeIrra
         mix(sh01, sh11, blend.frac.x),
         blend.frac.y,
     );
-    result.weight = blend.weight;
+    result.weight = clamp(blend.weight * probe_grid.blend_params.z, 0.0, 1.0);
     return result;
 }
 
-fn sample_reflection_probe_direction(
+fn reflection_probe_center(index: u32) -> vec3<f32> {
+    let dims = vec2<u32>(
+        max(u32(reflection_probe_grid.grid_params.z), 1u),
+        max(u32(reflection_probe_grid.grid_params.w), 1u),
+    );
+    let probe_x = index % dims.x;
+    let probe_y = index / dims.x;
+    let center_xy =
+        reflection_probe_grid.grid_origin.xy +
+        vec2<f32>(f32(probe_x), f32(probe_y)) * reflection_probe_grid.grid_params.xy;
+    let terrain_span = max(u_terrain.spacing_h_exag.x, 1e-6);
+    let terrain_uv = clamp(center_xy / terrain_span + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
+    let center_z = sample_height_geom(terrain_uv) * u_terrain.spacing_h_exag.z + reflection_probe_grid.grid_origin.z;
+    return vec3<f32>(center_xy, center_z);
+}
+
+fn reflection_probe_cell_extents() -> vec3<f32> {
+    let dims = vec2<u32>(
+        max(u32(reflection_probe_grid.grid_params.z), 1u),
+        max(u32(reflection_probe_grid.grid_params.w), 1u),
+    );
+    let total_bounds = max(
+        reflection_probe_grid.scene_bounds_max.xyz - reflection_probe_grid.scene_bounds_min.xyz,
+        vec3<f32>(1e-3),
+    );
+    let half_x = select(total_bounds.x * 0.5, max(reflection_probe_grid.grid_params.x * 0.5, 1e-3), dims.x > 1u);
+    let half_y = select(total_bounds.y * 0.5, max(reflection_probe_grid.grid_params.y * 0.5, 1e-3), dims.y > 1u);
+    let half_z = max(total_bounds.z * 0.5, 1e-3);
+    return vec3<f32>(half_x, half_y, half_z);
+}
+
+fn reflection_probe_box_project(
+    world_pos: vec3<f32>,
+    reflection_dir: vec3<f32>,
+    probe_center: vec3<f32>,
+) -> vec3<f32> {
+    let dir = normalize(reflection_dir);
+    let half_extents = reflection_probe_cell_extents();
+    let box_min = vec3<f32>(
+        probe_center.xy - half_extents.xy,
+        reflection_probe_grid.scene_bounds_min.z,
+    );
+    let box_max = vec3<f32>(
+        probe_center.xy + half_extents.xy,
+        reflection_probe_grid.scene_bounds_max.z,
+    );
+
+    let tx = select(
+        select(1.0e9, (box_min.x - world_pos.x) / dir.x, dir.x < -1.0e-4),
+        (box_max.x - world_pos.x) / dir.x,
+        dir.x > 1.0e-4,
+    );
+    let ty = select(
+        select(1.0e9, (box_min.y - world_pos.y) / dir.y, dir.y < -1.0e-4),
+        (box_max.y - world_pos.y) / dir.y,
+        dir.y > 1.0e-4,
+    );
+    let tz = select(
+        select(1.0e9, (box_min.z - world_pos.z) / dir.z, dir.z < -1.0e-4),
+        (box_max.z - world_pos.z) / dir.z,
+        dir.z > 1.0e-4,
+    );
+
+    let travel = max(min(tx, min(ty, tz)), 0.0);
+    let hit_pos = world_pos + dir * travel;
+    let corrected = hit_pos - probe_center;
+    let corrected_len2 = dot(corrected, corrected);
+    if (corrected_len2 > 1.0e-8) {
+        return normalize(corrected);
+    }
+    return dir;
+}
+
+fn sample_reflection_probe_array(
+    probe_index: u32,
     direction: vec3<f32>,
     roughness: f32,
-    probe: GpuReflectionProbeData,
 ) -> vec3<f32> {
-    let d = normalize(direction);
-    let sharpness = mix(8.0, 1.0, clamp(roughness, 0.0, 1.0));
-    let w_pos_x = pow(max(d.x, 0.0), sharpness);
-    let w_neg_x = pow(max(-d.x, 0.0), sharpness);
-    let w_pos_y = pow(max(d.y, 0.0), sharpness);
-    let w_neg_y = pow(max(-d.y, 0.0), sharpness);
-    let w_pos_z = pow(max(d.z, 0.0), sharpness);
-    let w_neg_z = pow(max(-d.z, 0.0), sharpness);
-    let total = max(w_pos_x + w_neg_x + w_pos_y + w_neg_y + w_pos_z + w_neg_z, 1e-5);
-    let directional =
-        probe.pos_x.rgb * w_pos_x +
-        probe.neg_x.rgb * w_neg_x +
-        probe.pos_y.rgb * w_pos_y +
-        probe.neg_y.rgb * w_neg_y +
-        probe.pos_z.rgb * w_pos_z +
-        probe.neg_z.rgb * w_neg_z;
-    let blur = clamp(roughness * roughness, 0.0, 1.0);
-    return mix(directional / total, probe.average.rgb, blur);
+    let dir = normalize(direction);
+    let abs_dir = abs(dir);
+    var face = 0u;
+    var uv = vec2<f32>(0.5, 0.5);
+
+    if (abs_dir.x >= abs_dir.y && abs_dir.x >= abs_dir.z) {
+        let ma = max(abs_dir.x, 1.0e-6);
+        if (dir.x > 0.0) {
+            face = 0u;
+            uv = 0.5 * (vec2<f32>(-dir.z, -dir.y) / ma + vec2<f32>(1.0));
+        } else {
+            face = 1u;
+            uv = 0.5 * (vec2<f32>(dir.z, -dir.y) / ma + vec2<f32>(1.0));
+        }
+    } else if (abs_dir.y >= abs_dir.x && abs_dir.y >= abs_dir.z) {
+        let ma = max(abs_dir.y, 1.0e-6);
+        if (dir.y > 0.0) {
+            face = 2u;
+            uv = 0.5 * (vec2<f32>(dir.x, dir.z) / ma + vec2<f32>(1.0));
+        } else {
+            face = 3u;
+            uv = 0.5 * (vec2<f32>(dir.x, -dir.z) / ma + vec2<f32>(1.0));
+        }
+    } else {
+        let ma = max(abs_dir.z, 1.0e-6);
+        if (dir.z > 0.0) {
+            face = 4u;
+            uv = 0.5 * (vec2<f32>(dir.x, -dir.y) / ma + vec2<f32>(1.0));
+        } else {
+            face = 5u;
+            uv = 0.5 * (vec2<f32>(-dir.x, -dir.y) / ma + vec2<f32>(1.0));
+        }
+    }
+
+    let mip_count = max(reflection_probe_grid.scene_bounds_max.w, 1.0);
+    let max_mip = max(mip_count - 1.0, 0.0);
+    let mip_level = clamp(roughness * roughness * max_mip, 0.0, max_mip);
+    let layer_index = i32(probe_index * 6u + face);
+    return textureSampleLevel(
+        reflection_probe_tex,
+        reflection_probe_samp,
+        clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)),
+        layer_index,
+        mip_level,
+    ).rgb;
+}
+
+fn sample_reflection_probe_at_index(
+    probe_index: u32,
+    world_pos: vec3<f32>,
+    reflection_dir: vec3<f32>,
+    roughness: f32,
+) -> vec3<f32> {
+    let probe_center = reflection_probe_center(probe_index);
+    let corrected_dir = reflection_probe_box_project(world_pos, reflection_dir, probe_center);
+    return sample_reflection_probe_array(probe_index, corrected_dir, roughness);
 }
 
 fn sample_reflection_probe(
@@ -203,20 +332,41 @@ fn sample_reflection_probe(
     result.prefiltered_color = vec3<f32>(0.0);
     result.weight = 0.0;
 
-    let blend = compute_probe_grid_blend(reflection_probe_grid, world_pos);
+    let blend = compute_probe_grid_blend(
+        reflection_probe_grid.grid_origin,
+        reflection_probe_grid.grid_params,
+        reflection_probe_grid.blend_params,
+        world_pos,
+    );
     if (blend.valid < 0.5) {
         return result;
     }
+    result.weight = clamp(blend.weight * reflection_probe_grid.blend_params.z, 0.0, 1.0);
+    if (result.weight <= 0.0) {
+        return result;
+    }
 
-    let r00 = sample_reflection_probe_direction(reflection_dir, roughness, reflection_probe_data[blend.idx00]);
-    let r10 = sample_reflection_probe_direction(reflection_dir, roughness, reflection_probe_data[blend.idx10]);
-    let r01 = sample_reflection_probe_direction(reflection_dir, roughness, reflection_probe_data[blend.idx01]);
-    let r11 = sample_reflection_probe_direction(reflection_dir, roughness, reflection_probe_data[blend.idx11]);
+    let s00 = sample_reflection_probe_at_index(blend.idx00, world_pos, reflection_dir, roughness);
+    let s10 = sample_reflection_probe_at_index(blend.idx10, world_pos, reflection_dir, roughness);
+    let s01 = sample_reflection_probe_at_index(blend.idx01, world_pos, reflection_dir, roughness);
+    let s11 = sample_reflection_probe_at_index(blend.idx11, world_pos, reflection_dir, roughness);
     result.prefiltered_color = mix(
-        mix(r00, r10, blend.frac.x),
-        mix(r01, r11, blend.frac.x),
+        mix(s00, s10, blend.frac.x),
+        mix(s01, s11, blend.frac.x),
         blend.frac.y,
     );
-    result.weight = blend.weight * clamp(reflection_probe_grid.blend_params.z, 0.0, 1.0);
     return result;
+}
+
+fn sample_reflection_probe_weight(world_pos: vec3<f32>) -> f32 {
+    let blend = compute_probe_grid_blend(
+        reflection_probe_grid.grid_origin,
+        reflection_probe_grid.grid_params,
+        reflection_probe_grid.blend_params,
+        world_pos,
+    );
+    if (blend.valid < 0.5) {
+        return 0.0;
+    }
+    return clamp(blend.weight * reflection_probe_grid.blend_params.z, 0.0, 1.0);
 }

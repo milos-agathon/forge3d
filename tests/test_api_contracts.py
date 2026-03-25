@@ -68,6 +68,9 @@ class TestNativeModuleSymbols:
         "TerrainRenderParams",
         "TerrainRenderer",
         "AovFrame",
+        "HdrFrame",
+        "OfflineBatchResult",
+        "OfflineMetrics",
         "CameraAnimation",
         "CameraState",
         "ClipmapConfig",
@@ -340,6 +343,15 @@ class TestOrphanedClassesRegistered:
         with pytest.raises(RuntimeError, match="constructed internally"):
             _native.Frame()
 
+    def test_hdr_frame_registered(self):
+        """HdrFrame must be registered but not constructible from Python."""
+        assert hasattr(_native, "HdrFrame"), (
+            "HdrFrame not found on _forge3d -- registration missing"
+        )
+        assert isinstance(getattr(_native, "HdrFrame"), type)
+        with pytest.raises(RuntimeError, match="constructed internally"):
+            _native.HdrFrame()
+
     def test_sdf_primitive_registered(self):
         """SdfPrimitive must be registered and importable."""
         assert hasattr(_native, "SdfPrimitive"), (
@@ -507,6 +519,7 @@ class TestPackageLevelApiContracts:
         "MaterialSet",
         "IBL",
         "OverlayLayer",
+        "HdrFrame",
         "__version__",
         "has_gpu",
         "open_viewer",
@@ -522,6 +535,8 @@ class TestPackageLevelApiContracts:
         "load_bundle",
         "set_license_key",
         "LicenseError",
+        "render_offline",
+        "oidn_available",
     ]
 
     @pytest.mark.parametrize("attr_name", EXPECTED_PACKAGE_ATTRS)

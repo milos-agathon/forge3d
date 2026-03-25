@@ -36,6 +36,7 @@ mod core;
 mod draw;
 mod height_ao;
 mod msaa;
+mod offline;
 mod pipeline_cache;
 mod probes;
 mod py_api;
@@ -58,7 +59,7 @@ use self::core::{
 };
 use self::height_ao::create_heightfield_init_resources;
 use self::msaa::{assert_msaa_invariants, log_msaa_debug, select_effective_msaa, MsaaInvariants};
-use self::resources::{create_accumulation_init_resources, create_base_init_resources};
+use self::resources::create_base_init_resources;
 use self::uniforms::{
     FogUniforms, HeightAoUniforms, MaterialLayerUniforms, OverlayUniforms, ShadowPassUniforms,
     SunVisUniforms,

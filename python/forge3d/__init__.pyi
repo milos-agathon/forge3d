@@ -3,7 +3,7 @@
 # Exists to mirror runtime signatures for IDEs and keep tooling aligned
 # RELEVANT FILES: python/forge3d/__init__.py, python/forge3d/config.py, src/render/params.rs, examples/terrain_demo.py
 from __future__ import annotations
-from typing import Tuple, Optional, Sequence, Any, Dict, Literal, Mapping
+from typing import Tuple, Optional, Sequence, Any, Dict, Literal, Mapping, Callable
 import os
 import numpy as np
 from .terrain_params import (
@@ -25,6 +25,10 @@ from .terrain_params import (
     SamplingSettings,
     ClampSettings,
     TerrainRenderParams as TerrainRenderParamsConfig,
+    DenoiseSettings,
+    OfflineQualitySettings,
+    VTLayerFamily,
+    TerrainVTSettings,
 )
 
 PathLikeStr = os.PathLike[str] | str
@@ -437,6 +441,7 @@ class TerrainRenderParams:
     albedo_mode: str
     colormap_strength: float
     overlays: Sequence[OverlayLayer]
+    terrain_data_revision: Optional[int]
     def __init__(self, params: Any) -> None: ...
     @property
     def light(self) -> Any: ...
@@ -464,6 +469,34 @@ class Frame:
     def save(self, path: PathLikeStr) -> None: ...
     def to_numpy(self) -> np.ndarray: ...
     def size(self) -> Tuple[int, int]: ...
+
+class HdrFrame:
+    def save(self, path: PathLikeStr) -> None: ...
+    def to_numpy_f32(self) -> np.ndarray: ...
+    @property
+    def size(self) -> Tuple[int, int]: ...
+
+class OfflineBatchResult:
+    @property
+    def total_samples(self) -> int: ...
+    @property
+    def batch_time_ms(self) -> float: ...
+    def __getitem__(self, key: str) -> Any: ...
+    def as_dict(self) -> Dict[str, Any]: ...
+
+class OfflineMetrics:
+    @property
+    def total_samples(self) -> int: ...
+    @property
+    def mean_delta(self) -> float: ...
+    @property
+    def p95_delta(self) -> float: ...
+    @property
+    def max_tile_delta(self) -> float: ...
+    @property
+    def converged_tile_ratio(self) -> float: ...
+    def __getitem__(self, key: str) -> Any: ...
+    def as_dict(self) -> Dict[str, Any]: ...
 
 class AovFrame:
     def size(self) -> Tuple[int, int]: ...
@@ -503,11 +536,67 @@ class TerrainRenderer:
         water_mask: Optional[np.ndarray] = ...,
         time_seconds: float = ...,
     ) -> Tuple[Frame, AovFrame]: ...
+    def begin_offline_accumulation(
+        self,
+        material_set: "MaterialSet",
+        env_maps: "IBL",
+        params: TerrainRenderParams,
+        heightmap: np.ndarray,
+        water_mask: Optional[np.ndarray] = ...,
+        jitter_sequence_samples: Optional[int] = ...,
+    ) -> None: ...
+    def accumulate_batch(self, sample_count: int) -> OfflineBatchResult: ...
+    def read_accumulation_metrics(
+        self,
+        target_variance: float,
+        tile_size: int = ...,
+    ) -> OfflineMetrics: ...
+    def resolve_offline_hdr(self) -> Tuple[HdrFrame, AovFrame]: ...
+    def upload_hdr_frame(self, data: np.ndarray, size: Tuple[int, int]) -> HdrFrame: ...
+    def tonemap_offline_hdr(self, hdr_frame: HdrFrame) -> Frame: ...
+    def end_offline_accumulation(self) -> None: ...
     def set_scatter_batches(self, batches: Sequence[Mapping[str, Any]]) -> None: ...
     def clear_scatter_batches(self) -> None: ...
     def get_scatter_stats(self) -> Dict[str, Any]: ...
     def get_scatter_memory_report(self) -> Dict[str, Any]: ...
     def get_probe_memory_report(self) -> Dict[str, Any]: ...
+    def get_reflection_probe_memory_report(self) -> Dict[str, Any]: ...
+
+class OfflineProgress:
+    samples_so_far: int
+    max_samples: int
+    mean_delta: float
+    p95_delta: float
+    converged_ratio: float
+    elapsed_ms: float
+
+class OfflineResult:
+    frame: Frame
+    hdr_frame: HdrFrame
+    aov_frame: AovFrame
+    metadata: Dict[str, Any]
+
+def render_offline(
+    renderer: TerrainRenderer,
+    material_set: "MaterialSet",
+    env_maps: "IBL",
+    params: TerrainRenderParams,
+    heightmap: np.ndarray,
+    *,
+    settings: OfflineQualitySettings,
+    progress_callback: Optional[Callable[[OfflineProgress], None]] = ...,
+    water_mask: Optional[np.ndarray] = ...,
+) -> OfflineResult: ...
+
+def oidn_available() -> bool: ...
+def oidn_denoise(
+    beauty: np.ndarray,
+    albedo: Optional[np.ndarray] = ...,
+    normal: Optional[np.ndarray] = ...,
+    *,
+    hdr: bool = ...,
+    quality: str = ...,
+) -> np.ndarray: ...
 
 # --- SDF types (P0.3) ---
 

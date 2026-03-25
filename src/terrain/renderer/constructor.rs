@@ -98,28 +98,86 @@ impl TerrainScene {
             contents: bytemuck::cast_slice(&probe_ssbo_init),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
-        let reflection_probe_grid_uniform_buffer =
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("terrain.reflection_probes.grid_uniform_buffer"),
-                contents: bytemuck::bytes_of(
-                    &crate::terrain::probes::ProbeGridUniformsGpu::disabled(),
-                ),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
-        let reflection_probe_ssbo_init = [crate::terrain::probes::GpuReflectionProbeData::zeroed()];
-        let reflection_probe_ssbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("terrain.reflection_probes.ssbo"),
-            contents: bytemuck::cast_slice(&reflection_probe_ssbo_init),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
         let probe_grid_uniform_alloc_bytes =
             std::mem::size_of::<crate::terrain::probes::ProbeGridUniformsGpu>() as u64;
         let probe_ssbo_alloc_bytes =
             std::mem::size_of::<crate::terrain::probes::GpuProbeData>() as u64;
+        let reflection_probe_grid_uniform_buffer =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.reflection_probes.grid_uniform_buffer"),
+                contents: bytemuck::bytes_of(
+                    &crate::terrain::probes::ReflectionProbeGridUniformsGpu::disabled(),
+                ),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
         let reflection_probe_grid_uniform_alloc_bytes =
-            std::mem::size_of::<crate::terrain::probes::ProbeGridUniformsGpu>() as u64;
-        let reflection_probe_ssbo_alloc_bytes =
-            std::mem::size_of::<crate::terrain::probes::GpuReflectionProbeData>() as u64;
+            std::mem::size_of::<crate::terrain::probes::ReflectionProbeGridUniformsGpu>() as u64;
+        let reflection_probe_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("terrain.reflection_probes.sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let reflection_probe_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.reflection_probes.fallback_texture"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 6,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let reflection_probe_fallback_zeroes = [0u16; 4 * 6];
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &reflection_probe_fallback_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&reflection_probe_fallback_zeroes),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(8),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 6,
+            },
+        );
+        let reflection_probe_fallback_view =
+            reflection_probe_fallback_texture.create_view(&wgpu::TextureViewDescriptor {
+                label: Some("terrain.reflection_probes.fallback_view"),
+                format: Some(wgpu::TextureFormat::Rgba16Float),
+                dimension: Some(wgpu::TextureViewDimension::D2Array),
+                aspect: wgpu::TextureAspect::All,
+                base_mip_level: 0,
+                mip_level_count: Some(1),
+                base_array_layer: 0,
+                array_layer_count: Some(6),
+            });
+        let reflection_probe_view =
+            reflection_probe_fallback_texture.create_view(&wgpu::TextureViewDescriptor {
+                label: Some("terrain.reflection_probes.active_view"),
+                format: Some(wgpu::TextureFormat::Rgba16Float),
+                dimension: Some(wgpu::TextureViewDimension::D2Array),
+                aspect: wgpu::TextureAspect::All,
+                base_mip_level: 0,
+                mip_level_count: Some(1),
+                base_array_layer: 0,
+                array_layer_count: Some(6),
+            });
 
         let pipeline = Self::create_render_pipeline(
             device.as_ref(),
@@ -167,11 +225,8 @@ impl TerrainScene {
             wgpu::TextureFormat::Rgba16Float,
             1,
         );
+        let offline_compute = Self::create_offline_compute_resources(device.as_ref());
 
-        let accumulation_resources = create_accumulation_init_resources(device.as_ref());
-        let accumulation_bind_group_layout = accumulation_resources.accumulation_bind_group_layout;
-        let accumulation_pipeline = accumulation_resources.accumulation_pipeline;
-        let accumulation_params_buffer = accumulation_resources.accumulation_params_buffer;
         #[cfg(feature = "enable-gpu-instancing")]
         // Terrain scatter is composited after the terrain pass. Keep the shared instancing
         // renderer reusable, but avoid inheriting terrain-depth mismatches into this path.
@@ -221,7 +276,6 @@ impl TerrainScene {
         tracker.track_buffer_allocation(probe_grid_uniform_alloc_bytes, false);
         tracker.track_buffer_allocation(probe_ssbo_alloc_bytes, false);
         tracker.track_buffer_allocation(reflection_probe_grid_uniform_alloc_bytes, false);
-        tracker.track_buffer_allocation(reflection_probe_ssbo_alloc_bytes, false);
 
         let pipeline_cache = PipelineCache {
             sample_count: 1,
@@ -240,6 +294,7 @@ impl TerrainScene {
             aov_blit_pipeline,
             background_blit_pipeline,
             normal_blit_pipeline,
+            offline_compute,
             sampler_linear,
             sky_bind_group_layout0,
             sky_bind_group_layout1,
@@ -299,37 +354,38 @@ impl TerrainScene {
             water_reflection_size: Mutex::new(water_reflection_size),
             water_reflection_fallback_view,
             water_reflection_pipeline,
-            accumulation_bind_group_layout,
-            accumulation_pipeline,
-            accumulation_texture: Mutex::new(None),
-            accumulation_view: Mutex::new(None),
-            accumulation_size: Mutex::new((0, 0)),
-            accumulation_params_buffer,
             material_layer_bind_group_layout,
             material_layer_uniform_buffer,
             probe_grid_uniform_buffer,
             probe_ssbo,
-            reflection_probe_grid_uniform_buffer,
-            reflection_probe_ssbo,
             probe_grid_uniform_alloc_bytes,
             probe_ssbo_alloc_bytes,
-            reflection_probe_grid_uniform_alloc_bytes,
-            reflection_probe_ssbo_alloc_bytes,
             probe_grid_uniform_bytes: 0,
             probe_ssbo_bytes: 0,
-            reflection_probe_grid_uniform_bytes: 0,
-            reflection_probe_ssbo_bytes: 0,
             probe_cache_key: None,
             probe_cached_grid: None,
             probe_cached_data: Vec::new(),
+            reflection_probe_grid_uniform_buffer,
+            reflection_probe_sampler,
+            reflection_probe_fallback_texture,
+            reflection_probe_fallback_view,
+            reflection_probe_texture: None,
+            reflection_probe_view,
+            reflection_probe_grid_uniform_alloc_bytes,
+            reflection_probe_grid_uniform_bytes: 0,
+            reflection_probe_texture_alloc_bytes: 0,
+            reflection_probe_texture_bytes: 0,
             reflection_probe_cache_key: None,
             reflection_probe_cached_grid: None,
-            reflection_probe_cached_data: Vec::new(),
+            reflection_probe_count: 0,
+            reflection_probe_resolution: 0,
+            reflection_probe_mip_levels: 0,
             #[cfg(feature = "enable-renderer-config")]
             config: Arc::new(Mutex::new(crate::render::params::RendererConfig::default())),
             aov_pipeline: Mutex::new(None),
             aov_pipeline_sample_count: Mutex::new(1),
             dof_renderer: Mutex::new(None),
+            offline_state: Mutex::new(None),
             #[cfg(feature = "enable-gpu-instancing")]
             scatter_renderer,
             #[cfg(feature = "enable-gpu-instancing")]

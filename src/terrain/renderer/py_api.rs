@@ -69,6 +69,16 @@ impl TerrainRenderer {
         water_mask: Option<PyReadonlyArray2<'py, f32>>,
         time_seconds: f32,
     ) -> PyResult<Py<crate::Frame>> {
+        if self
+            .scene
+            .offline_session_active()
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to query offline state: {e:#}")))?
+        {
+            return Err(PyRuntimeError::new_err(
+                "An offline accumulation session is active; call end_offline_accumulation() before one-shot rendering.",
+            ));
+        }
+
         if target.is_some() {
             return Err(PyRuntimeError::new_err(
                 "Custom render targets not yet supported. Use target=None for offscreen rendering.",
@@ -94,6 +104,16 @@ impl TerrainRenderer {
         water_mask: Option<PyReadonlyArray2<'py, f32>>,
         time_seconds: f32,
     ) -> PyResult<(Py<crate::Frame>, Py<crate::AovFrame>)> {
+        if self
+            .scene
+            .offline_session_active()
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to query offline state: {e:#}")))?
+        {
+            return Err(PyRuntimeError::new_err(
+                "An offline accumulation session is active; call end_offline_accumulation() before one-shot rendering.",
+            ));
+        }
+
         let (frame, aov_frame) = self
             .scene
             .render_internal_with_aov(material_set, env_maps, params, heightmap, water_mask, time_seconds)
@@ -544,36 +564,40 @@ impl TerrainRenderer {
     pub fn get_probe_memory_report(&self, py: Python<'_>) -> PyResult<PyObject> {
         let dict = pyo3::types::PyDict::new(py);
         let probe_stride = std::mem::size_of::<crate::terrain::probes::GpuProbeData>() as u64;
-        let reflection_probe_stride =
-            std::mem::size_of::<crate::terrain::probes::GpuReflectionProbeData>() as u64;
         let probe_count = if probe_stride > 0 {
             self.scene.probe_ssbo_bytes / probe_stride
         } else {
             0
         };
-        let reflection_probe_count = if reflection_probe_stride > 0 {
-            self.scene.reflection_probe_ssbo_bytes / reflection_probe_stride
-        } else {
-            0
-        };
-        let diffuse_total = self.scene.probe_grid_uniform_bytes + self.scene.probe_ssbo_bytes;
-        let reflection_total =
-            self.scene.reflection_probe_grid_uniform_bytes + self.scene.reflection_probe_ssbo_bytes;
         dict.set_item("probe_count", probe_count)?;
         dict.set_item("grid_uniform_bytes", self.scene.probe_grid_uniform_bytes)?;
         dict.set_item("probe_ssbo_bytes", self.scene.probe_ssbo_bytes)?;
-        dict.set_item("reflection_probe_count", reflection_probe_count)?;
         dict.set_item(
-            "reflection_grid_uniform_bytes",
+            "total_bytes",
+            self.scene.probe_grid_uniform_bytes + self.scene.probe_ssbo_bytes,
+        )?;
+        Ok(dict.into())
+    }
+
+    #[pyo3(signature = ())]
+    pub fn get_reflection_probe_memory_report(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("probe_count", self.scene.reflection_probe_count)?;
+        dict.set_item("resolution", self.scene.reflection_probe_resolution)?;
+        dict.set_item("mip_levels", self.scene.reflection_probe_mip_levels)?;
+        dict.set_item(
+            "grid_uniform_bytes",
             self.scene.reflection_probe_grid_uniform_bytes,
         )?;
         dict.set_item(
-            "reflection_probe_ssbo_bytes",
-            self.scene.reflection_probe_ssbo_bytes,
+            "cubemap_texture_bytes",
+            self.scene.reflection_probe_texture_bytes,
         )?;
-        dict.set_item("diffuse_total_bytes", diffuse_total)?;
-        dict.set_item("reflection_total_bytes", reflection_total)?;
-        dict.set_item("total_bytes", diffuse_total + reflection_total)?;
+        dict.set_item(
+            "total_bytes",
+            self.scene.reflection_probe_grid_uniform_bytes
+                + self.scene.reflection_probe_texture_bytes,
+        )?;
         Ok(dict.into())
     }
 

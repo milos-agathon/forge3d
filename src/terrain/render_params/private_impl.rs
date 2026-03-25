@@ -79,6 +79,7 @@ impl TerrainRenderParams {
             debug_mode: core.debug_mode,
             aa_samples: core.aa_samples,
             aa_seed: core.aa_seed,
+            terrain_data_revision: core.terrain_data_revision,
             height_curve_lut: core.height_curve_lut,
             overlays,
             light: light.unbind(),

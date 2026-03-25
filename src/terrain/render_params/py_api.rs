@@ -147,6 +147,11 @@ impl TerrainRenderParams {
     }
 
     #[getter]
+    pub fn terrain_data_revision(&self) -> Option<u64> {
+        self.terrain_data_revision
+    }
+
+    #[getter]
     pub fn height_curve_lut(&self) -> Option<Vec<f32>> {
         self.height_curve_lut
             .as_ref()

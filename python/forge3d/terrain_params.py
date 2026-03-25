@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from numbers import Integral
 from typing import List, Optional, Tuple, Sequence
 
 import numpy as np
@@ -345,18 +346,18 @@ class ProbeSettings:
 
 @dataclass
 class ReflectionProbeSettings:
-    """TV5.3: Local reflection probe configuration for terrain scenes."""
+    """Local reflection probe configuration for terrain scenes."""
 
     enabled: bool = False
     grid_dims: Tuple[int, int] = (4, 4)
     origin: Optional[Tuple[float, float]] = None
     spacing: Optional[Tuple[float, float]] = None
     height_offset: float = 5.0
-    ray_count: int = 16
-    fallback_blend_distance: Optional[float] = None
-    sky_color: Tuple[float, float, float] = (0.6, 0.75, 1.0)
-    sky_intensity: float = 1.0
-    ground_color: Tuple[float, float, float] = (0.22, 0.18, 0.14)
+    resolution: int = 16
+    ray_count: int = 64
+    trace_steps: int = 192
+    trace_refine_steps: int = 5
+    fallback_blend_distance: Optional[float | Tuple[float, float]] = None
     strength: float = 1.0
 
     def __post_init__(self) -> None:
@@ -364,20 +365,25 @@ class ReflectionProbeSettings:
             cols, rows = self.grid_dims
             if cols < 1 or rows < 1:
                 raise ValueError("grid_dims must be >= (1, 1)")
-            if cols * rows > 256:
-                raise ValueError("grid_dims product must be <= 256 (reflection probe count limit)")
+            if cols * rows > 64:
+                raise ValueError("reflection probe count limit is 64")
+            if self.resolution < 4 or (self.resolution & (self.resolution - 1)) != 0:
+                raise ValueError("resolution must be a power of two >= 4")
             if self.ray_count < 1:
                 raise ValueError("ray_count must be >= 1")
+            if self.trace_steps < 8:
+                raise ValueError("trace_steps must be >= 8")
+            if self.trace_refine_steps < 0:
+                raise ValueError("trace_refine_steps must be >= 0")
             if self.spacing is not None and (self.spacing[0] <= 0.0 or self.spacing[1] <= 0.0):
                 raise ValueError("spacing must be > 0 when provided")
-            if self.fallback_blend_distance is not None and self.fallback_blend_distance < 0.0:
-                raise ValueError("fallback_blend_distance must be >= 0")
-            if len(self.sky_color) != 3:
-                raise ValueError("sky_color must be (R, G, B)")
-            if len(self.ground_color) != 3:
-                raise ValueError("ground_color must be (R, G, B)")
-            if self.sky_intensity < 0.0:
-                raise ValueError("sky_intensity must be >= 0")
+            if self.fallback_blend_distance is not None:
+                value = self.fallback_blend_distance
+                if isinstance(value, tuple):
+                    if value[0] < 0.0 or value[1] < 0.0:
+                        raise ValueError("fallback_blend_distance tuple must be >= 0")
+                elif value < 0.0:
+                    raise ValueError("fallback_blend_distance must be >= 0")
             if not 0.0 <= self.strength <= 1.0:
                 raise ValueError("strength must be in [0, 1]")
 
@@ -486,10 +492,6 @@ class MaterialLayerSettings:
     TV4 extends this with bounded procedural variation controls. Those controls live
     under ``variation`` and default to zero amplitudes so the existing material
     layering output remains unchanged until explicitly enabled.
-
-    TV10 adds terrain-scale subsurface controls for the snow, rock, and wetness
-    layers. The controls stay per-layer and opt-in via layer enablement, while
-    explicit ``*_subsurface_strength=0.0`` restores the pre-TV10 response.
     """
 
     # Snow layer settings
@@ -501,8 +503,8 @@ class MaterialLayerSettings:
     snow_aspect_influence: float = 0.3  # 0=no aspect effect, 1=full (south-facing less snow)
     snow_color: Tuple[float, float, float] = (0.95, 0.95, 0.98)  # Snow albedo
     snow_roughness: float = 0.4  # Snow surface roughness
-    snow_subsurface_strength: float = 0.35  # TV10: terrain-scale SSS strength
-    snow_subsurface_color: Tuple[float, float, float] = (0.78, 0.88, 0.98)  # TV10: scatter tint
+    snow_subsurface_strength: float = 0.0  # TV10: terrain SSS response for snow/ice-like layers
+    snow_subsurface_tint: Tuple[float, float, float] = (1.0, 1.0, 1.0)
     
     # Rock layer settings
     rock_enabled: bool = False
@@ -510,15 +512,15 @@ class MaterialLayerSettings:
     rock_slope_blend: float = 10.0  # Slope blend range (degrees)
     rock_color: Tuple[float, float, float] = (0.35, 0.32, 0.28)  # Rock albedo
     rock_roughness: float = 0.8  # Rock surface roughness
-    rock_subsurface_strength: float = 0.0  # TV10: rock stays zero by default
-    rock_subsurface_color: Tuple[float, float, float] = (0.42, 0.36, 0.30)  # TV10: warm earth tint
+    rock_subsurface_strength: float = 0.0
+    rock_subsurface_tint: Tuple[float, float, float] = (1.0, 1.0, 1.0)
     
     # Wetness layer settings (darkening in concave areas)
     wetness_enabled: bool = False
     wetness_strength: float = 0.3  # Darkening strength (0-1)
     wetness_slope_influence: float = 0.5  # How much slope affects wetness
-    wetness_subsurface_strength: float = 0.12  # TV10: damp soil / vegetation fill
-    wetness_subsurface_color: Tuple[float, float, float] = (0.40, 0.28, 0.18)  # TV10: warm wet-earth tint
+    wetness_subsurface_strength: float = 0.0
+    wetness_subsurface_tint: Tuple[float, float, float] = (1.0, 1.0, 1.0)
     # TV4: Procedural variation controls shared across snow/rock/wetness.
     variation: MaterialNoiseSettings = field(default_factory=MaterialNoiseSettings)
 
@@ -537,9 +539,12 @@ class MaterialLayerSettings:
             raise ValueError("snow_roughness must be in [0, 1]")
         if not 0.0 <= self.snow_subsurface_strength <= 1.0:
             raise ValueError("snow_subsurface_strength must be in [0, 1]")
-        if len(self.snow_subsurface_color) != 3:
-            raise ValueError("snow_subsurface_color must be (R, G, B)")
-
+        if len(self.snow_subsurface_tint) != 3:
+            raise ValueError("snow_subsurface_tint must be (R, G, B)")
+        for component in self.snow_subsurface_tint:
+            if not 0.0 <= component <= 1.0:
+                raise ValueError("snow_subsurface_tint components must be in [0, 1]")
+        
         if not 0.0 <= self.rock_slope_min <= 90.0:
             raise ValueError("rock_slope_min must be in [0, 90]")
         if self.rock_slope_blend <= 0.0:
@@ -550,17 +555,23 @@ class MaterialLayerSettings:
             raise ValueError("rock_roughness must be in [0, 1]")
         if not 0.0 <= self.rock_subsurface_strength <= 1.0:
             raise ValueError("rock_subsurface_strength must be in [0, 1]")
-        if len(self.rock_subsurface_color) != 3:
-            raise ValueError("rock_subsurface_color must be (R, G, B)")
-
+        if len(self.rock_subsurface_tint) != 3:
+            raise ValueError("rock_subsurface_tint must be (R, G, B)")
+        for component in self.rock_subsurface_tint:
+            if not 0.0 <= component <= 1.0:
+                raise ValueError("rock_subsurface_tint components must be in [0, 1]")
+        
         if not 0.0 <= self.wetness_strength <= 1.0:
             raise ValueError("wetness_strength must be in [0, 1]")
         if not 0.0 <= self.wetness_slope_influence <= 1.0:
             raise ValueError("wetness_slope_influence must be in [0, 1]")
         if not 0.0 <= self.wetness_subsurface_strength <= 1.0:
             raise ValueError("wetness_subsurface_strength must be in [0, 1]")
-        if len(self.wetness_subsurface_color) != 3:
-            raise ValueError("wetness_subsurface_color must be (R, G, B)")
+        if len(self.wetness_subsurface_tint) != 3:
+            raise ValueError("wetness_subsurface_tint must be (R, G, B)")
+        for component in self.wetness_subsurface_tint:
+            if not 0.0 <= component <= 1.0:
+                raise ValueError("wetness_subsurface_tint components must be in [0, 1]")
         if not isinstance(self.variation, MaterialNoiseSettings):
             raise ValueError("variation must be a MaterialNoiseSettings instance")
 
@@ -888,15 +899,15 @@ class DenoiseSettings:
     Supports CPU-based A-trous wavelet denoising for:
     - Final rendered images
     - AOV buffers (AO, sun visibility, etc.)
-    
+
     Methods:
     - 'atrous': A-trous wavelet transform (edge-preserving)
-    - 'bilateral': Bilateral filter (simpler, faster)
+    - 'oidn': Intel Open Image Denoise (runtime optional)
     - 'none': No denoising
     """
     
     enabled: bool = False  # Disabled by default
-    method: str = "atrous"  # 'atrous', 'bilateral', 'none'
+    method: str = "atrous"  # 'atrous', 'oidn', 'none'
     iterations: int = 3     # Number of filter passes (1-10)
     
     # A-trous parameters
@@ -908,7 +919,7 @@ class DenoiseSettings:
     edge_stopping: float = 1.0  # Edge-stopping strength (0 = none, 1 = strong)
     
     def __post_init__(self) -> None:
-        valid_methods = ("atrous", "bilateral", "none")
+        valid_methods = ("atrous", "oidn", "none")
         if self.method not in valid_methods:
             raise ValueError(f"method must be one of {valid_methods}")
         if self.iterations < 1:
@@ -928,6 +939,36 @@ class DenoiseSettings:
     def uses_guidance(self) -> bool:
         """Returns True if denoiser uses normal/depth guidance."""
         return (self.sigma_normal > 0.001 or self.sigma_depth > 0.001) and self.method == "atrous"
+
+
+@dataclass
+class OfflineQualitySettings:
+    """Offline accumulation and adaptive sampling policy."""
+
+    enabled: bool = False  # Explicit opt-in required by render_offline()
+    adaptive: bool = False
+    target_variance: float = 0.001
+    max_samples: int = 64
+    min_samples: int = 4
+    batch_size: int = 4
+    tile_size: int = 16
+    convergence_ratio: float = 0.95
+
+    def __post_init__(self) -> None:
+        if self.target_variance < 0.0:
+            raise ValueError("target_variance must be >= 0")
+        if self.max_samples < 1:
+            raise ValueError("max_samples must be >= 1")
+        if self.min_samples < 1:
+            raise ValueError("min_samples must be >= 1")
+        if self.min_samples > self.max_samples:
+            raise ValueError("min_samples must be <= max_samples")
+        if self.batch_size < 1:
+            raise ValueError("batch_size must be >= 1")
+        if self.tile_size < 1:
+            raise ValueError("tile_size must be >= 1")
+        if not 0.0 <= self.convergence_ratio <= 1.0:
+            raise ValueError("convergence_ratio must be in [0, 1]")
 
 
 @dataclass
@@ -1206,6 +1247,97 @@ class SkySettings:
     def has_aerial_perspective(self) -> bool:
         """Returns True if aerial perspective is active."""
         return self.aerial_perspective and self.aerial_density > 0.001
+
+
+@dataclass
+class VTLayerFamily:
+    """Describes one paged terrain material family."""
+    family: str                        # "albedo" | "normal" | "mask"
+    virtual_size_px: Tuple[int, int] = (4096, 4096)  # family-wide invariant
+    tile_size: int = 248               # content pixels per tile edge
+    tile_border: int = 4               # gutter pixels per tile edge (slot_size = 256)
+    fallback: Tuple[float, ...] = (0.5, 0.5, 0.5, 1.0)  # last-resort per-family fallback
+
+    def __post_init__(self) -> None:
+        VALID_FAMILIES = {"albedo", "normal", "mask"}
+        if self.family not in VALID_FAMILIES:
+            raise ValueError(f"family must be one of {VALID_FAMILIES}")
+        # normal/mask are accepted in the Python contract for forward compatibility.
+        # They are rejected at native decode time (parse_vt_settings in Rust), not here.
+        if self.tile_size < 16:
+            raise ValueError("tile_size must be >= 16")
+        if self.tile_border < 0:
+            raise ValueError("tile_border must be >= 0")
+        w, h = self.virtual_size_px
+        if w < self.tile_size or h < self.tile_size:
+            raise ValueError("virtual_size_px must be >= tile_size in both dimensions")
+
+    @property
+    def slot_size(self) -> int:
+        """Physical atlas slot size = content + 2 * border."""
+        return self.tile_size + 2 * self.tile_border
+
+    @property
+    def pages_x0(self) -> int:
+        """Finest-level page count X."""
+        import math
+        return math.ceil(self.virtual_size_px[0] / self.tile_size)
+
+    @property
+    def pages_y0(self) -> int:
+        """Finest-level page count Y."""
+        import math
+        return math.ceil(self.virtual_size_px[1] / self.tile_size)
+
+    @property
+    def full_pyramid_levels(self) -> int:
+        """Maximum mip levels the virtual extent can support.
+        Derived from finest page counts, not raw pixel ratio."""
+        import math
+        return int(math.floor(math.log2(max(self.pages_x0, self.pages_y0)))) + 1
+
+    def pages_at_mip(self, mip: int) -> Tuple[int, int]:
+        """Page count at a given mip level (ceil-div, min 1)."""
+        import math
+        return (
+            max(1, math.ceil(self.pages_x0 / (2 ** mip))),
+            max(1, math.ceil(self.pages_y0 / (2 ** mip))),
+        )
+
+
+@dataclass
+class TerrainVTSettings:
+    """Terrain material virtual texturing configuration."""
+    enabled: bool = False
+    layers: List[VTLayerFamily] = field(default_factory=lambda: [
+        VTLayerFamily(family="albedo")
+    ])
+    atlas_size: int = 4096
+    residency_budget_mb: float = 256.0
+    max_mip_levels: int = 8
+    use_feedback: bool = True
+
+    def __post_init__(self) -> None:
+        families = [l.family for l in self.layers]
+        if len(families) != len(set(families)):
+            raise ValueError("duplicate family in layers")
+        if self.atlas_size < 256:
+            raise ValueError("atlas_size must be >= 256")
+        if self.residency_budget_mb <= 0:
+            raise ValueError("residency_budget_mb must be > 0")
+        if self.max_mip_levels < 1:
+            raise ValueError("max_mip_levels must be >= 1")
+        for layer in self.layers:
+            if self.atlas_size % layer.slot_size != 0:
+                raise ValueError(
+                    f"atlas_size ({self.atlas_size}) must be divisible by "
+                    f"slot_size ({layer.slot_size}) for family '{layer.family}'"
+                )
+
+    def actual_mip_count(self, family: str = "albedo") -> int:
+        """Effective mip count: min(requested, full pyramid levels)."""
+        layer = next(l for l in self.layers if l.family == family)
+        return min(self.max_mip_levels, layer.full_pyramid_levels)
 
 
 @dataclass
@@ -1630,7 +1762,7 @@ class TerrainRenderParams:
     sun_visibility: Optional[SunVisibilitySettings] = None
     # TV5: Local irradiance probes (defaults to disabled for backward compatibility)
     probes: Optional[ProbeSettings] = None
-    # TV5.3: Local reflection probes (defaults to disabled for backward compatibility)
+    # Local reflection probes (defaults to disabled for backward compatibility)
     reflection_probes: Optional[ReflectionProbeSettings] = None
     # P6.1: Color space correctness toggles (defaults to False for P5 compatibility)
     colormap_srgb: bool = False  # Use Rgba8UnormSrgb for colormap texture (correct sampling)
@@ -1665,10 +1797,15 @@ class TerrainRenderParams:
     volumetrics: Optional[VolumetricsSettings] = None
     # M6: Sky settings
     sky: Optional[SkySettings] = None
+    # TV20: Terrain material virtual texturing (defaults to disabled for backward compatibility)
+    vt: Optional[TerrainVTSettings] = None
     # Overlay system settings (lit texture overlays draped on terrain)
     overlay: Optional[OverlaySettings] = None
     # P3-reproject: Terrain CRS for auto-reprojection of vector overlays
     terrain_crs: Optional[str] = None  # e.g., "EPSG:4326", "EPSG:32654"
+    # Optional caller-provided terrain revision/checksum used for cache invalidation.
+    # When set, terrain probe prep can reuse this key instead of hashing every DEM sample.
+    terrain_data_revision: Optional[int] = None
 
     def __post_init__(self) -> None:
         # Default fog to disabled if not provided
@@ -1689,7 +1826,7 @@ class TerrainRenderParams:
         # TV5: Default probes to disabled if not provided
         if self.probes is None:
             self.probes = ProbeSettings()
-        # TV5.3: Default reflection probes to disabled if not provided
+        # Default reflection probes to disabled if not provided
         if self.reflection_probes is None:
             self.reflection_probes = ReflectionProbeSettings()
         # M2: Default bloom to disabled if not provided
@@ -1804,6 +1941,16 @@ class TerrainRenderParams:
         if self.aa_samples > 4096:
             raise ValueError("aa_samples must be <= 4096 (practical limit for offline rendering)")
 
+        if self.terrain_data_revision is not None:
+            if isinstance(self.terrain_data_revision, bool) or not isinstance(
+                self.terrain_data_revision, Integral
+            ):
+                raise ValueError("terrain_data_revision must be an integer or None")
+            if self.terrain_data_revision < 0:
+                raise ValueError("terrain_data_revision must be >= 0")
+            if self.terrain_data_revision > 0xFFFF_FFFF_FFFF_FFFF:
+                raise ValueError("terrain_data_revision must fit in u64")
+
 
 def load_height_curve_lut(path: str | Path) -> np.ndarray:
     p = Path(path)
@@ -1887,6 +2034,7 @@ def make_terrain_params_config(
     sky: Optional[SkySettings] = None,  # M6: Sky settings
     overlay: Optional[OverlaySettings] = None,  # Overlay settings (lit texture overlays)
     terrain_crs: Optional[str] = None,  # P3-reproject: Terrain CRS for auto-reprojection
+    terrain_data_revision: Optional[int] = None,
 ) -> TerrainRenderParams:
     light_color = [1.0, 1.0, 1.0]
     if sun_color is not None:
@@ -2035,6 +2183,7 @@ def make_terrain_params_config(
         sky=sky,
         overlay=overlay,
         terrain_crs=terrain_crs,
+        terrain_data_revision=terrain_data_revision,
     )
 
 
@@ -2059,12 +2208,15 @@ __all__ = [
     "MotionBlurSettings",
     "LensEffectsSettings",
     "DenoiseSettings",
+    "OfflineQualitySettings",
     "DensityVolumeSettings",
     "VolumetricsSettings",
     "SkySettings",
     "valley_fog_volume",
     "plume_volume",
     "localized_haze_volume",
+    "VTLayerFamily",
+    "TerrainVTSettings",
     "OverlayBlendMode",
     "OverlayLayerConfig",
     "OverlaySettings",

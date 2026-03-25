@@ -52,8 +52,8 @@ class TestMaterialLayerConfig:
         assert materials.snow_aspect_influence == 0.3
         assert materials.snow_color == (0.95, 0.95, 0.98)
         assert materials.snow_roughness == 0.4
-        assert materials.snow_subsurface_strength == pytest.approx(0.35)
-        assert materials.snow_subsurface_color == pytest.approx((0.78, 0.88, 0.98))
+        assert materials.snow_subsurface_strength == 0.0
+        assert materials.snow_subsurface_tint == (1.0, 1.0, 1.0)
 
     def test_rock_defaults(self):
         """Test rock layer default values."""
@@ -62,16 +62,16 @@ class TestMaterialLayerConfig:
         assert materials.rock_slope_blend == 10.0
         assert materials.rock_color == (0.35, 0.32, 0.28)
         assert materials.rock_roughness == 0.8
-        assert materials.rock_subsurface_strength == pytest.approx(0.0)
-        assert materials.rock_subsurface_color == pytest.approx((0.42, 0.36, 0.30))
+        assert materials.rock_subsurface_strength == 0.0
+        assert materials.rock_subsurface_tint == (1.0, 1.0, 1.0)
 
     def test_wetness_defaults(self):
         """Test wetness layer default values."""
         materials = MaterialLayerSettings()
         assert materials.wetness_strength == 0.3
         assert materials.wetness_slope_influence == 0.5
-        assert materials.wetness_subsurface_strength == pytest.approx(0.12)
-        assert materials.wetness_subsurface_color == pytest.approx((0.40, 0.28, 0.18))
+        assert materials.wetness_subsurface_strength == 0.0
+        assert materials.wetness_subsurface_tint == (1.0, 1.0, 1.0)
 
     def test_variation_defaults(self):
         """TV4: material variation defaults should be zero-regression."""
@@ -103,12 +103,16 @@ class TestMaterialLayerConfig:
             snow_altitude_blend=300.0,
             snow_slope_max=40.0,
             snow_aspect_influence=0.5,
+            snow_subsurface_strength=0.65,
+            snow_subsurface_tint=(0.82, 0.90, 1.0),
         )
         assert materials.snow_enabled is True
         assert materials.snow_altitude_min == 1500.0
         assert materials.snow_altitude_blend == 300.0
         assert materials.snow_slope_max == 40.0
         assert materials.snow_aspect_influence == 0.5
+        assert materials.snow_subsurface_strength == 0.65
+        assert materials.snow_subsurface_tint == (0.82, 0.90, 1.0)
 
     def test_rock_enabled(self):
         """Test enabling rock layer with custom settings."""
@@ -117,11 +121,15 @@ class TestMaterialLayerConfig:
             rock_slope_min=50.0,
             rock_slope_blend=15.0,
             rock_color=(0.4, 0.35, 0.3),
+            rock_subsurface_strength=0.2,
+            rock_subsurface_tint=(0.92, 0.78, 0.64),
         )
         assert materials.rock_enabled is True
         assert materials.rock_slope_min == 50.0
         assert materials.rock_slope_blend == 15.0
         assert materials.rock_color == (0.4, 0.35, 0.3)
+        assert materials.rock_subsurface_strength == 0.2
+        assert materials.rock_subsurface_tint == (0.92, 0.78, 0.64)
 
     def test_wetness_enabled(self):
         """Test enabling wetness layer with custom settings."""
@@ -129,30 +137,14 @@ class TestMaterialLayerConfig:
             wetness_enabled=True,
             wetness_strength=0.5,
             wetness_slope_influence=0.7,
+            wetness_subsurface_strength=0.35,
+            wetness_subsurface_tint=(0.72, 0.80, 0.88),
         )
         assert materials.wetness_enabled is True
         assert materials.wetness_strength == 0.5
         assert materials.wetness_slope_influence == 0.7
-
-    def test_tv10_subsurface_controls(self):
-        """TV10: each terrain layer should preserve explicit subsurface controls."""
-        materials = MaterialLayerSettings(
-            snow_enabled=True,
-            snow_subsurface_strength=0.55,
-            snow_subsurface_color=(0.72, 0.84, 0.96),
-            rock_enabled=True,
-            rock_subsurface_strength=0.12,
-            rock_subsurface_color=(0.44, 0.34, 0.26),
-            wetness_enabled=True,
-            wetness_subsurface_strength=0.22,
-            wetness_subsurface_color=(0.34, 0.22, 0.14),
-        )
-        assert materials.snow_subsurface_strength == pytest.approx(0.55)
-        assert materials.snow_subsurface_color == pytest.approx((0.72, 0.84, 0.96))
-        assert materials.rock_subsurface_strength == pytest.approx(0.12)
-        assert materials.rock_subsurface_color == pytest.approx((0.44, 0.34, 0.26))
-        assert materials.wetness_subsurface_strength == pytest.approx(0.22)
-        assert materials.wetness_subsurface_color == pytest.approx((0.34, 0.22, 0.14))
+        assert materials.wetness_subsurface_strength == 0.35
+        assert materials.wetness_subsurface_tint == (0.72, 0.80, 0.88)
 
     def test_snow_slope_max_validation(self):
         """Test that snow_slope_max outside [0, 90] raises error."""
@@ -185,18 +177,23 @@ class TestMaterialLayerConfig:
         with pytest.raises(ValueError, match="wetness_strength must be in"):
             MaterialLayerSettings(wetness_strength=1.5)
 
-    @pytest.mark.parametrize(
-        ("field", "value", "message"),
-        [
-            ("snow_subsurface_strength", -0.1, "snow_subsurface_strength must be in"),
-            ("rock_subsurface_strength", 1.2, "rock_subsurface_strength must be in"),
-            ("wetness_subsurface_strength", 1.1, "wetness_subsurface_strength must be in"),
-        ],
-    )
-    def test_subsurface_strength_validation(self, field, value, message):
-        """TV10: subsurface strengths stay bounded to [0, 1]."""
-        with pytest.raises(ValueError, match=message):
-            MaterialLayerSettings(**{field: value})
+    def test_subsurface_strength_validation(self):
+        """TV10: per-layer subsurface strengths stay bounded."""
+        with pytest.raises(ValueError, match="snow_subsurface_strength must be in"):
+            MaterialLayerSettings(snow_subsurface_strength=1.1)
+        with pytest.raises(ValueError, match="rock_subsurface_strength must be in"):
+            MaterialLayerSettings(rock_subsurface_strength=-0.1)
+        with pytest.raises(ValueError, match="wetness_subsurface_strength must be in"):
+            MaterialLayerSettings(wetness_subsurface_strength=1.5)
+
+    def test_subsurface_tint_validation(self):
+        """TV10: subsurface tints must be normalized RGB triples."""
+        with pytest.raises(ValueError, match="snow_subsurface_tint must be"):
+            MaterialLayerSettings(snow_subsurface_tint=(1.0, 1.0))
+        with pytest.raises(ValueError, match="rock_subsurface_tint components must be in"):
+            MaterialLayerSettings(rock_subsurface_tint=(1.1, 0.9, 0.8))
+        with pytest.raises(ValueError, match="wetness_subsurface_tint components must be in"):
+            MaterialLayerSettings(wetness_subsurface_tint=(0.4, -0.1, 0.6))
 
     def test_material_noise_octaves_validation(self):
         """TV4: octave count is intentionally bounded."""
@@ -216,19 +213,6 @@ class TestMaterialLayerConfig:
         """Test that invalid snow_color raises error."""
         with pytest.raises(ValueError, match="snow_color must be"):
             MaterialLayerSettings(snow_color=(1.0, 1.0))  # Missing component
-
-    @pytest.mark.parametrize(
-        ("field", "message"),
-        [
-            ("snow_subsurface_color", "snow_subsurface_color must be"),
-            ("rock_subsurface_color", "rock_subsurface_color must be"),
-            ("wetness_subsurface_color", "wetness_subsurface_color must be"),
-        ],
-    )
-    def test_subsurface_color_validation(self, field, message):
-        """TV10: subsurface colors must stay RGB tuples."""
-        with pytest.raises(ValueError, match=message):
-            MaterialLayerSettings(**{field: (1.0, 1.0)})
 
 
 class TestMaterialLayerInTerrainParams:
@@ -296,6 +280,12 @@ class TestMaterialLayerInTerrainParams:
             snow_enabled=True,
             rock_enabled=True,
             wetness_enabled=True,
+            snow_subsurface_strength=0.55,
+            snow_subsurface_tint=(0.84, 0.92, 1.0),
+            rock_subsurface_strength=0.15,
+            rock_subsurface_tint=(0.90, 0.78, 0.64),
+            wetness_subsurface_strength=0.25,
+            wetness_subsurface_tint=(0.70, 0.78, 0.88),
         )
         params = make_terrain_params_config(
             size_px=(256, 256),
@@ -310,6 +300,12 @@ class TestMaterialLayerInTerrainParams:
         assert params.materials.snow_enabled is True
         assert params.materials.rock_enabled is True
         assert params.materials.wetness_enabled is True
+        assert params.materials.snow_subsurface_strength == 0.55
+        assert params.materials.snow_subsurface_tint == (0.84, 0.92, 1.0)
+        assert params.materials.rock_subsurface_strength == 0.15
+        assert params.materials.rock_subsurface_tint == (0.90, 0.78, 0.64)
+        assert params.materials.wetness_subsurface_strength == 0.25
+        assert params.materials.wetness_subsurface_tint == (0.70, 0.78, 0.88)
 
     def test_terrain_params_with_variation_controls(self):
         """TV4: Terrain params should preserve nested variation settings."""
@@ -342,36 +338,6 @@ class TestMaterialLayerInTerrainParams:
         assert params.materials.variation.snow_macro_amplitude == 0.2
         assert params.materials.variation.rock_detail_amplitude == 0.3
         assert params.materials.variation.wetness_macro_amplitude == 0.1
-
-    def test_terrain_params_with_tv10_subsurface_controls(self):
-        """TV10: Terrain params should preserve per-layer subsurface values."""
-        materials = MaterialLayerSettings(
-            snow_enabled=True,
-            snow_subsurface_strength=0.48,
-            snow_subsurface_color=(0.74, 0.86, 0.97),
-            rock_enabled=True,
-            rock_subsurface_strength=0.10,
-            rock_subsurface_color=(0.43, 0.36, 0.29),
-            wetness_enabled=True,
-            wetness_subsurface_strength=0.18,
-            wetness_subsurface_color=(0.36, 0.25, 0.16),
-        )
-        params = make_terrain_params_config(
-            size_px=(256, 256),
-            render_scale=1.0,
-            terrain_span=1000.0,
-            msaa_samples=1,
-            z_scale=1.0,
-            exposure=1.0,
-            domain=(1000.0, 3000.0),
-            materials=materials,
-        )
-        assert params.materials.snow_subsurface_strength == pytest.approx(0.48)
-        assert params.materials.snow_subsurface_color == pytest.approx((0.74, 0.86, 0.97))
-        assert params.materials.rock_subsurface_strength == pytest.approx(0.10)
-        assert params.materials.rock_subsurface_color == pytest.approx((0.43, 0.36, 0.29))
-        assert params.materials.wetness_subsurface_strength == pytest.approx(0.18)
-        assert params.materials.wetness_subsurface_color == pytest.approx((0.36, 0.25, 0.16))
 
 
 class TestTerrainAttributeLogic:

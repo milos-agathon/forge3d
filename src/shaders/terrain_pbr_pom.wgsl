@@ -147,8 +147,16 @@ const DBG_NDC_DEPTH: u32 = 41u;       // NDC depth (clip.z/clip.w) as grayscale
 const DBG_VIEW_POS_XYZ: u32 = 42u;    // View-space position encoded as RGB (normalized to [0,1])
 const DBG_PROBE_IRRADIANCE: u32 = 50u; // Raw probe irradiance contribution
 const DBG_PROBE_WEIGHT: u32 = 51u;     // Probe blend weight
-const DBG_REFLECTION_PROBE_COLOR: u32 = 52u; // Raw local reflection probe color
+const DBG_REFLECTION_PROBE_COLOR: u32 = 52u;  // Raw local reflection probe color
 const DBG_REFLECTION_PROBE_WEIGHT: u32 = 53u; // Local reflection probe blend weight
+
+// Water reflection tuning: named here so local-planar/IBL balance stays explicit.
+const WATER_DEPTH_ATTEN_DEEP: f32 = 0.30;
+const WATER_COMBINED_REFLECTION_SCALE: f32 = 0.30;
+const WATER_SUN_SPECULAR_SCALE: f32 = 0.50;
+const WATER_BASE_TINT: vec3<f32> = vec3<f32>(0.15, 0.45, 0.85);
+const WATER_BASE_TINT_SCALE: f32 = 0.80;
+const WATER_SCATTER_SCALE: f32 = 2.0;
 
 struct TerrainUniforms {
     view : mat4x4<f32>,
@@ -181,7 +189,7 @@ struct OverlayUniforms {
     params3 : vec4<f32>, // P5: ao_weight, ao_fallback_enabled, pad, pad
     // P6: Micro-detail parameters
     params4 : vec4<f32>, // detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise
-    params5 : vec4<f32>, // detail_fade_start, detail_fade_end, output_srgb_eotf, pad
+    params5 : vec4<f32>, // detail_fade_start, detail_fade_end, output_srgb_eotf, offline_hdr_output
 };
 
 struct IblUniforms {
@@ -439,22 +447,22 @@ fn sample_atmosphere_sky(screen_pos: vec2<f32>) -> vec3<f32> {
 struct MaterialLayerUniforms {
     // Snow layer: vec4(altitude_min, altitude_blend, slope_max_rad, slope_blend_rad)
     snow_params0: vec4<f32>,
-    // Snow layer: vec4(aspect_influence, roughness, enabled, _pad)
+    // Snow layer: vec4(aspect_influence, roughness, enabled, sss_strength)
     snow_params1: vec4<f32>,
     // Snow color (RGB) + padding
     snow_color: vec4<f32>,
-    // TV10: snow subsurface tint (RGB) + strength
-    snow_subsurface: vec4<f32>,
+    // Snow subsurface tint (RGB) + padding
+    snow_sss_tint: vec4<f32>,
     // Rock layer: vec4(slope_min_rad, slope_blend_rad, roughness, enabled)
     rock_params: vec4<f32>,
-    // Rock color (RGB) + padding
+    // Rock color (RGB) + subsurface strength
     rock_color: vec4<f32>,
-    // TV10: rock subsurface tint (RGB) + strength
-    rock_subsurface: vec4<f32>,
-    // Wetness layer: vec4(strength, slope_influence, enabled, _pad)
+    // Rock subsurface tint (RGB) + padding
+    rock_sss_tint: vec4<f32>,
+    // Wetness layer: vec4(strength, slope_influence, enabled, sss_strength)
     wetness_params: vec4<f32>,
-    // TV10: wetness subsurface tint (RGB) + strength
-    wetness_subsurface: vec4<f32>,
+    // Wetness subsurface tint (RGB) + padding
+    wetness_sss_tint: vec4<f32>,
     // TV4: vec4(macro_scale, detail_scale, octaves, variation_enabled)
     variation_params0: vec4<f32>,
     // TV4 per-layer amplitudes: vec4(macro_amp, detail_amp, _pad, _pad)
@@ -482,8 +490,8 @@ struct TerrainLayerWeights {
 }
 
 struct TerrainSubsurfaceState {
-    color: vec3<f32>,
     strength: f32,
+    tint: vec3<f32>,
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -521,14 +529,6 @@ fn compute_terrain_attributes(world_normal: vec3<f32>) -> vec4<f32> {
 
 fn default_material_noise() -> TerrainMaterialNoise {
     return TerrainMaterialNoise(0.5, 0.5, 0.5, 0.5, 0.5, 0.5);
-}
-
-fn zero_terrain_layer_weights() -> TerrainLayerWeights {
-    return TerrainLayerWeights(0.0, 0.0, 0.0);
-}
-
-fn zero_terrain_subsurface_state() -> TerrainSubsurfaceState {
-    return TerrainSubsurfaceState(vec3<f32>(0.0), 0.0);
 }
 
 fn sample_material_noise(terrain_uv: vec2<f32>, height_norm: f32) -> TerrainMaterialNoise {
@@ -599,13 +599,20 @@ fn compute_snow_layer_weight(
     let aspect_factor = mix(1.0, 0.5 + 0.5 * south_factor, aspect_influence);
     
     // Combined snow weight
-    return apply_material_variation(
+    let snow_weight = apply_material_variation(
         altitude_factor * slope_factor * aspect_factor,
         material_noise.snow_macro,
         material_noise.snow_detail,
         material_layer_uniforms.snow_variation.x,
         material_layer_uniforms.snow_variation.y,
     );
+    return snow_weight;
+}
+
+/// M4: Apply snow layer blending based on altitude, slope, and aspect
+fn apply_snow_layer(base_albedo: vec3<f32>, snow_weight: f32) -> vec3<f32> {
+    let snow_color = material_layer_uniforms.snow_color.rgb;
+    return mix(base_albedo, snow_color, clamp(snow_weight, 0.0, 1.0));
 }
 
 fn compute_rock_layer_weight(
@@ -622,16 +629,23 @@ fn compute_rock_layer_weight(
     // Rock exposed on steep slopes
     let slope_min = material_layer_uniforms.rock_params.x;
     let slope_blend = material_layer_uniforms.rock_params.y;
-    return apply_material_variation(
+    let rock_weight = apply_material_variation(
         clamp((slope - slope_min) / max(slope_blend, 0.001), 0.0, 1.0),
         material_noise.rock_macro,
         material_noise.rock_detail,
         material_layer_uniforms.rock_variation.x,
         material_layer_uniforms.rock_variation.y,
     );
+    return rock_weight;
 }
 
-fn compute_wetness_layer_weight(
+/// M4: Apply rock layer blending based on slope
+fn apply_rock_layer(base_albedo: vec3<f32>, rock_weight: f32) -> vec3<f32> {
+    let rock_color = material_layer_uniforms.rock_color.rgb;
+    return mix(base_albedo, rock_color, clamp(rock_weight, 0.0, 1.0));
+}
+
+fn compute_wetness_layer_coverage(
     terrain_attrs: vec4<f32>,
     material_noise: TerrainMaterialNoise,
 ) -> f32 {
@@ -641,6 +655,7 @@ fn compute_wetness_layer_weight(
     }
     
     let slope = terrain_attrs.x;
+    
     // Wetness accumulates in flat, low areas (simplified: low slope = wet)
     let slope_influence = material_layer_uniforms.wetness_params.y;
     
@@ -655,7 +670,15 @@ fn compute_wetness_layer_weight(
     );
 }
 
-fn compute_terrain_layer_weights(
+/// M4: Apply wetness darkening based on slope (concavity proxy)
+fn apply_wetness_layer(base_albedo: vec3<f32>, wetness_coverage: f32) -> vec3<f32> {
+    // Darken by wetness
+    let strength = material_layer_uniforms.wetness_params.x;
+    let darkening = 1.0 - clamp(wetness_coverage, 0.0, 1.0) * strength;
+    return base_albedo * darkening;
+}
+
+fn resolve_terrain_layer_weights(
     world_pos: vec3<f32>,
     terrain_attrs: vec4<f32>,
     material_noise: TerrainMaterialNoise,
@@ -663,75 +686,80 @@ fn compute_terrain_layer_weights(
     return TerrainLayerWeights(
         compute_snow_layer_weight(world_pos, terrain_attrs, material_noise),
         compute_rock_layer_weight(terrain_attrs, material_noise),
-        compute_wetness_layer_weight(terrain_attrs, material_noise),
+        compute_wetness_layer_coverage(terrain_attrs, material_noise),
     );
 }
 
-/// M4: Apply snow layer blending using the precomputed snow weight.
-fn apply_snow_layer(base_albedo: vec3<f32>, snow_weight: f32) -> vec3<f32> {
-    return mix(base_albedo, material_layer_uniforms.snow_color.rgb, snow_weight);
-}
-
-/// M4: Apply rock layer blending using the precomputed rock weight.
-fn apply_rock_layer(base_albedo: vec3<f32>, rock_weight: f32) -> vec3<f32> {
-    return mix(base_albedo, material_layer_uniforms.rock_color.rgb, rock_weight);
-}
-
-/// M4: Apply wetness darkening using the precomputed wetness weight.
-fn apply_wetness_layer(base_albedo: vec3<f32>, wetness_weight: f32) -> vec3<f32> {
-    let darkening = 1.0 - wetness_weight * material_layer_uniforms.wetness_params.x;
-    return base_albedo * darkening;
-}
-
-fn compute_terrain_subsurface_state(layer_weights: TerrainLayerWeights) -> TerrainSubsurfaceState {
-    let snow_contrib = layer_weights.snow * material_layer_uniforms.snow_subsurface.w;
-    let rock_contrib = layer_weights.rock * material_layer_uniforms.rock_subsurface.w;
-    let wetness_contrib = layer_weights.wetness * material_layer_uniforms.wetness_subsurface.w;
-    let total_strength = snow_contrib + rock_contrib + wetness_contrib;
-    if (total_strength <= 0.0001) {
-        return zero_terrain_subsurface_state();
+fn apply_subsurface_layer(
+    state: TerrainSubsurfaceState,
+    layer_weight: f32,
+    layer_strength: f32,
+    layer_tint: vec3<f32>,
+) -> TerrainSubsurfaceState {
+    if (layer_weight <= 0.0 || layer_strength <= 0.0) {
+        return state;
     }
+    let coverage = clamp(layer_weight, 0.0, 1.0);
+    return TerrainSubsurfaceState(
+        mix(state.strength, layer_strength, coverage),
+        mix(state.tint, layer_tint, coverage),
+    );
+}
 
-    let scatter_color = (
-        material_layer_uniforms.snow_subsurface.rgb * snow_contrib +
-        material_layer_uniforms.rock_subsurface.rgb * rock_contrib +
-        material_layer_uniforms.wetness_subsurface.rgb * wetness_contrib
-    ) / total_strength;
-
-    return TerrainSubsurfaceState(scatter_color, clamp(total_strength, 0.0, 1.0));
+fn resolve_terrain_subsurface(layer_weights: TerrainLayerWeights) -> TerrainSubsurfaceState {
+    var state = TerrainSubsurfaceState(0.0, vec3<f32>(1.0, 1.0, 1.0));
+    state = apply_subsurface_layer(
+        state,
+        layer_weights.wetness,
+        material_layer_uniforms.wetness_params.w,
+        material_layer_uniforms.wetness_sss_tint.rgb,
+    );
+    state = apply_subsurface_layer(
+        state,
+        layer_weights.rock,
+        material_layer_uniforms.rock_color.w,
+        material_layer_uniforms.rock_sss_tint.rgb,
+    );
+    state = apply_subsurface_layer(
+        state,
+        layer_weights.snow,
+        material_layer_uniforms.snow_params1.w,
+        material_layer_uniforms.snow_sss_tint.rgb,
+    );
+    return state;
 }
 
 fn evaluate_terrain_subsurface(
     state: TerrainSubsurfaceState,
+    albedo: vec3<f32>,
     normal: vec3<f32>,
     view_dir: vec3<f32>,
     light_dir: vec3<f32>,
-    terrain_attrs: vec4<f32>,
-    albedo: vec3<f32>,
+    combined_shadow: f32,
+    ibl_diffuse_factor: f32,
 ) -> vec3<f32> {
-    if (state.strength <= 0.0001) {
-        return vec3<f32>(0.0);
+    if (state.strength <= 0.0) {
+        return vec3<f32>(0.0, 0.0, 0.0);
     }
 
-    let n_dot_l = dot(normal, light_dir);
-    let lambert = max(n_dot_l, 0.0);
-    let n_dot_v = max(dot(normal, view_dir), 0.0);
-    let wrap = mix(0.0, 0.55, state.strength);
-    let wrapped_lambert = clamp((n_dot_l + wrap) / (1.0 + wrap), 0.0, 1.0);
-    let wrap_diffusion = max(wrapped_lambert - lambert, 0.0);
-    let backscatter = pow(clamp(dot(view_dir, -light_dir), 0.0, 1.0), 3.0) * (1.0 - lambert);
-    let rim = pow(1.0 - n_dot_v, 2.0);
-    let curvature = clamp(
-        (length(dpdx(normal)) + length(dpdy(normal))) * 2.25 +
-        terrain_attrs.z / (3.14159265 * 2.0),
-        0.0,
-        1.0,
+    let n_dot_l = saturate(dot(normal, light_dir));
+    let wrap_width = 0.45 * state.strength;
+    let wrapped = saturate((n_dot_l + wrap_width) / (1.0 + wrap_width));
+    let wrap_boost = max(wrapped - n_dot_l, 0.0);
+
+    let view_backscatter = pow(saturate(dot(view_dir, -light_dir)), 4.0);
+    let backscatter = view_backscatter * (0.25 + 0.75 * (1.0 - n_dot_l));
+    let scatter_profile = max(wrap_boost * 1.35, backscatter * 0.30);
+
+    let shadow_bleed = mix(0.20, 1.0, clamp(combined_shadow, 0.0, 1.0));
+    let ambient_fill = ibl_diffuse_factor * (0.02 + 0.06 * state.strength) * (1.0 - n_dot_l * 0.5);
+    let scatter_color = clamp(
+        albedo * mix(vec3<f32>(1.0, 1.0, 1.0), state.tint, 0.85),
+        vec3<f32>(0.0, 0.0, 0.0),
+        vec3<f32>(1.5, 1.5, 1.5),
     );
-    let diffusion = wrap_diffusion * (0.70 + 0.30 * curvature)
-        + backscatter * (0.20 + 0.30 * curvature)
-        + rim * 0.12 * state.strength;
-    let scatter_tint = mix(albedo, state.color, 0.75);
-    return scatter_tint * diffusion * state.strength;
+
+    return scatter_color * (scatter_profile * shadow_bleed + ambient_fill) * (0.16 + 0.44 * state.strength);
 }
 
 // P4: Sample reflection texture with wave-based UV distortion
@@ -2187,7 +2215,6 @@ fn calculate_pbr_brdf_split_roughness(
 fn terrain_to_shading_params(
     roughness: f32,
     metallic: f32,
-    subsurface: f32,
     brdf_model: u32,  // Runtime flag: which BRDF model to use (default BRDF_COOK_TORRANCE_GGX)
 ) -> ShadingParamsGPU {
     var params: ShadingParamsGPU;
@@ -2196,7 +2223,7 @@ fn terrain_to_shading_params(
     params.roughness = roughness;
     params.sheen = 0.0;        // Terrain doesn't use sheen
     params.clearcoat = 0.0;    // Terrain doesn't use clearcoat
-    params.subsurface = subsurface;
+    params.subsurface = 0.0;   // Terrain-specific SSS is applied later in the land shading path
     params.anisotropy = 0.0;   // Terrain doesn't use anisotropy
     return params;
 }
@@ -2263,6 +2290,7 @@ fn is_finite_f32(x: f32) -> bool {
 struct IblSplit {
     diffuse: vec3<f32>,
     specular: vec3<f32>,
+    specular_brdf: vec3<f32>,
     fresnel: vec3<f32>,
     n_dot_v: f32,
 }
@@ -2313,7 +2341,8 @@ fn eval_ibl_split(
     let brdf_lut = textureSampleLevel(brdfLUT, envSampler, brdf_lut_uv, 0.0).rg;
     
     // Split-sum: prefiltered_color * (F0 * scale + bias)
-    result.specular = prefiltered_color * (F_ibl * brdf_lut.x + brdf_lut.y);
+    result.specular_brdf = F_ibl * brdf_lut.x + brdf_lut.y;
+    result.specular = prefiltered_color * result.specular_brdf;
     
     return result;
 }
@@ -2871,33 +2900,33 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         albedo = apply_slope_hue_variation(albedo, slope_factor, height_norm, hue_variation_strength);
     }
     
+    var terrain_layer_weights = TerrainLayerWeights(0.0, 0.0, 0.0);
+    var terrain_subsurface = TerrainSubsurfaceState(0.0, vec3<f32>(1.0, 1.0, 1.0));
+
     // ──────────────────────────────────────────────────────────────────────────
     // M4: Material Layer Blending (snow, rock, wetness)
     // Applied after base material but before lighting calculations.
     // When all layers disabled, this is a no-op preserving baseline output.
     // ──────────────────────────────────────────────────────────────────────────
-    var terrain_attrs = vec4<f32>(0.0);
-    var terrain_layer_weights = zero_terrain_layer_weights();
-    var terrain_subsurface = zero_terrain_subsurface_state();
     if (!is_water) {
         // Compute terrain attributes from stable geometric normal
-        terrain_attrs = compute_terrain_attributes(base_normal);
+        let terrain_attrs = compute_terrain_attributes(base_normal);
         var material_noise = default_material_noise();
         if (material_layer_uniforms.variation_params0.w > 0.5) {
             material_noise = sample_material_noise(uv, height_norm);
         }
-        terrain_layer_weights = compute_terrain_layer_weights(
+        terrain_layer_weights = resolve_terrain_layer_weights(
             input.world_position,
             terrain_attrs,
             material_noise,
         );
+        terrain_subsurface = resolve_terrain_subsurface(terrain_layer_weights);
 
         // Apply material layers in order: wetness (darkening) -> rock -> snow
         // Order matters: snow on top, then rock, then wetness darkening at base
         albedo = apply_wetness_layer(albedo, terrain_layer_weights.wetness);
         albedo = apply_rock_layer(albedo, terrain_layer_weights.rock);
         albedo = apply_snow_layer(albedo, terrain_layer_weights.snow);
-        terrain_subsurface = compute_terrain_subsurface_state(terrain_layer_weights);
     }
     
     occlusion = clamp(occlusion, u_shading.clamp2.x, u_shading.clamp2.y);
@@ -2976,12 +3005,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     var lighting: vec3<f32>;
     if (TERRAIN_USE_BRDF_DISPATCH) {
         // Use unified BRDF dispatch (allows model switching) with specular roughness
-        let shading_params = terrain_to_shading_params(
-            specular_roughness,
-            metallic,
-            terrain_subsurface.strength,
-            TERRAIN_BRDF_MODEL,
-        );
+        let shading_params = terrain_to_shading_params(specular_roughness, metallic, TERRAIN_BRDF_MODEL);
         let n_dot_l = max(dot(shading_normal, light_dir), 0.0);
         lighting = eval_brdf(shading_normal, view_dir, light_dir, albedo, shading_params) * n_dot_l;
     } else {
@@ -3054,29 +3078,19 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         ibl_albedo = vec3<f32>(0.0, 0.0, 0.0);
     }
     
-    // Use unified eval_ibl function from lighting_ibl.wgsl (P4 spec)
-    var ibl_contrib = eval_ibl(rotated_normal, rotated_view, ibl_albedo, metallic, roughness, f0);
-    
     // Also compute split IBL for PBR debug modes (diffuse/specular separation)
     let ibl_split = eval_ibl_split(rotated_normal, rotated_view, ibl_albedo, metallic, roughness, f0);
+    let reflection_dir = reflect(-view_dir, shading_normal);
     let probe_result = sample_probe_irradiance(input.world_position, shading_normal);
-    let local_reflection_dir = reflect(-view_dir, shading_normal);
-    let reflection_probe_result = sample_reflection_probe(input.world_position, local_reflection_dir, roughness);
+    let reflection_probe_result = sample_reflection_probe(input.world_position, reflection_dir, roughness);
+    let reflection_probe_weight = sample_reflection_probe_weight(input.world_position);
     let kS_ibl = ibl_split.fresnel;
     let kD_ibl = (vec3<f32>(1.0) - kS_ibl) * (1.0 - metallic);
     let global_diffuse = ibl_split.diffuse;
     let probe_diffuse = kD_ibl * ibl_albedo * probe_result.irradiance;
     let blended_diffuse = mix(global_diffuse, probe_diffuse, probe_result.weight);
-    let reflection_brdf_lut = textureSampleLevel(
-        brdfLUT,
-        envSampler,
-        vec2<f32>(ibl_split.n_dot_v, clamp(roughness, 0.0, 1.0)),
-        0.0,
-    ).rg;
-    let local_probe_specular =
-        reflection_probe_result.prefiltered_color
-        * (ibl_split.fresnel * reflection_brdf_lut.x + reflection_brdf_lut.y);
-    let blended_specular = mix(ibl_split.specular, local_probe_specular, reflection_probe_result.weight);
+    let local_specular = reflection_probe_result.prefiltered_color * ibl_split.specular_brdf;
+    let blended_specular = mix(ibl_split.specular, local_specular, reflection_probe_result.weight);
     
     // Apply IBL intensity and occlusion (no artificial boost - proper split-sum should work)
     // For water, don't apply occlusion to IBL (water surface is exposed to sky)
@@ -3086,12 +3100,13 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         // Water IBL is pure specular (no diffuse) - this is handled by ibl_albedo = black above
         // The reflection color comes entirely from the environment - no tinting
     }
+    let ibl_contrib_pre_ao = (blended_diffuse + blended_specular) * u_ibl.intensity;
     // Apply shadow to IBL diffuse (shadowed areas receive less ambient light)
     // But keep specular unaffected (sky reflections should still be visible)
     let ibl_diffuse_with_shadow = blended_diffuse * shadow_factor;
     let ibl_with_shadow = ibl_diffuse_with_shadow + blended_specular;
+    var ibl_contrib = vec3<f32>(0.0);
     ibl_contrib = ibl_with_shadow * u_ibl.intensity * ibl_occlusion;
-    let ibl_contrib_pre_ao = (blended_diffuse + blended_specular) * u_ibl.intensity;
     
     // Scale split components by intensity and occlusion for debug output
     let ibl_diffuse_scaled = blended_diffuse * u_ibl.intensity * ibl_occlusion * shadow_factor;
@@ -3489,13 +3504,13 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         return out;
     } else if (debug_mode == DBG_REFLECTION_PROBE_COLOR) {
         let mapped = tonemap_aces(max(
-            reflection_probe_result.prefiltered_color * reflection_probe_result.weight,
+            local_specular * reflection_probe_weight * u_ibl.intensity,
             vec3<f32>(0.0),
         ));
         out.color = vec4<f32>(linear_to_srgb(mapped), 1.0);
         return out;
     } else if (debug_mode == DBG_REFLECTION_PROBE_WEIGHT) {
-        out.color = vec4<f32>(vec3<f32>(reflection_probe_result.weight), 1.0);
+        out.color = vec4<f32>(vec3<f32>(reflection_probe_weight), 1.0);
         return out;
     } else if (debug_mode == DBG_SHADOW_TECHNIQUE) {
         // MODE 33: Shadow Technique Visualization
@@ -3679,7 +3694,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             // water_depth_value: 1.0 = deep, 0.0 = shallow
             // Depth attenuation: shallow = 100%, deep = 30% (70% absorbed)
             // This is aggressive but necessary for depth to be visible against bright specular
-            let depth_atten = mix(1.0, 0.3, water_depth_value);
+            let depth_atten = mix(1.0, WATER_DEPTH_ATTEN_DEEP, water_depth_value);
             
             // Blend planar reflection with IBL
             // When planar reflection is valid, it takes priority over IBL for terrain reflections
@@ -3698,12 +3713,17 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             
             // Combine: minimal reflections to let blue water color dominate
             // Reference image shows saturated blue lake - prioritize underwater color
-            let reflective = (combined_reflection * 0.1 + sun_spec * 0.5) * depth_atten;
+            let reflective =
+                (combined_reflection * WATER_COMBINED_REFLECTION_SCALE +
+                sun_spec * WATER_SUN_SPECULAR_SCALE) *
+                depth_atten;
             
-            // Water color: force blue to dominate over gray IBL
-            // Direct blue contribution scaled by exposure-appropriate factor
-            let blue_water = vec3<f32>(0.15, 0.45, 0.85); // Saturated blue
-            shaded = reflective * 0.3 + blue_water * 0.8 + water_scatter * 2.0;
+            // Water color: keep a stable artist-tunable blue tint while local/global
+            // reflections come from the blended probe + planar + IBL path above.
+            shaded =
+                reflective +
+                WATER_BASE_TINT * WATER_BASE_TINT_SCALE +
+                water_scatter * WATER_SCATTER_SCALE;
             
         } else {
             // ══════════════════════════════════════════════════════════════════════
@@ -3811,16 +3831,15 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             let ibl_diffuse_biased = blended_diffuse;
             let ibl_diffuse_factor = length(ibl_diffuse_biased) * u_ibl.intensity;
             let ibl_term = ibl_diffuse_factor * AMBIENT_FLOOR * 0.35;
-            let terrain_subsurface_term = evaluate_terrain_subsurface(
+            let terrain_sss = evaluate_terrain_subsurface(
                 terrain_subsurface,
+                albedo,
                 shading_normal,
                 view_dir,
                 light_dir,
-                terrain_attrs,
-                albedo,
+                combined_shadow,
+                ibl_diffuse_factor,
             );
-            let terrain_subsurface_lit =
-                terrain_subsurface_term * (sun_intensity * combined_shadow * 0.65 + ibl_term * 0.50);
             
             // P2-S4: lighting_factor = diffuse_lit + ibl_term
             let lighting_factor = diffuse_lit + ibl_term;
@@ -3831,11 +3850,11 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             
             // Add specular contribution (capped at 25% per P2-S4)
             // Specular for terrain must not exceed 25% of total RGB
-            let spec_contrib = ibl_split.specular * u_ibl.intensity * 0.12;
+            let spec_contrib = blended_specular * u_ibl.intensity * 0.12;
             let spec_capped = min(spec_contrib, albedo * 0.20);
             
             // Final terrain shading
-            shaded = lit_albedo + spec_capped + terrain_subsurface_lit;
+            shaded = lit_albedo + spec_capped + terrain_sss;
         }
         
         let exposure = max(u_shading.light_params.w, 0.0);
@@ -3850,10 +3869,15 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             input.clip_position.xy,
         );
         
-        // Use filmic tonemapping for better highlight compression (D1 fix)
-        // Filmic curve compresses highlights more aggressively than ACES
-        let tonemapped = tonemap_filmic_terrain(shaded);
-        final_color = tonemapped;
+        let offline_hdr_output = u_overlay.params5.w > 0.5;
+        if (offline_hdr_output) {
+            final_color = shaded;
+        } else {
+            // Use filmic tonemapping for better highlight compression (D1 fix)
+            // Filmic curve compresses highlights more aggressively than ACES
+            let tonemapped = tonemap_filmic_terrain(shaded);
+            final_color = tonemapped;
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -3961,8 +3985,11 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     //   - false (P5 legacy): pow-gamma approximation via gamma_correct()
     //   - true (P6 correct): exact piecewise linear_to_srgb() EOTF
     let output_srgb_eotf = u_overlay.params5.z > 0.5;
+    let offline_hdr_output = u_overlay.params5.w > 0.5;
     var encoded_color: vec3<f32>;
-    if (output_srgb_eotf) {
+    if (offline_hdr_output) {
+        encoded_color = final_color;
+    } else if (output_srgb_eotf) {
         // P6: Exact sRGB EOTF - clamp to [0,1] first, then apply exact curve
         encoded_color = linear_to_srgb(clamp(final_color, vec3<f32>(0.0), vec3<f32>(1.0)));
     } else {

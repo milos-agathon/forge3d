@@ -4,17 +4,17 @@ use crate::terrain::render_params;
 
 const TERRAIN_AOV_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
-struct AovAttachmentTarget {
-    internal_texture: wgpu::Texture,
-    internal_view: wgpu::TextureView,
-    _msaa_texture: Option<wgpu::Texture>,
-    msaa_view: Option<wgpu::TextureView>,
+pub(super) struct AovAttachmentTarget {
+    pub(super) internal_texture: wgpu::Texture,
+    pub(super) internal_view: wgpu::TextureView,
+    pub(super) _msaa_texture: Option<wgpu::Texture>,
+    pub(super) msaa_view: Option<wgpu::TextureView>,
 }
 
-struct TerrainAovTargets {
-    albedo: AovAttachmentTarget,
-    normal: AovAttachmentTarget,
-    depth: AovAttachmentTarget,
+pub(super) struct TerrainAovTargets {
+    pub(super) albedo: AovAttachmentTarget,
+    pub(super) normal: AovAttachmentTarget,
+    pub(super) depth: AovAttachmentTarget,
 }
 
 impl TerrainScene {
@@ -106,7 +106,7 @@ impl TerrainScene {
         }
     }
 
-    fn create_aov_render_targets(
+    pub(super) fn create_aov_render_targets(
         &self,
         width: u32,
         height: u32,
@@ -135,7 +135,7 @@ impl TerrainScene {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn run_main_pass_with_aov(
+    pub(super) fn run_main_pass_with_aov(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         params: &crate::terrain::render_params::TerrainRenderParams,
@@ -293,7 +293,7 @@ impl TerrainScene {
         Ok(())
     }
 
-    fn resolve_aux_output(
+    pub(super) fn resolve_aux_output(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         decoded: &crate::terrain::render_params::DecodedTerrainSettings,
@@ -396,7 +396,8 @@ impl TerrainScene {
         let decoded = params.decoded();
         self.prepare_frame_lighting(decoded)?;
 
-        let height_inputs = self.upload_height_inputs(heightmap, water_mask)?;
+        let height_inputs =
+            self.upload_height_inputs(heightmap, water_mask, params.terrain_data_revision)?;
         let probe_world_span = if params.camera_mode.to_lowercase() == "mesh" {
             params.terrain_span.max(1e-3)
         } else {
@@ -409,14 +410,20 @@ impl TerrainScene {
             &height_inputs.heightmap_data,
             (height_inputs.width, height_inputs.height),
             params.z_scale,
+            height_inputs.terrain_data_hash,
         );
         super::probes::prepare_reflection_probes(
             self,
             &decoded.reflection_probes,
+            material_set,
+            env_maps,
+            params,
+            decoded,
             probe_world_span,
             &height_inputs.heightmap_data,
             (height_inputs.width, height_inputs.height),
             params.z_scale,
+            height_inputs.terrain_data_hash,
         );
         let materials = self.prepare_material_context(material_set, params, decoded)?;
 

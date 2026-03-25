@@ -3,7 +3,9 @@ use super::*;
 mod execute;
 mod setup;
 
-pub(in crate::terrain::renderer) use setup::RenderTargets;
+pub(in crate::terrain::renderer) use setup::{
+    PreparedMaterials, RenderTargets, UploadedHeightInputs,
+};
 
 impl TerrainScene {
     pub(crate) fn render_internal(
@@ -18,7 +20,8 @@ impl TerrainScene {
         let decoded = params.decoded();
         self.prepare_frame_lighting(decoded)?;
 
-        let height_inputs = self.upload_height_inputs(heightmap, water_mask)?;
+        let height_inputs =
+            self.upload_height_inputs(heightmap, water_mask, params.terrain_data_revision)?;
         let probe_world_span = if params.camera_mode.to_lowercase() == "mesh" {
             params.terrain_span.max(1e-3)
         } else {
@@ -31,14 +34,20 @@ impl TerrainScene {
             &height_inputs.heightmap_data,
             (height_inputs.width, height_inputs.height),
             params.z_scale,
+            height_inputs.terrain_data_hash,
         );
         super::probes::prepare_reflection_probes(
             self,
             &decoded.reflection_probes,
+            material_set,
+            env_maps,
+            params,
+            decoded,
             probe_world_span,
             &height_inputs.heightmap_data,
             (height_inputs.width, height_inputs.height),
             params.z_scale,
+            height_inputs.terrain_data_hash,
         );
         let materials = self.prepare_material_context(material_set, params, decoded)?;
 
