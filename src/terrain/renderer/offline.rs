@@ -616,6 +616,15 @@ impl TerrainScene {
                 label: Some("terrain.offline.encoder"),
             });
 
+        let material_vt_ready = self.prepare_material_vt_frame(
+            &mut encoder,
+            &state.params,
+            &state.decoded,
+            state.materials.gpu_materials.layer_count,
+            state.internal_width,
+            state.internal_height,
+        )?;
+
         {
             let render_targets = &state.render_targets;
             let aov_targets = &state.aov_targets;
@@ -689,6 +698,7 @@ impl TerrainScene {
                 shadow_setup.height_min,
                 shadow_setup.height_exag,
                 eye.y,
+                material_vt_ready,
             )?;
 
             let water_reflection_bind_group = self.prepare_water_reflection_bind_group(
@@ -771,11 +781,12 @@ impl TerrainScene {
             state.total_samples,
         );
 
+        self.stage_material_vt_feedback_readback(&mut encoder)?;
         self.queue.submit(Some(encoder.finish()));
+        self.finish_material_vt_frame()?;
         state.total_samples += 1;
         Ok(())
     }
-
     fn dispatch_offline_accumulation_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -1477,22 +1488,7 @@ impl TerrainRenderer {
         };
 
         let work_result = (|| -> PyResult<()> {
-            // Only update VT on the first sample of each logical frame (batch)
-            let mut first_sample = true;
-
             for _ in 0..sample_count {
-                // Update VT only on first sample of this batch
-                if first_sample {
-                    let material_vt = self.scene.material_vt.lock()
-                        .map_err(|_| PyRuntimeError::new_err("material_vt mutex poisoned"))?;
-                    if !material_vt.sources.is_empty() {
-                        // VT is enabled; sources are registered
-                        // Update happens implicitly in render_offline_sample via bind group
-                    }
-                    drop(material_vt);
-                    first_sample = false;
-                }
-
                 let jitter = state.jitter_sequence.next();
                 self.scene
                     .render_offline_sample(&mut state, jitter)
@@ -1516,7 +1512,6 @@ impl TerrainRenderer {
             crate::OfflineBatchResult::new(total_samples, start.elapsed().as_secs_f64() * 1000.0),
         )?)
     }
-
     #[pyo3(signature = (target_variance, tile_size=DEFAULT_METRIC_TILE_SIZE))]
     pub fn read_accumulation_metrics(
         &mut self,

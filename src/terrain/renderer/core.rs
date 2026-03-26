@@ -86,6 +86,7 @@ pub struct TerrainScene {
     pub(super) vt_atlas_fallback_view: wgpu::TextureView,
     pub(super) vt_page_table_fallback_texture: wgpu::Texture,
     pub(super) vt_page_table_fallback_view: wgpu::TextureView,
+    pub(super) vt_feedback_fallback_buffer: wgpu::Buffer,
     pub(super) vt_atlas_sampler: wgpu::Sampler,
     pub(super) probe_grid_uniform_buffer: wgpu::Buffer,
     pub(super) probe_ssbo: wgpu::Buffer,

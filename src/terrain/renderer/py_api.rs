@@ -451,7 +451,9 @@ impl TerrainRenderer {
         )
     }
 
-    #[pyo3(text_signature = "(self, material_index, family, image_or_pyramid, virtual_size_px, fallback_color)")]
+    #[pyo3(
+        text_signature = "(self, material_index, family, image_or_pyramid, virtual_size_px, fallback_color)"
+    )]
     fn register_material_vt_source(
         &self,
         material_index: u32,
@@ -466,7 +468,7 @@ impl TerrainRenderer {
         let data = if let Ok(arr) = image_or_pyramid.extract::<Vec<u8>>() {
             arr
         } else if let Ok(arr_any) = image_or_pyramid.getattr("tobytes") {
-            arr_any.extract::<Vec<u8>>()?
+            arr_any.call0()?.extract::<Vec<u8>>()?
         } else {
             return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
                 "image_or_pyramid must be bytes or numpy array",

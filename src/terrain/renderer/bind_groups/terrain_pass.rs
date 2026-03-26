@@ -164,6 +164,7 @@ impl TerrainScene {
         height_min: f32,
         height_exag: f32,
         eye_y: f32,
+        material_vt_ready: bool,
     ) -> Result<TerrainPassBindGroups> {
         let main = self.create_terrain_main_bind_group(
             "terrain_pbr_pom.bind_group",
@@ -332,59 +333,99 @@ impl TerrainScene {
             0,
             bytemuck::bytes_of(&material_layer_uniforms),
         );
-        let material_layer = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("terrain.material_layer.bind_group"),
-            layout: &self.material_layer_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: self.material_layer_uniform_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: self.probe_grid_uniform_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: self.probe_ssbo.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: self
-                        .reflection_probe_grid_uniform_buffer
-                        .as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::TextureView(&self.reflection_probe_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: wgpu::BindingResource::Sampler(&self.reflection_probe_sampler),
-                },
-                // VT bindings (fallback)
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: self.vt_uniform_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: self.vt_fallback_uniform_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 8,
-                    resource: wgpu::BindingResource::TextureView(&self.vt_atlas_fallback_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 9,
-                    resource: wgpu::BindingResource::Sampler(&self.vt_atlas_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 10,
-                    resource: wgpu::BindingResource::TextureView(&self.vt_page_table_fallback_view),
-                },
-            ],
-        });
+        let build_material_layer_bind_group =
+            |atlas_view: &wgpu::TextureView,
+             page_table_view: &wgpu::TextureView,
+             feedback_buffer: &wgpu::Buffer| {
+                self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("terrain.material_layer.bind_group"),
+                    layout: &self.material_layer_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: self.material_layer_uniform_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: self.probe_grid_uniform_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: self.probe_ssbo.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: self
+                                .reflection_probe_grid_uniform_buffer
+                                .as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: wgpu::BindingResource::TextureView(
+                                &self.reflection_probe_view,
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: wgpu::BindingResource::Sampler(
+                                &self.reflection_probe_sampler,
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 6,
+                            resource: self.vt_uniform_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 7,
+                            resource: self.vt_fallback_uniform_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 8,
+                            resource: wgpu::BindingResource::TextureView(atlas_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 9,
+                            resource: wgpu::BindingResource::Sampler(&self.vt_atlas_sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 10,
+                            resource: wgpu::BindingResource::TextureView(page_table_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 11,
+                            resource: feedback_buffer.as_entire_binding(),
+                        },
+                    ],
+                })
+            };
+
+        let material_layer = if material_vt_ready {
+            let material_vt = self
+                .material_vt
+                .lock()
+                .map_err(|_| anyhow!("material_vt mutex poisoned"))?;
+            if let Some(bindings) = material_vt.binding_resources() {
+                build_material_layer_bind_group(
+                    bindings.atlas_view,
+                    bindings.page_table_view,
+                    bindings
+                        .feedback_buffer
+                        .unwrap_or(&self.vt_feedback_fallback_buffer),
+                )
+            } else {
+                build_material_layer_bind_group(
+                    &self.vt_atlas_fallback_view,
+                    &self.vt_page_table_fallback_view,
+                    &self.vt_feedback_fallback_buffer,
+                )
+            }
+        } else {
+            build_material_layer_bind_group(
+                &self.vt_atlas_fallback_view,
+                &self.vt_page_table_fallback_view,
+                &self.vt_feedback_fallback_buffer,
+            )
+        };
 
         Ok(TerrainPassBindGroups {
             main,

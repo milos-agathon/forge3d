@@ -1078,7 +1078,12 @@ class SkySettings:
 
 @dataclass
 class VTLayerFamily:
-    """Describes one paged terrain material family."""
+    """Describes one paged terrain material family.
+
+    The Python contract reserves ``albedo``, ``normal``, and ``mask`` families.
+    The current native terrain VT runtime pages only ``albedo``; ``normal`` and
+    ``mask`` remain forward-compatible placeholders for a later native extension.
+    """
     family: str                        # "albedo" | "normal" | "mask"
     virtual_size_px: Tuple[int, int] = (4096, 4096)  # family-wide invariant
     tile_size: int = 248               # content pixels per tile edge
@@ -1090,7 +1095,7 @@ class VTLayerFamily:
         if self.family not in VALID_FAMILIES:
             raise ValueError(f"family must be one of {VALID_FAMILIES}")
         # normal/mask are accepted in the Python contract for forward compatibility.
-        # They are rejected at native decode time (parse_vt_settings in Rust), not here.
+        # The current native terrain VT runtime pages only the albedo family.
         if self.tile_size < 16:
             raise ValueError("tile_size must be >= 16")
         if self.tile_border < 0:
@@ -1134,7 +1139,13 @@ class VTLayerFamily:
 
 @dataclass
 class TerrainVTSettings:
-    """Terrain material virtual texturing configuration."""
+    """Terrain material virtual texturing configuration.
+
+    v1 ships feedback-driven albedo-family paging plus runtime residency stats.
+    ``normal`` and ``mask`` layer families are accepted in ``layers`` so callers
+    can keep a stable contract, but the native terrain runtime currently ignores
+    them when building the resident tile set.
+    """
     enabled: bool = False
     layers: List[VTLayerFamily] = field(default_factory=lambda: [
         VTLayerFamily(family="albedo")
@@ -1624,7 +1635,7 @@ class TerrainRenderParams:
     volumetrics: Optional[VolumetricsSettings] = None
     # M6: Sky settings
     sky: Optional[SkySettings] = None
-    # TV20: Terrain material virtual texturing (defaults to disabled for backward compatibility)
+    # Terrain material virtual texturing (defaults to disabled for backward compatibility)
     vt: Optional[TerrainVTSettings] = None
     # Overlay system settings (lit texture overlays draped on terrain)
     overlay: Optional[OverlaySettings] = None

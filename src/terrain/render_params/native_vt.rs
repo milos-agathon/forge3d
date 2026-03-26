@@ -1,7 +1,9 @@
 #[cfg(feature = "extension-module")]
 #[derive(Clone)]
 pub struct VTLayerFamilyNative {
-    pub family: String,           // "albedo", "normal", or "mask"
+    // Python accepts "albedo", "normal", and "mask". The current terrain VT
+    // runtime pages only the albedo family and ignores the others for now.
+    pub family: String,
     pub virtual_size: (u32, u32),
     pub tile_size: u32,
     pub tile_border: u32,

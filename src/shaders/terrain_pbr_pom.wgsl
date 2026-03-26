@@ -474,6 +474,43 @@ struct MaterialLayerUniforms {
 @group(6) @binding(0)
 var<uniform> material_layer_uniforms: MaterialLayerUniforms;
 
+
+const TERRAIN_VT_MATERIAL_CAPACITY: u32 = 4u;
+
+struct TerrainVTUniforms {
+    config0: vec4<u32>,
+    config1: vec4<u32>,
+    config2: vec4<u32>,
+}
+
+struct TerrainVTFallbackColors {
+    colors: array<vec4<f32>, 4>,
+}
+
+struct TerrainVTFeedbackEntry {
+    tile_x: u32,
+    tile_y: u32,
+    mip_level: u32,
+    frame_number: u32,
+}
+
+@group(6) @binding(6)
+var<uniform> terrain_vt_uniforms: TerrainVTUniforms;
+
+@group(6) @binding(7)
+var<uniform> terrain_vt_fallbacks: TerrainVTFallbackColors;
+
+@group(6) @binding(8)
+var terrain_vt_atlas: texture_2d<f32>;
+
+@group(6) @binding(9)
+var terrain_vt_sampler: sampler;
+
+@group(6) @binding(10)
+var terrain_vt_page_table: texture_2d_array<f32>;
+
+@group(6) @binding(11)
+var<storage, read_write> terrain_vt_feedback: array<TerrainVTFeedbackEntry>;
 struct TerrainMaterialNoise {
     snow_macro: f32,
     snow_detail: f32,
@@ -1684,6 +1721,128 @@ fn sample_triplanar_checker(
     return check_x * weights.x + check_y * weights.y + check_z * weights.z;
 }
 
+fn terrain_vt_enabled() -> bool {
+    return terrain_vt_uniforms.config0.x > 0u;
+}
+
+fn terrain_vt_material_index(layer: f32) -> u32 {
+    let material_count = max(terrain_vt_uniforms.config2.y, 1u);
+    let clamped_layer = clamp(u32(max(layer, 0.0)), 0u, material_count - 1u);
+    return min(clamped_layer, TERRAIN_VT_MATERIAL_CAPACITY - 1u);
+}
+
+fn terrain_vt_fallback_color(material_index: u32) -> vec4<f32> {
+    return terrain_vt_fallbacks.colors[min(material_index, TERRAIN_VT_MATERIAL_CAPACITY - 1u)];
+}
+
+fn terrain_vt_desired_mip(ddx_uv: vec2<f32>, ddy_uv: vec2<f32>) -> u32 {
+    let virtual_size = vec2<f32>(
+        f32(max(terrain_vt_uniforms.config1.x, 1u)),
+        f32(max(terrain_vt_uniforms.config1.y, 1u)),
+    );
+    let footprint_x = max(length(ddx_uv * virtual_size), length(ddy_uv * virtual_size));
+    let desired = max(log2(max(footprint_x, 1.0)), 0.0);
+    return min(u32(desired), max(terrain_vt_uniforms.config2.x, 1u) - 1u);
+}
+
+fn terrain_vt_page_dims(mip_level: u32) -> vec2<u32> {
+    let base_dims = vec2<u32>(
+        max(terrain_vt_uniforms.config1.z, 1u),
+        max(terrain_vt_uniforms.config1.w, 1u),
+    );
+    let divisor = 1u << mip_level;
+    let bias = divisor - 1u;
+    return max(
+        (base_dims + vec2<u32>(bias, bias)) / vec2<u32>(divisor, divisor),
+        vec2<u32>(1u, 1u),
+    );
+}
+
+fn terrain_vt_page_table_layer(material_index: u32, mip_level: u32) -> i32 {
+    let max_mip_levels = max(terrain_vt_uniforms.config2.x, 1u);
+    return i32(material_index * max_mip_levels + mip_level);
+}
+
+fn terrain_vt_feedback_index(material_index: u32, mip_level: u32, tile_x: u32, tile_y: u32) -> u32 {
+    let base_pages_x = max(terrain_vt_uniforms.config1.z, 1u);
+    let base_pages_y = max(terrain_vt_uniforms.config1.w, 1u);
+    return (((material_index * max(terrain_vt_uniforms.config2.x, 1u)) + mip_level) * base_pages_y + tile_y) * base_pages_x + tile_x;
+}
+
+fn terrain_vt_write_feedback(material_index: u32, mip_level: u32, tile_x: u32, tile_y: u32) {
+    if (terrain_vt_uniforms.config2.w == 0u) {
+        return;
+    }
+    let base_pages_x = max(terrain_vt_uniforms.config1.z, 1u);
+    let base_pages_y = max(terrain_vt_uniforms.config1.w, 1u);
+    if (tile_x >= base_pages_x || tile_y >= base_pages_y) {
+        return;
+    }
+    let index = terrain_vt_feedback_index(material_index, mip_level, tile_x, tile_y);
+    terrain_vt_feedback[index] = TerrainVTFeedbackEntry(
+        tile_x,
+        tile_y,
+        mip_level,
+        material_index + 1u,
+    );
+}
+
+fn sample_material_layer_uv(
+    uv: vec2<f32>,
+    ddx_uv: vec2<f32>,
+    ddy_uv: vec2<f32>,
+    layer: f32,
+) -> vec3<f32> {
+    if (!terrain_vt_enabled()) {
+        let layer_index = i32(layer);
+        return textureSampleGrad(material_albedo_tex, material_samp, uv, layer_index, ddx_uv, ddy_uv).rgb;
+    }
+
+    let material_index = terrain_vt_material_index(layer);
+    let virtual_size = vec2<f32>(
+        f32(max(terrain_vt_uniforms.config1.x, 1u)),
+        f32(max(terrain_vt_uniforms.config1.y, 1u)),
+    );
+    let tile_size = f32(max(terrain_vt_uniforms.config0.y, 1u));
+    let tile_border = f32(terrain_vt_uniforms.config0.z);
+    let atlas_size = f32(max(terrain_vt_uniforms.config0.w, 1u));
+    let max_mip_levels = max(terrain_vt_uniforms.config2.x, 1u);
+    let wrapped_uv = fract(uv);
+    let virtual_texel = wrapped_uv * virtual_size;
+    let desired_mip = terrain_vt_desired_mip(ddx_uv, ddy_uv);
+    let desired_page_dims = terrain_vt_page_dims(desired_mip);
+    let desired_page_size = vec2<f32>(tile_size * exp2(f32(desired_mip)), tile_size * exp2(f32(desired_mip)));
+    let desired_page = min(vec2<u32>(virtual_texel / desired_page_size), desired_page_dims - vec2<u32>(1u, 1u));
+    terrain_vt_write_feedback(material_index, desired_mip, desired_page.x, desired_page.y);
+
+    var mip_level = desired_mip;
+    loop {
+        let page_dims = terrain_vt_page_dims(mip_level);
+        let page_size = vec2<f32>(tile_size * exp2(f32(mip_level)), tile_size * exp2(f32(mip_level)));
+        let page = min(vec2<u32>(virtual_texel / page_size), page_dims - vec2<u32>(1u, 1u));
+        let entry = textureLoad(
+            terrain_vt_page_table,
+            vec2<i32>(i32(page.x), i32(page.y)),
+            terrain_vt_page_table_layer(material_index, mip_level),
+            0,
+        );
+        if (entry.z > 0.5) {
+            let page_origin = vec2<f32>(f32(page.x), f32(page.y)) * page_size;
+            let texel_in_page = (virtual_texel - page_origin) / exp2(f32(mip_level));
+            let inner_texel = clamp(texel_in_page, vec2<f32>(0.0, 0.0), vec2<f32>(tile_size - 1.0, tile_size - 1.0));
+            let atlas_uv = vec2<f32>(entry.x, entry.y)
+                + (vec2<f32>(tile_border, tile_border) + inner_texel + vec2<f32>(0.5, 0.5)) / atlas_size;
+            return textureSampleLevel(terrain_vt_atlas, terrain_vt_sampler, atlas_uv, 0.0).rgb;
+        }
+        if (mip_level + 1u >= max_mip_levels) {
+            break;
+        }
+        mip_level = mip_level + 1u;
+    }
+
+    return terrain_vt_fallback_color(material_index).rgb;
+}
+
 /// Triplanar sampling with textureSampleGrad for correct mip selection.
 /// Computes UV gradients from world position derivatives for each projection axis.
 fn sample_triplanar(
@@ -1714,14 +1873,12 @@ fn sample_triplanar(
     let ddx_z = dpdx_world.xy;
     let ddy_z = dpdy_world.xy;
 
-    let layer_index = i32(layer);
-    let color_x = textureSampleGrad(material_albedo_tex, material_samp, uv_x, layer_index, ddx_x, ddy_x).rgb;
-    let color_y = textureSampleGrad(material_albedo_tex, material_samp, uv_y, layer_index, ddx_y, ddy_y).rgb;
-    let color_z = textureSampleGrad(material_albedo_tex, material_samp, uv_z, layer_index, ddx_z, ddy_z).rgb;
+    let color_x = sample_material_layer_uv(uv_x, ddx_x, ddy_x, layer);
+    let color_y = sample_material_layer_uv(uv_y, ddx_y, ddy_y, layer);
+    let color_z = sample_material_layer_uv(uv_z, ddx_z, ddy_z, layer);
 
     return color_x * weights.x + color_y * weights.y + color_z * weights.z;
 }
-
 fn build_tbn(normal : vec3<f32>) -> mat3x3<f32> {
     let up = select(vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(0.0, 1.0, 0.0), abs(normal.y) > 0.99);
     let tangent = normalize(cross(up, normal));

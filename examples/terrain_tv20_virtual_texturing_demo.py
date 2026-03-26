@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TV20 Terrain Material Virtual Texturing Demo
+Terrain Material Virtual Texturing Demo
 
 Demonstrates using the VT material streaming system to render large terrains
 with material sources generated from elevation data.
@@ -9,7 +9,6 @@ with material sources generated from elevation data.
 from __future__ import annotations
 
 import argparse
-import os
 import tempfile
 from pathlib import Path
 
@@ -27,12 +26,13 @@ def _import_forge3d():
 
 f3d = _import_forge3d()
 
-from forge3d.terrain_params import PomSettings, TerrainVTSettings, VTLayerFamily, make_terrain_params_config
+from forge3d.terrain_params import TerrainVTSettings, VTLayerFamily, make_terrain_params_config
 
 # Use default test DEM if available
 DEFAULT_DEM_PATH = Path(__file__).parent.parent / "assets" / "tif" / "dem_rainier.tif"
 DEFAULT_HDR_PATH = Path(__file__).parent.parent / "assets" / "hdr" / "env.hdr"
 DEFAULT_OUTPUT = Path(__file__).parent / "out" / "tv20_demo.png"
+DEMO_VT_MATERIAL_COUNT = 4
 
 
 def load_dem(dem_path: Path) -> np.ndarray:
@@ -49,33 +49,48 @@ def load_dem(dem_path: Path) -> np.ndarray:
         return np.random.rand(512, 512).astype(np.float32) * 1000
 
 
-def generate_material_albedo(dem: np.ndarray, material_index: int, virtual_size: int) -> bytes:
-    """Generate per-material albedo from elevation bands."""
-    # Simple height-based coloring
+def generate_material_albedo(dem: np.ndarray, material_index: int, virtual_size: int) -> np.ndarray:
+    """Generate a deterministic RGBA8 VT source for one terrain material layer."""
     normalized = (dem - dem.min()) / (dem.max() - dem.min() + 1e-6)
 
-    # Resample to virtual_size
-    scale_y = virtual_size / dem.shape[0]
-    scale_x = virtual_size / dem.shape[1]
-    resized = np.zeros((virtual_size, virtual_size), dtype=np.float32)
-    for y in range(virtual_size):
-        for x in range(virtual_size):
-            src_y = min(int(y / scale_y), dem.shape[0] - 1)
-            src_x = min(int(x / scale_x), dem.shape[1] - 1)
-            resized[y, x] = normalized[src_y, src_x]
+    y_index = np.clip(
+        np.floor(np.linspace(0, dem.shape[0], virtual_size, endpoint=False)).astype(np.int32),
+        0,
+        dem.shape[0] - 1,
+    )
+    x_index = np.clip(
+        np.floor(np.linspace(0, dem.shape[1], virtual_size, endpoint=False)).astype(np.int32),
+        0,
+        dem.shape[1] - 1,
+    )
+    resized = normalized[np.ix_(y_index, x_index)]
 
-    # Color by material index + elevation
-    color_value = 0.3 + (material_index * 0.1) + (resized * 0.3)
-    color_value = np.clip(color_value, 0, 1)
-
-    # Convert to RGBA bytes
-    rgba = np.zeros((virtual_size, virtual_size, 4), dtype=np.uint8)
-    rgba[:, :, 0] = (color_value * 255).astype(np.uint8)  # R
-    rgba[:, :, 1] = (color_value * 0.8 * 255).astype(np.uint8)  # G
-    rgba[:, :, 2] = (color_value * 0.6 * 255).astype(np.uint8)  # B
-    rgba[:, :, 3] = 255  # A
-
-    return rgba.tobytes()
+    coords = np.linspace(0.0, 1.0, virtual_size, dtype=np.float32)
+    xx, yy = np.meshgrid(coords, coords)
+    stripe = 0.5 + 0.5 * np.sin(
+        (xx * (material_index + 1.5) * 14.0 + yy * (material_index + 2.0) * 11.0) * np.pi
+    )
+    checker = (
+        (
+            np.floor(xx * (10 + material_index * 3))
+            + np.floor(yy * (12 + material_index * 2))
+        )
+        % 2.0
+    ).astype(np.float32)
+    modulation = np.clip(0.25 + 0.45 * resized + 0.30 * (0.55 * checker + 0.45 * stripe), 0.0, 1.0)
+    palette = np.array(
+        [
+            [0.88, 0.18, 0.12],
+            [0.14, 0.72, 0.22],
+            [0.16, 0.34, 0.90],
+            [0.92, 0.84, 0.18],
+        ],
+        dtype=np.float32,
+    )
+    base = palette[material_index % len(palette)]
+    rgb = np.clip(base * modulation[..., None] + (1.0 - modulation[..., None]) * 0.08, 0.0, 1.0)
+    alpha = np.ones((virtual_size, virtual_size, 1), dtype=np.float32)
+    return np.ascontiguousarray((np.concatenate([rgb, alpha], axis=-1) * 255.0).round().astype(np.uint8))
 
 
 def _write_preview_hdr(path: Path, width: int = 8, height: int = 4) -> None:
@@ -92,7 +107,7 @@ def _write_preview_hdr(path: Path, width: int = 8, height: int = 4) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="TV20 Virtual Texturing Demo")
+    parser = argparse.ArgumentParser(description="Terrain material virtual texturing demo")
     parser.add_argument("--dem", type=Path, default=DEFAULT_DEM_PATH, help="DEM file path")
     parser.add_argument("--hdr", type=Path, default=DEFAULT_HDR_PATH, help="HDR environment")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="Output PNG path")
@@ -126,10 +141,6 @@ def main() -> int:
     print(f"Loading IBL from {hdr_path}...")
     ibl = f3d.IBL.from_hdr(str(hdr_path), intensity=1.0)
 
-    # VT source registration would happen here if the feature is available in the build.
-    # The VT settings are passed to the renderer through the params, and the renderer
-    # will use those settings for its internal streaming system.
-
     # Create render parameters
     print("Setting up render parameters...")
     vt_settings = (
@@ -151,11 +162,25 @@ def main() -> int:
         z_scale=1.0,
         exposure=1.0,
         domain=(float(dem.min()), float(dem.max())),
+        albedo_mode="material",
+        colormap_strength=0.0,
+        camera_mode="mesh",
     )
 
-    # Set VT settings on the config
     if vt_settings:
         config.vt = vt_settings
+        renderer.clear_material_vt_sources()
+        print(f"Registering {DEMO_VT_MATERIAL_COUNT} VT material sources...")
+        for material_index in range(DEMO_VT_MATERIAL_COUNT):
+            source = generate_material_albedo(dem, material_index, args.virtual_size)
+            fallback_rgb = source[..., :3].astype(np.float32).mean(axis=(0, 1)) / 255.0
+            renderer.register_material_vt_source(
+                material_index,
+                "albedo",
+                source,
+                (args.virtual_size, args.virtual_size),
+                [float(fallback_rgb[0]), float(fallback_rgb[1]), float(fallback_rgb[2]), 1.0],
+            )
 
     # Wrap in native TerrainRenderParams
     params = f3d.TerrainRenderParams(config)
@@ -172,6 +197,25 @@ def main() -> int:
         print(f"  Layers: {len(vt_settings.layers)}")
         for layer in vt_settings.layers:
             print(f"    - {layer.family}: {layer.virtual_size_px}px (tile {layer.tile_size}px)")
+        print("  Runtime family support: albedo only (normal/mask are reserved for a later native path)")
+        print("\nVT Runtime Stats:")
+        stats = renderer.get_material_vt_stats()
+        for key in (
+            "resident_pages",
+            "total_pages",
+            "cache_budget_pages",
+            "cache_budget_mb",
+            "cache_hits",
+            "cache_misses",
+            "miss_rate",
+            "tiles_streamed",
+            "evictions",
+            "avg_upload_ms",
+            "resident_megabytes",
+            "source_count",
+            "feedback_requests",
+        ):
+            print(f"  {key}: {stats.get(key, 0.0)}")
 
     print(f"Saving output to {args.output}...")
     args.output.parent.mkdir(parents=True, exist_ok=True)

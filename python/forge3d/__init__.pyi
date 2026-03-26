@@ -559,6 +559,19 @@ class TerrainRenderer:
     def get_scatter_memory_report(self) -> Dict[str, Any]: ...
     def get_probe_memory_report(self) -> Dict[str, Any]: ...
     def get_reflection_probe_memory_report(self) -> Dict[str, Any]: ...
+    # Terrain material virtual texturing.
+    # The current native terrain runtime pages the albedo family; normal/mask
+    # families remain forward-compatible Python contract entries.
+    def register_material_vt_source(
+        self,
+        material_index: int,
+        family: str,
+        image_or_pyramid: Any,
+        virtual_size_px: Tuple[int, int],
+        fallback_color: Optional[Sequence[float]] = ...,
+    ) -> None: ...
+    def clear_material_vt_sources(self) -> None: ...
+    def get_material_vt_stats(self) -> Dict[str, float]: ...
 
 class OfflineProgress:
     samples_so_far: int

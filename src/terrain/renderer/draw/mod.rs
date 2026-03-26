@@ -95,6 +95,14 @@ impl TerrainScene {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("terrain.encoder"),
             });
+        let material_vt_ready = self.prepare_material_vt_frame(
+            &mut encoder,
+            params,
+            decoded,
+            materials.gpu_materials.layer_count,
+            render_targets.internal_width,
+            render_targets.internal_height,
+        )?;
 
         let height_ao_computed = self.compute_height_ao_pass(
             &mut encoder,
@@ -164,6 +172,7 @@ impl TerrainScene {
             shadow_setup.height_min,
             shadow_setup.height_exag,
             shadow_setup.eye.y,
+            material_vt_ready,
         )?;
 
         let water_reflection_bind_group = self.prepare_water_reflection_bind_group(
@@ -212,6 +221,7 @@ impl TerrainScene {
         #[cfg(feature = "enable-gpu-instancing")]
         {
             let scatter_state = self.build_scatter_render_state(
+                env_maps,
                 params,
                 decoded,
                 height_inputs.width,
@@ -224,13 +234,16 @@ impl TerrainScene {
                 &mut encoder,
                 &render_targets,
                 &height_inputs.heightmap_view,
+                env_maps,
                 &scatter_state,
             )?;
         }
 
         let (final_texture, final_width, final_height) =
             self.resolve_output(&mut encoder, params, decoded, render_targets)?;
+        self.stage_material_vt_feedback_readback(&mut encoder)?;
         self.queue.submit(Some(encoder.finish()));
+        self.finish_material_vt_frame()?;
 
         Ok(crate::Frame::new(
             self.device.clone(),
