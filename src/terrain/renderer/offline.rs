@@ -616,6 +616,14 @@ impl TerrainScene {
                 label: Some("terrain.offline.encoder"),
             });
 
+        let material_vt_ready = self.prepare_material_vt_frame(
+            &mut encoder,
+            &state.params,
+            &state.decoded,
+            state.materials.gpu_materials.layer_count,
+            state.internal_width,
+            state.internal_height,
+        )?;
         {
             let render_targets = &state.render_targets;
             let aov_targets = &state.aov_targets;
@@ -689,6 +697,7 @@ impl TerrainScene {
                 shadow_setup.height_min,
                 shadow_setup.height_exag,
                 eye.y,
+                material_vt_ready,
             )?;
 
             let water_reflection_bind_group = self.prepare_water_reflection_bind_group(
@@ -771,11 +780,12 @@ impl TerrainScene {
             state.total_samples,
         );
 
+        self.stage_material_vt_feedback_readback(&mut encoder)?;
         self.queue.submit(Some(encoder.finish()));
+        self.finish_material_vt_frame()?;
         state.total_samples += 1;
         Ok(())
     }
-
     fn dispatch_offline_accumulation_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -1501,7 +1511,6 @@ impl TerrainRenderer {
             crate::OfflineBatchResult::new(total_samples, start.elapsed().as_secs_f64() * 1000.0),
         )?)
     }
-
     #[pyo3(signature = (target_variance, tile_size=DEFAULT_METRIC_TILE_SIZE))]
     pub fn read_accumulation_metrics(
         &mut self,

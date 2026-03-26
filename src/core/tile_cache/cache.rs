@@ -37,9 +37,15 @@ impl TileCache {
         }
     }
 
-    pub fn configure_atlas(&mut self, atlas_width: u32, atlas_height: u32, tile_size: u32) {
+    /// Configure atlas dimensions and slot size (spec 8.4).
+    ///
+    /// # Arguments
+    /// * `atlas_width` - Physical atlas texture width in pixels
+    /// * `atlas_height` - Physical atlas texture height in pixels
+    /// * `slot_size` - Slot size in pixels (tile_size + 2*tile_border)
+    pub fn configure_atlas(&mut self, atlas_width: u32, atlas_height: u32, slot_size: u32) {
         self.atlas_allocator =
-            AtlasAllocator::new_with_dimensions(atlas_width, atlas_height, tile_size);
+            AtlasAllocator::new_with_dimensions(atlas_width, atlas_height, slot_size);
     }
 
     pub fn is_resident(&self, tile_id: &TileId) -> bool {
@@ -65,14 +71,24 @@ impl TileCache {
     }
 
     pub fn allocate_tile(&mut self, tile_id: TileId) -> Option<AtlasSlot> {
+        self.allocate_tile_with_evicted(tile_id)
+            .map(|(atlas_slot, _)| atlas_slot)
+    }
+
+    pub fn allocate_tile_with_evicted(
+        &mut self,
+        tile_id: TileId,
+    ) -> Option<(AtlasSlot, Vec<TileId>)> {
         if self.is_resident(&tile_id) {
-            return self.access_tile(&tile_id);
+            return self.access_tile(&tile_id).map(|slot| (slot, Vec::new()));
         }
 
+        let mut evicted = Vec::new();
         while self.resident_tiles.len() >= self.capacity {
-            if !self.evict_lru_tile() {
+            let Some(evicted_tile) = self.evict_lru_tile() else {
                 return None;
-            }
+            };
+            evicted.push(evicted_tile);
         }
 
         if let Some(atlas_slot) = self.atlas_allocator.allocate() {
@@ -90,13 +106,13 @@ impl TileCache {
             self.lru_queue.push_front(tile_id);
             self.stats.resident_count = self.resident_tiles.len();
 
-            Some(atlas_slot)
+            Some((atlas_slot, evicted))
         } else {
             None
         }
     }
 
-    fn evict_lru_tile(&mut self) -> bool {
+    fn evict_lru_tile(&mut self) -> Option<TileId> {
         let mut remaining = self.lru_queue.len();
 
         while remaining > 0 {
@@ -112,14 +128,14 @@ impl TileCache {
                     self.atlas_allocator.deallocate(entry.atlas_slot);
                     self.stats.evictions += 1;
                     self.stats.resident_count = self.resident_tiles.len();
-                    return true;
+                    return Some(lru_tile_id);
                 }
 
                 self.lru_queue.push_front(lru_tile_id);
             }
         }
 
-        false
+        None
     }
 
     pub fn get_atlas_slot(&self, tile_id: &TileId) -> Option<AtlasSlot> {

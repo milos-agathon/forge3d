@@ -23,9 +23,10 @@ Forge3D does not have a terrain-rendering foundation problem. It already has the
 - **TV13:** terrain population LOD pipeline is shipped, including QEM mesh simplification, auto-generated scatter LOD chains, and HLOD clustering/runtime integration.
 - **TV21:** terrain-mesh blending and contact integration are shipped, including per-batch blend/contact controls across the native renderer and viewer paths.
 - **TV22:** scatter wind animation is shipped, including GPU deformation, viewer/offscreen wiring, validation, and regression coverage.
+- Terrain material virtual texturing is shipped, including paged albedo-family streaming, queryable residency stats, an end-to-end demo, and regression coverage. The public contract already reserves normal and mask families for a later native extension.
 - Terrain rendering already includes clipmap terrain, COG/COPC/3D Tiles ingestion, PBR + POM, planar water reflections, vector overlays, cloud shadows, bloom, tone mapping, and height-aware lighting controls.
 - Terrain viewer post-processing already includes TAA, depth of field, and camera motion blur.
-- Generic virtual-texture and page-table foundations already exist in the renderer, but they are not yet used as a terrain-material delivery system.
+- Generic virtual-texture and page-table foundations are now exercised by the shipped terrain-material VT path rather than existing only as renderer-side scaffolding.
 
 ### Repository Hygiene Note
 
@@ -68,7 +69,7 @@ Only F1-F3 work is considered here. Higher-cost engine-scale work stays out of t
 | **Heterogeneous terrain volumetrics** | Blender: heterogeneous volume shading; Unreal: localized atmospheric FX | **Implemented in shipped scope.** Terrain volumetric fog and light shafts are exposed through `VolumetricsSettings`, decoded natively, applied in dedicated terrain-viewer screen/offscreen passes, and covered by examples/tests. The old backlog wording around bounded 3D density volumes was stale relative to the shipped feature surface. | F2 | Medium-High | **Done** |
 | **Weather particles** | Blender: particles; Unreal: GPU weather FX | **Missing.** No terrain-oriented GPU weather emitter/update/render path exists. | F3 | Medium | **Build later** |
 | **Terrain population LOD pipeline** | Blender: simplification workflows; Unreal: auto LOD + HLOD | **Implemented.** `simplify_mesh`, `generate_lod_chain`, `auto_lod_levels`, and HLOD clustering/runtime integration are present with documentation, a real-DEM demo, and regression coverage. | F2 | High | **Done** |
-| **Terrain material virtual texturing** | Unreal: virtual textures / RVT-style terrain material streaming; top engines: large-scene material paging | **Missing in the terrain path.** Generic virtual-texture foundations exist, but terrain material layers and masks are not delivered through a terrain VT/RVT-style system. | F2-F3 | High | **Build** |
+| **Terrain material virtual texturing** | Unreal: virtual textures / RVT-style terrain material streaming; top engines: large-scene material paging | **Implemented in shipped v1 scope.** Terrain VT settings, source registration, feedback-driven residency, queryable stats, a real-DEM demo, and regression coverage are present in the terrain path. The shipped runtime currently pages the albedo family; normal and mask families remain forward-compatible in the Python contract but are not yet decoded natively. | F2-F3 | High | **Done** |
 | **Terrain-mesh blending and contact integration** | Unreal: terrain/mesh blending, contact integration, terrain-aware surface transitions | **Implemented.** Terrain/mesh seam softening, terrain-aware contact darkening, per-batch controls, viewer IPC wiring, a demo, and regression coverage are present in the shipped codebase. | F2 | Medium-High | **Done** |
 | **Scatter wind animation** | Unreal: foliage wind; Blender: animated vegetation workflows | **Implemented.** Scatter wind settings, GPU deformation, viewer/offscreen wiring, time-driven animation plumbing, validation, examples, and regression coverage are present. | F1-F2 | Medium-High | **Done** |
 | **Terrain scene variants and review layers** | Unreal: Data Layers; Blender-adjacent: alternate scene states | **Partial.** Bundles persist terrain metadata and bookmarks, but there is no named terrain-variant model with atomic activation. | F1-F2 | High | **Build** |
@@ -87,29 +88,13 @@ Only F1-F3 work is considered here. Higher-cost engine-scale work stays out of t
 
 The epics below are the remaining terrain-first work that is both feasible and worth building now. Local reflection probes, TV13, TV21, and TV22 are no longer part of this section because they now have shipped runtime coverage.
 
-### Scale and Material Delivery
-
-### Epic TV20 - Terrain Material Virtual Texturing
-
-**Why this is in scope:** Large terrains can already stream geometry and data well, but terrain material delivery still behaves like a smaller-scene texture workflow. Top engines solve this with terrain-oriented virtual texturing and RVT-style paging.
-
-**Feasibility:** F2-F3
-**Estimate:** 24-40 pd
-**Priority:** P2
-
-| Task | Scope | Definition of done |
-|---|---|---|
-| **TV20.1 Define a terrain VT material contract** | Introduce a bounded terrain-material paging model for albedo, normal, and mask layers without inventing a general material-graph system. | A terrain material stack can declare paged layers with explicit tile size, residency budget, and fallback behavior; non-VT terrain scenes continue to render through the current path unchanged. |
-| **TV20.2 Add feedback-driven residency and terrain sampling** | Connect the existing virtual-texture foundations to terrain material sampling. | Camera motion requests only the needed material pages, terrain shaders sample paged material data correctly, and representative large-scene renders do not show persistent page seams or stale tiles. |
-| **TV20.3 Expose budgets, stats, and regression coverage** | Make the feature operable rather than opaque. | Cache budget, resident tile count, miss rate, and upload cost are queryable; at least one large-terrain test verifies stable residency behavior when the full material set exceeds immediate memory budget. |
-
 ### Review and Delivery
 
 ### Epic TV16 - Terrain Scene Variants and Review Layers
 
 **Why this is in scope:** Terrain review usually involves comparing alternate states of one scene, not reloading separate projects for every overlay, scatter, or lighting choice.
 
-**Feasibility:** F1-F2
+**Feasibility:** F1-F2  
 **Estimate:** 10-16 pd
 **Priority:** P2
 
@@ -123,7 +108,7 @@ The epics below are the remaining terrain-first work that is both feasible and w
 
 **Why this is in scope:** Keyframes exist, but terrain flyovers are still too manual. The missing layer is reusable rig authoring for orbit, rail, and constrained follow cameras.
 
-**Feasibility:** F1-F2
+**Feasibility:** F1-F2  
 **Estimate:** 12-20 pd
 **Priority:** P2
 
@@ -151,8 +136,8 @@ The epics below are the remaining terrain-first work that is both feasible and w
 
 **Why this is in scope:** Rain, snow, dust, ash, and airborne particulate events are terrain-visualization features, not game-engine fluff.
 
-**Feasibility:** F3
-**Estimate:** 25-40 pd
+**Feasibility:** F3  
+**Estimate:** 25-40 pd  
 **Priority:** P4
 
 | Task | Scope | Definition of done |
@@ -208,6 +193,7 @@ The following should not be smuggled back into the terrain roadmap:
 | TV10 - Terrain Subsurface Materials | Implemented |
 | TV12 - Terrain Offline Render Quality | Implemented |
 | TV13 - Terrain Population LOD Pipeline | Implemented |
+| Terrain Material Virtual Texturing | Implemented |
 | TV21 - Terrain-Mesh Blending and Contact Integration | Implemented |
 | TV22 - Scatter Wind Animation | Implemented |
 
@@ -215,12 +201,11 @@ The following should not be smuggled back into the terrain roadmap:
 
 | Epic | Low | High |
 |---|---:|---:|
-| TV20 - Terrain Material Virtual Texturing | 24 pd | 40 pd |
 | TV16 - Terrain Scene Variants and Review Layers | 10 pd | 16 pd |
 | TV17 - Terrain Camera Rig Toolkit | 12 pd | 20 pd |
 | TV18 - Terrain Shot Queue and Bounded Timeline | 18 pd | 28 pd |
 | TV7 - Weather Particle Foundation | 25 pd | 40 pd |
-| **Total core backlog** | **89 pd** | **144 pd** |
+| **Total core backlog** | **65 pd** | **104 pd** |
 
 ### Conditional and deferred backlog
 
@@ -241,23 +226,21 @@ The following should not be smuggled back into the terrain roadmap:
 
 | Phase | Epics | Reason |
 |---|---|---|
-| **Phase 1** | TV20 | Close the remaining terrain material delivery gap now that local-specular probe lighting is shipped. |
-| **Phase 2** | TV16, TV17 | Add review-state management and reusable flyover authoring once the remaining renderer backlog is narrower. |
-| **Phase 3** | TV18 | Build the shot queue and bounded timeline after variants and rig authoring exist. |
-| **Phase 4** | TV7 | Weather particles matter, but they are less foundational than terrain material delivery and review/delivery tooling. |
+| **Phase 1** | TV16, TV17 | Add review-state management and reusable flyover authoring now that the remaining renderer-only backlog is narrower. |
+| **Phase 2** | TV18 | Build the shot queue and bounded timeline after variants and rig authoring exist. |
+| **Phase 3** | TV7 | Weather particles matter, but they are less foundational than the review and delivery tooling backlog. |
 | **Later / optional** | TV8, TV9, TV11, TV14, TV15, TV19, TV23 | Only pursue when product direction or scene requirements clearly justify them. |
 
 ---
 
 ## 10. Bottom Line
 
-Forge3D no longer has a terrain-roadmap problem of "missing everything." Terrain local probe lighting, TV6, TV10, TV12, TV13, TV21, and TV22 are now in the shipped column, so the real remaining gaps are narrower and more concrete:
+Forge3D no longer has a terrain-roadmap problem of "missing everything." Terrain local probe lighting, terrain material virtual texturing, TV6, TV10, TV12, TV13, TV21, and TV22 are now in the shipped column, so the real remaining gaps are narrower and more concrete:
 
-1. **The remaining terrain/material delivery gap:** TV20.
-2. **Review and delivery workflow:** TV16, TV17, and TV18.
-3. **Terrain atmosphere and weather richness:** later TV7.
-4. **Conditional renderer upgrades that still are not in runtime code despite adjacent design work:** especially TV11.
+1. **Review and delivery workflow:** TV16, TV17, and TV18.
+2. **Terrain atmosphere and weather richness:** later TV7.
+3. **Conditional renderer upgrades that still are not in runtime code despite adjacent design work:** especially TV11.
 
-Terrain-local specular probes, terrain population scale, terrain/mesh integration, and scatter wind now have shipped first-pass runtime coverage rather than sitting in the remaining core backlog.
+Terrain-local specular probes, terrain material paging, terrain population scale, terrain/mesh integration, and scatter wind now have shipped first-pass runtime coverage rather than sitting in the remaining core backlog.
 
 That is the coherent terrain backlog. Everything else from Blender, Unreal, or other top-tier engines should remain conditional, deferred, or out of scope unless the product direction changes.

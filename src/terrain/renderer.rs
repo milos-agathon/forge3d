@@ -47,6 +47,7 @@ mod shadows;
 mod uniforms;
 mod upload;
 mod viewer;
+mod virtual_texture;
 mod water_reflection;
 
 pub use self::core::{TerrainRenderer, TerrainScene, ViewerTerrainData};

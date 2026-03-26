@@ -5,6 +5,7 @@ use super::decode_lighting::*;
 use super::decode_materials::*;
 use super::decode_postfx::*;
 use super::decode_probes::*;
+use super::decode_vt::*;
 use super::parse::*;
 use super::*;
 
@@ -47,6 +48,7 @@ impl TerrainRenderParams {
             sky: parse_sky_settings(&params),
             probes: parse_probe_settings(&params),
             reflection_probes: parse_reflection_probe_settings(&params),
+            vt: parse_vt_settings(&params),
         };
 
         let overlays = extract_overlays(params.getattr("overlays")?.as_gil_ref())?;

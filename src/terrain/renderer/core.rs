@@ -80,6 +80,14 @@ pub struct TerrainScene {
     pub(super) water_reflection_pipeline: wgpu::RenderPipeline,
     pub(super) material_layer_bind_group_layout: wgpu::BindGroupLayout,
     pub(super) material_layer_uniform_buffer: wgpu::Buffer,
+    pub(super) vt_uniform_buffer: wgpu::Buffer,
+    pub(super) vt_fallback_uniform_buffer: wgpu::Buffer,
+    pub(super) vt_atlas_fallback_texture: wgpu::Texture,
+    pub(super) vt_atlas_fallback_view: wgpu::TextureView,
+    pub(super) vt_page_table_fallback_texture: wgpu::Texture,
+    pub(super) vt_page_table_fallback_view: wgpu::TextureView,
+    pub(super) vt_feedback_fallback_buffer: wgpu::Buffer,
+    pub(super) vt_atlas_sampler: wgpu::Sampler,
     pub(super) probe_grid_uniform_buffer: wgpu::Buffer,
     pub(super) probe_ssbo: wgpu::Buffer,
     pub(super) probe_grid_uniform_alloc_bytes: u64,
@@ -118,6 +126,7 @@ pub struct TerrainScene {
     pub(super) scatter_last_frame_stats: crate::terrain::scatter::TerrainScatterFrameStats,
     #[cfg(feature = "enable-renderer-config")]
     pub(super) config: Arc<Mutex<crate::render::params::RendererConfig>>,
+    pub(super) material_vt: Mutex<super::virtual_texture::TerrainMaterialVT>,
     pub(super) viewer_heightmap: Option<ViewerTerrainData>,
 }
 
