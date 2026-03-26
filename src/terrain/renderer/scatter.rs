@@ -69,6 +69,7 @@ impl TerrainScene {
 
     pub(super) fn build_scatter_render_state(
         &self,
+        env_maps: &crate::lighting::ibl_wrapper::IBL,
         params: &crate::terrain::render_params::TerrainRenderParams,
         decoded: &crate::terrain::render_params::DecodedTerrainSettings,
         heightmap_width: u32,
@@ -77,6 +78,7 @@ impl TerrainScene {
         proj: glam::Mat4,
         eye_render: glam::Vec3,
     ) -> ScatterRenderState {
+        let _ = env_maps;
         let terrain_width = heightmap_width.max(heightmap_height).max(1) as f32;
         let terrain_span = params.terrain_span.max(1e-3);
         let scale_xy = terrain_span / terrain_width;
@@ -134,8 +136,10 @@ impl TerrainScene {
         encoder: &mut wgpu::CommandEncoder,
         render_targets: &RenderTargets,
         heightmap_view: &wgpu::TextureView,
+        env_maps: &crate::lighting::ibl_wrapper::IBL,
         state: &ScatterRenderState,
     ) -> Result<()> {
+        let _ = env_maps;
         if self.scatter_batches.is_empty() {
             self.scatter_last_frame_stats = TerrainScatterFrameStats::default();
             return Ok(());
