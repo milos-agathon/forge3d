@@ -586,6 +586,7 @@ class TestGeometryFunctionContracts:
         "geometry_generate_ribbon_py",
         "geometry_generate_thick_polyline_py",
         "geometry_extrude_polygon_py",
+        "geometry_simplify_mesh_py",
     ]
 
     @pytest.mark.parametrize("fn_name", GEOMETRY_FUNCTIONS)

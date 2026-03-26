@@ -1,41 +1,44 @@
 use crate::viewer::viewer_enums::{
-    ViewerCmd, ViewerDenoiseConfig, ViewerDofConfig, ViewerHeightAoConfig, ViewerLensEffectsConfig,
-    ViewerMaterialLayerConfig, ViewerMotionBlurConfig, ViewerSkyConfig, ViewerSunVisConfig,
-    ViewerTerrainScatterBatchConfig, ViewerTerrainScatterLevelConfig, ViewerTonemapConfig,
-    ViewerVectorOverlayConfig, ViewerVolumetricsConfig,
+    ViewerCmd, ViewerDenoiseConfig, ViewerDensityVolumeConfig, ViewerDofConfig,
+    ViewerHeightAoConfig, ViewerLensEffectsConfig, ViewerMaterialLayerConfig,
+    ViewerMotionBlurConfig, ViewerSkyConfig, ViewerSunVisConfig, ViewerTerrainScatterBatchConfig,
+    ViewerTerrainScatterBlendConfig, ViewerTerrainScatterContactConfig,
+    ViewerTerrainScatterLevelConfig, ViewerTonemapConfig, ViewerVectorOverlayConfig,
+    ViewerVolumetricsConfig,
 };
 
 use super::super::payloads::{
-    IpcDenoiseConfig, IpcDofConfig, IpcHeightAoConfig, IpcLensEffectsConfig,
-    IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcSkyConfig, IpcSunVisConfig,
-    IpcTerrainBlendConfig, IpcTerrainScatterBatch, IpcTerrainScatterLevel, IpcTonemapConfig,
+    IpcDenoiseConfig, IpcDensityVolumeConfig, IpcDofConfig, IpcHeightAoConfig,
+    IpcLensEffectsConfig, IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcScatterWind,
+    IpcSkyConfig, IpcSunVisConfig, IpcTerrainScatterBatch, IpcTerrainScatterBlend,
+    IpcTerrainScatterContact, IpcTerrainScatterLevel, IpcTonemapConfig,
     IpcVectorOverlayConfig, IpcVolumetricsConfig,
 };
 use super::super::request::IpcRequest;
 
-pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
+pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, String> {
     match req {
-        IpcRequest::LoadTerrain { path } => Some(ViewerCmd::LoadTerrain(path.clone())),
+        IpcRequest::LoadTerrain { path } => Ok(Some(ViewerCmd::LoadTerrain(path.clone()))),
         IpcRequest::SetTerrainCamera {
             phi_deg,
             theta_deg,
             radius,
             fov_deg,
-        } => Some(ViewerCmd::SetTerrainCamera {
+        } => Ok(Some(ViewerCmd::SetTerrainCamera {
             phi_deg: *phi_deg,
             theta_deg: *theta_deg,
             radius: *radius,
             fov_deg: *fov_deg,
-        }),
+        })),
         IpcRequest::SetTerrainSun {
             azimuth_deg,
             elevation_deg,
             intensity,
-        } => Some(ViewerCmd::SetTerrainSun {
+        } => Ok(Some(ViewerCmd::SetTerrainSun {
             azimuth_deg: *azimuth_deg,
             elevation_deg: *elevation_deg,
             intensity: *intensity,
-        }),
+        })),
         IpcRequest::SetTerrain {
             phi,
             theta,
@@ -50,7 +53,7 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             background,
             water_level,
             water_color,
-        } => Some(ViewerCmd::SetTerrain {
+        } => Ok(Some(ViewerCmd::SetTerrain {
             phi: *phi,
             theta: *theta,
             radius: *radius,
@@ -64,12 +67,16 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             background: *background,
             water_level: *water_level,
             water_color: *water_color,
-        }),
-        IpcRequest::GetTerrainParams => Some(ViewerCmd::GetTerrainParams),
-        IpcRequest::SetTerrainScatter { batches } => Some(ViewerCmd::SetTerrainScatter {
-            batches: batches.iter().map(map_terrain_scatter_batch).collect(),
-        }),
-        IpcRequest::ClearTerrainScatter => Some(ViewerCmd::ClearTerrainScatter),
+        })),
+        IpcRequest::GetTerrainParams => Ok(Some(ViewerCmd::GetTerrainParams)),
+        IpcRequest::SetTerrainScatter { batches } => Ok(Some(ViewerCmd::SetTerrainScatter {
+            batches: batches
+                .iter()
+                .enumerate()
+                .map(|(batch_index, batch)| map_terrain_scatter_batch(batch, batch_index))
+                .collect::<Result<Vec<_>, _>>()?,
+        })),
+        IpcRequest::ClearTerrainScatter => Ok(Some(ViewerCmd::ClearTerrainScatter)),
         IpcRequest::SetTerrainPbr {
             enabled,
             hdr_path,
@@ -91,7 +98,7 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             volumetrics,
             sky,
             debug_mode,
-        } => Some(ViewerCmd::SetTerrainPbr {
+        } => Ok(Some(ViewerCmd::SetTerrainPbr {
             enabled: *enabled,
             hdr_path: hdr_path.clone(),
             ibl_intensity: *ibl_intensity,
@@ -112,8 +119,8 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             volumetrics: Box::new(volumetrics.as_ref().map(map_volumetrics)),
             sky: sky.as_ref().map(map_sky),
             debug_mode: *debug_mode,
-        }),
-        _ => None,
+        })),
+        _ => Ok(None),
     }
 }
 
@@ -232,11 +239,38 @@ fn map_volumetrics(config: &IpcVolumetricsConfig) -> ViewerVolumetricsConfig {
         enabled: config.enabled.unwrap_or(false),
         mode: config.mode.clone().unwrap_or_else(|| "uniform".to_string()),
         density: config.density.unwrap_or(0.01),
+        height_falloff: config.height_falloff.unwrap_or(0.1),
         scattering: config.scattering.unwrap_or(0.5),
         absorption: config.absorption.unwrap_or(0.1),
         light_shafts: config.light_shafts.unwrap_or(false),
         shaft_intensity: config.shaft_intensity.unwrap_or(1.0),
+        steps: config.steps.unwrap_or(32),
         half_res: config.half_res.unwrap_or(false),
+        density_volumes: config
+            .density_volumes
+            .iter()
+            .map(map_density_volume)
+            .collect(),
+    }
+}
+
+fn map_density_volume(config: &IpcDensityVolumeConfig) -> ViewerDensityVolumeConfig {
+    ViewerDensityVolumeConfig {
+        preset: config
+            .preset
+            .clone()
+            .unwrap_or_else(|| "valley_fog".to_string()),
+        center: config.center.unwrap_or([0.0, 0.0, 0.0]),
+        size: config.size.unwrap_or([128.0, 64.0, 128.0]),
+        resolution: config.resolution.unwrap_or([64, 32, 64]),
+        density_scale: config.density_scale.unwrap_or(1.0),
+        edge_softness: config.edge_softness.unwrap_or(0.25),
+        noise_strength: config.noise_strength.unwrap_or(0.35),
+        floor_offset: config.floor_offset.unwrap_or(0.0),
+        ceiling: config.ceiling.unwrap_or(0.4),
+        plume_spread: config.plume_spread.unwrap_or(0.35),
+        wind: config.wind.unwrap_or([0.25, 1.0, 0.0]),
+        seed: config.seed.unwrap_or(0),
     }
 }
 
@@ -251,15 +285,23 @@ fn map_sky(config: &IpcSkyConfig) -> ViewerSkyConfig {
     }
 }
 
-fn map_terrain_scatter_batch(config: &IpcTerrainScatterBatch) -> ViewerTerrainScatterBatchConfig {
-    ViewerTerrainScatterBatchConfig {
+fn map_terrain_scatter_batch(
+    config: &IpcTerrainScatterBatch,
+    batch_index: usize,
+) -> Result<ViewerTerrainScatterBatchConfig, String> {
+    Ok(ViewerTerrainScatterBatchConfig {
         name: config.name.clone(),
         color: config.color.unwrap_or([0.85, 0.85, 0.85, 1.0]),
         max_draw_distance: config.max_draw_distance,
         terrain_blend: config
             .terrain_blend
             .as_ref()
-            .map(map_terrain_blend)
+            .map(map_terrain_scatter_blend)
+            .unwrap_or_default(),
+        terrain_contact: config
+            .terrain_contact
+            .as_ref()
+            .map(map_terrain_scatter_contact)
             .unwrap_or_default(),
         transforms: config.transforms.clone(),
         levels: config
@@ -267,18 +309,62 @@ fn map_terrain_scatter_batch(config: &IpcTerrainScatterBatch) -> ViewerTerrainSc
             .iter()
             .map(map_terrain_scatter_level)
             .collect(),
+        #[cfg(feature = "enable-gpu-instancing")]
+        wind: config
+            .wind
+            .as_ref()
+            .map(|wind| {
+                map_scatter_wind(wind).map_err(|e| format!("scatter batch {batch_index}: {e}"))
+            })
+            .transpose()?
+            .unwrap_or_default(),
+        hlod_config: config.hlod.as_ref().map(|h| {
+            crate::terrain::scatter::HlodConfig {
+                hlod_distance: h.hlod_distance,
+                cluster_radius: h.cluster_radius,
+                simplify_ratio: h.simplify_ratio,
+            }
+        }),
+    })
+}
+
+#[cfg(feature = "enable-gpu-instancing")]
+fn map_scatter_wind(
+    w: &IpcScatterWind,
+) -> Result<crate::terrain::scatter::ScatterWindSettingsNative, String> {
+    let settings = crate::terrain::scatter::ScatterWindSettingsNative {
+        enabled: w.enabled,
+        direction_deg: w.direction_deg,
+        speed: w.speed,
+        amplitude: w.amplitude,
+        rigidity: w.rigidity,
+        bend_start: w.bend_start,
+        bend_extent: w.bend_extent,
+        gust_strength: w.gust_strength,
+        gust_frequency: w.gust_frequency,
+        fade_start: w.fade_start,
+        fade_end: w.fade_end,
+    };
+    settings.validate().map_err(|e| e.to_string())?;
+    Ok(settings)
+}
+
+fn map_terrain_scatter_blend(config: &IpcTerrainScatterBlend) -> ViewerTerrainScatterBlendConfig {
+    ViewerTerrainScatterBlendConfig {
+        enabled: config.enabled.unwrap_or(false),
+        bury_depth: config.bury_depth.unwrap_or(0.75),
+        fade_distance: config.fade_distance.unwrap_or(2.5),
     }
 }
 
-fn map_terrain_blend(
-    config: &IpcTerrainBlendConfig,
-) -> crate::terrain::scatter::TerrainMeshBlendSettings {
-    let defaults = crate::terrain::scatter::TerrainMeshBlendSettings::default();
-    crate::terrain::scatter::TerrainMeshBlendSettings {
-        enabled: config.enabled.unwrap_or(defaults.enabled),
-        blend_distance: config.blend_distance.unwrap_or(defaults.blend_distance),
-        contact_strength: config.contact_strength.unwrap_or(defaults.contact_strength),
-        contact_distance: config.contact_distance.unwrap_or(defaults.contact_distance),
+fn map_terrain_scatter_contact(
+    config: &IpcTerrainScatterContact,
+) -> ViewerTerrainScatterContactConfig {
+    ViewerTerrainScatterContactConfig {
+        enabled: config.enabled.unwrap_or(false),
+        distance: config.distance.unwrap_or(3.0),
+        strength: config.strength.unwrap_or(0.35),
+        vertical_weight: config.vertical_weight.unwrap_or(0.65),
     }
 }
 

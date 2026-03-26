@@ -399,6 +399,7 @@ __all__ = [
     "HeightAoSettings",
     "SunVisibilitySettings",
     "ProbeSettings",
+    "ReflectionProbeSettings",
     "DetailSettings",
     "MaterialNoiseSettings",
     "MaterialLayerSettings",

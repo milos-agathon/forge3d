@@ -3059,7 +3059,6 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     
     var terrain_layer_weights = TerrainLayerWeights(0.0, 0.0, 0.0);
     var terrain_subsurface = TerrainSubsurfaceState(0.0, vec3<f32>(1.0, 1.0, 1.0));
-    
     // ──────────────────────────────────────────────────────────────────────────
     // M4: Material Layer Blending (snow, rock, wetness)
     // Applied after base material but before lighting calculations.
@@ -3078,7 +3077,6 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             material_noise,
         );
         terrain_subsurface = resolve_terrain_subsurface(terrain_layer_weights);
-        
         // Apply material layers in order: wetness (darkening) -> rock -> snow
         // Order matters: snow on top, then rock, then wetness darkening at base
         albedo = apply_wetness_layer(albedo, terrain_layer_weights.wetness);

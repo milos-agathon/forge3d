@@ -3,12 +3,13 @@ use super::*;
 
 #[cfg(feature = "enable-gpu-instancing")]
 use crate::terrain::scatter::{
-    accumulate_frame_stats, summarize_memory, TerrainScatterBatch, TerrainScatterFrameStats,
-    TerrainScatterLevelSpec, TerrainScatterMemoryReport,
+    accumulate_frame_stats, compute_wind_uniforms, pack_hlod_identity_instance, summarize_memory,
+    TerrainScatterBatch, TerrainScatterBlendConfig, TerrainScatterContactConfig,
+    TerrainScatterFrameStats, TerrainScatterLevelSpec, TerrainScatterMemoryReport,
 };
 
 #[cfg(feature = "enable-gpu-instancing")]
-fn viewer_render_from_contract(_use_pbr: bool, _terrain_width: f32, _h_range: f32) -> glam::Mat4 {
+fn viewer_render_from_contract() -> glam::Mat4 {
     // The terrain viewer renders in terrain-width units:
     // x/z cover [0, terrain_width], and both terrain shaders resolve world_y to
     // (height - min_height) * z_scale despite differing uniform formulas.
@@ -24,18 +25,17 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
     encoder: &mut wgpu::CommandEncoder,
     color_view: &wgpu::TextureView,
     depth_view: &wgpu::TextureView,
-    heightmap_view: &wgpu::TextureView,
     batches: &mut [TerrainScatterBatch],
-    use_pbr: bool,
     view: glam::Mat4,
     proj: glam::Mat4,
     eye_render: glam::Vec3,
+    heightmap_view: &wgpu::TextureView,
     terrain_width: f32,
-    height_min: f32,
-    h_range: f32,
+    terrain_min_height: f32,
     z_scale: f32,
     light_dir: [f32; 3],
     light_intensity: f32,
+    elapsed_time: f32,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     renderer: &mut crate::render::mesh_instanced::MeshInstancedRenderer,
@@ -44,24 +44,40 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
         return Ok(TerrainScatterFrameStats::default());
     }
 
-    let render_from_contract = viewer_render_from_contract(use_pbr, terrain_width, h_range);
+    let render_from_contract = viewer_render_from_contract();
     let eye_contract = render_from_contract.inverse().transform_point3(eye_render);
 
     renderer.reset_draw_batch_uniforms();
-    renderer.set_terrain_blend_context(
+    renderer.set_terrain_context(
         device,
         queue,
-        heightmap_view,
-        crate::render::mesh_instanced::TerrainBlendContext {
-            axis_mode: crate::render::mesh_instanced::TerrainBlendAxis::YUp,
-            uv_scale: [1.0 / terrain_width.max(1e-3), 1.0 / terrain_width.max(1e-3)],
-            uv_bias: [0.0, 0.0],
-            height_min,
-            height_max: height_min + h_range,
-            z_scale,
-        },
+        Some(crate::render::mesh_instanced::TerrainBlendContext {
+            heightmap_view,
+            world_to_uv_scale_bias: [
+                1.0 / terrain_width.max(1e-3),
+                1.0 / terrain_width.max(1e-3),
+                0.0,
+                0.0,
+            ],
+            height_to_world: [z_scale, -terrain_min_height * z_scale, 0.0, 0.0],
+        }),
     );
     let mut frame_stats = TerrainScatterFrameStats::default();
+    // Pre-create a single HLOD identity instance buffer that lives as long as the pass.
+    let identity_packed = pack_hlod_identity_instance(render_from_contract);
+    let hlod_inst_bytes = (std::mem::size_of::<f32>() * 16) as u64;
+    let hlod_instbuf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("terrain.scatter.hlod.instance_buffer"),
+        size: hlod_inst_bytes,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(
+        &hlod_instbuf,
+        0,
+        bytemuck::cast_slice(&identity_packed),
+    );
+
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("terrain_viewer.scatter_pass"),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -86,7 +102,6 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
 
     // Viewer uses identity render_from_contract, so instance_scale is 1.0.
     let instance_scale = 1.0_f32;
-    let instance_basis_from_contract = glam::Mat4::IDENTITY;
 
     for batch in batches {
         let (batch_stats, draws) = batch.prepare_draws(
@@ -95,15 +110,26 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
             eye_contract,
             render_from_contract,
             instance_scale,
-            instance_basis_from_contract,
         )?;
         accumulate_frame_stats(&mut frame_stats, &batch_stats);
+
+        // Compute batch-constant wind fields
+        let base_wind = compute_wind_uniforms(
+            &batch.wind,
+            elapsed_time,
+            0.0, // placeholder, overridden per-draw
+            instance_scale,
+        );
 
         for draw in draws {
             let Some(instbuf) = batch.level_instbuf(draw.level_index) else {
                 continue;
             };
-            renderer.draw_batch_params_with_terrain(
+            // Inject per-draw mesh_height_max
+            let mut wind = base_wind;
+            wind.wind_vec_bounds[3] = batch.level_mesh_height_max(draw.level_index);
+
+            renderer.draw_batch_params(
                 device,
                 &mut pass,
                 queue,
@@ -112,18 +138,48 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
                 batch.color,
                 light_dir,
                 light_intensity,
+                wind.wind_phase,
+                wind.wind_vec_bounds,
+                wind.wind_bend_fade,
+                batch.terrain_blend.uniform(),
+                batch.terrain_contact.uniform(),
                 batch.level_vbuf(draw.level_index),
                 batch.level_ibuf(draw.level_index),
                 instbuf,
                 batch.level_index_count(draw.level_index),
                 draw.instance_count,
-                crate::render::mesh_instanced::TerrainBlendParams {
-                    enabled: batch.terrain_blend.enabled,
-                    blend_distance: batch.terrain_blend.blend_distance,
-                    contact_strength: batch.terrain_blend.contact_strength,
-                    contact_distance: batch.terrain_blend.contact_distance,
-                },
             );
+        }
+
+        // Draw active HLOD clusters
+        let active_clusters = batch.hlod_active_clusters(eye_contract);
+        for cluster_idx in active_clusters {
+            if let (Some(vbuf), Some(ibuf)) = (
+                batch.hlod_cluster_vbuf(cluster_idx),
+                batch.hlod_cluster_ibuf(cluster_idx),
+            ) {
+                let index_count = batch.hlod_cluster_index_count(cluster_idx);
+                renderer.draw_batch_params(
+                    device,
+                    &mut pass,
+                    queue,
+                    view,
+                    proj,
+                    batch.color,
+                    light_dir,
+                    light_intensity,
+                    [0.0; 4],
+                    [0.0; 4],
+                    [0.0; 4],
+                    batch.terrain_blend.uniform(),
+                    batch.terrain_contact.uniform(),
+                    vbuf,
+                    ibuf,
+                    &hlod_instbuf,
+                    index_count,
+                    1,
+                );
+            }
         }
     }
 
@@ -155,13 +211,30 @@ impl ViewerTerrainScene {
                 batch.color,
                 batch.max_draw_distance,
                 batch.name.clone(),
-                batch.terrain_blend,
+                batch.wind.clone(),
+                batch.hlod_config.clone(),
+                TerrainScatterBlendConfig {
+                    enabled: batch.terrain_blend.enabled,
+                    bury_depth: batch.terrain_blend.bury_depth,
+                    fade_distance: batch.terrain_blend.fade_distance,
+                },
+                TerrainScatterContactConfig {
+                    enabled: batch.terrain_contact.enabled,
+                    distance: batch.terrain_contact.distance,
+                    strength: batch.terrain_contact.strength,
+                    vertical_weight: batch.terrain_contact.vertical_weight,
+                },
             )?);
         }
 
         self.scatter_batches = gpu_batches;
         self.scatter_last_frame_stats = TerrainScatterFrameStats::default();
         Ok(())
+    }
+
+    /// Accumulate elapsed time for scatter wind animation.
+    pub fn tick_scatter_time(&mut self, dt: f32) {
+        self.scatter_elapsed_time += dt;
     }
 
     pub fn clear_scatter_batches(&mut self) {
@@ -182,15 +255,13 @@ impl ViewerTerrainScene {
         encoder: &mut wgpu::CommandEncoder,
         color_view: &wgpu::TextureView,
         depth_view: &wgpu::TextureView,
-        heightmap_view: &wgpu::TextureView,
         batches: &mut [TerrainScatterBatch],
-        use_pbr: bool,
         view: glam::Mat4,
         proj: glam::Mat4,
         eye_render: glam::Vec3,
+        heightmap_view: &wgpu::TextureView,
         terrain_width: f32,
-        height_min: f32,
-        h_range: f32,
+        terrain_min_height: f32,
         z_scale: f32,
         light_dir: [f32; 3],
         light_intensity: f32,
@@ -199,18 +270,17 @@ impl ViewerTerrainScene {
             encoder,
             color_view,
             depth_view,
-            heightmap_view,
             batches,
-            use_pbr,
             view,
             proj,
             eye_render,
+            heightmap_view,
             terrain_width,
-            height_min,
-            h_range,
+            terrain_min_height,
             z_scale,
             light_dir,
             light_intensity,
+            self.scatter_elapsed_time,
             self.device.as_ref(),
             self.queue.as_ref(),
             &mut self.scatter_renderer,
@@ -224,13 +294,6 @@ mod tests {
 
     #[test]
     fn viewer_render_contract_is_identity_for_all_viewer_modes() {
-        assert_eq!(
-            viewer_render_from_contract(false, 96.0, 1200.0),
-            glam::Mat4::IDENTITY
-        );
-        assert_eq!(
-            viewer_render_from_contract(true, 96.0, 1200.0),
-            glam::Mat4::IDENTITY
-        );
+        assert_eq!(viewer_render_from_contract(), glam::Mat4::IDENTITY);
     }
 }

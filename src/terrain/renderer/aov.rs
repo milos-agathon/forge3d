@@ -391,6 +391,7 @@ impl TerrainScene {
         params: &render_params::TerrainRenderParams,
         heightmap: numpy::PyReadonlyArray2<'_, f32>,
         water_mask: Option<numpy::PyReadonlyArray2<'_, f32>>,
+        time_seconds: f32,
     ) -> Result<(crate::Frame, crate::AovFrame)> {
         let decoded = params.decoded();
         self.prepare_frame_lighting(decoded)?;
@@ -604,7 +605,6 @@ impl TerrainScene {
         #[cfg(feature = "enable-gpu-instancing")]
         {
             let scatter_state = self.build_scatter_render_state(
-                env_maps,
                 params,
                 decoded,
                 height_inputs.width,
@@ -612,12 +612,12 @@ impl TerrainScene {
                 shadow_setup.view_matrix,
                 shadow_setup.proj_matrix,
                 shadow_setup.eye,
+                time_seconds,
             );
             self.render_scatter_pass(
                 &mut encoder,
                 &render_targets,
                 &height_inputs.heightmap_view,
-                env_maps,
                 &scatter_state,
             )?;
         }

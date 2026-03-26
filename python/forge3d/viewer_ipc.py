@@ -939,3 +939,8 @@ def set_terrain_pbr(
     if debug_mode is not None: cmd["debug_mode"] = debug_mode
     
     return send_ipc(sock, cmd)
+
+
+def get_terrain_volumetrics_report(sock: socket.socket) -> Dict[str, Any]:
+    """Fetch the latest terrain heterogeneous-volumetrics report."""
+    return send_ipc(sock, {"cmd": "get_terrain_volumetrics_report"})

@@ -19,11 +19,18 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
         return Ok(None);
     }
 
-    let cmd = core::to_viewer_cmd(req)
-        .or_else(|| terrain::to_viewer_cmd(req))
-        .or_else(|| overlays::to_viewer_cmd(req))
-        .or_else(|| labels::to_viewer_cmd(req));
+    if let Some(cmd) = core::to_viewer_cmd(req) {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = terrain::to_viewer_cmd(req)? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = overlays::to_viewer_cmd(req) {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = labels::to_viewer_cmd(req) {
+        return Ok(Some(cmd));
+    }
 
-    cmd.map(Some)
-        .ok_or_else(|| format!("Unhandled IPC request: {req:?}"))
+    Err(format!("Unhandled IPC request: {req:?}"))
 }

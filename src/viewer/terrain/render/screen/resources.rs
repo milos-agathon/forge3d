@@ -32,8 +32,7 @@ impl ViewerTerrainScene {
             && (self.pbr_config.lens_effects.distortion.abs() > 0.001
                 || self.pbr_config.lens_effects.chromatic_aberration > 0.001
                 || self.pbr_config.lens_effects.vignette_strength > 0.001);
-        let needs_volumetrics =
-            self.pbr_config.volumetrics.enabled && self.pbr_config.volumetrics.density > 0.0001;
+        let needs_volumetrics = self.pbr_config.volumetrics.is_effectively_enabled();
         let needs_denoise = self.pbr_config.denoise.enabled;
         let needs_dof_scratch = needs_volumetrics && needs_post_process && !needs_dof;
 

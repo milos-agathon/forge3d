@@ -574,3 +574,58 @@ def subdivide_adaptive(
         bool(preserve_boundary),
     )
     return _mesh_from_py(out)  # type: ignore[arg-type]
+
+
+def simplify_mesh(mesh: MeshBuffers, target_ratio: float) -> MeshBuffers:
+    """Simplify a mesh to approximately target_ratio of its original triangle count.
+
+    Uses QEM edge-collapse. Normals are recomputed; UVs are best-effort.
+    """
+    _ensure_native()
+    payload = _mesh_to_py(mesh)
+    result = _forge3d.geometry_simplify_mesh_py(payload, float(target_ratio))
+    return _mesh_from_py(result)
+
+
+def generate_lod_chain(
+    mesh: MeshBuffers,
+    ratios: list[float],
+    *,
+    min_triangles: int = 8,
+) -> list[MeshBuffers]:
+    """Generate a LOD chain from one high-detail mesh.
+
+    Each level is simplified from the *original* mesh (not cascaded).
+    ``ratios[0]`` must be 1.0. Ratios must be in strictly descending order in (0.0, 1.0].
+
+    If a ratio produces fewer than ``min_triangles``, that level and all coarser
+    levels are dropped. Duplicate outputs (same triangle count as a prior level)
+    are also dropped.
+    """
+    if not ratios:
+        raise ValueError("ratios must be a non-empty list")
+    if abs(ratios[0] - 1.0) > 1e-6:
+        raise ValueError("ratios[0] must be 1.0 — LOD 0 is always the original mesh")
+    for i in range(1, len(ratios)):
+        if ratios[i] >= ratios[i - 1]:
+            raise ValueError(
+                f"ratios must be in strictly descending order, "
+                f"but ratios[{i}]={ratios[i]} >= ratios[{i-1}]={ratios[i-1]}"
+            )
+        if ratios[i] <= 0.0 or ratios[i] > 1.0:
+            raise ValueError(f"ratios[{i}]={ratios[i]} must be in (0.0, 1.0]")
+
+    chain: list[MeshBuffers] = [mesh]  # LOD 0 is always the original
+    prev_tri_count = mesh.triangle_count
+
+    for ratio in ratios[1:]:
+        simplified = simplify_mesh(mesh, ratio)  # always from original
+        tri_count = simplified.triangle_count
+        if tri_count < min_triangles:
+            break
+        if tri_count >= prev_tri_count:
+            continue  # deduplicate
+        chain.append(simplified)
+        prev_tri_count = tri_count
+
+    return chain

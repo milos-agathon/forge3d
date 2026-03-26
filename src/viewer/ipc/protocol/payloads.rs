@@ -149,6 +149,34 @@ pub struct IpcDenoiseConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcDensityVolumeConfig {
+    #[serde(default)]
+    pub preset: Option<String>,
+    #[serde(default)]
+    pub center: Option<[f32; 3]>,
+    #[serde(default)]
+    pub size: Option<[f32; 3]>,
+    #[serde(default)]
+    pub resolution: Option<[u32; 3]>,
+    #[serde(default)]
+    pub density_scale: Option<f32>,
+    #[serde(default)]
+    pub edge_softness: Option<f32>,
+    #[serde(default)]
+    pub noise_strength: Option<f32>,
+    #[serde(default)]
+    pub floor_offset: Option<f32>,
+    #[serde(default)]
+    pub ceiling: Option<f32>,
+    #[serde(default)]
+    pub plume_spread: Option<f32>,
+    #[serde(default)]
+    pub wind: Option<[f32; 3]>,
+    #[serde(default)]
+    pub seed: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct IpcVolumetricsConfig {
     #[serde(default)]
     pub enabled: Option<bool>,
@@ -156,6 +184,8 @@ pub struct IpcVolumetricsConfig {
     pub mode: Option<String>,
     #[serde(default)]
     pub density: Option<f32>,
+    #[serde(default)]
+    pub height_falloff: Option<f32>,
     #[serde(default)]
     pub scattering: Option<f32>,
     #[serde(default)]
@@ -165,7 +195,11 @@ pub struct IpcVolumetricsConfig {
     #[serde(default)]
     pub shaft_intensity: Option<f32>,
     #[serde(default)]
+    pub steps: Option<u32>,
+    #[serde(default)]
     pub half_res: Option<bool>,
+    #[serde(default)]
+    pub density_volumes: Vec<IpcDensityVolumeConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -196,6 +230,35 @@ pub struct IpcTerrainScatterLevel {
     pub max_distance: Option<f32>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct IpcHlodConfig {
+    pub hlod_distance: f32,
+    pub cluster_radius: f32,
+    pub simplify_ratio: f32,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcTerrainScatterBlend {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub bury_depth: Option<f32>,
+    #[serde(default)]
+    pub fade_distance: Option<f32>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcTerrainScatterContact {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub distance: Option<f32>,
+    #[serde(default)]
+    pub strength: Option<f32>,
+    #[serde(default)]
+    pub vertical_weight: Option<f32>,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct IpcTerrainScatterBatch {
     #[serde(default)]
@@ -205,23 +268,55 @@ pub struct IpcTerrainScatterBatch {
     #[serde(default)]
     pub max_draw_distance: Option<f32>,
     #[serde(default)]
-    pub terrain_blend: Option<IpcTerrainBlendConfig>,
+    pub terrain_blend: Option<IpcTerrainScatterBlend>,
+    #[serde(default)]
+    pub terrain_contact: Option<IpcTerrainScatterContact>,
     #[serde(default)]
     pub transforms: Vec<[f32; 16]>,
     #[serde(default)]
     pub levels: Vec<IpcTerrainScatterLevel>,
+    #[serde(default)]
+    pub wind: Option<IpcScatterWind>,
+    pub hlod: Option<IpcHlodConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct IpcTerrainBlendConfig {
+fn default_speed() -> f32 {
+    1.0
+}
+fn default_rigidity() -> f32 {
+    0.5
+}
+fn default_bend_extent() -> f32 {
+    1.0
+}
+fn default_gust_frequency() -> f32 {
+    0.3
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct IpcScatterWind {
     #[serde(default)]
-    pub enabled: Option<bool>,
+    pub enabled: bool,
     #[serde(default)]
-    pub blend_distance: Option<f32>,
+    pub direction_deg: f32,
+    #[serde(default = "default_speed")]
+    pub speed: f32,
     #[serde(default)]
-    pub contact_strength: Option<f32>,
+    pub amplitude: f32,
+    #[serde(default = "default_rigidity")]
+    pub rigidity: f32,
     #[serde(default)]
-    pub contact_distance: Option<f32>,
+    pub bend_start: f32,
+    #[serde(default = "default_bend_extent")]
+    pub bend_extent: f32,
+    #[serde(default)]
+    pub gust_strength: f32,
+    #[serde(default = "default_gust_frequency")]
+    pub gust_frequency: f32,
+    #[serde(default)]
+    pub fade_start: f32,
+    #[serde(default)]
+    pub fade_end: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -232,6 +327,43 @@ pub struct ViewerStats {
     pub scene_has_mesh: bool,
     pub transform_version: u64,
     pub transform_is_identity: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TerrainVolumetricsVolumeReport {
+    pub preset: String,
+    pub center: [f32; 3],
+    pub size: [f32; 3],
+    pub resolution: [u32; 3],
+    pub atlas_offset: [u32; 3],
+    pub voxel_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TerrainVolumetricsReport {
+    pub active_volume_count: u32,
+    pub atlas_dimensions: [u32; 3],
+    pub total_voxels: u64,
+    pub texture_bytes: u64,
+    pub memory_budget_bytes: u64,
+    pub raymarch_steps: u32,
+    pub half_res: bool,
+    pub volumes: Vec<TerrainVolumetricsVolumeReport>,
+}
+
+impl Default for TerrainVolumetricsReport {
+    fn default() -> Self {
+        Self {
+            active_volume_count: 0,
+            atlas_dimensions: [0, 0, 0],
+            total_voxels: 0,
+            texture_bytes: 0,
+            memory_budget_bytes: 16 * 1024 * 1024,
+            raymarch_steps: 0,
+            half_res: false,
+            volumes: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

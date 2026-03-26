@@ -192,20 +192,26 @@ impl ViewerTerrainPbrConfig {
         enabled: bool,
         mode: &str,
         density: f32,
+        height_falloff: f32,
         scattering: f32,
         absorption: f32,
         light_shafts: bool,
         shaft_intensity: f32,
+        steps: u32,
         half_res: bool,
+        density_volumes: &[super::types::DensityVolumeConfig],
     ) {
         self.volumetrics.enabled = enabled;
         self.volumetrics.mode = mode.to_string();
         self.volumetrics.density = density.clamp(0.0, 0.5);
+        self.volumetrics.height_falloff = height_falloff.clamp(0.0, 4.0);
         self.volumetrics.scattering = scattering.clamp(0.0, 1.0);
         self.volumetrics.absorption = absorption.clamp(0.0, 1.0);
         self.volumetrics.light_shafts = light_shafts;
         self.volumetrics.shaft_intensity = shaft_intensity.clamp(0.0, 10.0);
+        self.volumetrics.steps = steps.clamp(8, 128);
         self.volumetrics.half_res = half_res;
+        self.volumetrics.density_volumes = density_volumes.to_vec();
     }
 
     pub fn to_display_string(&self) -> String {
@@ -240,6 +246,12 @@ impl ViewerTerrainPbrConfig {
             parts.push(format!(
                 "overlay: depth={} halo={}",
                 self.vector_overlay.depth_test, self.vector_overlay.halo_enabled
+            ));
+        }
+        if !self.volumetrics.density_volumes.is_empty() {
+            parts.push(format!(
+                "hetero_volumes={}",
+                self.volumetrics.density_volumes.len()
             ));
         }
         parts.push(format!("tonemap={}", self.tonemap.operator));

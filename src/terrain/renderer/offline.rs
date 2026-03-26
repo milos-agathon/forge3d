@@ -624,7 +624,6 @@ impl TerrainScene {
             state.internal_width,
             state.internal_height,
         )?;
-
         {
             let render_targets = &state.render_targets;
             let aov_targets = &state.aov_targets;
