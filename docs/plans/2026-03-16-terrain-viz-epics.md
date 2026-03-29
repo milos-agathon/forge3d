@@ -1,7 +1,7 @@
 # Forge3D Terrain Visualization Epic Backlog
 
-**Date:** 2026-03-26
-**Sources:** `docs/plans/forge3d_vs_unreal_gap_analysis.md`, direct audit of `src/terrain`, `python/forge3d`, `tests/`, and `examples/`. `docs/superpowers/specs/*` and `docs/superpowers/plans/*` were treated as design and implementation-plan documents, not proof of shipped runtime support.
+**Date:** 2026-03-29
+**Sources:** `docs/plans/forge3d_vs_unreal_gap_analysis.md`, direct audit of `src/terrain`, `python/forge3d`, `src/viewer`, `tests/`, and `examples/`, plus a 2026-03-29 re-audit of the current runtime/API surfaces. `docs/superpowers/specs/*` and `docs/superpowers/plans/*` were treated as design and implementation-plan documents, not proof of shipped runtime support.
 **Scope:** Terrain-first 3D visualization only. This roadmap covers terrain rendering, terrain population, terrain review, and terrain delivery. It excludes editor-product work, gameplay systems, character systems, and generic DCC parity unless they directly improve terrain scenes.
 
 ---
@@ -33,6 +33,8 @@ Forge3D does not have a terrain-rendering foundation problem. It already has the
 As of 2026-03-25, the clean local worktrees for `epic-12-clean`, `epic-21`, `epic-22`, and `tv12-ship-release` were removed after confirming their commits already exist on `origin`. The local `epic-12` worktree and branch were then removed after audit: its branch tip `98fb618` was already contained in `origin/main` via the `tv12-ship-release` merge, and the leftover worktree-only edits were stale drift rather than unshipped TV12 work.
 
 The sections below separate implemented epics from work that is still open.
+
+As of the 2026-03-29 re-audit, none of the epics listed below as still open have moved to shipped runtime coverage in this worktree. The main change from the earlier draft is tighter wording around the existing foundations: bundles persist terrain metadata, presets, and camera bookmarks; camera animation supports one keyframed path plus frame export; water, curve/ribbon generation, and terrain post effects provide adjacent building blocks but do not by themselves close the remaining terrain-review, delivery, weather, or renderer-gap epics.
 
 ---
 
@@ -67,20 +69,21 @@ Only F1-F3 work is considered here. Higher-cost engine-scale work stays out of t
 | **Terrain subsurface materials** | Blender: Cycles SSS for snow/ice/earth; Unreal: Subsurface Profile shading | **Implemented.** Terrain-layer subsurface controls exist in `terrain_params.py`, are decoded in the native terrain path, and are consumed by the terrain shader with dedicated regression tests. | F2 | High | **Done** |
 | **Offline terrain quality pipeline** | Blender: accumulation AA, adaptive sampling, OIDN; Unreal: movie render quality passes | **Implemented.** `OfflineQualitySettings`, `render_offline`, adaptive scheduling, and optional OIDN denoise support are present and covered by dedicated TV12 tests. | F2 | High | **Done** |
 | **Heterogeneous terrain volumetrics** | Blender: heterogeneous volume shading; Unreal: localized atmospheric FX | **Implemented in shipped scope.** Terrain volumetric fog and light shafts are exposed through `VolumetricsSettings`, decoded natively, applied in dedicated terrain-viewer screen/offscreen passes, and covered by examples/tests. The old backlog wording around bounded 3D density volumes was stale relative to the shipped feature surface. | F2 | Medium-High | **Done** |
-| **Weather particles** | Blender: particles; Unreal: GPU weather FX | **Missing.** No terrain-oriented GPU weather emitter/update/render path exists. | F3 | Medium | **Build later** |
+| **Weather particles** | Blender: particles; Unreal: GPU weather FX | **Missing.** TV6 volumetric density volumes can suggest plume/ash-like atmospherics, but there is still no terrain-oriented GPU weather emitter/update/render path for rain, snow, dust, or ash particles. | F3 | Medium | **Build later** |
 | **Terrain population LOD pipeline** | Blender: simplification workflows; Unreal: auto LOD + HLOD | **Implemented.** `simplify_mesh`, `generate_lod_chain`, `auto_lod_levels`, and HLOD clustering/runtime integration are present with documentation, a real-DEM demo, and regression coverage. | F2 | High | **Done** |
 | **Terrain material virtual texturing** | Unreal: virtual textures / RVT-style terrain material streaming; top engines: large-scene material paging | **Implemented in shipped v1 scope.** Terrain VT settings, source registration, feedback-driven residency, queryable stats, a real-DEM demo, and regression coverage are present in the terrain path. The shipped runtime currently pages the albedo family; normal and mask families remain forward-compatible in the Python contract but are not yet decoded natively. | F2-F3 | High | **Done** |
 | **Terrain-mesh blending and contact integration** | Unreal: terrain/mesh blending, contact integration, terrain-aware surface transitions | **Implemented.** Terrain/mesh seam softening, terrain-aware contact darkening, per-batch controls, viewer IPC wiring, a demo, and regression coverage are present in the shipped codebase. | F2 | Medium-High | **Done** |
 | **Scatter wind animation** | Unreal: foliage wind; Blender: animated vegetation workflows | **Implemented.** Scatter wind settings, GPU deformation, viewer/offscreen wiring, time-driven animation plumbing, validation, examples, and regression coverage are present. | F1-F2 | Medium-High | **Done** |
-| **Terrain scene variants and review layers** | Unreal: Data Layers; Blender-adjacent: alternate scene states | **Partial.** Bundles persist terrain metadata and bookmarks, but there is no named terrain-variant model with atomic activation. | F1-F2 | High | **Build** |
-| **Terrain camera rig toolkit** | Unreal: camera rigs; Blender: path- and constraint-driven flyovers | **Partial.** Camera keyframes and offline frame enumeration exist, but reusable orbit/rail/target-follow terrain rigs do not. | F1-F2 | High | **Build** |
-| **Terrain shot queue and bounded timeline** | Unreal: Movie Render Queue + Sequencer; Blender: repeatable batch render workflows | **Partial.** Terrain AOV output and camera animation exist, but there is no terrain shot manifest, bounded track model, or multi-shot queue. | F2-F3 | High | **Build** |
-| **Page-based terrain shadowing** | Unreal: Virtual Shadow Maps | **Missing.** Design and implementation-plan docs exist for TV11, but the runtime terrain shadow path audited here does not expose a paged shadow backend, shadow page cache, or paged-shadow stats surface. | F3 | Medium | **Defer** |
-| **Coastal / hydrology water upgrade** | Blender: Ocean modifier; Unreal: higher-end water simulation | **Missing.** Current water uses analytic waves and foam rather than an FFT/spectrum-driven path. | F2 | Medium | **Conditional** |
-| **OCIO color-managed terrain output** | Blender: OCIO pipeline | **Missing.** No active OpenColorIO terrain output path is present. | F3 | Medium | **Conditional** |
-| **Terrain flow and trajectory visualization** | Blender: curve/path rendering; Unreal: ribbon/trail effects | **Partial.** Curve and ribbon geometry foundations exist, but not a terrain-aware flow visualization workflow. | F1-F2 | Medium | **Conditional** |
-| **Collaborative terrain review** | Unreal: collaborative viewing | **Partial.** The viewer IPC surface is a good substrate, but there is no multi-client terrain review session model. | F2 | Medium | **Conditional** |
-| **Terrain temporal upscaling** | Unreal: TSR / temporal upscalers; top engines: resolution scaling for heavy terrain scenes | **Missing.** TAA exists, but there is no lower-resolution terrain render plus temporal upscale path for the terrain renderer itself. Existing upscaled buffers in screen-space GI do not close this terrain-viewer gap. | F3 | Medium | **Conditional** |
+| **Terrain scene variants and review layers** | Unreal: Data Layers; Blender-adjacent: alternate scene states | **Partial.** Bundles persist terrain metadata, camera bookmarks, and presets, but there is still no named terrain-variant schema, grouped review-layer visibility model, or atomic apply/list API. | F1-F2 | High | **Build** |
+| **Terrain camera rig toolkit** | Unreal: camera rigs; Blender: path- and constraint-driven flyovers | **Partial.** `CameraAnimation`, example flyovers, and offline frame enumeration exist, but reusable orbit/rail/target-follow terrain rig primitives and bake-to-animation APIs do not. | F1-F2 | High | **Build** |
+| **Terrain shot queue and bounded timeline** | Unreal: Movie Render Queue + Sequencer; Blender: repeatable batch render workflows | **Partial.** Terrain AOV output and single-animation frame export exist, but there is no terrain shot manifest, bounded track model, pass-aware multi-shot queue, or resume semantics. | F2-F3 | High | **Build** |
+| **Page-based terrain shadowing** | Unreal: Virtual Shadow Maps | **Missing.** Design and implementation-plan docs exist for TV11, but the runtime terrain shadow path audited here still does not expose `shadow_backend`, paged-shadow settings, a shadow page cache, or paged-shadow stats. | F3 | Medium | **Defer** |
+| **Coastal / hydrology water upgrade** | Blender: Ocean modifier; Unreal: higher-end water simulation | **Missing.** Current water remains an analytic wave/foam path with `ocean`/`lake`/`river` presets rather than an FFT/spectrum-driven coastal or hydrology workflow. | F2 | Medium | **Conditional** |
+| **OCIO color-managed terrain output** | Blender: OCIO pipeline | **Missing.** No active OpenColorIO terrain output path or public OCIO surface is present. | F3 | Medium | **Conditional** |
+| **Terrain flow and trajectory visualization** | Blender: curve/path rendering; Unreal: ribbon/trail effects | **Partial.** Curve, ribbon, and tube geometry foundations exist, but there is still no terrain-aware flow or trajectory visualization workflow on top of them. | F1-F2 | Medium | **Conditional** |
+| **Compute tessellation for terrain** | Unreal / top engines: tessellation and displacement for close terrain detail | **Missing.** Generic mesh subdivision exists, but there is no terrain-specific compute tessellation pipeline or public terrain API for adaptive tessellation. | F2 | Medium | **Conditional** |
+| **Collaborative terrain review** | Unreal: collaborative viewing | **Partial.** The viewer IPC surface remains a good substrate, but there is still no multi-client terrain review session model, shared-state broadcast path, or shared annotation/camera workflow. | F2 | Medium | **Conditional** |
+| **Terrain temporal upscaling** | Unreal: TSR / temporal upscalers; top engines: resolution scaling for heavy terrain scenes | **Missing.** TAA exists, and some screen-space subsystems upscale their own buffers, but there is still no lower-resolution terrain render plus temporal upscale path for the terrain renderer or terrain viewer. | F3 | Medium | **Conditional** |
 
 ---
 
@@ -235,7 +238,7 @@ The following should not be smuggled back into the terrain roadmap:
 
 ## 10. Bottom Line
 
-Forge3D no longer has a terrain-roadmap problem of "missing everything." Terrain local probe lighting, terrain material virtual texturing, TV6, TV10, TV12, TV13, TV21, and TV22 are now in the shipped column, so the real remaining gaps are narrower and more concrete:
+Forge3D no longer has a terrain-roadmap problem of "missing everything." Terrain local probe lighting, terrain material virtual texturing, TV6, TV10, TV12, TV13, TV21, and TV22 are now in the shipped column, so the real remaining gaps are narrower and more concrete. The 2026-03-29 repo re-audit did not change that status split:
 
 1. **Review and delivery workflow:** TV16, TV17, and TV18.
 2. **Terrain atmosphere and weather richness:** later TV7.

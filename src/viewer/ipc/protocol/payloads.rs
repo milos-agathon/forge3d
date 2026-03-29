@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct IpcHeightAoConfig {
@@ -317,6 +318,99 @@ pub struct IpcScatterWind {
     pub fade_start: f32,
     #[serde(default)]
     pub fade_end: f32,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcRasterOverlaySpec {
+    pub name: String,
+    pub path: String,
+    #[serde(default)]
+    pub extent: Option<[f32; 4]>,
+    #[serde(default)]
+    pub opacity: Option<f32>,
+    #[serde(default)]
+    pub z_order: Option<i32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct IpcSceneVectorOverlay {
+    pub name: String,
+    #[serde(default)]
+    pub vertices: Vec<[f32; 8]>,
+    #[serde(default)]
+    pub indices: Vec<u32>,
+    #[serde(default = "super::defaults::default_primitive")]
+    pub primitive: String,
+    #[serde(default)]
+    pub drape: bool,
+    #[serde(default = "super::defaults::default_drape_offset")]
+    pub drape_offset: f32,
+    #[serde(default = "super::defaults::default_opacity")]
+    pub opacity: f32,
+    #[serde(default = "super::defaults::default_depth_bias")]
+    pub depth_bias: f32,
+    #[serde(default = "super::defaults::default_line_width")]
+    pub line_width: f32,
+    #[serde(default = "super::defaults::default_point_size")]
+    pub point_size: f32,
+    #[serde(default)]
+    pub z_order: i32,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcSceneBaseState {
+    #[serde(default)]
+    pub preset: Option<Map<String, Value>>,
+    #[serde(default)]
+    pub raster_overlays: Vec<IpcRasterOverlaySpec>,
+    #[serde(default)]
+    pub vector_overlays: Vec<IpcSceneVectorOverlay>,
+    #[serde(default)]
+    pub labels: Vec<Map<String, Value>>,
+    #[serde(default)]
+    pub scatter_batches: Vec<IpcTerrainScatterBatch>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcReviewLayer {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub raster_overlays: Vec<IpcRasterOverlaySpec>,
+    #[serde(default)]
+    pub vector_overlays: Vec<IpcSceneVectorOverlay>,
+    #[serde(default)]
+    pub labels: Vec<Map<String, Value>>,
+    #[serde(default)]
+    pub scatter_batches: Vec<IpcTerrainScatterBatch>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcSceneVariant {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub active_layer_ids: Vec<String>,
+    #[serde(default)]
+    pub preset: Option<Map<String, Value>>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct IpcSceneReviewState {
+    #[serde(default)]
+    pub base_state: IpcSceneBaseState,
+    #[serde(default)]
+    pub review_layers: Vec<IpcReviewLayer>,
+    #[serde(default)]
+    pub variants: Vec<IpcSceneVariant>,
+    #[serde(default)]
+    pub active_variant_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

@@ -250,6 +250,111 @@ mod tests {
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains(r#""ok":false"#));
         assert!(json.contains("test error"));
+
+        let resp = IpcResponse::with_active_scene_variant(None);
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains(r#""active_scene_variant":null"#));
+    }
+
+    #[test]
+    fn test_parse_set_scene_review_state() {
+        let json = r#"{
+            "cmd":"set_scene_review_state",
+            "state":{
+                "base_state":{
+                    "labels":[{"kind":"point","text":"Base","world_pos":[0.0,0.0,0.0]}]
+                },
+                "review_layers":[
+                    {
+                        "id":"notes",
+                        "name":"Notes",
+                        "labels":[{"kind":"point","text":"Note","world_pos":[1.0,0.0,0.0]}]
+                    }
+                ],
+                "variants":[
+                    {
+                        "id":"review",
+                        "active_layer_ids":["notes"],
+                        "preset":{"exposure":2.0}
+                    }
+                ],
+                "active_variant_id":"review"
+            }
+        }"#;
+        let req = parse_ipc_request(json).unwrap();
+        match &req {
+            IpcRequest::SetSceneReviewState { state } => {
+                assert_eq!(state.review_layers.len(), 1);
+                assert_eq!(state.variants.len(), 1);
+                assert_eq!(state.active_variant_id.as_deref(), Some("review"));
+            }
+            _ => panic!("Expected SetSceneReviewState"),
+        }
+
+        let cmd = ipc_request_to_viewer_cmd(&req).unwrap().unwrap();
+        match cmd {
+            crate::viewer::viewer_enums::ViewerCmd::SetSceneReviewState { state } => {
+                assert_eq!(state.review_layers.len(), 1);
+                assert_eq!(state.snapshot().active_scene_variant.as_deref(), Some("review"));
+                assert_eq!(state.snapshot().scene_variants[0].id, "review");
+            }
+            _ => panic!("Expected ViewerCmd::SetSceneReviewState"),
+        }
+    }
+
+    #[test]
+    fn test_parse_set_scene_review_state_rejects_duplicate_layer_ids() {
+        let json = r#"{
+            "cmd":"set_scene_review_state",
+            "state":{
+                "review_layers":[{"id":"dup"},{"id":"dup"}],
+                "variants":[]
+            }
+        }"#;
+        let req = parse_ipc_request(json).unwrap();
+        let err = ipc_request_to_viewer_cmd(&req).unwrap_err();
+        assert!(err.contains("Duplicate review layer ID"));
+    }
+
+    #[test]
+    fn test_parse_set_scene_review_state_rejects_missing_variant_layers() {
+        let json = r#"{
+            "cmd":"set_scene_review_state",
+            "state":{
+                "review_layers":[{"id":"known"}],
+                "variants":[{"id":"review","active_layer_ids":["missing"]}]
+            }
+        }"#;
+        let req = parse_ipc_request(json).unwrap();
+        let err = ipc_request_to_viewer_cmd(&req).unwrap_err();
+        assert!(err.contains("unknown review layer ID"));
+    }
+
+    #[test]
+    fn test_scene_review_query_requests_parse_as_special() {
+        for json in [
+            r#"{"cmd":"list_scene_variants"}"#,
+            r#"{"cmd":"list_review_layers"}"#,
+            r#"{"cmd":"get_active_scene_variant"}"#,
+        ] {
+            let req = parse_ipc_request(json).unwrap();
+            assert!(ipc_request_to_viewer_cmd(&req).unwrap().is_none());
+        }
+
+        let apply = parse_ipc_request(r#"{"cmd":"apply_scene_variant","variant_id":"review"}"#).unwrap();
+        let toggle = parse_ipc_request(
+            r#"{"cmd":"set_review_layer_visible","layer_id":"notes","visible":true}"#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            ipc_request_to_viewer_cmd(&apply).unwrap().unwrap(),
+            crate::viewer::viewer_enums::ViewerCmd::ApplySceneVariant { .. }
+        ));
+        assert!(matches!(
+            ipc_request_to_viewer_cmd(&toggle).unwrap().unwrap(),
+            crate::viewer::viewer_enums::ViewerCmd::SetReviewLayerVisible { .. }
+        ));
     }
 
     #[cfg(feature = "enable-gpu-instancing")]

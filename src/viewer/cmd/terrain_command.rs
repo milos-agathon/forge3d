@@ -37,6 +37,9 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                     Err(e) => eprintln!("[terrain] Failed to load {}: {}", path, e),
                 }
             }
+            if let Err(err) = viewer.reapply_scene_review_state() {
+                eprintln!("[scene_review] failed to reapply after terrain load: {err}");
+            }
             true
         }
         ViewerCmd::SetTerrainCamera {

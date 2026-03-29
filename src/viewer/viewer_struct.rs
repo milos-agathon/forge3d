@@ -24,6 +24,7 @@ use crate::picking::UnifiedPickingSystem;
 use crate::render::params::SsrParams;
 
 use super::camera_controller::CameraController;
+use super::scene_review::ViewerSceneReviewRegistry;
 use super::viewer_config::{FpsCounter, ViewerConfig};
 use super::viewer_enums::{CaptureKind, FogMode, VizMode};
 
@@ -254,4 +255,6 @@ pub struct Viewer {
     // Scene bundle save/load requests (handled by Python-side)
     pub(crate) pending_bundle_save: Option<(String, Option<String>)>,
     pub(crate) pending_bundle_load: Option<String>,
+    // TV16 review-state registry
+    pub(crate) scene_review_registry: ViewerSceneReviewRegistry,
 }

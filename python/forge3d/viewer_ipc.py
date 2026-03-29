@@ -740,6 +740,52 @@ def get_oit_mode(sock: socket.socket) -> Dict[str, Any]:
     return send_ipc(sock, {"cmd": "get_oit_mode"})
 
 
+# === TV16 REVIEW-STATE API ===
+
+def set_scene_review_state(
+    sock: socket.socket,
+    state: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Install the canonical TV16 review-state registry."""
+    return send_ipc(sock, {"cmd": "set_scene_review_state", "state": state})
+
+
+def list_scene_variants(sock: socket.socket) -> Dict[str, Any]:
+    """List structured scene-variant summaries from the active registry."""
+    return send_ipc(sock, {"cmd": "list_scene_variants"})
+
+
+def list_review_layers(sock: socket.socket) -> Dict[str, Any]:
+    """List structured review-layer summaries from the active registry."""
+    return send_ipc(sock, {"cmd": "list_review_layers"})
+
+
+def get_active_scene_variant(sock: socket.socket) -> Dict[str, Any]:
+    """Return the active scene-variant ID from the active registry."""
+    return send_ipc(sock, {"cmd": "get_active_scene_variant"})
+
+
+def apply_scene_variant(sock: socket.socket, variant_id: str) -> Dict[str, Any]:
+    """Apply a scene variant and clear manual review-layer overrides."""
+    return send_ipc(sock, {"cmd": "apply_scene_variant", "variant_id": str(variant_id)})
+
+
+def set_review_layer_visible(
+    sock: socket.socket,
+    layer_id: str,
+    visible: bool,
+) -> Dict[str, Any]:
+    """Apply a manual review-layer visibility override."""
+    return send_ipc(
+        sock,
+        {
+            "cmd": "set_review_layer_visible",
+            "layer_id": str(layer_id),
+            "visible": bool(visible),
+        },
+    )
+
+
 # === BUNDLE API ===
 
 def save_bundle(

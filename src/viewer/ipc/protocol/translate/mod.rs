@@ -1,6 +1,7 @@
 mod core;
 mod labels;
 mod overlays;
+mod scene_review;
 mod terrain;
 
 use crate::viewer::viewer_enums::ViewerCmd;
@@ -13,6 +14,9 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
         IpcRequest::GetStats
             | IpcRequest::PollPickEvents
             | IpcRequest::GetLassoState
+            | IpcRequest::ListSceneVariants
+            | IpcRequest::ListReviewLayers
+            | IpcRequest::GetActiveSceneVariant
             | IpcRequest::PollPendingBundleSave
             | IpcRequest::PollPendingBundleLoad
     ) {
@@ -29,6 +33,9 @@ pub fn ipc_request_to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, 
         return Ok(Some(cmd));
     }
     if let Some(cmd) = labels::to_viewer_cmd(req) {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = scene_review::to_viewer_cmd(req)? {
         return Ok(Some(cmd));
     }
 

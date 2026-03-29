@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 use super::payloads::{BundleRequest, TerrainVolumetricsReport, ViewerStats};
+use crate::viewer::scene_review::{ReviewLayerSummary, SceneVariantSummary};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct IpcResponse {
@@ -17,6 +18,12 @@ pub struct IpcResponse {
     pub bundle_request: Option<BundleRequest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub terrain_volumetrics_report: Option<TerrainVolumetricsReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scene_variants: Option<Vec<SceneVariantSummary>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_layers: Option<Vec<ReviewLayerSummary>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_scene_variant: Option<Option<String>>,
 }
 
 impl IpcResponse {
@@ -29,6 +36,9 @@ impl IpcResponse {
             lasso_state: None,
             bundle_request: None,
             terrain_volumetrics_report: None,
+            scene_variants: None,
+            review_layers: None,
+            active_scene_variant: None,
         }
     }
 
@@ -41,6 +51,9 @@ impl IpcResponse {
             lasso_state: None,
             bundle_request: None,
             terrain_volumetrics_report: None,
+            scene_variants: None,
+            review_layers: None,
+            active_scene_variant: None,
         }
     }
 
@@ -53,6 +66,9 @@ impl IpcResponse {
             lasso_state: None,
             bundle_request: None,
             terrain_volumetrics_report: None,
+            scene_variants: None,
+            review_layers: None,
+            active_scene_variant: None,
         }
     }
 
@@ -65,6 +81,9 @@ impl IpcResponse {
             lasso_state: None,
             bundle_request: None,
             terrain_volumetrics_report: None,
+            scene_variants: None,
+            review_layers: None,
+            active_scene_variant: None,
         }
     }
 
@@ -77,6 +96,9 @@ impl IpcResponse {
             lasso_state: None,
             bundle_request: Some(req),
             terrain_volumetrics_report: None,
+            scene_variants: None,
+            review_layers: None,
+            active_scene_variant: None,
         }
     }
 
@@ -89,6 +111,9 @@ impl IpcResponse {
             lasso_state: Some(state),
             bundle_request: None,
             terrain_volumetrics_report: None,
+            scene_variants: None,
+            review_layers: None,
+            active_scene_variant: None,
         }
     }
 
@@ -101,6 +126,54 @@ impl IpcResponse {
             lasso_state: None,
             bundle_request: None,
             terrain_volumetrics_report: Some(report),
+            scene_variants: None,
+            review_layers: None,
+            active_scene_variant: None,
+        }
+    }
+
+    pub fn with_scene_variants(scene_variants: Vec<SceneVariantSummary>) -> Self {
+        Self {
+            ok: true,
+            error: None,
+            stats: None,
+            pick_events: None,
+            lasso_state: None,
+            bundle_request: None,
+            terrain_volumetrics_report: None,
+            scene_variants: Some(scene_variants),
+            review_layers: None,
+            active_scene_variant: None,
+        }
+    }
+
+    pub fn with_review_layers(review_layers: Vec<ReviewLayerSummary>) -> Self {
+        Self {
+            ok: true,
+            error: None,
+            stats: None,
+            pick_events: None,
+            lasso_state: None,
+            bundle_request: None,
+            terrain_volumetrics_report: None,
+            scene_variants: None,
+            review_layers: Some(review_layers),
+            active_scene_variant: None,
+        }
+    }
+
+    pub fn with_active_scene_variant(active_scene_variant: Option<String>) -> Self {
+        Self {
+            ok: true,
+            error: None,
+            stats: None,
+            pick_events: None,
+            lasso_state: None,
+            bundle_request: None,
+            terrain_volumetrics_report: None,
+            scene_variants: None,
+            review_layers: None,
+            active_scene_variant: Some(active_scene_variant),
         }
     }
 }

@@ -15,6 +15,7 @@ mod labels_command;
 mod legacy_handler;
 mod pointcloud_command;
 mod scene_command;
+mod scene_review_command;
 mod scene_handlers;
 mod ssao_handlers;
 mod ssgi_handlers;

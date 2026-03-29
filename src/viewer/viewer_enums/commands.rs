@@ -1,4 +1,5 @@
 use crate::cli::args::GiVizMode;
+use crate::viewer::scene_review::ViewerSceneReviewStateConfig;
 
 use super::{
     ViewerDenoiseConfig, ViewerDofConfig, ViewerHeightAoConfig, ViewerLensEffectsConfig,
@@ -135,6 +136,9 @@ pub enum ViewerCmd {
     RemoveCallout { id: u64 },
     SetLabelTypography { tracking: Option<f32>, kerning: Option<bool>, line_height: Option<f32>, word_spacing: Option<f32> },
     SetDeclutterAlgorithm { algorithm: String, seed: Option<u64>, max_iterations: Option<usize> },
+    SetSceneReviewState { state: ViewerSceneReviewStateConfig },
+    ApplySceneVariant { variant_id: String },
+    SetReviewLayerVisible { layer_id: String, visible: bool },
     PollPickEvents, SetLassoMode { enabled: bool }, GetLassoState, ClearSelection,
     SetOitEnabled { enabled: bool, mode: String }, GetOitMode, SetTaaEnabled { enabled: bool }, GetTaaStatus,
     SetTaaParams { history_weight: Option<f32>, jitter_scale: Option<f32>, enable_jitter: Option<bool> },

@@ -14,6 +14,7 @@ pub mod image_analysis;
 mod init;
 mod input;
 pub mod ipc;
+mod scene_review;
 mod p5;
 pub mod pointcloud;
 mod render;

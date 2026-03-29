@@ -24,6 +24,9 @@ impl Viewer {
         if super::labels_command::handle_cmd(self, &cmd) {
             return;
         }
+        if super::scene_review_command::handle_cmd(self, &cmd) {
+            return;
+        }
         if super::ipc_command::handle_cmd(self, &cmd) {
             return;
         }

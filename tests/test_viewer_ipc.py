@@ -24,6 +24,7 @@ import pytest
 # Add the python package to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
+from forge3d.bundle import BundleManifest, LoadedBundle, ReviewLayer, SceneState, SceneVariant
 from forge3d.viewer import (
     ViewerHandle,
     ViewerError,
@@ -33,6 +34,7 @@ from forge3d.viewer import (
     open_viewer_async,
 )
 import forge3d.viewer as viewer_module
+import forge3d.viewer_ipc as viewer_ipc_module
 
 
 class TestReadyLineParsing:
@@ -239,6 +241,38 @@ class TestCommandFormatting:
         cmd = {"cmd": "clear_terrain_scatter"}
         parsed = json.loads(json.dumps(cmd))
         assert parsed["cmd"] == "clear_terrain_scatter"
+
+    def test_set_scene_review_state_format(self):
+        """set_scene_review_state preserves nested TV16 payloads."""
+        cmd = {
+            "cmd": "set_scene_review_state",
+            "state": {
+                "base_state": {"labels": [{"text": "Base", "kind": "point", "world_pos": [0.0, 0.0, 0.0]}]},
+                "review_layers": [{"id": "notes", "labels": [{"text": "Note", "kind": "point", "world_pos": [1.0, 0.0, 0.0]}]}],
+                "variants": [{"id": "review", "active_layer_ids": ["notes"], "preset": {"exposure": 2.0}}],
+                "active_variant_id": "review",
+            },
+        }
+        parsed = json.loads(json.dumps(cmd))
+        assert parsed["cmd"] == "set_scene_review_state"
+        assert parsed["state"]["variants"][0]["id"] == "review"
+        assert parsed["state"]["review_layers"][0]["id"] == "notes"
+
+    def test_scene_review_query_formats(self):
+        """TV16 query and mutation commands serialize with the expected keys."""
+        commands = [
+            {"cmd": "list_scene_variants"},
+            {"cmd": "list_review_layers"},
+            {"cmd": "get_active_scene_variant"},
+            {"cmd": "apply_scene_variant", "variant_id": "review"},
+            {"cmd": "set_review_layer_visible", "layer_id": "notes", "visible": True},
+        ]
+        parsed = [json.loads(json.dumps(cmd)) for cmd in commands]
+        assert parsed[0] == {"cmd": "list_scene_variants"}
+        assert parsed[1] == {"cmd": "list_review_layers"}
+        assert parsed[2] == {"cmd": "get_active_scene_variant"}
+        assert parsed[3] == {"cmd": "apply_scene_variant", "variant_id": "review"}
+        assert parsed[4] == {"cmd": "set_review_layer_visible", "layer_id": "notes", "visible": True}
 
     def test_set_transform_format(self):
         """set_transform command is formatted correctly."""
@@ -536,6 +570,120 @@ class TestViewerHandleHelpers:
 
         with pytest.raises(ViewerError, match="returned no report data"):
             handle.get_terrain_volumetrics_report()
+
+    def test_load_bundle_loads_terrain_then_review_state(self):
+        """The high-level bundle loader sends terrain first and then installs TV16 state."""
+        handle = ViewerHandle.__new__(ViewerHandle)
+        handle._cleanup_paths = []  # type: ignore[attr-defined]
+        sent: list[dict[str, Any]] = []
+        handle._send_command = lambda cmd: sent.append(cmd) or {"ok": True}  # type: ignore[attr-defined]
+
+        bundle = LoadedBundle(
+            path=Path("scene.forge3d"),
+            manifest=BundleManifest.new("scene"),
+            dem_path=Path("terrain.tif"),
+            scene_state=SceneState(
+                review_layers=[ReviewLayer(id="notes")],
+                variants=[SceneVariant(id="review", active_layer_ids=["notes"])],
+                active_variant_id="review",
+            ),
+        )
+
+        returned = handle.load_bundle(bundle)
+
+        assert returned is bundle
+        assert sent == [
+            {"cmd": "load_terrain", "path": "terrain.tif"},
+            {"cmd": "set_scene_review_state", "state": bundle.scene_state.to_dict()},
+        ]
+
+    def test_load_bundle_variant_override_updates_installed_state(self):
+        """An explicit variant_id overrides the bundle's active variant before install."""
+        handle = ViewerHandle.__new__(ViewerHandle)
+        handle._cleanup_paths = []  # type: ignore[attr-defined]
+        sent: list[dict[str, Any]] = []
+        handle._send_command = lambda cmd: sent.append(cmd) or {"ok": True}  # type: ignore[attr-defined]
+
+        bundle = LoadedBundle(
+            path=Path("scene.forge3d"),
+            manifest=BundleManifest.new("scene"),
+            scene_state=SceneState(
+                review_layers=[ReviewLayer(id="a"), ReviewLayer(id="b")],
+                variants=[
+                    SceneVariant(id="first", active_layer_ids=["a"]),
+                    SceneVariant(id="second", active_layer_ids=["b"]),
+                ],
+                active_variant_id="first",
+            ),
+        )
+
+        handle.load_bundle(bundle, variant_id="second")
+
+        assert bundle.get_active_variant_id() == "second"
+        assert sent == [
+            {
+                "cmd": "set_scene_review_state",
+                "state": bundle.scene_state.to_dict(),
+            }
+        ]
+
+    def test_scene_review_helper_methods_use_expected_commands(self):
+        """Variant and layer helpers send the exact TV16 command payloads."""
+        handle = ViewerHandle.__new__(ViewerHandle)
+
+        def fake_send(cmd: dict[str, Any]) -> dict[str, Any]:
+            if cmd["cmd"] == "list_scene_variants":
+                return {"ok": True, "scene_variants": [{"id": "review", "active_layer_ids": ["notes"]}]}
+            if cmd["cmd"] == "list_review_layers":
+                return {"ok": True, "review_layers": [{"id": "notes", "name": "Notes"}]}
+            if cmd["cmd"] == "get_active_scene_variant":
+                return {"ok": True, "active_scene_variant": "review"}
+            captured.append(cmd)
+            return {"ok": True}
+
+        captured: list[dict[str, Any]] = []
+        handle._send_command = fake_send  # type: ignore[attr-defined]
+
+        assert handle.list_scene_variants() == [{"id": "review", "active_layer_ids": ["notes"]}]
+        assert handle.list_review_layers() == [{"id": "notes", "name": "Notes"}]
+        assert handle.get_active_scene_variant() == "review"
+
+        handle.apply_scene_variant("review")
+        handle.set_review_layer_visible("notes", False)
+
+        assert captured == [
+            {"cmd": "apply_scene_variant", "variant_id": "review"},
+            {"cmd": "set_review_layer_visible", "layer_id": "notes", "visible": False},
+        ]
+
+
+class TestViewerIpcHelpers:
+    """Low-level viewer_ipc helpers should emit exact TV16 commands."""
+
+    def test_scene_review_ipc_helpers_emit_expected_commands(self, monkeypatch):
+        commands: list[dict[str, Any]] = []
+
+        def fake_send(_sock: Any, cmd: dict[str, Any]) -> dict[str, Any]:
+            commands.append(cmd)
+            return {"ok": True}
+
+        monkeypatch.setattr(viewer_ipc_module, "send_ipc", fake_send)
+
+        viewer_ipc_module.set_scene_review_state(object(), {"base_state": {}})
+        viewer_ipc_module.list_scene_variants(object())
+        viewer_ipc_module.list_review_layers(object())
+        viewer_ipc_module.get_active_scene_variant(object())
+        viewer_ipc_module.apply_scene_variant(object(), "review")
+        viewer_ipc_module.set_review_layer_visible(object(), "notes", True)
+
+        assert commands == [
+            {"cmd": "set_scene_review_state", "state": {"base_state": {}}},
+            {"cmd": "list_scene_variants"},
+            {"cmd": "list_review_layers"},
+            {"cmd": "get_active_scene_variant"},
+            {"cmd": "apply_scene_variant", "variant_id": "review"},
+            {"cmd": "set_review_layer_visible", "layer_id": "notes", "visible": True},
+        ]
 
 
 class TestNDJSONProtocol:

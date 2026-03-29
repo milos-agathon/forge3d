@@ -4,8 +4,8 @@
 > commercial license. See https://github.com/milos-agathon/forge3d#license. You can read and learn from the code,
 > but the highlighted functions will raise `LicenseError` without a valid key.
 
-Bundles package terrain, overlays, presets, and bookmarks into a portable
-directory with checksums.
+Bundles package terrain, presets, bookmarks, and the canonical TV16 scene
+review registry into a portable directory with checksums.
 
 ## Save a bundle
 
@@ -44,32 +44,34 @@ print(loaded.preset)
 
 ## Load the same bundle into a running viewer
 
-`ViewerHandle` does not have a dedicated high-level bundle loader yet. Load the
-bundle in Python, then apply its terrain, bookmark, and preset state to the
-viewer explicitly:
+`ViewerHandle.load_bundle()` loads the terrain, installs the bundle's review
+state, and applies the active scene variant automatically:
 
 ```python
-loaded = f3d.load_bundle(bundle_path)
-bookmark = loaded.manifest.camera_bookmarks[0]
-sun = (loaded.preset or {}).get("sun", {})
-
-with f3d.open_viewer_async(terrain_path=loaded.dem_path) as viewer:
-    viewer.set_camera_lookat(
-        eye=bookmark.eye,
-        target=bookmark.target,
-        up=bookmark.up,
-    )
-    viewer.set_fov(bookmark.fov_deg)
-    if sun:
-        viewer.set_sun(
-            azimuth_deg=float(sun.get("azimuth_deg", 315.0)),
-            elevation_deg=float(sun.get("elevation_deg", 30.0)),
-        )
+with f3d.open_viewer_async() as viewer:
+    loaded = viewer.load_bundle(bundle_path)
+    print(loaded.get_active_variant_id())
+    print([variant.id for variant in loaded.list_variants()])
     viewer.snapshot("bundle-loaded.png")
 ```
 
-That flow is what actually works today. Raw `LoadBundle` IPC only queues a
-pending request for higher-level interactive apps to handle.
+Pass `variant_id=` to override the bundle's active variant during load:
+
+```python
+with f3d.open_viewer_async() as viewer:
+    viewer.load_bundle(bundle_path, variant_id="review")
+    viewer.snapshot("bundle-loaded.png")
+```
+
+You can query and mutate the installed TV16 state directly from the handle:
+
+```python
+with f3d.open_viewer_async() as viewer:
+    loaded = viewer.load_bundle(bundle_path)
+    viewer.apply_scene_variant("review")
+    viewer.set_review_layer_visible("annotations", True)
+    print(viewer.list_review_layers())
+```
 
 ## Expected output
 

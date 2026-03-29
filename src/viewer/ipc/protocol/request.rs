@@ -8,8 +8,9 @@ use super::defaults::{
 };
 use super::payloads::{
     IpcDenoiseConfig, IpcDofConfig, IpcHeightAoConfig, IpcLensEffectsConfig,
-    IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcSkyConfig, IpcSunVisConfig,
-    IpcTerrainScatterBatch, IpcTonemapConfig, IpcVectorOverlayConfig, IpcVolumetricsConfig,
+    IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcSceneReviewState, IpcSkyConfig,
+    IpcSunVisConfig, IpcTerrainScatterBatch, IpcTonemapConfig, IpcVectorOverlayConfig,
+    IpcVolumetricsConfig,
 };
 
 #[rustfmt::skip]
@@ -116,6 +117,12 @@ pub enum IpcRequest {
     SetLassoMode { enabled: bool },
     GetLassoState,
     ClearSelection,
+    SetSceneReviewState { state: IpcSceneReviewState },
+    ListSceneVariants,
+    ListReviewLayers,
+    GetActiveSceneVariant,
+    ApplySceneVariant { variant_id: String },
+    SetReviewLayerVisible { layer_id: String, visible: bool },
     SetOitEnabled { enabled: bool, #[serde(default = "default_oit_mode")] mode: String },
     GetOitMode,
     SetTaaEnabled { enabled: bool },

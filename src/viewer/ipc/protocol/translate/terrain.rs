@@ -285,7 +285,7 @@ fn map_sky(config: &IpcSkyConfig) -> ViewerSkyConfig {
     }
 }
 
-fn map_terrain_scatter_batch(
+pub(super) fn map_terrain_scatter_batch(
     config: &IpcTerrainScatterBatch,
     batch_index: usize,
 ) -> Result<ViewerTerrainScatterBatchConfig, String> {

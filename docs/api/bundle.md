@@ -11,16 +11,20 @@ my_scene.forge3d/
 ├── manifest.json        # Version, checksums, metadata
 ├── terrain/             # DEM files
 │   └── dem.tif
-├── overlays/            # Vector data and labels
+├── overlays/            # Optional legacy raw overlay mirrors
 │   ├── vectors.geojson
 │   └── labels.json
 ├── camera/              # Camera bookmarks
 │   └── bookmarks.json
 ├── render/              # Render presets
 │   └── preset.json
+├── scene/
+│   └── state.json       # Canonical TV16 scene review state
 └── assets/              # Additional resources
-    └── hdri/
-        └── environment.hdr
+    ├── hdri/
+    │   └── environment.hdr
+    └── overlays/
+        └── ortho.png
 ```
 
 ## Python API
@@ -28,30 +32,52 @@ my_scene.forge3d/
 ### Creating Bundles
 
 ```python
-from forge3d.bundle import save_bundle, CameraBookmark
+from forge3d.bundle import (
+    CameraBookmark,
+    RasterOverlaySpec,
+    ReviewLayer,
+    SceneBaseState,
+    SceneState,
+    SceneVariant,
+    save_bundle,
+)
 
 # Save a scene bundle
 bundle_path = save_bundle(
     "my_scene",
     name="Mountain Terrain",
     dem_path="terrain/mt_fuji.tif",
-    colormap_name="terrain",
-    domain=(0.0, 3776.0),
-    crs="EPSG:32654",
-    preset={
-        "exposure": 1.5,
-        "z_scale": 2.0,
-        "colormap_strength": 0.8,
-    },
-    camera_bookmarks=[
-        CameraBookmark(
-            name="summit_view",
-            eye=(1000.0, 2000.0, 1500.0),
-            target=(0.0, 0.0, 0.0),
-            fov_deg=45.0,
-        )
-    ],
-    hdr_path="assets/hdri/evening_sky.hdr",
+    scene_state=SceneState(
+        base=SceneBaseState(
+            preset={"exposure": 1.5, "z_scale": 2.0},
+            camera_bookmarks=[
+                CameraBookmark(
+                    name="summit_view",
+                    eye=(1000.0, 2000.0, 1500.0),
+                    target=(0.0, 0.0, 0.0),
+                    fov_deg=45.0,
+                )
+            ],
+            raster_overlays=[
+                RasterOverlaySpec(
+                    name="ortho",
+                    path="assets/imagery/ortho.png",
+                    opacity=0.8,
+                )
+            ],
+        ),
+        review_layers=[
+            ReviewLayer(id="annotations", labels=[{
+                "kind": "point",
+                "text": "Summit",
+                "world_pos": [0.0, 0.0, 3776.0],
+            }]),
+        ],
+        variants=[
+            SceneVariant(id="review", active_layer_ids=["annotations"]),
+        ],
+        active_variant_id="review",
+    ),
 )
 ```
 
@@ -70,9 +96,9 @@ if is_bundle("my_scene.forge3d"):
     print(f"DEM: {bundle.dem_path}")
     print(f"Preset: {bundle.preset}")
     
-    # Access camera bookmarks
-    for bookmark in bundle.manifest.camera_bookmarks:
-        print(f"  Camera: {bookmark.name} at {bookmark.eye}")
+    print(bundle.scene_state.active_variant_id)
+    print(bundle.effective_scene_state().preset)
+    print([layer.id for layer in bundle.list_review_layers()])
 ```
 
 ## Data Structures
@@ -84,7 +110,7 @@ The manifest contains metadata and checksums for all bundle files.
 ```python
 @dataclass
 class BundleManifest:
-    version: int               # Schema version (currently 1)
+    version: int               # Schema version (currently 2)
     name: str                  # Human-readable bundle name
     created_at: str            # ISO 8601 timestamp
     description: Optional[str] # Optional description
@@ -117,6 +143,30 @@ class CameraBookmark:
     fov_deg: float             # Field of view in degrees
 ```
 
+### Scene Review State
+
+`scene/state.json` stores the canonical TV16 registry:
+
+```python
+@dataclass
+class SceneState:
+    base: SceneBaseState
+    review_layers: List[ReviewLayer]
+    variants: List[SceneVariant]
+    active_variant_id: Optional[str]
+```
+
+`LoadedBundle` exposes helper methods for variant and layer resolution:
+
+```python
+bundle.list_variants()
+bundle.list_review_layers()
+bundle.get_active_variant_id()
+bundle.apply_variant("review")
+bundle.set_review_layer_visible("annotations", True)
+bundle.effective_scene_state()
+```
+
 ### LoadedBundle
 
 ```python
@@ -128,7 +178,8 @@ class LoadedBundle:
     overlays: Optional[List[Dict]]  # Loaded overlay data
     labels: Optional[List[Dict]]    # Loaded label data
     preset: Optional[Dict]     # Render preset configuration
-    hdr_path: Optional[Path]   # Resolved HDR file path
+    hdr_path: Optional[Path]   # Resolved base HDR file path
+    scene_state: SceneState    # Canonical TV16 review registry
 ```
 
 ## IPC Commands
@@ -146,6 +197,14 @@ response = send_ipc(sock, {
     "path": "output/my_scene.forge3d",
     "name": "My Scene"
 })
+```
+
+### ViewerHandle.load_bundle
+
+```python
+with forge3d.open_viewer_async() as viewer:
+    bundle = viewer.load_bundle("scenes/my_scene.forge3d", variant_id="review")
+    print(viewer.get_active_scene_variant())
 ```
 
 ### LoadBundle
@@ -171,7 +230,8 @@ except ValueError as e:
 
 ## Version Compatibility
 
-- **Version 1**: Current schema (introduced in v1.11.0)
+- **Version 2**: Canonical `scene/state.json` bundle registry
+- **Version 1**: Legacy bundles still load and synthesize an empty review registry
 
 Forward compatibility: Bundles with higher version numbers are rejected. Backward compatibility: Future versions will support loading older bundles.
 

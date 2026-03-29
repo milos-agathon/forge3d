@@ -7,6 +7,7 @@ use std::sync::{Mutex, OnceLock};
 
 use super::super::ipc::TerrainVolumetricsReport;
 use super::super::ipc::ViewerStats;
+use super::super::scene_review::SceneReviewSnapshot;
 use super::super::viewer_enums::ViewerCmd;
 use crate::picking::PickEvent;
 
@@ -70,6 +71,25 @@ pub fn get_terrain_volumetrics_report() -> &'static Mutex<TerrainVolumetricsRepo
 pub fn update_terrain_volumetrics_report(report: TerrainVolumetricsReport) {
     if let Ok(mut current) = get_terrain_volumetrics_report().lock() {
         *current = report;
+    }
+}
+
+/// Global TV16 scene-review snapshot for structured IPC queries.
+static SCENE_REVIEW_STATE: OnceLock<Mutex<SceneReviewSnapshot>> = OnceLock::new();
+
+pub fn get_scene_review_state() -> &'static Mutex<SceneReviewSnapshot> {
+    SCENE_REVIEW_STATE.get_or_init(|| Mutex::new(SceneReviewSnapshot::default()))
+}
+
+pub fn update_scene_review_state(snapshot: SceneReviewSnapshot) {
+    if let Ok(mut current) = get_scene_review_state().lock() {
+        *current = snapshot;
+    }
+}
+
+pub fn update_active_scene_variant(active_scene_variant: Option<String>) {
+    if let Ok(mut current) = get_scene_review_state().lock() {
+        current.active_scene_variant = active_scene_variant;
     }
 }
 

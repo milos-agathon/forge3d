@@ -10,13 +10,18 @@ from pathlib import Path
 import pytest
 
 from forge3d.bundle import (
-    save_bundle,
-    load_bundle,
-    is_bundle,
     BundleManifest,
-    CameraBookmark,
-    TerrainMeta,
     BUNDLE_VERSION,
+    CameraBookmark,
+    RasterOverlaySpec,
+    ReviewLayer,
+    SceneBaseState,
+    SceneState,
+    SceneVariant,
+    TerrainMeta,
+    is_bundle,
+    load_bundle,
+    save_bundle,
 )
 
 pytestmark = pytest.mark.usefixtures("pro_license")
@@ -195,3 +200,200 @@ def test_checksum_verification():
         # Load without verification should succeed
         loaded = load_bundle(bundle_path, verify_checksums=False)
         assert loaded.preset == {"corrupted": True}
+
+
+def test_scene_state_v2_roundtrip_preserves_variants_and_assets(tmp_path: Path):
+    """TV16 scene/state.json preserves review layers, variants, and copied assets."""
+    bundle_path = tmp_path / "tv16_bundle.forge3d"
+    raster_path = tmp_path / "base_overlay.png"
+    hdr_path = tmp_path / "studio.hdr"
+    raster_path.write_bytes(b"base-overlay")
+    hdr_path.write_bytes(b"studio-hdr")
+
+    scene_state = SceneState(
+        base=SceneBaseState(
+            preset={"exposure": 1.25, "hdr_path": str(hdr_path)},
+            camera_bookmarks=[
+                CameraBookmark(
+                    name="overview",
+                    eye=(100.0, 200.0, 300.0),
+                    target=(0.0, 0.0, 0.0),
+                )
+            ],
+            raster_overlays=[
+                RasterOverlaySpec(
+                    name="ortho",
+                    path=str(raster_path),
+                    extent=(0.0, 0.0, 10.0, 10.0),
+                    opacity=0.75,
+                    z_order=2,
+                )
+            ],
+            vector_overlays=[
+                {
+                    "name": "base-triangles",
+                    "vertices": [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                    "indices": [0, 1, 2],
+                }
+            ],
+            labels=[{"text": "Summit", "world_pos": [1.0, 2.0, 3.0]}],
+            scatter_batches=[{"name": "base-scatter", "levels": [], "transforms": []}],
+        ),
+        review_layers=[
+            ReviewLayer(
+                id="annotations",
+                labels=[{"text": "Review note", "kind": "callout", "anchor": [2.0, 3.0, 4.0]}],
+            ),
+            ReviewLayer(
+                id="imagery",
+                raster_overlays=[
+                    RasterOverlaySpec(name="secondary", path=str(raster_path), opacity=0.4)
+                ],
+            ),
+        ],
+        variants=[
+            SceneVariant(
+                id="review",
+                active_layer_ids=["annotations"],
+                preset={"exposure": 3.0},
+            ),
+            SceneVariant(id="imagery", active_layer_ids=["imagery"]),
+        ],
+        active_variant_id="review",
+    )
+
+    save_bundle(bundle_path, name="tv16_bundle", scene_state=scene_state)
+
+    scene_file = bundle_path / "scene" / "state.json"
+    assert scene_file.exists()
+    with scene_file.open(encoding="utf-8") as handle:
+        raw_state = json.load(handle)
+
+    assert raw_state["base_state"]["raster_overlays"][0]["path"].startswith("assets/overlays/")
+    assert raw_state["base_state"]["preset"]["hdr_path"].startswith("assets/hdri/")
+
+    loaded = load_bundle(bundle_path)
+    assert loaded.get_active_variant_id() == "review"
+    assert [variant.id for variant in loaded.list_variants()] == ["review", "imagery"]
+    assert [layer.id for layer in loaded.list_review_layers()] == ["annotations", "imagery"]
+    assert loaded.scene_state.base.raster_overlays[0].path == str((bundle_path / raw_state["base_state"]["raster_overlays"][0]["path"]).resolve())
+    assert loaded.hdr_path == (bundle_path / raw_state["base_state"]["preset"]["hdr_path"]).resolve()
+
+    effective = loaded.effective_scene_state()
+    assert effective.preset == {"exposure": 3.0}
+    assert len(effective.labels) == 2
+    assert len(effective.raster_overlays) == 1
+
+
+def test_effective_scene_state_respects_variant_layers_and_manual_overrides(tmp_path: Path):
+    """Layer overrides apply on top of the active variant and clear when variants change."""
+    bundle_path = tmp_path / "review_state.forge3d"
+    scene_state = SceneState(
+        base=SceneBaseState(labels=[{"text": "Base", "world_pos": [0.0, 0.0, 0.0]}]),
+        review_layers=[
+            ReviewLayer(id="roads", labels=[{"text": "Roads", "world_pos": [1.0, 0.0, 0.0]}]),
+            ReviewLayer(id="contours", labels=[{"text": "Contours", "world_pos": [2.0, 0.0, 0.0]}]),
+        ],
+        variants=[
+            SceneVariant(id="focus", active_layer_ids=["roads"]),
+            SceneVariant(id="analysis", active_layer_ids=["contours"]),
+        ],
+        active_variant_id="focus",
+    )
+    save_bundle(bundle_path, name="review_state", scene_state=scene_state)
+
+    loaded = load_bundle(bundle_path)
+    assert [label["text"] for label in loaded.effective_scene_state().labels] == ["Base", "Roads"]
+
+    loaded.set_review_layer_visible("contours", True)
+    assert [label["text"] for label in loaded.effective_scene_state().labels] == ["Base", "Roads", "Contours"]
+
+    loaded.set_review_layer_visible("roads", False)
+    assert [label["text"] for label in loaded.effective_scene_state().labels] == ["Base", "Contours"]
+
+    loaded.apply_variant("analysis")
+    assert loaded.get_active_variant_id() == "analysis"
+    assert [label["text"] for label in loaded.effective_scene_state().labels] == ["Base", "Contours"]
+
+
+def test_loaded_bundle_rejects_unknown_variant_and_layer_mutations(tmp_path: Path):
+    """Bad layer and variant IDs fail explicitly."""
+    bundle_path = tmp_path / "invalid_ops.forge3d"
+    save_bundle(
+        bundle_path,
+        name="invalid_ops",
+        scene_state=SceneState(
+            review_layers=[ReviewLayer(id="notes")],
+            variants=[SceneVariant(id="default", active_layer_ids=["notes"])],
+            active_variant_id="default",
+        ),
+    )
+
+    loaded = load_bundle(bundle_path)
+    with pytest.raises(KeyError, match="Unknown scene variant"):
+        loaded.apply_variant("missing")
+    with pytest.raises(KeyError, match="Unknown review layer"):
+        loaded.set_review_layer_visible("missing", True)
+
+
+def test_load_v1_bundle_synthesizes_empty_review_registry(tmp_path: Path):
+    """Version 1 bundles load into an empty TV16 registry with base mirrors preserved."""
+    bundle_path = tmp_path / "legacy.forge3d"
+    (bundle_path / "overlays").mkdir(parents=True)
+    (bundle_path / "camera").mkdir()
+    (bundle_path / "render").mkdir()
+    (bundle_path / "assets" / "hdri").mkdir(parents=True)
+
+    hdr_path = bundle_path / "assets" / "hdri" / "legacy.hdr"
+    hdr_path.write_bytes(b"legacy-hdr")
+
+    with (bundle_path / "overlays" / "vectors.geojson").open("w", encoding="utf-8") as handle:
+        json.dump([{"vertices": [[0.0, 0.0, 0.0]], "indices": [0]}], handle)
+    with (bundle_path / "overlays" / "labels.json").open("w", encoding="utf-8") as handle:
+        json.dump([{"text": "Legacy", "world_pos": [0.0, 0.0, 0.0]}], handle)
+    with (bundle_path / "camera" / "bookmarks.json").open("w", encoding="utf-8") as handle:
+        json.dump(
+            [
+                CameraBookmark(
+                    name="legacy",
+                    eye=(1.0, 2.0, 3.0),
+                    target=(0.0, 0.0, 0.0),
+                ).to_dict()
+            ],
+            handle,
+            indent=2,
+        )
+    with (bundle_path / "render" / "preset.json").open("w", encoding="utf-8") as handle:
+        json.dump({"exposure": 2.0}, handle, indent=2)
+
+    manifest = {
+        "version": 1,
+        "name": "legacy",
+        "created_at": "2026-03-16T00:00:00+00:00",
+        "checksums": {
+            "overlays/vectors.geojson": "ignored",
+            "overlays/labels.json": "ignored",
+            "camera/bookmarks.json": "ignored",
+            "render/preset.json": "ignored",
+        },
+        "camera_bookmarks": [
+            CameraBookmark(
+                name="legacy",
+                eye=(1.0, 2.0, 3.0),
+                target=(0.0, 0.0, 0.0),
+            ).to_dict()
+        ],
+        "preset": {"exposure": 2.0},
+    }
+    with (bundle_path / "manifest.json").open("w", encoding="utf-8") as handle:
+        json.dump(manifest, handle, indent=2)
+
+    loaded = load_bundle(bundle_path, verify_checksums=False)
+    assert loaded.scene_state.active_variant_id is None
+    assert loaded.scene_state.review_layers == []
+    assert loaded.scene_state.variants == []
+    assert loaded.scene_state.base.preset is not None
+    assert loaded.scene_state.base.preset["exposure"] == 2.0
+    assert loaded.scene_state.base.preset["hdr_path"] == str(hdr_path.resolve())
+    assert len(loaded.scene_state.base.camera_bookmarks) == 1
+    assert loaded.scene_state.base.labels[0]["kind"] == "point"

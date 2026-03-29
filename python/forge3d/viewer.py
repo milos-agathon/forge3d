@@ -245,6 +245,27 @@ class ViewerHandle:
         self._cleanup_paths.extend(cleanup_paths)
         self._send_command({"cmd": "load_terrain", "path": actual_path})
 
+    def load_bundle(
+        self,
+        path_or_bundle: Union[str, Path, "LoadedBundle"],
+        variant_id: Optional[str] = None,
+    ) -> "LoadedBundle":
+        """Load a bundle's terrain and TV16 review state into the viewer."""
+        from .bundle import LoadedBundle, load_bundle as load_scene_bundle
+
+        bundle = (
+            path_or_bundle
+            if isinstance(path_or_bundle, LoadedBundle)
+            else load_scene_bundle(path_or_bundle)
+        )
+        if variant_id is not None:
+            bundle.apply_variant(variant_id)
+
+        if bundle.dem_path is not None:
+            self.load_terrain(bundle.dem_path)
+        self._send_command({"cmd": "set_scene_review_state", "state": bundle.scene_state.to_dict()})
+        return bundle
+
     def load_overlay(
         self,
         name: str,
@@ -362,6 +383,43 @@ class ViewerHandle:
     def clear_terrain_scatter(self) -> None:
         """Clear all terrain scatter batches from the active terrain scene."""
         self._send_command({"cmd": "clear_terrain_scatter"})
+
+    def list_scene_variants(self) -> List[Dict[str, Any]]:
+        """Return structured summaries for installed scene variants."""
+        response = self._send_command({"cmd": "list_scene_variants"})
+        variants = response.get("scene_variants")
+        if variants is None:
+            raise ViewerError("list_scene_variants returned no variant data")
+        return variants
+
+    def list_review_layers(self) -> List[Dict[str, Any]]:
+        """Return structured summaries for installed review layers."""
+        response = self._send_command({"cmd": "list_review_layers"})
+        layers = response.get("review_layers")
+        if layers is None:
+            raise ViewerError("list_review_layers returned no layer data")
+        return layers
+
+    def get_active_scene_variant(self) -> Optional[str]:
+        """Return the active scene variant ID, if any."""
+        response = self._send_command({"cmd": "get_active_scene_variant"})
+        if "active_scene_variant" not in response:
+            raise ViewerError("get_active_scene_variant returned no variant data")
+        return response.get("active_scene_variant")
+
+    def apply_scene_variant(self, variant_id: str) -> None:
+        """Apply a named scene variant and clear manual layer overrides."""
+        self._send_command({"cmd": "apply_scene_variant", "variant_id": str(variant_id)})
+
+    def set_review_layer_visible(self, layer_id: str, visible: bool) -> None:
+        """Apply a manual review-layer visibility override."""
+        self._send_command(
+            {
+                "cmd": "set_review_layer_visible",
+                "layer_id": str(layer_id),
+                "visible": bool(visible),
+            }
+        )
     
     def set_orbit_camera(
         self,

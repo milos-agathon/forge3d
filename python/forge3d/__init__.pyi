@@ -6,6 +6,21 @@ from __future__ import annotations
 from typing import Tuple, Optional, Sequence, Any, Dict, Literal, Mapping, Callable
 import os
 import numpy as np
+from .bundle import (
+    BUNDLE_VERSION,
+    BundleManifest,
+    CameraBookmark,
+    LoadedBundle,
+    RasterOverlaySpec,
+    ReviewLayer,
+    SceneBaseState,
+    SceneState,
+    SceneVariant,
+    TerrainMeta,
+    is_bundle,
+    load_bundle,
+    save_bundle,
+)
 from .terrain_params import (
     LightSettings,
     IblSettings,

@@ -11,8 +11,9 @@ use super::protocol::{
     ViewerStats,
 };
 use crate::viewer::event_loop::{
-    get_lasso_state, get_pick_events, get_terrain_volumetrics_report, take_pending_bundle_load,
-    take_pending_bundle_save,
+    get_lasso_state, get_pick_events, get_scene_review_state, get_terrain_volumetrics_report,
+    take_pending_bundle_load, take_pending_bundle_save, update_active_scene_variant,
+    update_scene_review_state,
 };
 use crate::viewer::viewer_enums::ViewerCmd;
 
@@ -193,6 +194,137 @@ where
                                     IpcResponse::with_terrain_volumetrics_report(report.clone())
                                 } else {
                                     IpcResponse::error("Failed to lock terrain volumetrics report")
+                                }
+                            }
+                            IpcRequest::ListSceneVariants => {
+                                if let Ok(snapshot) = get_scene_review_state().lock() {
+                                    IpcResponse::with_scene_variants(snapshot.scene_variants.clone())
+                                } else {
+                                    IpcResponse::error("Failed to lock scene review state")
+                                }
+                            }
+                            IpcRequest::ListReviewLayers => {
+                                if let Ok(snapshot) = get_scene_review_state().lock() {
+                                    IpcResponse::with_review_layers(snapshot.review_layers.clone())
+                                } else {
+                                    IpcResponse::error("Failed to lock scene review state")
+                                }
+                            }
+                            IpcRequest::GetActiveSceneVariant => {
+                                if let Ok(snapshot) = get_scene_review_state().lock() {
+                                    IpcResponse::with_active_scene_variant(
+                                        snapshot.active_scene_variant.clone(),
+                                    )
+                                } else {
+                                    IpcResponse::error("Failed to lock scene review state")
+                                }
+                            }
+                            req @ IpcRequest::SetSceneReviewState { .. } => {
+                                match ipc_request_to_viewer_cmd(&req) {
+                                    Ok(Some(cmd)) => {
+                                        let snapshot = match &cmd {
+                                            ViewerCmd::SetSceneReviewState { state } => {
+                                                Some(state.snapshot())
+                                            }
+                                            _ => None,
+                                        };
+                                        match cmd_sender(cmd) {
+                                            Ok(()) => {
+                                                if let Some(snapshot) = snapshot {
+                                                    update_scene_review_state(snapshot);
+                                                }
+                                                IpcResponse::success()
+                                            }
+                                            Err(e) => {
+                                                eprintln!("[IPC] Command error: {}", e);
+                                                IpcResponse::error(e)
+                                            }
+                                        }
+                                    }
+                                    Ok(None) => {
+                                        IpcResponse::error("Internal error: unhandled special request")
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[IPC] Conversion error: {}", e);
+                                        IpcResponse::error(e)
+                                    }
+                                }
+                            }
+                            ref req @ IpcRequest::ApplySceneVariant { ref variant_id } => {
+                                let variant_id = variant_id.clone();
+                                let variant_exists = get_scene_review_state()
+                                    .lock()
+                                    .map(|snapshot| {
+                                        snapshot
+                                            .scene_variants
+                                            .iter()
+                                            .any(|variant| variant.id == variant_id)
+                                    })
+                                    .unwrap_or(false);
+                                if !variant_exists {
+                                    IpcResponse::error(format!(
+                                        "Unknown scene variant: {}",
+                                        variant_id
+                                    ))
+                                } else {
+                                    match ipc_request_to_viewer_cmd(&req) {
+                                        Ok(Some(cmd)) => match cmd_sender(cmd) {
+                                            Ok(()) => {
+                                                update_active_scene_variant(Some(variant_id));
+                                                IpcResponse::success()
+                                            }
+                                            Err(e) => {
+                                                eprintln!("[IPC] Command error: {}", e);
+                                                IpcResponse::error(e)
+                                            }
+                                        },
+                                        Ok(None) => {
+                                            IpcResponse::error(
+                                                "Internal error: unhandled special request",
+                                            )
+                                        }
+                                        Err(e) => {
+                                            eprintln!("[IPC] Conversion error: {}", e);
+                                            IpcResponse::error(e)
+                                        }
+                                    }
+                                }
+                            }
+                            ref req @ IpcRequest::SetReviewLayerVisible { ref layer_id, .. } => {
+                                let layer_id = layer_id.clone();
+                                let layer_exists = get_scene_review_state()
+                                    .lock()
+                                    .map(|snapshot| {
+                                        snapshot
+                                            .review_layers
+                                            .iter()
+                                            .any(|layer| layer.id == layer_id)
+                                    })
+                                    .unwrap_or(false);
+                                if !layer_exists {
+                                    IpcResponse::error(format!(
+                                        "Unknown review layer: {}",
+                                        layer_id
+                                    ))
+                                } else {
+                                    match ipc_request_to_viewer_cmd(&req) {
+                                        Ok(Some(cmd)) => match cmd_sender(cmd) {
+                                            Ok(()) => IpcResponse::success(),
+                                            Err(e) => {
+                                                eprintln!("[IPC] Command error: {}", e);
+                                                IpcResponse::error(e)
+                                            }
+                                        },
+                                        Ok(None) => {
+                                            IpcResponse::error(
+                                                "Internal error: unhandled special request",
+                                            )
+                                        }
+                                        Err(e) => {
+                                            eprintln!("[IPC] Conversion error: {}", e);
+                                            IpcResponse::error(e)
+                                        }
+                                    }
                                 }
                             }
                             _ => match ipc_request_to_viewer_cmd(&req) {

@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.20.0"
+__version__ = "1.21.0"
 version = __version__
 
 import numpy as np
@@ -303,16 +303,33 @@ from .helpers.frame_dump import FrameDumper, dump_frame_sequence
 # -----------------------------------------------------------------------------
 # Scene Bundle (.forge3d)
 # -----------------------------------------------------------------------------
-from .bundle import (
-    save_bundle,
-    load_bundle,
-    is_bundle,
-    BundleManifest,
-    LoadedBundle,
-    CameraBookmark,
-    TerrainMeta,
-    BUNDLE_VERSION,
+_BUNDLE_EXPORT_NAMES = (
+    "save_bundle",
+    "load_bundle",
+    "is_bundle",
+    "BundleManifest",
+    "LoadedBundle",
+    "CameraBookmark",
+    "RasterOverlaySpec",
+    "SceneBaseState",
+    "ReviewLayer",
+    "SceneVariant",
+    "SceneState",
+    "TerrainMeta",
+    "BUNDLE_VERSION",
 )
+_AVAILABLE_BUNDLE_EXPORTS: list[str] = []
+try:
+    from . import bundle as _bundle_module
+except Exception:
+    # Keep unrelated imports working while bundle.py is mid-edit or otherwise
+    # unavailable. Direct bundle consumers can still import forge3d.bundle.
+    _bundle_module = None
+else:
+    for _name in _BUNDLE_EXPORT_NAMES:
+        if hasattr(_bundle_module, _name):
+            globals()[_name] = getattr(_bundle_module, _name)
+            _AVAILABLE_BUNDLE_EXPORTS.append(_name)
 
 # -----------------------------------------------------------------------------
 # P3-reproject: CRS utilities
@@ -461,15 +478,6 @@ __all__ = [
     "viewer_ipc",
     "colors",
     "interactive",
-    # Scene Bundle
-    "save_bundle",
-    "load_bundle",
-    "is_bundle",
-    "BundleManifest",
-    "LoadedBundle",
-    "CameraBookmark",
-    "TerrainMeta",
-    "BUNDLE_VERSION",
     # Datasets
     "mini_dem",
     "mini_dem_path",
@@ -520,3 +528,4 @@ __all__ = [
     "material_from_tags",
     "material_from_name",
 ]
+__all__.extend(_AVAILABLE_BUNDLE_EXPORTS)
