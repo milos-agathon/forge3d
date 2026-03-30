@@ -77,6 +77,7 @@ class ViewerHandle:
         theta_deg: float,
         radius: float,
         fov_deg: Optional[float] = ...,
+        target: Optional[tuple[float, float, float]] = ...,
     ) -> None: ...
     def snapshot(
         self,

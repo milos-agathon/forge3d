@@ -10,53 +10,39 @@ impl ViewerTerrainScene {
         flags: &ScreenRenderFlags,
     ) -> ScreenRenderState {
         let (
-            phi,
-            theta,
             r,
-            tw,
-            th,
             terrain_z_scale,
+            terrain_width,
+            h_range,
             domain,
             fov_deg,
             sun_azimuth_deg,
             sun_elevation_deg,
+            eye,
+            target,
+            view_mat,
         ) = {
             let terrain = self.terrain.as_ref().unwrap();
             (
-                terrain.cam_phi_deg.to_radians(),
-                terrain.cam_theta_deg.to_radians(),
                 terrain.cam_radius,
-                terrain.dimensions.0,
-                terrain.dimensions.1,
                 terrain.z_scale,
+                terrain.terrain_width(),
+                terrain.height_range(),
                 terrain.domain,
                 terrain.cam_fov_deg,
                 terrain.sun_azimuth_deg,
                 terrain.sun_elevation_deg,
+                terrain.camera_eye(),
+                terrain.camera_target(),
+                terrain.camera_view_matrix(),
             )
         };
-
-        let terrain_width = tw.max(th) as f32;
-        let h_range = domain.1 - domain.0;
         let legacy_z_scale = terrain_z_scale * h_range * 1000.0 / terrain_width.max(1.0);
         let shader_z_scale = if flags.use_pbr {
             terrain_z_scale
         } else {
             legacy_z_scale
         };
-        let center_y = if flags.use_pbr {
-            h_range * terrain_z_scale * 0.5
-        } else {
-            terrain_width * legacy_z_scale * 0.001 * 0.5
-        };
-        let center = glam::Vec3::new(terrain_width * 0.5, center_y, terrain_width * 0.5);
-
-        let eye = glam::Vec3::new(
-            center.x + r * theta.sin() * phi.cos(),
-            center.y + r * theta.cos(),
-            center.z + r * theta.sin() * phi.sin(),
-        );
-        let view_mat = glam::Mat4::look_at_rh(eye, center, glam::Vec3::Y);
         let proj_base = glam::Mat4::perspective_rh(
             fov_deg.to_radians(),
             width as f32 / height as f32,
@@ -111,8 +97,8 @@ impl ViewerTerrainScene {
             };
             println!("[render] Expected Y range: 0 to {:.1}", max_y);
             println!(
-                "[render] Camera center: ({:.1}, {:.1}, {:.1})",
-                center.x, center.y, center.z
+                "[render] Camera target: ({:.1}, {:.1}, {:.1})",
+                target.x, target.y, target.z
             );
         });
 

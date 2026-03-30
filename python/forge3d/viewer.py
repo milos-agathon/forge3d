@@ -427,15 +427,18 @@ class ViewerHandle:
         theta_deg: float,
         radius: float,
         fov_deg: Optional[float] = None,
+        target: Optional[Tuple[float, float, float]] = None,
     ) -> None:
         """Set orbit camera parameters (phi/theta/radius).
         
         Args:
             phi_deg: Azimuth angle in degrees (horizontal rotation)
-            theta_deg: Elevation angle in degrees (vertical angle from horizon)
+            theta_deg: Polar angle in degrees measured down from the vertical axis.
+                `0` looks straight down, `90` is level with the horizon.
             radius: Distance from target/center. For terrain scenes this is expressed in the
                 viewer's terrain-width world units, not DEM resolution meters.
             fov_deg: Optional field of view in degrees
+            target: Optional explicit orbit target in terrain-viewer world coordinates
         """
         cmd: Dict[str, Any] = {
             "cmd": "set_terrain_camera",
@@ -445,6 +448,8 @@ class ViewerHandle:
         }
         if fov_deg is not None:
             cmd["fov_deg"] = float(fov_deg)
+        if target is not None:
+            cmd["target"] = [float(target[0]), float(target[1]), float(target[2])]
         self._send_command(cmd)
     
     def snapshot(
@@ -523,6 +528,7 @@ class ViewerHandle:
                 theta_deg=state.theta_deg,
                 radius=state.radius,
                 fov_deg=state.fov_deg,
+                target=getattr(state, "target", None),
             )
             
             # Generate frame path

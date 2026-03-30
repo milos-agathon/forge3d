@@ -19,8 +19,10 @@ class _DummyHandle:
         self.commands.append(("send_ipc", cmd))
         return {"ok": True, "cmd": cmd.get("cmd")}
 
-    def set_orbit_camera(self, phi_deg, theta_deg, radius, fov_deg=None):
-        self.commands.append(("set_orbit_camera", phi_deg, theta_deg, radius, fov_deg))
+    def set_orbit_camera(self, phi_deg, theta_deg, radius, fov_deg=None, target=None):
+        self.commands.append(
+            ("set_orbit_camera", phi_deg, theta_deg, radius, fov_deg, target)
+        )
 
     def set_sun(self, azimuth_deg, elevation_deg):
         self.commands.append(("set_sun", azimuth_deg, elevation_deg))
@@ -93,7 +95,7 @@ def test_viewer_widget_delegates_to_handle_methods(tmp_path):
     assert response == {"ok": True, "cmd": "ping"}
     assert output_path == tmp_path / "widget.png"
     assert output_path.exists()
-    assert ("set_orbit_camera", 45.0, 35.0, 1500.0, 40.0) in dummy.commands
+    assert ("set_orbit_camera", 45.0, 35.0, 1500.0, 40.0, None) in dummy.commands
     assert ("set_sun", 135.0, 30.0) in dummy.commands
 
     widget.close()

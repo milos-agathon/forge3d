@@ -31,7 +31,13 @@ pub enum IpcRequest {
     SaveBundle { path: String, #[serde(default)] name: Option<String> },
     LoadBundle { path: String },
     LoadTerrain { path: String },
-    SetTerrainCamera { #[serde(default = "default_phi")] phi_deg: f32, #[serde(default = "default_theta")] theta_deg: f32, #[serde(default = "default_radius")] radius: f32, #[serde(default = "default_fov")] fov_deg: f32 },
+    SetTerrainCamera {
+        #[serde(default = "default_phi")] phi_deg: f32,
+        #[serde(default = "default_theta")] theta_deg: f32,
+        #[serde(default = "default_radius")] radius: f32,
+        #[serde(default = "default_fov")] fov_deg: f32,
+        #[serde(default)] target: Option<[f32; 3]>,
+    },
     SetTerrainSun { #[serde(default = "default_sun_azimuth")] azimuth_deg: f32, #[serde(default = "default_sun_elevation")] elevation_deg: f32, #[serde(default = "default_sun_intensity")] intensity: f32 },
     SetTerrain {
         #[serde(default)] phi: Option<f32>, #[serde(default)] theta: Option<f32>, #[serde(default)] radius: Option<f32>,
@@ -39,6 +45,7 @@ pub enum IpcRequest {
         #[serde(default)] sun_intensity: Option<f32>, #[serde(default)] ambient: Option<f32>, #[serde(default)] zscale: Option<f32>,
         #[serde(default)] shadow: Option<f32>, #[serde(default)] background: Option<[f32; 3]>, #[serde(default)] water_level: Option<f32>,
         #[serde(default)] water_color: Option<[f32; 3]>,
+        #[serde(default)] target: Option<[f32; 3]>,
     },
     SetTerrainScatter { #[serde(default)] batches: Vec<IpcTerrainScatterBatch> },
     ClearTerrainScatter,

@@ -47,12 +47,13 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             theta_deg,
             radius,
             fov_deg,
+            target,
         } => {
             if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
-                terrain_viewer.set_camera(*phi_deg, *theta_deg, *radius, *fov_deg);
+                terrain_viewer.set_camera(*phi_deg, *theta_deg, *radius, *fov_deg, *target);
                 println!(
-                    "[terrain] Camera: phi={:.1}° theta={:.1}° r={:.1} fov={:.1}°",
-                    phi_deg, theta_deg, radius, fov_deg
+                    "[terrain] Camera: phi={:.1}° theta={:.1}° r={:.1} fov={:.1}° target={:?}",
+                    phi_deg, theta_deg, radius, fov_deg, target
                 );
             }
             true
@@ -85,6 +86,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             background,
             water_level,
             water_color,
+            target,
         } => {
             if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
                 if let Some(terrain) = terrain_viewer.terrain.as_mut() {
@@ -126,6 +128,9 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                     }
                     if let Some(color) = water_color {
                         terrain.water_color = *color;
+                    }
+                    if let Some(value) = target {
+                        terrain.cam_target = *value;
                     }
                 }
                 if let Some(params) = terrain_viewer.get_params() {

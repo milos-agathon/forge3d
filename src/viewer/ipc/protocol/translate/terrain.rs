@@ -24,11 +24,13 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, Strin
             theta_deg,
             radius,
             fov_deg,
+            target,
         } => Ok(Some(ViewerCmd::SetTerrainCamera {
             phi_deg: *phi_deg,
             theta_deg: *theta_deg,
             radius: *radius,
             fov_deg: *fov_deg,
+            target: *target,
         })),
         IpcRequest::SetTerrainSun {
             azimuth_deg,
@@ -53,6 +55,7 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, Strin
             background,
             water_level,
             water_color,
+            target,
         } => Ok(Some(ViewerCmd::SetTerrain {
             phi: *phi,
             theta: *theta,
@@ -67,6 +70,7 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, Strin
             background: *background,
             water_level: *water_level,
             water_color: *water_color,
+            target: *target,
         })),
         IpcRequest::GetTerrainParams => Ok(Some(ViewerCmd::GetTerrainParams)),
         IpcRequest::SetTerrainScatter { batches } => Ok(Some(ViewerCmd::SetTerrainScatter {

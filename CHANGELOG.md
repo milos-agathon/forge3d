@@ -13,6 +13,15 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - Viewer IPC now rejects invalid terrain scatter wind payloads instead of silently replacing them with defaults.
 - Hardened the terrain scatter Python contract so invalid `wind` objects fail fast before serialization.
 
+## [1.22.0] - 2026-03-30
+
+### Added
+- Implemented Epic TV17 terrain camera rigs with reusable orbit, rail, and target-follow rig builders in `forge3d.camera_rigs`.
+- Added target-aware `CameraKeyframe` editing APIs, a dedicated terrain camera rig demo, and regression coverage for determinism, clearance enforcement, and target-bearing playback/export.
+
+### Changed
+- Bumped the package version to `1.22.0`.
+
 ## [1.21.0] - 2026-03-29
 
 ### Added

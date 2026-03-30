@@ -40,6 +40,7 @@ pub(crate) fn register_py_classes(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyLassoState>()?;
     m.add_class::<PyHeightfieldHit>()?;
     m.add_class::<PyPointBuffer>()?;
+    m.add_class::<crate::animation::CameraKeyframe>()?;
     m.add_class::<crate::animation::CameraAnimation>()?;
     m.add_class::<crate::animation::CameraState>()?;
     m.add_class::<crate::labels::py_bindings::PyLabelStyle>()?;

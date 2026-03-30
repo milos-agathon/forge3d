@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.21.0"
+__version__ = "1.22.0"
 version = __version__
 
 import numpy as np
@@ -78,6 +78,7 @@ if _NATIVE_MODULE is not None:
         "HighlightStyle",  # Feature B: Plan 3
         "LassoState",  # Feature B: Plan 3
         "HeightfieldHit",  # Feature B: Plan 3
+        "CameraKeyframe",  # Feature C: Camera animation keyframe editing
         "CameraAnimation",  # Feature C: Camera animation (Plan 1 MVP)
         "CameraState",  # Feature C: Camera animation (Plan 1 MVP)
         "SunPosition",  # P0.3/M2: Sun ephemeris
@@ -131,6 +132,7 @@ from .offline import OfflineProgress, OfflineResult, render_offline
 from .denoise_oidn import oidn_available, oidn_denoise
 from . import presets
 from . import animation
+from . import camera_rigs
 
 # -----------------------------------------------------------------------------
 # Core rendering API
@@ -401,6 +403,9 @@ __all__ = [
     "Frame",
     "AovFrame",
     "HdrFrame",
+    "CameraKeyframe",
+    "CameraAnimation",
+    "CameraState",
     # P0.3/M2: Sun ephemeris
     "SunPosition",
     "sun_position",
@@ -457,6 +462,8 @@ __all__ = [
     "geometry",
     "io",
     "terrain_scatter",
+    "animation",
+    "camera_rigs",
     # Interactive viewer
     "open_viewer",
     "open_viewer_async",

@@ -43,6 +43,48 @@ class TestCameraAnimation:
         assert anim.keyframe_count == 3
         assert anim.duration == 5.0
 
+    def test_get_keyframes_returns_editable_snapshot(self):
+        """Keyframes are inspectable after insertion, including explicit targets."""
+        from forge3d.animation import CameraAnimation
+
+        anim = CameraAnimation()
+        anim.add_keyframe(
+            time=1.0,
+            phi=45.0,
+            theta=35.0,
+            radius=1200.0,
+            fov=50.0,
+            target=(10.0, 20.0, 30.0),
+        )
+
+        keyframes = anim.get_keyframes()
+
+        assert len(keyframes) == 1
+        assert keyframes[0].time == pytest.approx(1.0)
+        assert keyframes[0].phi_deg == pytest.approx(45.0)
+        assert keyframes[0].target == pytest.approx((10.0, 20.0, 30.0))
+
+    def test_replace_and_clear_keyframes(self):
+        """Animations support whole-list replacement and clearing."""
+        from forge3d.animation import CameraAnimation, CameraKeyframe
+
+        anim = CameraAnimation()
+        anim.add_keyframe(time=5.0, phi=180.0, theta=35.0, radius=3000.0, fov=60.0)
+        anim.replace_keyframes(
+            [
+                CameraKeyframe(2.0, 90.0, 40.0, 2000.0, 55.0),
+                CameraKeyframe(0.0, 0.0, 45.0, 2500.0, 55.0, target=(1.0, 2.0, 3.0)),
+            ]
+        )
+
+        replaced = anim.get_keyframes()
+        assert [keyframe.time for keyframe in replaced] == [0.0, 2.0]
+        assert replaced[0].target == pytest.approx((1.0, 2.0, 3.0))
+
+        anim.clear_keyframes()
+        assert anim.keyframe_count == 0
+        assert anim.duration == 0.0
+
     def test_evaluate_single_keyframe(self):
         """Evaluating single keyframe returns that keyframe's values."""
         from forge3d.animation import CameraAnimation
@@ -56,6 +98,7 @@ class TestCameraAnimation:
         assert abs(state.theta_deg - 30.0) < 0.1
         assert abs(state.radius - 1000.0) < 0.1
         assert abs(state.fov_deg - 60.0) < 0.1
+        assert state.target is None
 
     def test_evaluate_at_keyframe_times(self):
         """Evaluation at keyframe times returns exact keyframe values."""
@@ -84,6 +127,34 @@ class TestCameraAnimation:
         state = anim.evaluate(0.5)
         # Midpoint should be approximately 45 degrees (cubic Hermite may vary slightly)
         assert abs(state.phi_deg - 45.0) < 5.0  # Allow some tolerance for cubic interpolation
+
+    def test_target_interpolation_midpoint(self):
+        """Explicit targets interpolate through CameraState."""
+        from forge3d.animation import CameraAnimation
+
+        anim = CameraAnimation()
+        anim.add_keyframe(
+            time=0.0,
+            phi=0.0,
+            theta=45.0,
+            radius=1000.0,
+            fov=60.0,
+            target=(0.0, 10.0, 0.0),
+        )
+        anim.add_keyframe(
+            time=1.0,
+            phi=90.0,
+            theta=45.0,
+            radius=1000.0,
+            fov=60.0,
+            target=(10.0, 20.0, 10.0),
+        )
+
+        state = anim.evaluate(0.5)
+        assert state.target is not None
+        assert state.target[0] == pytest.approx(5.0, abs=5.0)
+        assert state.target[1] == pytest.approx(15.0, abs=5.0)
+        assert state.target[2] == pytest.approx(5.0, abs=5.0)
 
     def test_interpolation_smooth(self):
         """Cubic Hermite interpolation is smooth (monotonic for linear input)."""
@@ -158,6 +229,7 @@ class TestCameraState:
         assert hasattr(state, 'theta_deg')
         assert hasattr(state, 'radius')
         assert hasattr(state, 'fov_deg')
+        assert hasattr(state, 'target')
 
     def test_camera_state_repr(self):
         """CameraState has readable string representation."""

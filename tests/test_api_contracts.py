@@ -71,6 +71,7 @@ class TestNativeModuleSymbols:
         "HdrFrame",
         "OfflineBatchResult",
         "OfflineMetrics",
+        "CameraKeyframe",
         "CameraAnimation",
         "CameraState",
         "ClipmapConfig",
@@ -298,7 +299,60 @@ class TestSceneMethodContracts:
 
 
 # ===========================================================================
-# Section 3: Scene method count snapshot
+# Section 3: Camera animation target contract (TV17)
+# ===========================================================================
+class TestCameraAnimationTargetContract:
+    """Verify the target-aware camera animation API exposed by TV17."""
+
+    def test_camera_keyframe_constructible(self):
+        """CameraKeyframe is constructible and preserves its target tuple."""
+        keyframe = _native.CameraKeyframe(
+            1.25,
+            30.0,
+            40.0,
+            500.0,
+            55.0,
+            (10.0, 20.0, 30.0),
+        )
+        assert keyframe.time == pytest.approx(1.25)
+        assert keyframe.phi_deg == pytest.approx(30.0)
+        assert keyframe.theta_deg == pytest.approx(40.0)
+        assert keyframe.radius == pytest.approx(500.0)
+        assert keyframe.fov_deg == pytest.approx(55.0)
+        assert keyframe.target == pytest.approx((10.0, 20.0, 30.0))
+
+    def test_camera_animation_target_round_trip(self):
+        """Target-bearing keyframes survive add/get/evaluate round-trips."""
+        animation = _native.CameraAnimation()
+        animation.add_keyframe(0.0, 0.0, 45.0, 1000.0, 55.0, (0.0, 10.0, 0.0))
+        animation.add_keyframe(1.0, 90.0, 45.0, 1200.0, 60.0, (100.0, 20.0, 50.0))
+
+        keyframes = animation.get_keyframes()
+        assert len(keyframes) == 2
+        assert keyframes[0].target == pytest.approx((0.0, 10.0, 0.0))
+        assert keyframes[1].target == pytest.approx((100.0, 20.0, 50.0))
+
+        state = animation.evaluate(0.5)
+        assert state.target == pytest.approx((50.0, 15.0, 25.0))
+
+    def test_camera_animation_replace_and_clear(self):
+        """Editable keyframe APIs accept CameraKeyframe instances directly."""
+        animation = _native.CameraAnimation()
+        replacement = [
+            _native.CameraKeyframe(0.0, 10.0, 30.0, 400.0, 40.0),
+            _native.CameraKeyframe(2.0, 20.0, 35.0, 450.0, 45.0, (5.0, 6.0, 7.0)),
+        ]
+
+        animation.replace_keyframes(replacement)
+        assert animation.keyframe_count == 2
+        assert animation.get_keyframes()[1].target == pytest.approx((5.0, 6.0, 7.0))
+
+        animation.clear_keyframes()
+        assert animation.keyframe_count == 0
+
+
+# ===========================================================================
+# Section 4: Scene method count snapshot
 # ===========================================================================
 class TestSceneMethodCount:
     """Guard against accidental bulk removal of Scene methods.
@@ -324,7 +378,7 @@ class TestSceneMethodCount:
 
 
 # ===========================================================================
-# Section 4: Previously-orphaned pyclass types now registered (P0.3)
+# Section 5: Previously-orphaned pyclass types now registered (P0.3)
 # ===========================================================================
 class TestOrphanedClassesRegistered:
     """Verify that previously-orphaned pyclass types are now registered.
@@ -394,8 +448,7 @@ class TestOrphanedClassesRegistered:
 
 
 # ===========================================================================
-# ===========================================================================
-# Section 5: TBN mesh functions exported (P0.4)
+# Section 6: TBN mesh functions exported (P0.4)
 # ===========================================================================
 class TestTbnFunctionsExported:
     """Verify that P0.4 TBN mesh functions are exported and return correct data.

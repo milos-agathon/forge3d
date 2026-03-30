@@ -471,6 +471,25 @@ class TestViewerHandleValidation:
 class TestViewerHandleHelpers:
     """Test higher-level ViewerHandle helper behavior without a live viewer."""
 
+    def test_set_orbit_camera_includes_optional_target(self):
+        """set_orbit_camera forwards explicit terrain targets when provided."""
+        handle = ViewerHandle.__new__(ViewerHandle)
+        sent: list[dict[str, Any]] = []
+        handle._send_command = lambda cmd: sent.append(cmd) or {"ok": True}  # type: ignore[attr-defined]
+
+        handle.set_orbit_camera(45.0, 35.0, 1500.0, fov_deg=40.0, target=(1.0, 2.0, 3.0))
+
+        assert sent == [
+            {
+                "cmd": "set_terrain_camera",
+                "phi_deg": 45.0,
+                "theta_deg": 35.0,
+                "radius": 1500.0,
+                "fov_deg": 40.0,
+                "target": [1.0, 2.0, 3.0],
+            }
+        ]
+
     def test_set_z_scale_uses_set_terrain_command(self):
         """set_z_scale forwards through the terrain IPC surface."""
         handle = ViewerHandle.__new__(ViewerHandle)
@@ -546,6 +565,48 @@ class TestViewerHandleHelpers:
         assert out.exists()
         assert out.read_bytes() == b"png"
         assert elapsed >= 0.15
+
+    def test_render_animation_forwards_target_bearing_states(self, tmp_path):
+        """render_animation keeps using the frame loop while forwarding state.target."""
+        handle = ViewerHandle.__new__(ViewerHandle)
+        orbit_calls: list[tuple[float, float, float, float, Any]] = []
+        snapshots: list[Path] = []
+
+        class _State:
+            def __init__(self, frame: int) -> None:
+                self.phi_deg = 10.0 + frame
+                self.theta_deg = 20.0 + frame
+                self.radius = 30.0 + frame
+                self.fov_deg = 40.0 + frame
+                self.target = (1.0 + frame, 2.0 + frame, 3.0 + frame)
+
+        class _Animation:
+            def get_frame_count(self, fps: int) -> int:
+                assert fps == 2
+                return 3
+
+            def evaluate(self, time: float):
+                return _State(int(round(time * 2)))
+
+        handle.set_orbit_camera = (  # type: ignore[method-assign]
+            lambda phi_deg, theta_deg, radius, fov_deg=None, target=None: orbit_calls.append(
+                (phi_deg, theta_deg, radius, fov_deg, target)
+            )
+        )
+        handle.snapshot = lambda path, width=None, height=None: snapshots.append(Path(path))  # type: ignore[method-assign]
+
+        handle.render_animation(_Animation(), tmp_path, fps=2)
+
+        assert orbit_calls == [
+            (10.0, 20.0, 30.0, 40.0, (1.0, 2.0, 3.0)),
+            (11.0, 21.0, 31.0, 41.0, (2.0, 3.0, 4.0)),
+            (12.0, 22.0, 32.0, 42.0, (3.0, 4.0, 5.0)),
+        ]
+        assert [path.name for path in snapshots] == [
+            "frame_0000.png",
+            "frame_0001.png",
+            "frame_0002.png",
+        ]
 
     def test_get_terrain_volumetrics_report_returns_payload(self):
         """The helper returns the decoded terrain volumetrics report."""

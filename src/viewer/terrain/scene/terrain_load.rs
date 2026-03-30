@@ -151,7 +151,7 @@ impl ViewerTerrainScene {
         });
 
         self.terrain_revision_counter = self.terrain_revision_counter.wrapping_add(1);
-        self.terrain = Some(ViewerTerrainData {
+        let mut terrain = ViewerTerrainData {
             heightmap,
             dimensions: (width, height),
             domain: (min_h, max_h),
@@ -167,6 +167,7 @@ impl ViewerTerrainScene {
             cam_phi_deg: 135.0,
             cam_theta_deg: 45.0,
             cam_fov_deg: 55.0,
+            cam_target: [0.0, 0.0, 0.0],
             sun_azimuth_deg: 135.0,
             sun_elevation_deg: 35.0,
             sun_intensity: 1.0,
@@ -176,7 +177,9 @@ impl ViewerTerrainScene {
             background_color: [0.5, 0.7, 0.9],
             water_level: -999999.0,
             water_color: [0.2, 0.4, 0.6],
-        });
+        };
+        terrain.cam_target = terrain.default_camera_target();
+        self.terrain = Some(terrain);
         update_terrain_volumetrics_report(TerrainVolumetricsReport::default());
 
         println!(
@@ -190,12 +193,16 @@ impl ViewerTerrainScene {
         self.terrain.is_some()
     }
 
-    pub fn set_camera(&mut self, phi: f32, theta: f32, radius: f32, fov: f32) {
+    pub fn set_camera(
+        &mut self,
+        phi: f32,
+        theta: f32,
+        radius: f32,
+        fov: f32,
+        target: Option<[f32; 3]>,
+    ) {
         if let Some(ref mut t) = self.terrain {
-            t.cam_phi_deg = phi;
-            t.cam_theta_deg = theta;
-            t.cam_radius = radius;
-            t.cam_fov_deg = fov;
+            t.set_camera_state(phi, theta, radius, fov, target);
         }
     }
 
@@ -209,8 +216,9 @@ impl ViewerTerrainScene {
 
     pub fn get_params(&self) -> Option<String> {
         self.terrain.as_ref().map(|t| format!(
-            "phi={:.1} theta={:.1} radius={:.0} fov={:.1} | sun_az={:.1} sun_el={:.1} intensity={:.2} ambient={:.2} | zscale={:.2} shadow={:.2}",
+            "phi={:.1} theta={:.1} radius={:.0} fov={:.1} target=({:.1}, {:.1}, {:.1}) | sun_az={:.1} sun_el={:.1} intensity={:.2} ambient={:.2} | zscale={:.2} shadow={:.2}",
             t.cam_phi_deg, t.cam_theta_deg, t.cam_radius, t.cam_fov_deg,
+            t.cam_target[0], t.cam_target[1], t.cam_target[2],
             t.sun_azimuth_deg, t.sun_elevation_deg, t.sun_intensity, t.ambient,
             t.z_scale, t.shadow_intensity
         ))

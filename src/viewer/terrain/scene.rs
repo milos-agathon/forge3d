@@ -7,6 +7,7 @@ use super::shader::TERRAIN_SHADER;
 use super::vector_overlay::{drape_vertices, VectorOverlayLayer, VectorOverlayStack, VectorVertex};
 use crate::shadows::{CsmConfig, CsmRenderer};
 use anyhow::Result;
+use glam::{Mat4, Vec3};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
@@ -75,6 +76,7 @@ pub struct ViewerTerrainData {
     pub cam_phi_deg: f32,
     pub cam_theta_deg: f32,
     pub cam_fov_deg: f32,
+    pub cam_target: [f32; 3],
     // Sun/lighting
     pub sun_azimuth_deg: f32,
     pub sun_elevation_deg: f32,
@@ -89,21 +91,65 @@ pub struct ViewerTerrainData {
 }
 
 impl ViewerTerrainData {
-    /// Set camera state from animation keyframe values
-    pub fn set_camera_state(&mut self, phi_deg: f32, theta_deg: f32, radius: f32, fov_deg: f32) {
+    pub fn terrain_width(&self) -> f32 {
+        self.dimensions.0.max(self.dimensions.1) as f32
+    }
+
+    pub fn height_range(&self) -> f32 {
+        self.domain.1 - self.domain.0
+    }
+
+    pub fn default_camera_target(&self) -> [f32; 3] {
+        [
+            self.terrain_width() * 0.5,
+            self.height_range() * self.z_scale * 0.5,
+            self.terrain_width() * 0.5,
+        ]
+    }
+
+    pub fn camera_target(&self) -> Vec3 {
+        Vec3::from_array(self.cam_target)
+    }
+
+    pub fn camera_eye(&self) -> Vec3 {
+        crate::terrain::camera::orbit_camera(
+            self.camera_target(),
+            self.cam_radius,
+            self.cam_phi_deg,
+            self.cam_theta_deg,
+        )
+    }
+
+    pub fn camera_view_matrix(&self) -> Mat4 {
+        Mat4::look_at_rh(self.camera_eye(), self.camera_target(), Vec3::Y)
+    }
+
+    /// Set camera state from animation keyframe values.
+    pub fn set_camera_state(
+        &mut self,
+        phi_deg: f32,
+        theta_deg: f32,
+        radius: f32,
+        fov_deg: f32,
+        target: Option<[f32; 3]>,
+    ) {
         self.cam_phi_deg = phi_deg;
         self.cam_theta_deg = theta_deg;
         self.cam_radius = radius;
         self.cam_fov_deg = fov_deg;
+        if let Some(target) = target {
+            self.cam_target = target;
+        }
     }
 
-    /// Get current camera state as tuple (phi, theta, radius, fov)
-    pub fn get_camera_state(&self) -> (f32, f32, f32, f32) {
+    /// Get current camera state as tuple (phi, theta, radius, fov, target).
+    pub fn get_camera_state(&self) -> (f32, f32, f32, f32, [f32; 3]) {
         (
             self.cam_phi_deg,
             self.cam_theta_deg,
             self.cam_radius,
             self.cam_fov_deg,
+            self.cam_target,
         )
     }
 }

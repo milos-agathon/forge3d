@@ -591,7 +591,7 @@ The system uses **Cubic Hermite (Catmull-Rom) spline interpolation** with:
 ### Camera Coordinate System
 
 - **phi (azimuth)**: Horizontal rotation, 0° = North, 90° = East, clockwise
-- **theta (elevation)**: Vertical angle from horizon, 0° = level, 90° = straight up
+- **theta (polar angle)**: Vertical angle from the +Y axis, 0° = straight down, 90° = level
 - **radius**: Distance from terrain center in meters
 - **fov**: Vertical field of view in degrees (typical range: 35-70°)
 

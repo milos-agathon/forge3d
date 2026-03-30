@@ -34,6 +34,7 @@ impl ViewerTerrainScene {
         let base_phi = terrain.cam_phi_deg;
         let base_theta = terrain.cam_theta_deg;
         let base_radius = terrain.cam_radius;
+        let base_target = terrain.cam_target;
         let _ = terrain;
 
         // Create accumulation texture (Rgba32Float for HDR)
@@ -135,6 +136,7 @@ impl ViewerTerrainScene {
             terrain.cam_phi_deg = base_phi;
             terrain.cam_theta_deg = base_theta;
             terrain.cam_radius = base_radius;
+            terrain.cam_target = base_target;
         }
 
         // Resolve: create final output and divide by sample count

@@ -1,7 +1,7 @@
 # Forge3D Terrain Visualization Epic Backlog
 
-**Date:** 2026-03-29
-**Sources:** `docs/plans/forge3d_vs_unreal_gap_analysis.md`, direct audit of `src/terrain`, `python/forge3d`, `src/viewer`, `tests/`, and `examples/`, plus a 2026-03-29 re-audit of the current runtime/API surfaces. `docs/superpowers/specs/*` and `docs/superpowers/plans/*` were treated as design and implementation-plan documents, not proof of shipped runtime support.
+**Date:** 2026-03-30
+**Sources:** `docs/plans/forge3d_vs_unreal_gap_analysis.md`, direct audit of `src/terrain`, `python/forge3d`, `src/viewer`, `tests/`, and `examples/`, plus a 2026-03-30 re-audit of the current runtime/API surfaces. `docs/superpowers/specs/*` and `docs/superpowers/plans/*` were treated as design and implementation-plan documents, not proof of shipped runtime support.
 **Scope:** Terrain-first 3D visualization only. This roadmap covers terrain rendering, terrain population, terrain review, and terrain delivery. It excludes editor-product work, gameplay systems, character systems, and generic DCC parity unless they directly improve terrain scenes.
 
 ---
@@ -21,6 +21,7 @@ Forge3D does not have a terrain-rendering foundation problem. It already has the
 - **TV10:** terrain subsurface materials are shipped. The public Python material-layer surface, native decode path, terrain shader integration, and regression coverage are all present in this worktree.
 - **TV12:** offline terrain render quality is shipped. Deterministic accumulation, adaptive sampling, and optional OIDN-based denoising are wired through the public Python API.
 - **TV13:** terrain population LOD pipeline is shipped, including QEM mesh simplification, auto-generated scatter LOD chains, and HLOD clustering/runtime integration.
+- **TV17:** terrain camera rigs are shipped. `forge3d.camera_rigs` exposes orbit, rail, and target-follow rigs with terrain-clearance enforcement, bake-to-`CameraAnimation`, a dedicated demo, and regression coverage.
 - **TV21:** terrain-mesh blending and contact integration are shipped, including per-batch blend/contact controls across the native renderer and viewer paths.
 - **TV22:** scatter wind animation is shipped, including GPU deformation, viewer/offscreen wiring, validation, and regression coverage.
 - Terrain material virtual texturing is shipped, including paged albedo-family streaming, queryable residency stats, an end-to-end demo, and regression coverage. The public contract already reserves normal and mask families for a later native extension.
@@ -34,7 +35,7 @@ As of 2026-03-25, the clean local worktrees for `epic-12-clean`, `epic-21`, `epi
 
 The sections below separate implemented epics from work that is still open.
 
-As of the 2026-03-29 re-audit, none of the epics listed below as still open have moved to shipped runtime coverage in this worktree. The main change from the earlier draft is tighter wording around the existing foundations: bundles persist terrain metadata, presets, and camera bookmarks; camera animation supports one keyframed path plus frame export; water, curve/ribbon generation, and terrain post effects provide adjacent building blocks but do not by themselves close the remaining terrain-review, delivery, weather, or renderer-gap epics.
+As of the 2026-03-30 re-audit, TV17 has moved to shipped runtime coverage in this worktree. The main change from the earlier draft is tighter wording around the existing foundations: bundles persist terrain metadata, presets, and camera bookmarks; camera animation now also includes reusable terrain rig authoring that bakes into the existing frame-export path; water, curve/ribbon generation, and terrain post effects provide adjacent building blocks but do not by themselves close the remaining terrain-review, delivery, weather, or renderer-gap epics.
 
 ---
 
@@ -75,7 +76,7 @@ Only F1-F3 work is considered here. Higher-cost engine-scale work stays out of t
 | **Terrain-mesh blending and contact integration** | Unreal: terrain/mesh blending, contact integration, terrain-aware surface transitions | **Implemented.** Terrain/mesh seam softening, terrain-aware contact darkening, per-batch controls, viewer IPC wiring, a demo, and regression coverage are present in the shipped codebase. | F2 | Medium-High | **Done** |
 | **Scatter wind animation** | Unreal: foliage wind; Blender: animated vegetation workflows | **Implemented.** Scatter wind settings, GPU deformation, viewer/offscreen wiring, time-driven animation plumbing, validation, examples, and regression coverage are present. | F1-F2 | Medium-High | **Done** |
 | **Terrain scene variants and review layers** | Unreal: Data Layers; Blender-adjacent: alternate scene states | **Partial.** Bundles persist terrain metadata, camera bookmarks, and presets, but there is still no named terrain-variant schema, grouped review-layer visibility model, or atomic apply/list API. | F1-F2 | High | **Build** |
-| **Terrain camera rig toolkit** | Unreal: camera rigs; Blender: path- and constraint-driven flyovers | **Partial.** `CameraAnimation`, example flyovers, and offline frame enumeration exist, but reusable orbit/rail/target-follow terrain rig primitives and bake-to-animation APIs do not. | F1-F2 | High | **Build** |
+| **Terrain camera rig toolkit** | Unreal: camera rigs; Blender: path- and constraint-driven flyovers | **Implemented.** `forge3d.camera_rigs` exposes orbit, rail, and target-follow rigs, bakes them into editable `CameraAnimation` keyframes, renders through the existing viewer/frame-export path, and is covered by a preset demo plus regression tests for determinism, frame counts, and clearance behavior. | F1-F2 | High | **Done** |
 | **Terrain shot queue and bounded timeline** | Unreal: Movie Render Queue + Sequencer; Blender: repeatable batch render workflows | **Partial.** Terrain AOV output and single-animation frame export exist, but there is no terrain shot manifest, bounded track model, pass-aware multi-shot queue, or resume semantics. | F2-F3 | High | **Build** |
 | **Page-based terrain shadowing** | Unreal: Virtual Shadow Maps | **Missing.** Design and implementation-plan docs exist for TV11, but the runtime terrain shadow path audited here still does not expose `shadow_backend`, paged-shadow settings, a shadow page cache, or paged-shadow stats. | F3 | Medium | **Defer** |
 | **Coastal / hydrology water upgrade** | Blender: Ocean modifier; Unreal: higher-end water simulation | **Missing.** Current water remains an analytic wave/foam path with `ocean`/`lake`/`river` presets rather than an FFT/spectrum-driven coastal or hydrology workflow. | F2 | Medium | **Conditional** |
@@ -89,7 +90,7 @@ Only F1-F3 work is considered here. Higher-cost engine-scale work stays out of t
 
 ## 5. Core Build Backlog
 
-The epics below are the remaining terrain-first work that is both feasible and worth building now. Local reflection probes, TV13, TV21, and TV22 are no longer part of this section because they now have shipped runtime coverage.
+The epics below are the remaining terrain-first work that is both feasible and worth building now. Local reflection probes, TV13, TV17, TV21, and TV22 are no longer part of this section because they now have shipped runtime coverage.
 
 ### Review and Delivery
 
@@ -106,20 +107,6 @@ The epics below are the remaining terrain-first work that is both feasible and w
 | **TV16.1 Add named terrain variants and review layers** | Extend bundles and runtime state with named variants and grouped layer visibility. | A bundle can persist named variants that share one terrain asset set, and the schema distinguishes between per-layer visibility and whole-variant activation. |
 | **TV16.2 Add atomic apply/list APIs** | Make variants usable from Python and IPC without ad hoc state juggling. | Clients can list variants, query the active variant, toggle layers, and apply a variant in one state transition; invalid IDs fail explicitly. |
 | **TV16.3 Add persistence and state-isolation tests** | Ensure variant switching is deterministic and bounded. | Tests prove that switching variants changes only declared overlay/scatter/label/preset state and survives bundle round-trip without silent state loss. |
-
-### Epic TV17 - Terrain Camera Rig Toolkit
-
-**Why this is in scope:** Keyframes exist, but terrain flyovers are still too manual. The missing layer is reusable rig authoring for orbit, rail, and constrained follow cameras.
-
-**Feasibility:** F1-F2  
-**Estimate:** 12-20 pd
-**Priority:** P2
-
-| Task | Scope | Definition of done |
-|---|---|---|
-| **TV17.1 Add terrain-relevant rig primitives** | Implement orbit, rail/path, and target-follow rigs with terrain-clearance control. | Each rig produces a deterministic camera path from a small parameter set, and clearance-constrained rigs do not intersect the terrain on representative DEMs. |
-| **TV17.2 Bake rigs into `CameraAnimation`** | Keep one playback/runtime model by compiling rigs into editable camera keyframes. | Rigs bake into `CameraAnimation`, can be inspected and edited, and render through the existing frame queue without a second animation runtime. |
-| **TV17.3 Add rig examples and tests** | Cover usability and safety. | At least two example flyovers and regression tests verify deterministic timing, frame counts, and clearance behavior. |
 
 ### Epic TV18 - Terrain Shot Queue and Bounded Timeline
 
@@ -196,6 +183,7 @@ The following should not be smuggled back into the terrain roadmap:
 | TV10 - Terrain Subsurface Materials | Implemented |
 | TV12 - Terrain Offline Render Quality | Implemented |
 | TV13 - Terrain Population LOD Pipeline | Implemented |
+| TV17 - Terrain Camera Rig Toolkit | Implemented |
 | Terrain Material Virtual Texturing | Implemented |
 | TV21 - Terrain-Mesh Blending and Contact Integration | Implemented |
 | TV22 - Scatter Wind Animation | Implemented |
@@ -205,10 +193,9 @@ The following should not be smuggled back into the terrain roadmap:
 | Epic | Low | High |
 |---|---:|---:|
 | TV16 - Terrain Scene Variants and Review Layers | 10 pd | 16 pd |
-| TV17 - Terrain Camera Rig Toolkit | 12 pd | 20 pd |
 | TV18 - Terrain Shot Queue and Bounded Timeline | 18 pd | 28 pd |
 | TV7 - Weather Particle Foundation | 25 pd | 40 pd |
-| **Total core backlog** | **65 pd** | **104 pd** |
+| **Total core backlog** | **53 pd** | **84 pd** |
 
 ### Conditional and deferred backlog
 
@@ -229,7 +216,7 @@ The following should not be smuggled back into the terrain roadmap:
 
 | Phase | Epics | Reason |
 |---|---|---|
-| **Phase 1** | TV16, TV17 | Add review-state management and reusable flyover authoring now that the remaining renderer-only backlog is narrower. |
+| **Phase 1** | TV16 | Add review-state management now that reusable flyover authoring has shipped. |
 | **Phase 2** | TV18 | Build the shot queue and bounded timeline after variants and rig authoring exist. |
 | **Phase 3** | TV7 | Weather particles matter, but they are less foundational than the review and delivery tooling backlog. |
 | **Later / optional** | TV8, TV9, TV11, TV14, TV15, TV19, TV23 | Only pursue when product direction or scene requirements clearly justify them. |
@@ -238,9 +225,9 @@ The following should not be smuggled back into the terrain roadmap:
 
 ## 10. Bottom Line
 
-Forge3D no longer has a terrain-roadmap problem of "missing everything." Terrain local probe lighting, terrain material virtual texturing, TV6, TV10, TV12, TV13, TV21, and TV22 are now in the shipped column, so the real remaining gaps are narrower and more concrete. The 2026-03-29 repo re-audit did not change that status split:
+Forge3D no longer has a terrain-roadmap problem of "missing everything." Terrain local probe lighting, terrain material virtual texturing, TV6, TV10, TV12, TV13, TV17, TV21, and TV22 are now in the shipped column, so the real remaining gaps are narrower and more concrete. The 2026-03-30 repo re-audit tightened that split further:
 
-1. **Review and delivery workflow:** TV16, TV17, and TV18.
+1. **Review and delivery workflow:** TV16 and TV18.
 2. **Terrain atmosphere and weather richness:** later TV7.
 3. **Conditional renderer upgrades that still are not in runtime code despite adjacent design work:** especially TV11.
 

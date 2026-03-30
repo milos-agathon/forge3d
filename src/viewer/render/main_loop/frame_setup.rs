@@ -87,26 +87,13 @@ impl Viewer {
             let (view_proj, camera_pos) = if let Some(ref terrain_viewer) = self.terrain_viewer {
                 if let Some(ref terrain) = terrain_viewer.terrain {
                     // Use terrain camera parameters
-                    let phi = terrain.cam_phi_deg.to_radians();
-                    let theta = terrain.cam_theta_deg.to_radians();
-                    let r = terrain.cam_radius;
-                    let (tw, th) = terrain.dimensions;
-                    let terrain_width = tw.max(th) as f32;
-                    let h_range = terrain.domain.1 - terrain.domain.0;
-                    let center_y = h_range * terrain.z_scale * 0.5;
-                    let center =
-                        glam::Vec3::new(terrain_width * 0.5, center_y, terrain_width * 0.5);
-                    let eye = glam::Vec3::new(
-                        center.x + r * theta.sin() * phi.cos(),
-                        center.y + r * theta.cos(),
-                        center.z + r * theta.sin() * phi.sin(),
-                    );
-                    let view_mat = Mat4::look_at_rh(eye, center, glam::Vec3::Y);
+                    let eye = terrain.camera_eye();
+                    let view_mat = terrain.camera_view_matrix();
                     let proj = Mat4::perspective_rh(
                         terrain.cam_fov_deg.to_radians(),
                         self.config.width as f32 / self.config.height as f32,
                         1.0,
-                        r * 10.0,
+                        terrain.cam_radius * 10.0,
                     );
                     (proj * view_mat, Some(eye))
                 } else {
