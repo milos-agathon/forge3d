@@ -1,6 +1,6 @@
 """P2.1/M5: Clipmap structure tests.
 
-Exit criteria from docs/plan.md:530:
+Exit criteria from docs/roadmap/roadmap.md:530:
 - [ ] Clipmap triangle budget verification (≥40% reduction at distance)
 """
 

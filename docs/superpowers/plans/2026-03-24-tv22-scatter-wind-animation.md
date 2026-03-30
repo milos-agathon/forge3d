@@ -1447,7 +1447,7 @@ git commit -m "feat(tv22): add scatter wind animation example with Mount Fuji DE
 ## Task 16: Documentation
 
 **Files:**
-- Create or modify: `docs/tv22-scatter-wind-animation.md`
+- Create or modify: `docs/terrain/tv22-scatter-wind-animation.md`
 
 - [ ] **Step 1: Write feature documentation**
 

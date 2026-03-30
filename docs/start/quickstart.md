@@ -88,7 +88,7 @@ widget.snapshot("widget-snapshot.png")
 
 ## Next steps
 
-- Follow the GIS workflow in [](tutorials/gis-track/index.md).
-- Follow the notebook-first workflow in [](tutorials/python-track/index.md).
-- Browse finished compositions in [](gallery/index.md).
-- See the surface area in [](api/api_reference.rst).
+- Follow the GIS workflow in [GIS Track](../tutorials/gis-track/index.md).
+- Follow the notebook-first workflow in [Python Track](../tutorials/python-track/index.md).
+- Browse finished compositions in [Gallery](../gallery/index.md).
+- See the surface area in [API Reference](../api/api_reference.rst).

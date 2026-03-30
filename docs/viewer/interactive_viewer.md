@@ -101,6 +101,6 @@ For script-friendly wrappers around these commands, see `forge3d.viewer_ipc`.
 
 ## Related pages
 
-- [Quickstart](../quickstart.md)
+- [Quickstart](../start/quickstart.md)
 - [GIS Track](../tutorials/gis-track/index.md)
 - [Python Track](../tutorials/python-track/index.md)

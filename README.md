@@ -100,7 +100,7 @@ Two tracks depending on your background:
 
 - **GIS professionals** — [Visualize your first DEM &rarr;](https://milos-agathon.github.io/forge3d/tutorials/gis-track/)
 - **Python developers** — [Your first 3D terrain &rarr;](https://milos-agathon.github.io/forge3d/tutorials/python-track/)
-- **Architecture overview** — [How forge3d works &rarr;](https://milos-agathon.github.io/forge3d/architecture.html)
+- **Architecture overview** — [How forge3d works &rarr;](https://milos-agathon.github.io/forge3d/start/architecture.html)
 
 ## Jupyter
 

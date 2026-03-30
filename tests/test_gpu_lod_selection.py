@@ -1,6 +1,6 @@
 """P2.3: GPU LOD selection tests.
 
-Exit criteria from docs/plan.md:
+Exit criteria from docs/roadmap/roadmap.md:
 - Compute shader frustum cull + LOD selection
 - Correct LOD selection based on screen-space error
 """

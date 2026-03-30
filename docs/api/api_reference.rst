@@ -103,12 +103,18 @@ workflow above and some are thin wrappers over native functionality:
 Related Pages
 -------------
 
-* :doc:`../quickstart`
-* :doc:`../terrain-tv1-atmosphere`
-* :doc:`../terrain-tv2-aovs`
-* :doc:`../terrain-tv3-scatter`
-* :doc:`../terrain-tv4-material-variation`
-* :doc:`../terrain-tv10-subsurface`
-* :doc:`../terrain-tv21-blending`
+* :doc:`../start/quickstart`
+* :doc:`../terrain/tv1-atmosphere`
+* :doc:`../terrain/tv2-aovs`
+* :doc:`../terrain/tv3-scatter`
+* :doc:`../terrain/tv4-material-variation`
+* :doc:`../terrain/tv5-probe-lighting`
+* :doc:`../terrain/tv6-heterogeneous-volumetrics`
+* :doc:`../terrain/tv10-subsurface`
+* :doc:`../terrain/tv12-offline-render-quality`
+* :doc:`../terrain/tv13-population-lod-pipeline`
+* :doc:`../terrain/tv20-virtual-texturing`
+* :doc:`../terrain/tv21-blending`
+* :doc:`../terrain/tv22-scatter-wind-animation`
 * :doc:`../tutorials/index`
 * :doc:`../gallery/index`

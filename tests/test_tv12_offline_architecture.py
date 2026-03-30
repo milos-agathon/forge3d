@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON_OFFLINE = ROOT / "python" / "forge3d" / "offline.py"
-TV12_DOC = ROOT / "docs" / "tv12-terrain-offline-render-quality.md"
+TV12_DOC = ROOT / "docs" / "terrain" / "tv12-offline-render-quality.md"
 TV12_SPEC = (
     ROOT / "docs" / "superpowers" / "specs" / "2026-03-22-tv12-terrain-offline-render-quality-design.md"
 )

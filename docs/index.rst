@@ -17,8 +17,8 @@ workflows for overlays, point clouds, map plates, buildings, and bundles.
    :maxdepth: 2
    :caption: Start Here
 
-   quickstart
-   architecture
+   start/quickstart
+   start/architecture
    api/api_reference
 
 .. toctree::
@@ -38,21 +38,25 @@ workflows for overlays, point clouds, map plates, buildings, and bundles.
    :maxdepth: 1
    :caption: Terrain Workflows
 
-   terrain-tv1-atmosphere
-   terrain-tv2-aovs
-   terrain-tv3-scatter
-   terrain-tv4-material-variation
-   terrain-tv5-probe-lighting
-   terrain-tv10-subsurface
-   terrain-tv20-virtual-texturing
-   terrain-tv21-blending
+   terrain/tv1-atmosphere
+   terrain/tv2-aovs
+   terrain/tv3-scatter
+   terrain/tv4-material-variation
+   terrain/tv5-probe-lighting
+   terrain/tv6-heterogeneous-volumetrics
+   terrain/tv10-subsurface
+   terrain/tv12-offline-render-quality
+   terrain/tv13-population-lod-pipeline
+   terrain/tv20-virtual-texturing
+   terrain/tv21-blending
+   terrain/tv22-scatter-wind-animation
 
 .. toctree::
    :maxdepth: 1
    :caption: Product Notes
 
-   pro-boundary-notes
-   launch-blog
+   product/pro-boundary-notes
+   product/launch-blog
 
 Platform Overview
 -----------------
@@ -69,5 +73,5 @@ The current public workflow is intentionally small:
 * ``forge3d.MapPlate``, ``forge3d.bundle``, and ``forge3d.export`` cover
   Pro-gated production packaging workflows around the live scene.
 
-If you are new to the project, start with :doc:`quickstart`, then walk one of
+If you are new to the project, start with :doc:`start/quickstart`, then walk one of
 the two tracks in :doc:`tutorials/index`.

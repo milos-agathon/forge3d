@@ -26,7 +26,7 @@ The package has one rendering path: Python launches the Rust
 `interactive_viewer` binary and sends explicit scene commands over IPC. That
 runtime powers notebooks, scripted snapshots, terrain overlays, point clouds,
 and headless rendering. The architecture overview lives in
-[architecture.md](architecture.md).
+[the architecture guide](../start/architecture.md).
 
 ## Getting Started
 
@@ -36,9 +36,9 @@ Install with:
 pip install forge3d
 ```
 
-Start with the [quickstart](quickstart.md), then pick the
-[GIS tutorials](tutorials/gis-track/index.md) or the
-[Python tutorials](tutorials/python-track/index.md).
+Start with the [quickstart](../start/quickstart.md), then pick the
+[GIS tutorials](../tutorials/gis-track/index.md) or the
+[Python tutorials](../tutorials/python-track/index.md).
 
 ## Open Source + Pro
 

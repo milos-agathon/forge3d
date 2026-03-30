@@ -128,7 +128,7 @@ adapters = forge3d.enumerate_adapters()  # may be empty on CI, but shouldn't cra
 
 ### 1.6 Pro boundary decision log
 
-A living document: `docs/pro-boundary-notes.md`. During Phase 1 and 2 work, log observations about which features feel open vs. Pro as they come up. No code changes — just capture thinking for Phase 3.
+A living document: `docs/product/pro-boundary-notes.md`. During Phase 1 and 2 work, log observations about which features feel open vs. Pro as they come up. No code changes — just capture thinking for Phase 3.
 
 **Impact:** Phase 3 starts with a decision log rather than a blank page.
 **Definition of done:** File exists, has at least 5 entries by end of Phase 2.
@@ -152,7 +152,7 @@ A living document: `docs/pro-boundary-notes.md`. During Phase 1 and 2 work, log 
 3. **API Reference** — auto-generated via autodoc/autosummary
 4. **Gallery** — visual showcase (2.4)
 
-**Architecture page** (`docs/architecture.md`):
+**Architecture page** (`docs/start/architecture.md`):
 - One-page overview: Rust engine → PyO3 bindings → headless wgpu rendering → PNG/PDF output
 - Explains why pre-built wheels mean no Rust toolchain needed
 - Diagram of the rendering pipeline (text-based, Mermaid or ASCII)
@@ -186,7 +186,7 @@ Each tutorial is a `.md` file in `docs/tutorials/` with complete, copy-pasteable
 | 3 | Point clouds and 3D Tiles | Load COPC file, explain point clouds, visualize | Fetched COPC (~3MB) |
 | 4 | Scene bundles | Save/load reproducible scenes, share with colleagues | From tutorial 1 output |
 
-**Pro boundary note:** GIS tutorial 3 (map plate) and GIS tutorial 4 (buildings) use features that may become Pro in Phase 3. Flag in `pro-boundary-notes.md`. During Phase 2 these work without a key. In Phase 3, add callout boxes: "This tutorial uses Pro features. [Get a Pro key →]"
+**Pro boundary note:** GIS tutorial 3 (map plate) and GIS tutorial 4 (buildings) use features that may become Pro in Phase 3. Flag in `docs/product/pro-boundary-notes.md`. During Phase 2 these work without a key. In Phase 3, add callout boxes: "This tutorial uses Pro features. [Get a Pro key →]"
 
 **Impact:** Two clear onramps for the two target audiences. Nobody hits a dead end.
 **Definition of done:** All 8 tutorials written, code blocks tested, output images rendered and embedded.

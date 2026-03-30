@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Terrain Rendering Validation Script.
 
-Implements the verification protocol from docs/plan.md:
+Implements the verification protocol from docs/roadmap/roadmap.md:
 - Baseline snapshot capture (no code changes)
 - Phase P1-P6 validation with diff images and SSIM
 - Final proofpack generation
@@ -194,7 +194,7 @@ def compare_images(ref: Path, test: Path, diff: Path, json_out: Path) -> dict:
 
 
 def capture_baseline() -> dict:
-    """Capture baseline snapshot (Section 1 of plan.md)."""
+    """Capture baseline snapshot (Section 1 of roadmap.md)."""
     print("=" * 60)
     print("Capturing baseline snapshot...")
     print("=" * 60)
@@ -254,7 +254,7 @@ def capture_baseline() -> dict:
 
 
 def validate_phase(phase: str) -> dict:
-    """Validate a specific phase against baseline (Sections 2-7 of plan.md)."""
+    """Validate a specific phase against baseline (Sections 2-7 of roadmap.md)."""
     print("=" * 60)
     print(f"Validating phase {phase}...")
     print("=" * 60)
@@ -325,7 +325,7 @@ def validate_phase(phase: str) -> dict:
 
 
 def generate_proofpack() -> dict:
-    """Generate final proofpack (Section 10 of plan.md)."""
+    """Generate final proofpack (Section 10 of roadmap.md)."""
     print("=" * 60)
     print("Generating final proofpack...")
     print("=" * 60)
@@ -428,7 +428,7 @@ def run_all() -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Terrain rendering validation per docs/plan.md"
+        description="Terrain rendering validation per docs/roadmap/roadmap.md"
     )
     parser.add_argument(
         "command",

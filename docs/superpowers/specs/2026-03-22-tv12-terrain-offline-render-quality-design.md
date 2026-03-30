@@ -535,4 +535,4 @@ The following are **explicitly not part of TV12**:
 | `python/forge3d/denoise_oidn.py` | New: `oidn_available()`, `oidn_denoise()` |
 | `examples/terrain_tv12_offline_quality_demo.py` | New: demo with real DEM, comparison renders |
 | `tests/test_tv12_offline_quality.py` | New: all tests from Section 10 |
-| `docs/tv12-terrain-offline-render-quality.md` | New: feature documentation |
+| `docs/terrain/tv12-offline-render-quality.md` | New: feature documentation |

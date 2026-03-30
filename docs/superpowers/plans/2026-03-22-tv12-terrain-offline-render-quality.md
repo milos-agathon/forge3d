@@ -39,7 +39,7 @@
 | `src/shaders/terrain_pbr_pom.wgsl` | Read `offline_hdr_output` flag; skip tonemap+sRGB when set |
 | `tests/test_tv12_offline_quality.py` | All TV12 tests |
 | `examples/terrain_tv12_offline_quality_demo.py` | Demo with real DEM, comparison renders |
-| `docs/tv12-terrain-offline-render-quality.md` | Feature documentation |
+| `docs/terrain/tv12-offline-render-quality.md` | Feature documentation |
 
 ---
 
@@ -1421,7 +1421,7 @@ git commit -m "test(tv12): add image output verification tests (PNG, EXR, HDR nu
 ## Task 13: Documentation
 
 **Files:**
-- Create: `docs/tv12-terrain-offline-render-quality.md`
+- Create: `docs/terrain/tv12-offline-render-quality.md`
 
 - [ ] **Step 1: Write feature documentation**
 
@@ -1436,7 +1436,7 @@ Cover:
 - [ ] **Step 2: Commit**
 
 ```bash
-git add docs/tv12-terrain-offline-render-quality.md
+git add docs/terrain/tv12-offline-render-quality.md
 git commit -m "docs(tv12): add terrain offline render quality feature documentation"
 ```
 

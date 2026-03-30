@@ -1,6 +1,6 @@
 """P2.2: Geo-morphing and seam correctness tests.
 
-Exit criteria from docs/plan.md:
+Exit criteria from docs/roadmap/roadmap.md:
 - Vertex blending at LOD boundaries
 - No T-junction artifacts at LOD boundaries
 """

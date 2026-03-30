@@ -310,7 +310,7 @@ The allocator reserves fixed overhead first, then sizes the resident pool from t
 ### 8.1 Core DoD Tests (TV11.4)
 
 **Test 1 — World-space translation stability (blocking):**
-Render frame A, translate camera by a small amount, render frame B. Use terrain depth AOV (per `terrain-tv2-aovs.md`) to reproject visible terrain points from A into B. Compare `DBG_SHADOW_FACTOR` only on matched receivers — same world-space point, not same screen pixel. Assert max shadow-factor delta < threshold (e.g. 0.02) on matched points. Run on Fuji and Rainier DEMs.
+Render frame A, translate camera by a small amount, render frame B. Use terrain depth AOV (per `docs/terrain/tv2-aovs.md`) to reproject visible terrain points from A into B. Compare `DBG_SHADOW_FACTOR` only on matched receivers — same world-space point, not same screen pixel. Assert max shadow-factor delta < threshold (e.g. 0.02) on matched points. Run on Fuji and Rainier DEMs.
 
 **Test 2 — Cascade transition continuity (blocking):**
 Use `SHADOW_DEBUG_CASCADES` to locate cascade split regions. Render `DBG_SHADOW_FACTOR` across those regions. Compute the spatial derivative of shadow factor perpendicular to the split boundary. Assert no derivative spike exceeding threshold. The existing `cascade_blend_range` (`csm_types.rs`) should produce smooth transitions; TV11 must prove the boundary band no longer produces a visible jump.
