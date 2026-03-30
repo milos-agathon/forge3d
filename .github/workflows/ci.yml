@@ -155,18 +155,22 @@ jobs:
             runner: windows-latest
             target: x86_64-pc-windows-msvc
             maturin_args: --release --out dist
+            manylinux: auto
           - os: linux
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             maturin_args: --release --out dist -i python3.10
+            manylinux: off
           - os: macos
             runner: macos-latest
             target: universal2-apple-darwin
             maturin_args: --release --out dist
+            manylinux: auto
           - os: linux-arm
             runner: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             maturin_args: --release --out dist -i python3.10
+            manylinux: auto
 
     steps:
       - uses: actions/checkout@v4
@@ -176,7 +180,7 @@ jobs:
         with:
           target: ${{ matrix.platform.target }}
           args: ${{ matrix.platform.maturin_args }}
-          manylinux: auto
+          manylinux: ${{ matrix.platform.manylinux }}
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
