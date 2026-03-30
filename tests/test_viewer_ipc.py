@@ -35,6 +35,7 @@ from forge3d.viewer import (
 )
 import forge3d.viewer as viewer_module
 import forge3d.viewer_ipc as viewer_ipc_module
+import forge3d._viewer_entry as viewer_entry_module
 
 
 class TestReadyLineParsing:
@@ -467,6 +468,26 @@ class TestViewerHandleValidation:
         finally:
             monkeypatch.setattr(viewer_module, "__file__", original_module_file)
 
+    def test_find_viewer_binary_uses_installed_console_script(self, tmp_path, monkeypatch):
+        """Installed wheels resolve the console-script launcher beside the current interpreter."""
+        package_root = tmp_path / "site-packages" / "forge3d"
+        package_root.mkdir(parents=True)
+        module_path = package_root / "viewer.py"
+        module_path.write_text("# test module path\n", encoding="utf-8")
+
+        scripts_dir = tmp_path / "venv" / ("Scripts" if sys.platform == "win32" else "bin")
+        scripts_dir.mkdir(parents=True)
+        suffix = ".exe" if sys.platform == "win32" else ""
+        viewer_script = scripts_dir / f"interactive_viewer{suffix}"
+        viewer_script.write_text("launcher", encoding="utf-8")
+        python_exe = scripts_dir / ("python.exe" if sys.platform == "win32" else "python")
+        python_exe.write_text("python", encoding="utf-8")
+
+        monkeypatch.setattr(viewer_module, "__file__", str(module_path))
+        monkeypatch.setattr(sys, "executable", str(python_exe))
+
+        assert _find_viewer_binary() == str(viewer_script)
+
 
 class TestViewerHandleHelpers:
     """Test higher-level ViewerHandle helper behavior without a live viewer."""
@@ -745,6 +766,54 @@ class TestViewerIpcHelpers:
             {"cmd": "apply_scene_variant", "variant_id": "review"},
             {"cmd": "set_review_layer_visible", "layer_id": "notes", "visible": True},
         ]
+
+    def test_viewer_ipc_binary_lookup_uses_shared_locator(self, tmp_path, monkeypatch):
+        """viewer_ipc resolves the same installed console-script path as viewer.py."""
+        package_root = tmp_path / "site-packages" / "forge3d"
+        package_root.mkdir(parents=True)
+        module_path = package_root / "viewer_ipc.py"
+        module_path.write_text("# test module path\n", encoding="utf-8")
+
+        scripts_dir = tmp_path / "venv" / ("Scripts" if sys.platform == "win32" else "bin")
+        scripts_dir.mkdir(parents=True)
+        suffix = ".exe" if sys.platform == "win32" else ""
+        viewer_script = scripts_dir / f"interactive_viewer{suffix}"
+        viewer_script.write_text("launcher", encoding="utf-8")
+        python_exe = scripts_dir / ("python.exe" if sys.platform == "win32" else "python")
+        python_exe.write_text("python", encoding="utf-8")
+
+        monkeypatch.setattr(viewer_ipc_module, "__file__", str(module_path))
+        monkeypatch.setattr(sys, "executable", str(python_exe))
+
+        assert viewer_ipc_module.find_viewer_binary() == str(viewer_script)
+
+
+class TestViewerEntryPoint:
+    """Console-script entrypoint tests for installed-wheel viewer launch."""
+
+    def test_viewer_entry_forwards_sys_argv_to_native_cli(self, monkeypatch):
+        """The console script forwards argv to the native CLI bridge."""
+        captured: list[list[str]] = []
+
+        class _Native:
+            def run_interactive_viewer_cli(self, args: list[str]) -> None:
+                captured.append(args)
+
+        monkeypatch.setattr(viewer_entry_module, "_get_native_module", lambda: _Native())
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["interactive_viewer", "--ipc-port", "0", "--size", "1280x720"],
+        )
+
+        assert viewer_entry_module.main() == 0
+        assert captured == [["--ipc-port", "0", "--size", "1280x720"]]
+
+    def test_viewer_entry_requires_native_cli_bridge(self, monkeypatch):
+        """The console script fails clearly when the native bridge is unavailable."""
+        monkeypatch.setattr(viewer_entry_module, "_get_native_module", lambda: None)
+
+        assert viewer_entry_module.main() == 1
 
 
 class TestNDJSONProtocol:

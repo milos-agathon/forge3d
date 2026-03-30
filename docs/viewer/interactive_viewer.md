@@ -3,16 +3,22 @@
 > **Status:** implemented
 
 The interactive viewer is the primary live-rendering path for forge3d. Python
-launches the Rust `interactive_viewer` binary, then drives it through TCP/NDJSON
-IPC with `ViewerHandle`.
+launches the installed `interactive_viewer` command, which is backed by the
+native forge3d extension, then drives it through TCP/NDJSON IPC with
+`ViewerHandle`.
 
 ## Quick Start
 
 ### Desktop viewer
 
 ```bash
-cargo build --release --bin interactive_viewer
+pip install forge3d
 ```
+
+`pip install forge3d` and `pip install -e .` now provide the
+`interactive_viewer` command directly. Source checkouts can still build a
+standalone launcher with `cargo build --release --bin interactive_viewer` when
+needed.
 
 ```python
 import forge3d as f3d

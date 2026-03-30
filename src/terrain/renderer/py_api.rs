@@ -87,7 +87,14 @@ impl TerrainRenderer {
 
         let frame = self
             .scene
-            .render_internal(material_set, env_maps, params, heightmap, water_mask, time_seconds)
+            .render_internal(
+                material_set,
+                env_maps,
+                params,
+                heightmap,
+                water_mask,
+                time_seconds,
+            )
             .map_err(|e| PyRuntimeError::new_err(format!("Rendering failed: {:#}", e)))?;
 
         Ok(Py::new(py, frame)?)
@@ -116,7 +123,14 @@ impl TerrainRenderer {
 
         let (frame, aov_frame) = self
             .scene
-            .render_internal_with_aov(material_set, env_maps, params, heightmap, water_mask, time_seconds)
+            .render_internal_with_aov(
+                material_set,
+                env_maps,
+                params,
+                heightmap,
+                water_mask,
+                time_seconds,
+            )
             .map_err(|e| PyRuntimeError::new_err(format!("Rendering with AOV failed: {:#}", e)))?;
 
         Ok((Py::new(py, frame)?, Py::new(py, aov_frame)?))
@@ -406,14 +420,17 @@ impl TerrainRenderer {
                         ($key:expr, $ty:ty, $default:expr) => {
                             match wind_dict
                                 .get_item($key)
-                                .map_err(|e| PyRuntimeError::new_err(format!(
-                                    "batch {batch_index} wind: {e}"
-                                )))?
+                                .map_err(|e| {
+                                    PyRuntimeError::new_err(format!(
+                                        "batch {batch_index} wind: {e}"
+                                    ))
+                                })?
                                 .filter(|v| !v.is_none())
                             {
                                 Some(v) => v.extract::<$ty>().map_err(|e| {
                                     PyRuntimeError::new_err(format!(
-                                        "batch {batch_index} wind: invalid '{}': {e}", $key
+                                        "batch {batch_index} wind: invalid '{}': {e}",
+                                        $key
                                     ))
                                 })?,
                                 None => $default,
@@ -437,9 +454,8 @@ impl TerrainRenderer {
                 }
                 None => crate::terrain::scatter::ScatterWindSettingsNative::default(),
             };
-            wind.validate().map_err(|e| {
-                PyRuntimeError::new_err(format!("batch {batch_index}: {e}"))
-            })?;
+            wind.validate()
+                .map_err(|e| PyRuntimeError::new_err(format!("batch {batch_index}: {e}")))?;
 
             let hlod_config = batch_dict
                 .get_item("hlod")
@@ -495,9 +511,7 @@ impl TerrainRenderer {
                 })
                 .transpose()
                 .map_err(|e| {
-                    PyRuntimeError::new_err(format!(
-                        "batch {batch_index}: invalid 'hlod': {e}"
-                    ))
+                    PyRuntimeError::new_err(format!("batch {batch_index}: invalid 'hlod': {e}"))
                 })?;
 
             native_batches.push(super::scatter::TerrainScatterUploadBatch {

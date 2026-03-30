@@ -295,7 +295,10 @@ mod tests {
         match cmd {
             crate::viewer::viewer_enums::ViewerCmd::SetSceneReviewState { state } => {
                 assert_eq!(state.review_layers.len(), 1);
-                assert_eq!(state.snapshot().active_scene_variant.as_deref(), Some("review"));
+                assert_eq!(
+                    state.snapshot().active_scene_variant.as_deref(),
+                    Some("review")
+                );
                 assert_eq!(state.snapshot().scene_variants[0].id, "review");
             }
             _ => panic!("Expected ViewerCmd::SetSceneReviewState"),
@@ -341,7 +344,8 @@ mod tests {
             assert!(ipc_request_to_viewer_cmd(&req).unwrap().is_none());
         }
 
-        let apply = parse_ipc_request(r#"{"cmd":"apply_scene_variant","variant_id":"review"}"#).unwrap();
+        let apply =
+            parse_ipc_request(r#"{"cmd":"apply_scene_variant","variant_id":"review"}"#).unwrap();
         let toggle = parse_ipc_request(
             r#"{"cmd":"set_review_layer_visible","layer_id":"notes","visible":true}"#,
         )
@@ -434,7 +438,10 @@ mod tests {
         match &req {
             IpcRequest::SetTerrainScatter { batches } => {
                 assert_eq!(batches.len(), 1);
-                assert!(batches[0].hlod.is_none(), "hlod should be None when omitted");
+                assert!(
+                    batches[0].hlod.is_none(),
+                    "hlod should be None when omitted"
+                );
             }
             _ => panic!("Expected SetTerrainScatter"),
         }

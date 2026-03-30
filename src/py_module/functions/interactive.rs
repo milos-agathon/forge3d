@@ -3,6 +3,7 @@ use super::*;
 pub(super) fn register_interactive_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(open_viewer, m)?)?;
     m.add_function(wrap_pyfunction!(open_terrain_viewer, m)?)?;
+    m.add_function(wrap_pyfunction!(run_interactive_viewer_cli, m)?)?;
     m.add_function(wrap_pyfunction!(set_point_shape_mode, m)?)?;
     m.add_function(wrap_pyfunction!(set_point_lod_threshold, m)?)?;
     m.add_function(wrap_pyfunction!(is_weighted_oit_available, m)?)?;

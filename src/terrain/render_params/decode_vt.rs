@@ -1,5 +1,5 @@
-use pyo3::prelude::*;
 use super::native_vt::{TerrainVTSettingsNative, VTLayerFamilyNative};
+use pyo3::prelude::*;
 
 pub(super) fn parse_vt_settings(params: &Bound<'_, PyAny>) -> TerrainVTSettingsNative {
     // First check if vt attribute exists and is not None
@@ -44,7 +44,10 @@ pub(super) fn parse_vt_settings(params: &Bound<'_, PyAny>) -> TerrainVTSettingsN
         if let Ok(layers_obj) = vt_obj.getattr("layers") {
             if let Ok(layers_list) = layers_obj.extract::<Vec<Bound<'_, PyAny>>>() {
                 for layer_obj in layers_list {
-                    if let Ok(family) = layer_obj.getattr("family").and_then(|v| v.extract::<String>()) {
+                    if let Ok(family) = layer_obj
+                        .getattr("family")
+                        .and_then(|v| v.extract::<String>())
+                    {
                         let virtual_size_px: (u32, u32) = layer_obj
                             .getattr("virtual_size_px")
                             .and_then(|v| v.extract())

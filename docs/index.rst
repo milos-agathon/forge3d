@@ -38,18 +38,18 @@ workflows for overlays, point clouds, map plates, buildings, and bundles.
    :maxdepth: 1
    :caption: Terrain Workflows
 
-   terrain/tv1-atmosphere
-   terrain/tv2-aovs
-   terrain/tv3-scatter
-   terrain/tv4-material-variation
-   terrain/tv5-probe-lighting
-   terrain/tv6-heterogeneous-volumetrics
-   terrain/tv10-subsurface
-   terrain/tv12-offline-render-quality
-   terrain/tv13-population-lod-pipeline
-   terrain/tv20-virtual-texturing
-   terrain/tv21-blending
-   terrain/tv22-scatter-wind-animation
+   terrain/atmosphere
+   terrain/aovs
+   terrain/scatter
+   terrain/material-variation
+   terrain/probe-lighting
+   terrain/heterogeneous-volumetrics
+   terrain/subsurface
+   terrain/offline-render-quality
+   terrain/population-lod-pipeline
+   terrain/virtual-texturing
+   terrain/blending
+   terrain/scatter-wind-animation
 
 .. toctree::
    :maxdepth: 1
@@ -63,7 +63,8 @@ Platform Overview
 
 The current public workflow is intentionally small:
 
-* ``forge3d.open_viewer_async()`` launches the Rust ``interactive_viewer`` binary.
+* ``forge3d.open_viewer_async()`` launches the installed ``interactive_viewer``
+  command backed by the native forge3d extension.
 * ``forge3d.ViewerHandle`` exposes the live control surface for terrain, overlays,
   point clouds, camera, lighting, and snapshots.
 * ``forge3d.ViewerWidget`` wraps that same viewer flow for notebooks and falls

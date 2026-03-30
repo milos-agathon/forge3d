@@ -2,8 +2,11 @@
 
 ## Launch Viewer
 ```bash
-cargo run --release --example interactive_viewer
+interactive_viewer
 ```
+
+If you are testing from a source checkout without the installed launcher yet,
+`cargo run --bin interactive_viewer --` remains a fallback.
 
 ## Test Sequence
 

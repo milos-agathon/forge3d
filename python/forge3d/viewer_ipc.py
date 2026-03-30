@@ -11,14 +11,14 @@ interactive loops and direct socket access.
 from __future__ import annotations
 
 import json
-import platform
 import re
 import socket
 import subprocess
 import threading
 import time
-from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+
+from ._viewer_binary import find_viewer_binary as _resolve_viewer_binary
 
 
 _READY_PATTERN = re.compile(r"FORGE3D_VIEWER_READY\s+port=(\d+)")
@@ -26,32 +26,14 @@ _READY_PATTERN = re.compile(r"FORGE3D_VIEWER_READY\s+port=(\d+)")
 
 def find_viewer_binary() -> str:
     """Find the interactive_viewer binary.
-    
-    Searches in cargo target/release and target/debug directories.
-    
+
     Returns:
         Path to the interactive_viewer binary
-        
+
     Raises:
         FileNotFoundError: if binary not found
     """
-    ext = ".exe" if platform.system() == "Windows" else ""
-    
-    # Try relative to this file (python/forge3d/viewer_ipc.py -> repo root)
-    repo_root = Path(__file__).parent.parent.parent
-    candidates = [
-        repo_root / "target" / "release" / f"interactive_viewer{ext}",
-        repo_root / "target" / "debug" / f"interactive_viewer{ext}",
-    ]
-    
-    for c in candidates:
-        if c.exists():
-            return str(c)
-    
-    raise FileNotFoundError(
-        "interactive_viewer binary not found. "
-        "Build with: cargo build --release --bin interactive_viewer"
-    )
+    return _resolve_viewer_binary(__file__)
 
 
 def send_ipc(sock: socket.socket, cmd: Dict[str, Any]) -> Dict[str, Any]:

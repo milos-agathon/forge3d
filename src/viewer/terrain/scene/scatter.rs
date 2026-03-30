@@ -72,11 +72,7 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-    queue.write_buffer(
-        &hlod_instbuf,
-        0,
-        bytemuck::cast_slice(&identity_packed),
-    );
+    queue.write_buffer(&hlod_instbuf, 0, bytemuck::cast_slice(&identity_packed));
 
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("terrain_viewer.scatter_pass"),

@@ -306,7 +306,8 @@ impl Viewer {
             // Scene bundle save/load requests (handled by Python-side)
             pending_bundle_save: None,
             pending_bundle_load: None,
-            scene_review_registry: crate::viewer::scene_review::ViewerSceneReviewRegistry::default(),
+            scene_review_registry: crate::viewer::scene_review::ViewerSceneReviewRegistry::default(
+            ),
         };
 
         viewer.sync_ssr_params_to_gi();

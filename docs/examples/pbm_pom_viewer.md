@@ -42,11 +42,15 @@ The interactive terrain viewer now supports an enhanced **PBR rendering mode** w
 
 ## Quick Start
 
-### Build the Viewer
+### Viewer Launcher
 
 ```bash
-cargo build --release --bin interactive_viewer
+pip install forge3d
 ```
+
+`pip install forge3d` now installs the `interactive_viewer` command directly.
+If you are working from a source checkout and still want a standalone launcher,
+you can build it with `cargo build --release --bin interactive_viewer`.
 
 ### Basic Usage
 
@@ -520,9 +524,11 @@ pytest tests/test_terrain_viewer_pbr.py -v
 
 ### Shader compilation error
 
-- Run `cargo build --release --bin interactive_viewer` to rebuild
+- Reinstall or rebuild `forge3d` so the native extension and `interactive_viewer` command stay in sync (`pip install .`, `pip install -e .`, or `maturin develop --release`)
+- Source checkouts can still rebuild the standalone launcher with `cargo build --release --bin interactive_viewer`
 - Check for WGSL syntax errors in `src/viewer/terrain/shader_pbr.rs`
 
-### Tests fail with "viewer binary not found"
+### Tests fail with "`interactive_viewer` command not found"
 
-- Build the viewer: `cargo build --release --bin interactive_viewer`
+- Install `forge3d` so the console command is created: `pip install forge3d`
+- In a source checkout, a standalone fallback is still available: `cargo build --release --bin interactive_viewer`

@@ -33,7 +33,12 @@ impl VirtualTexture {
                 let (r, g, b, a) = if in_border_x || in_border_y {
                     // Border: checkerboard pattern
                     let checker = (((x / 2) + (y / 2)) & 1) as u8;
-                    (128 + checker * 64, 128 + checker * 64, 128 + checker * 64, 255)
+                    (
+                        128 + checker * 64,
+                        128 + checker * 64,
+                        128 + checker * 64,
+                        255,
+                    )
                 } else {
                     // Content region: per-tile color based on tile coordinates and mip
                     let content_x = x - tile_border;

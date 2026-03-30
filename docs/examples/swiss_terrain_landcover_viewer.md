@@ -47,8 +47,12 @@ python examples/swiss_terrain_landcover_viewer.py --overlay-opacity 0.7 --preset
   pip install pillow
   ```
 
-**Build Requirements:**
-- Interactive viewer binary must be built:
+**Viewer Requirements:**
+- Install `forge3d` so the `interactive_viewer` command is available:
+  ```bash
+  pip install forge3d
+  ```
+- Source checkouts can still build a standalone launcher if needed:
   ```bash
   cargo build --release --bin interactive_viewer
   ```
@@ -428,8 +432,13 @@ python examples/swiss_terrain_landcover_viewer.py \
 pip install rasterio
 ```
 
-### Issue: "interactive_viewer binary not found"
-**Solution:** Build the viewer:
+### Issue: "`interactive_viewer` command not found"
+**Solution:** Install `forge3d` so the launcher is created:
+```bash
+pip install forge3d
+```
+
+If you are running from a source checkout and want a standalone fallback, you can still build it:
 ```bash
 cargo build --release --bin interactive_viewer
 ```

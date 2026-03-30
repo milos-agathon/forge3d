@@ -46,8 +46,12 @@ python examples/luxembourg_rail_overlay.py \
 pip install geopandas fiona pyproj rasterio numpy Pillow
 ```
 
-**Build Requirements:**
-- The `interactive_viewer` binary must be built:
+**Viewer Requirements:**
+- Install `forge3d` so the `interactive_viewer` command is available:
+  ```bash
+  pip install forge3d
+  ```
+- Source checkouts can still build a standalone launcher if needed:
   ```bash
   cargo build --release --bin interactive_viewer
   ```

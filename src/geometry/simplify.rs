@@ -328,10 +328,7 @@ pub fn simplify_mesh(mesh: &MeshBuffers, target_ratio: f32) -> GeometryResult<Me
         if has_uvs {
             let uv0 = uvs[rv0 as usize];
             let uv1 = uvs[rv1 as usize];
-            uvs[rv0 as usize] = [
-                (uv0[0] + uv1[0]) * 0.5,
-                (uv0[1] + uv1[1]) * 0.5,
-            ];
+            uvs[rv0 as usize] = [(uv0[0] + uv1[0]) * 0.5, (uv0[1] + uv1[1]) * 0.5];
         }
 
         // Tangents: keep from rv0 (best-effort)
@@ -392,8 +389,7 @@ pub fn simplify_mesh(mesh: &MeshBuffers, target_ratio: f32) -> GeometryResult<Me
         for &nv in &neighbor_verts {
             let ek = edge_key(rv0, nv);
             let is_boundary = boundary_edges.contains(&ek);
-            let cost =
-                compute_collapse_cost(&positions, &quadrics, rv0, nv, is_boundary);
+            let cost = compute_collapse_cost(&positions, &quadrics, rv0, nv, is_boundary);
             heap.push(CollapseCandidate {
                 cost,
                 v0: ek.0,
@@ -441,7 +437,9 @@ pub fn simplify_mesh(mesh: &MeshBuffers, target_ratio: f32) -> GeometryResult<Me
 
     for &old_idx in &sorted_verts {
         let p = positions[old_idx as usize];
-        result.positions.push([p[0] as f32, p[1] as f32, p[2] as f32]);
+        result
+            .positions
+            .push([p[0] as f32, p[1] as f32, p[2] as f32]);
         if has_uvs {
             result.uvs.push(uvs[old_idx as usize]);
         }
@@ -527,9 +525,7 @@ fn recompute_area_weighted_normals(mesh: &mut MeshBuffers) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::{
-        generate_primitive, generate_unit_box, PrimitiveParams, PrimitiveType,
-    };
+    use crate::geometry::{generate_primitive, generate_unit_box, PrimitiveParams, PrimitiveType};
 
     #[test]
     fn simplify_box_reduces_triangles() {
@@ -623,10 +619,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert!(
-            !mesh.uvs.is_empty(),
-            "Sphere should have UVs"
-        );
+        assert!(!mesh.uvs.is_empty(), "Sphere should have UVs");
         let result = simplify_mesh(&mesh, 0.5).unwrap();
         assert_eq!(
             result.uvs.len(),

@@ -11,13 +11,13 @@ mod displacement;
 mod extrude;
 pub mod grid;
 mod primitives;
+mod simplify;
 mod subdivision;
 mod tangents;
 mod thick_polyline;
 mod transform;
 pub mod transforms;
 mod validate;
-mod simplify;
 mod weld;
 
 // Python bindings modules (extension-module only)
@@ -35,12 +35,12 @@ pub use primitives::{
     generate_cone, generate_cylinder, generate_plane, generate_primitive, generate_sphere,
     generate_text3d_stub, generate_torus, generate_unit_box, PrimitiveParams, PrimitiveType,
 };
+pub use simplify::simplify_mesh;
 pub use subdivision::subdivide_triangles;
 #[cfg(feature = "extension-module")]
 pub use thick_polyline::geometry_generate_thick_polyline_py;
 pub use transform::{center_to_target, compute_bounds, flip_axis, scale_about_pivot, swap_axes};
 pub use validate::{validate_mesh, MeshStats, MeshValidationIssue, MeshValidationReport};
-pub use simplify::simplify_mesh;
 pub use weld::{weld_mesh, WeldOptions, WeldResult};
 
 // Re-export Python bindings

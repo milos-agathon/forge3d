@@ -7,13 +7,15 @@ Phase 2 developer workflow: viewer, datasets, widgets, and tutorial assets.
 
 ```bash
 pip install -e .[all,jupyter,datasets]
-cargo build --release --bin interactive_viewer
 ```
 
-`open_viewer_async()` looks for `interactive_viewer` in `target/release`,
-`target/debug`, or on `PATH`. If the binary is missing, `ViewerWidget` can
-still show its inline fallback preview when you pass previewable terrain data
-via `terrain_path=` or `src=`.
+`pip install` now installs an `interactive_viewer` command backed by the native
+forge3d extension, so a separate `cargo build --release --bin interactive_viewer`
+step is no longer required. In source checkouts, `open_viewer_async()` still
+prefers fresh binaries from `target/release` or `target/debug` when they exist.
+If no viewer launcher is available, `ViewerWidget` can still show its inline
+fallback preview when you pass previewable terrain data via `terrain_path=` or
+`src=`.
 
 ## First terrain
 

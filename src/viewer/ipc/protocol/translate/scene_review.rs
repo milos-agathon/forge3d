@@ -5,19 +5,17 @@ use crate::viewer::scene_review::{
 use crate::viewer::viewer_enums::ViewerCmd;
 
 use super::super::payloads::{
-    IpcRasterOverlaySpec, IpcReviewLayer, IpcSceneBaseState, IpcSceneReviewState,
-    IpcSceneVariant, IpcSceneVectorOverlay,
+    IpcRasterOverlaySpec, IpcReviewLayer, IpcSceneBaseState, IpcSceneReviewState, IpcSceneVariant,
+    IpcSceneVectorOverlay,
 };
 use super::super::request::IpcRequest;
 use super::terrain::map_terrain_scatter_batch;
 
 pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, String> {
     match req {
-        IpcRequest::SetSceneReviewState { state } => {
-            Ok(Some(ViewerCmd::SetSceneReviewState {
-                state: map_scene_review_state(state)?,
-            }))
-        }
+        IpcRequest::SetSceneReviewState { state } => Ok(Some(ViewerCmd::SetSceneReviewState {
+            state: map_scene_review_state(state)?,
+        })),
         IpcRequest::ApplySceneVariant { variant_id } => Ok(Some(ViewerCmd::ApplySceneVariant {
             variant_id: variant_id.clone(),
         })),
@@ -31,7 +29,9 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, Strin
     }
 }
 
-fn map_scene_review_state(config: &IpcSceneReviewState) -> Result<ViewerSceneReviewStateConfig, String> {
+fn map_scene_review_state(
+    config: &IpcSceneReviewState,
+) -> Result<ViewerSceneReviewStateConfig, String> {
     let state = ViewerSceneReviewStateConfig {
         base_state: map_base_state(&config.base_state, "base_state")?,
         review_layers: config
@@ -40,11 +40,7 @@ fn map_scene_review_state(config: &IpcSceneReviewState) -> Result<ViewerSceneRev
             .enumerate()
             .map(|(index, layer)| map_review_layer(layer, index))
             .collect::<Result<Vec<_>, _>>()?,
-        variants: config
-            .variants
-            .iter()
-            .map(map_variant)
-            .collect::<Vec<_>>(),
+        variants: config.variants.iter().map(map_variant).collect::<Vec<_>>(),
         active_variant_id: config.active_variant_id.clone(),
     };
     state.validate()?;
@@ -72,12 +68,17 @@ fn map_base_state(
             .scatter_batches
             .iter()
             .enumerate()
-            .map(|(index, batch)| map_terrain_scatter_batch(batch, index).map_err(|e| format!("{context}: {e}")))
+            .map(|(index, batch)| {
+                map_terrain_scatter_batch(batch, index).map_err(|e| format!("{context}: {e}"))
+            })
             .collect::<Result<Vec<_>, _>>()?,
     })
 }
 
-fn map_review_layer(config: &IpcReviewLayer, layer_index: usize) -> Result<ViewerReviewLayerConfig, String> {
+fn map_review_layer(
+    config: &IpcReviewLayer,
+    layer_index: usize,
+) -> Result<ViewerReviewLayerConfig, String> {
     Ok(ViewerReviewLayerConfig {
         id: config.id.clone(),
         name: config.name.clone(),

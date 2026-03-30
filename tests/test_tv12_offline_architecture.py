@@ -6,10 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON_OFFLINE = ROOT / "python" / "forge3d" / "offline.py"
-TV12_DOC = ROOT / "docs" / "terrain" / "tv12-offline-render-quality.md"
-TV12_SPEC = (
-    ROOT / "docs" / "superpowers" / "specs" / "2026-03-22-tv12-terrain-offline-render-quality-design.md"
-)
+TV12_DOC = ROOT / "docs" / "terrain" / "offline-render-quality.md"
 RUST_OFFLINE = ROOT / "src" / "terrain" / "renderer" / "offline.rs"
 HDR_FRAME_RS = ROOT / "src" / "py_types" / "hdr_frame.rs"
 SHADER_DIR = ROOT / "src" / "shaders"
@@ -57,11 +54,12 @@ def test_tv12_docs_reference_public_batch_primitives() -> None:
         assert api_name in source, f"TV12 docs do not mention public API {api_name}"
 
 
-def test_tv12_spec_locks_linear_ldr_output_and_scalar_depth_reference() -> None:
-    source = TV12_SPEC.read_text(encoding="utf-8")
-    assert "Depth reference:** One R32Float texture" in source
-    assert "Writes to Rgba8Unorm texture" in source
-    assert "Writes to Rgba8UnormSrgb texture" not in source
+def test_tv12_docs_lock_linear_hdr_and_aov_output_contract() -> None:
+    source = TV12_DOC.read_text(encoding="utf-8")
+    assert "OfflineResult.hdr_frame" in source
+    assert "resolved linear HDR beauty buffer" in source
+    assert "aligned albedo, normal, and depth outputs" in source
+    assert "Rgba8UnormSrgb" not in source
 
 
 def test_offline_renderer_bypasses_taa_reprojection_by_construction() -> None:

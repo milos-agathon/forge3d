@@ -172,11 +172,11 @@ def _build_materials(domain: tuple[float, float], z_scale: float, scene: dict) -
     subsurface = replace(
         baseline,
         snow_subsurface_strength=0.58,
-        snow_subsurface_color=(0.72, 0.85, 0.98),
+        snow_subsurface_tint=(0.72, 0.85, 0.98),
         rock_subsurface_strength=0.04,
-        rock_subsurface_color=(0.44, 0.37, 0.30),
+        rock_subsurface_tint=(0.44, 0.37, 0.30),
         wetness_subsurface_strength=0.14,
-        wetness_subsurface_color=(0.38, 0.27, 0.18),
+        wetness_subsurface_tint=(0.38, 0.27, 0.18),
     )
     return baseline, subsurface
 

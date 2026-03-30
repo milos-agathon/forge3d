@@ -11,8 +11,8 @@ use super::super::payloads::{
     IpcDenoiseConfig, IpcDensityVolumeConfig, IpcDofConfig, IpcHeightAoConfig,
     IpcLensEffectsConfig, IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcScatterWind,
     IpcSkyConfig, IpcSunVisConfig, IpcTerrainScatterBatch, IpcTerrainScatterBlend,
-    IpcTerrainScatterContact, IpcTerrainScatterLevel, IpcTonemapConfig,
-    IpcVectorOverlayConfig, IpcVolumetricsConfig,
+    IpcTerrainScatterContact, IpcTerrainScatterLevel, IpcTonemapConfig, IpcVectorOverlayConfig,
+    IpcVolumetricsConfig,
 };
 use super::super::request::IpcRequest;
 
@@ -322,13 +322,14 @@ pub(super) fn map_terrain_scatter_batch(
             })
             .transpose()?
             .unwrap_or_default(),
-        hlod_config: config.hlod.as_ref().map(|h| {
-            crate::terrain::scatter::HlodConfig {
+        hlod_config: config
+            .hlod
+            .as_ref()
+            .map(|h| crate::terrain::scatter::HlodConfig {
                 hlod_distance: h.hlod_distance,
                 cluster_radius: h.cluster_radius,
                 simplify_ratio: h.simplify_ratio,
-            }
-        }),
+            }),
     })
 }
 

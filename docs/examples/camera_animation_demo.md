@@ -19,8 +19,8 @@ The camera animation feature provides:
 
 ### Required
 - Python 3.8+
-- forge3d extension module installed (`maturin develop --release`)
-- Interactive viewer binary built (`cargo build --release --bin interactive_viewer`)
+- forge3d installed (`pip install forge3d` or `maturin develop --release` from a source checkout)
+- `interactive_viewer` command available (installed automatically with `pip install forge3d`; source checkouts can still build `cargo build --release --bin interactive_viewer` if they need a standalone launcher)
 - DEM terrain file (e.g., `assets/tif/Mount_Fuji_30m.tif`)
 
 ### Optional (for MP4 export)

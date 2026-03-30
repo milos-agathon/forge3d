@@ -1,6 +1,6 @@
 [package]
 name = "forge3d"
-version = "1.22.0"
+version = "1.23.0"
 edition = "2021"
 autoexamples = false
 description = "GPU-accelerated 3D terrain rendering for Python and Rust"

@@ -187,22 +187,22 @@ pub fn compute_wind_uniforms(
 
     ScatterWindUniforms {
         wind_phase: [
-            time_seconds * wind.speed * tau,         // temporal_phase
+            time_seconds * wind.speed * tau,          // temporal_phase
             time_seconds * wind.gust_frequency * tau, // gust_phase
             wind.gust_strength,                       // gust_strength (contract units)
             wind.rigidity,                            // rigidity [0,1]
         ],
         wind_vec_bounds: [
-            dir_x * wind.amplitude,  // wind_dir.x * amplitude
-            0.0,                     // wind_dir.y (zero, XZ ground plane)
-            dir_z * wind.amplitude,  // wind_dir.z * amplitude
-            mesh_height_max,         // per-draw mesh height
+            dir_x * wind.amplitude, // wind_dir.x * amplitude
+            0.0,                    // wind_dir.y (zero, XZ ground plane)
+            dir_z * wind.amplitude, // wind_dir.z * amplitude
+            mesh_height_max,        // per-draw mesh height
         ],
         wind_bend_fade: [
-            wind.bend_start,                      // bend_start [0,1]
-            wind.bend_extent,                     // bend_extent (> 0)
-            wind.fade_start * instance_scale,     // fade_start (approx render-space)
-            wind.fade_end * instance_scale,       // fade_end (approx render-space)
+            wind.bend_start,                  // bend_start [0,1]
+            wind.bend_extent,                 // bend_extent (> 0)
+            wind.fade_start * instance_scale, // fade_start (approx render-space)
+            wind.fade_end * instance_scale,   // fade_end (approx render-space)
         ],
     }
 }
@@ -695,9 +695,15 @@ fn mesh_bounding_radius(mesh: &MeshBuffers) -> f32 {
 /// Extract the maximum axis scale from a row-major 4x4 transform.
 fn max_instance_scale(row_major: &[f32; 16]) -> f32 {
     // Row-major layout: col0=(r[0],r[4],r[8]), col1=(r[1],r[5],r[9]), col2=(r[2],r[6],r[10])
-    let sx = (row_major[0] * row_major[0] + row_major[4] * row_major[4] + row_major[8] * row_major[8]).sqrt();
-    let sy = (row_major[1] * row_major[1] + row_major[5] * row_major[5] + row_major[9] * row_major[9]).sqrt();
-    let sz = (row_major[2] * row_major[2] + row_major[6] * row_major[6] + row_major[10] * row_major[10]).sqrt();
+    let sx =
+        (row_major[0] * row_major[0] + row_major[4] * row_major[4] + row_major[8] * row_major[8])
+            .sqrt();
+    let sy =
+        (row_major[1] * row_major[1] + row_major[5] * row_major[5] + row_major[9] * row_major[9])
+            .sqrt();
+    let sz =
+        (row_major[2] * row_major[2] + row_major[6] * row_major[6] + row_major[10] * row_major[10])
+            .sqrt();
     sx.max(sy).max(sz)
 }
 
@@ -778,19 +784,16 @@ fn build_hlod_cache(
         let radius = instance_indices
             .iter()
             .map(|&i| {
-                let pos_dist = Vec3::new(positions[i][0], positions[i][1], positions[i][2]).distance(center);
+                let pos_dist =
+                    Vec3::new(positions[i][0], positions[i][1], positions[i][2]).distance(center);
                 let inst_scale = max_instance_scale(&transforms_rowmajor[i]);
                 pos_dist + base_mesh_radius * inst_scale
             })
             .fold(0.0f32, f32::max);
 
         // Simplify the merged mesh
-        let simplified = simplify_mesh(&merged, config.simplify_ratio).map_err(|e| {
-            anyhow!(
-                "HLOD cluster simplification failed: {}",
-                e.message()
-            )
-        })?;
+        let simplified = simplify_mesh(&merged, config.simplify_ratio)
+            .map_err(|e| anyhow!("HLOD cluster simplification failed: {}", e.message()))?;
 
         // Upload to GPU
         let vertices: Vec<VertexPN> = simplified
@@ -808,8 +811,7 @@ fn build_hlod_cache(
             .collect();
 
         let vertex_buffer_bytes = (vertices.len() * std::mem::size_of::<VertexPN>()) as u64;
-        let index_buffer_bytes =
-            (simplified.indices.len() * std::mem::size_of::<u32>()) as u64;
+        let index_buffer_bytes = (simplified.indices.len() * std::mem::size_of::<u32>()) as u64;
 
         if vertex_buffer_bytes == 0 || index_buffer_bytes == 0 {
             // Degenerate cluster after simplification — skip
@@ -1039,10 +1041,11 @@ fn build_gpu_level(
         })
         .collect::<Vec<_>>();
 
-    let (y_min, y_max) = vertices.iter().fold(
-        (f32::INFINITY, f32::NEG_INFINITY),
-        |(mn, mx), v| (mn.min(v.position[1]), mx.max(v.position[1])),
-    );
+    let (y_min, y_max) = vertices
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(mn, mx), v| {
+            (mn.min(v.position[1]), mx.max(v.position[1]))
+        });
     let mesh_height_max = y_max;
     let y_extent = y_max - y_min;
     if y_extent > 1e-6 && y_min.abs() > 0.05 * y_extent {
@@ -1338,7 +1341,11 @@ mod tests {
 
     #[test]
     fn compute_wind_zero_amplitude_returns_zeros() {
-        let wind = ScatterWindSettingsNative { enabled: true, amplitude: 0.0, ..Default::default() };
+        let wind = ScatterWindSettingsNative {
+            enabled: true,
+            amplitude: 0.0,
+            ..Default::default()
+        };
         let u = compute_wind_uniforms(&wind, 1.0, 10.0, 1.0);
         assert_eq!(u.wind_vec_bounds[0], 0.0);
         assert_eq!(u.wind_vec_bounds[2], 0.0);
@@ -1348,7 +1355,7 @@ mod tests {
     fn compute_wind_direction_and_amplitude() {
         let wind = ScatterWindSettingsNative {
             enabled: true,
-            direction_deg: 0.0,  // +X direction
+            direction_deg: 0.0, // +X direction
             amplitude: 3.0,
             ..Default::default()
         };
@@ -1424,7 +1431,10 @@ mod tests {
     fn mesh_height_max_uses_vertex_y_max() {
         // Vertices: y values [0.0, 1.5, 3.0]
         let positions = vec![[0.0, 0.0, 0.0], [1.0, 1.5, 0.0], [0.0, 3.0, 1.0]];
-        let y_max = positions.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max);
+        let y_max = positions
+            .iter()
+            .map(|p| p[1])
+            .fold(f32::NEG_INFINITY, f32::max);
         assert!((y_max - 3.0).abs() < 1e-6);
     }
 
@@ -1467,11 +1477,7 @@ mod tests {
     #[test]
     fn mesh_bounding_radius_computes_max_distance_from_origin() {
         let mesh = crate::geometry::MeshBuffers {
-            positions: vec![
-                [1.0, 0.0, 0.0],
-                [0.0, 2.0, 0.0],
-                [0.0, 0.0, 0.5],
-            ],
+            positions: vec![[1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 0.5]],
             normals: vec![[0.0, 1.0, 0.0]; 3],
             indices: vec![0, 1, 2],
             ..Default::default()
@@ -1484,10 +1490,7 @@ mod tests {
     fn max_instance_scale_extracts_uniform_scale() {
         // Identity with scale=5
         let row = [
-            5.0, 0.0, 0.0, 0.0,
-            0.0, 5.0, 0.0, 0.0,
-            0.0, 0.0, 5.0, 0.0,
-            0.0, 0.0, 0.0, 1.0,
+            5.0, 0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ];
         let s = max_instance_scale(&row);
         assert!((s - 5.0).abs() < 1e-5, "scale should be 5.0, got {s}");
@@ -1497,10 +1500,7 @@ mod tests {
     fn max_instance_scale_extracts_nonuniform_scale() {
         // scale_x=2, scale_y=7, scale_z=3
         let row = [
-            2.0, 0.0, 0.0, 0.0,
-            0.0, 7.0, 0.0, 0.0,
-            0.0, 0.0, 3.0, 0.0,
-            0.0, 0.0, 0.0, 1.0,
+            2.0, 0.0, 0.0, 0.0, 0.0, 7.0, 0.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ];
         let s = max_instance_scale(&row);
         assert!((s - 7.0).abs() < 1e-5, "scale should be 7.0, got {s}");

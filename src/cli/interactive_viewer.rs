@@ -15,22 +15,25 @@ fn gi_cli_config_to_commands(cfg: &GiCliConfig) -> Vec<String> {
 /// `examples/interactive_viewer.rs` entrypoint so that existing tests and
 /// docs that rely on the CLI semantics continue to work.
 pub fn run_interactive_viewer_cli() -> Result<(), Box<dyn std::error::Error>> {
+    run_interactive_viewer_cli_with_args(env::args().skip(1).collect())
+}
+
+pub fn run_interactive_viewer_cli_with_args(
+    all_args: Vec<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Collect all CLI arguments (excluding argv[0]) so we can validate
     // GI-related flags using the central schema in src/cli/args.rs.
-    let all_args: Vec<String> = env::args().skip(1).collect();
-
-    let gi_cfg = match GiCliConfig::parse(&all_args) {
-        Ok(cfg) => cfg,
-        Err(e) => {
-            eprintln!("[forge3d CLI] error parsing GI flags: {e}");
-            std::process::exit(1);
-        }
-    };
+    let gi_cfg = GiCliConfig::parse(&all_args).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("[forge3d CLI] error parsing GI flags: {e}"),
+        )
+    })?;
 
     // Seed initial commands with GI configuration derived from GiCliConfig.
     let mut cmds: Vec<String> = gi_cli_config_to_commands(&gi_cfg);
 
-    let mut args = all_args.into_iter();
+    let mut args = all_args.iter().cloned();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--size" => {
@@ -239,11 +242,10 @@ pub fn run_interactive_viewer_cli() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Check for IPC mode
-    let all_args_again: Vec<String> = env::args().skip(1).collect();
     let mut ipc_host: Option<String> = None;
     let mut ipc_port: Option<u16> = None;
 
-    let mut args_iter = all_args_again.iter();
+    let mut args_iter = all_args.iter();
     while let Some(arg) = args_iter.next() {
         match arg.as_str() {
             "--ipc-host" => {

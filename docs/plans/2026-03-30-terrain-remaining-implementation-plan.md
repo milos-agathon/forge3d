@@ -1,82 +1,128 @@
 # Terrain Remaining Implementation Plan
 
-**Date:** 2026-03-30  
-**Sources:** `docs/plans/2026-03-16-terrain-viz-epics.md`, direct repo audit of `src/`, `python/forge3d/`, `tests/`, `examples/`, and targeted terrain regression runs in the current worktree.  
-**Purpose:** Record the work that still must be implemented after the 2026-03-30 terrain-foundations re-audit. This document distinguishes between:
+**Date:** 2026-03-30
+**Primary source:** `docs/plans/2026-03-16-terrain-viz-epics.md`
+**Audit basis:** direct repo inspection of `examples/`, `python/forge3d/`, `src/terrain/`, `src/viewer/terrain/`, `docs/terrain/`, `tests/`, and targeted validation in the current worktree.
 
-1. work needed to make already-claimed "implemented" epics actually complete in the current worktree
-2. net-new terrain epics that are still genuinely unimplemented
+This document replaces the earlier stale conclusion that the main remaining work was "restore missing demos." That was true for an earlier snapshot, but it is no longer true in the current worktree. Most claimed implemented-terrain epics now have real runtime and example files again. The remaining work is narrower and more precise:
 
----
-
-## 1. Completion Rule
-
-A terrain epic is not fully complete in this repo until all of the following are true:
-
-1. The runtime/API path exists and works.
-2. The docs describe the real API and real behavior.
-3. Any claimed example/demo script exists and runs, or all claims about that example are removed.
-4. Tests match the current surface and do not point at deleted assets.
-5. CI does not reference missing example scripts.
-
-The current worktree clears item 1 for many shipped epics, but fails items 2-5 in several places.
+1. fix the implemented epics that still have broken or misleading public surfaces
+2. standardize the demo/example substrate where it is inconsistent
+3. only then spend time on the genuinely unimplemented terrain backlog
 
 ---
 
-## 2. P0 Repo-Completion Work For Already-Implemented Epics
+## 1. Validation Summary
 
-These items come before any new terrain epic. They are required to make the current "Implemented foundations" table defensible.
+### 1.1 What was validated
 
-| Priority | Area | What still must be implemented | Done when |
-|---|---|---|---|
-| **P0** | Example/demo recovery or cleanup | Restore the missing terrain example scripts, or deliberately replace them and update every doc/test/CI reference. Affected claims currently cover TV2, TV3, TV4, TV5, TV6, TV10, TV12, TV13, TV20, TV21, and TV22. | No terrain docs/tests/CI entries point at deleted `examples/terrain_tv*_demo.py` files. |
-| **P0** | Demo-regression repair | Fix the currently broken example-driven tests by restoring the expected scripts or rewriting the tests around the new example locations. | The demo tests for TV4, TV6, TV10, TV21, and TV24 pass again, or are intentionally replaced with equivalent coverage. |
-| **P0** | CI matrix repair | Remove or replace CI entries that still point at deleted example scripts. | CI example lanes only reference scripts that exist in `examples/`. |
-| **P0** | TV10 docs/API alignment | Update TV10 docs to use the real `*_subsurface_tint` API, correct the default values, and remove algorithm claims that the shader does not implement. | The TV10 doc snippet is copy-paste correct and the prose matches the actual shader/data model. |
+- Targeted terrain-epic regression suite:
+  - `pytest tests/test_terrain_sky_parity.py tests/test_aov.py tests/test_terrain_scatter.py tests/test_terrain_tv4_material_variation.py tests/test_terrain_probes.py tests/test_terrain_tv6_heterogeneous_volumetrics.py tests/test_terrain_tv10_subsurface_materials.py tests/test_tv12_offline_quality.py tests/test_tv12_offline_architecture.py tests/test_terrain_tv13_lod_pipeline.py tests/test_camera_rigs.py tests/test_terrain_camera_rigs_demo.py tests/test_tv20_virtual_texturing.py tests/test_terrain_tv21_blending.py tests/test_tv22_scatter_wind.py -q`
+  - Result: `191 passed, 2 skipped`
+- Example-backed and golden-adjacent validation:
+  - `pytest tests/test_terrain_tv4_demo.py tests/test_terrain_tv6_heterogeneous_volumetrics.py tests/test_terrain_tv10_demo.py tests/test_terrain_tv21_demo.py tests/test_terrain_tv24_demo.py tests/test_terrain_visual_goldens.py tests/test_terrain_tv10_goldens.py -q`
+  - Result: `1 failed, 4 passed, 2 skipped`
+  - The failing test was `tests/test_terrain_tv10_demo.py`
+- Direct demo smoke runs:
+  - Passed: `TV2`, `TV4`, `TV5`, `TV12`, `TV13`, `TV17`, `TV20`, `TV22`
+  - Failed: `TV3` under reduced `--max-dem-size`
+
+### 1.2 Completion scale used below
+
+| Level | Meaning |
+|---|---|
+| **95-100%** | Runtime, docs, tests, and demo surface are aligned enough to treat the epic as effectively complete. |
+| **80-94%** | Core implementation is real, but meaningful quality debt remains. |
+| **60-79%** | Core runtime exists, but shipped surface drift or scope caveats make "Implemented" too strong without qualification. |
 
 ---
 
-## 3. Epic-By-Epic Remaining Work
+## 2. Implemented Foundations Audit
 
-This section is the concrete delta from "runtime exists" to "epic is actually complete."
+This section covers every epic listed in the `Implemented foundations` table in `docs/plans/2026-03-16-terrain-viz-epics.md`.
 
-| Epic | Current reality | What still must be implemented |
+| Epic | Completion | Current status | Findings | Required follow-up |
+|---|---:|---|---|---|
+| **TV1 - Terrain Atmosphere Path Parity** | **97%** | Strongest shipped terrain epic. Runtime, docs, example, and parity tests are aligned. | No material defect found in this audit. | Keep current parity coverage intact. |
+| **TV2 - Terrain Output and Compositing Foundation** | **88%** | AOV and EXR runtime are real and green. Demo smoke passed. | The demo's `_terrain_span()` helper uses raw raster resolution directly, so EPSG:4326 DEMs produce absurd spans like `0.05` and the scene quietly falls back to minimum camera/z-scale heuristics. The feature works, but the demo math is wrong. | Replace the local span heuristic with the guarded helper pattern already used by TV3/TV13/TV22, or make it CRS-aware. Recheck framing and printed diagnostics after that fix. |
+| **TV3 - Terrain Scatter and Population** | **84%** | Runtime tests are green. | The public demo is brittle. `python examples/terrain_tv3_scatter_demo.py --width 640 --height 360 --max-dem-size 384` failed because `seeded_random_transforms()` could place only `46` of `96` requested hero instances after filtering. This makes the exposed downsampling knob unsafe and explains why TV3 is not in the example-sanity CI matrix. | Make the demo adapt requested counts, spacing, or filters to reduced terrain size, then add a demo smoke test or CI lane. |
+| **TV4 - Terrain Material Variation Upgrade** | **86%** | Runtime tests and demo smoke passed. | Same demo-span bug as TV2. The TV4 demo printed `Terrain span: 0.03` on an EPSG:4326 Mount Fuji DEM, which is not a defensible scene span and is only hidden by downstream clamps. | Standardize TV4 onto the guarded span helper used by TV3/TV13/TV22. |
+| **TV5 - Terrain Local Probe Lighting** | **96%** | Diffuse and reflection probe runtime, docs, demo smoke, and tests are aligned. | No actionable defect found in this audit. | Keep probe and reflection-probe coverage healthy. |
+| **TV6 - Heterogeneous Terrain Volumetrics** | **95%** | Runtime and example-backed coverage are aligned. | No actionable defect found in this audit. | Keep viewer/reporting coverage healthy. |
+| **TV10 - Terrain Subsurface Materials** | **68%** | Core native decode and shader path are real, but the public surface is not clean. | The real-DEM demo is broken right now. `tests/test_terrain_tv10_demo.py` fails because `examples/terrain_tv10_subsurface_demo.py` still passes dead kwargs like `snow_subsurface_color` even though the shipped API is `snow_subsurface_tint`. `docs/terrain/subsurface.md` repeats the dead `*_subsurface_color` names and also documents the wrong defaults; the actual defaults are zero-strength neutral tints, not non-zero snow/wetness SSS. `tests/test_terrain_tv10_goldens.py` is also stale behind its dedicated-golden gate and would hit the same dead kwargs when enabled. TV10 also shares the same broken `_terrain_span()` helper used by TV2/TV4/TV12. | Rename all public references to `*_subsurface_tint`, correct the documented defaults, repair the demo, update the dedicated-golden test, and switch the demo to the guarded span helper. TV10 should not stay in the "cleanly implemented" bucket until this is fixed. |
+| **TV12 - Terrain Offline Render Quality** | **84%** | Public API, runtime tests, architecture-doc checks, and demo smoke all passed. | The TV12 demo has the same broken `_terrain_span()` logic as TV2/TV4/TV10 and printed `Terrain span: 0.05` for the Rainier DEM. Separately, the shipped implementation is still CPU-readback-heavy by design; it is functional, but that remains the main architecture ceiling for the epic. | Fix the demo span helper now. Leave GPU-resident accumulation/convergence as a separate improvement unless product goals require it. |
+| **TV13 - Terrain Population LOD Pipeline** | **93%** | Simplification, auto-LOD, HLOD, tests, and demo smoke all worked. | No correctness bug found. Small smoke settings can make HLOD look unimpressive or even worse in raw draw-count terms, but that is an example-quality issue, not a broken runtime. | Optional: retune the demo defaults if it should prove HLOD payoff more clearly. Not a blocker. |
+| **TV17 - Terrain Camera Rig Toolkit** | **95%** | Tests passed and the export-path demo smoke passed. | No actionable defect found in this audit. | Keep current regression and demo coverage. |
+| **TV20 - Terrain Material Virtual Texturing** | **78%** if the epic means full terrain VT, **93%** if it means shipped v1 scope | Real shipped v1. Tests and demo smoke passed. | The native runtime is intentionally albedo-only. `normal` and `mask` families are accepted by the Python contract for forward compatibility but are not decoded or sampled natively. Residency feedback also still depends on CPU readback. This is not a hidden bug; it is a scope boundary that must stay explicit. | Decide whether "Implemented" means "v1 shipped albedo paging" or "full terrain material VT." If the latter, normal/mask family decode, sampling, and stats still remain. |
+| **TV21 - Terrain-Mesh Blending and Contact Integration** | **95%** | Runtime, tests, and demo smoke are aligned. | No actionable defect found in this audit. | Keep demo and regression coverage. |
+| **TV22 - Scatter Wind Animation** | **83%** | Runtime tests and demo smoke passed. | The epic is functionally shipped, but it is built on an acknowledged substrate defect. `docs/terrain/scatter-wind-animation.md` explicitly records accepted limitations including render-path-dependent phase and a translation/basis-frame mismatch because TV22 works around a pre-existing scatter instance-packing issue. That means TV22 is shipped, but not fully clean. | Keep TV22 marked as implemented in shipped scope, but track scatter instance-packing cleanup as the dependency for fully closing the epic. |
+
+### 2.1 Bottom line on implemented foundations
+
+- **Effectively complete:** `TV1`, `TV5`, `TV6`, `TV13`, `TV17`, `TV21`
+- **Implemented with meaningful quality debt:** `TV2`, `TV3`, `TV4`, `TV12`, `TV22`
+- **Implemented but still publicly broken/misaligned:** `TV10`
+- **Implemented only when read as shipped v1 scope:** `TV20`
+
+---
+
+## 3. Cross-Epic Defects And Quality Debt
+
+These are the real remaining implementation items for the already-shipped column.
+
+| Priority | Area | Problem | Affected epics | Requirement |
+|---|---|---|---|---|
+| **P0** | TV10 public-surface drift | The runtime uses `*_subsurface_tint`, but the demo, docs, and dedicated-golden test still use dead `*_subsurface_color` names and wrong defaults. | `TV10` | Repair demo/docs/golden suite and rerun example-backed validation. |
+| **P0** | Inconsistent terrain-span helpers across demos | Some demos guard against implausibly small world spans from geographic-degree rasters; others do not. This yields nonsense spans like `0.03` or `0.05` and hides the mistake behind minimum camera/z-scale clamps. | `TV2`, `TV4`, `TV10`, `TV12` now; `TV3`, `TV13`, `TV22`, and `TV24` already use the safer pattern | Extract and reuse one guarded helper, or make span calculation explicitly CRS-aware. |
+| **P1** | TV3 demo robustness | The public downsampling control can invalidate hardcoded seeded placement counts and crash the demo. | `TV3` | Scale transform requests to terrain size or relax filters automatically when the user downsamples. |
+| **P1** | Scope labeling for shipped v1 work | Some implemented epics are clean only if their scope caveats remain explicit. | `TV20`, `TV22`, `TV12` | Keep docs and planning language honest about what is shipped vs. what is deferred. |
+| **P2** | Example-sanity coverage is uneven | The example CI matrix currently covers only a small subset of the implemented terrain demos. TV3's public-demo failure escaped because there was no direct example lane. | Especially `TV3`, but also the broader terrain demo surface | After fixing the demo substrate, expand example smoke coverage selectively. |
+
+---
+
+## 4. Dependencies And Blockers
+
+| Dependency | Why it matters | Blocks |
 |---|---|---|
-| **TV1 - Terrain Atmosphere Path Parity** | Strongest shipped foundation. Runtime, example, and parity tests are aligned. | No material implementation gap found in this audit. Keep current coverage healthy. |
-| **TV2 - Terrain Output and Compositing Foundation** | Core AOV and EXR functionality is real. | Restore or replace the missing TV2 example script and repair the CI/example-story around it. |
-| **TV3 - Terrain Scatter and Population** | Scatter runtime looks real and tested. | Restore or replace the missing TV3 demo so the docs stop advertising a nonexistent bundled example. |
-| **TV4 - Terrain Material Variation Upgrade** | Core runtime/tests are present. | Restore or replace the missing TV4 demo, repair its demo test, and repair the CI example lane that still points at the deleted script. |
-| **TV5 - Terrain Local Probe Lighting** | Probe lighting runtime is present, including reflection probes. | Restore or replace the missing probe-lighting demo and the missing reflection-probe demo, or remove the corresponding docs/demo-test claims. |
-| **TV6 - Heterogeneous Terrain Volumetrics** | Runtime/settings path is present. | Restore or replace the missing real-DEM volumetrics demo so the example-driven coverage matches the shipped claim again. |
-| **TV10 - Terrain Subsurface Materials** | Native decode and shader path are present. | Restore or replace the missing TV10 demo and fix the docs so they describe the real API, real defaults, and real shader behavior. |
-| **TV12 - Terrain Offline Render Quality** | Public API and runtime path are present. | Restore or replace the missing TV12 demo. If the goal is a more complete renderer-grade offline path, move accumulation/convergence off the current CPU-readback-heavy approach. |
-| **TV13 - Terrain Population LOD Pipeline** | Simplification, auto-LOD, and HLOD runtime are present. | Restore or replace the missing TV13 end-to-end demo so the docs and shipped claim stay honest. |
-| **TV17 - Terrain Camera Rig Toolkit** | Best-aligned shipped epic besides TV1. | No material implementation gap found in this audit. Keep the current demo/tests intact. |
-| **Terrain Material Virtual Texturing** | Good shipped v1. Current native runtime pages albedo only. | Restore or replace the missing TV20 demo. If this epic is meant to be complete beyond v1 scope, add native normal/mask family decode, residency, and sampling rather than leaving them as contract placeholders. |
-| **TV21 - Terrain-Mesh Blending and Contact Integration** | Runtime path is present and tested. | Restore or replace the missing TV21 real-DEM example and repair its example smoke test. |
-| **TV22 - Scatter Wind Animation** | Runtime/viewer path is present. | Restore or replace the missing TV22 demo. If this epic is meant to be fully closed rather than v1-shipped, fix the underlying scatter instance-packing issue that TV22 currently works around. |
+| **Shared demo-span helper cleanup** | Until the repo uses one consistent terrain-span rule, several demos will keep reporting bogus scale and relying on hidden clamps. | Clean closure of `TV2`, `TV4`, `TV10`, and `TV12` |
+| **Scatter instance-packing cleanup** | TV22 explicitly works around a pre-existing packing/basis mismatch. | A truly clean close on `TV22`; possibly future scatter-adjacent work |
+| **Native normal/mask VT path** | The Python contract already accepts more than albedo, but the runtime does not. | Calling `TV20` fully complete in the broad sense |
+| **GPU-resident offline accumulation/convergence** | TV12 is functionally real today, but CPU readback remains the main architecture ceiling. | Calling `TV12` renderer-grade complete rather than functionally shipped |
 
 ---
 
-## 4. Net-New Terrain Epics Still Not Implemented
+## 5. Revised Execution Order
 
-These are the actual terrain epics that remain unbuilt after the implemented-foundations audit.
+The next work should not start with new terrain epics. It should start by cleaning the already-shipped column.
 
-### 4.1 Core backlog
+1. **Fix TV10 first.**
+   Repair `examples/terrain_tv10_subsurface_demo.py`, `docs/terrain/subsurface.md`, and `tests/test_terrain_tv10_goldens.py` so the shipped API, demo, docs, and gated golden lane all agree on `*_subsurface_tint`.
+2. **Standardize terrain-span helpers next.**
+   Lift the guarded helper pattern already present in TV3/TV13/TV22 into the remaining demos that still use raw geographic-degree span.
+3. **Make the TV3 demo robust.**
+   The demo must survive its own exposed `--max-dem-size` knob before it can be treated as a reliable shipped example or promoted into CI example coverage.
+4. **Then decide how hard to close the scope-limited epics.**
+   `TV20` and `TV22` are shippable today, but only with their current caveats kept explicit.
+5. **Only after that move back to the true backlog.**
+   The core unimplemented terrain epics are still `TV16`, then `TV18`, then `TV7`.
 
-| Epic | Why it still must be implemented | Minimum definition of done |
-|---|---|---|
-| **TV16 - Terrain Scene Variants and Review Layers** | Bundles persist terrain metadata, presets, and bookmarks, but there is still no real terrain review-state model. | Named terrain variants, grouped review-layer visibility, atomic list/query/apply APIs, and persistence/state-isolation tests. |
-| **TV18 - Terrain Shot Queue and Bounded Timeline** | Forge3D can render one terrain sequence, but still lacks a terrain delivery workflow for multi-shot output. | Serializable shot manifest, bounded terrain-only track set, pass-aware multi-shot rendering, stable output layout, and resume semantics. |
-| **TV7 - Weather Particle Foundation** | TV6 volumetrics do not replace true terrain weather particles. | GPU spawn/update/render for terrain weather, terrain-aware collision/kill behavior, and a narrow preset set covering rain, snow, dust, and ash. |
+---
 
-### 4.2 Deferred or conditional work
+## 6. Net-New Terrain Epics Still Not Implemented
 
-These are still genuinely unimplemented, but they are not the first priority after the repo-completion work above:
+After the implemented-foundations cleanup above, the genuinely unbuilt terrain backlog is still:
 
-- **TV11 - Page-Based Terrain Shadowing**
+### 6.1 Core backlog
+
+- **TV16 - Terrain Scene Variants and Review Layers**
+- **TV18 - Terrain Shot Queue and Bounded Timeline**
+- **TV7 - Weather Particle Foundation**
+
+### 6.2 Conditional or deferred backlog
+
 - **TV8 - Coastal / Hydrology Water Upgrade**
 - **TV9 - OCIO Color-Managed Terrain Output**
+- **TV11 - Page-Based Terrain Shadowing**
 - **TV14 - Terrain Flow and Trajectory Visualization**
 - **TV15 - Compute Tessellation for Terrain**
 - **TV19 - Collaborative Terrain Review**
@@ -84,22 +130,14 @@ These are still genuinely unimplemented, but they are not the first priority aft
 
 ---
 
-## 5. Recommended Execution Order
+## 7. Practical Conclusion
 
-1. **Repair the shipped surface first.** Restore or replace missing example scripts, fix demo tests, and clean up CI/doc references.
-2. **Fix TV10 documentation next.** It is the one implemented epic whose public doc is actively wrong enough to break copy-paste usage.
-3. **Then build TV16.** Review-state management is the next real missing terrain workflow primitive.
-4. **Then build TV18.** Shot queuing depends on a clearer terrain review/variant model.
-5. **Then build TV7.** Weather particles matter, but they are less foundational than the review/delivery backlog.
-6. **Only after that, decide whether to expand scope-limited shipped work.** The main candidates are TV20 normal/mask VT support, a more GPU-resident TV12 pipeline, and the substrate cleanup behind TV22.
+The repo no longer has a "missing terrain demos everywhere" problem. That diagnosis is stale.
 
----
+The actual remaining work is:
 
-## 6. Bottom Line
+1. **repair the implemented column where it is still publicly inconsistent**
+2. **standardize the demo substrate where helpers drifted**
+3. **only then continue with `TV16`, `TV18`, and `TV7`**
 
-Forge3D does not primarily need more terrain feature ideation right now. It needs two things:
-
-1. cleanup work that makes the already-claimed terrain foundations actually complete in the current repo
-2. the next real backlog epics: TV16, TV18, and then TV7
-
-That is the remaining implementation plan.
+That is the current terrain remaining implementation plan.

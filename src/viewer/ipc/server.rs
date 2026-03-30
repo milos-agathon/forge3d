@@ -198,7 +198,9 @@ where
                             }
                             IpcRequest::ListSceneVariants => {
                                 if let Ok(snapshot) = get_scene_review_state().lock() {
-                                    IpcResponse::with_scene_variants(snapshot.scene_variants.clone())
+                                    IpcResponse::with_scene_variants(
+                                        snapshot.scene_variants.clone(),
+                                    )
                                 } else {
                                     IpcResponse::error("Failed to lock scene review state")
                                 }
@@ -241,9 +243,9 @@ where
                                             }
                                         }
                                     }
-                                    Ok(None) => {
-                                        IpcResponse::error("Internal error: unhandled special request")
-                                    }
+                                    Ok(None) => IpcResponse::error(
+                                        "Internal error: unhandled special request",
+                                    ),
                                     Err(e) => {
                                         eprintln!("[IPC] Conversion error: {}", e);
                                         IpcResponse::error(e)
@@ -278,11 +280,9 @@ where
                                                 IpcResponse::error(e)
                                             }
                                         },
-                                        Ok(None) => {
-                                            IpcResponse::error(
-                                                "Internal error: unhandled special request",
-                                            )
-                                        }
+                                        Ok(None) => IpcResponse::error(
+                                            "Internal error: unhandled special request",
+                                        ),
                                         Err(e) => {
                                             eprintln!("[IPC] Conversion error: {}", e);
                                             IpcResponse::error(e)
@@ -315,11 +315,9 @@ where
                                                 IpcResponse::error(e)
                                             }
                                         },
-                                        Ok(None) => {
-                                            IpcResponse::error(
-                                                "Internal error: unhandled special request",
-                                            )
-                                        }
+                                        Ok(None) => IpcResponse::error(
+                                            "Internal error: unhandled special request",
+                                        ),
                                         Err(e) => {
                                             eprintln!("[IPC] Conversion error: {}", e);
                                             IpcResponse::error(e)

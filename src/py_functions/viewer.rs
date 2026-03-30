@@ -179,3 +179,18 @@ pub(crate) fn open_terrain_viewer(
         pyo3::exceptions::PyRuntimeError::new_err(format!("Terrain viewer error: {}", e))
     })
 }
+
+#[pyfunction]
+#[pyo3(signature = (args=None))]
+pub(crate) fn run_interactive_viewer_cli(
+    py: Python<'_>,
+    args: Option<Vec<String>>,
+) -> PyResult<()> {
+    use crate::cli::interactive_viewer::run_interactive_viewer_cli_with_args;
+
+    let argv = args.unwrap_or_default();
+    py.allow_threads(move || run_interactive_viewer_cli_with_args(argv).map_err(|e| e.to_string()))
+        .map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("interactive_viewer error: {}", e))
+        })
+}

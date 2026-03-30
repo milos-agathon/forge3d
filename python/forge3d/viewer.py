@@ -19,6 +19,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
+from ._viewer_binary import find_viewer_binary as _resolve_viewer_binary
+
 # Import Renderer and MSAA config with fallbacks for standalone testing
 try:
     from . import Renderer
@@ -586,30 +588,7 @@ class ViewerHandle:
 
 def _find_viewer_binary() -> str:
     """Find the interactive_viewer binary."""
-    # Try to find in cargo target directory
-    # Path: python/forge3d/viewer.py -> python/forge3d -> python -> forge3d (repo root)
-    cargo_target = Path(__file__).parent.parent.parent / "target"
-
-    suffix = ".exe" if sys.platform == "win32" else ""
-    candidates = []
-    for profile in ("release", "debug"):
-        binary = cargo_target / profile / f"interactive_viewer{suffix}"
-        if binary.exists():
-            candidates.append(binary)
-    if candidates:
-        newest = max(candidates, key=lambda path: path.stat().st_mtime_ns)
-        return str(newest)
-
-    # Try PATH
-    import shutil
-    path_binary = shutil.which("interactive_viewer")
-    if path_binary:
-        return path_binary
-    
-    raise FileNotFoundError(
-        "Could not find interactive_viewer binary. "
-        "Build with: cargo build --release --bin interactive_viewer"
-    )
+    return _resolve_viewer_binary(__file__)
 
 
 def open_viewer_async(

@@ -5,13 +5,20 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and follows SemVer (pre-1.0 may include breaking changes).
 
 ## [Unreleased]
+
+## [1.23.0] - 2026-03-30
 ### Added
+- `pip install forge3d` now installs the `interactive_viewer` command, so standard viewer usage no longer requires a separate `cargo build --release --bin interactive_viewer` step.
 - Completed Epic TV22 scatter wind animation across the terrain renderer and interactive viewer workflows.
 - Added regression coverage for `render_with_aov(..., time_seconds=...)` and an opt-in live viewer wind path covering viewer time accumulation and camera updates.
 
 ### Fixed
 - Viewer IPC now rejects invalid terrain scatter wind payloads instead of silently replacing them with defaults.
 - Hardened the terrain scatter Python contract so invalid `wind` objects fail fast before serialization.
+- Updated viewer and example documentation to use the installed `interactive_viewer` command by default, while keeping direct Cargo execution as a source-checkout fallback.
+
+### Changed
+- Bumped the package version to `1.23.0`.
 
 ## [1.22.0] - 2026-03-30
 

@@ -82,7 +82,7 @@ ts.apply_to_renderer(renderer, [batch])
 ## Example and tests
 
 - Real-DEM example: `python examples/terrain_tv21_blending_demo.py`
-- Example notes: `docs/examples/terrain_tv21_blending_demo.md`
+- Example notes: `docs/examples/blending_demo.md`
 - Feature regression tests: `tests/test_terrain_tv21_blending.py`
 - Real-DEM example smoke test: `tests/test_terrain_tv21_demo.py`
 

@@ -11,7 +11,10 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
         }
         ViewerCmd::ApplySceneVariant { variant_id } => {
             if let Err(err) = viewer.apply_scene_variant(variant_id) {
-                eprintln!("[scene_review] failed to apply variant '{}': {err}", variant_id);
+                eprintln!(
+                    "[scene_review] failed to apply variant '{}': {err}",
+                    variant_id
+                );
             }
             true
         }

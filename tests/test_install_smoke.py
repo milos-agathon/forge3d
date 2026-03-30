@@ -1,6 +1,6 @@
 """Smoke tests for package installation metadata and public API."""
 
-from importlib.metadata import metadata
+from importlib.metadata import distribution, metadata
 from pathlib import Path
 import re
 import sys
@@ -158,3 +158,14 @@ def test_installed_project_urls_match_public_metadata():
     for label, url in expected_urls.items():
         assert f"{label}, {url}" in project_urls
     assert all("github.com/forge3d/forge3d" not in value for value in project_urls)
+
+
+def test_installs_interactive_viewer_console_script():
+    """The wheel exposes the interactive viewer command via console_scripts."""
+    entry_points = distribution("forge3d").entry_points
+    assert any(
+        ep.group == "console_scripts"
+        and ep.name == "interactive_viewer"
+        and ep.value == "forge3d._viewer_entry:main"
+        for ep in entry_points
+    )

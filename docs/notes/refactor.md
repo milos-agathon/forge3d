@@ -117,7 +117,7 @@ Based on AGENTS.md and `docs/codebase-refactor.md`, the following rules govern t
 
 1. **Python `open_3d_viewer()`** → `lib.rs:open_3d_viewer()` → [run_viewer()](mod.rs:6949:0-8437:1)
 2. **Python `open_terrain_viewer()`** → `lib.rs:open_terrain_viewer()` → [run_viewer()](mod.rs:6949:0-8437:1)
-3. **CLI `cargo run --bin interactive_viewer`** → `cli/interactive_viewer.rs:main()` → [run_viewer()](mod.rs:6949:0-8437:1) or [run_viewer_with_ipc()](mod.rs:8471:0-8666:1)
+3. **CLI `interactive_viewer`** (or `cargo run --bin interactive_viewer --` from a pure source checkout) → `cli/interactive_viewer.rs:main()` → [run_viewer()](mod.rs:6949:0-8437:1) or [run_viewer_with_ipc()](mod.rs:8471:0-8666:1)
 
 ---
 
@@ -498,7 +498,7 @@ sha256sum src/shaders/viewer/*.wgsl
 | `cargo check --all-features` passes | CI / local |
 | `cargo test --all-features` passes | CI / local |
 | `pytest tests/ -v` passes | CI / local |
-| Viewer still runs interactively | `cargo run --bin interactive_viewer -- --width 640 --height 480` |
+| Viewer still runs interactively | `interactive_viewer --width 640 --height 480` (or `cargo run --bin interactive_viewer -- --width 640 --height 480` from a source checkout) |
 | P5 captures produce identical output | Hash comparison of `reports/p5/*.png` |
 
 ---

@@ -60,7 +60,23 @@ def _downsample_heightmap(heightmap: np.ndarray, max_dim: int) -> np.ndarray:
 
 
 def _load_dem(path: Path, max_dim: int) -> tuple[object, np.ndarray]:
-    dem = f3dio.load_dem(str(path), fill_nodata_values=True)
+    try:
+        dem = f3dio.load_dem(str(path), fill_nodata_values=True)
+    except ImportError:
+        try:
+            from PIL import Image
+        except ImportError as exc:
+            raise SystemExit(
+                "DEM loading requires rasterio or Pillow. "
+                "Install with `pip install rasterio` or `pip install pillow`."
+            ) from exc
+
+        with Image.open(path) as image:
+            data = np.asarray(image, dtype=np.float32)
+        if data.ndim == 3:
+            data = data[..., 0]
+        dem = f3dio.load_dem_from_array(data)
+
     heightmap = np.asarray(dem.data, dtype=np.float32).copy()
     return dem, _downsample_heightmap(heightmap, max_dim)
 

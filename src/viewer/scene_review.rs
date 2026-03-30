@@ -12,13 +12,13 @@ use crate::picking::LayerBvhData;
 use crate::viewer::event_loop::update_scene_review_state;
 use crate::viewer::terrain::vector_overlay::{OverlayPrimitive, VectorOverlayLayer, VectorVertex};
 use crate::viewer::terrain::BlendMode;
+use crate::viewer::viewer_enums::ViewerTerrainScatterBatchConfig;
 use crate::viewer::viewer_enums::{
     ViewerDenoiseConfig, ViewerDensityVolumeConfig, ViewerDofConfig, ViewerHeightAoConfig,
     ViewerLensEffectsConfig, ViewerMaterialLayerConfig, ViewerMotionBlurConfig, ViewerSkyConfig,
     ViewerSunVisConfig, ViewerTonemapConfig, ViewerVectorOverlayConfig, ViewerVolumetricsConfig,
 };
 use crate::viewer::Viewer;
-use crate::viewer::viewer_enums::ViewerTerrainScatterBatchConfig;
 
 #[derive(Debug, Clone, Default)]
 pub struct ViewerRasterOverlayConfig {
@@ -205,7 +205,9 @@ impl ViewerSceneReviewStateConfig {
     }
 
     pub fn variant_by_id(&self, variant_id: &str) -> Option<&ViewerSceneVariantConfig> {
-        self.variants.iter().find(|variant| variant.id == variant_id)
+        self.variants
+            .iter()
+            .find(|variant| variant.id == variant_id)
     }
 }
 
@@ -347,7 +349,10 @@ impl Viewer {
                     Ok(id) => raster_ids.push(id),
                     Err(err) => record_scene_review_error(
                         &mut first_error,
-                        format!("Failed to load review raster overlay '{}': {err}", overlay.name),
+                        format!(
+                            "Failed to load review raster overlay '{}': {err}",
+                            overlay.name
+                        ),
                     ),
                 }
             }
@@ -371,7 +376,9 @@ impl Viewer {
         #[cfg(feature = "enable-gpu-instancing")]
         {
             if let Some(ref mut terrain_viewer) = self.terrain_viewer {
-                if let Err(err) = terrain_viewer.set_scatter_batches_from_configs(&effective.scatter_batches) {
+                if let Err(err) =
+                    terrain_viewer.set_scatter_batches_from_configs(&effective.scatter_batches)
+                {
                     record_scene_review_error(
                         &mut first_error,
                         format!("Failed to set review scatter batches: {err:#}"),
@@ -384,7 +391,8 @@ impl Viewer {
             if !effective.scatter_batches.is_empty() {
                 record_scene_review_error(
                     &mut first_error,
-                    "Review scatter batches require Cargo feature 'enable-gpu-instancing'".to_string(),
+                    "Review scatter batches require Cargo feature 'enable-gpu-instancing'"
+                        .to_string(),
                 );
             }
         }
@@ -440,15 +448,13 @@ fn add_managed_vector_overlay(
         .vertices
         .iter()
         .map(|vertex| {
-            let feature_id = if vertex.len() > 7 { vertex[7] as u32 } else { 0 };
+            let feature_id = if vertex.len() > 7 {
+                vertex[7] as u32
+            } else {
+                0
+            };
             VectorVertex::with_feature_id(
-                vertex[0],
-                vertex[1],
-                vertex[2],
-                vertex[3],
-                vertex[4],
-                vertex[5],
-                vertex[6],
+                vertex[0], vertex[1], vertex[2], vertex[3], vertex[4], vertex[5], vertex[6],
                 feature_id,
             )
         })
@@ -593,9 +599,7 @@ impl Viewer {
         let exposure = first_f32(preset, &["exposure"]);
         let msaa = first_u32(preset, &["msaa"]);
         let normal_strength = first_f32(preset, &["normal_strength"]);
-        let height_ao = preset
-            .get("height_ao")
-            .and_then(parse_height_ao_config);
+        let height_ao = preset.get("height_ao").and_then(parse_height_ao_config);
         let sun_visibility = preset
             .get("sun_visibility")
             .and_then(parse_sun_visibility_config);
@@ -605,16 +609,12 @@ impl Viewer {
             .and_then(parse_vector_overlay_config);
         let tonemap = preset.get("tonemap").and_then(parse_tonemap_config);
         let dof = preset.get("dof").and_then(parse_dof_config);
-        let motion_blur = preset
-            .get("motion_blur")
-            .and_then(parse_motion_blur_config);
+        let motion_blur = preset.get("motion_blur").and_then(parse_motion_blur_config);
         let lens_effects = preset
             .get("lens_effects")
             .and_then(parse_lens_effects_config);
         let denoise = preset.get("denoise").and_then(parse_denoise_config);
-        let volumetrics = preset
-            .get("volumetrics")
-            .and_then(parse_volumetrics_config);
+        let volumetrics = preset.get("volumetrics").and_then(parse_volumetrics_config);
         let sky = preset.get("sky").and_then(parse_sky_config);
         let debug_mode = first_u32(preset, &["debug_mode"]);
 
@@ -749,13 +749,7 @@ fn add_review_label(viewer: &mut Viewer, payload: &Map<String, Value>) -> Result
                 .collect();
             Ok(viewer
                 .label_manager
-                .add_line_label(
-                    curved.text,
-                    polyline,
-                    style,
-                    LineLabelPlacement::Along,
-                    0.0,
-                )
+                .add_line_label(curved.text, polyline, style, LineLabelPlacement::Along, 0.0)
                 .0)
         }
         "callout" => {
@@ -867,13 +861,19 @@ fn apply_curved_style(style: &mut LabelStyle, payload: &CurvedLabelPayload) {
 }
 
 fn first_f32(map: &Map<String, Value>, keys: &[&str]) -> Option<f32> {
-    keys.iter()
-        .find_map(|key| map.get(*key).and_then(Value::as_f64).map(|value| value as f32))
+    keys.iter().find_map(|key| {
+        map.get(*key)
+            .and_then(Value::as_f64)
+            .map(|value| value as f32)
+    })
 }
 
 fn first_u32(map: &Map<String, Value>, keys: &[&str]) -> Option<u32> {
-    keys.iter()
-        .find_map(|key| map.get(*key).and_then(Value::as_u64).map(|value| value as u32))
+    keys.iter().find_map(|key| {
+        map.get(*key)
+            .and_then(Value::as_u64)
+            .map(|value| value as u32)
+    })
 }
 
 fn first_bool(map: &Map<String, Value>, keys: &[&str]) -> Option<bool> {
@@ -882,15 +882,13 @@ fn first_bool(map: &Map<String, Value>, keys: &[&str]) -> Option<bool> {
 }
 
 fn first_string(map: &Map<String, Value>, keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| {
-        map.get(*key)
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-    })
+    keys.iter()
+        .find_map(|key| map.get(*key).and_then(Value::as_str).map(ToOwned::to_owned))
 }
 
 fn first_array3(map: &Map<String, Value>, keys: &[&str]) -> Option<[f32; 3]> {
-    keys.iter().find_map(|key| map.get(*key).and_then(value_as_array3))
+    keys.iter()
+        .find_map(|key| map.get(*key).and_then(value_as_array3))
 }
 
 fn value_as_array2(value: &Value) -> Option<[f32; 2]> {
@@ -1355,10 +1353,7 @@ mod tests {
         registry
             .install(ViewerSceneReviewStateConfig {
                 base_state: ViewerSceneBaseStateConfig {
-                    preset: Some(Map::from_iter([(
-                        "exposure".to_string(),
-                        Value::from(1.0),
-                    )])),
+                    preset: Some(Map::from_iter([("exposure".to_string(), Value::from(1.0))])),
                     labels: vec![Map::from_iter([
                         ("kind".to_string(), Value::from("point")),
                         ("text".to_string(), Value::from("Base")),
@@ -1398,10 +1393,7 @@ mod tests {
                 variants: vec![ViewerSceneVariantConfig {
                     id: "review".to_string(),
                     active_layer_ids: vec!["roads".to_string()],
-                    preset: Some(Map::from_iter([(
-                        "exposure".to_string(),
-                        Value::from(3.0),
-                    )])),
+                    preset: Some(Map::from_iter([("exposure".to_string(), Value::from(3.0))])),
                     ..ViewerSceneVariantConfig::default()
                 }],
                 active_variant_id: Some("review".to_string()),
@@ -1458,8 +1450,14 @@ mod tests {
         assert_eq!(registry.visible_layer_ids().len(), 2);
 
         registry.apply_variant("analysis").unwrap();
-        assert_eq!(registry.state.active_variant_id.as_deref(), Some("analysis"));
-        assert_eq!(registry.visible_layer_ids(), HashSet::from_iter(["contours".to_string()]));
+        assert_eq!(
+            registry.state.active_variant_id.as_deref(),
+            Some("analysis")
+        );
+        assert_eq!(
+            registry.visible_layer_ids(),
+            HashSet::from_iter(["contours".to_string()])
+        );
     }
 
     #[test]

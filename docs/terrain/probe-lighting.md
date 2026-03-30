@@ -94,7 +94,7 @@ memory = renderer.get_probe_memory_report()
 - Example: `python examples/terrain_tv5_probe_lighting_demo.py`
 - Water-focused reflection-probe demo: `python examples/terrain_tv24_reflection_probe_demo.py`
 - API and behavior tests: `tests/test_terrain_probes.py`
-- Real-DEM demo notes: `docs/examples/terrain_tv24_reflection_probe_demo.md`
+- Real-DEM demo notes: `docs/examples/reflection_probe_demo.md`
 - Detailed design/spec: `docs/superpowers/specs/2026-03-21-tv5-local-probe-lighting-design.md`
 
 The bundled demo writes six outputs:
