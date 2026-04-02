@@ -101,8 +101,10 @@ fn composite_layers(
 
         for y in 0..target_height {
             for x in 0..target_width {
-                let u = x as f32 / target_width as f32;
-                let v = y as f32 / target_height as f32;
+                // Sample at pixel centers so a terrain-sized categorical overlay
+                // round-trips without half-texel interpolation drift.
+                let u = (x as f32 + 0.5) / target_width as f32;
+                let v = (y as f32 + 0.5) / target_height as f32;
                 if u < extent[0] || u > extent[2] || v < extent[1] || v > extent[3] {
                     continue;
                 }

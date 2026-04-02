@@ -5,14 +5,15 @@
 
 ## Overview
 
-Interactive 3D viewer for Swiss terrain (DEM elevation) with land cover classification draped as a lit overlay. The land cover is automatically resampled to match DEM resolution and reprojected to EPSG:3035 (LAEA Europe).
+Interactive 3D viewer for Swiss terrain (DEM elevation) with land cover classification draped as a lit overlay. The script now reprojects the DEM and land-cover overlay to EPSG:2056, frames the full country by default in `hq4`, and can compose snapshots with a title, caption, and legend.
 
 **Key Features:**
 - **Elevation:** Switzerland DEM from `assets/tif/switzerland_dem.tif`
 - **Land Cover Overlay:** Classification from `assets/tif/switzerland_land_cover.tif`
-- **Automatic Resampling:** Land cover matched to DEM resolution and CRS
+- **Automatic Reprojection:** DEM and land cover matched on an EPSG:2056 grid
 - **Lit Overlays:** Land cover blended into albedo before lighting → receives sun, shadows, AO
 - **4 High-Quality Presets:** Optimized rendering configurations for different use cases
+- **Snapshot Layout:** Optional title, caption, and upper-left legend for published exports
 - **Interactive Controls:** Real-time camera orbit, overlay opacity adjustment, snapshots
 
 ## Quick Start
@@ -109,7 +110,7 @@ python examples/swiss_terrain_landcover_viewer.py --preset hq3
 
 **Use Case:** Cinematic renders with camera effects and warm color grading.
 
-### Preset HQ4: Maximum Quality
+### Preset HQ4: Land-Cover Fidelity
 ```bash
 python examples/swiss_terrain_landcover_viewer.py --preset hq4
 ```
@@ -117,16 +118,16 @@ python examples/swiss_terrain_landcover_viewer.py --preset hq4
 **Configuration:**
 - Resolution: 3840×2160 (4K)
 - MSAA: 8x
-- Heightfield AO: Enabled
+- Heightfield AO: Enabled (light pass for contour definition)
 - Sun Visibility: Enabled
-- Snow Layer: Enabled
-- Rock Layer: Enabled
-- Depth of Field: Enabled
-- Lens Effects: Enabled
-- Exposure: 1.2
+- Snow Layer: Disabled
+- Rock Layer: Disabled
+- Depth of Field: Disabled
+- Lens Effects: Disabled
+- Exposure: 1.0
 - Temperature: 6500K (neutral)
 
-**Use Case:** Maximum quality renders with all effects enabled (slower performance).
+**Use Case:** Palette-safe land-cover renders where terrain contours should read as hillshade instead of exaggerated spikes.
 
 ## Command-Line Options
 
@@ -139,7 +140,7 @@ python examples/swiss_terrain_landcover_viewer.py --preset hq4
 | `--width` | int | 1920 | Window width in pixels |
 | `--height` | int | 1080 | Window height in pixels |
 | `--snapshot` | Path | None | Take snapshot and exit |
-| `--crs` | str | `EPSG:3035` | Target CRS for reprojection |
+| `--crs` | str | `EPSG:2056` | Target CRS for reprojection |
 | `--preset` | choice | None | High-quality preset: `hq1`, `hq2`, `hq3`, `hq4` |
 
 ### Overlay Options
@@ -211,7 +212,7 @@ quit                               # Exit viewer
 The script automatically resamples the land cover to match the DEM:
 
 1. **Read DEM metadata:** Extract CRS, transform, dimensions
-2. **Reproject land cover:** Transform to target CRS (EPSG:3035)
+2. **Reproject DEM + land cover:** Build a shared target grid in EPSG:2056
 3. **Resample:** Use nearest-neighbor resampling (preserves class values)
 4. **Colormap:** Apply Corine-style land cover colors
 5. **Export:** Save as RGBA PNG for overlay system
@@ -280,7 +281,7 @@ Default camera settings optimized for Swiss Alps:
     "theta": 40.0,      # Elevation angle (degrees)
     "radius": 4500.0,   # Distance from terrain center (meters)
     "fov": 35.0,        # Field of view (degrees)
-    "zscale": 0.15,     # Height exaggeration (15% of terrain width)
+    "zscale": 0.05,     # Height exaggeration (viewer world units)
 }
 ```
 
@@ -338,21 +339,21 @@ python examples/swiss_terrain_landcover_viewer.py \
 
 **Result:** 4K render with DoF, lens effects, warm temperature (5500K), low sun for golden hour lighting.
 
-### Example 5: Maximum Quality Comparison
+### Example 5: Land-Cover Fidelity Comparison
 ```bash
-# Maximum quality with overlay
+# Contour-focused land-cover render
 python examples/swiss_terrain_landcover_viewer.py \
   --preset hq4 \
   --snapshot swiss_with_overlay.png
 
-# Maximum quality without overlay (DEM only)
+# Same lighting without overlay (DEM only)
 python examples/swiss_terrain_landcover_viewer.py \
   --preset hq4 \
   --no-overlay \
   --snapshot swiss_no_overlay.png
 ```
 
-**Result:** Two 4K renders for side-by-side comparison of overlay impact.
+**Result:** Two 4K renders for side-by-side comparison of overlay impact under relief-driven hillshade with low height exaggeration.
 
 ### Example 6: Custom Resolution and Opacity
 ```bash

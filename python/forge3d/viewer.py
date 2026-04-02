@@ -275,8 +275,14 @@ class ViewerHandle:
         extent: Optional[Tuple[float, float, float, float]] = None,
         opacity: Optional[float] = None,
         z_order: Optional[int] = None,
+        preserve_colors: Optional[bool] = None,
     ) -> None:
-        """Load an image overlay texture and drape it on the current terrain."""
+        """Load an image overlay texture and drape it on the current terrain.
+
+        ``preserve_colors`` switches raster overlays into a viewer mode that
+        composites their source colors after terrain lighting so categorical
+        palettes survive unchanged.
+        """
         cmd: Dict[str, Any] = {
             "cmd": "load_overlay",
             "name": str(name),
@@ -289,6 +295,13 @@ class ViewerHandle:
         if z_order is not None:
             cmd["z_order"] = int(z_order)
         self._send_command(cmd)
+        if preserve_colors is not None:
+            self._send_command(
+                {
+                    "cmd": "set_overlay_preserve_colors",
+                    "preserve_colors": bool(preserve_colors),
+                }
+            )
 
     def load_point_cloud(
         self,

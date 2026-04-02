@@ -102,13 +102,14 @@ impl ViewerTerrainScene {
                 usage: wgpu::BufferUsages::INDEX,
             });
 
-        let terrain_span = width.max(height) as f32;
+        let terrain_width = width as f32;
+        let terrain_span = terrain_width.max(height as f32);
         let cam_radius = terrain_span * 1.5;
 
         let uniforms = TerrainUniforms {
             view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(),
             sun_dir: [0.5, 0.8, 0.3, 0.0],
-            terrain_params: [min_h, max_h - min_h, terrain_span, 1.0],
+            terrain_params: [min_h, max_h - min_h, terrain_width, 1.0],
             lighting: [1.0, 0.3, 0.5, -999999.0],
             background: [0.5, 0.7, 0.9, 0.0],
             water_color: [0.2, 0.4, 0.6, 0.0],

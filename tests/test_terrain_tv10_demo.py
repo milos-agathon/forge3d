@@ -29,7 +29,10 @@ def _load_module_by_path(path: Path) -> types.ModuleType:
 
 def test_tv10_example_renders_real_dems(tmp_path: Path) -> None:
     repo = Path(__file__).resolve().parents[1]
-    mod = _load_module_by_path(repo / "examples" / "terrain_tv10_subsurface_demo.py")
+    example_path = repo / "examples" / "terrain_tv10_subsurface_demo.py"
+    if not example_path.exists():
+        pytest.skip("TV10 example script is not present in this checkout")
+    mod = _load_module_by_path(example_path)
 
     result = mod.render_demo(
         output_dir=tmp_path / "tv10-demo",

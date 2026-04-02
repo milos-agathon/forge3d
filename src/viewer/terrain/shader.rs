@@ -25,6 +25,7 @@ struct VertexOutput {
 @vertex
 fn vs_main(@location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>) -> VertexOutput {
     let dims = vec2<f32>(textureDimensions(heightmap));
+    let terrain_depth = u.terrain_params.z * dims.y / max(dims.x, 1.0);
     let max_texel = vec2<i32>(i32(dims.x) - 1, i32(dims.y) - 1);
     let texel = clamp(
         vec2<i32>(i32(uv.x * f32(dims.x)), i32(uv.y * f32(dims.y))),
@@ -44,7 +45,7 @@ fn vs_main(@location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>) -> VertexOut
     let world_y = h_normalized * terrain_width * z_scale * 0.001;
     
     let world_x = uv.x * terrain_width;
-    let world_z = uv.y * terrain_width;
+    let world_z = uv.y * terrain_depth;
     
     var out: VertexOutput;
     out.world_pos = vec3<f32>(world_x, world_y, world_z);

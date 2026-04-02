@@ -35,7 +35,10 @@ def _rasterio_available() -> bool:
 )
 def test_tv6_example_renders_real_dem_and_reports_budget(tmp_path: Path) -> None:
     repo = Path(__file__).resolve().parents[1]
-    mod = _load_module_by_path(repo / "examples" / "terrain_tv6_heterogeneous_volumetrics_demo.py")
+    example_path = repo / "examples" / "terrain_tv6_heterogeneous_volumetrics_demo.py"
+    if not example_path.exists():
+        pytest.skip("TV6 example script is not present in this checkout")
+    mod = _load_module_by_path(example_path)
 
     try:
         result = mod.render_demo(

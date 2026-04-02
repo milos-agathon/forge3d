@@ -1,10 +1,15 @@
 # python/dask/__init__.py
-# Minimal dask package stub for tests and demos without network installs.
-# Exists to allow patching of dask.array APIs in tests.
-# RELEVANT FILES:python/dask/array/__init__.py,python/forge3d/ingest/dask_adapter.py
+# Minimal dask shim for environments where the real dependency is absent.
+# RELEVANT FILES:python/dask/base.py,python/dask/array/__init__.py,examples/belgium_bivariate_climate_map.py
 
-"""
-Minimal local stub to let tests import dask when it's not installed.
-"""
+"""Lightweight repo-local ``dask`` stub for optional xarray compatibility."""
 
-# Intentionally minimal; real functionality is patched in tests.
+from __future__ import annotations
+
+__forge3d_stub__ = True
+__version__ = "0.0-stub"
+
+from . import array, base
+from .base import is_dask_collection
+
+__all__ = ["array", "base", "is_dask_collection"]

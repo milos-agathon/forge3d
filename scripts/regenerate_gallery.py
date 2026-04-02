@@ -654,20 +654,30 @@ def render_03_swiss_landcover() -> None:
         "examples/swiss_terrain_landcover_viewer.py",
         "--preset", "hq4",
         "--width", str(sw), "--height", str(sh),
-        "--cam-radius", "14000",
-        "--cam-phi", "80",
+        "--crs", "EPSG:2056",
+        "--cam-radius", "18000",
+        "--cam-phi", "90",
+        "--cam-theta", "10",
+        "--cam-fov", "16",
+        "--zscale", "0.03",
         "--no-solid",
         "--background", "#ffffff",
+        "--sun-azimuth", "315",
+        "--sun-elevation", "17",
+        "--ambient", "0.14",
+        "--sun-intensity", "1.54",
+        "--shadow-strength", "0.76",
+        "--ibl-intensity", "0.13",
+        "--overlay-opacity", "0.82",
         "--legend-position", "northwest",
-        "--legend-scale", "0.3",
-        "--legend-transparent-bg",
+        "--legend-scale", "0.22",
         "--msaa", "8",
         "--shadow-technique", "pcss",
-        "--exposure", "1.35",
+        "--exposure", "1.24",
         "--snapshot", str(tmp),
     ], tmp)
 
-    # White background — skip dark title bar, just copy the render.
+    # The Swiss example now composes its own title/caption/legend layout.
     from shutil import copy2
     copy2(tmp, out)
 

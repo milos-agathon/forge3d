@@ -95,6 +95,8 @@ pub struct OverlayConfig {
     pub enabled: bool,
     /// Global overlay opacity multiplier (0.0 - 1.0)
     pub global_opacity: f32,
+    /// Preserve source overlay colors by compositing after terrain lighting
+    pub preserve_colors: bool,
     /// Show solid base surface (default: true)
     /// When false, fragments with overlay alpha=0 are discarded (like rayshader solid=FALSE)
     pub solid: bool,
@@ -105,6 +107,7 @@ impl OverlayConfig {
         Self {
             enabled: false,
             global_opacity: 1.0,
+            preserve_colors: false,
             solid: true,
         }
     }

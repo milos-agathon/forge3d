@@ -62,6 +62,7 @@ fn vs_shadow(@builtin(vertex_index) vertex_id: u32) -> VertexOutput {
     let height_min = u_shadow.terrain_params.x;
     let height_range = u_shadow.terrain_params.y;  // Not used, but kept for clarity
     let terrain_width = u_shadow.terrain_params.z;
+    let terrain_depth = terrain_width * f32(textureDimensions(height_tex, 0).y) / max(f32(textureDimensions(height_tex, 0).x), 1.0);
     let z_scale = u_shadow.terrain_params.w;
     let grid_res = u32(u_shadow.grid_params.x);
     
@@ -111,11 +112,11 @@ fn vs_shadow(@builtin(vertex_index) vertex_id: u32) -> VertexOutput {
     let h_raw = textureLoad(height_tex, texel_clamped, 0).r;
     
     // World position calculation - MUST match main shader (shader_pbr.rs) EXACTLY
-    // Main shader: world_pos = (uv.x * terrain_width, (h - min_h) * z_scale, uv.y * terrain_width)
+    // Main shader: world_pos = (uv.x * terrain_width, (h - min_h) * z_scale, uv.y * terrain_depth)
     // No normalization or height curve - main shader doesn't use them either
     let world_x = uv.x * terrain_width;
     let world_y = (h_raw - height_min) * z_scale;
-    let world_z = uv.y * terrain_width;
+    let world_z = uv.y * terrain_depth;
     let world_pos = vec3<f32>(world_x, world_y, world_z);
     
     // Transform to light clip space

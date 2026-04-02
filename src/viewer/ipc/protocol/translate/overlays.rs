@@ -33,6 +33,11 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             Some(ViewerCmd::SetOverlaysEnabled { enabled: *enabled })
         }
         IpcRequest::SetOverlaySolid { solid } => Some(ViewerCmd::SetOverlaySolid { solid: *solid }),
+        IpcRequest::SetOverlayPreserveColors { preserve_colors } => {
+            Some(ViewerCmd::SetOverlayPreserveColors {
+                preserve_colors: *preserve_colors,
+            })
+        }
         IpcRequest::ListOverlays => Some(ViewerCmd::ListOverlays),
         IpcRequest::AddVectorOverlay {
             name,

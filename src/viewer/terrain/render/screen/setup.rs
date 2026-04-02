@@ -187,7 +187,11 @@ impl ViewerTerrainScene {
                     self.pbr_config.exposure,
                     self.pbr_config.normal_strength,
                     self.pbr_config.ibl_intensity,
-                    0.0,
+                    if self.pbr_config.overlay.preserve_colors {
+                        1.0
+                    } else {
+                        0.0
+                    },
                 ],
                 camera_pos: [eye.x, eye.y, eye.z, 1.0],
                 lens_params: [

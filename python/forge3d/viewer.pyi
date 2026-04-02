@@ -34,6 +34,7 @@ class ViewerHandle:
         extent: Optional[tuple[float, float, float, float]] = ...,
         opacity: Optional[float] = ...,
         z_order: Optional[int] = ...,
+        preserve_colors: Optional[bool] = ...,
     ) -> None: ...
     def load_point_cloud(
         self,

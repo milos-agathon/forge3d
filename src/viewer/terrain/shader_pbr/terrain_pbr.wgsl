@@ -10,7 +10,7 @@ struct Uniforms {
     background: vec4<f32>,      // r, g, b, _
     water_color: vec4<f32>,     // r, g, b, _
     // PBR params
-    pbr_params: vec4<f32>,      // exposure, normal_strength, ibl_intensity, _
+    pbr_params: vec4<f32>,      // exposure, normal_strength, ibl_intensity, overlay_preserve_colors
     camera_pos: vec4<f32>,      // camera world position
     // Lens effects: vignette_strength, vignette_radius, vignette_softness, _
     lens_params: vec4<f32>,
@@ -86,6 +86,7 @@ struct VertexOutput {
 @vertex
 fn vs_main(@location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>) -> VertexOutput {
     let dims = textureDimensions(heightmap);
+    let terrain_depth = u.terrain_params.z * f32(dims.y) / max(f32(dims.x), 1.0);
     let max_texel = vec2<i32>(i32(dims.x) - 1, i32(dims.y) - 1);
     let texel = clamp(
         vec2<i32>(i32(uv.x * f32(dims.x)), i32(uv.y * f32(dims.y))),
@@ -101,7 +102,7 @@ fn vs_main(@location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>) -> VertexOut
     let world_y = (h - min_h) * z_scale;
     
     let world_x = uv.x * terrain_width;
-    let world_z = uv.y * terrain_width;
+    let world_z = uv.y * terrain_depth;
     
     var out: VertexOutput;
     out.world_pos = vec3<f32>(world_x, world_y, world_z);
@@ -321,8 +322,9 @@ fn sample_csm_shadow(world_pos: vec3<f32>, normal: vec3<f32>, cascade_idx: u32) 
     let light_space_pos = cascade.light_view_proj * vec4<f32>(world_pos, 1.0);
     let ndc = light_space_pos.xyz / light_space_pos.w;
     
-    // Convert XY from NDC [-1,1] to UV [0,1]; Z is already [0,1] (orthographic_rh)
-    let shadow_coords = ndc.xy * 0.5 + 0.5;
+    // Convert from NDC to shadow texture UVs. Y must be flipped to match the
+    // depth target's texture-space orientation.
+    let shadow_coords = vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
     let depth_01 = ndc.z;  // orthographic_rh maps Z to [0,1] directly
     
     // Out of bounds check
@@ -477,8 +479,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         // Transform to light space
         let light_space_pos = cascade.light_view_proj * vec4<f32>(in.world_pos, 1.0);
         let ndc = light_space_pos.xyz / light_space_pos.w;
-        let shadow_uv = ndc.xy * 0.5 + 0.5;
-        let receiver_depth = ndc.z * 0.5 + 0.5;
+        let shadow_uv = vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
+        let receiver_depth = ndc.z;
         
         // Visualize light-space coords: R=u, G=v, B=depth
         return vec4<f32>(shadow_uv.x, shadow_uv.y, receiver_depth, 1.0);
@@ -493,8 +495,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         
         let light_space_pos = cascade.light_view_proj * vec4<f32>(in.world_pos, 1.0);
         let ndc = light_space_pos.xyz / light_space_pos.w;
-        let shadow_uv = ndc.xy * 0.5 + 0.5;
-        let receiver_depth = ndc.z * 0.5 + 0.5;
+        let shadow_uv = vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
+        let receiver_depth = ndc.z;
         
         // Sample shadow map using comparison sampler (returns 0 or 1)
         let shadow_result = textureSampleCompare(shadow_maps, shadow_sampler, shadow_uv, i32(cascade_idx), receiver_depth);
@@ -529,9 +531,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let overlay_opacity = u.overlay_params.y;
     let overlay_blend_mode = u.overlay_params.z;
     let solid_surface = u.overlay_params.w > 0.5;
-    
+    let overlay_preserve_colors = u.pbr_params.w > 0.5;
+
     // Sample overlay texture for solid check and blending
     let overlay = textureSample(overlay_tex, overlay_sampler, in.uv);
+    let overlay_alpha = overlay.a * overlay_opacity;
+    let solid_background = overlay_enabled && solid_surface && overlay_alpha <= 0.01;
     
     // When solid=false and overlay is enabled, discard fragments where overlay alpha is low
     // This hides the base surface outside the region of interest (like rayshader solid=FALSE)
@@ -541,19 +546,23 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     
+    let preserve_overlay_active = overlay_enabled && overlay_preserve_colors && overlay_alpha > 0.01;
+
     if overlay_enabled && overlay_opacity > 0.001 {
-        let blend_alpha = overlay.a * overlay_opacity;
-        
-        if blend_alpha > 0.01 {
+        if overlay_alpha > 0.01 {
             // Apply blend mode (overlay already sampled above for solid check)
             if overlay_blend_mode < 0.5 {
+                var blend_alpha = overlay_alpha;
+                if overlay_preserve_colors {
+                    blend_alpha = clamp(overlay_alpha * 1.10, 0.0, 1.0);
+                }
                 // Normal blend: fully replace albedo with overlay when alpha is high
                 // For land cover overlays, we want the categorical colors to show through
                 albedo = mix(albedo, overlay.rgb, blend_alpha);
             } else if overlay_blend_mode < 1.5 {
                 // Multiply blend
                 let multiplied = albedo * overlay.rgb;
-                albedo = mix(albedo, multiplied, blend_alpha);
+                albedo = mix(albedo, multiplied, overlay_alpha);
             } else {
                 // Overlay blend (Photoshop-style)
                 let base = albedo;
@@ -562,7 +571,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 blended.r = select(1.0 - 2.0 * (1.0 - base.r) * (1.0 - overlay.r), 2.0 * base.r * overlay.r, base.r < 0.5);
                 blended.g = select(1.0 - 2.0 * (1.0 - base.g) * (1.0 - overlay.g), 2.0 * base.g * overlay.g, base.g < 0.5);
                 blended.b = select(1.0 - 2.0 * (1.0 - base.b) * (1.0 - overlay.b), 2.0 * base.b * overlay.b, base.b < 0.5);
-                albedo = mix(albedo, blended, blend_alpha);
+                albedo = mix(albedo, blended, overlay_alpha);
             }
         }
     }
@@ -606,10 +615,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let shadow_term = mix(1.0, combined_shadow, shadow_strength);
     // Soften shadow color: shadowed areas get a cool blue tint instead of pure black
     let shadow_tint = mix(vec3<f32>(0.42, 0.47, 0.56), vec3<f32>(1.0), shadow_term);
+    let effective_shadow_tint = select(shadow_tint, vec3<f32>(1.0), preserve_overlay_active);
 
     // View direction
     let view_dir = normalize(u.camera_pos.xyz - in.world_pos);
     let terrain_width = u.terrain_params.z;
+    let terrain_depth = terrain_width * f32(textureDimensions(heightmap).y) / max(f32(textureDimensions(heightmap).x), 1.0);
+    let terrain_span = max(terrain_width, terrain_depth);
 
     // === DIRECT SUN LIGHTING ===
     let sun_color = vec3<f32>(1.0, 0.93, 0.78); // Warm golden sunlight
@@ -647,7 +659,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let rim_light = fresnel * sun_color * 0.06 * shadow_term * sun_intensity;
 
     // === COMBINE ALL LIGHTING ===
-    var color = diffuse * shadow_tint
+    var color = diffuse * effective_shadow_tint
               + specular_color
               + water_spec
               + fill_light * height_ao
@@ -655,25 +667,35 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
               + ambient_hemi
               + rim_light;
 
+    if preserve_overlay_active {
+        let preserve_intensity = max(dot(color, vec3<f32>(0.2126, 0.7152, 0.0722)), 0.0);
+        let preserve_display = pow(aces_tonemap(vec3<f32>(preserve_intensity * exposure)), vec3<f32>(1.0 / 2.2)).x;
+        color = overlay.rgb * preserve_display;
+    } else {
+        // Apply exposure and tonemapping
+        color = color * exposure;
+        color = aces_tonemap(color);
+
+        // Gamma correction (linear to sRGB)
+        color = pow(color, vec3<f32>(1.0 / 2.2));
+    }
+
     // === ATMOSPHERIC PERSPECTIVE (depth-based haze) ===
-    let atmo_scale = 0.12 / max(terrain_width, 1.0);
+    let atmo_scale = 0.045 / max(terrain_span, 1.0);
     let view_dist = length(u.camera_pos.xyz - in.world_pos);
-    let atmo_factor = 1.0 - exp(-view_dist * atmo_scale);
+    let atmo_factor = pow(clamp(1.0 - exp(-view_dist * atmo_scale), 0.0, 1.0), 1.35);
     let atmo_color = mix(
         vec3<f32>(0.55, 0.62, 0.72),  // Haze near color
         vec3<f32>(0.64, 0.70, 0.79),  // Haze far color
         clamp(atmo_factor, 0.0, 1.0)
     );
 
-    // Apply exposure and tonemapping
-    color = color * exposure;
-    color = aces_tonemap(color);
-
-    // Gamma correction (linear to sRGB)
-    color = pow(color, vec3<f32>(1.0 / 2.2));
-
     // Apply atmospheric haze AFTER tonemapping (in display space)
-    color = mix(color, atmo_color, clamp(atmo_factor * 0.16, 0.0, 0.20));
+    var haze_mix = clamp(atmo_factor * 0.055, 0.0, 0.08);
+    if overlay_enabled && overlay_preserve_colors && overlay_alpha > 0.01 {
+        haze_mix = 0.0;
+    }
+    color = mix(color, atmo_color, haze_mix);
 
     // Apply vignette (lens effect)
     let vignette_strength = u.lens_params.x;
@@ -684,6 +706,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let center_dist = length(screen_uv - vec2<f32>(0.5));
         let vignette = 1.0 - smoothstep(vignette_radius - vignette_softness, vignette_radius + vignette_softness, center_dist * 2.0);
         color = color * mix(1.0, vignette, vignette_strength);
+    }
+
+    if solid_background {
+        color = u.background.rgb;
     }
 
     return vec4<f32>(color, 1.0);

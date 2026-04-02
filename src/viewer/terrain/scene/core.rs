@@ -387,6 +387,10 @@ impl ViewerTerrainScene {
             update_terrain_volumetrics_report(TerrainVolumetricsReport::default());
         }
 
+        if self.pbr_config.enabled {
+            self.init_shadows();
+        }
+
         println!(
             "[terrain_pbr] updated: {}",
             self.pbr_config.to_display_string()

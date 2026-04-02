@@ -68,6 +68,7 @@ pub enum IpcRequest {
     SetGlobalOverlayOpacity { opacity: f32 },
     SetOverlaysEnabled { enabled: bool },
     SetOverlaySolid { solid: bool },
+    SetOverlayPreserveColors { preserve_colors: bool },
     ListOverlays,
     AddVectorOverlay {
         name: String, vertices: Vec<[f32; 8]>, indices: Vec<u32>, #[serde(default = "default_primitive")] primitive: String,

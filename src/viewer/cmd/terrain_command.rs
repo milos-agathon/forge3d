@@ -90,6 +90,13 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
         } => {
             if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
                 if let Some(terrain) = terrain_viewer.terrain.as_mut() {
+                    let old_default_target = terrain.default_camera_target();
+                    let target_was_default = terrain
+                        .cam_target
+                        .iter()
+                        .zip(old_default_target.iter())
+                        .all(|(current, default)| (current - default).abs() < 0.01);
+
                     if let Some(v) = phi {
                         terrain.cam_phi_deg = *v;
                     }
@@ -116,6 +123,9 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                     }
                     if let Some(v) = zscale {
                         terrain.z_scale = v.max(0.01);
+                        if target.is_none() && target_was_default {
+                            terrain.cam_target = terrain.default_camera_target();
+                        }
                     }
                     if let Some(v) = shadow {
                         terrain.shadow_intensity = v.clamp(0.0, 1.0);
@@ -322,6 +332,13 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
                 terrain_viewer.set_overlay_solid(*solid);
                 println!("[overlay] solid={}", solid);
+            }
+            true
+        }
+        ViewerCmd::SetOverlayPreserveColors { preserve_colors } => {
+            if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
+                terrain_viewer.set_overlay_preserve_colors(*preserve_colors);
+                println!("[overlay] preserve_colors={}", preserve_colors);
             }
             true
         }

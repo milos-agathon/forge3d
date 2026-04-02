@@ -32,7 +32,9 @@ fn sample_height(uv: vec2<f32>) -> f32 {
     let pixel = vec2<i32>(uv * tex_size);
     let clamped_pixel = clamp(pixel, vec2<i32>(0), vec2<i32>(tex_size) - vec2<i32>(1));
     let h = textureLoad(height_tex, clamped_pixel, 0).r;
-    return h * u_sun.params1.z + u_sun.params1.w;
+    // Height textures store raw elevation values. Convert them to the same
+    // scene-space Y used by the terrain render path: (h - height_min) * z_scale.
+    return (h - u_sun.params1.w) * u_sun.params1.z;
 }
 
 fn compute_sun_visibility(center_uv: vec2<f32>, center_height: f32) -> f32 {

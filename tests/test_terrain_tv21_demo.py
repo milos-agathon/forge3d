@@ -30,6 +30,8 @@ def _load_example_module():
 def test_tv21_demo_renders_real_dem_outputs() -> None:
     if not terrain_rendering_available():
         pytest.skip("TV21 example requires GPU-backed terrain runtime")
+    if not EXAMPLE_PATH.exists():
+        pytest.skip("TV21 example script is not present in this checkout")
 
     module = _load_example_module()
     with tempfile.TemporaryDirectory() as tmpdir:

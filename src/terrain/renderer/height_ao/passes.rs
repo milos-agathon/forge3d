@@ -128,13 +128,24 @@ impl TerrainScene {
             -decoded.light.direction[2],
         )
         .normalize();
+        let hard_mode = decoded.sun_visibility.mode.eq_ignore_ascii_case("hard");
+        let effective_samples = if hard_mode {
+            1.0
+        } else {
+            decoded.sun_visibility.samples as f32
+        };
+        let effective_softness = if hard_mode {
+            0.0
+        } else {
+            decoded.sun_visibility.softness
+        };
 
         let sv_uniforms = SunVisUniforms {
             params0: [
-                decoded.sun_visibility.samples as f32,
+                effective_samples,
                 decoded.sun_visibility.steps as f32,
                 decoded.sun_visibility.max_distance,
-                decoded.sun_visibility.softness,
+                effective_softness,
             ],
             params1: [
                 params.terrain_span / width as f32,

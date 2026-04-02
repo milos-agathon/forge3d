@@ -96,7 +96,11 @@ impl ViewerTerrainScene {
         let overlay_view = overlay_stack
             .composite_view()
             .expect("overlay composite_view should exist after ensure_fallback_texture");
-        let overlay_sampler = overlay_stack.sampler();
+        let overlay_sampler = if self.pbr_config.overlay.preserve_colors {
+            &sampler
+        } else {
+            overlay_stack.sampler()
+        };
 
         // Get CSM shadow resources - create fallbacks if they don't exist
         let (shadow_view, moment_view, shadow_sampler) =
@@ -350,7 +354,7 @@ impl ViewerTerrainScene {
             None => return,
         };
         let (width, height) = terrain.dimensions;
-        let h_range = terrain.domain.1 - terrain.domain.0;
+        let terrain_depth = terrain_width * (height as f32 / width.max(1) as f32);
         let z_scale = terrain.z_scale;
 
         // Height AO compute pass
@@ -378,8 +382,8 @@ impl ViewerTerrainScene {
                     self.pbr_config.height_ao.max_distance,
                     self.pbr_config.height_ao.strength,
                     terrain_width / width as f32,
-                    terrain_width / height as f32,
-                    h_range * z_scale,
+                    terrain_depth / height as f32,
+                    z_scale,
                     terrain.domain.0,
                     ao_width as f32,
                     ao_height as f32,
@@ -445,16 +449,27 @@ impl ViewerTerrainScene {
                     (width as f32 * self.pbr_config.sun_visibility.resolution_scale) as u32;
                 let sv_height =
                     (height as f32 * self.pbr_config.sun_visibility.resolution_scale) as u32;
+                let hard_mode = self.pbr_config.sun_visibility.mode.eq_ignore_ascii_case("hard");
+                let effective_samples = if hard_mode {
+                    1.0
+                } else {
+                    self.pbr_config.sun_visibility.samples as f32
+                };
+                let effective_softness = if hard_mode {
+                    0.0
+                } else {
+                    self.pbr_config.sun_visibility.softness
+                };
 
                 // Update uniforms - sun_dir should point toward sun (negate light direction)
                 let uniforms: [f32; 16] = [
-                    self.pbr_config.sun_visibility.samples as f32,
+                    effective_samples,
                     self.pbr_config.sun_visibility.steps as f32,
                     self.pbr_config.sun_visibility.max_distance,
-                    self.pbr_config.sun_visibility.softness,
+                    effective_softness,
                     terrain_width / width as f32,
-                    terrain_width / height as f32,
-                    h_range * z_scale,
+                    terrain_depth / height as f32,
+                    z_scale,
                     terrain.domain.0,
                     sv_width as f32,
                     sv_height as f32,

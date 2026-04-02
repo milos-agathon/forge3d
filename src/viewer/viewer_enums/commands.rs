@@ -97,7 +97,8 @@ pub enum ViewerCmd {
     LoadOverlay { name: String, path: String, extent: Option<[f32; 4]>, opacity: Option<f32>, z_order: Option<i32> },
     RemoveOverlay { id: u32 }, SetOverlayVisible { id: u32, visible: bool },
     SetOverlayOpacity { id: u32, opacity: f32 }, SetGlobalOverlayOpacity { opacity: f32 },
-    SetOverlaysEnabled { enabled: bool }, SetOverlaySolid { solid: bool }, ListOverlays,
+    SetOverlaysEnabled { enabled: bool }, SetOverlaySolid { solid: bool },
+    SetOverlayPreserveColors { preserve_colors: bool }, ListOverlays,
     AddVectorOverlay {
         name: String, vertices: Vec<[f32; 8]>, indices: Vec<u32>, primitive: String, drape: bool,
         drape_offset: f32, opacity: f32, depth_bias: f32, line_width: f32, point_size: f32, z_order: i32,

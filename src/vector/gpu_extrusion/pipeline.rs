@@ -209,39 +209,65 @@ impl GpuExtrusion {
             usage: wgpu::BufferUsages::STORAGE,
         });
 
-        let positions_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        let positions_size = (vertex_count as u64) * 16;
+        let indices_size = (index_count as u64) * 4;
+        let normals_size = (vertex_count as u64) * 16;
+        let uvs_size = (vertex_count as u64) * 8;
+
+        let positions_storage = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("vf.Vector.Extrusion.Output.Positions"),
-            size: (vertex_count as u64) * 16,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::MAP_READ
-                | wgpu::BufferUsages::COPY_SRC,
+            size: positions_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let indices_storage = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vf.Vector.Extrusion.Output.Indices"),
+            size: indices_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let normals_storage = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vf.Vector.Extrusion.Output.Normals"),
+            size: normals_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let uvs_storage = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vf.Vector.Extrusion.Output.UVs"),
+            size: uvs_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        // Readback requires a dedicated COPY_DST | MAP_READ staging buffer on current wgpu.
+        let positions_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vf.Vector.Extrusion.Readback.Positions"),
+            size: positions_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
 
         let indices_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Extrusion.Output.Indices"),
-            size: (index_count as u64) * 4,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::MAP_READ
-                | wgpu::BufferUsages::COPY_SRC,
+            label: Some("vf.Vector.Extrusion.Readback.Indices"),
+            size: indices_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
 
         let normals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Extrusion.Output.Normals"),
-            size: (vertex_count as u64) * 16,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::MAP_READ
-                | wgpu::BufferUsages::COPY_SRC,
+            label: Some("vf.Vector.Extrusion.Readback.Normals"),
+            size: normals_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
 
         let uvs_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Extrusion.Output.UVs"),
-            size: (vertex_count as u64) * 8,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::MAP_READ
-                | wgpu::BufferUsages::COPY_SRC,
+            label: Some("vf.Vector.Extrusion.Readback.UVs"),
+            size: uvs_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
 
@@ -273,19 +299,19 @@ impl GpuExtrusion {
                 },
                 wgpu::BindGroupEntry {
                     binding: 4,
-                    resource: positions_buffer.as_entire_binding(),
+                    resource: positions_storage.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 5,
-                    resource: indices_buffer.as_entire_binding(),
+                    resource: indices_storage.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 6,
-                    resource: normals_buffer.as_entire_binding(),
+                    resource: normals_storage.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 7,
-                    resource: uvs_buffer.as_entire_binding(),
+                    resource: uvs_storage.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 8,
@@ -308,6 +334,11 @@ impl GpuExtrusion {
             let workgroup_count = ((metas.len() as u32) + 63) / 64;
             compute_pass.dispatch_workgroups(workgroup_count.max(1), 1, 1);
         }
+
+        encoder.copy_buffer_to_buffer(&positions_storage, 0, &positions_buffer, 0, positions_size);
+        encoder.copy_buffer_to_buffer(&indices_storage, 0, &indices_buffer, 0, indices_size);
+        encoder.copy_buffer_to_buffer(&normals_storage, 0, &normals_buffer, 0, normals_size);
+        encoder.copy_buffer_to_buffer(&uvs_storage, 0, &uvs_buffer, 0, uvs_size);
 
         queue.submit(Some(encoder.finish()));
 

@@ -16,10 +16,19 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
+import numpy as np
 import pytest
+
+try:
+    from PIL import Image
+
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
 
 # Find project root
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -29,8 +38,8 @@ def find_viewer_binary() -> Path:
     """Find the interactive_viewer binary."""
     ext = ".exe" if os.name == "nt" else ""
     candidates = [
-        PROJECT_ROOT / "target" / "release" / f"interactive_viewer{ext}",
         PROJECT_ROOT / "target" / "debug" / f"interactive_viewer{ext}",
+        PROJECT_ROOT / "target" / "release" / f"interactive_viewer{ext}",
     ]
     for c in candidates:
         if c.exists():
@@ -43,6 +52,7 @@ def find_test_dem() -> Path:
     candidates = [
         PROJECT_ROOT / "assets" / "Gore_Range_Albers_1m.tif",
         PROJECT_ROOT / "assets" / "dem_rainier.tif",
+        PROJECT_ROOT / "assets" / "tif" / "switzerland_dem.tif",
     ]
     for c in candidates:
         if c.exists():
@@ -95,6 +105,12 @@ def start_viewer_with_ipc(binary: Path, width: int = 640, height: int = 480) -> 
     if port is None:
         process.terminate()
         raise RuntimeError("Timeout waiting for viewer READY signal")
+
+    def drain_stdout(stream) -> None:
+        for _ in iter(stream.readline, ""):
+            pass
+
+    threading.Thread(target=drain_stdout, args=(process.stdout,), daemon=True).start()
     
     return process, port
 
@@ -105,6 +121,73 @@ def image_hash(path: Path) -> str:
         return ""
     with open(path, "rb") as f:
         return hashlib.sha256(f.read()).hexdigest()[:16]
+
+
+def wait_for_snapshot(path: Path, timeout_s: float = 10.0) -> bool:
+    """Wait for an async viewer snapshot to exist and stabilize on disk."""
+    deadline = time.time() + timeout_s
+    last_size = -1
+    stable_reads = 0
+    while time.time() < deadline:
+        if path.exists():
+            try:
+                size = path.stat().st_size
+            except OSError:
+                time.sleep(0.2)
+                continue
+            if size > 1000:
+                stable_reads = stable_reads + 1 if size == last_size else 0
+                last_size = size
+                if stable_reads >= 2:
+                    return True
+        time.sleep(0.2)
+    return False
+
+
+def write_solid_overlay(path: Path, rgba: tuple[int, int, int, int]) -> None:
+    """Write a flat RGBA overlay image for preserve_colors testing."""
+    if not HAS_PIL:
+        raise RuntimeError("Pillow is required to write overlay fixtures")
+    Image.new("RGBA", (64, 64), rgba).save(path)
+
+
+def write_ridge_heightmap_tiff(path: Path, size: int = 256) -> None:
+    """Write a synthetic ridge TIFF that produces strong lee-side shadows."""
+    if not HAS_PIL:
+        raise RuntimeError("Pillow is required to write terrain fixtures")
+    x = np.linspace(-1.0, 1.0, size, dtype=np.float32)
+    y = np.linspace(-1.0, 1.0, size, dtype=np.float32)
+    xx, yy = np.meshgrid(x, y)
+    ridge = np.exp(-xx**2 * 10.0) * 1.0
+    ridge2 = np.exp(-(xx - 0.35) ** 2 * 30.0) * 0.65
+    ridge3 = np.exp(-(xx + 0.45) ** 2 * 24.0) * 0.55
+    ramp = np.clip(0.2 + 0.3 * yy, 0.0, 1.0)
+    height = ridge + ridge2 + ridge3 + ramp
+    height = (height - height.min()) / max(float(height.max() - height.min()), 1e-6)
+    Image.fromarray(np.round(height * 65535.0).astype(np.uint16)).save(path)
+
+
+def load_rgb(path: Path) -> np.ndarray:
+    """Load an image as float RGB in [0, 1]."""
+    if not HAS_PIL:
+        raise RuntimeError("Pillow is required to inspect snapshots")
+    return np.asarray(Image.open(path).convert("RGB"), dtype=np.float32) / 255.0
+
+
+def luminance(rgb: np.ndarray) -> np.ndarray:
+    """Compute luminance from RGB."""
+    return rgb[..., 0] * 0.2126 + rgb[..., 1] * 0.7152 + rgb[..., 2] * 0.0722
+
+
+def mean_normalized_rgb(rgb: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Compute mean RGB normalized by total intensity."""
+    mean = np.mean(rgb[mask], axis=0)
+    return mean / max(float(np.sum(mean)), 1e-6)
+
+
+def terrain_mask(rgb: np.ndarray) -> np.ndarray:
+    """Mask out the white background around the terrain snapshot."""
+    return np.any(rgb < 0.97, axis=2) & (np.sum(rgb, axis=2) > 0.05)
 
 
 @pytest.fixture
@@ -206,7 +289,7 @@ class TestTerrainViewerPbr:
                 "width": 640,
                 "height": 480,
             })
-            time.sleep(0.5)
+            assert wait_for_snapshot(legacy_path), "Legacy snapshot not created"
             
             # Enable PBR and capture
             send_ipc(sock, {
@@ -222,8 +305,8 @@ class TestTerrainViewerPbr:
                 "width": 640,
                 "height": 480,
             })
-            time.sleep(0.5)
-            
+            assert wait_for_snapshot(pbr_path), "PBR snapshot not created"
+
             # Both should exist
             assert legacy_path.exists(), "Legacy snapshot not created"
             assert pbr_path.exists(), "PBR snapshot not created"
@@ -316,7 +399,7 @@ class TestTerrainViewerPbr:
                 "width": 640,
                 "height": 480,
             })
-            time.sleep(0.5)
+            assert wait_for_snapshot(snap_path), "DoF snapshot not created (viewer crash?)"
 
             assert snap_path.exists(), "DoF snapshot not created (viewer crash?)"
             assert snap_path.stat().st_size > 1000, "DoF snapshot too small"
@@ -380,8 +463,8 @@ class TestTerrainViewerPbr:
                 "width": 640,
                 "height": 480,
             })
-            time.sleep(0.5)
-            
+            assert wait_for_snapshot(snap_path), "Height AO snapshot not created (compute pipeline crash?)"
+
             assert snap_path.exists(), "Height AO snapshot not created (compute pipeline crash?)"
             assert snap_path.stat().st_size > 1000, "Height AO snapshot too small"
             print(f"[test] Height AO snapshot: {snap_path.stat().st_size} bytes - Metal/R32Float compat OK")
@@ -422,8 +505,8 @@ class TestTerrainViewerPbr:
                 "width": 640,
                 "height": 480,
             })
-            time.sleep(0.5)
-            
+            assert wait_for_snapshot(snap_path), "Sun vis snapshot not created (compute pipeline crash?)"
+
             assert snap_path.exists(), "Sun vis snapshot not created (compute pipeline crash?)"
             assert snap_path.stat().st_size > 1000, "Sun vis snapshot too small"
             print(f"[test] Sun visibility snapshot: {snap_path.stat().st_size} bytes - Metal/R32Float compat OK")
@@ -459,11 +542,268 @@ class TestTerrainViewerPbr:
                 "width": 640,
                 "height": 480,
             })
-            time.sleep(0.5)
-            
+            assert wait_for_snapshot(snap_path), "Combined effects snapshot not created"
+
             assert snap_path.exists(), "Combined effects snapshot not created"
             assert snap_path.stat().st_size > 1000, "Combined effects snapshot too small"
             print(f"[test] Combined effects snapshot: {snap_path.stat().st_size} bytes")
+
+    @pytest.mark.skipif(not HAS_PIL, reason="Requires Pillow")
+    def test_preserve_colors_toggle_restores_regular_output(self):
+        """Toggling preserve-colors should not perturb normal overlay output."""
+        binary = find_viewer_binary()
+        process, port = start_viewer_with_ipc(binary)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect(("127.0.0.1", port))
+        sock.settimeout(30.0)
+
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                terrain_path = Path(tmpdir) / "ridge.tif"
+                overlay_path = Path(tmpdir) / "overlay.png"
+                regular_path = Path(tmpdir) / "regular.png"
+                preserve_path = Path(tmpdir) / "preserve.png"
+                regular_again_path = Path(tmpdir) / "regular_again.png"
+                source_rgba = (214, 82, 38, 255)
+                source_rgb = np.asarray(source_rgba[:3], dtype=np.float32) / 255.0
+                source_norm = source_rgb / np.sum(source_rgb)
+
+                write_ridge_heightmap_tiff(terrain_path)
+                write_solid_overlay(overlay_path, source_rgba)
+
+                resp = send_ipc(sock, {"cmd": "load_terrain", "path": str(terrain_path)})
+                assert resp.get("ok"), f"Terrain load failed: {resp.get('error')}"
+
+                resp = send_ipc(sock, {
+                    "cmd": "set_terrain",
+                    "phi": 90.0,
+                    "theta": 30.0,
+                    "radius": 220.0,
+                    "fov": 35.0,
+                    "zscale": 1.4,
+                    "sun_azimuth": 315.0,
+                    "sun_elevation": 10.0,
+                    "sun_intensity": 4.0,
+                    "ambient": 0.12,
+                    "shadow": 1.0,
+                    "background": [1.0, 1.0, 1.0],
+                })
+                assert resp.get("ok"), f"Terrain config failed: {resp.get('error')}"
+
+                resp = send_ipc(sock, {
+                    "cmd": "set_terrain_pbr",
+                    "enabled": True,
+                    "shadow_technique": "pcss",
+                    "shadow_map_res": 4096,
+                    "exposure": 1.1,
+                    "msaa": 4,
+                    "ibl_intensity": 0.15,
+                    "normal_strength": 3.8,
+                    "height_ao": {
+                        "enabled": False,
+                    },
+                    "sun_visibility": {
+                        "enabled": True,
+                        "mode": "hard",
+                        "samples": 1,
+                        "steps": 64,
+                        "max_distance": 400.0,
+                        "softness": 0.0,
+                        "bias": 0.005,
+                        "resolution_scale": 1.0,
+                    },
+                })
+                assert resp.get("ok"), f"PBR config failed: {resp.get('error')}"
+
+                resp = send_ipc(sock, {
+                    "cmd": "load_overlay",
+                    "name": "flat",
+                    "path": str(overlay_path),
+                    "extent": [0.0, 0.0, 1.0, 1.0],
+                    "opacity": 1.0,
+                    "z_order": 0,
+                })
+                assert resp.get("ok"), f"Overlay load failed: {resp.get('error')}"
+                assert send_ipc(sock, {"cmd": "set_overlays_enabled", "enabled": True}).get("ok")
+                assert send_ipc(sock, {"cmd": "set_overlay_solid", "solid": True}).get("ok")
+                assert send_ipc(sock, {"cmd": "set_overlay_preserve_colors", "preserve_colors": False}).get("ok")
+
+                time.sleep(2.0)
+                assert send_ipc(sock, {
+                    "cmd": "snapshot",
+                    "path": str(regular_path),
+                    "width": 640,
+                    "height": 480,
+                }, timeout=60.0).get("ok")
+                assert wait_for_snapshot(regular_path), "regular snapshot not written"
+
+                assert send_ipc(sock, {
+                    "cmd": "set_overlay_preserve_colors",
+                    "preserve_colors": True,
+                }).get("ok")
+                time.sleep(2.0)
+                assert send_ipc(sock, {
+                    "cmd": "snapshot",
+                    "path": str(preserve_path),
+                    "width": 640,
+                    "height": 480,
+                }, timeout=60.0).get("ok")
+                assert wait_for_snapshot(preserve_path), "preserve_colors snapshot not written"
+
+                assert send_ipc(sock, {
+                    "cmd": "set_overlay_preserve_colors",
+                    "preserve_colors": False,
+                }).get("ok")
+                time.sleep(2.0)
+                assert send_ipc(sock, {
+                    "cmd": "snapshot",
+                    "path": str(regular_again_path),
+                    "width": 640,
+                    "height": 480,
+                }, timeout=60.0).get("ok")
+                assert wait_for_snapshot(regular_again_path), "regular-again snapshot not written"
+
+                regular_hash = image_hash(regular_path)
+                preserve_hash = image_hash(preserve_path)
+                regular_again_hash = image_hash(regular_again_path)
+
+                assert regular_hash == regular_again_hash, "preserve_colors toggle should not alter normal overlay output"
+                assert preserve_hash != regular_hash, "preserve_colors should produce a distinct shaded result"
+        finally:
+            try:
+                send_ipc(sock, {"cmd": "close"})
+            except Exception:
+                pass
+            sock.close()
+            process.terminate()
+            process.wait(timeout=5)
+
+    @pytest.mark.skipif(not HAS_PIL, reason="Requires Pillow")
+    @pytest.mark.parametrize(
+        ("source_rgba", "min_lit_mean"),
+        [
+            ((214, 82, 38, 255), 0.0),
+            ((57, 125, 73, 255), 0.35),
+        ],
+    )
+    def test_preserve_colors_ridge_regression(self, source_rgba, min_lit_mean):
+        """Preserve-colors mode should preserve hue without collapsing to a dark mask."""
+        binary = find_viewer_binary()
+        process, port = start_viewer_with_ipc(binary)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect(("127.0.0.1", port))
+        sock.settimeout(30.0)
+
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                terrain_path = Path(tmpdir) / "ridge.tif"
+                overlay_path = Path(tmpdir) / "overlay.png"
+                preserve_path = Path(tmpdir) / "preserve.png"
+                source_rgb = np.asarray(source_rgba[:3], dtype=np.float32) / 255.0
+                source_norm = source_rgb / np.sum(source_rgb)
+
+                write_ridge_heightmap_tiff(terrain_path)
+                write_solid_overlay(overlay_path, source_rgba)
+
+                resp = send_ipc(sock, {"cmd": "load_terrain", "path": str(terrain_path)})
+                assert resp.get("ok"), f"Terrain load failed: {resp.get('error')}"
+
+                resp = send_ipc(sock, {
+                    "cmd": "set_terrain",
+                    "phi": 90.0,
+                    "theta": 30.0,
+                    "radius": 220.0,
+                    "fov": 35.0,
+                    "zscale": 1.4,
+                    "sun_azimuth": 315.0,
+                    "sun_elevation": 10.0,
+                    "sun_intensity": 4.0,
+                    "ambient": 0.12,
+                    "shadow": 1.0,
+                    "background": [1.0, 1.0, 1.0],
+                })
+                assert resp.get("ok"), f"Terrain config failed: {resp.get('error')}"
+
+                resp = send_ipc(sock, {
+                    "cmd": "set_terrain_pbr",
+                    "enabled": True,
+                    "shadow_technique": "pcss",
+                    "shadow_map_res": 4096,
+                    "exposure": 1.1,
+                    "msaa": 4,
+                    "ibl_intensity": 0.15,
+                    "normal_strength": 3.8,
+                    "height_ao": {"enabled": False},
+                    "sun_visibility": {
+                        "enabled": True,
+                        "mode": "hard",
+                        "samples": 1,
+                        "steps": 64,
+                        "max_distance": 400.0,
+                        "softness": 0.0,
+                        "bias": 0.005,
+                        "resolution_scale": 1.0,
+                    },
+                })
+                assert resp.get("ok"), f"PBR config failed: {resp.get('error')}"
+
+                resp = send_ipc(sock, {
+                    "cmd": "load_overlay",
+                    "name": "flat",
+                    "path": str(overlay_path),
+                    "extent": [0.0, 0.0, 1.0, 1.0],
+                    "opacity": 1.0,
+                    "z_order": 0,
+                })
+                assert resp.get("ok"), f"Overlay load failed: {resp.get('error')}"
+                assert send_ipc(sock, {"cmd": "set_overlays_enabled", "enabled": True}).get("ok")
+                assert send_ipc(sock, {"cmd": "set_overlay_solid", "solid": True}).get("ok")
+                assert send_ipc(sock, {"cmd": "set_overlay_preserve_colors", "preserve_colors": True}).get("ok")
+
+                time.sleep(2.0)
+                assert send_ipc(sock, {
+                    "cmd": "snapshot",
+                    "path": str(preserve_path),
+                    "width": 640,
+                    "height": 480,
+                }, timeout=60.0).get("ok")
+                assert wait_for_snapshot(preserve_path), "preserve_colors snapshot not written"
+
+                preserve_rgb = load_rgb(preserve_path)
+                mask = terrain_mask(preserve_rgb)
+                assert np.count_nonzero(mask) > 1000, "terrain mask should cover a meaningful ROI"
+
+                lum = luminance(preserve_rgb)
+                roi_lum = lum[mask]
+                shadow_threshold = float(np.quantile(roi_lum, 0.10))
+                lit_threshold = float(np.quantile(roi_lum, 0.90))
+                shadow_mask = mask & (lum <= shadow_threshold)
+                lit_mask = mask & (lum >= lit_threshold)
+
+                shadow_mean = float(np.mean(lum[shadow_mask]))
+                lit_mean = float(np.mean(lum[lit_mask]))
+                shadow_ratio = shadow_mean / max(lit_mean, 1e-6)
+
+                lit_norm = mean_normalized_rgb(preserve_rgb, lit_mask)
+                shadow_norm = mean_normalized_rgb(preserve_rgb, shadow_mask)
+                lit_error = float(np.max(np.abs(lit_norm - source_norm)))
+                shadow_error = float(np.max(np.abs(shadow_norm - source_norm)))
+
+                assert shadow_ratio <= 0.35, f"preserve_colors shadows are too bright: ratio={shadow_ratio:.3f}"
+                if min_lit_mean > 0.0:
+                    assert lit_mean >= min_lit_mean, (
+                        f"preserve_colors lit regions are too dark: mean={lit_mean:.3f}"
+                    )
+                assert lit_error <= 0.10, f"lit overlay hue drifted too far from source: err={lit_error:.3f}"
+                assert shadow_error <= 0.10, f"shadow overlay hue drifted too far from source: err={shadow_error:.3f}"
+        finally:
+            try:
+                send_ipc(sock, {"cmd": "close"})
+            except Exception:
+                pass
+            sock.close()
+            process.terminate()
+            process.wait(timeout=5)
 
 
 if __name__ == "__main__":

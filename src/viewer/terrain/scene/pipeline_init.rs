@@ -120,15 +120,28 @@ impl ViewerTerrainScene {
 
     /// P6.2: Initialize Shadow Mapping (CSM) resources
     pub fn init_shadows(&mut self) {
-        if self.csm_renderer.is_some() {
-            return;
+        let desired_shadow_map_size = self.pbr_config.shadow_map_res.clamp(512, 8192);
+        let desired_cascade_count = 4;
+
+        if let Some(existing) = self.csm_renderer.as_ref() {
+            if existing.config.shadow_map_size == desired_shadow_map_size
+                && existing.config.cascade_count == desired_cascade_count
+            {
+                return;
+            }
         }
 
-        // Create CSM renderer with default configuration
+        self.csm_renderer = None;
+        self.csm_uniform_buffer = None;
+        self.moment_pass = None;
+
+        // Create CSM renderer using the active PBR shadow resolution instead of
+        // a hard-coded fallback so terrain shadows remain spatially stable at
+        // large extents like the full Switzerland scene.
         let shadow_debug_mode = crate::core::shadows::parse_shadow_debug_env();
         let csm_config = CsmConfig {
-            cascade_count: 4,
-            shadow_map_size: 2048,        // Matches default in PbrConfig
+            cascade_count: desired_cascade_count,
+            shadow_map_size: desired_shadow_map_size,
             max_shadow_distance: 50000.0, // Large enough to cover terrain at any camera distance
             pcf_kernel_size: 3,
             depth_bias: 0.0005,
@@ -143,7 +156,8 @@ impl ViewerTerrainScene {
 
         let csm = CsmRenderer::new(&self.device, csm_config);
         println!(
-            "[terrain_scene] CSM renderer created, has_moment_maps={}",
+            "[terrain_scene] CSM renderer created, shadow_map_size={}, has_moment_maps={}",
+            csm.config.shadow_map_size,
             csm.evsm_maps.is_some()
         );
         self.csm_renderer = Some(csm);

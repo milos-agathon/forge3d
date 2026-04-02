@@ -92,7 +92,15 @@ pub struct ViewerTerrainData {
 
 impl ViewerTerrainData {
     pub fn terrain_width(&self) -> f32 {
-        self.dimensions.0.max(self.dimensions.1) as f32
+        self.dimensions.0 as f32
+    }
+
+    pub fn terrain_depth(&self) -> f32 {
+        self.dimensions.1 as f32
+    }
+
+    pub fn terrain_span(&self) -> f32 {
+        self.terrain_width().max(self.terrain_depth())
     }
 
     pub fn height_range(&self) -> f32 {
@@ -103,7 +111,7 @@ impl ViewerTerrainData {
         [
             self.terrain_width() * 0.5,
             self.height_range() * self.z_scale * 0.5,
-            self.terrain_width() * 0.5,
+            self.terrain_depth() * 0.5,
         ]
     }
 

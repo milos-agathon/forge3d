@@ -307,6 +307,102 @@ class TestSunVisibility:
         assert arr.dtype == np.uint8
         assert arr[..., :3].max() > arr[..., :3].min(), "Frame should have contrast"
 
+    def test_sun_vis_hard_mode_ignores_softness_and_samples(self, renderer_setup):
+        """Hard mode should force binary occlusion regardless of softness/samples."""
+        renderer, material_set, ibl = renderer_setup
+        heightmap = _create_ridge_heightmap()
+
+        base = SunVisibilitySettings(
+            enabled=True,
+            mode="hard",
+            samples=1,
+            steps=32,
+            max_distance=1.0,
+            softness=0.0,
+            resolution_scale=1.0,
+            bias=0.001,
+        )
+        overridden = SunVisibilitySettings(
+            enabled=True,
+            mode="hard",
+            samples=8,
+            steps=32,
+            max_distance=1.0,
+            softness=2.0,
+            resolution_scale=1.0,
+            bias=0.001,
+        )
+
+        frame_base = renderer.render_terrain_pbr_pom(
+            material_set=material_set,
+            env_maps=ibl,
+            params=f3d.TerrainRenderParams(_build_config(sun_visibility=base)),
+            heightmap=heightmap,
+        )
+        frame_overridden = renderer.render_terrain_pbr_pom(
+            material_set=material_set,
+            env_maps=ibl,
+            params=f3d.TerrainRenderParams(_build_config(sun_visibility=overridden)),
+            heightmap=heightmap,
+        )
+
+        arr_base = frame_base.to_numpy()
+        arr_overridden = frame_overridden.to_numpy()
+        assert np.array_equal(
+            arr_base, arr_overridden
+        ), "hard mode should ignore softness/samples overrides"
+
+    def test_sun_vis_hard_and_soft_modes_diverge(self, renderer_setup):
+        """Hard mode should differ measurably from soft mode on the same ridge scene."""
+        renderer, material_set, ibl = renderer_setup
+        heightmap = _create_ridge_heightmap()
+
+        hard = SunVisibilitySettings(
+            enabled=True,
+            mode="hard",
+            samples=8,
+            steps=32,
+            max_distance=1.0,
+            softness=2.0,
+            resolution_scale=1.0,
+            bias=0.001,
+        )
+        soft = SunVisibilitySettings(
+            enabled=True,
+            mode="soft",
+            samples=8,
+            steps=32,
+            max_distance=1.0,
+            softness=2.0,
+            resolution_scale=1.0,
+            bias=0.001,
+        )
+
+        frame_hard = renderer.render_terrain_pbr_pom(
+            material_set=material_set,
+            env_maps=ibl,
+            params=f3d.TerrainRenderParams(_build_config(sun_visibility=hard)),
+            heightmap=heightmap,
+        )
+        frame_soft = renderer.render_terrain_pbr_pom(
+            material_set=material_set,
+            env_maps=ibl,
+            params=f3d.TerrainRenderParams(_build_config(sun_visibility=soft)),
+            heightmap=heightmap,
+        )
+
+        arr_hard = frame_hard.to_numpy()
+        arr_soft = frame_soft.to_numpy()
+        diff = float(
+            np.mean(np.abs(arr_hard[..., :3].astype(np.float32) - arr_soft[..., :3].astype(np.float32)))
+        )
+        ssim = _compute_ssim_approx(arr_hard[..., :3], arr_soft[..., :3])
+
+        assert np.any(arr_hard != arr_soft), "hard and soft modes should not render identically"
+        assert diff > 0.25 or ssim < 0.999, (
+            f"hard and soft modes should diverge measurably: diff={diff:.3f}, ssim={ssim:.4f}"
+        )
+
 
 def test_sun_visibility_dataclass_validation():
     """Test SunVisibilitySettings dataclass validation."""

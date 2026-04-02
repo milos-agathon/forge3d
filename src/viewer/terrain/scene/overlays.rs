@@ -147,6 +147,11 @@ impl ViewerTerrainScene {
         self.pbr_config.overlay.solid = solid;
     }
 
+    /// Preserve source raster colors by compositing after terrain lighting.
+    pub fn set_overlay_preserve_colors(&mut self, preserve_colors: bool) {
+        self.pbr_config.overlay.preserve_colors = preserve_colors;
+    }
+
     // === VECTOR OVERLAY (OPTION B) MANAGEMENT API ===
 
     /// Initialize the vector overlay stack if not already initialized

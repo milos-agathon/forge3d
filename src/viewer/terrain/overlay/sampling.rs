@@ -9,11 +9,15 @@ pub(super) fn sample_bilinear(
     v: f32,
     opacity: f32,
 ) -> [f32; 4] {
+    if width == 0 || height == 0 {
+        return [0.0, 0.0, 0.0, 0.0];
+    }
+
     let u = u.clamp(0.0, 1.0);
     let v = v.clamp(0.0, 1.0);
 
-    let fx = u * (width.saturating_sub(1)) as f32;
-    let fy = v * (height.saturating_sub(1)) as f32;
+    let fx = (u * width as f32 - 0.5).clamp(0.0, width.saturating_sub(1) as f32);
+    let fy = (v * height as f32 - 0.5).clamp(0.0, height.saturating_sub(1) as f32);
 
     let x0 = fx.floor() as u32;
     let y0 = fy.floor() as u32;
