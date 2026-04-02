@@ -7,7 +7,6 @@ import numpy as np
 import pytest
 
 pytest.importorskip("PIL.Image")
-pytest.importorskip("rasterio")
 
 from PIL import Image, ImageDraw
 

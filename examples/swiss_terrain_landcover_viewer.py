@@ -7,11 +7,7 @@ import time
 from pathlib import Path
 
 import numpy as np
-import rasterio
 from PIL import Image, ImageDraw, ImageFont
-from rasterio.crs import CRS
-from rasterio.enums import Resampling
-from rasterio.warp import calculate_default_transform, reproject
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 from forge3d.viewer import open_viewer_async
@@ -182,6 +178,11 @@ def compose_snapshot(raw_path: Path, output_path: Path) -> None:
 
 
 def ensure_dem_in_target_crs(dem_path: Path) -> Path:
+    import rasterio
+    from rasterio.crs import CRS
+    from rasterio.enums import Resampling
+    from rasterio.warp import calculate_default_transform, reproject
+
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     output_path = CACHE_DIR / f"{dem_path.stem}_{CACHE_KEY}.tif"
     with rasterio.open(dem_path) as src:
@@ -294,6 +295,8 @@ def classes_to_rgba(classes: np.ndarray) -> np.ndarray:
 
 
 def build_landcover_classes(landcover_path: Path) -> Path:
+    import rasterio
+
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     classes_path = CACHE_DIR / f"{landcover_path.stem}_{LANDCOVER_CLASS_CACHE_KEY}_classes.tif"
     if classes_path.exists() and classes_path.stat().st_mtime >= landcover_path.stat().st_mtime:
@@ -315,6 +318,10 @@ def build_landcover_classes(landcover_path: Path) -> Path:
 
 
 def build_overlay(landcover_path: Path, terrain_path: Path) -> Path:
+    import rasterio
+    from rasterio.enums import Resampling
+    from rasterio.warp import reproject
+
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     classes_path = build_landcover_classes(landcover_path)
     overlay_path = CACHE_DIR / f"{landcover_path.stem}_{CACHE_KEY}_{LANDCOVER_OVERLAY_CACHE_KEY}_overlay.png"

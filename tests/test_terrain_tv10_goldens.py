@@ -116,11 +116,11 @@ def _tv10_materials() -> MaterialLayerSettings:
         wetness_strength=0.18,
         wetness_slope_influence=0.45,
         snow_subsurface_strength=0.58,
-        snow_subsurface_color=(0.72, 0.85, 0.98),
+        snow_subsurface_tint=(0.72, 0.85, 0.98),
         rock_subsurface_strength=0.04,
-        rock_subsurface_color=(0.45, 0.38, 0.30),
+        rock_subsurface_tint=(0.45, 0.38, 0.30),
         wetness_subsurface_strength=0.16,
-        wetness_subsurface_color=(0.38, 0.27, 0.18),
+        wetness_subsurface_tint=(0.38, 0.27, 0.18),
     )
 
 
