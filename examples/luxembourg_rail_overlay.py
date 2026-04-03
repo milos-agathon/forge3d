@@ -135,11 +135,35 @@ def generate_dem_mask(dem_path: Path, output_path: Path) -> bool:
         return False
 
 
+def _terrain_world_dimensions(width: int, height: int) -> Tuple[float, float]:
+    """Return the viewer's terrain X/Z spans for a DEM of the given shape."""
+    return float(width), float(height)
+
+
+def _project_coord_to_terrain_world(
+    x: float,
+    y: float,
+    *,
+    min_x: float,
+    max_x: float,
+    min_y: float,
+    max_y: float,
+    terrain_width: float,
+    terrain_depth: float,
+) -> Tuple[float, float]:
+    """Map projected map coordinates into the viewer's terrain-local X/Z space."""
+    u = (x - min_x) / (max_x - min_x) if max_x != min_x else 0.5
+    v = (max_y - y) / (max_y - min_y) if max_y != min_y else 0.5
+    world_x = u * terrain_width
+    world_z = v * terrain_depth
+    return world_x, world_z
+
+
 def load_gpkg_lines(gpkg_path: Path, dem_path: Path, color: List[float], line_width: float = 10.0) -> Tuple[List[List[float]], List[int]]:
     """Load line geometries from GeoPackage and convert to triangle quads.
     
-    The coordinates are reprojected to EPSG:3035 and mapped from GeoPackage bounds 
-    to terrain world space, where terrain is centered at origin.
+    The coordinates are reprojected to EPSG:3035 and mapped into the viewer's
+    terrain-local world space, where X spans the DEM width and Z spans the DEM height.
     
     Args:
         gpkg_path: Path to GeoPackage file
@@ -168,13 +192,17 @@ def load_gpkg_lines(gpkg_path: Path, dem_path: Path, color: List[float], line_wi
     
     # Get terrain dimensions and bounds from DEM
     terrain_width = 1000.0  # Default
+    terrain_depth = 1000.0
     dem_min_x, dem_min_y, dem_max_x, dem_max_y = 0.0, 0.0, 1.0, 1.0
     
     if HAS_RASTERIO and dem_path.exists():
         try:
             with rasterio.open(dem_path) as dem:
-                terrain_width = float(max(dem.width, dem.height))
-                print(f"  DEM dimensions: {dem.width}x{dem.height}, terrain_width={terrain_width}")
+                terrain_width, terrain_depth = _terrain_world_dimensions(dem.width, dem.height)
+                print(
+                    f"  DEM dimensions: {dem.width}x{dem.height}, "
+                    f"terrain_width={terrain_width}, terrain_depth={terrain_depth}"
+                )
                 
                 # Get DEM bounds in its native CRS
                 dem_bounds = dem.bounds
@@ -245,14 +273,14 @@ def load_gpkg_lines(gpkg_path: Path, dem_path: Path, color: List[float], line_wi
             coords = list(geom.coords)
             _add_linestring_as_quads(coords, color, vertices, indices, 0,
                           dem_min_x, dem_max_x, dem_min_y, dem_max_y, 
-                          terrain_width, line_width)
+                          terrain_width, terrain_depth, line_width)
             
         elif geom.geom_type == 'MultiLineString':
             for line in geom.geoms:
                 coords = list(line.coords)
                 _add_linestring_as_quads(coords, color, vertices, indices, 0,
                               dem_min_x, dem_max_x, dem_min_y, dem_max_y, 
-                              terrain_width, line_width)
+                              terrain_width, terrain_depth, line_width)
     
     print(f"Loaded {len(vertices)} vertices, {len(indices)//3} triangles from {gpkg_path}")
     return vertices, indices
@@ -261,6 +289,7 @@ def load_gpkg_lines(gpkg_path: Path, dem_path: Path, color: List[float], line_wi
 def _add_linestring_as_quads(coords: list, color: list, vertices: list, indices: list, 
                               vertex_offset: int, min_x: float, max_x: float, 
                               min_y: float, max_y: float, terrain_width: float,
+                              terrain_depth: float,
                               line_width: float = 10.0):
     """Add a linestring as continuous triangle strip for thick line rendering.
     
@@ -271,13 +300,19 @@ def _add_linestring_as_quads(coords: list, color: list, vertices: list, indices:
     if len(coords) < 2:
         return
     
-    # First convert all coords to world space (0 to terrain_width)
+    # First convert all coords to viewer terrain space.
     world_coords = []
     for x, y, *rest in coords:
-        u = (x - min_x) / (max_x - min_x) if max_x != min_x else 0.5
-        v = (max_y - y) / (max_y - min_y) if max_y != min_y else 0.5
-        world_x = u * terrain_width
-        world_z = v * terrain_width
+        world_x, world_z = _project_coord_to_terrain_world(
+            x,
+            y,
+            min_x=min_x,
+            max_x=max_x,
+            min_y=min_y,
+            max_y=max_y,
+            terrain_width=terrain_width,
+            terrain_depth=terrain_depth,
+        )
         world_coords.append((world_x, world_z))
     
     # Half width for offset calculation
@@ -359,7 +394,11 @@ def _add_linestring_as_quads(coords: list, color: list, vertices: list, indices:
         indices.extend([r0, r1, l1])  # Triangle 2
 
 
-def create_demo_lines(terrain_width: float, line_width: float = 15.0) -> Tuple[List[List[float]], List[int]]:
+def create_demo_lines(
+    terrain_width: float,
+    terrain_depth: float,
+    line_width: float = 15.0,
+) -> Tuple[List[List[float]], List[int]]:
     """Create simple demo lines as triangle quads when no GeoPackage is available."""
     vertices = []
     indices = []
@@ -367,11 +406,12 @@ def create_demo_lines(terrain_width: float, line_width: float = 15.0) -> Tuple[L
     # Create a simple grid of lines for demonstration
     color = [0.9, 0.3, 0.1, 1.0]  # Red-orange
     half_w = terrain_width * 0.4
+    half_d = terrain_depth * 0.4
     half_line = line_width / 2.0
     
     # Create horizontal lines as quads
     for i in range(-3, 4):
-        z = i * terrain_width * 0.1
+        z = i * terrain_depth * 0.1
         points = list(np.linspace(-half_w, half_w, 10))
         for j in range(len(points) - 1):
             x1, x2 = points[j], points[j + 1]
@@ -388,7 +428,7 @@ def create_demo_lines(terrain_width: float, line_width: float = 15.0) -> Tuple[L
     # Create vertical lines as quads
     for i in range(-3, 4):
         x = i * terrain_width * 0.1
-        points = list(np.linspace(-half_w, half_w, 10))
+        points = list(np.linspace(-half_d, half_d, 10))
         for j in range(len(points) - 1):
             z1, z2 = points[j], points[j + 1]
             # Create quad vertices (perpendicular to line direction)
@@ -436,10 +476,11 @@ def load_gpkg_lines_sqlite(gpkg_path: Path, dem_path: Path, color: List[float], 
     
     # Get terrain dimensions for scaling
     terrain_width = 1000.0
+    terrain_depth = 1000.0
     if HAS_RASTERIO and dem_path.exists():
         try:
             with rasterio.open(dem_path) as dem:
-                terrain_width = float(max(dem.width, dem.height))
+                terrain_width, terrain_depth = _terrain_world_dimensions(dem.width, dem.height)
         except:
             pass
             
@@ -543,7 +584,7 @@ def load_gpkg_lines_sqlite(gpkg_path: Path, dem_path: Path, color: List[float], 
     for pts in raw_lines:
         _add_linestring_as_quads(pts, color, vertices, indices, 0,
                       norm_min_x, norm_max_x, norm_min_y, norm_max_y,
-                      terrain_width, line_width)
+                      terrain_width, terrain_depth, line_width)
     return vertices, indices
 
 
@@ -1189,13 +1230,14 @@ def main() -> int:
             
             # Create demo lines with terrain_width from DEM
             terrain_width = 1000.0  # Default
+            terrain_depth = 1000.0
             if HAS_RASTERIO and args.dem.exists():
                 try:
                     with rasterio.open(args.dem) as dem:
-                        terrain_width = float(max(dem.width, dem.height))
+                        terrain_width, terrain_depth = _terrain_world_dimensions(dem.width, dem.height)
                 except:
                     pass
-            vertices, indices = create_demo_lines(terrain_width, args.line_width)
+            vertices, indices = create_demo_lines(terrain_width, terrain_depth, args.line_width)
             # Update colors for demo lines
             for v in vertices:
                 v[3:7] = line_color

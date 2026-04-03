@@ -20,6 +20,7 @@ import concurrent.futures
 import math
 import shutil
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.request import urlopen
@@ -30,7 +31,7 @@ import numpy as np
 import rasterio
 import rioxarray  # noqa: F401
 import xarray as xr
-from PIL import Image, ImageDraw, ImageEnhance, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 from rasterio.enums import Resampling
 from rasterio.features import geometry_mask
 from rasterio.transform import from_bounds
@@ -754,10 +755,6 @@ def _save_texture(path: Path, texture_rgba: np.ndarray) -> Path:
 
 def _annotate_3d_snapshot(raw_path: Path, final_path: Path, *, subtitle: str) -> None:
     image = Image.open(raw_path).convert("RGBA")
-    rgb = image.convert("RGB")
-    rgb = ImageEnhance.Color(rgb).enhance(1.18)
-    rgb = ImageEnhance.Contrast(rgb).enhance(1.05)
-    image = Image.merge("RGBA", (*rgb.split(), image.getchannel("A")))
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     title_font = _load_font(max(44, image.width // 36), bold=True)
@@ -846,12 +843,12 @@ def _render_3d(
                 "radius": camera_radius,
                 "fov": cam_fov,
                 "zscale": zscale,
-                "sun_azimuth": 145.0,
-                "sun_elevation": 34.0,
-                "sun_intensity": 1.10,
-                "ambient": 0.20,
-                "shadow": 0.34,
-                "background": [0.955, 0.962, 0.978],
+                "sun_azimuth": 315.0,
+                "sun_elevation": 24.0,
+                "sun_intensity": 1.0,
+                "ambient": 0.29,
+                "shadow": 0.72,
+                "background": [1.0, 1.0, 1.0],
             }
         )
         viewer.send_ipc(
@@ -860,16 +857,27 @@ def _render_3d(
                 "enabled": True,
                 "shadow_technique": "pcss",
                 "shadow_map_res": 4096,
-                "exposure": 1.00,
-                "msaa": 4,
-                "normal_strength": 1.10,
+                "exposure": 1.0,
+                "msaa": 8,
+                "ibl_intensity": 0.32,
+                "normal_strength": 3.4,
                 "height_ao": {
                     "enabled": True,
-                    "directions": 8,
-                    "steps": 18,
+                    "directions": 12,
+                    "steps": 32,
                     "max_distance": ao_distance,
-                    "strength": 0.34,
-                    "resolution_scale": 0.5,
+                    "strength": 0.75,
+                    "resolution_scale": 0.75,
+                },
+                "sun_visibility": {
+                    "enabled": True,
+                    "mode": "hard",
+                    "samples": 1,
+                    "steps": 48,
+                    "max_distance": 2000.0 * terrain_relief_scale,
+                    "softness": 0.0,
+                    "bias": 0.005,
+                    "resolution_scale": 1.0,
                 },
             }
         )
@@ -877,12 +885,13 @@ def _render_3d(
             name="belgium_climate",
             path=texture_path,
             extent=(0.0, 0.0, 1.0, 1.0),
-            opacity=0.92,
+            opacity=1.0,
             z_order=0,
+            preserve_colors=True,
         )
         viewer.send_ipc({"cmd": "set_overlays_enabled", "enabled": True})
-        viewer.send_ipc({"cmd": "set_overlay_preserve_colors", "preserve_colors": True})
-        viewer.send_ipc({"cmd": "set_overlay_solid", "solid": False})
+        viewer.send_ipc({"cmd": "set_overlay_solid", "solid": True})
+        time.sleep(2.0)
         viewer.snapshot(raw_output_path, width=snapshot_size[0], height=snapshot_size[1])
     _annotate_3d_snapshot(raw_output_path, final_output_path, subtitle=subtitle)
 

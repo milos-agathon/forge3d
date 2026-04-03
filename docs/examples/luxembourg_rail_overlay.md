@@ -169,7 +169,8 @@ snap output.png 3840x2160          # Save 4K screenshot
 ### Coordinate System
 The viewer uses **EPSG:3035 (ETRS89-LAEA)**.
 - If the DEM or Vector data is in a different CRS (like EPSG:4326), the script uses `pyproj` to reproject bounds and vertices automatically.
-- The terrain is centered at `(0,0,0)` in world space.
+- Terrain-local coordinates use the DEM raster shape directly:
+  `x` spans `[0, dem.width]` and `z` spans `[0, dem.height]`.
 
 ### Geometry Generation
 The function `load_gpkg_lines` reads the GeoPackage and calls `_add_linestring_as_quads`.
