@@ -66,10 +66,28 @@ def test_classes_to_rgba_uses_display_palette_and_makes_invalid_pixels_transpare
     classes = np.array([[1, -1]], dtype=np.int16)
 
     rgba = module.classes_to_rgba(classes)
+    expected_palette = module.landcover_palette_rgb()
 
     assert tuple(int(v) for v in module.LANDCOVER_SOURCE_PALETTE_RGB[1]) == (57, 125, 73)
-    assert tuple(int(v) for v in rgba[0, 0]) == (43, 106, 61, 255)
+    assert tuple(int(v) for v in rgba[0, 0]) == tuple(int(v) for v in expected_palette[1]) + (255,)
     assert tuple(int(v) for v in rgba[0, 1]) == (0, 0, 0, 0)
+
+
+def test_bare_ground_and_rangeland_use_requested_legend_colors() -> None:
+    module = load_module()
+    full_palette = module.landcover_palette_rgb(1.0)
+
+    assert tuple(int(v) for v in full_palette[5]) == (165, 155, 143)
+    assert tuple(int(v) for v in full_palette[7]) == (227, 226, 195)
+
+
+def test_default_landcover_opacity_lightens_palette_toward_white() -> None:
+    module = load_module()
+    base = module.landcover_palette_rgb(1.0)
+    softened = module.landcover_palette_rgb(module.LANDCOVER_OPACITY)
+
+    assert np.all(softened >= base)
+    assert np.any(softened > base)
 
 
 def test_compose_snapshot_adds_title_legend_and_caption(tmp_path: Path) -> None:

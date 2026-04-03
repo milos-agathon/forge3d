@@ -119,6 +119,79 @@ def wait_for_file(path: Path, timeout_s: float = 120.0) -> None:
     raise RuntimeError(f"Timed out waiting for output: {path}")
 
 
+def _step_log_path(name: str) -> Path:
+    safe = "".join(ch.lower() if ch.isalnum() else "-" for ch in name).strip("-")
+    return WORK_DIR / f"{safe or 'render'}.log"
+
+
+def _tail_log(path: Path, max_lines: int = 40) -> str:
+    if not path.exists():
+        return "<no log captured>"
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        return f"<unable to read log: {exc}>"
+    if not lines:
+        return "<log empty>"
+    return "\n".join(lines[-max_lines:])
+
+
+def _example_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env["FORGE3D_REPO_ROOT"] = str(REPO_ROOT)
+    env["FORGE3D_LICENSE_KEY"] = env.get(
+        "FORGE3D_LICENSE_KEY", sign_test_key("PRO", "20991231")
+    )
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        str(PYTHON_DIR)
+        if not existing_pythonpath
+        else os.pathsep.join([str(PYTHON_DIR), existing_pythonpath])
+    )
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONUTF8", "1")
+    return env
+
+
+def wait_for_file_from_process(
+    path: Path,
+    *,
+    process: subprocess.Popen[str],
+    timeout_s: float,
+    name: str,
+    log_path: Path,
+) -> None:
+    deadline = time.time() + timeout_s
+    last_size = -1
+    stable_hits = 0
+    while time.time() < deadline:
+        if path.exists():
+            size = path.stat().st_size
+            if size > 0:
+                if process.poll() is not None:
+                    return
+                if size == last_size:
+                    stable_hits += 1
+                else:
+                    stable_hits = 0
+                last_size = size
+                if stable_hits >= 3:
+                    return
+
+        returncode = process.poll()
+        if returncode is not None:
+            detail = (
+                f"[{name}] subprocess exited with code {returncode} before writing "
+                f"{path.name}\nLog: {log_path}\n{_tail_log(log_path)}"
+            )
+            raise RuntimeError(detail)
+
+        time.sleep(0.3)
+
+    detail = f"Timed out waiting for output: {path}\nLog: {log_path}\n{_tail_log(log_path)}"
+    raise RuntimeError(detail)
+
+
 def run_example(name: str, args: list[str], output_path: Path) -> None:
     """Run an example script in a subprocess and wait for *output_path*.
 
@@ -131,25 +204,39 @@ def run_example(name: str, args: list[str], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.unlink(missing_ok=True)
 
-    env = os.environ.copy()
-    env["FORGE3D_REPO_ROOT"] = str(REPO_ROOT)
-    env["FORGE3D_LICENSE_KEY"] = env.get(
-        "FORGE3D_LICENSE_KEY", sign_test_key("PRO", "20991231")
-    )
-    env["PYTHONPATH"] = str(PYTHON_DIR)
+    env = _example_env()
+    log_path = _step_log_path(name)
+    log_path.unlink(missing_ok=True)
 
-    try:
-        subprocess.run(
+    with log_path.open("w", encoding="utf-8") as log_file:
+        process = subprocess.Popen(
             [sys.executable] + args,
             cwd=REPO_ROOT,
             env=env,
-            check=False,         # viewer may exit non-zero on shutdown
-            timeout=180,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            text=True,
         )
-    except subprocess.TimeoutExpired:
-        print(f"  [{name}] subprocess timed out (180 s) -- checking file ...")
 
-    wait_for_file(output_path)
+        try:
+            wait_for_file_from_process(
+                output_path,
+                process=process,
+                timeout_s=240.0,
+                name=name,
+                log_path=log_path,
+            )
+        finally:
+            try:
+                process.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                print(f"  [{name}] subprocess hung on shutdown -- terminating ...")
+                process.kill()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+
     print(f"  [{name}] done -> {output_path.name}")
 
 
@@ -166,47 +253,57 @@ def run_example_interactive(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.unlink(missing_ok=True)
 
-    env = os.environ.copy()
-    env["FORGE3D_REPO_ROOT"] = str(REPO_ROOT)
-    env["FORGE3D_LICENSE_KEY"] = env.get(
-        "FORGE3D_LICENSE_KEY", sign_test_key("PRO", "20991231")
-    )
-    env["PYTHONPATH"] = str(PYTHON_DIR)
+    env = _example_env()
+    log_path = _step_log_path(name)
+    log_path.unlink(missing_ok=True)
 
-    process = subprocess.Popen(
-        [sys.executable] + args,
-        cwd=REPO_ROOT,
-        env=env,
-        stdin=subprocess.PIPE,
-        text=True,
-    )
-
-    try:
-        if process.stdin is None:
-            raise RuntimeError("Failed to open stdin for interactive example")
-
-        for command in commands:
-            process.stdin.write(command + "\n")
-            process.stdin.flush()
-            time.sleep(0.3)
-
-        wait_for_file(output_path)
-
-        process.stdin.write("quit\n")
-        process.stdin.flush()
-        process.stdin.close()
+    with log_path.open("w", encoding="utf-8") as log_file:
+        process = subprocess.Popen(
+            [sys.executable] + args,
+            cwd=REPO_ROOT,
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
 
         try:
-            process.wait(timeout=20)
-        except subprocess.TimeoutExpired:
-            print(f"  [{name}] interactive subprocess hung on shutdown -- terminating ...")
-            process.kill()
+            if process.stdin is None:
+                raise RuntimeError("Failed to open stdin for interactive example")
+
+            for command in commands:
+                process.stdin.write(command + "\n")
+                process.stdin.flush()
+                time.sleep(0.3)
+
+            wait_for_file_from_process(
+                output_path,
+                process=process,
+                timeout_s=240.0,
+                name=name,
+                log_path=log_path,
+            )
+
+            process.stdin.write("quit\n")
+            process.stdin.flush()
+            process.stdin.close()
+
             try:
-                process.wait(timeout=5)
+                process.wait(timeout=20)
             except subprocess.TimeoutExpired:
-                pass
-    except BrokenPipeError:
-        print(f"  [{name}] interactive subprocess exited early -- checking file ...")
+                print(f"  [{name}] interactive subprocess hung on shutdown -- terminating ...")
+                process.kill()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+        except BrokenPipeError:
+            if not output_path.exists() or output_path.stat().st_size <= 0:
+                raise RuntimeError(
+                    f"[{name}] interactive subprocess exited early before snapshot\n"
+                    f"Log: {log_path}\n{_tail_log(log_path)}"
+                ) from None
 
     print(f"  [{name}] done -> {output_path.name}")
 
@@ -648,32 +745,10 @@ def render_03_swiss_landcover() -> None:
     tmp = WORK_DIR / "03-base.png"
     out = IMAGES_DIR / "03-swiss-landcover.png"
 
-    sw, sh = 3840, 3840
-
     run_example("03 swiss", [
         "examples/swiss_terrain_landcover_viewer.py",
-        "--preset", "hq4",
-        "--width", str(sw), "--height", str(sh),
-        "--crs", "EPSG:2056",
-        "--cam-radius", "18000",
-        "--cam-phi", "90",
-        "--cam-theta", "10",
-        "--cam-fov", "16",
-        "--zscale", "0.03",
-        "--no-solid",
-        "--background", "#ffffff",
-        "--sun-azimuth", "315",
-        "--sun-elevation", "17",
-        "--ambient", "0.14",
-        "--sun-intensity", "1.54",
-        "--shadow-strength", "0.76",
-        "--ibl-intensity", "0.13",
-        "--overlay-opacity", "0.82",
-        "--legend-position", "northwest",
-        "--legend-scale", "0.22",
-        "--msaa", "8",
-        "--shadow-technique", "pcss",
-        "--exposure", "1.24",
+        "--width", "3840",
+        "--height", "3840",
         "--snapshot", str(tmp),
     ], tmp)
 

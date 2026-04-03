@@ -26,25 +26,30 @@ def _hex_to_rgb(color: str) -> tuple[int, int, int]:
     return tuple(int(color[index : index + 2], 16) for index in (1, 3, 5))
 
 
+def _rgb_to_hex(rgb: tuple[int, int, int]) -> str:
+    return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+
+
 LANDCOVER_CLASSES = [
     ("#419bdf", "#2a86d8", "Water"),
     ("#397d49", "#2b6a3d", "Trees"),
     ("#7a87c6", "#6677c8", "Flooded vegetation"),
     ("#e49635", "#d97f22", "Crops"),
     ("#c4281b", "#b72218", "Built area"),
-    ("#a59b8f", "#8f7a63", "Bare ground"),
+    ("#a59b8f", "#a59b8f", "Bare ground"),
     ("#a8ebff", "#8cddff", "Snow"),
-    ("#e3e2c3", "#bcb568", "Rangeland"),
+    ("#e3e2c3", "#e3e2c3", "Rangeland"),
 ]
-LANDCOVER_LEGEND = [(display, label) for _, display, label in LANDCOVER_CLASSES]
+LANDCOVER_LABELS = [label for _, _, label in LANDCOVER_CLASSES]
 LANDCOVER_SOURCE_PALETTE_RGB = np.array([_hex_to_rgb(source) for source, _, _ in LANDCOVER_CLASSES], dtype=np.uint8)
-LANDCOVER_PALETTE_RGB = np.array([_hex_to_rgb(display) for _, display, _ in LANDCOVER_CLASSES], dtype=np.uint8)
+LANDCOVER_BASE_PALETTE_RGB = np.array([_hex_to_rgb(display) for _, display, _ in LANDCOVER_CLASSES], dtype=np.uint8)
 LANDCOVER_INVALID_CHANNEL_MAX = 15
 LANDCOVER_DESPECKLE_PASSES = 2
 LANDCOVER_DESPECKLE_MAX_SUPPORT = 2
 LANDCOVER_DESPECKLE_MIN_MAJORITY = 4
 LANDCOVER_CLASS_CACHE_KEY = "src-v1"
-LANDCOVER_OVERLAY_CACHE_KEY = "display-v2"
+LANDCOVER_OPACITY = 0.70
+LANDCOVER_OVERLAY_CACHE_KEY = f"display-v4-op{int(round(LANDCOVER_OPACITY * 1000.0)):04d}"
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS_DIR = ROOT / "assets" / "tif"
@@ -97,7 +102,6 @@ PBR_CONFIG = {
         "tint": 0.0,
     },
 }
-LANDCOVER_OPACITY = 0.98
 
 
 def load_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
@@ -108,6 +112,20 @@ def load_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
         except OSError:
             continue
     return ImageFont.load_default()
+
+
+def landcover_palette_rgb(opacity: float = LANDCOVER_OPACITY) -> np.ndarray:
+    opacity = float(np.clip(opacity, 0.0, 1.0))
+    if opacity >= 0.999:
+        return LANDCOVER_BASE_PALETTE_RGB.copy()
+    base = LANDCOVER_BASE_PALETTE_RGB.astype(np.float32)
+    mixed = np.round(255.0 - (255.0 - base) * opacity)
+    return mixed.astype(np.uint8)
+
+
+def landcover_legend(opacity: float = LANDCOVER_OPACITY) -> list[tuple[str, str]]:
+    palette = landcover_palette_rgb(opacity)
+    return [(_rgb_to_hex(tuple(int(channel) for channel in palette[index])), label) for index, label in enumerate(LANDCOVER_LABELS)]
 
 
 def crop_subject(image: Image.Image) -> Image.Image:
@@ -157,7 +175,7 @@ def compose_snapshot(raw_path: Path, output_path: Path) -> None:
     legend_cursor = legend_y + legend_title_font.size + 10
     dot = max(10, legend_font.size - 2)
     row_gap = max(6, legend_font.size // 3)
-    for color, label in LANDCOVER_LEGEND:
+    for color, label in landcover_legend():
         draw.ellipse((legend_x, legend_cursor, legend_x + dot, legend_cursor + dot), fill=color, outline=(160, 160, 160))
         draw.text((legend_x + dot + 10, legend_cursor - 2), label, fill=(72, 72, 78), font=legend_font)
         legend_cursor += dot + row_gap
@@ -254,7 +272,7 @@ def despeckle_landcover_classes(classes: np.ndarray, passes: int = LANDCOVER_DES
         same_count = np.zeros((height, width), dtype=np.uint8)
         best_count = np.zeros((height, width), dtype=np.uint8)
         best_class = np.full((height, width), -1, dtype=np.int16)
-        for index in range(len(LANDCOVER_PALETTE_RGB)):
+        for index in range(len(LANDCOVER_BASE_PALETTE_RGB)):
             mask = cleaned == index
             if not np.any(mask):
                 continue
@@ -289,7 +307,8 @@ def despeckle_landcover_classes(classes: np.ndarray, passes: int = LANDCOVER_DES
 def classes_to_rgba(classes: np.ndarray) -> np.ndarray:
     rgba = np.zeros(classes.shape + (4,), dtype=np.uint8)
     valid = classes >= 0
-    rgba[valid, :3] = LANDCOVER_PALETTE_RGB[classes[valid]]
+    palette = landcover_palette_rgb()
+    rgba[valid, :3] = palette[classes[valid]]
     rgba[:, :, 3] = np.where(valid, 255, 0).astype(np.uint8)
     return rgba
 
@@ -363,7 +382,7 @@ def render(snapshot_path: Path, dem_path: Path, landcover_path: Path, width: int
             "landcover",
             overlay_path,
             extent=(0.0, 0.0, 1.0, 1.0),
-            opacity=LANDCOVER_OPACITY,
+            opacity=1.0,
             preserve_colors=True,
         )
         viewer.send_ipc({"cmd": "set_overlays_enabled", "enabled": True})
