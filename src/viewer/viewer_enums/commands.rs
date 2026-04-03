@@ -84,6 +84,7 @@ pub enum ViewerCmd {
     GetTerrainParams,
     SetTerrainPbr {
         enabled: Option<bool>, hdr_path: Option<String>, ibl_intensity: Option<f32>,
+        hdr_rotate_deg: Option<f32>,
         shadow_technique: Option<String>, shadow_map_res: Option<u32>, exposure: Option<f32>,
         msaa: Option<u32>, normal_strength: Option<f32>,
         height_ao: Box<Option<ViewerHeightAoConfig>>, sun_visibility: Box<Option<ViewerSunVisConfig>>,

@@ -65,6 +65,7 @@ pub(super) struct TerrainPbrUniforms {
     pub background: [f32; 4],
     pub water_color: [f32; 4],
     pub pbr_params: [f32; 4], // exposure, normal_strength, ibl_intensity, overlay_preserve_colors
+    pub ibl_params: [f32; 4], // use_hdri (>0.5), specular_max_mip, sin_theta, cos_theta
     pub camera_pos: [f32; 4], // camera world position
     pub lens_params: [f32; 4], // vignette_strength, vignette_radius, vignette_softness, _
     pub screen_dims: [f32; 4], // width, height, _, _

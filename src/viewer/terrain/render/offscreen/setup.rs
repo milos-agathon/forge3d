@@ -220,6 +220,7 @@ impl ViewerTerrainScene {
             water_color,
         )) = pbr_uniforms_data
         {
+            self.ensure_terrain_ibl_resources();
             let pbr_uniforms = TerrainPbrUniforms {
                 view_proj: view_proj.to_cols_array_2d(),
                 sun_dir: [sun_dir.x, sun_dir.y, sun_dir.z, 0.0],
@@ -242,6 +243,7 @@ impl ViewerTerrainScene {
                         0.0
                     },
                 ],
+                ibl_params: self.terrain_ibl_uniform_params(),
                 camera_pos: [eye.x, eye.y, eye.z, 1.0],
                 lens_params: [
                     self.pbr_config.lens_effects.vignette_strength,

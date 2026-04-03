@@ -11,6 +11,7 @@ struct Uniforms {
     water_color: vec4<f32>,     // r, g, b, _
     // PBR params
     pbr_params: vec4<f32>,      // exposure, normal_strength, ibl_intensity, overlay_preserve_colors
+    ibl_params: vec4<f32>,      // use_hdri (>0.5), specular_max_mip, sin_theta, cos_theta
     camera_pos: vec4<f32>,      // camera world position
     // Lens effects: vignette_strength, vignette_radius, vignette_softness, _
     lens_params: vec4<f32>,
@@ -35,6 +36,10 @@ struct Uniforms {
 @group(0) @binding(9) var moment_maps: texture_2d_array<f32>;
 @group(0) @binding(10) var moment_sampler: sampler;
 @group(0) @binding(11) var<storage, read> csm_uniforms: CsmUniforms;
+@group(0) @binding(12) var envSpecular: texture_cube<f32>;
+@group(0) @binding(13) var envIrradiance: texture_cube<f32>;
+@group(0) @binding(14) var envSampler: sampler;
+@group(0) @binding(15) var brdfLUT: texture_2d<f32>;
 
 // Shadow cascade data (matches Rust CsmCascadeData: 144 bytes)
 struct ShadowCascade {
@@ -83,10 +88,18 @@ struct VertexOutput {
     @location(2) raw_height: f32,
 };
 
+fn terrain_depth_from_dims(dims: vec2<f32>) -> f32 {
+    return u.terrain_params.z * dims.y / max(dims.x, 1.0);
+}
+
+fn height_to_world_y(h: f32) -> f32 {
+    return (h - u.terrain_params.x) * u.terrain_params.w;
+}
+
 @vertex
 fn vs_main(@location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>) -> VertexOutput {
     let dims = textureDimensions(heightmap);
-    let terrain_depth = u.terrain_params.z * f32(dims.y) / max(f32(dims.x), 1.0);
+    let terrain_depth = terrain_depth_from_dims(vec2<f32>(f32(dims.x), f32(dims.y)));
     let max_texel = vec2<i32>(i32(dims.x) - 1, i32(dims.y) - 1);
     let texel = clamp(
         vec2<i32>(i32(uv.x * f32(dims.x)), i32(uv.y * f32(dims.y))),
@@ -95,11 +108,8 @@ fn vs_main(@location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>) -> VertexOut
     );
     let h = textureLoad(heightmap, texel, 0).r;
     
-    let min_h = u.terrain_params.x;
     let terrain_width = u.terrain_params.z;
-    let z_scale = u.terrain_params.w;
-    
-    let world_y = (h - min_h) * z_scale;
+    let world_y = height_to_world_y(h);
     
     let world_x = uv.x * terrain_width;
     let world_z = uv.y * terrain_depth;
@@ -113,10 +123,32 @@ fn vs_main(@location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>) -> VertexOut
 }
 
 // Improved normal calculation from height gradient
-fn compute_normal(world_pos: vec3<f32>) -> vec3<f32> {
-    let dx = dpdx(world_pos);
-    let dy = dpdy(world_pos);
-    var n = normalize(cross(dy, dx));
+fn compute_normal(uv: vec2<f32>) -> vec3<f32> {
+    let dims_u = textureDimensions(heightmap);
+    let dims = vec2<f32>(f32(dims_u.x), f32(dims_u.y));
+    let terrain_depth = terrain_depth_from_dims(dims);
+    let max_texel = vec2<i32>(i32(dims_u.x) - 1, i32(dims_u.y) - 1);
+    let texel = clamp(
+        vec2<i32>(
+            i32(uv.x * max(f32(dims_u.x) - 1.0, 0.0)),
+            i32(uv.y * max(f32(dims_u.y) - 1.0, 0.0)),
+        ),
+        vec2<i32>(0, 0),
+        max_texel
+    );
+    let left = vec2<i32>(max(texel.x - 1, 0), texel.y);
+    let right = vec2<i32>(min(texel.x + 1, max_texel.x), texel.y);
+    let down = vec2<i32>(texel.x, max(texel.y - 1, 0));
+    let up = vec2<i32>(texel.x, min(texel.y + 1, max_texel.y));
+    let step_x = u.terrain_params.z / max(f32(dims_u.x) - 1.0, 1.0);
+    let step_z = terrain_depth / max(f32(dims_u.y) - 1.0, 1.0);
+    let h_l = height_to_world_y(textureLoad(heightmap, left, 0).r);
+    let h_r = height_to_world_y(textureLoad(heightmap, right, 0).r);
+    let h_d = height_to_world_y(textureLoad(heightmap, down, 0).r);
+    let h_u = height_to_world_y(textureLoad(heightmap, up, 0).r);
+    let tangent_x = vec3<f32>(2.0 * step_x, h_r - h_l, 0.0);
+    let tangent_z = vec3<f32>(0.0, h_u - h_d, 2.0 * step_z);
+    var n = normalize(cross(tangent_z, tangent_x));
     // Amplify normal detail based on pbr_params.y (normal_strength)
     let strength = u.pbr_params.y;
     n.x *= strength;
@@ -206,6 +238,41 @@ fn ggx_specular(normal: vec3<f32>, light_dir: vec3<f32>, view_dir: vec3<f32>, ro
     let G_v = n_dot_v / (n_dot_v * (1.0 - k) + k + 0.0001);
     let G_l = n_dot_l / (n_dot_l * (1.0 - k) + k + 0.0001);
     return D * G_v * G_l;
+}
+
+fn fresnel_schlick_roughness(cos_theta: f32, f0: vec3<f32>, roughness: f32) -> vec3<f32> {
+    return f0 + (max(vec3<f32>(1.0 - roughness), f0) - f0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
+}
+
+fn rotate_y(v: vec3<f32>, sin_theta: f32, cos_theta: f32) -> vec3<f32> {
+    return vec3<f32>(
+        v.x * cos_theta + v.z * sin_theta,
+        v.y,
+        -v.x * sin_theta + v.z * cos_theta,
+    );
+}
+
+fn eval_hdri_ibl(
+    normal: vec3<f32>,
+    view_dir: vec3<f32>,
+    base_color: vec3<f32>,
+    roughness: f32,
+    f0: vec3<f32>,
+) -> vec3<f32> {
+    let n_dot_v = max(dot(normal, view_dir), 0.0);
+    let roughness_clamped = clamp(roughness, 0.0, 1.0);
+    let rotated_normal = rotate_y(normal, u.ibl_params.z, u.ibl_params.w);
+    let rotated_view = rotate_y(view_dir, u.ibl_params.z, u.ibl_params.w);
+    let reflection_dir = reflect(-rotated_view, rotated_normal);
+    let fresnel = fresnel_schlick_roughness(n_dot_v, f0, roughness_clamped);
+    let diffuse_weight = vec3<f32>(1.0) - fresnel;
+    let irradiance = textureSampleLevel(envIrradiance, envSampler, rotated_normal, 0.0).rgb;
+    let diffuse = diffuse_weight * base_color * irradiance;
+    let mip_level = roughness_clamped * roughness_clamped * max(u.ibl_params.y, 0.0);
+    let prefiltered = textureSampleLevel(envSpecular, envSampler, reflection_dir, mip_level).rgb;
+    let brdf = textureSampleLevel(brdfLUT, envSampler, vec2<f32>(n_dot_v, roughness_clamped), 0.0).rg;
+    let specular = prefiltered * (fresnel * brdf.x + brdf.y);
+    return diffuse + specular;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -454,7 +521,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     
     // Debug mode 35 - Visualize raw shadow value (grayscale: black=shadow, white=lit)
     if csm_uniforms.debug_mode == 35u {
-        let normal = compute_normal(in.world_pos);
+        let normal = compute_normal(in.uv);
         let view_depth = max(length(u.camera_pos.xyz - in.world_pos), 0.1);
         let shadow_val = calculate_csm_shadow(in.world_pos, normal, view_depth);
         return vec4<f32>(shadow_val, shadow_val, shadow_val, 1.0);
@@ -511,7 +578,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let h_norm = clamp((in.raw_height - u.terrain_params.x) / max(u.terrain_params.y, 1.0), 0.0, 1.0);
     
     // Compute surface normal
-    let normal = compute_normal(in.world_pos);
+    let normal = compute_normal(in.uv);
     
     // Slope for material blending (0 = flat, 1 = vertical)
     let slope = 1.0 - abs(normal.y);
@@ -622,6 +689,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let terrain_width = u.terrain_params.z;
     let terrain_depth = terrain_width * f32(textureDimensions(heightmap).y) / max(f32(textureDimensions(heightmap).x), 1.0);
     let terrain_span = max(terrain_width, terrain_depth);
+    let hdri_enabled = u.ibl_params.x > 0.5;
 
     // === DIRECT SUN LIGHTING ===
     let sun_color = vec3<f32>(1.0, 0.93, 0.78); // Warm golden sunlight
@@ -650,8 +718,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let bounce_color = vec3<f32>(0.18, 0.14, 0.10); // Warm earth tone
     let ground_bounce = albedo * bounce_color * bounce_ndotl * 0.05;
 
-    // === HEMISPHERE AMBIENT (sky + ground, modulated by AO) ===
+    // === INDIRECT LIGHTING (HDRI when loaded, analytic hemisphere fallback otherwise) ===
     let ambient_hemi = sky_ambient(normal) * albedo * ambient_strength * ibl_intensity * height_ao * 0.75;
+    let ibl_roughness = select(roughness, 0.05, is_water);
+    let ibl_f0 = select(vec3<f32>(0.04), vec3<f32>(0.02), is_water);
+    let ambient_ibl = eval_hdri_ibl(normal, view_dir, albedo, ibl_roughness, ibl_f0)
+        * ambient_strength
+        * ibl_intensity
+        * height_ao;
+    let indirect_light = select(ambient_hemi, ambient_ibl, hdri_enabled);
 
     // === FRESNEL RIM LIGHT (depth cue at grazing angles) ===
     let n_dot_v = max(dot(normal, view_dir), 0.0);
@@ -664,7 +739,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
               + water_spec
               + fill_light * height_ao
               + ground_bounce
-              + ambient_hemi
+              + indirect_light
               + rim_light;
 
     if preserve_overlay_active {

@@ -901,6 +901,7 @@ def set_terrain_pbr(
     enabled: Optional[bool] = None,
     hdr_path: Optional[str] = None,
     ibl_intensity: Optional[float] = None,
+    hdr_rotate_deg: Optional[float] = None,
     shadow_technique: Optional[str] = None,
     shadow_map_res: Optional[int] = None,
     exposure: Optional[float] = None,
@@ -926,6 +927,7 @@ def set_terrain_pbr(
         enabled: Enable PBR mode
         hdr_path: Path to HDR environment map
         ibl_intensity: Intensity of IBL lighting
+        hdr_rotate_deg: HDR environment rotation in degrees
         shadow_technique: Shadow mode ("none", "hard", "pcf", "pcss", "vsm", "evsm")
         shadow_map_res: Resolution of shadow maps
         exposure: Exposure value
@@ -948,6 +950,7 @@ def set_terrain_pbr(
     if enabled is not None: cmd["enabled"] = enabled
     if hdr_path is not None: cmd["hdr_path"] = hdr_path
     if ibl_intensity is not None: cmd["ibl_intensity"] = ibl_intensity
+    if hdr_rotate_deg is not None: cmd["hdr_rotate_deg"] = hdr_rotate_deg
     if shadow_technique is not None: cmd["shadow_technique"] = shadow_technique
     if shadow_map_res is not None: cmd["shadow_map_res"] = shadow_map_res
     if exposure is not None: cmd["exposure"] = exposure

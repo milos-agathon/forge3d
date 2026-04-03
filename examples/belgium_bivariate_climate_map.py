@@ -80,6 +80,18 @@ MAP_CAPTION = (
     "Sources: TerraClimate + AWS Terrain Tiles | ©2026 Milos Popovic (milospopovic.net)"
 )
 
+# Categorical palettes need gentler lighting than land-cover textures. Strong AO,
+# self-shadowing, and exaggerated normals make preserve_colors overlays read
+# much darker than their source swatches.
+OVERLAY_SUN_AZIMUTH = 318.0
+OVERLAY_SUN_ELEVATION = 42.0
+OVERLAY_SUN_INTENSITY = 0.92
+OVERLAY_AMBIENT = 0.52
+OVERLAY_SHADOW = 0.18
+OVERLAY_EXPOSURE = 1.16
+OVERLAY_IBL_INTENSITY = 0.55
+OVERLAY_NORMAL_STRENGTH = 1.2
+
 BLUEGOLD_4X4 = {
     (1, 1): "#d3d3d3",
     (2, 1): "#a6bcc7",
@@ -825,7 +837,6 @@ def _render_3d(
     terrain_relief_scale = math.sqrt(terrain_xy_scale)
     camera_radius = cam_radius * terrain_xy_scale
     zscale = BASE_TERRAIN_ZSCALE * terrain_relief_scale
-    ao_distance = 220.0 * terrain_relief_scale
 
     raw_output_path.parent.mkdir(parents=True, exist_ok=True)
     with f3d.open_viewer_async(
@@ -843,11 +854,11 @@ def _render_3d(
                 "radius": camera_radius,
                 "fov": cam_fov,
                 "zscale": zscale,
-                "sun_azimuth": 315.0,
-                "sun_elevation": 24.0,
-                "sun_intensity": 1.0,
-                "ambient": 0.29,
-                "shadow": 0.72,
+                "sun_azimuth": OVERLAY_SUN_AZIMUTH,
+                "sun_elevation": OVERLAY_SUN_ELEVATION,
+                "sun_intensity": OVERLAY_SUN_INTENSITY,
+                "ambient": OVERLAY_AMBIENT,
+                "shadow": OVERLAY_SHADOW,
                 "background": [1.0, 1.0, 1.0],
             }
         )
@@ -855,30 +866,13 @@ def _render_3d(
             {
                 "cmd": "set_terrain_pbr",
                 "enabled": True,
-                "shadow_technique": "pcss",
-                "shadow_map_res": 4096,
-                "exposure": 1.0,
+                "shadow_technique": "none",
+                "exposure": OVERLAY_EXPOSURE,
                 "msaa": 8,
-                "ibl_intensity": 0.32,
-                "normal_strength": 3.4,
-                "height_ao": {
-                    "enabled": True,
-                    "directions": 12,
-                    "steps": 32,
-                    "max_distance": ao_distance,
-                    "strength": 0.75,
-                    "resolution_scale": 0.75,
-                },
-                "sun_visibility": {
-                    "enabled": True,
-                    "mode": "hard",
-                    "samples": 1,
-                    "steps": 48,
-                    "max_distance": 2000.0 * terrain_relief_scale,
-                    "softness": 0.0,
-                    "bias": 0.005,
-                    "resolution_scale": 1.0,
-                },
+                "ibl_intensity": OVERLAY_IBL_INTENSITY,
+                "normal_strength": OVERLAY_NORMAL_STRENGTH,
+                "height_ao": {"enabled": False},
+                "sun_visibility": {"enabled": False},
             }
         )
         viewer.load_overlay(

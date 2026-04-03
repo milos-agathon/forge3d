@@ -12,6 +12,7 @@ impl ViewerTerrainPbrConfig {
         enabled: Option<bool>,
         hdr_path: Option<String>,
         ibl_intensity: Option<f32>,
+        hdr_rotate_deg: Option<f32>,
         shadow_technique: Option<String>,
         shadow_map_res: Option<u32>,
         exposure: Option<f32>,
@@ -33,6 +34,9 @@ impl ViewerTerrainPbrConfig {
         }
         if let Some(v) = ibl_intensity {
             self.ibl_intensity = v.max(0.0);
+        }
+        if let Some(v) = hdr_rotate_deg {
+            self.hdr_rotate_deg = v.rem_euclid(360.0);
         }
         if let Some(t) = shadow_technique {
             let t_lower = t.to_lowercase();
@@ -221,7 +225,10 @@ impl ViewerTerrainPbrConfig {
                 "shadow={} res={}",
                 self.shadow_technique, self.shadow_map_res
             ),
-            format!("IBL={:.2} exp={:.2}", self.ibl_intensity, self.exposure),
+            format!(
+                "IBL={:.2} rot={:.1} exp={:.2}",
+                self.ibl_intensity, self.hdr_rotate_deg, self.exposure
+            ),
             format!("msaa={} normal={:.2}", self.msaa, self.normal_strength),
         ];
         if self.height_ao.enabled {

@@ -7,6 +7,7 @@ pub struct ViewerTerrainPbrConfig {
     pub enabled: bool,
     pub hdr_path: Option<PathBuf>,
     pub ibl_intensity: f32,
+    pub hdr_rotate_deg: f32,
     pub shadow_technique: String,
     pub shadow_map_res: u32,
     pub exposure: f32,

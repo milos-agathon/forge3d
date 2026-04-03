@@ -150,6 +150,7 @@ impl Default for ViewerTerrainPbrConfig {
             enabled: false,
             hdr_path: None,
             ibl_intensity: 1.0,
+            hdr_rotate_deg: 0.0,
             shadow_technique: "pcss".to_string(),
             shadow_map_res: 2048,
             exposure: 1.0,

@@ -127,6 +127,46 @@ impl ViewerTerrainScene {
                             },
                             count: None,
                         },
+                        // Terrain HDRI specular cube map
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 12,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                                view_dimension: wgpu::TextureViewDimension::Cube,
+                                multisampled: false,
+                            },
+                            count: None,
+                        },
+                        // Terrain HDRI irradiance cube map
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 13,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                                view_dimension: wgpu::TextureViewDimension::Cube,
+                                multisampled: false,
+                            },
+                            count: None,
+                        },
+                        // Terrain HDRI sampler
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 14,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
+                        },
+                        // Terrain HDRI BRDF LUT
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 15,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                multisampled: false,
+                            },
+                            count: None,
+                        },
                     ],
                 });
 

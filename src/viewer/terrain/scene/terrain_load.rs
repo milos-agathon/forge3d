@@ -2,6 +2,8 @@ use super::*;
 use crate::viewer::event_loop::update_terrain_volumetrics_report;
 use crate::viewer::ipc::TerrainVolumetricsReport;
 
+const MAX_VIEWER_TERRAIN_GRID_RESOLUTION: u32 = 2048;
+
 impl ViewerTerrainScene {
     pub fn load_terrain(&mut self, path: &str) -> Result<()> {
         use std::fs::File;
@@ -83,7 +85,7 @@ impl ViewerTerrainScene {
         );
 
         let heightmap_view = heightmap_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let grid_res = 4096u32.min(width.min(height));
+        let grid_res = terrain_grid_resolution(width, height);
         let (vertices, indices) = create_grid_mesh(grid_res);
 
         let vertex_buffer = self
@@ -184,8 +186,8 @@ impl ViewerTerrainScene {
         update_terrain_volumetrics_report(TerrainVolumetricsReport::default());
 
         println!(
-            "[terrain] Loaded {}x{} DEM, domain: {:.1}..{:.1}",
-            width, height, min_h, max_h
+            "[terrain] Loaded {}x{} DEM, domain: {:.1}..{:.1}, grid={}x{}",
+            width, height, min_h, max_h, grid_res, grid_res
         );
         Ok(())
     }
@@ -248,6 +250,12 @@ impl ViewerTerrainScene {
     }
 }
 
+fn terrain_grid_resolution(width: u32, height: u32) -> u32 {
+    width
+        .min(height)
+        .clamp(2, MAX_VIEWER_TERRAIN_GRID_RESOLUTION)
+}
+
 fn create_grid_mesh(resolution: u32) -> (Vec<f32>, Vec<u32>) {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
@@ -276,4 +284,20 @@ fn create_grid_mesh(resolution: u32) -> (Vec<f32>, Vec<u32>) {
     }
 
     (vertices, indices)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::terrain_grid_resolution;
+
+    #[test]
+    fn viewer_terrain_grid_resolution_keeps_small_heightmaps_native() {
+        assert_eq!(terrain_grid_resolution(512, 384), 384);
+    }
+
+    #[test]
+    fn viewer_terrain_grid_resolution_caps_large_heightmaps() {
+        assert_eq!(terrain_grid_resolution(11589, 10518), 2048);
+        assert_eq!(terrain_grid_resolution(5794, 5259), 2048);
+    }
 }

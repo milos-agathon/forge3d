@@ -1,8 +1,240 @@
 use super::*;
+use crate::core::ibl::{IBLQuality, IBLRenderer};
 use crate::viewer::terrain::overlay::OverlayStack;
 use crate::viewer::terrain::post_process::PostProcessPass;
+use half::f16;
 
 impl ViewerTerrainScene {
+    fn clear_terrain_ibl(&mut self) {
+        self.terrain_ibl_renderer = None;
+        self.terrain_ibl_hdr_path = None;
+        self.terrain_ibl_specular_view = None;
+        self.terrain_ibl_irradiance_view = None;
+        self.terrain_ibl_brdf_view = None;
+        self.terrain_ibl_specular_mip_count = 1;
+    }
+
+    fn ensure_terrain_ibl_sampler(&mut self) {
+        if self.terrain_ibl_sampler.is_none() {
+            self.terrain_ibl_sampler = Some(self.device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("terrain_viewer_pbr.ibl_sampler"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            }));
+        }
+    }
+
+    fn ensure_terrain_ibl_fallback_resources(&mut self) {
+        self.ensure_terrain_ibl_sampler();
+
+        if self.terrain_ibl_fallback_cube.is_none() {
+            let cube = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("terrain_viewer_pbr.ibl_fallback_cube"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 6,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let zero = f16::from_f32(0.0).to_bits();
+            let one = f16::from_f32(1.0).to_bits();
+            let mut texels = Vec::with_capacity(24);
+            for _ in 0..6 {
+                texels.extend_from_slice(&[zero, zero, zero, one]);
+            }
+            self.queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &cube,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                bytemuck::cast_slice(&texels),
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(8),
+                    rows_per_image: Some(1),
+                },
+                wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 6,
+                },
+            );
+            self.terrain_ibl_fallback_cube_view =
+                Some(cube.create_view(&wgpu::TextureViewDescriptor {
+                    label: Some("terrain_viewer_pbr.ibl_fallback_cube_view"),
+                    format: Some(wgpu::TextureFormat::Rgba16Float),
+                    dimension: Some(wgpu::TextureViewDimension::Cube),
+                    aspect: wgpu::TextureAspect::All,
+                    base_mip_level: 0,
+                    mip_level_count: Some(1),
+                    base_array_layer: 0,
+                    array_layer_count: Some(6),
+                }));
+            self.terrain_ibl_fallback_cube = Some(cube);
+        }
+
+        if self.terrain_ibl_fallback_brdf.is_none() {
+            let brdf = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("terrain_viewer_pbr.ibl_fallback_brdf"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let zero = f16::from_f32(0.0).to_bits();
+            let one = f16::from_f32(1.0).to_bits();
+            let texels = [zero, zero, zero, one];
+            self.queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &brdf,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                bytemuck::cast_slice(&texels),
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(8),
+                    rows_per_image: Some(1),
+                },
+                wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+            );
+            self.terrain_ibl_fallback_brdf_view =
+                Some(brdf.create_view(&wgpu::TextureViewDescriptor {
+                    label: Some("terrain_viewer_pbr.ibl_fallback_brdf_view"),
+                    ..Default::default()
+                }));
+            self.terrain_ibl_fallback_brdf = Some(brdf);
+        }
+    }
+
+    fn load_terrain_ibl(&mut self, path: &std::path::Path) -> anyhow::Result<()> {
+        let hdr_img = crate::formats::hdr::load_hdr(path)
+            .map_err(|e| anyhow::anyhow!("failed to load HDR '{}': {}", path.display(), e))?;
+        let quality = IBLQuality::Low;
+        let mut ibl = IBLRenderer::new(&self.device, quality);
+        ibl.set_base_resolution(quality.base_environment_size());
+        ibl.load_environment_map(
+            &self.device,
+            &self.queue,
+            &hdr_img.data,
+            hdr_img.width,
+            hdr_img.height,
+        )
+        .map_err(anyhow::Error::msg)?;
+        ibl.initialize(&self.device, &self.queue)
+            .map_err(anyhow::Error::msg)?;
+
+        let (irr_tex, spec_tex, brdf_tex) = ibl.textures();
+        let irr_tex = irr_tex.ok_or_else(|| anyhow::anyhow!("missing irradiance cube map"))?;
+        let spec_tex = spec_tex.ok_or_else(|| anyhow::anyhow!("missing specular cube map"))?;
+        let brdf_tex = brdf_tex.ok_or_else(|| anyhow::anyhow!("missing BRDF LUT"))?;
+        let specular_mip_count = quality.specular_mip_levels();
+
+        self.terrain_ibl_specular_view = Some(spec_tex.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("terrain_viewer_pbr.ibl_specular_view"),
+            format: Some(wgpu::TextureFormat::Rgba16Float),
+            dimension: Some(wgpu::TextureViewDimension::Cube),
+            aspect: wgpu::TextureAspect::All,
+            base_mip_level: 0,
+            mip_level_count: Some(specular_mip_count),
+            base_array_layer: 0,
+            array_layer_count: Some(6),
+        }));
+        self.terrain_ibl_irradiance_view =
+            Some(irr_tex.create_view(&wgpu::TextureViewDescriptor {
+                label: Some("terrain_viewer_pbr.ibl_irradiance_view"),
+                format: Some(wgpu::TextureFormat::Rgba16Float),
+                dimension: Some(wgpu::TextureViewDimension::Cube),
+                aspect: wgpu::TextureAspect::All,
+                base_mip_level: 0,
+                mip_level_count: Some(1),
+                base_array_layer: 0,
+                array_layer_count: Some(6),
+            }));
+        self.terrain_ibl_brdf_view = Some(brdf_tex.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("terrain_viewer_pbr.ibl_brdf_view"),
+            ..Default::default()
+        }));
+        self.terrain_ibl_specular_mip_count = specular_mip_count;
+        self.terrain_ibl_hdr_path = Some(path.to_path_buf());
+        self.terrain_ibl_renderer = Some(ibl);
+        Ok(())
+    }
+
+    pub(super) fn ensure_terrain_ibl_resources(&mut self) {
+        self.ensure_terrain_ibl_fallback_resources();
+
+        let desired_path = self.pbr_config.hdr_path.clone();
+        match desired_path {
+            Some(path) => {
+                let needs_reload = self.terrain_ibl_hdr_path.as_ref() != Some(&path)
+                    || self.terrain_ibl_renderer.is_none()
+                    || self.terrain_ibl_specular_view.is_none()
+                    || self.terrain_ibl_irradiance_view.is_none()
+                    || self.terrain_ibl_brdf_view.is_none();
+                if needs_reload {
+                    if let Err(err) = self.load_terrain_ibl(&path) {
+                        eprintln!(
+                            "[terrain_pbr] Failed to load HDRI '{}': {}",
+                            path.display(),
+                            err
+                        );
+                        self.clear_terrain_ibl();
+                    } else {
+                        println!("[terrain_pbr] Loaded HDRI '{}'", path.display());
+                    }
+                }
+            }
+            None => {
+                if self.terrain_ibl_renderer.is_some() || self.terrain_ibl_hdr_path.is_some() {
+                    self.clear_terrain_ibl();
+                }
+            }
+        }
+    }
+
+    pub(super) fn terrain_ibl_uniform_params(&self) -> [f32; 4] {
+        let theta = self.pbr_config.hdr_rotate_deg.to_radians();
+        [
+            if self.terrain_ibl_specular_view.is_some()
+                && self.terrain_ibl_irradiance_view.is_some()
+                && self.terrain_ibl_brdf_view.is_some()
+            {
+                1.0
+            } else {
+                0.0
+            },
+            self.terrain_ibl_specular_mip_count.saturating_sub(1) as f32,
+            theta.sin(),
+            theta.cos(),
+        ]
+    }
+
     pub fn blit_texture_to_view(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -37,6 +269,7 @@ impl ViewerTerrainScene {
     pub(super) fn prepare_pbr_bind_group_internal(&mut self, uniforms: &TerrainPbrUniforms) {
         // Ensure fallback texture exists first (before any borrows)
         self.ensure_fallback_texture();
+        self.ensure_terrain_ibl_resources();
 
         // Early return checks
         if self.pbr_bind_group_layout.is_none() || self.terrain.is_none() {
@@ -89,6 +322,22 @@ impl ViewerTerrainScene {
         let fallback_view = self.fallback_texture_view.as_ref().unwrap();
         let ao_view = self.height_ao_view.as_ref().unwrap_or(fallback_view);
         let sv_view = self.sun_vis_view.as_ref().unwrap_or(fallback_view);
+        let ibl_specular_view = self
+            .terrain_ibl_specular_view
+            .as_ref()
+            .or(self.terrain_ibl_fallback_cube_view.as_ref())
+            .unwrap();
+        let ibl_irradiance_view = self
+            .terrain_ibl_irradiance_view
+            .as_ref()
+            .or(self.terrain_ibl_fallback_cube_view.as_ref())
+            .unwrap();
+        let ibl_brdf_view = self
+            .terrain_ibl_brdf_view
+            .as_ref()
+            .or(self.terrain_ibl_fallback_brdf_view.as_ref())
+            .unwrap();
+        let ibl_sampler = self.terrain_ibl_sampler.as_ref().unwrap();
 
         // Get overlay view and sampler from stack
         // ensure_fallback_texture() guarantees composite_view is Some (either actual composite or RGBA fallback)
@@ -290,6 +539,22 @@ impl ViewerTerrainScene {
                         binding: 11,
                         resource: csm_buffer.as_entire_binding(),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: wgpu::BindingResource::TextureView(ibl_specular_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::TextureView(ibl_irradiance_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 14,
+                        resource: wgpu::BindingResource::Sampler(ibl_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 15,
+                        resource: wgpu::BindingResource::TextureView(ibl_brdf_view),
+                    },
                 ],
             }));
         }
@@ -449,7 +714,11 @@ impl ViewerTerrainScene {
                     (width as f32 * self.pbr_config.sun_visibility.resolution_scale) as u32;
                 let sv_height =
                     (height as f32 * self.pbr_config.sun_visibility.resolution_scale) as u32;
-                let hard_mode = self.pbr_config.sun_visibility.mode.eq_ignore_ascii_case("hard");
+                let hard_mode = self
+                    .pbr_config
+                    .sun_visibility
+                    .mode
+                    .eq_ignore_ascii_case("hard");
                 let effective_samples = if hard_mode {
                     1.0
                 } else {

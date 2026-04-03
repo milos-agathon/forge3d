@@ -767,6 +767,33 @@ class TestViewerIpcHelpers:
             {"cmd": "set_review_layer_visible", "layer_id": "notes", "visible": True},
         ]
 
+    def test_set_terrain_pbr_emits_hdr_controls(self, monkeypatch):
+        commands: list[dict[str, Any]] = []
+
+        def fake_send(_sock: Any, cmd: dict[str, Any]) -> dict[str, Any]:
+            commands.append(cmd)
+            return {"ok": True}
+
+        monkeypatch.setattr(viewer_ipc_module, "send_ipc", fake_send)
+
+        viewer_ipc_module.set_terrain_pbr(
+            object(),
+            enabled=True,
+            hdr_path="assets/hdri/brown_photostudio_02_4k.hdr",
+            ibl_intensity=0.75,
+            hdr_rotate_deg=135.0,
+        )
+
+        assert commands == [
+            {
+                "cmd": "set_terrain_pbr",
+                "enabled": True,
+                "hdr_path": "assets/hdri/brown_photostudio_02_4k.hdr",
+                "ibl_intensity": 0.75,
+                "hdr_rotate_deg": 135.0,
+            }
+        ]
+
     def test_viewer_ipc_binary_lookup_uses_shared_locator(self, tmp_path, monkeypatch):
         """viewer_ipc resolves the same installed console-script path as viewer.py."""
         package_root = tmp_path / "site-packages" / "forge3d"

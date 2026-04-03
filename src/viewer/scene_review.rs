@@ -594,6 +594,7 @@ impl Viewer {
         let enabled = first_bool(preset, &["enabled", "terrain_pbr_enabled"]);
         let hdr_path = first_string(preset, &["hdr_path", "hdr"]);
         let ibl_intensity = first_f32(preset, &["ibl_intensity"]);
+        let hdr_rotate_deg = first_f32(preset, &["hdr_rotate_deg", "hdr_rotate"]);
         let shadow_technique = first_string(preset, &["shadow_technique"]);
         let shadow_map_res = first_u32(preset, &["shadow_map_res"]);
         let exposure = first_f32(preset, &["exposure"]);
@@ -665,6 +666,7 @@ impl Viewer {
                 enabled,
                 hdr_path,
                 ibl_intensity,
+                hdr_rotate_deg,
                 shadow_technique,
                 shadow_map_res,
                 exposure,

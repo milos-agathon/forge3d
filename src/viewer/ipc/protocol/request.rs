@@ -53,6 +53,7 @@ pub enum IpcRequest {
     GetTerrainVolumetricsReport,
     SetTerrainPbr {
         #[serde(default)] enabled: Option<bool>, #[serde(default)] hdr_path: Option<String>, #[serde(default)] ibl_intensity: Option<f32>,
+        #[serde(default, alias = "hdr_rotate")] hdr_rotate_deg: Option<f32>,
         #[serde(default)] shadow_technique: Option<String>, #[serde(default)] shadow_map_res: Option<u32>, #[serde(default)] exposure: Option<f32>,
         #[serde(default)] msaa: Option<u32>, #[serde(default)] normal_strength: Option<f32>, #[serde(default)] height_ao: Option<IpcHeightAoConfig>,
         #[serde(default)] sun_visibility: Option<IpcSunVisConfig>, #[serde(default)] materials: Option<IpcMaterialLayerConfig>,
