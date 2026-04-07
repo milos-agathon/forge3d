@@ -95,8 +95,6 @@ def _sample_palette(rgb_lut: np.ndarray, values: np.ndarray) -> np.ndarray:
 
 def _hillshade(heightmap: np.ndarray, azimuth_deg: float, elevation_deg: float) -> np.ndarray:
     dy, dx = np.gradient(heightmap.astype(np.float32))
-    slope_x = -dx
-    slope_y = -dy
 
     azimuth = np.deg2rad(float(azimuth_deg))
     elevation = np.deg2rad(float(elevation_deg))
@@ -109,7 +107,8 @@ def _hillshade(heightmap: np.ndarray, azimuth_deg: float, elevation_deg: float) 
         dtype=np.float32,
     )
 
-    normal = np.dstack((-slope_x, np.ones_like(heightmap, dtype=np.float32), -slope_y))
+    # Raster rows increase southward, so the north-axis gradient is -dy.
+    normal = np.dstack((-dx, np.ones_like(heightmap, dtype=np.float32), dy))
     normal /= np.linalg.norm(normal, axis=2, keepdims=True) + 1e-8
     shade = normal @ light
     return np.clip(0.18 + 0.82 * shade, 0.0, 1.0)

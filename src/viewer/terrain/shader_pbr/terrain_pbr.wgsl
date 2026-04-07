@@ -212,6 +212,62 @@ fn aces_tonemap(color: vec3<f32>) -> vec3<f32> {
     return saturate((color * (a * color + b)) / (color * (c * color + d) + e));
 }
 
+// Preserve categorical overlay hue while carrying stronger terrain structure
+// through a scalar derived from the lit terrain field plus signed ridge relief.
+fn preserve_overlay_scalar(
+    lit_linear: vec3<f32>,
+    normal: vec3<f32>,
+    sun_dir: vec3<f32>,
+    wrapped_ndotl: f32,
+    shadow_term: f32,
+    height_ao: f32,
+    view_dir: vec3<f32>,
+    exposure: f32,
+    normal_strength: f32,
+) -> f32 {
+    let base_intensity = max(dot(lit_linear, vec3<f32>(0.2126, 0.7152, 0.0722)), 0.0);
+
+    // Macro terrain form: focus the added contrast on mountain slopes, not flats.
+    let slope_steepness = clamp(1.0 - abs(normal.y), 0.0, 1.0);
+    let mountain_weight = smoothstep(0.05, 0.42, slope_steepness);
+    let normal_gain = 1.0 + smoothstep(1.0, 3.8, normal_strength) * 0.18;
+    let light_facing = clamp(dot(normal, sun_dir), 0.0, 1.0);
+    let macro_shade = mix(wrapped_ndotl, light_facing, 0.68);
+    let macro_scale = mix(1.0, 0.55 + macro_shade * 0.94, mountain_weight)
+        * (1.0 + mountain_weight * 0.16 * normal_gain);
+
+    // Local ridge structure from screen-space normal variation.
+    let dndx = dpdx(normal);
+    let dndy = dpdy(normal);
+    let normal_gradient = length(dndx) + length(dndy);
+    let edge_signal = clamp(
+        mountain_weight * 0.24 + normal_gradient * (8.5 + 1.2 * normal_gain),
+        0.0,
+        1.0,
+    );
+
+    let ridge_bright = clamp(
+        edge_signal * (light_facing + 0.22) * 0.20,
+        0.0,
+        0.16,
+    );
+    let ridge_dark = clamp(
+        edge_signal * (1.0 - light_facing) * 0.20,
+        0.0,
+        0.10,
+    );
+    let local_scale = 1.0 + ridge_bright - ridge_dark;
+
+    // Keep shadows coherent with AO/shadow terms while adding a subtle view rim.
+    let occlusion_scale = mix(0.965, 1.0, height_ao * shadow_term);
+    let rim = pow(1.0 - max(dot(normal, view_dir), 0.0), 3.0) * mountain_weight * 0.055;
+
+    var preserve_intensity = base_intensity * macro_scale * local_scale * occlusion_scale;
+    preserve_intensity += base_intensity * rim;
+    preserve_intensity = max(preserve_intensity, 0.0);
+    return pow(aces_tonemap(vec3<f32>(preserve_intensity * exposure)), vec3<f32>(1.0 / 2.2)).x;
+}
+
 // Hemisphere sky ambient with warm ground bounce
 fn sky_ambient(normal: vec3<f32>) -> vec3<f32> {
     let sky_zenith = vec3<f32>(0.36, 0.55, 0.88);   // Deep blue zenith
@@ -743,8 +799,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
               + rim_light;
 
     if preserve_overlay_active {
-        let preserve_intensity = max(dot(color, vec3<f32>(0.2126, 0.7152, 0.0722)), 0.0);
-        let preserve_display = pow(aces_tonemap(vec3<f32>(preserve_intensity * exposure)), vec3<f32>(1.0 / 2.2)).x;
+        let preserve_display = preserve_overlay_scalar(
+            color,
+            normal,
+            sun_dir,
+            wrapped_ndotl,
+            shadow_term,
+            height_ao,
+            view_dir,
+            exposure,
+            u.pbr_params.y,
+        );
         color = overlay.rgb * preserve_display;
     } else {
         // Apply exposure and tonemapping

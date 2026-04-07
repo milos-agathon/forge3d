@@ -75,51 +75,75 @@ TERRARIUM_TILE_SIZE = 256
 DEM_DOWNLOAD_WORKERS = 8
 DEFAULT_DEM_ZOOM = 11
 LANDCOVER_OPACITY = 1.00
-LANDCOVER_OVERLAY_CACHE_KEY = f"display-v4-op{int(round(LANDCOVER_OPACITY * 1000.0)):04d}"
+COLOR_PASS_OVERLAY_BAKE_STRENGTH = 0.10
+COLOR_PASS_OVERLAY_SATURATION = 1.04
+COLOR_PASS_OVERLAY_LIGHTNESS_SCALE = 1.02
+LANDCOVER_OVERLAY_CACHE_KEY = (
+    f"display-v13-op{int(round(LANDCOVER_OPACITY * 1000.0)):04d}"
+    f"-bake{int(round(COLOR_PASS_OVERLAY_BAKE_STRENGTH * 1000.0)):04d}"
+    f"-sat{int(round(COLOR_PASS_OVERLAY_SATURATION * 1000.0)):04d}"
+    f"-lift{int(round(COLOR_PASS_OVERLAY_LIGHTNESS_SCALE * 1000.0)):04d}"
+)
 LANDCOVER_DESPECKLE_PASSES = 2
 LANDCOVER_DESPECKLE_MAX_SUPPORT = 2
 LANDCOVER_DESPECKLE_MIN_MAJORITY = 4
 OVERLAY_PRESERVE_COLORS = True
 OVERLAY_SOLID_SURFACE = False
+PASS_SETTLE_SECONDS = 2.0
+SUBJECT_MASK_DIFF_MIN = 4.0
+SUBJECT_MASK_DIFF_MAX = 18.0
 
-HEIGHT_SHADE_AZIMUTH = 315.0
-HEIGHT_SHADE_ELEVATION = 24.0
-HEIGHT_SHADE_AMBIENT = 0.42
-HEIGHT_SHADE_DIFFUSE = 0.82
-HEIGHT_SHADE_GAMMA = 0.92
-HEIGHT_SHADE_CONTRAST = 1.20
-HEIGHT_SHADE_SATURATION = 1.26
-HEIGHT_SHADE_DETAIL_ZFACTOR = 1.65
-HEIGHT_SHADE_BROAD_ZFACTOR = 2.45
-HEIGHT_SHADE_BROAD_BLUR_RADIUS = 2.6
-HEIGHT_SHADE_BROAD_WEIGHT = 0.62
-HEIGHT_SHADE_RELIEF_STRENGTH = 0.23
+HEIGHT_SHADE_AZIMUTH = 314.0
+HEIGHT_SHADE_ELEVATION = 22.0
+HEIGHT_SHADE_AMBIENT = 0.46
+HEIGHT_SHADE_DIFFUSE = 0.80
+HEIGHT_SHADE_GAMMA = 0.99
+HEIGHT_SHADE_CONTRAST = 1.18
+HEIGHT_SHADE_DETAIL_ZFACTOR = 1.85
+HEIGHT_SHADE_BROAD_ZFACTOR = 2.55
+HEIGHT_SHADE_BROAD_BLUR_RADIUS = 2.4
+HEIGHT_SHADE_BROAD_WEIGHT = 0.60
+HEIGHT_SHADE_RELIEF_STRENGTH = 0.20
 HEIGHT_SHADE_RELIEF_SLOPE_GAMMA = 0.85
-HEIGHT_SHADE_LOCAL_CONTRAST = 0.34
-HEIGHT_SHADE_LOCAL_CONTRAST_RADIUS = 1.6
+HEIGHT_SHADE_LOCAL_CONTRAST = 0.24
+HEIGHT_SHADE_LOCAL_CONTRAST_RADIUS = 1.45
 
 REFERENCE_TERRAIN_WIDTH = 1500.0
 BASE_CAMERA_RADIUS = 4800.0
 BASE_ZSCALE = 0.035
-RELIEF_CAMERA_PULLBACK = 0.96
-RELIEF_EXAGGERATION = 0.90
+RELIEF_CAMERA_PULLBACK = 1.03
+RELIEF_EXAGGERATION = 1.08
 
 COMPOSITION_BACKGROUND_RGBA = (248, 248, 245, 255)
-SUBJECT_SHADOW_RGB = (195, 207, 224)
-SUBJECT_SHADOW_ALPHA = 112
-SUBJECT_SHADOW_BLUR_RATIO = 0.012
-SUBJECT_SHADOW_OFFSET_X_RATIO = 0.018
-SUBJECT_SHADOW_OFFSET_Y_RATIO = 0.026
+SUBJECT_SHADOW_RGB = (142, 148, 157)
+SUBJECT_SHADOW_CONTACT_ALPHA = 48
+SUBJECT_SHADOW_CONTACT_BLUR_RATIO = 0.004
+SUBJECT_SHADOW_CONTACT_DISTANCE_RATIO = 0.010
+SUBJECT_SHADOW_TAIL_ALPHA = 22
+SUBJECT_SHADOW_TAIL_BLUR_RATIO = 0.010
+SUBJECT_SHADOW_TAIL_DISTANCE_RATIO = 0.024
+RELIEF_BLEND_BLUR_RADIUS = 2.6
+RELIEF_BLEND_LOW_PERCENTILE = 6.0
+RELIEF_BLEND_HIGH_PERCENTILE = 94.0
+RELIEF_BLEND_CONTRAST = 1.08
+RELIEF_BLEND_GAMMA = 1.02
+RELIEF_BLEND_VALUE_FLOOR = 0.78
+RELIEF_BLEND_VALUE_GAIN = 0.24
+RELIEF_BLEND_HIGHLIGHT_START = 0.72
+RELIEF_BLEND_HIGHLIGHT_GAIN = 0.03
+COMPOSITION_SUBJECT_SCALE = 1.22
+COMPOSITION_SUBJECT_SHIFT_X_RATIO = 0.055
+COMPOSITION_SUBJECT_SHIFT_Y_RATIO = -0.036
 
 TERRAIN_CONFIG = {
     "phi": 90.0,
-    "theta": 18.0,
-    "fov": 20.0,
-    "sun_azimuth": 315.0,
-    "sun_elevation": 25.0,
-    "sun_intensity": 1.06,
-    "ambient": 0.68,
-    "shadow": 0.28,
+    "theta": 32.0,
+    "fov": 23.0,
+    "sun_azimuth": 314.0,
+    "sun_elevation": 28.0,
+    "sun_intensity": 1.70,
+    "ambient": 0.58,
+    "shadow": 0.40,
     "background": [1.0, 1.0, 1.0],
 }
 PBR_CONFIG = {
@@ -128,27 +152,27 @@ PBR_CONFIG = {
     "hdr_rotate_deg": 0.0,
     "shadow_technique": "pcss",
     "shadow_map_res": 4096,
-    "exposure": 1.04,
+    "exposure": 1.01,
     "msaa": 8,
-    "ibl_intensity": 0.16,
-    "normal_strength": 1.15,
+    "ibl_intensity": 0.12,
+    "normal_strength": 1.00,
     "height_ao": {
         "enabled": True,
-        "directions": 6,
-        "steps": 14,
-        "max_distance": 120.0,
-        "strength": 0.26,
-        "resolution_scale": 0.5,
+        "directions": 8,
+        "steps": 20,
+        "max_distance": 200.0,
+        "strength": 0.30,
+        "resolution_scale": 0.65,
     },
     "sun_visibility": {
-        "enabled": False,
-        "mode": "hard",
-        "samples": 1,
-        "steps": 52,
+        "enabled": True,
+        "mode": "soft",
+        "samples": 2,
+        "steps": 40,
         "max_distance": 2200.0,
-        "softness": 0.0,
-        "bias": 0.005,
-        "resolution_scale": 1.0,
+        "softness": 0.55,
+        "bias": 0.0032,
+        "resolution_scale": 0.75,
     },
     "tonemap": {
         "operator": "aces",
@@ -156,6 +180,35 @@ PBR_CONFIG = {
         "white_balance_enabled": True,
         "temperature": 6500.0,
         "tint": 0.0,
+    },
+}
+RELIEF_PASS_TERRAIN_OVERRIDES = {
+    "sun_elevation": 18.0,
+    "sun_intensity": 3.70,
+    "ambient": 0.40,
+    "shadow": 0.70,
+}
+RELIEF_PASS_PBR_OVERRIDES = {
+    "exposure": 1.01,
+    "ibl_intensity": 0.03,
+    "normal_strength": 1.55,
+    "height_ao": {
+        "enabled": True,
+        "directions": 10,
+        "steps": 24,
+        "max_distance": 240.0,
+        "strength": 0.40,
+        "resolution_scale": 0.72,
+    },
+    "sun_visibility": {
+        "enabled": True,
+        "mode": "hard",
+        "samples": 1,
+        "steps": 96,
+        "max_distance": 3200.0,
+        "softness": 0.0,
+        "bias": 0.0028,
+        "resolution_scale": 0.90,
     },
 }
 
@@ -166,6 +219,16 @@ def _hex_to_rgb(color: str) -> tuple[int, int, int]:
 
 def _rgb_to_hex(rgb: tuple[int, int, int]) -> str:
     return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+
+
+def _deep_merge_dict(base: dict, overrides: dict) -> dict:
+    merged = copy.deepcopy(base)
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_dict(merged[key], value)
+        else:
+            merged[key] = copy.deepcopy(value)
+    return merged
 
 
 LANDCOVER_CLASSES = [
@@ -613,8 +676,7 @@ def _blur_heightmap(heightmap: np.ndarray, radius: float) -> np.ndarray:
 
 def _hillshade(heightmap: np.ndarray, azimuth_deg: float, elevation_deg: float, *, z_factor: float) -> np.ndarray:
     dy, dx = np.gradient(heightmap.astype(np.float32))
-    slope_x = -dx * float(z_factor)
-    slope_y = -dy * float(z_factor)
+    z = float(z_factor)
     azimuth = np.deg2rad(float(azimuth_deg))
     elevation = np.deg2rad(float(elevation_deg))
     light = np.array(
@@ -625,7 +687,8 @@ def _hillshade(heightmap: np.ndarray, azimuth_deg: float, elevation_deg: float, 
         ],
         dtype=np.float32,
     )
-    normal = np.dstack((-slope_x, np.ones_like(heightmap, dtype=np.float32), -slope_y))
+    # Raster rows increase southward, so the north-axis gradient is -dy.
+    normal = np.dstack((-dx * z, np.ones_like(heightmap, dtype=np.float32), dy * z))
     normal /= np.linalg.norm(normal, axis=2, keepdims=True) + 1e-8
     shade = normal @ light
     return np.clip(shade, 0.0, 1.0)
@@ -689,8 +752,10 @@ def _classes_to_rgba(classes: np.ndarray, dem: np.ndarray, opacity: float = LAND
         rgb_lut[class_id] = palette[index]
     rgb = rgb_lut[classes]
     shade = _height_shade_from_dem(dem)
+    shade = 1.0 - (1.0 - shade) * COLOR_PASS_OVERLAY_BAKE_STRENGTH
     rgb = np.clip(rgb * shade[:, :, None], 0.0, 1.0)
-    rgb = _boost_saturation(rgb, HEIGHT_SHADE_SATURATION)
+    rgb = _boost_saturation(rgb, COLOR_PASS_OVERLAY_SATURATION)
+    rgb = np.clip(rgb * COLOR_PASS_OVERLAY_LIGHTNESS_SCALE, 0.0, 1.0)
     rgba = np.zeros((classes.shape[0], classes.shape[1], 4), dtype=np.uint8)
     rgba[:, :, :3] = np.round(np.clip(rgb, 0.0, 1.0) * 255.0).astype(np.uint8)
     rgba[:, :, 3] = np.where(classes != 0, _landcover_alpha(opacity), 0).astype(np.uint8)
@@ -731,24 +796,34 @@ def _legend_entries(present_classes: list[int]) -> list[tuple[str, str]]:
     return entries
 
 
+def _subject_alpha(image: Image.Image) -> np.ndarray:
+    arr = np.asarray(image.convert("RGBA"), dtype=np.uint8)
+    source_alpha = arr[:, :, 3].astype(np.float32) / 255.0
+    alpha_coverage = float(np.count_nonzero(source_alpha > 0.03)) / float(source_alpha.size)
+    if 0.0 < alpha_coverage < 0.98:
+        return source_alpha
+    corners = np.asarray(
+        [arr[0, 0, :3], arr[0, -1, :3], arr[-1, 0, :3], arr[-1, -1, :3]],
+        dtype=np.float32,
+    )
+    background = np.median(corners, axis=0)
+    distance = np.abs(arr[:, :, :3].astype(np.float32) - background[None, None, :]).max(axis=2)
+    alpha = np.clip(
+        (distance - SUBJECT_MASK_DIFF_MIN)
+        / max(SUBJECT_MASK_DIFF_MAX - SUBJECT_MASK_DIFF_MIN, 1e-6),
+        0.0,
+        1.0,
+    )
+    return alpha * np.where(arr[:, :, 3] > 0, 1.0, 0.0).astype(np.float32)
+
+
 def _crop_subject(image: Image.Image) -> Image.Image:
     arr = np.asarray(image.convert("RGBA"), dtype=np.uint8).copy()
-    alpha_mask = arr[:, :, 3] > 8
-    alpha_coverage = float(np.count_nonzero(alpha_mask)) / float(alpha_mask.size)
-    if 0.0 < alpha_coverage < 0.98:
-        mask = alpha_mask
-    else:
-        corners = np.asarray(
-            [arr[0, 0, :3], arr[0, -1, :3], arr[-1, 0, :3], arr[-1, -1, :3]],
-            dtype=np.int16,
-        )
-        background = np.median(corners, axis=0)
-        mask = (arr[:, :, 3] > 0) & (
-            np.abs(arr[:, :, :3].astype(np.int16) - background).max(axis=2) > 8
-        )
+    alpha = _subject_alpha(image)
+    mask = alpha > 0.03
     if not np.any(mask):
         return image
-    arr[~mask, 3] = 0
+    arr[:, :, 3] = np.round(np.clip(alpha, 0.0, 1.0) * 255.0).astype(np.uint8)
     ys, xs = np.nonzero(mask)
     pad = max(8, round(max(image.size) * 0.01))
     return Image.fromarray(arr, mode="RGBA").crop(
@@ -778,21 +853,142 @@ def _trim_canvas_whitespace(image: Image.Image) -> Image.Image:
     )
 
 
-def _make_subject_shadow(subject: Image.Image) -> tuple[Image.Image, tuple[int, int]]:
-    alpha = subject.getchannel("A")
-    shadow_alpha = alpha.point(lambda value: int(round(value * SUBJECT_SHADOW_ALPHA / 255.0)))
+def _shadow_offset_from_sun(
+    subject_size: tuple[int, int],
+    *,
+    azimuth_deg: float,
+    elevation_deg: float,
+    distance_ratio: float,
+) -> tuple[int, int]:
+    azimuth = math.radians(float(azimuth_deg))
+    elevation = math.radians(float(np.clip(elevation_deg, 0.0, 89.0)))
+    light_x = math.sin(azimuth)
+    light_y = -math.cos(azimuth)
+    length = max(math.hypot(light_x, light_y), 1e-6)
+    shadow_x = -light_x / length
+    shadow_y = -light_y / length
+    elevation_scale = 0.82 + 0.38 * math.cos(elevation)
+    distance_px = max(3, round(max(subject_size) * distance_ratio * elevation_scale))
+    return (
+        int(round(shadow_x * distance_px)),
+        int(round(shadow_y * distance_px)),
+    )
+
+
+def _make_shadow_layer(
+    subject: Image.Image,
+    *,
+    alpha_scale: int,
+    blur_ratio: float,
+    distance_ratio: float,
+    azimuth_deg: float,
+    elevation_deg: float,
+) -> tuple[Image.Image, tuple[int, int]]:
+    alpha = subject.getchannel("A").point(
+        lambda value: int(round(value * alpha_scale / 255.0))
+    )
     shadow = Image.new("RGBA", subject.size, SUBJECT_SHADOW_RGB + (0,))
-    shadow.putalpha(shadow_alpha)
-    blur_radius = max(8, round(max(subject.size) * SUBJECT_SHADOW_BLUR_RATIO))
+    shadow.putalpha(alpha)
+    blur_radius = max(2, round(max(subject.size) * blur_ratio))
     shadow = shadow.filter(ImageFilter.GaussianBlur(radius=blur_radius))
-    offset = (
-        max(10, round(subject.width * SUBJECT_SHADOW_OFFSET_X_RATIO)),
-        max(12, round(subject.height * SUBJECT_SHADOW_OFFSET_Y_RATIO)),
+    offset = _shadow_offset_from_sun(
+        subject.size,
+        azimuth_deg=azimuth_deg,
+        elevation_deg=elevation_deg,
+        distance_ratio=distance_ratio,
     )
     return shadow, offset
 
 
-def _compose_snapshot(raw_path: Path, output_path: Path, present_classes: list[int]) -> None:
+def _make_subject_shadow(
+    subject: Image.Image,
+    *,
+    azimuth_deg: float,
+    elevation_deg: float,
+) -> tuple[Image.Image, tuple[int, int]]:
+    layers = [
+        _make_shadow_layer(
+            subject,
+            alpha_scale=SUBJECT_SHADOW_CONTACT_ALPHA,
+            blur_ratio=SUBJECT_SHADOW_CONTACT_BLUR_RATIO,
+            distance_ratio=SUBJECT_SHADOW_CONTACT_DISTANCE_RATIO,
+            azimuth_deg=azimuth_deg,
+            elevation_deg=elevation_deg,
+        ),
+        _make_shadow_layer(
+            subject,
+            alpha_scale=SUBJECT_SHADOW_TAIL_ALPHA,
+            blur_ratio=SUBJECT_SHADOW_TAIL_BLUR_RATIO,
+            distance_ratio=SUBJECT_SHADOW_TAIL_DISTANCE_RATIO,
+            azimuth_deg=azimuth_deg,
+            elevation_deg=elevation_deg,
+        ),
+    ]
+    min_x = min(offset[0] for _, offset in layers)
+    min_y = min(offset[1] for _, offset in layers)
+    max_x = max(offset[0] + shadow.width for shadow, offset in layers)
+    max_y = max(offset[1] + shadow.height for shadow, offset in layers)
+    composite = Image.new("RGBA", (max_x - min_x, max_y - min_y), (0, 0, 0, 0))
+    for shadow, offset in layers:
+        composite.alpha_composite(shadow, dest=(offset[0] - min_x, offset[1] - min_y))
+    return composite, (min_x, min_y)
+
+
+def _combine_render_passes(
+    color_raw_path: Path,
+    relief_raw_path: Path,
+    output_path: Path,
+) -> None:
+    color_image = Image.open(color_raw_path).convert("RGBA")
+    relief_image = Image.open(relief_raw_path).convert("RGBA")
+    if color_image.size != relief_image.size:
+        raise ValueError("Color and relief passes must have identical dimensions")
+
+    color = np.asarray(color_image, dtype=np.float32) / 255.0
+    relief_blurred = relief_image.filter(ImageFilter.GaussianBlur(radius=RELIEF_BLEND_BLUR_RADIUS))
+    relief = np.asarray(relief_blurred, dtype=np.float32) / 255.0
+
+    alpha = _subject_alpha(color_image)
+    mask = alpha > 0.03
+    if not np.any(mask):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        color_image.save(output_path)
+        return
+
+    luminance = relief[:, :, :3] @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    lo = float(np.percentile(luminance[mask], RELIEF_BLEND_LOW_PERCENTILE))
+    hi = float(np.percentile(luminance[mask], RELIEF_BLEND_HIGH_PERCENTILE))
+    shade = np.clip((luminance - lo) / max(hi - lo, 1e-6), 0.0, 1.0)
+    shade = np.clip((shade - 0.5) * RELIEF_BLEND_CONTRAST + 0.5, 0.0, 1.0)
+    shade = np.power(shade, RELIEF_BLEND_GAMMA, dtype=np.float32)
+
+    base_rgb = color[:, :, :3]
+    base_value = np.max(base_rgb, axis=2, keepdims=True)
+    base_scale = np.divide(base_rgb, np.maximum(base_value, 1e-6))
+    target_value = np.clip(
+        base_value[:, :, 0] * (RELIEF_BLEND_VALUE_FLOOR + RELIEF_BLEND_VALUE_GAIN * shade)
+        + RELIEF_BLEND_HIGHLIGHT_GAIN * np.maximum(shade - RELIEF_BLEND_HIGHLIGHT_START, 0.0),
+        0.0,
+        1.0,
+    )
+
+    combined = np.zeros_like(color)
+    combined[:, :, :3] = np.clip(base_scale * target_value[:, :, None], 0.0, 1.0)
+    combined[:, :, 3] = np.clip(alpha, 0.0, 1.0)
+    combined[~mask, :3] = 0.0
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(np.round(combined * 255.0).astype(np.uint8), mode="RGBA").save(output_path)
+
+
+def _compose_snapshot(
+    raw_path: Path,
+    output_path: Path,
+    present_classes: list[int],
+    *,
+    sun_azimuth: float,
+    sun_elevation: float,
+) -> None:
     raw = Image.open(raw_path).convert("RGBA")
     subject = _crop_subject(raw)
     width, height = raw.size
@@ -844,10 +1040,29 @@ def _compose_snapshot(raw_path: Path, output_path: Path, present_classes: list[i
     map_width = max(1, width - margin * 2)
     map_bottom = footer_top - section_gap
     map_height = max(1, map_bottom - map_top)
-    subject.thumbnail((map_width, map_height), Image.Resampling.LANCZOS)
-    map_x = margin + max(0, (map_width - subject.width) // 2)
-    map_y = map_top + max(0, (map_height - subject.height) // 2)
-    subject_shadow, shadow_offset = _make_subject_shadow(subject)
+    if not math.isclose(COMPOSITION_SUBJECT_SCALE, 1.0):
+        subject = subject.resize(
+            (
+                max(1, round(subject.width * COMPOSITION_SUBJECT_SCALE)),
+                max(1, round(subject.height * COMPOSITION_SUBJECT_SCALE)),
+            ),
+            resample=Image.Resampling.LANCZOS,
+        )
+    map_x = (
+        margin
+        + max(0, (map_width - subject.width) // 2)
+        + round(width * COMPOSITION_SUBJECT_SHIFT_X_RATIO)
+    )
+    map_y = (
+        map_top
+        + max(0, (map_height - subject.height) // 2)
+        + round(height * COMPOSITION_SUBJECT_SHIFT_Y_RATIO)
+    )
+    subject_shadow, shadow_offset = _make_subject_shadow(
+        subject,
+        azimuth_deg=sun_azimuth,
+        elevation_deg=sun_elevation,
+    )
     canvas.alpha_composite(
         subject_shadow,
         dest=(map_x + shadow_offset[0], map_y + shadow_offset[1]),
@@ -892,7 +1107,11 @@ def _render(
     if not hdr_path.is_file():
         raise FileNotFoundError(f"HDRI not found: {hdr_path}")
     snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    color_raw_snapshot_path = snapshot_path.with_name(f"{snapshot_path.stem}_color_raw.png")
+    relief_raw_snapshot_path = snapshot_path.with_name(f"{snapshot_path.stem}_relief_raw.png")
     raw_snapshot_path = snapshot_path.with_name(f"{snapshot_path.stem}_raw.png")
+    color_raw_snapshot_path.unlink(missing_ok=True)
+    relief_raw_snapshot_path.unlink(missing_ok=True)
     raw_snapshot_path.unlink(missing_ok=True)
     snapshot_path.unlink(missing_ok=True)
 
@@ -906,10 +1125,12 @@ def _render(
     terrain_cmd = dict(TERRAIN_CONFIG)
     terrain_cmd["radius"] = radius
     terrain_cmd["zscale"] = zscale
-    pbr_config = copy.deepcopy(PBR_CONFIG)
-    pbr_config["hdr_path"] = str(hdr_path)
-    pbr_config["ibl_intensity"] = float(hdr_intensity)
-    pbr_config["hdr_rotate_deg"] = float(hdr_rotate)
+    color_pbr_config = copy.deepcopy(PBR_CONFIG)
+    color_pbr_config["hdr_path"] = str(hdr_path)
+    color_pbr_config["ibl_intensity"] = float(hdr_intensity)
+    color_pbr_config["hdr_rotate_deg"] = float(hdr_rotate)
+    relief_terrain_cmd = _deep_merge_dict(terrain_cmd, RELIEF_PASS_TERRAIN_OVERRIDES)
+    relief_pbr_config = _deep_merge_dict(color_pbr_config, RELIEF_PASS_PBR_OVERRIDES)
 
     with f3d.open_viewer_async(
         terrain_path=dem_path,
@@ -918,7 +1139,7 @@ def _render(
         timeout=45.0,
     ) as viewer:
         viewer.send_ipc({"cmd": "set_terrain", **terrain_cmd})
-        viewer.send_ipc({"cmd": "set_terrain_pbr", **pbr_config})
+        viewer.send_ipc({"cmd": "set_terrain_pbr", **color_pbr_config})
         viewer.load_overlay(
             "bosnia_landcover",
             overlay_path,
@@ -928,10 +1149,26 @@ def _render(
         )
         viewer.send_ipc({"cmd": "set_overlays_enabled", "enabled": True})
         viewer.send_ipc({"cmd": "set_overlay_solid", "solid": OVERLAY_SOLID_SURFACE})
-        time.sleep(2.0)
-        viewer.snapshot(raw_snapshot_path, width=snapshot_width, height=snapshot_height)
+        viewer.send_ipc(
+            {"cmd": "set_overlay_preserve_colors", "preserve_colors": OVERLAY_PRESERVE_COLORS}
+        )
+        time.sleep(PASS_SETTLE_SECONDS)
+        viewer.snapshot(color_raw_snapshot_path, width=snapshot_width, height=snapshot_height)
 
-    _compose_snapshot(raw_snapshot_path, snapshot_path, present_classes)
+        viewer.send_ipc({"cmd": "set_terrain", **relief_terrain_cmd})
+        viewer.send_ipc({"cmd": "set_terrain_pbr", **relief_pbr_config})
+        viewer.send_ipc({"cmd": "set_overlays_enabled", "enabled": False})
+        time.sleep(PASS_SETTLE_SECONDS)
+        viewer.snapshot(relief_raw_snapshot_path, width=snapshot_width, height=snapshot_height)
+
+    _combine_render_passes(color_raw_snapshot_path, relief_raw_snapshot_path, raw_snapshot_path)
+    _compose_snapshot(
+        raw_snapshot_path,
+        snapshot_path,
+        present_classes,
+        sun_azimuth=float(terrain_cmd["sun_azimuth"]),
+        sun_elevation=float(terrain_cmd["sun_elevation"]),
+    )
 
 
 def main() -> int:

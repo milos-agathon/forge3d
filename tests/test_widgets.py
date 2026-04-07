@@ -2,6 +2,8 @@
 
 import pytest
 
+import numpy as np
+
 ipywidgets = pytest.importorskip("ipywidgets")
 
 from forge3d import widgets as widgets_module
@@ -79,6 +81,15 @@ def test_inline_preview_update_params_triggers_fresh_render():
     second = view.render_png_bytes()
 
     assert first != second
+
+
+def test_inline_hillshade_uses_geographic_east_west_direction():
+    east_rising_heightmap = np.tile(np.linspace(0.0, 1.0, 32, dtype=np.float32), (32, 1))
+
+    shade_from_east = widgets_module._hillshade(east_rising_heightmap, azimuth_deg=90.0, elevation_deg=30.0)
+    shade_from_west = widgets_module._hillshade(east_rising_heightmap, azimuth_deg=270.0, elevation_deg=30.0)
+
+    assert float(shade_from_west.mean()) > float(shade_from_east.mean())
 
 
 def test_viewer_widget_delegates_to_handle_methods(tmp_path):

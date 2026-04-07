@@ -110,3 +110,37 @@ def test_landcover_alpha_uses_actual_transparency_scale() -> None:
     assert module._landcover_alpha(0.0) == 0
     assert module._landcover_alpha(0.5) == 128
     assert module._landcover_alpha(1.0) == 255
+
+
+def test_hillshade_uses_geographic_east_west_direction() -> None:
+    module = load_module()
+    east_rising_heightmap = np.tile(np.linspace(0.0, 1.0, 32, dtype=np.float32), (32, 1))
+
+    shade_from_east = module._hillshade(
+        east_rising_heightmap,
+        azimuth_deg=90.0,
+        elevation_deg=30.0,
+        z_factor=1.0,
+    )
+    shade_from_west = module._hillshade(
+        east_rising_heightmap,
+        azimuth_deg=270.0,
+        elevation_deg=30.0,
+        z_factor=1.0,
+    )
+
+    assert float(shade_from_west.mean()) > float(shade_from_east.mean())
+
+
+def test_shadow_offset_tracks_sun_direction() -> None:
+    module = load_module()
+
+    dx, dy = module._shadow_offset_from_sun(
+        (1000, 800),
+        azimuth_deg=314.0,
+        elevation_deg=28.0,
+        distance_ratio=0.02,
+    )
+
+    assert dx > 0
+    assert dy > 0
