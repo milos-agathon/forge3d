@@ -1,24 +1,10 @@
 #!/usr/bin/env python3
-"""Bosnia and Herzegovina land-cover terrain render in pure Python + forge3d.
-
-Workflow:
-1. Download the Bosnia and Herzegovina country polygon from Natural Earth.
-2. Download the 2024 Esri 10m land-cover tiles covering BIH (33T and 34T).
-3. Crop each palette GeoTIFF to the country boundary.
-4. Download AWS Terrarium DEM tiles for the same country extent.
-5. Reproject the DEM to a common target CRS.
-6. Merge and categorical-resample the cropped land-cover tiles onto the DEM grid.
-7. Convert the class raster into an RGBA overlay and render it with forge3d.
-
-Requirements:
-    pip install forge3d geopandas pillow rasterio
-"""
+"""Bosnia land-cover terrain render."""
 
 from __future__ import annotations
 
 import argparse
 import concurrent.futures
-import copy
 import math
 import shutil
 import tempfile
@@ -44,192 +30,35 @@ ensure_repo_import()
 
 import forge3d as f3d
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "examples" / "out" / "bosnia_terrain_landcover"
-DEFAULT_CACHE_DIR = PROJECT_ROOT / "examples" / ".cache" / "bosnia_terrain_landcover"
-DEFAULT_HDRI_PATH = PROJECT_ROOT / "assets" / "hdri" / "brown_photostudio_02_4k.hdr"
+ROOT = Path(__file__).resolve().parents[1]
+OUT_DIR = ROOT / "examples" / "out" / "bosnia_terrain_landcover"
+CACHE_DIR = ROOT / "examples" / ".cache" / "bosnia_terrain_landcover"
+HDR = ROOT / "assets" / "hdri" / "brown_photostudio_02_4k.hdr"
 
 COUNTRY_A3 = "BIH"
 COUNTRY_NAME = "Bosnia and Herzegovina"
 COUNTRY_TITLE = "Land Cover in 2024: Bosnia and Herzegovina"
 TARGET_CRS = "EPSG:3035"
-
-NATURAL_EARTH_COUNTRIES_URL = (
-    "https://naturalearth.s3.amazonaws.com/10m_cultural/ne_10m_admin_0_countries.zip"
+NATURAL_EARTH = (
+    "https://naturalearth.s3.amazonaws.com/10m_cultural/"
+    "ne_10m_admin_0_countries.zip"
 )
-TERRARIUM_TILE_URL = (
-    "https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png"
-)
-LANDCOVER_TILE_URLS = {
+TERRARIUM = "https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png"
+LANDCOVER_URLS = {
     "33T": "https://lulctimeseries.blob.core.windows.net/lulctimeseriesv003/lc2024/33T_20240101-20241231.tif",
     "34T": "https://lulctimeseries.blob.core.windows.net/lulctimeseriesv003/lc2024/34T_20240101-20241231.tif",
 }
-
 CAPTION_LINES = [
     "©2026 Milos Popovic (https://milospopovic.net)",
     "Data: Sentinel-2 10m Land Use/Land Cover – Esri, Impact Observatory, Microsoft, and AWS Terrarium DEM",
 ]
 
-TERRARIUM_TILE_SIZE = 256
-DEM_DOWNLOAD_WORKERS = 8
-DEFAULT_DEM_ZOOM = 11
-LANDCOVER_OPACITY = 1.00
-COLOR_PASS_OVERLAY_BAKE_STRENGTH = 0.10
-COLOR_PASS_OVERLAY_SATURATION = 1.04
-COLOR_PASS_OVERLAY_LIGHTNESS_SCALE = 1.02
-LANDCOVER_OVERLAY_CACHE_KEY = (
-    f"display-v13-op{int(round(LANDCOVER_OPACITY * 1000.0)):04d}"
-    f"-bake{int(round(COLOR_PASS_OVERLAY_BAKE_STRENGTH * 1000.0)):04d}"
-    f"-sat{int(round(COLOR_PASS_OVERLAY_SATURATION * 1000.0)):04d}"
-    f"-lift{int(round(COLOR_PASS_OVERLAY_LIGHTNESS_SCALE * 1000.0)):04d}"
-)
-LANDCOVER_DESPECKLE_PASSES = 2
-LANDCOVER_DESPECKLE_MAX_SUPPORT = 2
-LANDCOVER_DESPECKLE_MIN_MAJORITY = 4
-OVERLAY_PRESERVE_COLORS = True
-OVERLAY_SOLID_SURFACE = False
+VIEWER_SIZE = (1400, 1400)
+SNAPSHOT_SIZE = (4200, 4200)
+DEM_ZOOM = 11
+TILE_SIZE = 256
+DEM_WORKERS = 8
 PASS_SETTLE_SECONDS = 2.0
-SUBJECT_MASK_DIFF_MIN = 4.0
-SUBJECT_MASK_DIFF_MAX = 18.0
-
-HEIGHT_SHADE_AZIMUTH = 314.0
-HEIGHT_SHADE_ELEVATION = 22.0
-HEIGHT_SHADE_AMBIENT = 0.46
-HEIGHT_SHADE_DIFFUSE = 0.80
-HEIGHT_SHADE_GAMMA = 0.99
-HEIGHT_SHADE_CONTRAST = 1.18
-HEIGHT_SHADE_DETAIL_ZFACTOR = 1.85
-HEIGHT_SHADE_BROAD_ZFACTOR = 2.55
-HEIGHT_SHADE_BROAD_BLUR_RADIUS = 2.4
-HEIGHT_SHADE_BROAD_WEIGHT = 0.60
-HEIGHT_SHADE_RELIEF_STRENGTH = 0.20
-HEIGHT_SHADE_RELIEF_SLOPE_GAMMA = 0.85
-HEIGHT_SHADE_LOCAL_CONTRAST = 0.24
-HEIGHT_SHADE_LOCAL_CONTRAST_RADIUS = 1.45
-
-REFERENCE_TERRAIN_WIDTH = 1500.0
-BASE_CAMERA_RADIUS = 4800.0
-BASE_ZSCALE = 0.035
-RELIEF_CAMERA_PULLBACK = 1.03
-RELIEF_EXAGGERATION = 1.08
-
-COMPOSITION_BACKGROUND_RGBA = (248, 248, 245, 255)
-SUBJECT_SHADOW_RGB = (142, 148, 157)
-SUBJECT_SHADOW_CONTACT_ALPHA = 48
-SUBJECT_SHADOW_CONTACT_BLUR_RATIO = 0.004
-SUBJECT_SHADOW_CONTACT_DISTANCE_RATIO = 0.010
-SUBJECT_SHADOW_TAIL_ALPHA = 22
-SUBJECT_SHADOW_TAIL_BLUR_RATIO = 0.010
-SUBJECT_SHADOW_TAIL_DISTANCE_RATIO = 0.024
-RELIEF_BLEND_BLUR_RADIUS = 2.6
-RELIEF_BLEND_LOW_PERCENTILE = 6.0
-RELIEF_BLEND_HIGH_PERCENTILE = 94.0
-RELIEF_BLEND_CONTRAST = 1.08
-RELIEF_BLEND_GAMMA = 1.02
-RELIEF_BLEND_VALUE_FLOOR = 0.78
-RELIEF_BLEND_VALUE_GAIN = 0.24
-RELIEF_BLEND_HIGHLIGHT_START = 0.72
-RELIEF_BLEND_HIGHLIGHT_GAIN = 0.03
-COMPOSITION_SUBJECT_SCALE = 1.22
-COMPOSITION_SUBJECT_SHIFT_X_RATIO = 0.055
-COMPOSITION_SUBJECT_SHIFT_Y_RATIO = -0.036
-
-TERRAIN_CONFIG = {
-    "phi": 90.0,
-    "theta": 32.0,
-    "fov": 23.0,
-    "sun_azimuth": 314.0,
-    "sun_elevation": 28.0,
-    "sun_intensity": 1.70,
-    "ambient": 0.58,
-    "shadow": 0.40,
-    "background": [1.0, 1.0, 1.0],
-}
-PBR_CONFIG = {
-    "enabled": True,
-    "hdr_path": str(DEFAULT_HDRI_PATH.resolve()),
-    "hdr_rotate_deg": 0.0,
-    "shadow_technique": "pcss",
-    "shadow_map_res": 4096,
-    "exposure": 1.01,
-    "msaa": 8,
-    "ibl_intensity": 0.12,
-    "normal_strength": 1.00,
-    "height_ao": {
-        "enabled": True,
-        "directions": 8,
-        "steps": 20,
-        "max_distance": 200.0,
-        "strength": 0.30,
-        "resolution_scale": 0.65,
-    },
-    "sun_visibility": {
-        "enabled": True,
-        "mode": "soft",
-        "samples": 2,
-        "steps": 40,
-        "max_distance": 2200.0,
-        "softness": 0.55,
-        "bias": 0.0032,
-        "resolution_scale": 0.75,
-    },
-    "tonemap": {
-        "operator": "aces",
-        "white_point": 6.0,
-        "white_balance_enabled": True,
-        "temperature": 6500.0,
-        "tint": 0.0,
-    },
-}
-RELIEF_PASS_TERRAIN_OVERRIDES = {
-    "sun_elevation": 18.0,
-    "sun_intensity": 3.70,
-    "ambient": 0.40,
-    "shadow": 0.70,
-}
-RELIEF_PASS_PBR_OVERRIDES = {
-    "exposure": 1.01,
-    "ibl_intensity": 0.03,
-    "normal_strength": 1.55,
-    "height_ao": {
-        "enabled": True,
-        "directions": 10,
-        "steps": 24,
-        "max_distance": 240.0,
-        "strength": 0.40,
-        "resolution_scale": 0.72,
-    },
-    "sun_visibility": {
-        "enabled": True,
-        "mode": "hard",
-        "samples": 1,
-        "steps": 96,
-        "max_distance": 3200.0,
-        "softness": 0.0,
-        "bias": 0.0028,
-        "resolution_scale": 0.90,
-    },
-}
-
-
-def _hex_to_rgb(color: str) -> tuple[int, int, int]:
-    return tuple(int(color[index : index + 2], 16) for index in (1, 3, 5))
-
-
-def _rgb_to_hex(rgb: tuple[int, int, int]) -> str:
-    return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
-
-
-def _deep_merge_dict(base: dict, overrides: dict) -> dict:
-    merged = copy.deepcopy(base)
-    for key, value in overrides.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = _deep_merge_dict(merged[key], value)
-        else:
-            merged[key] = copy.deepcopy(value)
-    return merged
-
 
 LANDCOVER_CLASSES = [
     (1, "#419bdf", "#2f90e3", "Water"),
@@ -241,8 +70,19 @@ LANDCOVER_CLASSES = [
     (9, "#a8ebff", "#f8fcff", "Snow"),
     (11, "#e3e2c3", "#efe4b5", "Rangeland"),
 ]
-LANDCOVER_CLASS_IDS = [class_id for class_id, _, _, _ in LANDCOVER_CLASSES]
-LANDCOVER_SOURCE_COLORMAP = {
+LANDCOVER_CLASS_IDS = [class_id for class_id, *_ in LANDCOVER_CLASSES]
+LANDCOVER_OVERLAY = {"opacity": 1.0, "bake": 0.10, "sat": 1.04, "lift": 1.02}
+LANDCOVER_OVERLAY_CACHE_KEY = (
+    f"display-v13-op{int(round(LANDCOVER_OVERLAY['opacity'] * 1000)):04d}"
+    f"-bake{int(round(LANDCOVER_OVERLAY['bake'] * 1000)):04d}"
+    f"-sat{int(round(LANDCOVER_OVERLAY['sat'] * 1000)):04d}"
+    f"-lift{int(round(LANDCOVER_OVERLAY['lift'] * 1000)):04d}"
+)
+DISPLAY_RGB = np.array(
+    [tuple(int(color[i : i + 2], 16) for i in (1, 3, 5)) for _, _, color, _ in LANDCOVER_CLASSES],
+    dtype=np.uint8,
+)
+SOURCE_COLORMAP = {
     0: (0, 0, 0, 0),
     1: (65, 155, 223, 255),
     2: (57, 125, 73, 255),
@@ -253,35 +93,103 @@ LANDCOVER_SOURCE_COLORMAP = {
     9: (168, 235, 255, 255),
     11: (227, 226, 195, 255),
 }
-LANDCOVER_SOURCE_COLORMAP_FULL = {
-    index: LANDCOVER_SOURCE_COLORMAP.get(index, (0, 0, 0, 0)) for index in range(256)
+SOURCE_COLORMAP_FULL = {index: SOURCE_COLORMAP.get(index, (0, 0, 0, 0)) for index in range(256)}
+DESPECKLE = {"passes": 2, "max_support": 2, "min_majority": 4}
+SHADE = {
+    "azimuth": 314.0,
+    "elevation": 22.0,
+    "ambient": 0.46,
+    "diffuse": 0.80,
+    "gamma": 0.99,
+    "contrast": 1.18,
+    "detail_z": 1.85,
+    "broad_z": 2.55,
+    "broad_blur": 2.4,
+    "broad_weight": 0.60,
+    "relief_strength": 0.20,
+    "slope_gamma": 0.85,
+    "local_contrast": 0.24,
+    "local_radius": 1.45,
 }
+CAMERA = {"ref": 1500.0, "radius": 4800.0, "zscale": 0.035, "pullback": 1.03, "exaggeration": 1.08}
+TERRAIN = {
+    "phi": 90.0,
+    "theta": 32.0,
+    "fov": 23.0,
+    "sun_azimuth": 314.0,
+    "sun_elevation": 28.0,
+    "sun_intensity": 1.70,
+    "ambient": 0.58,
+    "shadow": 0.40,
+    "background": [1.0, 1.0, 1.0],
+}
+PBR = {
+    "enabled": True,
+    "shadow_technique": "pcss",
+    "shadow_map_res": 4096,
+    "exposure": 1.01,
+    "msaa": 8,
+    "ibl_intensity": 0.12,
+    "normal_strength": 1.00,
+    "height_ao": {"enabled": True, "directions": 8, "steps": 20, "max_distance": 200.0, "strength": 0.30, "resolution_scale": 0.65},
+    "sun_visibility": {"enabled": True, "mode": "soft", "samples": 2, "steps": 40, "max_distance": 2200.0, "softness": 0.55, "bias": 0.0032, "resolution_scale": 0.75},
+    "tonemap": {"operator": "aces", "white_point": 6.0, "white_balance_enabled": True, "temperature": 6500.0, "tint": 0.0},
+}
+RELIEF_TERRAIN = {"sun_elevation": 18.0, "sun_intensity": 3.70, "ambient": 0.40, "shadow": 0.70}
+RELIEF_PBR = {
+    "exposure": 1.01,
+    "ibl_intensity": 0.03,
+    "normal_strength": 1.55,
+    "height_ao": {"enabled": True, "directions": 10, "steps": 24, "max_distance": 240.0, "strength": 0.40, "resolution_scale": 0.72},
+    "sun_visibility": {"enabled": True, "mode": "hard", "samples": 1, "steps": 96, "max_distance": 3200.0, "softness": 0.0, "bias": 0.0028, "resolution_scale": 0.90},
+}
+COMP = {
+    "bg": (248, 248, 245, 255),
+    "scale": 1.22,
+    "shift_x": 0.055,
+    "shift_y": -0.036,
+    "mask_min": 4.0,
+    "mask_max": 18.0,
+    "relief_blur": 2.6,
+    "relief_low": 6.0,
+    "relief_high": 94.0,
+    "relief_contrast": 1.08,
+    "relief_gamma": 1.02,
+    "value_floor": 0.78,
+    "value_gain": 0.24,
+    "highlight_start": 0.72,
+    "highlight_gain": 0.03,
+}
+SHADOW = {"rgb": (142, 148, 157), "layers": ((48, 0.004, 0.010), (22, 0.010, 0.024))}
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
-    parser.add_argument("--hdr", type=Path, default=DEFAULT_HDRI_PATH)
-    parser.add_argument("--hdr-intensity", type=float, default=float(PBR_CONFIG["ibl_intensity"]))
-    parser.add_argument("--hdr-rotate", type=float, default=float(PBR_CONFIG["hdr_rotate_deg"]))
+    parser.add_argument("--output-dir", type=Path, default=OUT_DIR)
+    parser.add_argument("--cache-dir", type=Path, default=CACHE_DIR)
     parser.add_argument("--snapshot", type=Path, default=None)
-    parser.add_argument("--dem-zoom", type=int, default=DEFAULT_DEM_ZOOM)
-    parser.add_argument("--viewer-width", type=int, default=1400)
-    parser.add_argument("--viewer-height", type=int, default=1400)
-    parser.add_argument("--snapshot-width", type=int, default=4200)
-    parser.add_argument("--snapshot-height", type=int, default=4200)
-    parser.add_argument("--skip-render", action="store_true")
+    parser.add_argument("--dem-zoom", type=int, default=DEM_ZOOM)
     parser.add_argument("--force", action="store_true")
     return parser.parse_args()
 
 
-def _crs_cache_key(crs: str) -> str:
-    return str(crs).lower().replace(":", "_").replace("/", "_").replace(" ", "_")
-
-
 def _overlay_cache_path(cache_dir: Path) -> Path:
     return cache_dir / f"{COUNTRY_A3.lower()}_landcover_overlay_{LANDCOVER_OVERLAY_CACHE_KEY}.png"
+
+
+def _rgb_to_hex(rgb: tuple[int, int, int]) -> str:
+    return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+
+
+def _landcover_alpha(opacity: float = LANDCOVER_OVERLAY["opacity"]) -> int:
+    return int(round(float(np.clip(opacity, 0.0, 1.0)) * 255.0))
+
+
+def _is_fresh(output_path: Path, input_paths: Iterable[Path]) -> bool:
+    return output_path.exists() and all(
+        path.exists() and path.stat().st_mtime <= output_path.stat().st_mtime
+        for path in input_paths
+    )
 
 
 def _download(url: str, dest: Path, *, force: bool) -> Path:
@@ -295,40 +203,23 @@ def _download(url: str, dest: Path, *, force: bool) -> Path:
             dir=str(dest.parent),
             delete=False,
         ) as handle:
-            tmp_path = Path(handle.name)
+            tmp = Path(handle.name)
             shutil.copyfileobj(response, handle, length=1024 * 1024)
-    tmp_path.replace(dest)
+    tmp.replace(dest)
     return dest
 
 
-def _is_fresh(output_path: Path, input_paths: Iterable[Path]) -> bool:
-    if not output_path.exists():
-        return False
-    output_mtime = output_path.stat().st_mtime
-    for input_path in input_paths:
-        if not input_path.exists() or input_path.stat().st_mtime > output_mtime:
-            return False
-    return True
-
-
-def _load_country_gdf(boundary_zip: Path, target_crs: str) -> gpd.GeoDataFrame:
+def _country_geometry(boundary_zip: Path, target_crs: str):
     countries = gpd.read_file(boundary_zip)
     country = countries[countries["ADM0_A3"] == COUNTRY_A3]
     if country.empty:
         raise RuntimeError(f"Could not find {COUNTRY_NAME} in Natural Earth countries data")
-    return country.to_crs(target_crs)
-
-
-def _load_country_geometry(boundary_zip: Path, target_crs: str):
-    country = _load_country_gdf(boundary_zip, target_crs)
-    if hasattr(country.geometry, "union_all"):
-        return country.geometry.union_all()
-    return country.geometry.unary_union
+    country = country.to_crs(target_crs)
+    return country.geometry.union_all() if hasattr(country.geometry, "union_all") else country.geometry.unary_union
 
 
 def _tile_x_from_lon(lon: float, zoom: int) -> int:
-    n = 1 << zoom
-    return int(np.clip(((lon + 180.0) / 360.0) * n, 0, n - 1))
+    return int(np.clip(((lon + 180.0) / 360.0) * (1 << zoom), 0, (1 << zoom) - 1))
 
 
 def _tile_y_from_lat(lat: float, zoom: int) -> int:
@@ -339,73 +230,59 @@ def _tile_y_from_lat(lat: float, zoom: int) -> int:
 
 
 def _tile_bounds_mercator(x: int, y: int, zoom: int) -> tuple[float, float, float, float]:
-    world_span = 20037508.342789244 * 2.0
-    tile_span = world_span / float(1 << zoom)
-    west = -20037508.342789244 + x * tile_span
-    east = west + tile_span
-    north = 20037508.342789244 - y * tile_span
-    south = north - tile_span
-    return west, south, east, north
+    span = 20037508.342789244 * 2.0 / float(1 << zoom)
+    west = -20037508.342789244 + x * span
+    east = west + span
+    north = 20037508.342789244 - y * span
+    return west, north - span, east, north
 
 
 def _decode_terrarium(tile_path: Path) -> np.ndarray:
     rgb = np.asarray(Image.open(tile_path).convert("RGB"), dtype=np.float32)
     return (rgb[:, :, 0] * 256.0 + rgb[:, :, 1] + rgb[:, :, 2] / 256.0) - 32768.0
 
-
-def _download_terrarium_tile(cache_dir: Path, zoom: int, x: int, y: int, *, force: bool) -> Path:
-    tile_path = cache_dir / "terrarium" / str(zoom) / str(x) / f"{y}.png"
-    url = TERRARIUM_TILE_URL.format(z=zoom, x=x, y=y)
-    return _download(url, tile_path, force=force)
-
-
-def _build_terrarium_source_dem(boundary_zip: Path, cache_dir: Path, zoom: int, *, force: bool) -> Path:
-    if zoom < 1 or zoom > 12:
+def _build_terrarium_source_dem(
+    boundary_zip: Path,
+    cache_dir: Path,
+    zoom: int,
+    *,
+    force: bool,
+) -> Path:
+    if not 1 <= zoom <= 12:
         raise ValueError("DEM zoom must be between 1 and 12")
-    output_path = cache_dir / f"{COUNTRY_A3.lower()}_terrarium_dem_z{zoom}_3857.tif"
-    if output_path.exists() and not force:
-        return output_path
+    output = cache_dir / f"{COUNTRY_A3.lower()}_terrarium_dem_z{zoom}_3857.tif"
+    if output.exists() and not force:
+        return output
 
-    country_wgs84 = _load_country_geometry(boundary_zip, "EPSG:4326")
-    lon_min, lat_min, lon_max, lat_max = country_wgs84.bounds
-    x_min = _tile_x_from_lon(lon_min, zoom)
-    x_max = _tile_x_from_lon(lon_max, zoom)
-    y_min = _tile_y_from_lat(lat_max, zoom)
-    y_max = _tile_y_from_lat(lat_min, zoom)
+    lon_min, lat_min, lon_max, lat_max = _country_geometry(boundary_zip, "EPSG:4326").bounds
+    x_min, x_max = _tile_x_from_lon(lon_min, zoom), _tile_x_from_lon(lon_max, zoom)
+    y_min, y_max = _tile_y_from_lat(lat_max, zoom), _tile_y_from_lat(lat_min, zoom)
     tiles = [(x, y) for y in range(y_min, y_max + 1) for x in range(x_min, x_max + 1)]
     if not tiles:
         raise RuntimeError(f"No DEM tiles intersected {COUNTRY_NAME}")
 
     def _fetch(tile: tuple[int, int]) -> tuple[tuple[int, int], Path]:
         x, y = tile
-        return tile, _download_terrarium_tile(cache_dir, zoom, x, y, force=force)
+        path = cache_dir / "terrarium" / str(zoom) / str(x) / f"{y}.png"
+        return tile, _download(TERRARIUM.format(z=zoom, x=x, y=y), path, force=force)
 
     fetched: list[tuple[tuple[int, int], Path]] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=DEM_DOWNLOAD_WORKERS) as executor:
-        for item in executor.map(_fetch, tiles):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=DEM_WORKERS) as pool:
+        for item in pool.map(_fetch, tiles):
             fetched.append(item)
 
-    tile_rows = y_max - y_min + 1
-    tile_cols = x_max - x_min + 1
-    mosaic = np.empty(
-        (tile_rows * TERRARIUM_TILE_SIZE, tile_cols * TERRARIUM_TILE_SIZE),
-        dtype=np.float32,
-    )
-    for (x, y), tile_path in fetched:
-        row = y - y_min
-        col = x - x_min
-        r0 = row * TERRARIUM_TILE_SIZE
-        c0 = col * TERRARIUM_TILE_SIZE
-        mosaic[r0 : r0 + TERRARIUM_TILE_SIZE, c0 : c0 + TERRARIUM_TILE_SIZE] = _decode_terrarium(
-            tile_path
-        )
+    rows, cols = y_max - y_min + 1, x_max - x_min + 1
+    mosaic = np.empty((rows * TILE_SIZE, cols * TILE_SIZE), dtype=np.float32)
+    for (x, y), path in fetched:
+        r0 = (y - y_min) * TILE_SIZE
+        c0 = (x - x_min) * TILE_SIZE
+        mosaic[r0 : r0 + TILE_SIZE, c0 : c0 + TILE_SIZE] = _decode_terrarium(path)
 
     west, _, _, north = _tile_bounds_mercator(x_min, y_min, zoom)
     _, south, east, _ = _tile_bounds_mercator(x_max, y_max, zoom)
-    transform = from_bounds(west, south, east, north, mosaic.shape[1], mosaic.shape[0])
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
     with rasterio.open(
-        output_path,
+        output,
         "w",
         driver="GTiff",
         width=mosaic.shape[1],
@@ -413,35 +290,29 @@ def _build_terrarium_source_dem(boundary_zip: Path, cache_dir: Path, zoom: int, 
         count=1,
         dtype="float32",
         crs="EPSG:3857",
-        transform=transform,
+        transform=from_bounds(west, south, east, north, mosaic.shape[1], mosaic.shape[0]),
         nodata=-9999.0,
         compress="lzw",
     ) as dst:
         dst.write(mosaic, 1)
-    return output_path
+    return output
 
 
-def _build_dem(boundary_zip: Path, cache_dir: Path, target_crs: str, zoom: int, *, force: bool) -> Path:
-    target_key = _crs_cache_key(target_crs)
-    output_path = cache_dir / f"{COUNTRY_A3.lower()}_dem_{target_key}_z{zoom}.tif"
-    source_path = _build_terrarium_source_dem(boundary_zip, cache_dir, zoom, force=force)
-    if _is_fresh(output_path, [source_path]) and not force:
-        return output_path
+def _build_dem(boundary_zip: Path, cache_dir: Path, zoom: int, *, force: bool) -> Path:
+    output = cache_dir / f"{COUNTRY_A3.lower()}_dem_epsg_3035_z{zoom}.tif"
+    source = _build_terrarium_source_dem(boundary_zip, cache_dir, zoom, force=force)
+    if _is_fresh(output, [source]) and not force:
+        return output
 
-    country_target = _load_country_geometry(boundary_zip, target_crs)
-    country_shapes = [country_target]
-    with rasterio.open(source_path) as src:
+    country = _country_geometry(boundary_zip, TARGET_CRS)
+    with rasterio.open(source) as src:
         transform, width, height = calculate_default_transform(
-            src.crs,
-            target_crs,
-            src.width,
-            src.height,
-            *src.bounds,
+            src.crs, TARGET_CRS, src.width, src.height, *src.bounds
         )
         profile = src.profile.copy()
         profile.update(
             driver="GTiff",
-            crs=target_crs,
+            crs=TARGET_CRS,
             transform=transform,
             width=width,
             height=height,
@@ -450,52 +321,55 @@ def _build_dem(boundary_zip: Path, cache_dir: Path, target_crs: str, zoom: int, 
             nodata=-9999.0,
             compress="lzw",
         )
-        with MemoryFile() as memfile:
-            with memfile.open(**profile) as tmp:
+        with MemoryFile() as mem:
+            with mem.open(**profile) as tmp:
                 reproject(
                     source=rasterio.band(src, 1),
                     destination=rasterio.band(tmp, 1),
                     src_transform=src.transform,
                     src_crs=src.crs,
                     dst_transform=transform,
-                    dst_crs=target_crs,
+                    dst_crs=TARGET_CRS,
                     resampling=Resampling.bilinear,
                     src_nodata=src.nodata,
                     dst_nodata=profile["nodata"],
                     init_dest_nodata=True,
                 )
-            with memfile.open() as reproj:
+            with mem.open() as reproj:
                 data, masked_transform = rasterio.mask.mask(
                     reproj,
-                    country_shapes,
+                    [country],
                     crop=True,
                     nodata=profile["nodata"],
                     filled=True,
                 )
-    output_profile = profile.copy()
-    output_profile.update(
-        transform=masked_transform,
-        width=data.shape[2],
-        height=data.shape[1],
-    )
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with rasterio.open(output_path, "w", **output_profile) as dst:
+
+    profile.update(transform=masked_transform, width=data.shape[2], height=data.shape[1])
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with rasterio.open(output, "w", **profile) as dst:
         dst.write(data)
-    return output_path
+    return output
 
 
 def _download_landcover_tiles(cache_dir: Path, *, force: bool) -> dict[str, Path]:
     tile_dir = cache_dir / "landcover_tiles"
-    downloads: dict[str, Path] = {}
-    for tile_id, url in LANDCOVER_TILE_URLS.items():
-        downloads[tile_id] = _download(url, tile_dir / url.rsplit("/", 1)[-1], force=force)
-    return downloads
+    return {
+        tile_id: _download(url, tile_dir / url.rsplit("/", 1)[-1], force=force)
+        for tile_id, url in LANDCOVER_URLS.items()
+    }
 
 
-def _crop_landcover_tile(tile_id: str, tile_path: Path, country_wgs84, cache_dir: Path, *, force: bool) -> Path | None:
-    output_path = cache_dir / "landcover_crops" / f"{COUNTRY_A3.lower()}_{tile_id}_crop.tif"
-    if output_path.exists() and not force:
-        return output_path
+def _crop_landcover_tile(
+    tile_id: str,
+    tile_path: Path,
+    country_wgs84,
+    cache_dir: Path,
+    *,
+    force: bool,
+) -> Path | None:
+    output = cache_dir / "landcover_crops" / f"{COUNTRY_A3.lower()}_{tile_id}_crop.tif"
+    if output.exists() and not force:
+        return output
 
     with rasterio.open(tile_path) as src:
         country_proj = gpd.GeoSeries([country_wgs84], crs="EPSG:4326").to_crs(src.crs)
@@ -519,27 +393,21 @@ def _crop_landcover_tile(tile_id: str, tile_path: Path, country_wgs84, cache_dir
             nodata=0,
             compress="lzw",
         )
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with rasterio.open(output_path, "w", **profile) as dst:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with rasterio.open(output, "w", **profile) as dst:
             dst.write(data)
             try:
                 dst.write_colormap(1, src.colormap(1))
             except ValueError:
                 pass
-    return output_path
+    return output
 
 
-def _sanitize_landcover_classes(classes: np.ndarray) -> np.ndarray:
+def _clean_landcover_classes(classes: np.ndarray) -> np.ndarray:
     cleaned = np.asarray(classes, dtype=np.uint8).copy()
-    valid_mask = np.isin(cleaned, np.asarray(LANDCOVER_CLASS_IDS, dtype=np.uint8))
-    cleaned[~valid_mask] = 0
-    return cleaned
-
-
-def _despeckle_landcover_classes(classes: np.ndarray) -> np.ndarray:
-    cleaned = classes.copy()
+    cleaned[~np.isin(cleaned, np.asarray(LANDCOVER_CLASS_IDS, dtype=np.uint8))] = 0
     height, width = cleaned.shape
-    for _ in range(LANDCOVER_DESPECKLE_PASSES):
+    for _ in range(DESPECKLE["passes"]):
         same_count = np.zeros((height, width), dtype=np.uint8)
         best_count = np.zeros((height, width), dtype=np.uint8)
         best_class = np.zeros((height, width), dtype=np.uint8)
@@ -565,8 +433,8 @@ def _despeckle_landcover_classes(classes: np.ndarray) -> np.ndarray:
             best_class[replace] = class_id
         replace = (
             (cleaned != 0)
-            & (same_count <= LANDCOVER_DESPECKLE_MAX_SUPPORT)
-            & (best_count >= LANDCOVER_DESPECKLE_MIN_MAJORITY)
+            & (same_count <= DESPECKLE["max_support"])
+            & (best_count >= DESPECKLE["min_majority"])
             & (best_class != cleaned)
             & (best_class != 0)
         )
@@ -580,30 +448,28 @@ def _build_landcover_classes(
     boundary_zip: Path,
     tile_paths: dict[str, Path],
     dem_path: Path,
-    output_dir: Path,
-    target_crs: str,
+    cache_dir: Path,
     *,
     force: bool,
 ) -> Path:
-    country_wgs84 = _load_country_geometry(boundary_zip, "EPSG:4326")
-    crop_paths: list[Path] = []
-    for tile_id, tile_path in tile_paths.items():
-        crop_path = _crop_landcover_tile(tile_id, tile_path, country_wgs84, output_dir, force=force)
-        if crop_path is not None:
-            crop_paths.append(crop_path)
+    country = _country_geometry(boundary_zip, "EPSG:4326")
+    crop_paths = [
+        crop
+        for tile_id, tile_path in tile_paths.items()
+        if (crop := _crop_landcover_tile(tile_id, tile_path, country, cache_dir, force=force))
+        is not None
+    ]
     if not crop_paths:
         raise RuntimeError(f"No land-cover tiles intersected {COUNTRY_NAME}")
-
-    target_key = _crs_cache_key(target_crs)
-    classes_path = output_dir / f"{COUNTRY_A3.lower()}_landcover_classes_{target_key}.tif"
-    if _is_fresh(classes_path, [dem_path, *crop_paths]) and not force:
-        return classes_path
+    output = cache_dir / f"{COUNTRY_A3.lower()}_landcover_classes_epsg_3035.tif"
+    if _is_fresh(output, [dem_path, *crop_paths]) and not force:
+        return output
 
     with rasterio.open(dem_path) as dem:
         classes = np.zeros((dem.height, dem.width), dtype=np.uint8)
         terrain_mask = dem.read(1, masked=True).mask
-        for crop_path in crop_paths:
-            with rasterio.open(crop_path) as src:
+        for crop in crop_paths:
+            with rasterio.open(crop) as src:
                 warped = np.zeros_like(classes)
                 reproject(
                     source=rasterio.band(src, 1),
@@ -619,44 +485,28 @@ def _build_landcover_classes(
                 )
             classes = np.where(warped != 0, warped, classes)
         classes[terrain_mask] = 0
-        classes = _despeckle_landcover_classes(_sanitize_landcover_classes(classes))
-
+        classes = _clean_landcover_classes(classes)
         profile = dem.profile.copy()
-        profile.update(
-            driver="GTiff",
-            count=1,
-            dtype="uint8",
-            nodata=0,
-            compress="lzw",
-        )
-        classes_path.parent.mkdir(parents=True, exist_ok=True)
-        with rasterio.open(classes_path, "w", **profile) as dst:
+        profile.update(driver="GTiff", count=1, dtype="uint8", nodata=0, compress="lzw")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with rasterio.open(output, "w", **profile) as dst:
             dst.write(classes, 1)
-            dst.write_colormap(1, LANDCOVER_SOURCE_COLORMAP_FULL)
-    return classes_path
+            dst.write_colormap(1, SOURCE_COLORMAP_FULL)
+    return output
 
-
-def _load_font(size: int, bold: bool = False) -> ImageFont.ImageFont:
+def _load_font(size: int, *, bold: bool = False) -> ImageFont.ImageFont:
     names = ["DejaVuSans-Bold.ttf", "Arial Bold.ttf", "arialbd.ttf"] if bold else ["DejaVuSans.ttf", "Arial.ttf", "arial.ttf"]
     for name in names:
         try:
             return ImageFont.truetype(name, size)
         except OSError:
-            continue
+            pass
     return ImageFont.load_default()
 
 
-def _landcover_palette_rgb() -> np.ndarray:
-    return np.array([_hex_to_rgb(display) for _, _, display, _ in LANDCOVER_CLASSES], dtype=np.uint8)
-
-
-def _landcover_alpha(opacity: float = LANDCOVER_OPACITY) -> int:
-    return int(round(float(np.clip(opacity, 0.0, 1.0)) * 255.0))
-
-
 def _boost_saturation(rgb: np.ndarray, amount: float) -> np.ndarray:
-    luminance = np.tensordot(rgb, np.array([0.2126, 0.7152, 0.0722], dtype=np.float32), axes=([2], [0]))
-    return np.clip(luminance[:, :, None] + (rgb - luminance[:, :, None]) * amount, 0.0, 1.0)
+    lum = np.tensordot(rgb, np.array([0.2126, 0.7152, 0.0722], dtype=np.float32), axes=([2], [0]))
+    return np.clip(lum[:, :, None] + (rgb - lum[:, :, None]) * amount, 0.0, 1.0)
 
 
 def _blur_heightmap(heightmap: np.ndarray, radius: float) -> np.ndarray:
@@ -665,8 +515,7 @@ def _blur_heightmap(heightmap: np.ndarray, radius: float) -> np.ndarray:
     finite = np.isfinite(heightmap)
     if not np.any(finite):
         return np.zeros_like(heightmap, dtype=np.float32)
-    lo = float(np.nanmin(heightmap[finite]))
-    hi = float(np.nanmax(heightmap[finite]))
+    lo, hi = float(np.nanmin(heightmap[finite])), float(np.nanmax(heightmap[finite]))
     span = max(hi - lo, 1e-6)
     normalized = np.clip((heightmap - lo) / span, 0.0, 1.0)
     image = Image.fromarray(np.round(normalized * 255.0).astype(np.uint8), mode="L")
@@ -676,256 +525,122 @@ def _blur_heightmap(heightmap: np.ndarray, radius: float) -> np.ndarray:
 
 def _hillshade(heightmap: np.ndarray, azimuth_deg: float, elevation_deg: float, *, z_factor: float) -> np.ndarray:
     dy, dx = np.gradient(heightmap.astype(np.float32))
-    z = float(z_factor)
     azimuth = np.deg2rad(float(azimuth_deg))
     elevation = np.deg2rad(float(elevation_deg))
-    light = np.array(
-        [
-            np.cos(elevation) * np.sin(azimuth),
-            np.sin(elevation),
-            np.cos(elevation) * np.cos(azimuth),
-        ],
-        dtype=np.float32,
-    )
-    # Raster rows increase southward, so the north-axis gradient is -dy.
-    normal = np.dstack((-dx * z, np.ones_like(heightmap, dtype=np.float32), dy * z))
+    light = np.array([np.cos(elevation) * np.sin(azimuth), np.sin(elevation), np.cos(elevation) * np.cos(azimuth)], dtype=np.float32)
+    normal = np.dstack((-dx * float(z_factor), np.ones_like(heightmap, dtype=np.float32), dy * float(z_factor)))
     normal /= np.linalg.norm(normal, axis=2, keepdims=True) + 1e-8
-    shade = normal @ light
-    return np.clip(shade, 0.0, 1.0)
+    return np.clip(normal @ light, 0.0, 1.0)
 
 
 def _height_shade_from_dem(dem: np.ndarray) -> np.ndarray:
     valid = np.isfinite(dem)
     if not np.any(valid):
         return np.ones_like(dem, dtype=np.float32)
-    fill_value = float(np.nanmedian(dem[valid]))
-    filled = np.where(valid, dem, fill_value).astype(np.float32)
-    broad_height = _blur_heightmap(filled, HEIGHT_SHADE_BROAD_BLUR_RADIUS)
-    broad = _hillshade(
-        broad_height,
-        HEIGHT_SHADE_AZIMUTH,
-        HEIGHT_SHADE_ELEVATION,
-        z_factor=HEIGHT_SHADE_BROAD_ZFACTOR,
-    )
-    detail = _hillshade(
-        filled,
-        HEIGHT_SHADE_AZIMUTH,
-        HEIGHT_SHADE_ELEVATION,
-        z_factor=HEIGHT_SHADE_DETAIL_ZFACTOR,
-    )
-    shade = HEIGHT_SHADE_BROAD_WEIGHT * broad + (1.0 - HEIGHT_SHADE_BROAD_WEIGHT) * detail
-
+    filled = np.where(valid, dem, float(np.nanmedian(dem[valid]))).astype(np.float32)
+    broad_height = _blur_heightmap(filled, SHADE["broad_blur"])
+    broad = _hillshade(broad_height, SHADE["azimuth"], SHADE["elevation"], z_factor=SHADE["broad_z"])
+    detail = _hillshade(filled, SHADE["azimuth"], SHADE["elevation"], z_factor=SHADE["detail_z"])
+    shade = SHADE["broad_weight"] * broad + (1.0 - SHADE["broad_weight"]) * detail
     relief = filled - broad_height
-    relief_scale = float(np.nanpercentile(np.abs(relief[valid]), 92.0))
-    relief_scale = max(relief_scale, 1e-6)
-    relief_unit = np.clip(relief / relief_scale, -1.0, 1.0)
-
+    relief_unit = np.clip(relief / max(float(np.nanpercentile(np.abs(relief[valid]), 92.0)), 1e-6), -1.0, 1.0)
     slope_y, slope_x = np.gradient(broad_height.astype(np.float32))
     slope = np.hypot(slope_x, slope_y)
-    slope_scale = float(np.nanpercentile(slope[valid], 85.0))
-    slope_scale = max(slope_scale, 1e-6)
-    slope_weight = np.clip(slope / slope_scale, 0.0, 1.0)
-    slope_weight = np.power(slope_weight, HEIGHT_SHADE_RELIEF_SLOPE_GAMMA, dtype=np.float32)
-
-    shade = np.clip(
-        shade + HEIGHT_SHADE_RELIEF_STRENGTH * relief_unit * slope_weight,
-        0.0,
-        1.0,
-    )
-
-    local_base = _blur_heightmap(shade, HEIGHT_SHADE_LOCAL_CONTRAST_RADIUS)
-    shade = np.clip(
-        shade + HEIGHT_SHADE_LOCAL_CONTRAST * (shade - local_base),
-        0.0,
-        1.0,
-    )
-    shade = np.clip(HEIGHT_SHADE_AMBIENT + HEIGHT_SHADE_DIFFUSE * shade, 0.0, 1.0)
-    shade = np.power(shade, HEIGHT_SHADE_GAMMA, dtype=np.float32)
-    shade = np.clip((shade - 0.5) * HEIGHT_SHADE_CONTRAST + 0.5, 0.0, 1.0)
-    return shade.astype(np.float32)
+    slope_weight = np.clip(slope / max(float(np.nanpercentile(slope[valid], 85.0)), 1e-6), 0.0, 1.0)
+    slope_weight = np.power(slope_weight, SHADE["slope_gamma"], dtype=np.float32)
+    shade = np.clip(shade + SHADE["relief_strength"] * relief_unit * slope_weight, 0.0, 1.0)
+    shade = np.clip(shade + SHADE["local_contrast"] * (shade - _blur_heightmap(shade, SHADE["local_radius"])), 0.0, 1.0)
+    shade = np.clip(SHADE["ambient"] + SHADE["diffuse"] * shade, 0.0, 1.0)
+    shade = np.power(shade, SHADE["gamma"], dtype=np.float32)
+    return np.clip((shade - 0.5) * SHADE["contrast"] + 0.5, 0.0, 1.0).astype(np.float32)
 
 
-def _classes_to_rgba(classes: np.ndarray, dem: np.ndarray, opacity: float = LANDCOVER_OPACITY) -> np.ndarray:
-    palette = _landcover_palette_rgb().astype(np.float32) / 255.0
-    rgb_lut = np.zeros((256, 3), dtype=np.float32)
-    for index, (class_id, _, _, _) in enumerate(LANDCOVER_CLASSES):
-        rgb_lut[class_id] = palette[index]
-    rgb = rgb_lut[classes]
-    shade = _height_shade_from_dem(dem)
-    shade = 1.0 - (1.0 - shade) * COLOR_PASS_OVERLAY_BAKE_STRENGTH
+def _classes_to_rgba(classes: np.ndarray, dem: np.ndarray, opacity: float = LANDCOVER_OVERLAY["opacity"]) -> np.ndarray:
+    lut = np.zeros((256, 3), dtype=np.float32)
+    for idx, class_id in enumerate(LANDCOVER_CLASS_IDS):
+        lut[class_id] = DISPLAY_RGB[idx].astype(np.float32) / 255.0
+    rgb = lut[classes]
+    shade = 1.0 - (1.0 - _height_shade_from_dem(dem)) * LANDCOVER_OVERLAY["bake"]
     rgb = np.clip(rgb * shade[:, :, None], 0.0, 1.0)
-    rgb = _boost_saturation(rgb, COLOR_PASS_OVERLAY_SATURATION)
-    rgb = np.clip(rgb * COLOR_PASS_OVERLAY_LIGHTNESS_SCALE, 0.0, 1.0)
+    rgb = _boost_saturation(rgb, LANDCOVER_OVERLAY["sat"])
+    rgb = np.clip(rgb * LANDCOVER_OVERLAY["lift"], 0.0, 1.0)
     rgba = np.zeros((classes.shape[0], classes.shape[1], 4), dtype=np.uint8)
-    rgba[:, :, :3] = np.round(np.clip(rgb, 0.0, 1.0) * 255.0).astype(np.uint8)
+    rgba[:, :, :3] = np.round(rgb * 255.0).astype(np.uint8)
     rgba[:, :, 3] = np.where(classes != 0, _landcover_alpha(opacity), 0).astype(np.uint8)
     return rgba
 
 
-def _build_overlay(
-    classes_path: Path,
-    dem_path: Path,
-    output_path: Path,
-    *,
-    force: bool,
-) -> tuple[Path, list[int]]:
-    if _is_fresh(output_path, [classes_path, dem_path]) and not force:
-        with rasterio.open(classes_path) as src:
-            classes = src.read(1)
-        present_classes = [class_id for class_id in LANDCOVER_CLASS_IDS if np.any(classes == class_id)]
-        return output_path, present_classes
-
+def _build_overlay(classes_path: Path, dem_path: Path, output_path: Path, *, force: bool) -> tuple[Path, list[int]]:
     with rasterio.open(classes_path) as src:
         classes = src.read(1)
+    present = [class_id for class_id in LANDCOVER_CLASS_IDS if np.any(classes == class_id)]
+    if _is_fresh(output_path, [classes_path, dem_path]) and not force:
+        return output_path, present
     with rasterio.open(dem_path) as dem_src:
         dem = dem_src.read(1, masked=True).filled(np.nan).astype(np.float32)
-    present_classes = [class_id for class_id in LANDCOVER_CLASS_IDS if np.any(classes == class_id)]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(_classes_to_rgba(classes, dem), mode="RGBA").save(output_path)
-    return output_path, present_classes
+    return output_path, present
 
 
 def _legend_entries(present_classes: list[int]) -> list[tuple[str, str]]:
-    palette = _landcover_palette_rgb()
-    entries: list[tuple[str, str]] = []
-    wanted = present_classes or LANDCOVER_CLASS_IDS
-    for index, (class_id, _, _, label) in enumerate(LANDCOVER_CLASSES):
-        if class_id in wanted:
-            color = tuple(int(channel) for channel in palette[index])
-            entries.append((_rgb_to_hex(color), label))
-    return entries
+    wanted = set(present_classes or LANDCOVER_CLASS_IDS)
+    return [(_rgb_to_hex(tuple(int(v) for v in DISPLAY_RGB[i])), label) for i, (class_id, _, _, label) in enumerate(LANDCOVER_CLASSES) if class_id in wanted]
 
 
 def _subject_alpha(image: Image.Image) -> np.ndarray:
     arr = np.asarray(image.convert("RGBA"), dtype=np.uint8)
-    source_alpha = arr[:, :, 3].astype(np.float32) / 255.0
-    alpha_coverage = float(np.count_nonzero(source_alpha > 0.03)) / float(source_alpha.size)
-    if 0.0 < alpha_coverage < 0.98:
-        return source_alpha
-    corners = np.asarray(
-        [arr[0, 0, :3], arr[0, -1, :3], arr[-1, 0, :3], arr[-1, -1, :3]],
-        dtype=np.float32,
-    )
-    background = np.median(corners, axis=0)
-    distance = np.abs(arr[:, :, :3].astype(np.float32) - background[None, None, :]).max(axis=2)
-    alpha = np.clip(
-        (distance - SUBJECT_MASK_DIFF_MIN)
-        / max(SUBJECT_MASK_DIFF_MAX - SUBJECT_MASK_DIFF_MIN, 1e-6),
-        0.0,
-        1.0,
-    )
-    return alpha * np.where(arr[:, :, 3] > 0, 1.0, 0.0).astype(np.float32)
+    src_alpha = arr[:, :, 3].astype(np.float32) / 255.0
+    coverage = float(np.count_nonzero(src_alpha > 0.03)) / float(src_alpha.size)
+    if 0.0 < coverage < 0.98:
+        return src_alpha
+    corners = np.asarray([arr[0, 0, :3], arr[0, -1, :3], arr[-1, 0, :3], arr[-1, -1, :3]], dtype=np.float32)
+    bg = np.median(corners, axis=0)
+    dist = np.abs(arr[:, :, :3].astype(np.float32) - bg[None, None, :]).max(axis=2)
+    return np.clip((dist - COMP["mask_min"]) / max(COMP["mask_max"] - COMP["mask_min"], 1e-6), 0.0, 1.0) * (arr[:, :, 3] > 0).astype(np.float32)
 
 
 def _crop_subject(image: Image.Image) -> Image.Image:
-    arr = np.asarray(image.convert("RGBA"), dtype=np.uint8).copy()
     alpha = _subject_alpha(image)
     mask = alpha > 0.03
     if not np.any(mask):
         return image
+    arr = np.asarray(image.convert("RGBA"), dtype=np.uint8).copy()
     arr[:, :, 3] = np.round(np.clip(alpha, 0.0, 1.0) * 255.0).astype(np.uint8)
     ys, xs = np.nonzero(mask)
     pad = max(8, round(max(image.size) * 0.01))
-    return Image.fromarray(arr, mode="RGBA").crop(
-        (
-            max(0, int(xs.min()) - pad),
-            max(0, int(ys.min()) - pad),
-            min(image.width, int(xs.max()) + pad + 1),
-            min(image.height, int(ys.max()) + pad + 1),
-        )
-    )
+    return Image.fromarray(arr, mode="RGBA").crop((max(0, int(xs.min()) - pad), max(0, int(ys.min()) - pad), min(image.width, int(xs.max()) + pad + 1), min(image.height, int(ys.max()) + pad + 1)))
 
 
-def _trim_canvas_whitespace(image: Image.Image) -> Image.Image:
+def _trim_background(image: Image.Image) -> Image.Image:
     arr = np.asarray(image.convert("RGBA"), dtype=np.uint8)
     mask = (arr[:, :, 3] > 0) & (np.abs(arr[:, :, :3].astype(np.int16) - 255).max(axis=2) > 8)
     if not np.any(mask):
         return image
     ys, xs = np.nonzero(mask)
     pad = max(12, round(min(image.size) * 0.012))
-    return image.crop(
-        (
-            max(0, int(xs.min()) - pad),
-            max(0, int(ys.min()) - pad),
-            min(image.width, int(xs.max()) + pad + 1),
-            min(image.height, int(ys.max()) + pad + 1),
-        )
-    )
+    return image.crop((max(0, int(xs.min()) - pad), max(0, int(ys.min()) - pad), min(image.width, int(xs.max()) + pad + 1), min(image.height, int(ys.max()) + pad + 1)))
 
 
-def _shadow_offset_from_sun(
-    subject_size: tuple[int, int],
-    *,
-    azimuth_deg: float,
-    elevation_deg: float,
-    distance_ratio: float,
-) -> tuple[int, int]:
+def _shadow_offset_from_sun(subject_size: tuple[int, int], *, azimuth_deg: float, elevation_deg: float, distance_ratio: float) -> tuple[int, int]:
     azimuth = math.radians(float(azimuth_deg))
     elevation = math.radians(float(np.clip(elevation_deg, 0.0, 89.0)))
-    light_x = math.sin(azimuth)
-    light_y = -math.cos(azimuth)
+    light_x, light_y = math.sin(azimuth), -math.cos(azimuth)
     length = max(math.hypot(light_x, light_y), 1e-6)
-    shadow_x = -light_x / length
-    shadow_y = -light_y / length
-    elevation_scale = 0.82 + 0.38 * math.cos(elevation)
-    distance_px = max(3, round(max(subject_size) * distance_ratio * elevation_scale))
-    return (
-        int(round(shadow_x * distance_px)),
-        int(round(shadow_y * distance_px)),
-    )
+    distance = max(3, round(max(subject_size) * distance_ratio * (0.82 + 0.38 * math.cos(elevation))))
+    return int(round((-light_x / length) * distance)), int(round((-light_y / length) * distance))
 
 
-def _make_shadow_layer(
-    subject: Image.Image,
-    *,
-    alpha_scale: int,
-    blur_ratio: float,
-    distance_ratio: float,
-    azimuth_deg: float,
-    elevation_deg: float,
-) -> tuple[Image.Image, tuple[int, int]]:
-    alpha = subject.getchannel("A").point(
-        lambda value: int(round(value * alpha_scale / 255.0))
-    )
-    shadow = Image.new("RGBA", subject.size, SUBJECT_SHADOW_RGB + (0,))
-    shadow.putalpha(alpha)
-    blur_radius = max(2, round(max(subject.size) * blur_ratio))
-    shadow = shadow.filter(ImageFilter.GaussianBlur(radius=blur_radius))
-    offset = _shadow_offset_from_sun(
-        subject.size,
-        azimuth_deg=azimuth_deg,
-        elevation_deg=elevation_deg,
-        distance_ratio=distance_ratio,
-    )
-    return shadow, offset
-
-
-def _make_subject_shadow(
-    subject: Image.Image,
-    *,
-    azimuth_deg: float,
-    elevation_deg: float,
-) -> tuple[Image.Image, tuple[int, int]]:
-    layers = [
-        _make_shadow_layer(
-            subject,
-            alpha_scale=SUBJECT_SHADOW_CONTACT_ALPHA,
-            blur_ratio=SUBJECT_SHADOW_CONTACT_BLUR_RATIO,
-            distance_ratio=SUBJECT_SHADOW_CONTACT_DISTANCE_RATIO,
-            azimuth_deg=azimuth_deg,
-            elevation_deg=elevation_deg,
-        ),
-        _make_shadow_layer(
-            subject,
-            alpha_scale=SUBJECT_SHADOW_TAIL_ALPHA,
-            blur_ratio=SUBJECT_SHADOW_TAIL_BLUR_RATIO,
-            distance_ratio=SUBJECT_SHADOW_TAIL_DISTANCE_RATIO,
-            azimuth_deg=azimuth_deg,
-            elevation_deg=elevation_deg,
-        ),
-    ]
-    min_x = min(offset[0] for _, offset in layers)
-    min_y = min(offset[1] for _, offset in layers)
+def _make_subject_shadow(subject: Image.Image, *, azimuth_deg: float, elevation_deg: float) -> tuple[Image.Image, tuple[int, int]]:
+    layers = []
+    for alpha_scale, blur_ratio, distance_ratio in SHADOW["layers"]:
+        alpha = subject.getchannel("A").point(lambda value, a=alpha_scale: int(round(value * a / 255.0)))
+        shadow = Image.new("RGBA", subject.size, SHADOW["rgb"] + (0,))
+        shadow.putalpha(alpha)
+        shadow = shadow.filter(ImageFilter.GaussianBlur(radius=max(2, round(max(subject.size) * blur_ratio))))
+        offset = _shadow_offset_from_sun(subject.size, azimuth_deg=azimuth_deg, elevation_deg=elevation_deg, distance_ratio=distance_ratio)
+        layers.append((shadow, offset))
+    min_x, min_y = min(offset[0] for _, offset in layers), min(offset[1] for _, offset in layers)
     max_x = max(offset[0] + shadow.width for shadow, offset in layers)
     max_y = max(offset[1] + shadow.height for shadow, offset in layers)
     composite = Image.new("RGBA", (max_x - min_x, max_y - min_y), (0, 0, 0, 0))
@@ -934,322 +649,130 @@ def _make_subject_shadow(
     return composite, (min_x, min_y)
 
 
-def _combine_render_passes(
-    color_raw_path: Path,
-    relief_raw_path: Path,
-    output_path: Path,
-) -> None:
+def _combine_render_passes(color_raw_path: Path, relief_raw_path: Path) -> Image.Image:
     color_image = Image.open(color_raw_path).convert("RGBA")
     relief_image = Image.open(relief_raw_path).convert("RGBA")
     if color_image.size != relief_image.size:
         raise ValueError("Color and relief passes must have identical dimensions")
-
     color = np.asarray(color_image, dtype=np.float32) / 255.0
-    relief_blurred = relief_image.filter(ImageFilter.GaussianBlur(radius=RELIEF_BLEND_BLUR_RADIUS))
-    relief = np.asarray(relief_blurred, dtype=np.float32) / 255.0
-
+    relief = np.asarray(relief_image.filter(ImageFilter.GaussianBlur(radius=COMP["relief_blur"])), dtype=np.float32) / 255.0
     alpha = _subject_alpha(color_image)
     mask = alpha > 0.03
     if not np.any(mask):
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        color_image.save(output_path)
-        return
-
+        return color_image
     luminance = relief[:, :, :3] @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
-    lo = float(np.percentile(luminance[mask], RELIEF_BLEND_LOW_PERCENTILE))
-    hi = float(np.percentile(luminance[mask], RELIEF_BLEND_HIGH_PERCENTILE))
-    shade = np.clip((luminance - lo) / max(hi - lo, 1e-6), 0.0, 1.0)
-    shade = np.clip((shade - 0.5) * RELIEF_BLEND_CONTRAST + 0.5, 0.0, 1.0)
-    shade = np.power(shade, RELIEF_BLEND_GAMMA, dtype=np.float32)
-
+    low = float(np.percentile(luminance[mask], COMP["relief_low"]))
+    high = float(np.percentile(luminance[mask], COMP["relief_high"]))
+    shade = np.clip((luminance - low) / max(high - low, 1e-6), 0.0, 1.0)
+    shade = np.clip((shade - 0.5) * COMP["relief_contrast"] + 0.5, 0.0, 1.0)
+    shade = np.power(shade, COMP["relief_gamma"], dtype=np.float32)
     base_rgb = color[:, :, :3]
     base_value = np.max(base_rgb, axis=2, keepdims=True)
     base_scale = np.divide(base_rgb, np.maximum(base_value, 1e-6))
-    target_value = np.clip(
-        base_value[:, :, 0] * (RELIEF_BLEND_VALUE_FLOOR + RELIEF_BLEND_VALUE_GAIN * shade)
-        + RELIEF_BLEND_HIGHLIGHT_GAIN * np.maximum(shade - RELIEF_BLEND_HIGHLIGHT_START, 0.0),
-        0.0,
-        1.0,
-    )
-
+    target_value = np.clip(base_value[:, :, 0] * (COMP["value_floor"] + COMP["value_gain"] * shade) + COMP["highlight_gain"] * np.maximum(shade - COMP["highlight_start"], 0.0), 0.0, 1.0)
     combined = np.zeros_like(color)
     combined[:, :, :3] = np.clip(base_scale * target_value[:, :, None], 0.0, 1.0)
     combined[:, :, 3] = np.clip(alpha, 0.0, 1.0)
     combined[~mask, :3] = 0.0
+    return Image.fromarray(np.round(combined * 255.0).astype(np.uint8), mode="RGBA")
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(np.round(combined * 255.0).astype(np.uint8), mode="RGBA").save(output_path)
-
-
-def _compose_snapshot(
-    raw_path: Path,
-    output_path: Path,
-    present_classes: list[int],
-    *,
-    sun_azimuth: float,
-    sun_elevation: float,
-) -> None:
-    raw = Image.open(raw_path).convert("RGBA")
+def _compose_snapshot(raw: Image.Image, output_path: Path, present_classes: list[int], *, sun_azimuth: float, sun_elevation: float) -> None:
     subject = _crop_subject(raw)
     width, height = raw.size
-    canvas = Image.new("RGBA", (width, height), COMPOSITION_BACKGROUND_RGBA)
+    canvas = Image.new("RGBA", (width, height), COMP["bg"])
     draw = ImageDraw.Draw(canvas)
     margin = max(20, width // 52)
-    top_gap = max(16, height // 180)
-    section_gap = max(10, height // 220)
-
+    top_gap, section_gap = max(16, height // 180), max(10, height // 220)
     title_font = _load_font(max(28, width // 30), bold=True)
     legend_title_font = _load_font(max(18, width // 48), bold=True)
     legend_font = _load_font(max(14, width // 82))
     caption_font = _load_font(max(12, width // 105))
-
     title_box = draw.textbbox((0, 0), COUNTRY_TITLE, font=title_font)
     title_y = margin
-
-    dot = max(10, legend_font.size - 2)
-    row_gap = max(6, legend_font.size // 3)
-    legend_entries = _legend_entries(present_classes)
-    caption_gap = max(4, caption_font.size // 3)
-    caption_height = len(CAPTION_LINES) * caption_font.size + max(0, len(CAPTION_LINES) - 1) * caption_gap
-    footer_height = caption_height + max(14, height // 120)
-    footer_top = height - margin - footer_height
-
-    legend_label_width = 0
-    for _, label in legend_entries:
-        label_box = draw.textbbox((0, 0), label, font=legend_font)
-        legend_label_width = max(legend_label_width, label_box[2] - label_box[0])
-    legend_title_box = draw.textbbox((0, 0), "Land Cover", font=legend_title_font)
-    legend_columns = 1
-    legend_rows = max(1, math.ceil(len(legend_entries) / legend_columns))
-    column_gap = max(18, width // 110)
-    column_width = dot + 10 + legend_label_width
-    legend_width = max(
-        legend_title_box[2] - legend_title_box[0],
-        legend_columns * column_width + max(0, legend_columns - 1) * column_gap,
-    )
-    legend_height = legend_title_font.size + 10 + legend_rows * dot + max(0, legend_rows - 1) * row_gap
-    legend_gap_above_caption = max(12, height // 180)
-    footer_lift = max(72, height // 36)
-    layout_legend_y = footer_top - legend_height - legend_gap_above_caption
+    entries = _legend_entries(present_classes)
+    dot = max(10, getattr(legend_font, "size", 14) - 2)
+    row_gap = max(6, getattr(legend_font, "size", 14) // 3)
+    caption_gap = max(4, getattr(caption_font, "size", 12) // 3)
+    caption_h = len(CAPTION_LINES) * getattr(caption_font, "size", 12) + max(0, len(CAPTION_LINES) - 1) * caption_gap
+    footer_top = height - margin - (caption_h + max(14, height // 120))
+    legend_h = getattr(legend_title_font, "size", 18) + 10 + len(entries) * dot + max(0, len(entries) - 1) * row_gap
     legend_x = margin
-    legend_y = layout_legend_y - footer_lift
-
-    caption_top = footer_top + max(10, height // 220) - footer_lift
-
+    legend_y = footer_top - legend_h - max(12, height // 180) - max(72, height // 36)
+    caption_top = footer_top + max(10, height // 220) - max(72, height // 36)
     map_top = title_y + (title_box[3] - title_box[1]) + top_gap
-    map_width = max(1, width - margin * 2)
-    map_bottom = footer_top - section_gap
-    map_height = max(1, map_bottom - map_top)
-    if not math.isclose(COMPOSITION_SUBJECT_SCALE, 1.0):
-        subject = subject.resize(
-            (
-                max(1, round(subject.width * COMPOSITION_SUBJECT_SCALE)),
-                max(1, round(subject.height * COMPOSITION_SUBJECT_SCALE)),
-            ),
-            resample=Image.Resampling.LANCZOS,
-        )
-    map_x = (
-        margin
-        + max(0, (map_width - subject.width) // 2)
-        + round(width * COMPOSITION_SUBJECT_SHIFT_X_RATIO)
-    )
-    map_y = (
-        map_top
-        + max(0, (map_height - subject.height) // 2)
-        + round(height * COMPOSITION_SUBJECT_SHIFT_Y_RATIO)
-    )
-    subject_shadow, shadow_offset = _make_subject_shadow(
-        subject,
-        azimuth_deg=sun_azimuth,
-        elevation_deg=sun_elevation,
-    )
-    canvas.alpha_composite(
-        subject_shadow,
-        dest=(map_x + shadow_offset[0], map_y + shadow_offset[1]),
-    )
+    map_w = max(1, width - margin * 2)
+    map_h = max(1, footer_top - section_gap - map_top)
+    if not math.isclose(COMP["scale"], 1.0):
+        subject = subject.resize((max(1, round(subject.width * COMP["scale"])), max(1, round(subject.height * COMP["scale"]))), resample=Image.Resampling.LANCZOS)
+    map_x = margin + max(0, (map_w - subject.width) // 2) + round(width * COMP["shift_x"])
+    map_y = map_top + max(0, (map_h - subject.height) // 2) + round(height * COMP["shift_y"])
+    subject_shadow, shadow_offset = _make_subject_shadow(subject, azimuth_deg=sun_azimuth, elevation_deg=sun_elevation)
+    canvas.alpha_composite(subject_shadow, dest=(map_x + shadow_offset[0], map_y + shadow_offset[1]))
     canvas.alpha_composite(subject, dest=(map_x, map_y))
-
     draw.text((width // 2, title_y), COUNTRY_TITLE, fill=(38, 38, 42), font=title_font, anchor="ma")
     draw.text((legend_x, legend_y), "Land Cover", fill=(54, 54, 60), font=legend_title_font)
-    legend_cursor = legend_y + legend_title_font.size + 10
-    dot = max(10, legend_font.size - 2)
-    for index, (color, label) in enumerate(legend_entries):
-        column = index // legend_rows
-        row = index % legend_rows
-        item_x = legend_x + column * (column_width + column_gap)
+    legend_cursor = legend_y + getattr(legend_title_font, "size", 18) + 10
+    for row, (color, label) in enumerate(entries):
         item_y = legend_cursor + row * (dot + row_gap)
-        draw.ellipse((item_x, item_y, item_x + dot, item_y + dot), fill=color, outline=(160, 160, 160))
-        draw.text((item_x + dot + 10, item_y - 2), label, fill=(72, 72, 78), font=legend_font)
+        draw.ellipse((legend_x, item_y, legend_x + dot, item_y + dot), fill=color, outline=(160, 160, 160))
+        draw.text((legend_x + dot + 10, item_y - 2), label, fill=(72, 72, 78), font=legend_font)
     for index, line in enumerate(CAPTION_LINES):
-        y = caption_top + index * (caption_font.size + caption_gap)
-        draw.text((width // 2, y), line, fill=(82, 82, 88), font=caption_font, anchor="ma")
-
+        draw.text((width // 2, caption_top + index * (getattr(caption_font, "size", 12) + caption_gap)), line, fill=(82, 82, 88), font=caption_font, anchor="ma")
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    _trim_canvas_whitespace(canvas).save(output_path)
+    _trim_background(canvas).save(output_path)
 
 
-def _render(
-    snapshot_path: Path,
-    dem_path: Path,
-    overlay_path: Path,
-    present_classes: list[int],
-    *,
-    hdr_path: Path,
-    hdr_intensity: float,
-    hdr_rotate: float,
-    viewer_width: int,
-    viewer_height: int,
-    snapshot_width: int,
-    snapshot_height: int,
-) -> None:
-    snapshot_path = snapshot_path.resolve()
-    hdr_path = hdr_path.resolve()
-    if not hdr_path.is_file():
-        raise FileNotFoundError(f"HDRI not found: {hdr_path}")
-    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
-    color_raw_snapshot_path = snapshot_path.with_name(f"{snapshot_path.stem}_color_raw.png")
-    relief_raw_snapshot_path = snapshot_path.with_name(f"{snapshot_path.stem}_relief_raw.png")
-    raw_snapshot_path = snapshot_path.with_name(f"{snapshot_path.stem}_raw.png")
-    color_raw_snapshot_path.unlink(missing_ok=True)
-    relief_raw_snapshot_path.unlink(missing_ok=True)
-    raw_snapshot_path.unlink(missing_ok=True)
-    snapshot_path.unlink(missing_ok=True)
-
+def _render(snapshot_path: Path, dem_path: Path, overlay_path: Path, present_classes: list[int]) -> None:
+    hdr = HDR.resolve()
+    if not hdr.is_file():
+        raise FileNotFoundError(f"HDRI not found: {hdr}")
     with rasterio.open(dem_path) as dem_src:
         terrain_width = float(max(dem_src.width, dem_src.height))
-    terrain_xy_scale = terrain_width / REFERENCE_TERRAIN_WIDTH
-    terrain_relief_scale = math.sqrt(max(terrain_xy_scale, 1e-6))
-    radius = BASE_CAMERA_RADIUS * terrain_xy_scale * RELIEF_CAMERA_PULLBACK
-    zscale = BASE_ZSCALE * terrain_relief_scale * RELIEF_EXAGGERATION
-
-    terrain_cmd = dict(TERRAIN_CONFIG)
-    terrain_cmd["radius"] = radius
-    terrain_cmd["zscale"] = zscale
-    color_pbr_config = copy.deepcopy(PBR_CONFIG)
-    color_pbr_config["hdr_path"] = str(hdr_path)
-    color_pbr_config["ibl_intensity"] = float(hdr_intensity)
-    color_pbr_config["hdr_rotate_deg"] = float(hdr_rotate)
-    relief_terrain_cmd = _deep_merge_dict(terrain_cmd, RELIEF_PASS_TERRAIN_OVERRIDES)
-    relief_pbr_config = _deep_merge_dict(color_pbr_config, RELIEF_PASS_PBR_OVERRIDES)
-
-    with f3d.open_viewer_async(
-        terrain_path=dem_path,
-        width=viewer_width,
-        height=viewer_height,
-        timeout=45.0,
-    ) as viewer:
-        viewer.send_ipc({"cmd": "set_terrain", **terrain_cmd})
-        viewer.send_ipc({"cmd": "set_terrain_pbr", **color_pbr_config})
-        viewer.load_overlay(
-            "bosnia_landcover",
-            overlay_path,
-            extent=(0.0, 0.0, 1.0, 1.0),
-            opacity=1.0,
-            preserve_colors=OVERLAY_PRESERVE_COLORS,
-        )
-        viewer.send_ipc({"cmd": "set_overlays_enabled", "enabled": True})
-        viewer.send_ipc({"cmd": "set_overlay_solid", "solid": OVERLAY_SOLID_SURFACE})
-        viewer.send_ipc(
-            {"cmd": "set_overlay_preserve_colors", "preserve_colors": OVERLAY_PRESERVE_COLORS}
-        )
-        time.sleep(PASS_SETTLE_SECONDS)
-        viewer.snapshot(color_raw_snapshot_path, width=snapshot_width, height=snapshot_height)
-
-        viewer.send_ipc({"cmd": "set_terrain", **relief_terrain_cmd})
-        viewer.send_ipc({"cmd": "set_terrain_pbr", **relief_pbr_config})
-        viewer.send_ipc({"cmd": "set_overlays_enabled", "enabled": False})
-        time.sleep(PASS_SETTLE_SECONDS)
-        viewer.snapshot(relief_raw_snapshot_path, width=snapshot_width, height=snapshot_height)
-
-    _combine_render_passes(color_raw_snapshot_path, relief_raw_snapshot_path, raw_snapshot_path)
-    _compose_snapshot(
-        raw_snapshot_path,
-        snapshot_path,
-        present_classes,
-        sun_azimuth=float(terrain_cmd["sun_azimuth"]),
-        sun_elevation=float(terrain_cmd["sun_elevation"]),
-    )
+    terrain_xy = terrain_width / CAMERA["ref"]
+    radius = CAMERA["radius"] * terrain_xy * CAMERA["pullback"]
+    zscale = CAMERA["zscale"] * math.sqrt(max(terrain_xy, 1e-6)) * CAMERA["exaggeration"]
+    terrain_cmd = {**TERRAIN, "radius": radius, "zscale": zscale}
+    relief_terrain = {**terrain_cmd, **RELIEF_TERRAIN}
+    color_pbr = {**PBR, "hdr_path": str(hdr), "height_ao": dict(PBR["height_ao"]), "sun_visibility": dict(PBR["sun_visibility"]), "tonemap": dict(PBR["tonemap"])}
+    relief_pbr = {**color_pbr, **RELIEF_PBR, "height_ao": dict(RELIEF_PBR["height_ao"]), "sun_visibility": dict(RELIEF_PBR["sun_visibility"]), "tonemap": dict(color_pbr["tonemap"])}
+    snapshot_path = snapshot_path.resolve()
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    snapshot_path.unlink(missing_ok=True)
+    with tempfile.TemporaryDirectory(prefix="forge3d_bih_render_") as tmp:
+        color_raw = Path(tmp) / "color_raw.png"
+        relief_raw = Path(tmp) / "relief_raw.png"
+        with f3d.open_viewer_async(terrain_path=dem_path, width=VIEWER_SIZE[0], height=VIEWER_SIZE[1], timeout=45.0) as viewer:
+            viewer.send_ipc({"cmd": "set_terrain", **terrain_cmd})
+            viewer.send_ipc({"cmd": "set_terrain_pbr", **color_pbr})
+            viewer.load_overlay("bosnia_landcover", overlay_path, extent=(0.0, 0.0, 1.0, 1.0), opacity=1.0, preserve_colors=True)
+            viewer.send_ipc({"cmd": "set_overlays_enabled", "enabled": True})
+            viewer.send_ipc({"cmd": "set_overlay_solid", "solid": False})
+            viewer.send_ipc({"cmd": "set_overlay_preserve_colors", "preserve_colors": True})
+            time.sleep(PASS_SETTLE_SECONDS)
+            viewer.snapshot(color_raw, width=SNAPSHOT_SIZE[0], height=SNAPSHOT_SIZE[1])
+            viewer.send_ipc({"cmd": "set_terrain", **relief_terrain})
+            viewer.send_ipc({"cmd": "set_terrain_pbr", **relief_pbr})
+            viewer.send_ipc({"cmd": "set_overlays_enabled", "enabled": False})
+            time.sleep(PASS_SETTLE_SECONDS)
+            viewer.snapshot(relief_raw, width=SNAPSHOT_SIZE[0], height=SNAPSHOT_SIZE[1])
+        raw = _combine_render_passes(color_raw, relief_raw)
+    _compose_snapshot(raw, snapshot_path, present_classes, sun_azimuth=float(terrain_cmd["sun_azimuth"]), sun_elevation=float(terrain_cmd["sun_elevation"]))
 
 
 def main() -> int:
     args = _parse_args()
     output_dir = args.output_dir.resolve()
     cache_dir = args.cache_dir.resolve()
-    target_key = _crs_cache_key(TARGET_CRS)
-    snapshot_path = (
-        args.snapshot.resolve()
-        if args.snapshot is not None
-        else output_dir / "bosnia_landcover_2024.png"
-    )
-
+    snapshot = args.snapshot.resolve() if args.snapshot is not None else output_dir / "bosnia_landcover_2024.png"
     output_dir.mkdir(parents=True, exist_ok=True)
     cache_dir.mkdir(parents=True, exist_ok=True)
-
-    boundary_zip = _download(
-        NATURAL_EARTH_COUNTRIES_URL,
-        cache_dir / "ne_10m_admin_0_countries.zip",
-        force=bool(args.force),
-    )
+    boundary_zip = _download(NATURAL_EARTH, cache_dir / "ne_10m_admin_0_countries.zip", force=bool(args.force))
+    dem_path = _build_dem(boundary_zip, cache_dir, int(args.dem_zoom), force=bool(args.force))
     tile_paths = _download_landcover_tiles(cache_dir, force=bool(args.force))
-    dem_path = _build_dem(
-        boundary_zip,
-        cache_dir,
-        TARGET_CRS,
-        int(args.dem_zoom),
-        force=bool(args.force),
-    )
-    classes_path = _build_landcover_classes(
-        boundary_zip,
-        tile_paths,
-        dem_path,
-        cache_dir,
-        TARGET_CRS,
-        force=bool(args.force),
-    )
-    overlay_cache_path, present_classes = _build_overlay(
-        classes_path,
-        dem_path,
-        _overlay_cache_path(cache_dir),
-        force=bool(args.force),
-    )
-    overlay_path = output_dir / "bosnia_landcover_overlay.png"
-    if not _is_fresh(overlay_path, [overlay_cache_path]) or bool(args.force):
-        shutil.copy2(overlay_cache_path, overlay_path)
-
-    dem_copy_path = output_dir / f"bosnia_dem_{target_key}.tif"
-    if not _is_fresh(dem_copy_path, [dem_path]) or bool(args.force):
-        shutil.copy2(dem_path, dem_copy_path)
-    classes_copy_path = output_dir / f"bosnia_landcover_classes_{target_key}.tif"
-    if not _is_fresh(classes_copy_path, [classes_path]) or bool(args.force):
-        shutil.copy2(classes_path, classes_copy_path)
-
-    print(f"[BIH] DEM: {dem_copy_path}")
-    print(f"[BIH] classes: {classes_copy_path}")
-    print(f"[BIH] overlay: {overlay_path}")
-    print(
-        f"[BIH] hdri: {args.hdr.resolve()} "
-        f"(intensity={float(args.hdr_intensity):.2f}, rotate={float(args.hdr_rotate):.1f} deg)"
-    )
-    print(f"[BIH] visible classes: {', '.join(str(value) for value in present_classes) if present_classes else 'none'}")
-
-    if args.skip_render:
-        print("[BIH] skipping 3D render (--skip-render)")
-        return 0
-
-    _render(
-        snapshot_path,
-        dem_copy_path,
-        overlay_path,
-        present_classes,
-        hdr_path=args.hdr,
-        hdr_intensity=float(args.hdr_intensity),
-        hdr_rotate=float(args.hdr_rotate),
-        viewer_width=int(args.viewer_width),
-        viewer_height=int(args.viewer_height),
-        snapshot_width=int(args.snapshot_width),
-        snapshot_height=int(args.snapshot_height),
-    )
-    print(f"[BIH] snapshot: {snapshot_path}")
+    classes_path = _build_landcover_classes(boundary_zip, tile_paths, dem_path, cache_dir, force=bool(args.force))
+    overlay_path, present = _build_overlay(classes_path, dem_path, _overlay_cache_path(cache_dir), force=bool(args.force))
+    _render(snapshot, dem_path, overlay_path, present)
+    print(snapshot)
     return 0
 
 

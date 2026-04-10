@@ -43,10 +43,14 @@ def load_provider(provider: str) -> Callable[[str], Colormap]:
         return f
     if p == "pycpt":
         def f(path_or_name: str) -> Colormap:
-            # path or name resolved by pycpt loaders
             m = importlib.import_module("pycpt")
-            cmap = m.load(path_or_name)
-            # pycpt returns a Matplotlib cmap
+            if hasattr(m, "load"):
+                cmap = m.load(path_or_name)
+            elif hasattr(m, "read"):
+                palette = m.read(path_or_name)
+                cmap = getattr(palette, "cmap", palette)
+            else:
+                raise AttributeError("pycpt exposes neither load() nor read()")
             return _mpl_to_colormap(cmap, f"pycpt:{path_or_name}")
         return f
     raise KeyError(f"Unknown provider: {provider}")

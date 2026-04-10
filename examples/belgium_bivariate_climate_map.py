@@ -31,7 +31,7 @@ import numpy as np
 import rasterio
 import rioxarray  # noqa: F401
 import xarray as xr
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from rasterio.enums import Resampling
 from rasterio.features import geometry_mask
 from rasterio.transform import from_bounds
@@ -49,6 +49,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "examples" / "out" / "belgium_bivariate_climate"
 DEFAULT_CACHE_DIR = PROJECT_ROOT / "examples" / ".cache" / "belgium_bivariate_climate"
 DEFAULT_TARGET_CRS = "EPSG:3035"
+HDR_PATH = PROJECT_ROOT / "assets" / "hdri" / "brown_photostudio_02_4k.hdr"
 
 NATURAL_EARTH_COUNTRIES_URL = (
     "https://naturalearth.s3.amazonaws.com/10m_cultural/ne_10m_admin_0_countries.zip"
@@ -74,23 +75,115 @@ TERRACLIMATE_RETRIES = 3
 REFERENCE_TERRAIN_WIDTH = 365.0
 BASE_TERRAIN_ZSCALE = 0.12
 MAP_SCALE_2D = 1.12
+VIEWER_SETTLE_SECONDS = 2.0
 
 MAP_TITLE = "BELGIUM: Temperature and Precipitation"
 MAP_CAPTION = (
     "Sources: TerraClimate + AWS Terrain Tiles | ©2026 Milos Popovic (milospopovic.net)"
 )
 
-# Categorical palettes need gentler lighting than land-cover textures. Strong AO,
-# self-shadowing, and exaggerated normals make preserve_colors overlays read
-# much darker than their source swatches.
-OVERLAY_SUN_AZIMUTH = 318.0
-OVERLAY_SUN_ELEVATION = 42.0
-OVERLAY_SUN_INTENSITY = 0.92
-OVERLAY_AMBIENT = 0.52
-OVERLAY_SHADOW = 0.18
-OVERLAY_EXPOSURE = 1.16
-OVERLAY_IBL_INTENSITY = 0.55
-OVERLAY_NORMAL_STRENGTH = 1.2
+COLOR_TERRAIN = {
+    "phi": 90.0,
+    "theta": 22.0,
+    "fov": 24.0,
+    "sun_azimuth": 320.0,
+    "sun_elevation": 34.0,
+    "sun_intensity": 1.14,
+    "ambient": 0.56,
+    "shadow": 0.28,
+    "background": [1.0, 1.0, 1.0],
+}
+COLOR_PBR = {
+    "enabled": True,
+    "shadow_technique": "pcss",
+    "shadow_map_res": 4096,
+    "exposure": 1.06,
+    "msaa": 8,
+    "ibl_intensity": 0.12,
+    "normal_strength": 0.96,
+    "height_ao": {
+        "enabled": True,
+        "directions": 6,
+        "steps": 14,
+        "max_distance": 120.0,
+        "strength": 0.12,
+        "resolution_scale": 0.58,
+    },
+    "sun_visibility": {
+        "enabled": True,
+        "mode": "soft",
+        "samples": 1,
+        "steps": 22,
+        "max_distance": 900.0,
+        "softness": 0.28,
+        "bias": 0.0034,
+        "resolution_scale": 0.62,
+    },
+    "tonemap": {
+        "operator": "aces",
+        "white_point": 5.0,
+        "white_balance_enabled": True,
+        "temperature": 6500.0,
+        "tint": 0.0,
+    },
+}
+RELIEF_TERRAIN = {
+    "sun_elevation": 18.0,
+    "sun_intensity": 3.35,
+    "ambient": 0.38,
+    "shadow": 0.68,
+}
+RELIEF_PBR = {
+    "exposure": 1.02,
+    "ibl_intensity": 0.03,
+    "normal_strength": 1.48,
+    "height_ao": {
+        "enabled": True,
+        "directions": 8,
+        "steps": 20,
+        "max_distance": 180.0,
+        "strength": 0.24,
+        "resolution_scale": 0.68,
+    },
+    "sun_visibility": {
+        "enabled": True,
+        "mode": "hard",
+        "samples": 1,
+        "steps": 72,
+        "max_distance": 1600.0,
+        "softness": 0.0,
+        "bias": 0.0029,
+        "resolution_scale": 0.82,
+    },
+}
+COMPOSE_3D = {
+    "bg": (248, 247, 242, 255),
+    "scale": 1.11,
+    "shift_x": 0.045,
+    "shift_y": -0.008,
+    "mask_min": 4.0,
+    "mask_max": 18.0,
+    "relief_blur": 2.6,
+    "relief_low": 8.0,
+    "relief_high": 95.0,
+    "relief_contrast": 1.08,
+    "relief_gamma": 1.00,
+    "value_floor": 0.84,
+    "value_gain": 0.19,
+    "highlight_start": 0.76,
+    "highlight_gain": 0.02,
+}
+COMPOSE_2D = {
+    "bg": (248, 247, 242, 255),
+    "shadow_color": (146, 148, 156),
+    "shadow_alpha": 62,
+    "shadow_blur": 30,
+    "shift_x": 0.050,
+}
+SHADOW_3D = {
+    "rgb": (142, 148, 157),
+    "layers": ((44, 0.004, 0.010), (20, 0.010, 0.024)),
+}
 
 BLUEGOLD_4X4 = {
     (1, 1): "#d3d3d3",
@@ -677,11 +770,6 @@ def _make_legend(*, panel_alpha: int = 255) -> Image.Image:
     return panel
 
 
-def _measure_centered(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> int:
-    box = draw.textbbox((0, 0), text, font=font)
-    return box[2] - box[0]
-
-
 def _measure_text(
     draw: ImageDraw.ImageDraw,
     text: str,
@@ -691,22 +779,156 @@ def _measure_text(
     return box[2] - box[0], box[3] - box[1]
 
 
+def _subject_alpha(image: Image.Image, *, mask_min: float, mask_max: float) -> np.ndarray:
+    arr = np.asarray(image.convert("RGBA"), dtype=np.uint8)
+    src_alpha = arr[:, :, 3].astype(np.float32) / 255.0
+    coverage = float(np.count_nonzero(src_alpha > 0.03)) / float(src_alpha.size)
+    if 0.0 < coverage < 0.98:
+        return src_alpha
+    corners = np.asarray(
+        [arr[0, 0, :3], arr[0, -1, :3], arr[-1, 0, :3], arr[-1, -1, :3]],
+        dtype=np.float32,
+    )
+    bg = np.median(corners, axis=0)
+    dist = np.abs(arr[:, :, :3].astype(np.float32) - bg[None, None, :]).max(axis=2)
+    span = max(float(mask_max) - float(mask_min), 1e-6)
+    alpha = np.clip((dist - float(mask_min)) / span, 0.0, 1.0)
+    return alpha * (arr[:, :, 3] > 0).astype(np.float32)
+
+
+def _crop_subject(image: Image.Image, *, alpha: np.ndarray | None = None) -> Image.Image:
+    if alpha is None:
+        alpha = np.asarray(image.getchannel("A"), dtype=np.float32) / 255.0
+    mask = alpha > 0.03
+    if not np.any(mask):
+        return image
+    arr = np.asarray(image.convert("RGBA"), dtype=np.uint8).copy()
+    arr[:, :, 3] = np.round(np.clip(alpha, 0.0, 1.0) * 255.0).astype(np.uint8)
+    ys, xs = np.nonzero(mask)
+    pad = max(10, round(max(image.size) * 0.012))
+    return Image.fromarray(arr, mode="RGBA").crop(
+        (
+            max(0, int(xs.min()) - pad),
+            max(0, int(ys.min()) - pad),
+            min(image.width, int(xs.max()) + pad + 1),
+            min(image.height, int(ys.max()) + pad + 1),
+        )
+    )
+
+
+def _shadow_offset_from_sun(
+    subject_size: tuple[int, int],
+    *,
+    azimuth_deg: float,
+    elevation_deg: float,
+    distance_ratio: float,
+) -> tuple[int, int]:
+    azimuth = math.radians(float(azimuth_deg))
+    elevation = math.radians(float(np.clip(elevation_deg, 0.0, 89.0)))
+    light_x, light_y = math.sin(azimuth), -math.cos(azimuth)
+    length = max(math.hypot(light_x, light_y), 1e-6)
+    distance = max(
+        3,
+        round(max(subject_size) * distance_ratio * (0.82 + 0.38 * math.cos(elevation))),
+    )
+    return int(round((-light_x / length) * distance)), int(round((-light_y / length) * distance))
+
+
+def _make_subject_shadow(
+    subject: Image.Image,
+    *,
+    azimuth_deg: float,
+    elevation_deg: float,
+) -> tuple[Image.Image, tuple[int, int]]:
+    layers = []
+    for alpha_scale, blur_ratio, distance_ratio in SHADOW_3D["layers"]:
+        alpha = subject.getchannel("A").point(
+            lambda value, a=alpha_scale: int(round(value * a / 255.0))
+        )
+        shadow = Image.new("RGBA", subject.size, SHADOW_3D["rgb"] + (0,))
+        shadow.putalpha(alpha)
+        shadow = shadow.filter(
+            ImageFilter.GaussianBlur(radius=max(2, round(max(subject.size) * blur_ratio)))
+        )
+        offset = _shadow_offset_from_sun(
+            subject.size,
+            azimuth_deg=azimuth_deg,
+            elevation_deg=elevation_deg,
+            distance_ratio=distance_ratio,
+        )
+        layers.append((shadow, offset))
+    min_x = min(offset[0] for _, offset in layers)
+    min_y = min(offset[1] for _, offset in layers)
+    max_x = max(offset[0] + shadow.width for shadow, offset in layers)
+    max_y = max(offset[1] + shadow.height for shadow, offset in layers)
+    composite = Image.new("RGBA", (max_x - min_x, max_y - min_y), (0, 0, 0, 0))
+    for shadow, offset in layers:
+        composite.alpha_composite(shadow, dest=(offset[0] - min_x, offset[1] - min_y))
+    return composite, (min_x, min_y)
+
+
+def _combine_render_passes(color_raw_path: Path, relief_raw_path: Path) -> Image.Image:
+    color_image = Image.open(color_raw_path).convert("RGBA")
+    relief_image = Image.open(relief_raw_path).convert("RGBA")
+    if color_image.size != relief_image.size:
+        raise ValueError("Color and relief passes must have identical dimensions")
+
+    color = np.asarray(color_image, dtype=np.float32) / 255.0
+    relief = np.asarray(
+        relief_image.filter(ImageFilter.GaussianBlur(radius=COMPOSE_3D["relief_blur"])),
+        dtype=np.float32,
+    ) / 255.0
+    alpha = _subject_alpha(
+        color_image,
+        mask_min=COMPOSE_3D["mask_min"],
+        mask_max=COMPOSE_3D["mask_max"],
+    )
+    mask = alpha > 0.03
+    if not np.any(mask):
+        return color_image
+
+    luminance = relief[:, :, :3] @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    low = float(np.percentile(luminance[mask], COMPOSE_3D["relief_low"]))
+    high = float(np.percentile(luminance[mask], COMPOSE_3D["relief_high"]))
+    shade = np.clip((luminance - low) / max(high - low, 1e-6), 0.0, 1.0)
+    shade = np.clip((shade - 0.5) * COMPOSE_3D["relief_contrast"] + 0.5, 0.0, 1.0)
+    shade = np.power(shade, COMPOSE_3D["relief_gamma"], dtype=np.float32)
+
+    base_rgb = color[:, :, :3]
+    base_value = np.max(base_rgb, axis=2, keepdims=True)
+    base_scale = np.divide(base_rgb, np.maximum(base_value, 1e-6))
+    target_value = np.clip(
+        base_value[:, :, 0]
+        * (COMPOSE_3D["value_floor"] + COMPOSE_3D["value_gain"] * shade)
+        + COMPOSE_3D["highlight_gain"]
+        * np.maximum(shade - COMPOSE_3D["highlight_start"], 0.0),
+        0.0,
+        1.0,
+    )
+    combined = np.zeros_like(color)
+    combined[:, :, :3] = np.clip(base_scale * target_value[:, :, None], 0.0, 1.0)
+    combined[:, :, 3] = np.clip(alpha, 0.0, 1.0)
+    combined[~mask, :3] = 0.0
+    return Image.fromarray(np.round(combined * 255.0).astype(np.uint8), mode="RGBA")
+
+
 def _compose_2d(texture_rgba: np.ndarray, output_path: Path, *, subtitle: str) -> None:
     texture = Image.fromarray(texture_rgba, mode="RGBA")
-    scaled = texture.resize(
+    subject = texture.resize(
         (int(texture.width * MAP_SCALE_2D), int(texture.height * MAP_SCALE_2D)),
         Image.Resampling.NEAREST,
     )
-    legend = _make_legend(panel_alpha=255).resize((1600, 1210), Image.Resampling.LANCZOS)
-    width = max(scaled.width + 70, 2200)
-    footer_height = 92
-    top_margin = 18
-    title_gap = 20
-    subtitle_gap = 26
-    title_font = _load_font(66, bold=True)
+    legend = _make_legend(panel_alpha=244).resize((1040, 786), Image.Resampling.LANCZOS)
+    width = max(subject.width + 520, 2600)
+    footer_height = 110
+    top_margin = 28
+    title_gap = 16
+    subtitle_gap = 24
+    panel_margin = 34
+    title_font = _load_font(72, bold=True)
     subtitle_font = _load_font(36)
     caption_font = _load_font(28)
-    metrics_draw = ImageDraw.Draw(Image.new("RGBA", (1, 1), (255, 255, 255, 0)))
+    metrics_draw = ImageDraw.Draw(Image.new("RGBA", (1, 1), COMPOSE_2D["bg"]))
 
     title_w, title_h = _measure_text(metrics_draw, MAP_TITLE, title_font)
     subtitle_w, subtitle_h = _measure_text(metrics_draw, subtitle, subtitle_font)
@@ -714,22 +936,47 @@ def _compose_2d(texture_rgba: np.ndarray, output_path: Path, *, subtitle: str) -
     title_y = top_margin
     subtitle_y = title_y + title_h + title_gap
     map_y = subtitle_y + subtitle_h + subtitle_gap
-    height = map_y + scaled.height + 22 + footer_height
-    canvas = Image.new("RGBA", (width, height), (255, 255, 255, 255))
+    height = map_y + subject.height + 44 + footer_height
+    canvas = Image.new("RGBA", (width, height), COMPOSE_2D["bg"])
     draw = ImageDraw.Draw(canvas)
-    map_x = (width - scaled.width) // 2
-    canvas.alpha_composite(scaled, dest=(map_x, map_y))
+    map_x = (width - subject.width) // 2 + round(width * COMPOSE_2D["shift_x"])
+    map_shadow = Image.new("RGBA", subject.size, COMPOSE_2D["shadow_color"] + (0,))
+    map_shadow.putalpha(
+        subject.getchannel("A").point(
+            lambda value: int(round(value * COMPOSE_2D["shadow_alpha"] / 255.0))
+        )
+    )
+    map_shadow = map_shadow.filter(ImageFilter.GaussianBlur(radius=COMPOSE_2D["shadow_blur"]))
+    canvas.alpha_composite(map_shadow, dest=(map_x + 26, map_y + 34))
+    canvas.alpha_composite(subject, dest=(map_x, map_y))
 
-    draw.text(((width - title_w) / 2, title_y), MAP_TITLE, fill=(35, 35, 40, 255), font=title_font)
-    draw.text(((width - subtitle_w) / 2, subtitle_y), subtitle, fill=(70, 70, 78, 255), font=subtitle_font)
-    canvas.alpha_composite(legend, dest=(34, height - footer_height - legend.height - 18))
+    draw.text(((width - title_w) / 2, title_y), MAP_TITLE, fill=(36, 35, 40, 255), font=title_font)
+    draw.text(
+        ((width - subtitle_w) / 2, subtitle_y),
+        subtitle,
+        fill=(78, 77, 84, 255),
+        font=subtitle_font,
+    )
+    legend_panel = (
+        panel_margin,
+        height - footer_height - legend.height - 28,
+        panel_margin + legend.width + 16,
+        height - footer_height - 12,
+    )
+    draw.rounded_rectangle(
+        legend_panel,
+        radius=26,
+        fill=(255, 255, 255, 208),
+        outline=(232, 231, 226, 255),
+        width=2,
+    )
+    canvas.alpha_composite(legend, dest=(legend_panel[0] + 8, legend_panel[1] + 8))
     footer_y = height - footer_height
-    draw.rectangle((0, footer_y, width, height), fill=(247, 247, 249, 255))
-    draw.line((0, footer_y, width, footer_y), fill=(222, 222, 228, 255), width=2)
+    draw.line((0, footer_y, width, footer_y), fill=(226, 223, 217, 255), width=2)
     draw.text(
         ((width - caption_w) / 2, footer_y + (footer_height - caption_h) / 2 - 1),
         MAP_CAPTION,
-        fill=(58, 58, 66, 255),
+        fill=(92, 90, 94, 255),
         font=caption_font,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -765,56 +1012,91 @@ def _save_texture(path: Path, texture_rgba: np.ndarray) -> Path:
     return path
 
 
-def _annotate_3d_snapshot(raw_path: Path, final_path: Path, *, subtitle: str) -> None:
-    image = Image.open(raw_path).convert("RGBA")
-    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    title_font = _load_font(max(44, image.width // 36), bold=True)
-    subtitle_font = _load_font(max(26, image.width // 62))
-    caption_font = _load_font(max(24, image.width // 82))
-    legend = _make_legend(panel_alpha=238).resize((800, 606), Image.Resampling.LANCZOS)
+def _compose_3d_snapshot(raw: Image.Image, final_path: Path, *, subtitle: str) -> None:
+    alpha = _subject_alpha(
+        raw,
+        mask_min=COMPOSE_3D["mask_min"],
+        mask_max=COMPOSE_3D["mask_max"],
+    )
+    subject = _crop_subject(raw, alpha=alpha)
+    width, height = raw.size
+    canvas = Image.new("RGBA", (width, height), COMPOSE_3D["bg"])
+    draw = ImageDraw.Draw(canvas)
 
-    title_w, title_h = _measure_text(draw, MAP_TITLE, title_font)
-    subtitle_w, subtitle_h = _measure_text(draw, subtitle, subtitle_font)
-    caption_w, caption_h = _measure_text(draw, MAP_CAPTION, caption_font)
-    panel_margin = max(18, image.width // 70)
-    top_panel_height = max(152, title_h + subtitle_h + 72, image.height // 8)
-    top_panel = (
-        panel_margin,
-        panel_margin,
-        image.width - panel_margin,
-        panel_margin + top_panel_height,
+    margin = max(20, width // 54)
+    top_gap = max(14, height // 180)
+    section_gap = max(10, height // 230)
+    title_font = _load_font(max(30, width // 30), bold=True)
+    subtitle_font = _load_font(max(16, width // 66))
+    caption_font = _load_font(max(13, width // 108))
+    title_box = draw.textbbox((0, 0), MAP_TITLE, font=title_font)
+    subtitle_box = draw.textbbox((0, 0), subtitle, font=subtitle_font)
+    caption_box = draw.textbbox((0, 0), MAP_CAPTION, font=caption_font)
+    title_y = margin
+    subtitle_y = title_y + (title_box[3] - title_box[1]) + 12
+    footer_height = (caption_box[3] - caption_box[1]) + max(34, height // 96)
+    footer_top = height - margin - footer_height
+    map_top = subtitle_y + (subtitle_box[3] - subtitle_box[1]) + top_gap
+    map_h = max(1, footer_top - section_gap - map_top)
+    map_w = max(1, width - margin * 2)
+    if not math.isclose(COMPOSE_3D["scale"], 1.0):
+        subject = subject.resize(
+            (
+                max(1, round(subject.width * COMPOSE_3D["scale"])),
+                max(1, round(subject.height * COMPOSE_3D["scale"])),
+            ),
+            resample=Image.Resampling.LANCZOS,
+        )
+    map_x = margin + max(0, (map_w - subject.width) // 2) + round(width * COMPOSE_3D["shift_x"])
+    map_y = map_top + max(0, (map_h - subject.height) // 2) + round(height * COMPOSE_3D["shift_y"])
+    legend = _make_legend(panel_alpha=242).resize((740, 560), Image.Resampling.LANCZOS)
+    legend_panel = (
+        margin,
+        footer_top - legend.height - max(28, height // 120),
+        margin + legend.width + 18,
+        footer_top - 8,
     )
-    title_y = top_panel[1] + 16
-    subtitle_y = title_y + title_h + 18
-    draw.rounded_rectangle(top_panel, radius=24, fill=(255, 255, 255, 205))
-    draw.text(((image.width - title_w) / 2, title_y), MAP_TITLE, fill=(25, 25, 30, 255), font=title_font)
-    draw.text(((image.width - subtitle_w) / 2, subtitle_y), subtitle, fill=(58, 58, 66, 255), font=subtitle_font)
-    overlay.alpha_composite(legend, dest=(panel_margin, image.height - legend.height - panel_margin))
-    caption_pad_x = max(18, image.width // 110)
-    caption_pad_y = max(12, image.height // 170)
+    caption_panel_width = (caption_box[2] - caption_box[0]) + max(90, width // 24)
     caption_panel = (
-        image.width - panel_margin - caption_w - (caption_pad_x * 2),
-        image.height - panel_margin - caption_h - (caption_pad_y * 2),
-        image.width - panel_margin,
-        image.height - panel_margin,
+        width - margin - caption_panel_width,
+        footer_top,
+        width - margin,
+        height - margin,
     )
+
+    subject_shadow, shadow_offset = _make_subject_shadow(
+        subject,
+        azimuth_deg=float(COLOR_TERRAIN["sun_azimuth"]),
+        elevation_deg=float(COLOR_TERRAIN["sun_elevation"]),
+    )
+    canvas.alpha_composite(subject_shadow, dest=(map_x + shadow_offset[0], map_y + shadow_offset[1]))
+    canvas.alpha_composite(subject, dest=(map_x, map_y))
+    draw.text((width // 2, title_y), MAP_TITLE, fill=(38, 37, 42), font=title_font, anchor="ma")
+    draw.text((width // 2, subtitle_y), subtitle, fill=(78, 76, 82), font=subtitle_font, anchor="ma")
+    draw.rounded_rectangle(
+        legend_panel,
+        radius=24,
+        fill=(255, 255, 255, 208),
+        outline=(230, 227, 221, 255),
+        width=2,
+    )
+    canvas.alpha_composite(legend, dest=(legend_panel[0] + 9, legend_panel[1] + 9))
     draw.rounded_rectangle(
         caption_panel,
         radius=22,
-        fill=(255, 255, 255, 218),
-        outline=(255, 255, 255, 240),
+        fill=(255, 255, 255, 214),
+        outline=(232, 229, 224, 255),
         width=2,
     )
     draw.text(
-        (caption_panel[0] + caption_pad_x, caption_panel[1] + caption_pad_y - 1),
+        ((caption_panel[0] + caption_panel[2]) / 2, (caption_panel[1] + caption_panel[3]) / 2 - 2),
         MAP_CAPTION,
-        fill=(30, 30, 36, 255),
+        fill=(86, 84, 90, 255),
         font=caption_font,
+        anchor="mm",
     )
-
     final_path.parent.mkdir(parents=True, exist_ok=True)
-    Image.alpha_composite(image, overlay).save(final_path)
+    canvas.save(final_path)
 
 
 def _render_3d(
@@ -831,6 +1113,9 @@ def _render_3d(
     cam_radius: float,
     cam_fov: float,
 ) -> None:
+    hdr = HDR_PATH.resolve()
+    if not hdr.is_file():
+        raise FileNotFoundError(f"HDRI not found: {hdr}")
     with rasterio.open(dem_path) as dem_src:
         terrain_width = float(max(dem_src.width, dem_src.height))
     terrain_xy_scale = terrain_width / REFERENCE_TERRAIN_WIDTH
@@ -839,55 +1124,64 @@ def _render_3d(
     zscale = BASE_TERRAIN_ZSCALE * terrain_relief_scale
 
     raw_output_path.parent.mkdir(parents=True, exist_ok=True)
-    with f3d.open_viewer_async(
-        terrain_path=dem_path,
-        width=viewer_size[0],
-        height=viewer_size[1],
-        fov_deg=32.0,
-        timeout=45.0,
-    ) as viewer:
-        viewer.send_ipc(
-            {
-                "cmd": "set_terrain",
-                "phi": cam_phi,
-                "theta": cam_theta,
-                "radius": camera_radius,
-                "fov": cam_fov,
-                "zscale": zscale,
-                "sun_azimuth": OVERLAY_SUN_AZIMUTH,
-                "sun_elevation": OVERLAY_SUN_ELEVATION,
-                "sun_intensity": OVERLAY_SUN_INTENSITY,
-                "ambient": OVERLAY_AMBIENT,
-                "shadow": OVERLAY_SHADOW,
-                "background": [1.0, 1.0, 1.0],
-            }
-        )
-        viewer.send_ipc(
-            {
-                "cmd": "set_terrain_pbr",
-                "enabled": True,
-                "shadow_technique": "none",
-                "exposure": OVERLAY_EXPOSURE,
-                "msaa": 8,
-                "ibl_intensity": OVERLAY_IBL_INTENSITY,
-                "normal_strength": OVERLAY_NORMAL_STRENGTH,
-                "height_ao": {"enabled": False},
-                "sun_visibility": {"enabled": False},
-            }
-        )
-        viewer.load_overlay(
-            name="belgium_climate",
-            path=texture_path,
-            extent=(0.0, 0.0, 1.0, 1.0),
-            opacity=1.0,
-            z_order=0,
-            preserve_colors=True,
-        )
-        viewer.send_ipc({"cmd": "set_overlays_enabled", "enabled": True})
-        viewer.send_ipc({"cmd": "set_overlay_solid", "solid": True})
-        time.sleep(2.0)
-        viewer.snapshot(raw_output_path, width=snapshot_size[0], height=snapshot_size[1])
-    _annotate_3d_snapshot(raw_output_path, final_output_path, subtitle=subtitle)
+    terrain_cmd = {
+        **COLOR_TERRAIN,
+        "phi": cam_phi,
+        "theta": cam_theta,
+        "radius": camera_radius,
+        "fov": cam_fov,
+        "zscale": zscale,
+    }
+    relief_terrain = {**terrain_cmd, **RELIEF_TERRAIN}
+    color_pbr = {
+        **COLOR_PBR,
+        "hdr_path": str(hdr),
+        "height_ao": dict(COLOR_PBR["height_ao"]),
+        "sun_visibility": dict(COLOR_PBR["sun_visibility"]),
+        "tonemap": dict(COLOR_PBR["tonemap"]),
+    }
+    relief_pbr = {
+        **color_pbr,
+        **RELIEF_PBR,
+        "height_ao": dict(RELIEF_PBR["height_ao"]),
+        "sun_visibility": dict(RELIEF_PBR["sun_visibility"]),
+        "tonemap": dict(color_pbr["tonemap"]),
+    }
+
+    with tempfile.TemporaryDirectory(prefix="forge3d_bel_render_") as tmp:
+        color_raw = Path(tmp) / "color_raw.png"
+        relief_raw = Path(tmp) / "relief_raw.png"
+        with f3d.open_viewer_async(
+            terrain_path=dem_path,
+            width=viewer_size[0],
+            height=viewer_size[1],
+            fov_deg=32.0,
+            timeout=45.0,
+        ) as viewer:
+            viewer.send_ipc({"cmd": "set_terrain", **terrain_cmd})
+            viewer.send_ipc({"cmd": "set_terrain_pbr", **color_pbr})
+            viewer.load_overlay(
+                name="belgium_climate",
+                path=texture_path,
+                extent=(0.0, 0.0, 1.0, 1.0),
+                opacity=1.0,
+                z_order=0,
+                preserve_colors=True,
+            )
+            viewer.send_ipc({"cmd": "set_overlays_enabled", "enabled": True})
+            viewer.send_ipc({"cmd": "set_overlay_solid", "solid": False})
+            viewer.send_ipc({"cmd": "set_overlay_preserve_colors", "preserve_colors": True})
+            time.sleep(VIEWER_SETTLE_SECONDS)
+            viewer.snapshot(color_raw, width=snapshot_size[0], height=snapshot_size[1])
+
+            viewer.send_ipc({"cmd": "set_terrain", **relief_terrain})
+            viewer.send_ipc({"cmd": "set_terrain_pbr", **relief_pbr})
+            viewer.send_ipc({"cmd": "set_overlays_enabled", "enabled": False})
+            time.sleep(VIEWER_SETTLE_SECONDS)
+            viewer.snapshot(relief_raw, width=snapshot_size[0], height=snapshot_size[1])
+        combined = _combine_render_passes(color_raw, relief_raw)
+    combined.save(raw_output_path)
+    _compose_3d_snapshot(combined, final_output_path, subtitle=subtitle)
 
 
 def _print_summary(
