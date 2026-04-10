@@ -32,8 +32,6 @@ CLEAN_DEM = OUTPUT_DIR / "pol_pd_clean_height_shade.tif"
 OVERLAY_PATH = OUTPUT_DIR / "poland_magma_height_shade_overlay.png"
 SNAPSHOT_PATH = OUTPUT_DIR / "poland_spikes_height_shade_raw.png"
 FINAL_PATH = OUTPUT_DIR / "poland_population_spikes_height_shade_4k.png"
-LEGEND_REFERENCE_PATH = OUTPUT_DIR / "legend_like_1_45_0_5.png"
-
 WINDOW_SIZE = base.WINDOW_SIZE
 SNAP_SIZE = base.SNAP_SIZE
 BG_COLOR = base.BG_COLOR
@@ -42,9 +40,6 @@ HEIGHT_GAMMA = 1.45
 COLOR_GAMMA = 1.12
 COLOR_FLOOR_SHADE = 0.28
 COLOR_SAT_BOOST = 1.42
-REFERENCE_GAMMA = 0.95
-REFERENCE_SATURATION = 1.30
-REFERENCE_CONTRAST = 1.08
 
 
 def configure_base_module() -> None:
@@ -333,19 +328,6 @@ def cleanup_snapshot(raw: np.ndarray) -> np.ndarray:
     final_bg = bg_mask | ((structure_conf < 0.08) & (vis_mix < 0.18))
     result[final_bg] = [3, 3, 5]
     return result
-
-
-def grade_approved_reference() -> np.ndarray:
-    """Match the approved reference plate exactly, then make it less pale."""
-    reference = np.array(Image.open(str(LEGEND_REFERENCE_PATH)).convert("RGB"), dtype=np.float32) / 255.0
-    graded = np.clip(reference, 0.0, 1.0) ** REFERENCE_GAMMA
-    graded *= 255.0
-    mean = np.mean(graded, axis=2, keepdims=True)
-    graded = mean + (graded - mean) * REFERENCE_SATURATION
-    graded = 128.0 + (graded - 128.0) * REFERENCE_CONTRAST
-    return np.clip(graded, 0.0, 255.0).astype(np.uint8)
-
-
 def main() -> int:
     configure_base_module()
 

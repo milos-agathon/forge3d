@@ -1,7 +1,6 @@
 use super::*;
 
 impl SsgiRenderer {
-    #[allow(dead_code)]
     pub fn get_output(&self) -> &TextureView {
         &self.ssgi_filtered_view
     }

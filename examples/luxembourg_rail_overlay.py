@@ -50,11 +50,9 @@ from forge3d.interactive import run_interactive_loop
 
 # P0.3/M2: Sun ephemeris - calculate realistic sun position from location and time
 try:
-    from forge3d import sun_position, sun_position_utc, SunPosition
+    from forge3d import sun_position
 except ImportError:
     def sun_position(*args, **kwargs): raise NotImplementedError("Sun ephemeris requires native build (maturin develop --release)")
-    def sun_position_utc(*args, **kwargs): raise NotImplementedError("Sun ephemeris requires native build (maturin develop --release)")
-    class SunPosition: pass
 
 try:
     import numpy as np
@@ -77,10 +75,8 @@ except ImportError:
 
 try:
     import geopandas as gpd
-    HAS_GPD = True
 except ImportError:
     gpd = None
-    HAS_GPD = False
 
 try:
     import rasterio
@@ -100,10 +96,8 @@ except ImportError:
 
 try:
     from PIL import Image
-    HAS_PIL = True
 except ImportError:
     Image = None
-    HAS_PIL = False
 
 # find_viewer_binary, send_ipc imported from forge3d.viewer_ipc
 # hex_to_rgba imported from forge3d.colors
@@ -302,7 +296,7 @@ def _add_linestring_as_quads(coords: list, color: list, vertices: list, indices:
     
     # First convert all coords to viewer terrain space.
     world_coords = []
-    for x, y, *rest in coords:
+    for x, y, *_ in coords:
         world_x, world_z = _project_coord_to_terrain_world(
             x,
             y,

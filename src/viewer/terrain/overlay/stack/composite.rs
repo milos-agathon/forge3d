@@ -143,12 +143,6 @@ fn layer_pixels(layer: &OverlayLayerGpu) -> Option<(&[u8], u32, u32)> {
             width,
             height,
         } => Some((rgba.as_slice(), *width, *height)),
-        OverlayData::Image { path } => {
-            if let Ok(img) = image::open(path) {
-                let _rgba_img = img.to_rgba8();
-            }
-            None
-        }
     }
 }
 

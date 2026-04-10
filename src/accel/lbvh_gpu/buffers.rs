@@ -1,6 +1,5 @@
 use super::*;
 
-#[allow(dead_code)]
 /// GPU buffer collection for BVH construction
 pub(super) struct GpuBuffers {
     pub(super) centroids_buffer: Buffer,
@@ -13,7 +12,7 @@ pub(super) struct GpuBuffers {
     pub(super) sort_temp_values: Buffer,
     pub(super) sort_histogram: Buffer,
     pub(super) sort_prefix_sums: Buffer,
-    pub(super) node_flags_buffer: Buffer,
+    pub(super) _node_flags_buffer: Buffer,
 }
 
 impl GpuBvhBuilder {
@@ -118,7 +117,7 @@ impl GpuBvhBuilder {
                 mapped_at_creation: false,
             }),
 
-            node_flags_buffer: self.device.create_buffer(&wgpu::BufferDescriptor {
+            _node_flags_buffer: self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Node Flags"),
                 size: (node_count * 4) as u64,
                 usage: BufferUsages::STORAGE,

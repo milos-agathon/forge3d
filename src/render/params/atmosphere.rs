@@ -11,7 +11,6 @@ pub enum SkyModel {
 }
 
 impl SkyModel {
-    #[allow(dead_code)]
     pub fn canonical(self) -> &'static str {
         match self {
             Self::HosekWilkie => "hosek-wilkie",
@@ -64,7 +63,6 @@ pub enum VolumetricPhase {
 }
 
 impl VolumetricPhase {
-    #[allow(dead_code)]
     pub fn canonical(self) -> &'static str {
         match self {
             Self::Isotropic => "isotropic",

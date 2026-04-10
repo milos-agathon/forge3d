@@ -5,7 +5,6 @@ mod constructor;
 mod runtime;
 mod stats;
 
-#[allow(dead_code)]
 pub struct SsrRenderer {
     settings: SsrSettings,
     settings_buffer: Buffer,
@@ -24,12 +23,12 @@ pub struct SsrRenderer {
 
     // ssr_spec_texture   : Rgba16Float raw SSR specular from cs_shade
     //                      (rgb = spec radiance, a = reflection weight in [0,1]).
-    ssr_spec_texture: Texture,
+    _ssr_spec_texture: Texture,
     ssr_spec_view: TextureView,
     // ssr_final_texture  : Rgba16Float SSR after environment fallback
     //                      (rgb = spec radiance, a > 0 for surface hits, a = 0 for
     //                      env-only misses; see fallback_env.wgsl).
-    ssr_final_texture: Texture,
+    _ssr_final_texture: Texture,
     ssr_final_view: TextureView,
     // ssr_history_texture: Rgba16Float previous-frame SSR used for temporal filtering.
     ssr_history_texture: Texture,
@@ -43,11 +42,11 @@ pub struct SsrRenderer {
     ssr_hit_view: TextureView,
     // ssr_composited_texture: Rgba8Unorm view of base lighting + SSR specular after
     //                         tone mapping; used by the viewer for SSR previews.
-    ssr_composited_texture: Texture,
+    _ssr_composited_texture: Texture,
     ssr_composited_view: TextureView,
     scene_color_override: Option<TextureView>,
 
-    env_texture: Texture,
+    _env_texture: Texture,
     env_view: TextureView,
     env_sampler: Sampler,
     linear_sampler: Sampler,

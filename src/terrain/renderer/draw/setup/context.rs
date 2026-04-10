@@ -8,11 +8,9 @@ pub(in crate::terrain::renderer) struct UploadedHeightInputs {
     pub(in crate::terrain::renderer) height: u32,
     pub(in crate::terrain::renderer) heightmap_data: Vec<f32>,
     pub(in crate::terrain::renderer) terrain_data_hash: u64,
-    #[allow(dead_code)]
-    pub(in crate::terrain::renderer) heightmap_texture: wgpu::Texture,
+    pub(in crate::terrain::renderer) _heightmap_texture: wgpu::Texture,
     pub(in crate::terrain::renderer) heightmap_view: wgpu::TextureView,
-    #[allow(dead_code)]
-    pub(in crate::terrain::renderer) water_mask_texture: Option<wgpu::Texture>,
+    pub(in crate::terrain::renderer) _water_mask_texture: Option<wgpu::Texture>,
     pub(in crate::terrain::renderer) water_mask_view_uploaded: Option<wgpu::TextureView>,
 }
 
@@ -134,9 +132,9 @@ impl TerrainScene {
             height: height as u32,
             heightmap_data,
             terrain_data_hash,
-            heightmap_texture,
+            _heightmap_texture: heightmap_texture,
             heightmap_view,
-            water_mask_texture,
+            _water_mask_texture: water_mask_texture,
             water_mask_view_uploaded,
         })
     }

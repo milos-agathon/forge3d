@@ -4,7 +4,7 @@
 use super::denoise::DenoisePass;
 use super::render::TerrainUniforms;
 use super::shader::TERRAIN_SHADER;
-use super::vector_overlay::{drape_vertices, VectorOverlayLayer, VectorOverlayStack, VectorVertex};
+use super::vector_overlay::{drape_vertices, VectorOverlayLayer, VectorOverlayStack};
 use crate::shadows::{CsmConfig, CsmRenderer};
 use anyhow::Result;
 use glam::{Mat4, Vec3};
@@ -64,7 +64,7 @@ pub struct ViewerTerrainData {
     pub dimensions: (u32, u32),
     pub domain: (f32, f32),
     pub revision: u64,
-    pub heightmap_texture: wgpu::Texture,
+    pub _heightmap_texture: wgpu::Texture,
     pub heightmap_view: wgpu::TextureView,
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
@@ -97,10 +97,6 @@ impl ViewerTerrainData {
 
     pub fn terrain_depth(&self) -> f32 {
         self.dimensions.1 as f32
-    }
-
-    pub fn terrain_span(&self) -> f32 {
-        self.terrain_width().max(self.terrain_depth())
     }
 
     pub fn height_range(&self) -> f32 {
@@ -148,17 +144,6 @@ impl ViewerTerrainData {
         if let Some(target) = target {
             self.cam_target = target;
         }
-    }
-
-    /// Get current camera state as tuple (phi, theta, radius, fov, target).
-    pub fn get_camera_state(&self) -> (f32, f32, f32, f32, [f32; 3]) {
-        (
-            self.cam_phi_deg,
-            self.cam_theta_deg,
-            self.cam_radius,
-            self.cam_fov_deg,
-            self.cam_target,
-        )
     }
 }
 
@@ -246,11 +231,6 @@ pub struct ViewerTerrainScene {
     // P1.4: TAA support for terrain viewer
     pub(super) taa_renderer: Option<crate::core::taa::TaaRenderer>,
     pub(super) taa_jitter: crate::core::jitter::JitterState,
-    pub(super) prev_view_proj: glam::Mat4,
-    pub(super) velocity_texture: Option<wgpu::Texture>,
-    pub(super) velocity_view: Option<wgpu::TextureView>,
-    pub(super) velocity_pipeline: Option<wgpu::ComputePipeline>,
-    pub(super) velocity_bind_group_layout: Option<wgpu::BindGroupLayout>,
     pub(super) terrain_revision_counter: u64,
     #[cfg(feature = "enable-gpu-instancing")]
     pub(super) scatter_renderer: crate::render::mesh_instanced::MeshInstancedRenderer,

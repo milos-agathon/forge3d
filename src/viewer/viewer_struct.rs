@@ -173,7 +173,7 @@ pub struct Viewer {
     pub(crate) fog_frame_index: u32,
     // Froxelized volumetrics (Milestone 4)
     pub(crate) fog_bgl3: BindGroupLayout,
-    pub(crate) froxel_tex: Texture,
+    pub(crate) _froxel_tex: Texture,
     pub(crate) froxel_view: TextureView,
     pub(crate) froxel_sampler: Sampler,
     pub(crate) froxel_build_pipeline: ComputePipeline,
@@ -194,14 +194,12 @@ pub struct Viewer {
     pub(crate) fog_bgl0: BindGroupLayout,
     pub(crate) fog_bgl1: BindGroupLayout,
     pub(crate) fog_bgl2: BindGroupLayout,
-    #[allow(dead_code)]
-    pub(crate) fog_shadow_map: Texture,
+    pub(crate) _fog_shadow_map: Texture,
     pub(crate) fog_shadow_view: TextureView,
     pub(crate) fog_shadow_sampler: Sampler,
     pub(crate) fog_shadow_matrix: Buffer,
     // Fog zero fallback (1x1 RGBA16F zero) for disabled fog compositing
-    #[allow(dead_code)]
-    pub(crate) fog_zero_tex: Texture,
+    pub(crate) _fog_zero_tex: Texture,
     pub(crate) fog_zero_view: TextureView,
     // Exposed toggles
     pub(crate) fog_density: f32,
@@ -212,7 +210,7 @@ pub struct Viewer {
     pub(crate) fog_mode: FogMode,
     // Cascaded shadow maps for directional sun shadows (future fog + lighting)
     pub(crate) csm: Option<CsmShadowMap>,
-    pub(crate) csm_config: CsmConfig,
+    pub(crate) _csm_config: CsmConfig,
     pub(crate) csm_depth_pipeline: Option<RenderPipeline>,
     pub(crate) csm_depth_camera: Option<Buffer>,
     // Sky exposed controls (runtime adjustable)

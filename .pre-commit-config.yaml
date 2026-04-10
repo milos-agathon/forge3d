@@ -3,10 +3,7 @@ repos:
     hooks:
       - id: cargo-clippy
         name: cargo clippy
-        entry: >
-          cargo clippy --workspace --all-targets --features
-          extension-module,default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings
-          -- -D warnings
+        entry: cargo forge3d-clippy
         language: system
         pass_filenames: false
         always_run: true

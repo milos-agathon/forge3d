@@ -1,7 +1,5 @@
 // src/geometry/displacement.rs
 // Heightmap and procedural displacement with normal recomputation and bounds growth.
-#![allow(dead_code)]
-
 use super::MeshBuffers;
 
 fn recompute_normals(mesh: &mut MeshBuffers) {

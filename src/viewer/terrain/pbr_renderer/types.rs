@@ -24,7 +24,6 @@ pub struct ViewerTerrainPbrConfig {
     pub volumetrics: VolumetricsConfig,
     pub denoise: DenoiseConfig,
     pub overlay: OverlayConfig,
-    pub vector_overlays_enabled: bool,
     pub debug_mode: u32,
 }
 

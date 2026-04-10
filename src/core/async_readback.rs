@@ -109,8 +109,6 @@ pub struct AsyncReadbackManager {
 /// Internal task for the readback worker
 struct ReadbackTask {
     buffer: Arc<Buffer>,
-    #[allow(dead_code)]
-    width: u32,
     height: u32,
     padded_bpr: u32,
     row_bytes: u32,
@@ -178,7 +176,6 @@ impl AsyncReadbackManager {
         // Submit task to worker
         let task = ReadbackTask {
             buffer: buffer.clone(),
-            width,
             height,
             padded_bpr,
             row_bytes,

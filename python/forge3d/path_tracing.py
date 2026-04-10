@@ -175,6 +175,8 @@ class PathTracer:
         v2: tuple[float, float, float],
         material_or_color,
     ) -> None:
+        # Geometry is accepted for API parity but ignored by the deterministic fallback.
+        _ = (v0, v1, v2)
         # Record a simple material signature to differentiate renders deterministically
         kind = "generic"
         if isinstance(material_or_color, dict):

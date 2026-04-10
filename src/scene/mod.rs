@@ -1,5 +1,4 @@
 // T41-BEGIN:scene-module
-#![allow(dead_code)]
 #![allow(deprecated)]
 
 mod core;
@@ -49,9 +48,9 @@ pub struct Scene {
 
     // E2/E1: Per-tile uniforms bind group (group 3)
     bg3_tile: wgpu::BindGroup,
-    tile_ubo: wgpu::Buffer,
-    tile_slot_ubo: wgpu::Buffer,
-    mosaic_params_ubo: wgpu::Buffer,
+    _tile_ubo: wgpu::Buffer,
+    _tile_slot_ubo: wgpu::Buffer,
+    _mosaic_params_ubo: wgpu::Buffer,
 
     vbuf: wgpu::Buffer,
     ibuf: wgpu::Buffer,

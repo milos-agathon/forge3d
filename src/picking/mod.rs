@@ -80,8 +80,6 @@ impl Default for PickingConfig {
 /// Manages picking operations for the viewer
 pub struct PickingManager {
     device: Arc<Device>,
-    #[allow(dead_code)]
-    queue: Arc<Queue>,
     config: PickingConfig,
     id_buffer_pass: Option<IdBufferPass>,
     tile_id_pass: Option<TileIdPass>,
@@ -98,10 +96,9 @@ pub struct PickingManager {
 
 impl PickingManager {
     /// Create a new picking manager
-    pub fn new(device: Arc<Device>, queue: Arc<Queue>) -> Self {
+    pub fn new(device: Arc<Device>, _queue: Arc<Queue>) -> Self {
         Self {
             device,
-            queue,
             config: PickingConfig::default(),
             id_buffer_pass: None,
             tile_id_pass: None,

@@ -13,9 +13,9 @@ use super::readers::{HeightReader, SyntheticHeightReader};
 pub struct AsyncTileLoader {
     req_tx: SyncSender<TileId>,
     done_rx: Receiver<TileData>,
-    dispatcher: thread::JoinHandle<()>,
-    workers: Vec<thread::JoinHandle<()>>,
-    worker_txs: Vec<Sender<TileId>>,
+    _dispatcher: thread::JoinHandle<()>,
+    _workers: Vec<thread::JoinHandle<()>>,
+    _worker_txs: Vec<Sender<TileId>>,
     pool_size: usize,
     // E1e: dedup + backpressure
     pending: Mutex<HashSet<TileId>>, // TileIds currently in-flight
@@ -102,9 +102,9 @@ impl AsyncTileLoader {
         Self {
             req_tx,
             done_rx,
-            dispatcher,
-            workers,
-            worker_txs,
+            _dispatcher: dispatcher,
+            _workers: workers,
+            _worker_txs: worker_txs,
             pool_size: n,
             pending: Mutex::new(HashSet::new()),
             max_in_flight: max_in_flight.max(1),

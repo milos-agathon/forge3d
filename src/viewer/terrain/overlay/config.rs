@@ -1,26 +1,9 @@
-use std::path::PathBuf;
-
 /// Blend mode for overlay compositing
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BlendMode {
     /// Standard alpha blend: mix(base, overlay, alpha)
     #[default]
     Normal,
-    /// Multiply: base * overlay
-    Multiply,
-    /// Overlay: Photoshop-style overlay blend
-    Overlay,
-}
-
-impl BlendMode {
-    /// Convert to f32 for shader uniform
-    pub fn to_shader_value(&self) -> f32 {
-        match self {
-            BlendMode::Normal => 0.0,
-            BlendMode::Multiply => 1.0,
-            BlendMode::Overlay => 2.0,
-        }
-    }
 }
 
 /// Source data for an overlay layer
@@ -32,8 +15,6 @@ pub enum OverlayData {
         width: u32,
         height: u32,
     },
-    /// Path to an image file (PNG, JPEG, etc.)
-    Image { path: PathBuf },
 }
 
 /// Single overlay layer configuration
@@ -80,12 +61,6 @@ pub struct OverlayLayerGpu {
     pub id: u32,
     /// Layer configuration (CPU side)
     pub config: OverlayLayer,
-    /// GPU texture
-    pub texture: wgpu::Texture,
-    /// Texture view
-    pub view: wgpu::TextureView,
-    /// Texture dimensions
-    pub dimensions: (u32, u32),
 }
 
 /// Overlay configuration for IPC/API

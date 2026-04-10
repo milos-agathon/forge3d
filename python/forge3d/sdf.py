@@ -462,7 +462,7 @@ class HybridRenderer:
 
                 color = np.array([0.6, 0.7, 0.9])  # Sky color
 
-                for step in range(max_steps):
+                for _ in range(max_steps):
                     if t >= max_t:
                         break
 
@@ -525,7 +525,7 @@ def create_simple_scene() -> SdfScene:
     builder, box_idx = builder.add_box((2, 0, 0), (0.8, 0.8, 0.8), 2)
 
     # Union them
-    builder, union_idx = builder.union(sphere_idx, box_idx)
+    builder, _ = builder.union(sphere_idx, box_idx)
 
     return builder.build()
 

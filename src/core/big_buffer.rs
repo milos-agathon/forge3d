@@ -46,8 +46,7 @@ struct BigBufferAllocator {
     /// Allocated blocks
     allocated_blocks: HashMap<u32, u32>, // offset -> size
     /// Total buffer size
-    #[allow(dead_code)]
-    total_size: u32,
+    _total_size: u32,
 }
 
 impl BigBufferAllocator {
@@ -55,7 +54,7 @@ impl BigBufferAllocator {
         Self {
             free_blocks: vec![(0, size)],
             allocated_blocks: HashMap::new(),
-            total_size: size,
+            _total_size: size,
         }
     }
 

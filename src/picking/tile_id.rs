@@ -83,12 +83,10 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
 pub struct TileIdPass {
     id_texture: Texture,
     id_view: TextureView,
-    #[allow(dead_code)]
-    depth_texture: Texture,
+    _depth_texture: Texture,
     depth_view: TextureView,
     pipeline: RenderPipeline,
-    #[allow(dead_code)]
-    bind_group_layout: BindGroupLayout,
+    _bind_group_layout: BindGroupLayout,
     uniform_buffer: Buffer,
     bind_group: BindGroup,
     tile_size: u32,
@@ -234,10 +232,10 @@ impl TileIdPass {
         Self {
             id_texture,
             id_view,
-            depth_texture,
+            _depth_texture: depth_texture,
             depth_view,
             pipeline,
-            bind_group_layout,
+            _bind_group_layout: bind_group_layout,
             uniform_buffer,
             bind_group,
             tile_size,

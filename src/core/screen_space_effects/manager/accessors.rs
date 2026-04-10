@@ -4,16 +4,10 @@ use super::*;
 impl ScreenSpaceEffectsManager {
     pub fn gi_debug_view(&self) -> Option<&TextureView> {
         if let Some(ref ssr) = self.ssr_renderer {
-            #[allow(dead_code)]
-            {
-                return Some(ssr.get_output());
-            }
+            return Some(ssr.get_output());
         }
         if let Some(ref ssgi) = self.ssgi_renderer {
-            #[allow(dead_code)]
-            {
-                return Some(ssgi.get_output_for_display());
-            }
+            return Some(ssgi.get_output_for_display());
         }
         None
     }

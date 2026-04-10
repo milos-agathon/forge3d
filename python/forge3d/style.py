@@ -245,28 +245,6 @@ def _parse_layer(data: dict) -> StyleLayer:
         minzoom=data.get("minzoom"),
         maxzoom=data.get("maxzoom"),
     )
-
-
-def _get_color_value(value: Any) -> str | None:
-    """Extract color string from value (skip expressions)."""
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    # Skip expressions for now
-    return None
-
-
-def _get_number_value(value: Any) -> float | None:
-    """Extract number from value (skip expressions)."""
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    # Expressions handled by evaluate_number_expr
-    return None
-
-
 def evaluate_color_expr(
     value: Any,
     properties: dict[str, Any],
@@ -317,20 +295,6 @@ def evaluate_number_expr(
         ctx = EvalContext(properties=properties, zoom=zoom)
         return evaluate_number(value, ctx)
     return None
-
-
-def _get_text_field(value: Any) -> str | None:
-    """Extract text field property name."""
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list) and len(value) == 2:
-        if value[0] == "get":
-            return f"{{{value[1]}}}"
-    return None
-
-
 def paint_to_vector_style(
     paint: PaintProps,
     properties: dict[str, Any] | None = None,

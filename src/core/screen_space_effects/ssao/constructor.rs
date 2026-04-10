@@ -2,7 +2,6 @@ use super::pipelines::{create_layouts, create_pipelines, SsaoLayouts, SsaoPipeli
 use super::resources::{create_shared_buffers, create_textures, SsaoSharedBuffers, SsaoTextures};
 use super::*;
 
-#[allow(dead_code)]
 pub struct SsaoRenderer {
     pub(crate) settings: SsaoSettings,
     pub(super) settings_buffer: Buffer,
@@ -20,7 +19,7 @@ pub struct SsaoRenderer {
     pub(super) composite_pipeline: ComputePipeline,
     pub(super) composite_bind_group_layout: BindGroupLayout,
     pub(super) comp_uniform: Buffer,
-    pub(super) noise_texture: Texture,
+    pub(super) _noise_texture: Texture,
     pub(super) noise_view: TextureView,
     pub(super) noise_sampler: Sampler,
     pub(super) ssao_texture: Texture,
@@ -31,7 +30,7 @@ pub struct SsaoRenderer {
     pub(super) ssao_history_view: TextureView,
     pub(super) ssao_resolved: Texture,
     pub(super) ssao_resolved_view: TextureView,
-    pub(super) ssao_tmp: Texture,
+    pub(super) _ssao_tmp: Texture,
     pub(super) ssao_tmp_view: TextureView,
     pub(super) ssao_composited: Texture,
     pub(super) ssao_composited_view: TextureView,
@@ -120,7 +119,7 @@ impl SsaoRenderer {
             composite_pipeline,
             composite_bind_group_layout,
             comp_uniform,
-            noise_texture,
+            _noise_texture: noise_texture,
             noise_view,
             noise_sampler,
             ssao_texture,
@@ -131,7 +130,7 @@ impl SsaoRenderer {
             ssao_history_view,
             ssao_resolved,
             ssao_resolved_view,
-            ssao_tmp,
+            _ssao_tmp: ssao_tmp,
             ssao_tmp_view,
             ssao_composited,
             ssao_composited_view,

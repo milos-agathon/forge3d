@@ -39,7 +39,7 @@ pub struct DensityVolumeAtlasData {
 }
 
 pub struct DensityVolumeAtlasGpu {
-    pub texture: wgpu::Texture,
+    pub _texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
     pub metadata: Vec<DensityVolumeGpuMetadata>,
@@ -119,7 +119,7 @@ impl DensityVolumeAtlasGpu {
         report.half_res = half_res;
 
         Self {
-            texture,
+            _texture: texture,
             view,
             sampler,
             metadata: data.metadata,

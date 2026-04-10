@@ -29,7 +29,6 @@ pub enum BrdfModel {
 }
 
 impl BrdfModel {
-    #[allow(dead_code)]
     pub fn canonical(self) -> &'static str {
         match self {
             Self::Lambert => "lambert",

@@ -10,18 +10,6 @@ from typing import Any, Mapping, Optional
 import numpy as np
 
 from .offscreen import render_offscreen_rgba, rgba_to_png_bytes
-
-
-def _require_ipython():
-    try:
-        import IPython  # noqa: F401
-        from IPython.display import Image, display  # noqa: F401
-    except Exception as exc:  # pragma: no cover - notebook-only path
-        raise ImportError(
-            "IPython is required for display helpers. Install with: pip install ipython"
-        ) from exc
-
-
 def display_rgba(rgba: np.ndarray, *, title: Optional[str] = None) -> None:
     """Display an RGBA numpy array inside a Jupyter notebook cell.
 

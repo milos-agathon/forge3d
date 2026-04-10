@@ -338,15 +338,6 @@ impl PostProcessPass {
             pass.draw(0..3, 0..1); // Full-screen triangle
         }
     }
-
-    /// Check if any post-process effects are enabled
-    pub fn effects_enabled(
-        distortion: f32,
-        chromatic_aberration: f32,
-        vignette_strength: f32,
-    ) -> bool {
-        distortion.abs() > 0.001 || chromatic_aberration > 0.001 || vignette_strength > 0.001
-    }
 }
 
 /// Post-process shader with full-screen triangle, distortion, CA, and vignette

@@ -74,11 +74,7 @@ impl TbnData {
 
 /// Triangle for TBN calculation
 struct Triangle {
-    #[allow(dead_code)]
-    indices: [u32; 3],
     positions: [Vec3; 3],
-    #[allow(dead_code)]
-    normals: [Vec3; 3],
     uvs: [Vec2; 3],
 }
 
@@ -89,23 +85,13 @@ impl Triangle {
             vertices[indices[1] as usize].position,
             vertices[indices[2] as usize].position,
         ];
-        let normals = [
-            vertices[indices[0] as usize].normal,
-            vertices[indices[1] as usize].normal,
-            vertices[indices[2] as usize].normal,
-        ];
         let uvs = [
             vertices[indices[0] as usize].uv,
             vertices[indices[1] as usize].uv,
             vertices[indices[2] as usize].uv,
         ];
 
-        Self {
-            indices,
-            positions,
-            normals,
-            uvs,
-        }
+        Self { positions, uvs }
     }
 
     /// Calculate face tangent and bitangent using the MikkTSpace method

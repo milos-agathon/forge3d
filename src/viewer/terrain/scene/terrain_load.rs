@@ -159,7 +159,7 @@ impl ViewerTerrainScene {
             dimensions: (width, height),
             domain: (min_h, max_h),
             revision: self.terrain_revision_counter,
-            heightmap_texture,
+            _heightmap_texture: heightmap_texture,
             heightmap_view,
             vertex_buffer,
             index_buffer,

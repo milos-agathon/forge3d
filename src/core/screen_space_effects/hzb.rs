@@ -140,15 +140,6 @@ impl HzbPyramid {
         })
     }
 
-    #[allow(dead_code)]
-    fn ensure_size(&mut self, device: &Device, width: u32, height: u32) {
-        if self.width == width && self.height == height {
-            return;
-        }
-        // Recreate texture with new size
-        *self = Self::new(device, width, height).expect("HzbPyramid::new should not fail");
-    }
-
     /// Build HZB from a source DEPTH view (mip 0), limiting to `levels` mips (including level 0).
     /// Produces a pyramid in `self.tex` up to the requested number of levels.
     pub fn build_n(
@@ -271,7 +262,6 @@ impl HzbPyramid {
         self.build_n(device, encoder, src_depth, self.mip_count, reversed_z);
     }
 
-    #[allow(dead_code)]
     pub(crate) fn texture_view(&self) -> TextureView {
         self.tex.create_view(&TextureViewDescriptor::default())
     }

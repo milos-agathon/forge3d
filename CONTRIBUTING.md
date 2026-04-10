@@ -7,6 +7,7 @@
 3. Create a Python environment for Python 3.10+.
 4. Install build tooling: `python -m pip install -U pip maturin pytest`
 5. Build the extension in development mode: `maturin develop`
+6. Install git hooks: `pre-commit install`
 
 Optional extras:
 
@@ -20,17 +21,17 @@ Optional extras:
 # Python tests
 python -m pytest tests/ -v --tb=short
 
+# Rust lint gate used by CI and pre-commit
+cargo forge3d-clippy
+
 # Rust tests
 cargo test --workspace --all-features
-
-# Focused package smoke checks
-python -m pytest tests/test_install_smoke.py -v
 ```
 
 ## Code Style
 
 - Python: keep public signatures typed and match the existing module layout.
-- Rust: run `cargo fmt` and keep `cargo clippy` clean when touching Rust code.
+- Rust: run `cargo fmt` and keep `cargo forge3d-clippy` clean when touching Rust code.
 - Docs: keep tutorial snippets copy-pasteable and aligned with the current API.
 
 ## Pull Requests

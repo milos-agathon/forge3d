@@ -64,8 +64,7 @@ impl Drop for PoolBlock {
 /// A single memory pool for a specific size bucket
 struct MemoryPool {
     /// GPU buffer for this pool
-    #[allow(dead_code)]
-    buffer: Buffer,
+    _buffer: Buffer,
     /// Size of each allocation in this pool
     allocation_size: u64,
     /// Total pool size
@@ -95,7 +94,7 @@ impl MemoryPool {
         let free_blocks = vec![(0, aligned_pool_size)];
 
         Self {
-            buffer,
+            _buffer: buffer,
             allocation_size: aligned_size,
             total_size: aligned_pool_size,
             free_blocks,

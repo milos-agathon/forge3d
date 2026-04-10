@@ -1,12 +1,10 @@
 // src/render/instancing.rs
 // Minimal CPU instancing utility: duplicates a base mesh for each transform.
 // This serves as a portable fallback in environments where GPU instancing may not be available.
-#![allow(dead_code)]
-
-use glam::{Mat3, Mat4, Vec3};
-
 #[cfg(feature = "extension-module")]
 use crate::geometry::MeshBuffers;
+#[cfg(feature = "extension-module")]
+use glam::{Mat3, Mat4, Vec3};
 
 #[cfg(all(feature = "extension-module", feature = "enable-gpu-instancing"))]
 use numpy::{PyArray1, PyArrayMethods};
@@ -15,11 +13,13 @@ use numpy::{PyReadonlyArray2, PyUntypedArrayMethods};
 #[cfg(feature = "extension-module")]
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyDict};
 
+#[cfg(feature = "extension-module")]
 fn apply_transform_position(m: &Mat4, p: [f32; 3]) -> [f32; 3] {
     let v = m.transform_point3(Vec3::new(p[0], p[1], p[2]));
     [v.x, v.y, v.z]
 }
 
+#[cfg(feature = "extension-module")]
 fn apply_transform_normal(m: &Mat3, n: [f32; 3]) -> [f32; 3] {
     let v = (*m * Vec3::new(n[0], n[1], n[2])).normalize_or_zero();
     [v.x, v.y, v.z]

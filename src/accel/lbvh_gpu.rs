@@ -23,7 +23,6 @@ mod topology;
 
 use buffers::GpuBuffers;
 
-#[allow(dead_code)]
 /// Uniforms for Morton code generation
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -38,7 +37,6 @@ struct MortonUniforms {
     _pad3: f32,
 }
 
-#[allow(dead_code)]
 /// Uniforms for radix sort passes
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -49,7 +47,6 @@ struct SortUniforms {
     _pad1: u32,
 }
 
-#[allow(dead_code)]
 /// Uniforms for BVH linking
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -60,7 +57,6 @@ struct LinkUniforms {
     _pad1: u32,
 }
 
-#[allow(dead_code)]
 /// GPU BVH builder with WGSL compute pipelines
 pub struct GpuBvhBuilder {
     device: Arc<Device>,
@@ -75,7 +71,7 @@ pub struct GpuBvhBuilder {
     sort_bitonic_pipeline: ComputePipeline,
     link_nodes_pipeline: ComputePipeline,
     init_leaves_pipeline: ComputePipeline,
-    refit_leaves_pipeline: ComputePipeline,
-    refit_internal_pipeline: ComputePipeline,
+    _refit_leaves_pipeline: ComputePipeline,
+    _refit_internal_pipeline: ComputePipeline,
     refit_iterative_pipeline: ComputePipeline,
 }

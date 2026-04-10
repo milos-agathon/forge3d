@@ -484,92 +484,9 @@ impl VectorOverlayStack {
         }));
     }
 
-    /// Render a single layer (call during render pass)
-    /// Returns true if something was drawn
-    pub fn render_layer<'a>(
-        &'a self,
-        pass: &mut wgpu::RenderPass<'a>,
-        layer_index: usize,
-        view_proj: [[f32; 4]; 4],
-        sun_dir: [f32; 3],
-        lighting: [f32; 4],
-    ) -> bool {
-        if !self.enabled {
-            return false;
-        }
-
-        let bind_group = match &self.bind_group {
-            Some(bg) => bg,
-            None => return false,
-        };
-
-        let uniform_buffer = match &self.uniform_buffer {
-            Some(buf) => buf,
-            None => return false,
-        };
-
-        // Get visible layers
-        let visible_layers: Vec<_> = self.layers.iter().filter(|l| l.config.visible).collect();
-
-        if layer_index >= visible_layers.len() {
-            return false;
-        }
-
-        let layer = visible_layers[layer_index];
-
-        // Update uniforms for this layer (with default highlight - no selection)
-        let uniforms = VectorOverlayUniforms {
-            view_proj,
-            sun_dir: [sun_dir[0], sun_dir[1], sun_dir[2], 0.0],
-            lighting,
-            layer_params: [
-                layer.config.opacity * self.global_opacity,
-                layer.config.depth_bias,
-                layer.config.line_width,
-                layer.config.point_size,
-            ],
-            highlight_color: [1.0, 0.8, 0.0, 0.5], // Default yellow highlight
-            selected_feature_id: 0,                // No selection by default
-            _pad: [0; 7],
-        };
-
-        self.queue
-            .write_buffer(uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
-
-        // Select pipeline based on primitive type
-        let pipeline = match layer.config.primitive {
-            OverlayPrimitive::Triangles | OverlayPrimitive::TriangleStrip => {
-                self.pipeline_triangles.as_ref()
-            }
-            OverlayPrimitive::Lines | OverlayPrimitive::LineStrip => self.pipeline_lines.as_ref(),
-            OverlayPrimitive::Points => self.pipeline_points.as_ref(),
-        };
-
-        if let Some(pipeline) = pipeline {
-            pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, bind_group, &[]);
-            pass.set_vertex_buffer(0, layer.vertex_buffer.slice(..));
-
-            if layer.index_count > 0 {
-                pass.set_index_buffer(layer.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..layer.index_count, 0, 0..1);
-            } else {
-                pass.draw(0..layer.vertex_count, 0..1);
-            }
-            true
-        } else {
-            false
-        }
-    }
-
     /// Get count of visible layers
     pub fn visible_layer_count(&self) -> usize {
         self.layers.iter().filter(|l| l.config.visible).count()
-    }
-
-    /// Get all layers (for ID buffer rendering)
-    pub fn layers(&self) -> &[VectorOverlayGpu] {
-        &self.layers
     }
 
     /// Render a single layer with highlight support for picking

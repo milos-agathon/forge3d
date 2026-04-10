@@ -238,8 +238,8 @@ struct GpuHlodCluster {
     index_count: u32,
     center: Vec3,
     radius: f32,
-    vertex_buffer_bytes: u64,
-    index_buffer_bytes: u64,
+    _vertex_buffer_bytes: u64,
+    _index_buffer_bytes: u64,
     _vertex_handle: ResourceHandle,
     _index_handle: ResourceHandle,
 }
@@ -854,8 +854,8 @@ fn build_hlod_cache(
             index_count: simplified.indices.len() as u32,
             center,
             radius,
-            vertex_buffer_bytes,
-            index_buffer_bytes,
+            _vertex_buffer_bytes: vertex_buffer_bytes,
+            _index_buffer_bytes: index_buffer_bytes,
             _vertex_handle: vertex_handle,
             _index_handle: index_handle,
         });

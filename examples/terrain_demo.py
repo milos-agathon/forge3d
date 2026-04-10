@@ -97,7 +97,7 @@ def _apply_json_preset(args: argparse.Namespace, preset_path: Path, cli_explicit
     # Get the project root for resolving relative paths
     project_root = Path(__file__).parent.parent
     
-    for preset_key, (arg_name, cli_flag) in param_map.items():
+    for preset_key, (arg_name, _cli_flag) in param_map.items():
         if preset_key not in cli_params:
             continue
         

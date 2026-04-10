@@ -80,7 +80,7 @@ def generate_cube_tbn() -> Tuple[List[Dict[str, Any]], List[int], List[Dict[str,
         (np.array([0, 0, -1], np.float32), np.array([-1, 0, 0], np.float32), np.array([0, 1, 0], np.float32),
          [np.array([1, -1, -1]), np.array([1, 1, -1]), np.array([-1, 1, -1]), np.array([-1, -1, -1])]),
     ]
-    for face_idx, (n, t, b, corners) in enumerate(faces):
+    for n, t, b, corners in faces:
         base = len(vertices)
         uvs = [np.array([0, 0]), np.array([1, 0]), np.array([1, 1]), np.array([0, 1])]
         for i in range(4):

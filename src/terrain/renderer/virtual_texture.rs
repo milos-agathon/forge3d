@@ -21,7 +21,6 @@ const TERRAIN_VT_BYTES_PER_PIXEL: usize = 4;
 #[cfg(feature = "extension-module")]
 #[derive(Clone)]
 pub(super) struct VTSource {
-    pub material_index: u32,
     pub virtual_size: (u32, u32),
     pub data: Vec<u8>,
     pub fallback_color: [f32; 4],
@@ -175,7 +174,6 @@ impl TerrainMaterialVT {
         self.sources.insert(
             (material_index, family),
             VTSource {
-                material_index,
                 virtual_size: virtual_size_px,
                 data,
                 fallback_color,

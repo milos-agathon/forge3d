@@ -267,6 +267,8 @@ test_output.json
 # Rust/Cargo specific
 Cargo.lock  # Keep for applications, ignore for libraries - this is an app so keep it
 .cargo/
+!.cargo/
+!.cargo/config.toml
 
 # maturin build artifacts
 *.whl

@@ -1,6 +1,4 @@
 // A2-BEGIN:terrain-module
-#![allow(dead_code)]
-
 // T11-BEGIN:terrain-mesh-mod
 pub mod mesh;
 pub use mesh::{make_grid, GridMesh, GridVertex, Indices};

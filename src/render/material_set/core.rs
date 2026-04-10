@@ -13,8 +13,7 @@ pub struct MaterialSet {
     pub(crate) triplanar_scale: f32,
     pub(crate) normal_strength: f32,
     pub(crate) blend_sharpness: f32,
-    #[cfg_attr(not(feature = "extension-module"), allow(dead_code))]
-    pub(crate) texture_paths: Vec<Option<String>>,
+    pub(crate) _texture_paths: Vec<Option<String>>,
     #[cfg(feature = "extension-module")]
     pub(crate) gpu_cache: OnceCell<Arc<super::GpuMaterialSet>>,
 }
@@ -26,7 +25,7 @@ impl Clone for MaterialSet {
             triplanar_scale: self.triplanar_scale,
             normal_strength: self.normal_strength,
             blend_sharpness: self.blend_sharpness,
-            texture_paths: self.texture_paths.clone(),
+            _texture_paths: self._texture_paths.clone(),
             #[cfg(feature = "extension-module")]
             gpu_cache: OnceCell::new(),
         }
@@ -46,7 +45,7 @@ impl MaterialSet {
             triplanar_scale,
             normal_strength,
             blend_sharpness,
-            texture_paths,
+            _texture_paths: texture_paths,
             #[cfg(feature = "extension-module")]
             gpu_cache: OnceCell::new(),
         }

@@ -6,14 +6,11 @@ use std::io::{Cursor, Read, Seek, SeekFrom};
 /// KTX2 loader with transcoding support
 pub struct Ktx2Loader {
     /// Enable transcoding support
-    #[allow(dead_code)]
-    transcoding_enabled: bool,
+    _transcoding_enabled: bool,
     /// Supported target formats
-    #[allow(dead_code)]
-    target_formats: Vec<wgpu::TextureFormat>,
+    _target_formats: Vec<wgpu::TextureFormat>,
     /// Optional Basis transcoder (not wired yet).
-    #[allow(dead_code)]
-    basis_transcoder: Option<BasisTranscoder>,
+    _basis_transcoder: Option<BasisTranscoder>,
 }
 
 impl Default for Ktx2Loader {
@@ -26,18 +23,18 @@ impl Ktx2Loader {
     /// Create new KTX2 loader
     pub fn new() -> Self {
         Self {
-            transcoding_enabled: true,
-            target_formats: Self::default_target_formats(),
-            basis_transcoder: None,
+            _transcoding_enabled: true,
+            _target_formats: Self::default_target_formats(),
+            _basis_transcoder: None,
         }
     }
 
     /// Create loader with specific target formats
     pub fn with_target_formats(formats: Vec<wgpu::TextureFormat>) -> Self {
         Self {
-            transcoding_enabled: true,
-            target_formats: formats,
-            basis_transcoder: None,
+            _transcoding_enabled: true,
+            _target_formats: formats,
+            _basis_transcoder: None,
         }
     }
 
@@ -205,13 +202,11 @@ pub struct BasisTranscoder {
 
 impl BasisTranscoder {
     /// Initialize transcoder
-    #[allow(dead_code)]
     pub fn new() -> Result<Self, String> {
         Ok(Self {})
     }
 
     /// Transcode to target format
-    #[allow(dead_code)]
     pub fn transcode(
         &self,
         _data: &[u8],

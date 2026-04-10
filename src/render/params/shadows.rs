@@ -15,7 +15,6 @@ pub enum ShadowTechnique {
 }
 
 impl ShadowTechnique {
-    #[allow(dead_code)]
     pub fn canonical(self) -> &'static str {
         match self {
             Self::Hard => "hard",

@@ -1,8 +1,6 @@
 // src/render/mesh_instanced.rs
 // GPU instanced mesh renderer (feature-gated by enable-gpu-instancing)
 
-#![allow(dead_code)]
-
 use bytemuck::{Pod, Zeroable};
 use glam::Mat4;
 use std::cell::Cell;
@@ -80,7 +78,6 @@ pub struct MeshInstancedRenderer {
     pipeline: RenderPipeline,
     uniforms: ScatterBatchUniforms,
     uniforms_buf: Buffer,
-    bind_group_layout: BindGroupLayout,
     bind_group: BindGroup,
     terrain_context: TerrainContextUniforms,
     terrain_context_buf: Buffer,
@@ -342,7 +339,6 @@ impl MeshInstancedRenderer {
             pipeline,
             uniforms,
             uniforms_buf,
-            bind_group_layout,
             bind_group,
             terrain_context,
             terrain_context_buf,

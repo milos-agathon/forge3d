@@ -18,12 +18,6 @@ impl VectorOverlayStack {
             uniform_buffer: None,
             bind_group: None,
             sampler: None,
-            id_pipeline_triangles: None,
-            id_pipeline_lines: None,
-            id_pipeline_points: None,
-            id_bind_group_layout: None,
-            id_uniform_buffer: None,
-            id_bind_group: None,
             oit_pipeline_triangles: None,
             oit_pipeline_lines: None,
             oit_pipeline_points: None,
@@ -53,6 +47,7 @@ impl VectorOverlayStack {
                 usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
             });
 
+        let layer_name = layer.name.clone();
         let gpu_layer = VectorOverlayGpu {
             vertex_count: layer.vertices.len() as u32,
             index_count: layer.indices.len() as u32,
@@ -68,26 +63,8 @@ impl VectorOverlayStack {
         // Sort by z_order
         self.layers.sort_by_key(|l| l.config.z_order);
 
+        println!("[vector_overlay] Added layer '{layer_name}' (id={id})");
         id
-    }
-
-    /// Update vertices for an existing layer (for animation)
-    pub fn update_vertices(&mut self, id: u32, vertices: Vec<VectorVertex>) {
-        if let Some(layer) = self.layers.iter_mut().find(|l| l.id == id) {
-            layer.config.vertices = vertices.clone();
-            layer.vertex_count = vertices.len() as u32;
-
-            // Recreate vertex buffer
-            layer.vertex_buffer =
-                self.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("vector_overlay_vertices_{}", id)),
-                        contents: bytemuck::cast_slice(&vertices),
-                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                    });
-
-            self.dirty = true;
-        }
     }
 
     /// Remove a vector overlay by ID. Returns true if found and removed.
@@ -122,21 +99,6 @@ impl VectorOverlayStack {
         self.layers.iter().map(|l| l.id).collect()
     }
 
-    /// Get number of layers
-    pub fn len(&self) -> usize {
-        self.layers.len()
-    }
-
-    /// Check if empty
-    pub fn is_empty(&self) -> bool {
-        self.layers.is_empty()
-    }
-
-    /// Check if any visible layers exist
-    pub fn has_visible_layers(&self) -> bool {
-        self.layers.iter().any(|l| l.config.visible)
-    }
-
     /// Check if enabled
     pub fn is_enabled(&self) -> bool {
         self.enabled
@@ -155,10 +117,5 @@ impl VectorOverlayStack {
     /// Get visible layers in z-order
     pub fn visible_layers(&self) -> impl Iterator<Item = &VectorOverlayGpu> {
         self.layers.iter().filter(|l| l.config.visible)
-    }
-
-    /// Get global opacity
-    pub fn global_opacity(&self) -> f32 {
-        self.global_opacity
     }
 }

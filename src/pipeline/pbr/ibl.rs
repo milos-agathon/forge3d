@@ -1,17 +1,16 @@
 use super::*;
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub(super) struct PbrIblResources {
-    pub(super) irradiance_texture: Texture,
+    pub(super) _irradiance_texture: Texture,
     pub(super) irradiance_view: TextureView,
     pub(super) irradiance_sampler: Sampler,
-    pub(super) prefilter_texture: Texture,
+    pub(super) _prefilter_texture: Texture,
     pub(super) prefilter_view: TextureView,
-    pub(super) prefilter_sampler: Sampler,
-    pub(super) brdf_lut_texture: Texture,
+    pub(super) _prefilter_sampler: Sampler,
+    pub(super) _brdf_lut_texture: Texture,
     pub(super) brdf_lut_view: TextureView,
-    pub(super) brdf_lut_sampler: Sampler,
+    pub(super) _brdf_lut_sampler: Sampler,
 }
 
 pub(super) fn create_fallback_ibl_resources(device: &Device, queue: &Queue) -> PbrIblResources {
@@ -76,12 +75,12 @@ pub(super) fn create_fallback_ibl_resources(device: &Device, queue: &Queue) -> P
     PbrIblResources {
         irradiance_view: irradiance_texture.create_view(&TextureViewDescriptor::default()),
         irradiance_sampler,
-        irradiance_texture,
+        _irradiance_texture: irradiance_texture,
         prefilter_view: prefilter_texture.create_view(&TextureViewDescriptor::default()),
-        prefilter_sampler,
-        prefilter_texture,
+        _prefilter_sampler: prefilter_sampler,
+        _prefilter_texture: prefilter_texture,
         brdf_lut_view: brdf_lut_texture.create_view(&TextureViewDescriptor::default()),
-        brdf_lut_sampler,
-        brdf_lut_texture,
+        _brdf_lut_sampler: brdf_lut_sampler,
+        _brdf_lut_texture: brdf_lut_texture,
     }
 }

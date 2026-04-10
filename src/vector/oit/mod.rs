@@ -20,12 +20,9 @@ use pipeline::{create_accumulation_textures, create_compose_pipeline};
 #[cfg(feature = "weighted-oit")]
 /// OIT rendering state and resources.
 pub struct WeightedOIT {
-    #[allow(dead_code)]
-    color_buffer: wgpu::Texture,
-    #[allow(dead_code)]
-    reveal_buffer: wgpu::Texture,
-    #[allow(dead_code)]
-    depth_buffer: wgpu::Texture,
+    _color_buffer: wgpu::Texture,
+    _reveal_buffer: wgpu::Texture,
+    _depth_buffer: wgpu::Texture,
     color_view: wgpu::TextureView,
     reveal_view: wgpu::TextureView,
     depth_view: wgpu::TextureView,
@@ -56,9 +53,9 @@ impl WeightedOIT {
             create_compose_pipeline(device, target_format, &color_view, &reveal_view);
 
         Ok(Self {
-            color_buffer,
-            reveal_buffer,
-            depth_buffer,
+            _color_buffer: color_buffer,
+            _reveal_buffer: reveal_buffer,
+            _depth_buffer: depth_buffer,
             color_view,
             reveal_view,
             depth_view,

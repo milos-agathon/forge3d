@@ -17,8 +17,6 @@ pub use super::render_bundles_types::{
 /// Render bundle encoder for building bundles
 pub struct RenderBundleBuilder {
     device: Arc<wgpu::Device>,
-    #[allow(dead_code)]
-    queue: Arc<wgpu::Queue>,
     config: RenderBundleConfig,
     buffers: Vec<wgpu::Buffer>,
     textures: Vec<wgpu::Texture>,
@@ -26,14 +24,9 @@ pub struct RenderBundleBuilder {
 }
 
 impl RenderBundleBuilder {
-    pub fn new(
-        device: Arc<wgpu::Device>,
-        queue: Arc<wgpu::Queue>,
-        config: RenderBundleConfig,
-    ) -> Self {
+    pub fn new(device: Arc<wgpu::Device>, config: RenderBundleConfig) -> Self {
         Self {
             device,
-            queue,
             config,
             buffers: Vec::new(),
             textures: Vec::new(),
@@ -198,16 +191,14 @@ impl RenderBundleBuilder {
 /// Render bundle manager for organizing and executing bundles
 pub struct RenderBundleManager {
     device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
     bundles: HashMap<String, CompiledRenderBundle>,
     execution_stats: HashMap<String, Vec<f32>>,
 }
 
 impl RenderBundleManager {
-    pub fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>) -> Self {
+    pub fn new(device: Arc<wgpu::Device>, _queue: Arc<wgpu::Queue>) -> Self {
         Self {
             device,
-            queue,
             bundles: HashMap::new(),
             execution_stats: HashMap::new(),
         }
@@ -224,7 +215,7 @@ impl RenderBundleManager {
         config: RenderBundleConfig,
         pipeline: &wgpu::RenderPipeline,
     ) -> Result<(), String> {
-        let builder = RenderBundleBuilder::new(self.device.clone(), self.queue.clone(), config);
+        let builder = RenderBundleBuilder::new(self.device.clone(), config);
         self.add_bundle(name, builder.build(pipeline));
         Ok(())
     }

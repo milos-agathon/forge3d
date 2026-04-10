@@ -1,8 +1,6 @@
 /// Indirect drawing and GPU culling manager
 pub struct IndirectRenderer {
     pub(super) draw_commands_buffer: wgpu::Buffer,
-    #[allow(dead_code)]
-    pub(super) draw_commands_capacity: usize,
     pub(super) instances_buffer: wgpu::Buffer,
     pub(super) instances_capacity: usize,
     pub(super) culling_pipeline: wgpu::ComputePipeline,

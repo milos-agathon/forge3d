@@ -9,8 +9,6 @@ pub(crate) struct ThreadPool {
 }
 
 struct Worker {
-    #[allow(dead_code)]
-    id: usize,
     handle: Option<thread::JoinHandle<()>>,
 }
 
@@ -23,8 +21,8 @@ impl ThreadPool {
 
         let mut workers = Vec::with_capacity(size);
 
-        for id in 0..size {
-            workers.push(Worker::new(id, Arc::clone(&receiver)));
+        for _ in 0..size {
+            workers.push(Worker::new(Arc::clone(&receiver)));
         }
 
         ThreadPool {
@@ -62,7 +60,7 @@ impl Drop for ThreadPool {
 }
 
 impl Worker {
-    fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
+    fn new(receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
         let handle = thread::spawn(move || loop {
             let message = receiver.lock().unwrap().recv();
             match message {
@@ -74,7 +72,6 @@ impl Worker {
         });
 
         Worker {
-            id,
             handle: Some(handle),
         }
     }

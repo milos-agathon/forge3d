@@ -4,8 +4,6 @@
 // - Handles input events (mouse, keyboard)
 // - Renders frames at 60 FPS
 // - Orbit and FPS camera modes
-#![allow(dead_code)]
-
 pub mod camera_controller;
 mod cmd;
 mod event_loop;

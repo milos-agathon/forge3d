@@ -242,7 +242,7 @@ impl TerrainSpike {
         return Ok(Self {
             width,
             height,
-            grid,
+            _grid: grid,
             device,
             queue,
             tp,
@@ -260,7 +260,7 @@ impl TerrainSpike {
             lut_format,
             color,
             color_view,
-            normal,
+            _normal: normal,
             normal_view,
             globals,
             last_uniforms: uniforms,

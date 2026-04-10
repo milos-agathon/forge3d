@@ -4,11 +4,9 @@ use crate::terrain::renderer::core::TERRAIN_DEPTH_FORMAT;
 pub(in crate::terrain::renderer) struct RenderTargets {
     pub(in crate::terrain::renderer) internal_texture: wgpu::Texture,
     pub(in crate::terrain::renderer) internal_view: wgpu::TextureView,
-    #[allow(dead_code)]
-    pub(in crate::terrain::renderer) msaa_texture: Option<wgpu::Texture>,
+    pub(in crate::terrain::renderer) _msaa_texture: Option<wgpu::Texture>,
     pub(in crate::terrain::renderer) msaa_view: Option<wgpu::TextureView>,
-    #[allow(dead_code)]
-    pub(in crate::terrain::renderer) depth_texture: wgpu::Texture,
+    pub(in crate::terrain::renderer) _depth_texture: wgpu::Texture,
     pub(in crate::terrain::renderer) depth_view: wgpu::TextureView,
     pub(in crate::terrain::renderer) out_width: u32,
     pub(in crate::terrain::renderer) out_height: u32,
@@ -213,9 +211,9 @@ impl TerrainScene {
         Ok(RenderTargets {
             internal_texture,
             internal_view,
-            msaa_texture,
+            _msaa_texture: msaa_texture,
             msaa_view,
-            depth_texture,
+            _depth_texture: depth_texture,
             depth_view,
             out_width,
             out_height,

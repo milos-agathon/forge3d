@@ -1,7 +1,6 @@
 use super::*;
 use crate::core::ibl::{IBLQuality, IBLRenderer};
 use crate::viewer::terrain::overlay::OverlayStack;
-use crate::viewer::terrain::post_process::PostProcessPass;
 use half::f16;
 
 impl ViewerTerrainScene {
@@ -233,35 +232,6 @@ impl ViewerTerrainScene {
             theta.sin(),
             theta.cos(),
         ]
-    }
-
-    pub fn blit_texture_to_view(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        input_view: &wgpu::TextureView,
-        output_view: &wgpu::TextureView,
-        width: u32,
-        height: u32,
-        format: wgpu::TextureFormat,
-    ) {
-        if self.post_process.is_none() {
-            self.post_process = Some(PostProcessPass::new(self.device.clone(), format));
-        }
-        if let Some(ref mut pp) = self.post_process {
-            pp.apply_from_input(
-                encoder,
-                &self.queue,
-                input_view,
-                output_view,
-                width,
-                height,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-            );
-        }
     }
 
     /// Prepare PBR bind group with current uniforms (called before render pass)

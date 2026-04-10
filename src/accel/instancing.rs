@@ -32,17 +32,14 @@ pub struct InstanceData {
 pub struct TLAS {
     instances: Vec<InstanceData>,
     max_instances: usize,
-    #[allow(dead_code)]
-    device: std::sync::Arc<Device>,
 }
 
 impl TLAS {
     /// Create a new TLAS with the given maximum instance capacity.
-    pub fn new(device: std::sync::Arc<Device>, max_instances: usize) -> Self {
+    pub fn new(_device: std::sync::Arc<Device>, max_instances: usize) -> Self {
         Self {
             instances: Vec::new(),
             max_instances,
-            device,
         }
     }
 

@@ -90,7 +90,6 @@ impl DofPass {
         );
     }
 
-    #[allow(dead_code)]
     pub fn apply(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,

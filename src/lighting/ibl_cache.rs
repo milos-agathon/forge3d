@@ -10,10 +10,9 @@ use wgpu::*;
 /// Total budget: <=64 MiB
 /// IBL resource cache for BRDF/irradiance/specular maps.
 /// Some fields are not accessed in all builds; silence until the full IBL path is wired.
-#[allow(dead_code)]
 pub struct IblResourceCache {
     device: Arc<Device>,
-    queue: Arc<Queue>,
+    _queue: Arc<Queue>,
 
     /// BRDF integration LUT (512x512 RG16F) ~2 MiB
     pub brdf_lut: Option<Texture>,
@@ -48,7 +47,7 @@ impl IblResourceCache {
 
         Self {
             device,
-            queue,
+            _queue: queue,
             brdf_lut: None,
             brdf_lut_view: None,
             irradiance_map: None,

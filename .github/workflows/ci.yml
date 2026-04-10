@@ -100,7 +100,7 @@ jobs:
           RUST_TEST_THREADS: 1
 
       - name: Run cargo clippy
-        run: cargo clippy --workspace --features default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings -- -D warnings
+        run: cargo forge3d-clippy
 
   # ============================================================================
   # Interactive Viewer E2E (macOS only; optional)

@@ -167,7 +167,6 @@ impl Default for ViewerTerrainPbrConfig {
             volumetrics: VolumetricsConfig::default(),
             denoise: DenoiseConfig::default(),
             overlay: OverlayConfig::new(),
-            vector_overlays_enabled: false,
             debug_mode: 0,
         }
     }

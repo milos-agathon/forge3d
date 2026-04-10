@@ -40,8 +40,7 @@ pub struct TonemapProcessor {
     /// Green-magenta tint
     tint: f32,
     /// M6: Default 1x1x1 LUT texture (identity)
-    #[allow(dead_code)]
-    default_lut_texture: Texture,
+    _default_lut_texture: Texture,
     default_lut_view: TextureView,
     /// M6: LUT sampler
     lut_sampler: Sampler,
@@ -251,7 +250,7 @@ impl TonemapProcessor {
             white_balance_enabled: false,
             temperature: 6500.0,
             tint: 0.0,
-            default_lut_texture,
+            _default_lut_texture: default_lut_texture,
             default_lut_view,
             lut_sampler,
         })

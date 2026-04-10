@@ -58,7 +58,6 @@ pub(super) fn select_effective_msaa(
     choose_effective_msaa(requested, &supported)
 }
 
-#[allow(dead_code)]
 pub(super) struct MsaaInvariants {
     pub(super) effective_msaa: u32,
     pub(super) pipeline_sample_count: u32,

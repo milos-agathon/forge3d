@@ -192,8 +192,8 @@ impl TerrainScene {
         Ok(NoopShadow {
             _csm_uniform_buffer: csm_uniform_buffer,
             _shadow_maps_texture: shadow_maps_texture,
-            shadow_maps_view,
-            shadow_sampler,
+            _shadow_maps_view: shadow_maps_view,
+            _shadow_sampler: shadow_sampler,
             _moment_maps_texture: moment_maps_texture,
             moment_maps_view,
             moment_sampler,

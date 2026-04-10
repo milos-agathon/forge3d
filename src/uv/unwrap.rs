@@ -1,12 +1,12 @@
 //! UV Unwrap helpers (F10): planar and spherical projections.
-#![allow(dead_code)]
-
+#[cfg(feature = "extension-module")]
 use crate::geometry::MeshBuffers;
 #[cfg(feature = "extension-module")]
 use crate::geometry::{mesh_from_python, mesh_to_python};
 #[cfg(feature = "extension-module")]
 use pyo3::{prelude::*, types::PyDict};
 
+#[cfg(feature = "extension-module")]
 fn compute_bounds(positions: &[[f32; 3]]) -> Option<([f32; 3], [f32; 3])> {
     if positions.is_empty() {
         return None;
@@ -26,6 +26,7 @@ fn compute_bounds(positions: &[[f32; 3]]) -> Option<([f32; 3], [f32; 3])> {
     Some((min, max))
 }
 
+#[cfg(feature = "extension-module")]
 fn planar_unwrap(mesh: &mut MeshBuffers, axis: usize) {
     // axis: dropped axis (0=X -> use YZ, 1=Y -> use XZ, 2=Z -> use XY)
     let (u_idx, v_idx) = match axis {
@@ -46,6 +47,7 @@ fn planar_unwrap(mesh: &mut MeshBuffers, axis: usize) {
         .collect();
 }
 
+#[cfg(feature = "extension-module")]
 fn spherical_unwrap(mesh: &mut MeshBuffers) {
     if mesh.positions.is_empty() {
         mesh.uvs.clear();

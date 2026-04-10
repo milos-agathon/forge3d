@@ -123,8 +123,8 @@ impl GpuBvhBuilder {
             sort_bitonic_pipeline,
             link_nodes_pipeline,
             init_leaves_pipeline,
-            refit_leaves_pipeline,
-            refit_internal_pipeline,
+            _refit_leaves_pipeline: refit_leaves_pipeline,
+            _refit_internal_pipeline: refit_internal_pipeline,
             refit_iterative_pipeline,
         })
     }

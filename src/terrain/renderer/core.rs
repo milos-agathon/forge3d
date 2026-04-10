@@ -5,7 +5,6 @@ use super::*;
 /// Owns the WGPU pipeline state for the PBR+POM terrain path and is free of
 /// any PyO3 attributes so it can be reused by the interactive viewer and
 /// other Rust callers.
-#[allow(dead_code)]
 pub struct TerrainScene {
     pub(super) device: Arc<wgpu::Device>,
     pub(super) queue: Arc<wgpu::Queue>,
@@ -23,13 +22,13 @@ pub struct TerrainScene {
     pub(super) sky_bind_group_layout0: wgpu::BindGroupLayout,
     pub(super) sky_bind_group_layout1: wgpu::BindGroupLayout,
     pub(super) sky_pipeline: wgpu::ComputePipeline,
-    pub(super) sky_fallback_texture: wgpu::Texture,
+    pub(super) _sky_fallback_texture: wgpu::Texture,
     pub(super) sky_fallback_view: wgpu::TextureView,
-    pub(super) height_curve_identity_texture: wgpu::Texture,
+    pub(super) _height_curve_identity_texture: wgpu::Texture,
     pub(super) height_curve_identity_view: wgpu::TextureView,
-    pub(super) water_mask_fallback_texture: wgpu::Texture,
+    pub(super) _water_mask_fallback_texture: wgpu::Texture,
     pub(super) water_mask_fallback_view: wgpu::TextureView,
-    pub(super) ao_debug_fallback_texture: wgpu::Texture,
+    pub(super) _ao_debug_fallback_texture: wgpu::Texture,
     pub(super) ao_debug_fallback_view: wgpu::TextureView,
     pub(super) ao_debug_sampler: wgpu::Sampler,
     pub(super) ao_debug_view: Option<wgpu::TextureView>,
@@ -82,9 +81,9 @@ pub struct TerrainScene {
     pub(super) material_layer_uniform_buffer: wgpu::Buffer,
     pub(super) vt_uniform_buffer: wgpu::Buffer,
     pub(super) vt_fallback_uniform_buffer: wgpu::Buffer,
-    pub(super) vt_atlas_fallback_texture: wgpu::Texture,
+    pub(super) _vt_atlas_fallback_texture: wgpu::Texture,
     pub(super) vt_atlas_fallback_view: wgpu::TextureView,
-    pub(super) vt_page_table_fallback_texture: wgpu::Texture,
+    pub(super) _vt_page_table_fallback_texture: wgpu::Texture,
     pub(super) vt_page_table_fallback_view: wgpu::TextureView,
     pub(super) vt_feedback_fallback_buffer: wgpu::Buffer,
     pub(super) vt_atlas_sampler: wgpu::Sampler,
@@ -100,7 +99,7 @@ pub struct TerrainScene {
     pub(super) reflection_probe_grid_uniform_buffer: wgpu::Buffer,
     pub(super) reflection_probe_sampler: wgpu::Sampler,
     pub(super) reflection_probe_fallback_texture: wgpu::Texture,
-    pub(super) reflection_probe_fallback_view: wgpu::TextureView,
+    pub(super) _reflection_probe_fallback_view: wgpu::TextureView,
     pub(super) reflection_probe_texture: Option<wgpu::Texture>,
     pub(super) reflection_probe_view: wgpu::TextureView,
     pub(super) reflection_probe_grid_uniform_alloc_bytes: u64,
@@ -114,7 +113,7 @@ pub struct TerrainScene {
     pub(super) reflection_probe_mip_levels: u32,
     pub(super) aov_pipeline: Mutex<Option<wgpu::RenderPipeline>>,
     pub(super) aov_pipeline_sample_count: Mutex<u32>,
-    pub(super) dof_renderer: Mutex<Option<crate::core::dof::DofRenderer>>,
+    pub(super) _dof_renderer: Mutex<Option<crate::core::dof::DofRenderer>>,
     pub(super) offline_state: Mutex<Option<OfflineAccumulationState>>,
     #[cfg(feature = "enable-gpu-instancing")]
     pub(super) scatter_renderer: crate::render::mesh_instanced::MeshInstancedRenderer,
@@ -130,7 +129,6 @@ pub struct TerrainScene {
     pub(super) viewer_heightmap: Option<ViewerTerrainData>,
 }
 
-#[allow(dead_code)]
 pub struct ViewerTerrainData {
     pub heightmap: Vec<f32>,
     pub dimensions: (u32, u32),
@@ -168,7 +166,7 @@ pub(super) struct OfflineAccumulationState {
     pub(super) beauty_accumulation: crate::terrain::AccumulationBuffer,
     pub(super) albedo_accumulation: crate::terrain::AccumulationBuffer,
     pub(super) normal_accumulation: crate::terrain::AccumulationBuffer,
-    pub(super) depth_reference_texture: wgpu::Texture,
+    pub(super) _depth_reference_texture: wgpu::Texture,
     pub(super) depth_reference_view: wgpu::TextureView,
     pub(super) luminance_texture: wgpu::Texture,
     pub(super) luminance_view: wgpu::TextureView,
@@ -201,12 +199,11 @@ pub(super) struct OfflineComputeResources {
     pub(super) tonemap_pipeline: wgpu::ComputePipeline,
 }
 
-#[allow(dead_code)]
 pub(super) struct NoopShadow {
     pub(super) _csm_uniform_buffer: wgpu::Buffer,
     pub(super) _shadow_maps_texture: wgpu::Texture,
-    pub(super) shadow_maps_view: wgpu::TextureView,
-    pub(super) shadow_sampler: wgpu::Sampler,
+    pub(super) _shadow_maps_view: wgpu::TextureView,
+    pub(super) _shadow_sampler: wgpu::Sampler,
     pub(super) _moment_maps_texture: wgpu::Texture,
     pub(super) moment_maps_view: wgpu::TextureView,
     pub(super) moment_sampler: wgpu::Sampler,

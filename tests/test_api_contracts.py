@@ -1067,7 +1067,7 @@ class TestTerrainAnalysisApi:
         import numpy as np
         ts = self._make_spike()
         heights = np.zeros(64 * 64, dtype=np.float32)
-        slopes, aspects = ts.slope_aspect_compute(heights, 64, 64)
+        slopes, _ = ts.slope_aspect_compute(heights, 64, 64)
         assert slopes.shape == (64 * 64,)
         assert slopes.max() == pytest.approx(0.0, abs=1e-5)
 

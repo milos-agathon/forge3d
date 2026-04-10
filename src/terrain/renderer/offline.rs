@@ -565,7 +565,7 @@ impl TerrainScene {
             beauty_accumulation,
             albedo_accumulation,
             normal_accumulation,
-            depth_reference_texture,
+            _depth_reference_texture: depth_reference_texture,
             depth_reference_view,
             luminance_texture,
             luminance_view,

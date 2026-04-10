@@ -18,17 +18,6 @@ pub enum OverlayPrimitive {
 }
 
 impl OverlayPrimitive {
-    /// Convert to wgpu primitive topology
-    pub fn to_wgpu_topology(&self) -> wgpu::PrimitiveTopology {
-        match self {
-            OverlayPrimitive::Points => wgpu::PrimitiveTopology::PointList,
-            OverlayPrimitive::Lines => wgpu::PrimitiveTopology::LineList,
-            OverlayPrimitive::LineStrip => wgpu::PrimitiveTopology::LineStrip,
-            OverlayPrimitive::Triangles => wgpu::PrimitiveTopology::TriangleList,
-            OverlayPrimitive::TriangleStrip => wgpu::PrimitiveTopology::TriangleStrip,
-        }
-    }
-
     /// Create from string (for IPC parsing)
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
@@ -54,17 +43,6 @@ pub struct VectorVertex {
 }
 
 impl VectorVertex {
-    /// Create a new vertex with position and color
-    pub fn new(x: f32, y: f32, z: f32, r: f32, g: f32, b: f32, a: f32) -> Self {
-        Self {
-            position: [x, y, z],
-            color: [r, g, b, a],
-            uv: [0.0, 0.0],
-            normal: [0.0, 1.0, 0.0], // Default up normal
-            feature_id: 0,
-        }
-    }
-
     /// Create a new vertex with position, color, and feature ID
     pub fn with_feature_id(
         x: f32,
@@ -81,34 +59,6 @@ impl VectorVertex {
             color: [r, g, b, a],
             uv: [0.0, 0.0],
             normal: [0.0, 1.0, 0.0],
-            feature_id,
-        }
-    }
-
-    /// Create with full parameters
-    pub fn with_all(position: [f32; 3], color: [f32; 4], uv: [f32; 2], normal: [f32; 3]) -> Self {
-        Self {
-            position,
-            color,
-            uv,
-            normal,
-            feature_id: 0,
-        }
-    }
-
-    /// Create with full parameters including feature ID
-    pub fn with_all_and_id(
-        position: [f32; 3],
-        color: [f32; 4],
-        uv: [f32; 2],
-        normal: [f32; 3],
-        feature_id: u32,
-    ) -> Self {
-        Self {
-            position,
-            color,
-            uv,
-            normal,
             feature_id,
         }
     }
@@ -151,11 +101,6 @@ impl VectorVertex {
                 },
             ],
         }
-    }
-
-    /// Set feature ID on this vertex
-    pub fn set_feature_id(&mut self, id: u32) {
-        self.feature_id = id;
     }
 }
 
@@ -238,14 +183,6 @@ pub struct VectorOverlayStack {
     pub bind_group: Option<wgpu::BindGroup>,
     pub sampler: Option<wgpu::Sampler>,
 
-    // ID buffer pipelines for picking
-    pub id_pipeline_triangles: Option<wgpu::RenderPipeline>,
-    pub id_pipeline_lines: Option<wgpu::RenderPipeline>,
-    pub id_pipeline_points: Option<wgpu::RenderPipeline>,
-    pub id_bind_group_layout: Option<wgpu::BindGroupLayout>,
-    pub id_uniform_buffer: Option<wgpu::Buffer>,
-    pub id_bind_group: Option<wgpu::BindGroup>,
-
     // P0.1/M1: OIT pipelines with WBOIT blend states
     pub oit_pipeline_triangles: Option<wgpu::RenderPipeline>,
     pub oit_pipeline_lines: Option<wgpu::RenderPipeline>,
@@ -253,11 +190,7 @@ pub struct VectorOverlayStack {
 }
 
 mod core;
-mod id_buffer;
 mod pipelines;
-
-#[allow(unused_imports)]
-pub use id_buffer::{IdBufferUniforms, ID_BUFFER_SHADER};
 
 fn sample_heightmap_bilinear(heightmap: &[f32], dims: (u32, u32), u: f32, v: f32) -> f32 {
     let (w, h) = dims;

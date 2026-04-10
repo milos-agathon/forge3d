@@ -1,6 +1,5 @@
 use super::effect::PostFxEffect;
 use super::resources::PostFxResourcePool;
-use crate::core::async_compute::AsyncComputeConfig;
 use crate::core::error::{RenderError, RenderResult};
 use crate::core::gpu_timing::GpuTimingManager;
 use std::collections::{HashMap, VecDeque};
@@ -14,9 +13,6 @@ pub struct PostFxChain {
     execution_order: VecDeque<String>,
     /// Resource pool for ping-pong and temporal textures
     resource_pool: PostFxResourcePool,
-    /// Async compute configuration
-    #[allow(dead_code)]
-    async_config: AsyncComputeConfig,
     /// Whether chain is enabled
     enabled: bool,
     /// Chain timing statistics
@@ -33,7 +29,6 @@ impl PostFxChain {
             effects: HashMap::new(),
             execution_order: VecDeque::new(),
             resource_pool,
-            async_config: AsyncComputeConfig::default(),
             enabled: true,
             timing_stats: HashMap::new(),
         }

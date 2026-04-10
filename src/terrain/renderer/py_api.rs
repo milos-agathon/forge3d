@@ -6,9 +6,10 @@ use numpy::PyUntypedArrayMethods;
 impl TerrainRenderer {
     #[new]
     pub fn new(session: &crate::core::session::Session) -> PyResult<Self> {
+        let ctx = crate::core::gpu::ctx();
         let scene = TerrainScene::new(
-            session.device.clone(),
-            session.queue.clone(),
+            ctx.device.clone(),
+            ctx.queue.clone(),
             session.adapter.clone(),
         )
         .map_err(|e| {

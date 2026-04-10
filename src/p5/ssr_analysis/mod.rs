@@ -1,6 +1,4 @@
 //! SSR analysis module for stripe contrast and quality metrics.
-#![allow(dead_code)]
-
 mod luminance;
 mod roi;
 

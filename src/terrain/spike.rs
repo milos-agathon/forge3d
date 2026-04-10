@@ -9,7 +9,7 @@ const NORMAL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 pub struct TerrainSpike {
     width: u32,
     height: u32,
-    grid: u32,
+    _grid: u32,
 
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -33,7 +33,7 @@ pub struct TerrainSpike {
 
     color: wgpu::Texture,
     color_view: wgpu::TextureView,
-    normal: wgpu::Texture,
+    _normal: wgpu::Texture,
     normal_view: wgpu::TextureView,
 
     globals: Globals,
@@ -51,7 +51,6 @@ pub struct TerrainSpike {
     // E1: GPU height mosaic (R32Float) for streamed tiles
     height_mosaic: Option<crate::terrain::stream::HeightMosaic>,
     // E3: Optional overlay mosaic (RGBA8) for basemap streaming
-    #[allow(dead_code)]
     overlay_mosaic: Option<crate::terrain::stream::ColorMosaic>,
     // E3: Overlay compositor
     overlay_renderer: Option<crate::core::overlays::OverlayRenderer>,

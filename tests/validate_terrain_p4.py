@@ -249,31 +249,6 @@ def get_water_mask_stats(water_mask: np.ndarray) -> dict:
     }
 
 
-def validate_luminance_quantiles(
-    luminance: np.ndarray,
-    mask: np.ndarray,
-    ref_quantiles: dict[str, float],
-    tolerance: float = 0.03
-) -> list[ValidationResult]:
-    """Validate luminance quantiles against reference (R1, P2-L, P3-L, P4-L)."""
-    results = []
-    L = luminance[mask]
-
-    for q_name, q_ref in ref_quantiles.items():
-        q_val = float(q_name.replace("q", "")) / 100.0
-        q_computed = float(np.quantile(L, q_val))
-        passed = abs(q_computed - q_ref) <= tolerance
-        results.append(ValidationResult(
-            name=f"L-{q_name}",
-            passed=passed,
-            value=q_computed,
-            expected=f"{q_ref:.3f} ± {tolerance:.3f}",
-            message=f"quantile {q_name}: {q_computed:.3f} (ref: {q_ref:.3f})"
-        ))
-
-    return results
-
-
 def validate_p4(
     image_path: Path,
     verbose: bool = True,
@@ -484,7 +459,7 @@ def validate_p4(
     mean_hi = float(L[L >= q90_val].mean())
     mean_lo = float(L[L <= q10].mean()) if (L <= q10).sum() > 0 else 0.001
     ratio = mean_hi / max(mean_lo, 0.001)
-    ratio_target, (ratio_lo, ratio_hi) = GORE["luminance"]["dynamic_ratio"]
+    _, (ratio_lo, ratio_hi) = GORE["luminance"]["dynamic_ratio"]
     p2.add("dynamic_ratio", ratio_lo <= ratio <= ratio_hi, ratio, f"{ratio_lo}-{ratio_hi}")
 
     # Stricter crushed/blown (GORE_STRICT: <0.1%)
@@ -567,18 +542,18 @@ def validate_p4(
     h_mean, h_std = float(H.mean()), float(H.std())
     s_mean, s_std = float(S.mean()), float(S.std())
     
-    h_target, (h_lo, h_hi) = GORE["hsv"]["h_mean"]
+    _, (h_lo, h_hi) = GORE["hsv"]["h_mean"]
     p3.add("h_mean", h_lo <= h_mean <= h_hi, h_mean, f"{h_lo}-{h_hi}")
     
     # h_std: STRETCH GOAL - log but warn if outside range
-    h_std_target, (h_std_lo, h_std_hi) = GORE["hsv"]["h_std"]
+    _, (h_std_lo, h_std_hi) = GORE["hsv"]["h_std"]
     h_std_in_range = h_std_lo <= h_std <= h_std_hi
     p3.add("h_std", h_std_in_range, h_std, f"{h_std_lo}-{h_std_hi} [STRETCH]")
     
-    s_target, (s_lo, s_hi) = GORE["hsv"]["s_mean"]
+    _, (s_lo, s_hi) = GORE["hsv"]["s_mean"]
     p3.add("s_mean", s_lo <= s_mean <= s_hi, s_mean, f"{s_lo}-{s_hi}")
     
-    s_std_target, (s_std_lo, s_std_hi) = GORE["hsv"]["s_std"]
+    _, (s_std_lo, s_std_hi) = GORE["hsv"]["s_std"]
     p3.add("s_std", s_std_lo <= s_std <= s_std_hi, s_std, f"{s_std_lo}-{s_std_hi}")
 
     # P3-C band-wise hue monotonicity (use 2D masks for proper alignment)

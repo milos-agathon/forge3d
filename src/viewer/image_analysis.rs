@@ -2,8 +2,6 @@
 //!
 //! Provides functions for computing image quality metrics like SSIM, Delta-E,
 //! and luminance analysis on RGBA16F textures.
-#![allow(dead_code)]
-
 use crate::p5::ssr::SsrScenePreset;
 use crate::renderer::readback::read_texture_tight;
 use half::f16;

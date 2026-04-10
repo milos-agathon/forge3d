@@ -3,9 +3,9 @@ use super::*;
 
 #[cfg(feature = "enable-gpu-instancing")]
 use crate::terrain::scatter::{
-    accumulate_frame_stats, compute_wind_uniforms, pack_hlod_identity_instance, summarize_memory,
+    accumulate_frame_stats, compute_wind_uniforms, pack_hlod_identity_instance,
     TerrainScatterBatch, TerrainScatterBlendConfig, TerrainScatterContactConfig,
-    TerrainScatterFrameStats, TerrainScatterLevelSpec, TerrainScatterMemoryReport,
+    TerrainScatterFrameStats, TerrainScatterLevelSpec,
 };
 
 #[cfg(feature = "enable-gpu-instancing")]
@@ -236,51 +236,6 @@ impl ViewerTerrainScene {
     pub fn clear_scatter_batches(&mut self) {
         self.scatter_batches.clear();
         self.scatter_last_frame_stats = TerrainScatterFrameStats::default();
-    }
-
-    pub fn scatter_memory_report(&self) -> TerrainScatterMemoryReport {
-        summarize_memory(&self.scatter_batches)
-    }
-
-    pub fn scatter_last_frame_stats(&self) -> TerrainScatterFrameStats {
-        self.scatter_last_frame_stats.clone()
-    }
-
-    pub(in crate::viewer::terrain) fn render_scatter_pass(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        color_view: &wgpu::TextureView,
-        depth_view: &wgpu::TextureView,
-        batches: &mut [TerrainScatterBatch],
-        view: glam::Mat4,
-        proj: glam::Mat4,
-        eye_render: glam::Vec3,
-        heightmap_view: &wgpu::TextureView,
-        terrain_width: f32,
-        terrain_min_height: f32,
-        z_scale: f32,
-        light_dir: [f32; 3],
-        light_intensity: f32,
-    ) -> Result<TerrainScatterFrameStats> {
-        render_scatter_batches(
-            encoder,
-            color_view,
-            depth_view,
-            batches,
-            view,
-            proj,
-            eye_render,
-            heightmap_view,
-            terrain_width,
-            terrain_min_height,
-            z_scale,
-            light_dir,
-            light_intensity,
-            self.scatter_elapsed_time,
-            self.device.as_ref(),
-            self.queue.as_ref(),
-            &mut self.scatter_renderer,
-        )
     }
 }
 

@@ -13,15 +13,7 @@ use std::sync::Arc;
 #[cfg(feature = "extension-module")]
 #[pyclass(module = "forge3d._forge3d", name = "Session")]
 pub struct Session {
-    #[allow(dead_code)]
-    pub(crate) device: Arc<wgpu::Device>,
-    #[allow(dead_code)]
-    pub(crate) queue: Arc<wgpu::Queue>,
     pub(crate) adapter: Arc<wgpu::Adapter>,
-    #[allow(dead_code)]
-    pub(crate) instance: Arc<wgpu::Instance>,
-    #[allow(dead_code)]
-    pub(crate) surface: Option<Arc<wgpu::Surface<'static>>>,
     window: bool,
 }
 
@@ -52,11 +44,7 @@ impl Session {
         }
 
         Ok(Self {
-            device: Arc::clone(&ctx.device),
-            queue: Arc::clone(&ctx.queue),
             adapter: Arc::clone(&ctx.adapter),
-            instance: Arc::clone(&ctx.instance),
-            surface: None,
             window,
         })
     }

@@ -40,7 +40,8 @@ impl MaterialSet {
     ) -> Result<Arc<GpuMaterialSet>> {
         self.gpu_cache
             .get_or_try_init(|| {
-                let gpu = GpuMaterialSet::new(device, queue, &self.materials, &self.texture_paths)?;
+                let gpu =
+                    GpuMaterialSet::new(device, queue, &self.materials, &self._texture_paths)?;
                 Ok(Arc::new(gpu))
             })
             .map(Arc::clone)

@@ -6,7 +6,6 @@ mod controls;
 mod runtime;
 
 /// SSGI renderer
-#[allow(dead_code)]
 pub struct SsgiRenderer {
     settings: SsgiSettings,
     settings_buffer: Buffer,
@@ -48,7 +47,7 @@ pub struct SsgiRenderer {
     // Composited material (material + SSGI)
     // ssgi_composited: Rgba8Unorm material buffer + SSGI diffuse contribution, used for
     //                   P5 visualization and metrics (not the main HDR lighting buffer).
-    ssgi_composited: Texture,
+    _ssgi_composited: Texture,
     ssgi_composited_view: TextureView,
     composite_uniform: Buffer,
     scene_history: [Texture; 2],
@@ -58,7 +57,7 @@ pub struct SsgiRenderer {
     linear_sampler: Sampler,
 
     // Env
-    env_texture: Texture,
+    _env_texture: Texture,
     env_view: TextureView,
     env_sampler: Sampler,
 

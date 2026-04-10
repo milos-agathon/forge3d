@@ -134,10 +134,6 @@ impl LayerBvhData {
 
 /// Unified picking system with BVH acceleration
 pub struct UnifiedPickingSystem {
-    #[allow(dead_code)]
-    device: Arc<Device>,
-    #[allow(dead_code)]
-    queue: Arc<Queue>,
     config: UnifiedPickingConfig,
     /// BVH data per layer
     layer_bvhs: HashMap<u32, LayerBvhData>,
@@ -149,10 +145,8 @@ pub struct UnifiedPickingSystem {
 
 impl UnifiedPickingSystem {
     /// Create a new unified picking system
-    pub fn new(device: Arc<Device>, queue: Arc<Queue>) -> Self {
+    pub fn new(_device: Arc<Device>, _queue: Arc<Queue>) -> Self {
         Self {
-            device,
-            queue,
             config: UnifiedPickingConfig::default(),
             layer_bvhs: HashMap::new(),
             selection_manager: SelectionManager::new(),

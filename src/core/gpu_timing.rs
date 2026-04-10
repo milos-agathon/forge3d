@@ -6,7 +6,7 @@
 
 use super::error::{RenderError, RenderResult};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use wgpu::*;
 
 /// Handle for a GPU timing scope
@@ -91,8 +91,6 @@ impl<'a> TimingScope<'a> {
 pub struct GpuTimingManager {
     config: GpuTimingConfig,
     device: Arc<Device>,
-    #[allow(dead_code)]
-    queue: Arc<Queue>,
 
     // Timestamp queries
     timestamp_query_set: Option<QuerySet>,
@@ -107,8 +105,6 @@ pub struct GpuTimingManager {
     // Timing state
     active_scopes: HashMap<TimingScopeId, String>,
     query_index: u32,
-    #[allow(dead_code)]
-    results: Arc<Mutex<Vec<TimingResult>>>,
     scope_labels: Vec<String>,
 
     // Feature support
@@ -121,7 +117,7 @@ impl GpuTimingManager {
     /// Create new GPU timing manager
     pub fn new(
         device: Arc<Device>,
-        queue: Arc<Queue>,
+        _queue: Arc<Queue>,
         config: GpuTimingConfig,
     ) -> RenderResult<Self> {
         let features = device.features();
@@ -143,7 +139,6 @@ impl GpuTimingManager {
         let mut manager = Self {
             config: config.clone(),
             device: device.clone(),
-            queue,
             timestamp_query_set: None,
             timestamp_buffer: None,
             timestamp_readback_buffer: None,
@@ -152,7 +147,6 @@ impl GpuTimingManager {
             pipeline_stats_readback_buffer: None,
             active_scopes: HashMap::new(),
             query_index: 0,
-            results: Arc::new(Mutex::new(Vec::new())),
             scope_labels: Vec::new(),
             supports_timestamps,
             supports_pipeline_stats,

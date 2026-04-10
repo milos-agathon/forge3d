@@ -15,7 +15,6 @@ use std::sync::Arc;
 #[pyclass(module = "forge3d._forge3d", name = "Colormap1D")]
 #[derive(Clone)]
 pub struct Colormap1D {
-    #[allow(dead_code)]
     pub(crate) lut: Arc<crate::terrain::ColormapLUT>,
     pub(crate) domain: (f32, f32),
     pub(crate) stops: Vec<(f32, String)>,

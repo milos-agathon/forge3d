@@ -2,14 +2,14 @@
 //!
 //! Builds ribbon geometry with constant world-space width and optional depth offset
 //! for Z-fighting mitigation when overlaying on other geometry.
-#![allow(dead_code)]
-
 use super::{curves, MeshBuffers};
 
 /// Default miter limit for sharp corner clamping.
+#[cfg(feature = "extension-module")]
 const DEFAULT_MITER_LIMIT: f32 = 4.0;
 
 /// Default join style for polyline corners.
+#[cfg(feature = "extension-module")]
 const DEFAULT_JOIN_STYLE: &str = "miter";
 
 /// Generate a thick 3D polyline as a ribbon with constant world-space width.

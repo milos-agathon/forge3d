@@ -115,7 +115,6 @@ impl IndirectRenderer {
 
         Ok(Self {
             draw_commands_buffer,
-            draw_commands_capacity: initial_capacity,
             instances_buffer,
             instances_capacity: initial_capacity,
             culling_pipeline,

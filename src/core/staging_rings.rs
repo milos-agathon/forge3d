@@ -85,12 +85,6 @@ pub struct StagingRing {
     fence_tracker: Arc<Mutex<FenceTracker>>,
     /// Statistics tracking
     stats: Arc<Mutex<StagingStats>>,
-    /// Device reference for buffer creation
-    #[allow(dead_code)]
-    device: Arc<Device>,
-    /// Queue reference for fence submission
-    #[allow(dead_code)]
-    queue: Arc<Queue>,
 }
 
 impl StagingRing {
@@ -141,8 +135,6 @@ impl StagingRing {
             current_index: 0,
             fence_tracker: Arc::new(Mutex::new(FenceTracker::new(device.clone(), queue.clone()))),
             stats: Arc::new(Mutex::new(stats)),
-            device,
-            queue,
         };
         instance.publish_stats();
         instance

@@ -5,13 +5,6 @@ fn approx_eq(a: f32, b: f32) {
 }
 
 #[test]
-fn test_blend_mode_values() {
-    assert_eq!(BlendMode::Normal.to_shader_value(), 0.0);
-    assert_eq!(BlendMode::Multiply.to_shader_value(), 1.0);
-    assert_eq!(BlendMode::Overlay.to_shader_value(), 2.0);
-}
-
-#[test]
 fn test_overlay_layer_default() {
     let layer = OverlayLayer::default();
     assert!(layer.name.is_empty());

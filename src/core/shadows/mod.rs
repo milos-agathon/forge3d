@@ -28,8 +28,7 @@ pub struct CsmShadowMap {
     /// Directional light
     light: DirectionalLight,
     /// Shadow map texture array
-    #[allow(dead_code)]
-    shadow_maps: wgpu::Texture,
+    _shadow_maps: wgpu::Texture,
     /// Shadow map depth views (one per cascade)
     shadow_depth_views: Vec<wgpu::TextureView>,
     /// Combined shadow map array view for sampling
@@ -72,7 +71,7 @@ impl CsmShadowMap {
         Self {
             config,
             light: DirectionalLight::default(),
-            shadow_maps,
+            _shadow_maps: shadow_maps,
             shadow_depth_views,
             shadow_array_view,
             shadow_sampler,

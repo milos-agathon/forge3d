@@ -65,27 +65,5 @@ pub(super) fn blend_pixel(blend_mode: BlendMode, dst: [f32; 4], src: [f32; 4]) -
             let a = dst_a + src_a * (1.0 - dst_a);
             [r, g, b, a]
         }
-        BlendMode::Multiply => {
-            let r = (dst_r * src_r) * src_a + dst_r * (1.0 - src_a);
-            let g = (dst_g * src_g) * src_a + dst_g * (1.0 - src_a);
-            let b = (dst_b * src_b) * src_a + dst_b * (1.0 - src_a);
-            let a = dst_a.max(src_a);
-            [r, g, b, a]
-        }
-        BlendMode::Overlay => {
-            let r = overlay_channel(dst_r, src_r) * src_a + dst_r * (1.0 - src_a);
-            let g = overlay_channel(dst_g, src_g) * src_a + dst_g * (1.0 - src_a);
-            let b = overlay_channel(dst_b, src_b) * src_a + dst_b * (1.0 - src_a);
-            let a = dst_a.max(src_a);
-            [r, g, b, a]
-        }
-    }
-}
-
-fn overlay_channel(base: f32, blend: f32) -> f32 {
-    if base < 0.5 {
-        2.0 * base * blend
-    } else {
-        1.0 - 2.0 * (1.0 - base) * (1.0 - blend)
     }
 }

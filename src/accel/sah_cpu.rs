@@ -291,7 +291,6 @@ impl CpuSahBuilder {
                     best_split = Some(SplitInfo {
                         axis,
                         position: split_pos,
-                        cost,
                     });
                 }
             }
@@ -435,6 +434,4 @@ struct BuildInfo {
 struct SplitInfo {
     axis: usize,
     position: f32,
-    #[allow(dead_code)]
-    cost: f32,
 }

@@ -508,7 +508,7 @@ def _save_image(img, path: Path) -> None:
             print("  Warning: Saved as .npy (no PNG writer available)")
 
 
-def _apply_luminance_unsharp(frame, strength: float, sigma: float = 2.5):
+def _apply_luminance_unsharp(frame, strength: float):
     """P5-US: Apply luminance unsharp mask for gradient enhancement.
     
     Enhances local contrast by boosting high-frequency luminance detail.
@@ -519,8 +519,6 @@ def _apply_luminance_unsharp(frame, strength: float, sigma: float = 2.5):
     Args:
         frame: Rendered frame (forge3d.Frame or numpy array)
         strength: Unsharp strength k in [0.1, 1.0]. Higher = more contrast.
-        sigma: Gaussian blur sigma (default 2.5 pixel for terrain detail)
-    
     Returns:
         Modified frame with enhanced gradients
     """

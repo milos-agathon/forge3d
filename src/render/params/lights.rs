@@ -22,7 +22,6 @@ pub enum LightType {
 }
 
 impl LightType {
-    #[allow(dead_code)]
     pub fn canonical(self) -> &'static str {
         match self {
             Self::Directional => "directional",
