@@ -112,7 +112,7 @@ pub fn mesh_from_python_dict(mesh: &PyDict) -> PyResult<MeshBuffers> {
     } else {
         let array: PyReadonlyArray1<u32> = indices_obj.extract()?;
         let slice = array.as_slice()?;
-        if slice.len() % 3 != 0 {
+        if !slice.len().is_multiple_of(3) {
             return Err(PyValueError::new_err(
                 "indices length must be a multiple of 3",
             ));
@@ -120,7 +120,7 @@ pub fn mesh_from_python_dict(mesh: &PyDict) -> PyResult<MeshBuffers> {
         indices = slice.to_vec();
     }
 
-    if indices.len() % 3 != 0 {
+    if !indices.len().is_multiple_of(3) {
         return Err(PyValueError::new_err(
             "indices length must be a multiple of 3",
         ));

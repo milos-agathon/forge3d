@@ -33,7 +33,7 @@ fn gpu_matches_cpu_for_square() {
 
     let gpu = GpuExtrusion::new(&device);
     let output = gpu
-        .extrude(&device, &queue, &[polygon.clone()], height)
+        .extrude(&device, &queue, std::slice::from_ref(&polygon), height)
         .expect("gpu extrusion failed");
 
     let vertex_count = output.vertex_count as usize;

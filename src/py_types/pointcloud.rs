@@ -19,7 +19,7 @@ impl PyPointBuffer {
     #[new]
     #[pyo3(signature = (positions, colors = None))]
     fn new(positions: Vec<f32>, colors: Option<Vec<u8>>) -> PyResult<Self> {
-        if positions.len() % 3 != 0 {
+        if !positions.len().is_multiple_of(3) {
             return Err(PyValueError::new_err(
                 "positions length must be a multiple of 3",
             ));
