@@ -71,7 +71,7 @@ CRS Reprojection (P3):
     python examples/terrain_viewer_interactive.py --dem assets/dem_utm.tif \\
         --vector-overlay roads.geojson --vector-crs EPSG:4326 --terrain-crs EPSG:32654
 
-See docs/pbm_pom_viewer.md for full documentation.
+See the quickstart, examples catalog, and API reference for the current terrain viewer workflow.
 """
 
 from __future__ import annotations

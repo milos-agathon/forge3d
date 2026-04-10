@@ -389,23 +389,17 @@ class ReflectionProbeSettings:
 
 @dataclass
 class DetailSettings:
-    """P6: Micro-detail configuration for close-range surface enhancement.
-    
-    When enabled=False, micro-detail is disabled (no-op for P5 compatibility).
-    Adds triplanar detail normals and procedural albedo noise that fade
+    """P6 micro-detail configuration for close-range surface enhancement.
+
+    When ``enabled`` is false, micro-detail is disabled. When enabled, the
+    renderer adds triplanar detail normals and procedural albedo noise that fade
     with distance to prevent LOD popping and shimmer.
-    
-    P6 Gradient Match extension:
-    - detail_normal_path: Path to DEM-derived detail normal texture (optional).
-      When provided, samples from texture instead of procedural normals.
-    - detail_sigma_px: Gaussian sigma used to generate detail normals (for metadata).
-    - detail_strength: Blending strength for DEM-derived detail normals (0.0-1.0).
-    
-    detail_scale: World-space repeat interval for detail normals (default 2.0 meters).
-    normal_strength: Strength of detail normal perturbation (0.0-1.0).
-    albedo_noise: Brightness variation amplitude (±percentage, e.g., 0.1 = ±10%).
-    fade_start: Distance at which detail begins fading (world units).
-    fade_end: Distance at which detail is fully faded out (world units).
+
+    Gradient-match fields:
+    ``detail_normal_path`` points to an optional DEM-derived detail-normal
+    texture, ``detail_sigma_px`` records the Gaussian sigma used to generate it,
+    and ``detail_strength`` controls how strongly it blends with the procedural
+    detail path.
     """
 
     enabled: bool = False  # Disabled by default (P5 compatibility)

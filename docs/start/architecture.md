@@ -1,106 +1,113 @@
 # Architecture
 
-Phase 2 treats forge3d as a developer platform around one rendering core, not a
-collection of disconnected demos.
+forge3d has two main public execution paths and one shared data model behind
+them.
 
-## Layers
+## The Two Rendering Paths
 
-### 1. Rust runtime
+### 1. Viewer-first scene control
 
-The Rust side owns the renderer, terrain scene, point-cloud path, and the
-`interactive_viewer` desktop binary.
+This is the default user-facing path:
 
-### 2. Python control surface
+1. resolve terrain or other scene assets
+2. launch `interactive_viewer` with `forge3d.open_viewer_async()`
+3. drive the scene through `ViewerHandle`
+4. capture snapshots, frame sequences, or downstream products
 
-The Python package provides:
+This path covers most of the repo's examples, tutorials, and gallery entries.
+It is the right default for terrain scenes, overlays, point clouds, labels,
+camera automation, and notebook-driven inspection.
 
-- launch helpers in `forge3d.viewer`
-- low-level IPC helpers in `forge3d.viewer_ipc`
-- dataset resolution in `forge3d.datasets`
-- notebook wrappers in `forge3d.widgets`
-- packaging utilities in `forge3d.map_plate`, `forge3d.bundle`, and
-  `forge3d.export`
+### 2. Native/offscreen rendering
 
-### 3. Tutorials and samples
+This is the lower-level path for controlled rendering without the desktop viewer:
 
-The docs, bundled data, gallery, and notebooks are the contract for how the
-platform is supposed to feel to a new user.
+- `Scene` for compact offscreen scene rendering
+- `Session` + `TerrainRenderer` + `TerrainRenderParams` for terrain PBR/POM
+- `render_offline()` for accumulation-based offline output
+- `oidn_denoise()` for CPU denoise after accumulation
 
-## Primary rendering path
+Use this path when you need explicit renderer ownership, deterministic batch
+rendering, AOVs, or advanced terrain-quality settings that belong in a pipeline
+rather than an interactive session.
 
-The intended runtime path is:
+## Shared Runtime Layers
 
-1. Resolve a DEM or scene asset.
-2. Launch `interactive_viewer` with `forge3d.open_viewer_async()`.
-3. Hold on to `ViewerHandle`.
-4. Send explicit updates over TCP/NDJSON IPC.
-5. Capture snapshots or export downstream assets.
+### Native runtime
 
-That keeps Python thin and makes the viewer the single place where terrain,
-overlays, point clouds, and camera state actually render.
+The Rust layer owns GPU resources, the terrain renderer, point-cloud support,
+screen-space effects, and the `interactive_viewer` executable.
 
-## Notebook path
+### Python package
 
-`ViewerWidget` is the notebook wrapper around the same viewer process. When the
-full viewer cannot launch, the widget falls back to an inline pseudo-3D preview
-so examples still run in constrained environments.
+The Python layer is the user-facing control surface. The main modules are:
 
-That fallback is intentionally narrower than the full viewer. It is useful for
-documentation, CI, and quick previews, but it remains an implementation detail
-of the widget; the authoritative interactive path is still the Rust viewer plus
-IPC.
+- `forge3d.viewer`, `forge3d.viewer_ipc`, and `forge3d.widgets` for live scenes
+- `forge3d.datasets`, `forge3d.crs`, and `forge3d.cog` for terrain/data access
+- `forge3d.terrain_params`, `forge3d.presets`, `forge3d.animation`, and `forge3d.camera_rigs` for scene configuration
+- `forge3d.pointcloud`, `forge3d.buildings`, `forge3d.tiles3d`, and `forge3d.style` for non-raster scene assets
+- `forge3d.map_plate`, `forge3d.export`, and `forge3d.bundle` for packaged outputs
 
-## IPC model
+### Examples, tutorials, and gallery
 
-The high-level wrapper covers common commands directly:
+The `examples/` directory shows the supported workflows in executable form.
+The tutorials explain the common onboarding paths. The gallery provides smaller
+recipe-style references tied to concrete outputs.
 
-- `load_terrain()`
+## IPC Model
+
+`ViewerHandle` exposes the high-frequency operations directly:
+
 - `load_overlay()`
 - `load_point_cloud()`
 - `set_point_cloud_params()`
 - `set_orbit_camera()`
+- `set_camera_lookat()`
 - `set_sun()`
 - `snapshot()`
 
-Anything more specialized can still be issued through `ViewerHandle.send_ipc()`
-or the helpers in `forge3d.viewer_ipc`, including vector overlays, labels, and
-bundle commands.
+Everything else flows through explicit NDJSON commands over TCP. You can send
+those with `ViewerHandle.send_ipc()` or by using helper functions from
+`forge3d.viewer_ipc`.
 
-## Data flow
+That split keeps the common workflow ergonomic while leaving the full scene
+command surface available.
 
-### DEMs
+## Data Flow
 
-- Bundled samples ship as `.npy` and GeoJSON metadata.
-- Larger tutorial datasets resolve from local repo assets or download through
-  `pooch`.
-- `.npy` terrain inputs are converted to temporary TIFFs before viewer launch so
-  the current binary can consume them without changing the viewer CLI contract.
+### Terrain
 
-### Overlays
+- small bundled samples come from `forge3d.datasets`
+- larger samples resolve from local assets first, then download as needed
+- `numpy` DEMs can still feed the viewer path through wrapper-side conversion
 
-- Raster overlays are loaded directly with `load_overlay()`.
-- Vector overlays and labels are sent as explicit IPC payloads.
+### Scene layers
 
-### Buildings
+- raster overlays load directly through `ViewerHandle.load_overlay()`
+- vector overlays and labels use raw IPC or `forge3d.viewer_ipc`
+- point clouds and scene assets use viewer or module-specific helpers
 
-- `forge3d.buildings` parses GeoJSON, CityJSON, or 3D Tiles metadata.
-- When native geometry extraction is available, the resulting triangles can be
-  forwarded to the viewer through `add_vector_overlay`.
-- Without the native path, the Python fallback still exposes counts, materials,
-  bounds, and attributes for inspection.
+### Packaged outputs
 
-### Bundles and export
+- viewer snapshots feed map-plate and pure-Python composition examples
+- scene state can be saved and loaded through bundle workflows
+- vector scenes can be exported separately through `forge3d.export`
 
-- `forge3d.bundle` writes portable `.forge3d` directories for terrain,
-  overlays, presets, and bookmarks.
-- `forge3d.MapPlate` composes rendered terrain with legends, scale bars, north
-  arrows, and inset images.
-- `forge3d.export` generates SVG or PDF from 2D vector scenes.
+## Open-Source And Pro Boundaries
 
-## Design constraints
+The open-source core covers the viewer, terrain rendering, datasets, point
+clouds, raster overlays, labels, animations, widgets, geometry helpers, and the
+native rendering path.
 
-- One live rendering path: the viewer binary.
-- Thin Python wrappers over explicit commands.
-- Small bundled examples and larger on-demand datasets.
-- Notebook support without creating a second full renderer stack.
-- Production-output features layered on top of the same scene assets.
+Pro-gated workflows are layered on top of that core rather than replacing it:
+map plates, vector export, style import, bundles, and building-focused product
+pipelines.
+
+## Reading The Repo
+
+If you are navigating the codebase:
+
+- start with `python/forge3d/__init__.py` for the public package surface
+- use `examples/` for concrete workflows
+- use `docs/examples/index.md` to map example scripts to modules and features
+- use `docs/api/api_reference.rst` when you need the module-by-module reference

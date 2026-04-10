@@ -33,7 +33,7 @@ Interactive Commands:
     camera phi=N theta=N      Set camera position
     quit                      Exit viewer
 
-See docs/api/style.md for Style Spec documentation.
+See the API reference and examples catalog for the current Style Spec workflow.
 """
 
 from __future__ import annotations

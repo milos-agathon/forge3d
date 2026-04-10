@@ -1,78 +1,47 @@
-forge3d Developer Platform
-==========================
+forge3d Documentation
+=====================
 
-forge3d is a Rust-powered terrain and scene viewer with a Python surface built
-around one primary workflow:
-
-1. Resolve a dataset.
-2. Launch the interactive viewer or notebook widget.
-3. Send small, explicit scene updates over IPC.
-4. Capture snapshots, package scenes, or compose publication output.
-
-The Phase 2 platform work adds the missing developer layer around that runtime:
-sample datasets, notebook widgets, a clearer docs spine, and higher-level
-workflows for overlays, point clouds, map plates, buildings, and bundles.
+forge3d is a Python package and native runtime for terrain-centric 3D scenes.
+The docs below are intentionally organized around the workflows the repo
+actually supports today: viewer-first scene control, native/offscreen rendering,
+data loading, cartography, export, and the runnable examples in ``examples/``.
 
 .. toctree::
-   :maxdepth: 2
-   :caption: Start Here
+   :maxdepth: 1
+   :caption: Start
 
    start/quickstart
    start/architecture
-   api/api_reference
+   viewer/index
 
 .. toctree::
-   :maxdepth: 2
-   :caption: Tutorials
+   :maxdepth: 1
+   :caption: Guides
+
+   guides/feature_map
+   guides/data_and_scene_workflows
+   guides/rendering_and_analysis
+   terrain/offline-render-quality
+   guides/output_and_integration
+   examples/index
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Learn
 
    tutorials/index
    gallery/index
 
 .. toctree::
-   :maxdepth: 2
-   :caption: Viewer And Scene Ops
-
-   viewer/index
-
-.. toctree::
    :maxdepth: 1
-   :caption: Terrain Workflows
+   :caption: Reference
 
-   terrain/atmosphere
-   terrain/aovs
-   terrain/scatter
-   terrain/material-variation
-   terrain/probe-lighting
-   terrain/heterogeneous-volumetrics
-   terrain/subsurface
-   terrain/offline-render-quality
-   terrain/population-lod-pipeline
-   terrain/virtual-texturing
-   terrain/blending
-   terrain/scatter-wind-animation
+   api/api_reference
 
-.. toctree::
-   :maxdepth: 1
-   :caption: Product Notes
+Where To Start
+--------------
 
-   product/pro-boundary-notes
-   product/launch-blog
-
-Platform Overview
------------------
-
-The current public workflow is intentionally small:
-
-* ``forge3d.open_viewer_async()`` launches the installed ``interactive_viewer``
-  command backed by the native forge3d extension.
-* ``forge3d.ViewerHandle`` exposes the live control surface for terrain, overlays,
-  point clouds, camera, lighting, and snapshots.
-* ``forge3d.ViewerWidget`` wraps that same viewer flow for notebooks and falls
-  back to an inline preview inside the widget when a full viewer process is
-  unavailable.
-* ``forge3d.datasets`` provides bundled samples and on-demand fetch helpers.
-* ``forge3d.MapPlate``, ``forge3d.bundle``, and ``forge3d.export`` cover
-  Pro-gated production packaging workflows around the live scene.
-
-If you are new to the project, start with :doc:`start/quickstart`, then walk one of
-the two tracks in :doc:`tutorials/index`.
+* New to the package: start with :doc:`start/quickstart`.
+* Want the high-level feature map first: read :doc:`guides/feature_map`.
+* Looking for a script close to your use case: jump to :doc:`examples/index`.
+* Need exact modules, classes, and functions: use :doc:`api/api_reference`.

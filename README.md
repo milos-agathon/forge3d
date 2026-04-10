@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <strong>GPU-accelerated 3D terrain rendering for Python.</strong><br>
-  Built in Rust with WebGPU. Pre-built wheels — no Rust toolchain required.
+  <strong>Python-first terrain and scene rendering on top of Rust + WebGPU.</strong><br>
+  Interactive viewer, offscreen rendering, overlays, point clouds, notebooks, and production outputs.
 </p>
 
 <p align="center">
@@ -20,103 +20,75 @@
   <img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/assets/highres.png" alt="forge3d hero render" width="720">
 </p>
 
-**This image was generated with 5 lines of Python.** Load a DEM, launch the GPU viewer, position the camera, and capture a publication-quality snapshot. No shaders to write. No OpenGL boilerplate. Just `pip install forge3d`.
-
-```python
-import forge3d
-
-with forge3d.open_viewer_async(terrain_path="rainier.tif") as viewer:
-    viewer.set_orbit_camera(phi_deg=225, theta_deg=35, radius=1.2)
-    viewer.set_sun(azimuth_deg=315, elevation_deg=32)
-    viewer.snapshot("render.png", width=3840, height=2160)
-```
-
 ## Install
 
 ```bash
 pip install forge3d
 ```
 
-Need Jupyter widgets or tutorial datasets?
+Optional extras:
 
 ```bash
-pip install "forge3d[jupyter]"     # ViewerWidget for notebooks
-pip install "forge3d[datasets]"    # on-demand sample DEMs, CityJSON, COPC
-pip install "forge3d[all]"         # everything
+pip install "forge3d[jupyter]"   # notebook widget support
+pip install "forge3d[datasets]"  # on-demand sample datasets
+pip install "forge3d[all]"       # everything
 ```
 
-## Gallery
-
-<table>
-  <tr>
-    <td align="center"><img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/gallery/images/01-mount-rainier.png" width="280"><br><sub>PBR terrain</sub></td>
-    <td align="center"><img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/gallery/images/03-swiss-landcover.png" width="280"><br><sub>Landcover overlay</sub></td>
-    <td align="center"><img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/gallery/images/06-point-cloud.png" width="280"><br><sub>LiDAR point cloud</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/gallery/images/09-shadow-comparison.png" width="280"><br><sub>Sun & shadow control</sub></td>
-    <td align="center"><img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/gallery/images/02-mount-fuji-labels.png" width="280"><br><sub>GeoPackage labels</sub></td>
-    <td align="center"><img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/gallery/images/05-3d-buildings.png" width="280"><br><sub>CityJSON buildings</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/gallery/images/04-luxembourg-rail-network.png" width="280"><br><sub>Vector overlays</sub></td>
-    <td align="center"><img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/gallery/images/07-camera-flyover.png" width="280"><br><sub>Camera animation</sub></td>
-    <td align="center"><img src="https://raw.githubusercontent.com/milos-agathon/forge3d/main/docs/gallery/images/10-map-plate.png" width="280"><br><sub>Map plate compositor</sub></td>
-  </tr>
-</table>
-
-<p align="center"><a href="https://milos-agathon.github.io/forge3d/gallery/"><strong>See the full gallery &rarr;</strong></a></p>
-
-## What You Get
-
-### Open Source (Apache-2.0 / MIT)
-
-Everything you need to go from raw elevation data to a rendered 3D scene:
-
-- **Interactive viewer** — real-time orbit, pan, zoom via a Rust/WebGPU subprocess controlled from Python over IPC
-- **Terrain rendering** — load GeoTIFFs or numpy arrays, PBR materials, 100+ colormaps
-- **Vector overlays** — GeoJSON/GeoPackage polygons, lines, and labels projected onto terrain
-- **Point clouds** — COPC and LAZ files with millions of points, colored by elevation or classification
-- **3D Tiles** — stream OGC 3D Tiles tilesets directly into the viewer
-- **CRS reprojection** — automatic coordinate transforms via PROJ + pyproj
-- **Camera animation** — keyframed flyover paths with frame-by-frame export
-- **Jupyter integration** — `ViewerWidget` embeds the viewer inline in notebooks
-- **High-res snapshots** — up to 8K PNG export from any camera angle
-
-### Pro
-
-Professional cartography and production workflows:
-
-- **Map plate compositor** — legends, scale bars, north arrows, multi-panel layouts
-- **SVG / PDF export** — publication-ready vector output
-- **3D buildings** — GeoJSON, CityJSON, and 3D Tiles import with roof inference and PBR materials
-- **Mapbox Style Spec** — load and apply Mapbox-compatible styles
-- **Scene bundles** — save and share complete `.forge3d` scene packages
-- **Commercial licensing details &rarr;** https://github.com/milos-agathon/forge3d#license
-
-## Tutorials
-
-Two tracks depending on your background:
-
-- **GIS professionals** — [Visualize your first DEM &rarr;](https://milos-agathon.github.io/forge3d/tutorials/gis-track/)
-- **Python developers** — [Your first 3D terrain &rarr;](https://milos-agathon.github.io/forge3d/tutorials/python-track/)
-- **Architecture overview** — [How forge3d works &rarr;](https://milos-agathon.github.io/forge3d/start/architecture.html)
-
-## Jupyter
+## Quick Start
 
 ```python
-from forge3d.widgets import ViewerWidget
+import forge3d as f3d
 
-widget = ViewerWidget(terrain_path="dem.npy")
-widget.set_camera(phi_deg=225, theta_deg=35, radius=1.2)
-widget.set_sun(azimuth_deg=315, elevation_deg=32)
-widget.snapshot()  # renders inline
+dem_path = f3d.fetch_dem("rainier")
+
+with f3d.open_viewer_async(terrain_path=dem_path, width=1440, height=900) as viewer:
+    viewer.set_z_scale(0.1)
+    viewer.set_orbit_camera(phi_deg=28, theta_deg=49, radius=5400, fov_deg=42)
+    viewer.set_sun(azimuth_deg=302, elevation_deg=24)
+    viewer.snapshot("rainier.png", width=1920, height=1080)
 ```
 
-## Links
+## What forge3d Covers
 
-[Documentation](https://milos-agathon.github.io/forge3d/) &nbsp;&middot;&nbsp; [API Reference](https://milos-agathon.github.io/forge3d/api/api_reference.html) &nbsp;&middot;&nbsp; [GitHub](https://github.com/milos-agathon/forge3d) &nbsp;&middot;&nbsp; [PyPI](https://pypi.org/project/forge3d/)
+Open-source workflow:
+
+- Interactive terrain viewing through `open_viewer_async()` and `ViewerHandle`
+- Terrain snapshots from GeoTIFF or `numpy` DEM inputs
+- Raster overlays, vector overlays, labels, and camera automation
+- LAZ/COPC/EPT point-cloud loading
+- COG access, CRS helpers, datasets, presets, and notebook widgets
+- Native/offscreen rendering with `Scene`, `Session`, `TerrainRenderer`, and `TerrainRenderParams`
+- Geometry, mesh, vector, SDF, path-tracing, lighting, and terrain scatter helpers
+
+Pro workflow:
+
+- `MapPlate`, `Legend`, `ScaleBar`, and `NorthArrow` for cartographic composition
+- SVG/PDF vector export
+- Building import pipelines for GeoJSON, CityJSON, and 3D Tiles workflows
+- Mapbox-style import and scene bundles
+
+## Documentation Map
+
+- [Quickstart](https://milos-agathon.github.io/forge3d/start/quickstart.html): install, first viewer session, first overlay, first notebook widget
+- [Feature Map](https://milos-agathon.github.io/forge3d/guides/feature_map.html): repo-wide overview of the supported workflows
+- [Examples Catalog](https://milos-agathon.github.io/forge3d/examples/index.html): every script and notebook in `examples/`
+- [Tutorials](https://milos-agathon.github.io/forge3d/tutorials/index.html): guided GIS and Python tracks
+- [Gallery](https://milos-agathon.github.io/forge3d/gallery/index.html): finished recipes and visuals
+- [API Reference](https://milos-agathon.github.io/forge3d/api/api_reference.html): the full public Python surface
+
+## Examples
+
+The repo ships a broad set of runnable examples in [`examples/`](examples/), including:
+
+- interactive terrain scenes and raster overlays
+- Mapbox-style, labels, and picking demos
+- point-cloud and building viewers
+- camera animation and terrain camera rigs
+- COG streaming and offscreen terrain rendering
+- pure-Python composition examples and notebooks
+
+Run any script with `python examples/<name>.py --help` when it exposes CLI options.
 
 ## License
 
-Open-source core released under Apache-2.0 OR MIT. Pro features require a commercial license key set with `forge3d.set_license_key(...)`. Licensing details live at https://github.com/milos-agathon/forge3d#license
+The open-source core is released under Apache-2.0 OR MIT. Pro-gated features require a commercial license key set with `forge3d.set_license_key(...)`.

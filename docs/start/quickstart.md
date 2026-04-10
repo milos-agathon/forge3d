@@ -1,25 +1,34 @@
 # Quickstart
 
-This quickstart assumes you are working from a source checkout and want the full
-Phase 2 developer workflow: viewer, datasets, widgets, and tutorial assets.
+This page gets you onto the main public workflow as fast as possible:
+
+1. install the package
+2. open a terrain scene
+3. add an overlay or notebook widget
+4. jump to the example or guide that matches your real task
 
 ## Install
 
 ```bash
-pip install -e .[all,jupyter,datasets]
+pip install forge3d
 ```
 
-`pip install` now installs an `interactive_viewer` command backed by the native
-forge3d extension, so a separate `cargo build --release --bin interactive_viewer`
-step is no longer required. In source checkouts, `open_viewer_async()` still
-prefers fresh binaries from `target/release` or `target/debug` when they exist.
-If no viewer launcher is available, `ViewerWidget` can still show its inline
-fallback preview when you pass previewable terrain data via `terrain_path=` or
-`src=`.
+Common extras:
 
-## First terrain
+```bash
+pip install "forge3d[jupyter]"
+pip install "forge3d[datasets]"
+pip install "forge3d[all]"
+```
 
-The smallest self-contained sample is the bundled `mini_dem.npy` dataset.
+`pip install forge3d` installs the native extension and the `interactive_viewer`
+launcher used by `open_viewer_async()`. In source checkouts, the Python wrapper
+can still pick newer local binaries from `target/debug` or `target/release`
+when they exist.
+
+## First viewer session
+
+Use the bundled mini DEM when you want a zero-download sanity check:
 
 ```python
 import forge3d as f3d
@@ -34,63 +43,81 @@ with f3d.open_viewer_async(
     viewer.snapshot("mini-dem.png", width=1600, height=900)
 ```
 
-`mini_dem_path()` returns a `.npy` file. The Python wrapper converts it to a
-temporary TIFF before launching the current viewer binary, so the same example
-works with either packaged numpy DEMs or GeoTIFFs.
-
-## Pull a real dataset
-
-The larger sample registry resolves local repo assets first and downloads only
-when needed.
+Use `fetch_dem()` when you want a larger sample dataset:
 
 ```python
 import forge3d as f3d
 
-rainier = f3d.fetch_dem("rainier")
+dem_path = f3d.fetch_dem("rainier")
 
-with f3d.open_viewer_async(terrain_path=rainier) as viewer:
-    viewer.set_orbit_camera(phi_deg=28, theta_deg=48, radius=5500)
-    viewer.set_sun(azimuth_deg=300, elevation_deg=24)
-    viewer.snapshot("rainier.png")
+with f3d.open_viewer_async(terrain_path=dem_path, width=1440, height=900) as viewer:
+    viewer.set_z_scale(0.1)
+    viewer.set_orbit_camera(phi_deg=28, theta_deg=49, radius=5400, fov_deg=42)
+    viewer.set_sun(azimuth_deg=302, elevation_deg=24)
+    viewer.snapshot("rainier.png", width=1920, height=1080)
 ```
 
-Available dataset helpers:
+## First overlay
+
+Raster overlays sit on the same viewer handle:
 
 ```python
 import forge3d as f3d
 
-print(f3d.available_datasets())
-print(f3d.dataset_info()["mt-st-helens"])
+dem_path = f3d.fetch_dem("swiss")
+overlay_path = f3d.fetch_dataset("swiss-land-cover")
+
+with f3d.open_viewer_async(terrain_path=dem_path, width=1500, height=960) as viewer:
+    viewer.load_overlay(
+        name="land-cover",
+        path=overlay_path,
+        opacity=0.82,
+        z_order=10,
+        preserve_colors=True,
+    )
+    viewer.set_orbit_camera(phi_deg=90, theta_deg=10, radius=18000, fov_deg=16)
+    viewer.set_sun(azimuth_deg=315, elevation_deg=17)
+    viewer.snapshot("swiss-land-cover.png")
 ```
 
-## Notebook workflow
+For custom vector overlays, labels, and other lower-level scene commands, drop
+to `viewer.send_ipc(...)` or the helper functions in `forge3d.viewer_ipc`.
 
-Use `ViewerWidget` when you want the live viewer in Jupyter. Pass `src=` if you
-also want the inline fallback preview to remain usable in headless sessions.
+## First notebook widget
+
+Use `ViewerWidget` when you want the same viewer path in Jupyter:
 
 ```python
 import forge3d as f3d
 
 widget = f3d.ViewerWidget(
     terrain_path=f3d.mini_dem_path(),
-    src=f3d.mini_dem_path(),
+    src=f3d.mini_dem(),
     width=960,
     height=600,
 )
+widget.set_camera(phi_deg=30, theta_deg=58, radius=1.7, fov_deg=42)
+widget.set_sun(azimuth_deg=315, elevation_deg=30)
 widget
 ```
 
-You can drive it from Python after display:
+When the full viewer cannot launch, the widget can fall back to an inline
+preview if you also provided previewable source data through `src=`.
 
-```python
-widget.set_camera(phi_deg=20, theta_deg=60, radius=1.5)
-widget.set_sun(azimuth_deg=250, elevation_deg=40)
-widget.snapshot("widget-snapshot.png")
-```
+## When To Leave The Viewer Path
 
-## Next steps
+Stay with `open_viewer_async()` and `ViewerHandle` for most scene work.
 
-- Follow the GIS workflow in [GIS Track](../tutorials/gis-track/index.md).
-- Follow the notebook-first workflow in [Python Track](../tutorials/python-track/index.md).
-- Browse finished compositions in [Gallery](../gallery/index.md).
-- See the surface area in [API Reference](../api/api_reference.rst).
+Move to the lower-level native surface when you need deterministic offscreen
+pipelines or explicit renderer control:
+
+- `Scene` for compact offscreen rendering
+- `Session` + `TerrainRenderer` + `TerrainRenderParams` for terrain PBR/POM
+- `render_offline()` and `oidn_denoise()` for offline accumulation and denoise
+
+## Next Steps
+
+- Read the repo-wide [Feature Map](../guides/feature_map.md).
+- Browse every runnable script in the [Examples Catalog](../examples/index.md).
+- Follow the [GIS Track](../tutorials/gis-track/index.md) or [Python Track](../tutorials/python-track/index.md).
+- Use the [API Reference](../api/api_reference.rst) when you already know the symbol you need.

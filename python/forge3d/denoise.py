@@ -1,7 +1,7 @@
 # python/forge3d/denoise.py
 # Edge-aware A-trous denoiser guided by albedo/normal/depth; pure NumPy implementation.
 # Provides a minimal, deterministic denoiser for Workstream A5 acceptance and tests.
-# RELEVANT FILES:python/forge3d/path_tracing.py,tests/test_a5_denoise.py,docs/api/denoise.md
+# RELEVANT FILES:python/forge3d/path_tracing.py,tests/test_a5_denoise.py,docs/api/api_reference.rst
 
 from __future__ import annotations
 

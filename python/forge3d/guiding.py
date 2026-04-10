@@ -1,7 +1,7 @@
 # python/forge3d/guiding.py
 # Simple online spatial/directional guiding utilities for experiments and tests.
 # This exists to satisfy A13 by providing a minimal, deterministic histogram-based guider.
-# RELEVANT FILES:python/forge3d/__init__.py,src/path_tracing/guiding.rs,tests/test_guiding.py,docs/api/guiding.md
+# RELEVANT FILES:python/forge3d/__init__.py,src/path_tracing/guiding.rs,tests/test_guiding.py,docs/api/api_reference.rst
 
 from __future__ import annotations
 

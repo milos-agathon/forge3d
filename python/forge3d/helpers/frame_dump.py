@@ -13,16 +13,16 @@ from .offscreen import save_png_deterministic
 
 
 class FrameDumper:
-    """Records sequences of RGBA frames to disk with auto-numbered filenames.
+    """Record RGBA frames to disk with auto-numbered filenames.
 
-    Example:
+    Example::
+
         dumper = FrameDumper(output_dir="frames", prefix="render")
         dumper.start_recording()
         for i in range(100):
             rgba = render_frame(i)
             dumper.capture_frame(rgba)
         dumper.stop_recording()
-        # Produces: frames/render_0000.png, frames/render_0001.png, ...
     """
 
     def __init__(self, output_dir: str | Path = "frames", prefix: str = "frame"):

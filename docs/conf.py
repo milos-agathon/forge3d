@@ -66,7 +66,7 @@ intersphinx_mapping = {
 }
 
 # Todo extension settings
-todo_include_todos = True
+todo_include_todos = False
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -74,51 +74,11 @@ templates_path = ['_templates']
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 exclude_patterns = [
-    '_build', 
-    'Thumbs.db', 
+    '_build',
+    'Thumbs.db',
     '.DS_Store',
     '**/*.pyc',
     '__pycache__',
-    'task.xml',
-    'task-gpt.txt',
-    'PLAN.json',
-    'REPORT.md',
-    'QUESTIONS.md',
-    'CLAUDE_UPDATE_REPORT.md',
-    # Phase 2 docs build intentionally excludes older exploratory docs with
-    # unresolved cross-references that are outside the current docs spine.
-    '2026-03-10-developer-platform-plan.md',
-    '2026-03-11-plan-review-phase1-phase2.md',
-    'roadmap/*',
-    'rust-python-exposure-deep-dive-2026-02-17.md',
-    'api/*.md',
-    'api/generated/*',
-    'api/uniforms.rst',
-    'api/vector_graphics.rst',
-    'api/vector_overlays.rst',
-    'examples/*',
-    'ingest/*',
-    'integration/*',
-    'memory/*',
-    'notes/*',
-    'offscreen/*',
-    'plans/*',
-    'postfx/*',
-    'production/*',
-    'superpowers/*',
-    'terrain/lod.md',
-    'terrain/tbn.md',
-    'terrain/terrain_overlays.rst',
-    'terrain/terrain_pbr_pom_shader_reference.md',
-    'terrain/terrain_rendering.rst',
-    'tiles/*',
-    'user/*',
-    'viewer/screenshot_controls.md',
-    'viewer/interactive_viewer.rst',
-    'viewer/test_ssao_interactive.md',
-    # Prefer Markdown versions of these docs
-    'interop_zero_copy.rst',
-    'memory_budget.rst',
 ]
 
 # The theme to use for HTML and HTML Help pages.
@@ -153,9 +113,9 @@ html_baseurl = os.environ.get(
     'https://milos-agathon.github.io/forge3d/',
 ).rstrip('/') + '/'
 # Guard logo and favicon to avoid warnings when assets are missing.
-_LOGO = os.path.join(_HERE, 'assets', 'logo-forge3d.png')
+_LOGO = os.path.join(_HERE, 'assets', 'logo', 'forge3d_dark.svg')
 _FAVICON = os.path.join(_HERE, 'assets', 'favicon.ico')
-html_logo = 'assets/logo-forge3d.png' if os.path.exists(_LOGO) else None
+html_logo = 'assets/logo/forge3d_dark.svg' if os.path.exists(_LOGO) else None
 html_favicon = 'assets/favicon.ico' if os.path.exists(_FAVICON) else None
 
 # HTML context

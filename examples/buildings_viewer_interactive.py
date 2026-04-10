@@ -55,7 +55,7 @@ Interactive Commands:
     snapshot output.png                  Take screenshot
     quit                                 Exit viewer
 
-See docs/buildings.md for full documentation.
+See the main docs feature map and API reference for the current buildings workflow.
 """
 
 from __future__ import annotations

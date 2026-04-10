@@ -1,15 +1,9 @@
 # python/forge3d/style_expressions.py
 """Mapbox Style Spec expression evaluation.
 
-Implements evaluation of data-driven expressions including:
-- `interpolate`: Linear/exponential interpolation between stops
-- `step`: Stepped/discrete values at breakpoints
-- `match`: Pattern matching on property values
-- `get`: Property value lookup
-- `coalesce`: First non-null value
-- Math operators: +, -, *, /, %, ^
-- Comparison: <, <=, >, >=
-- Logic: all, any, !, case
+Supported expression families include ``interpolate``, ``step``, ``match``,
+``get``, ``coalesce``, arithmetic operators, comparisons, and logic operators
+such as ``all``, ``any``, and ``case``.
 """
 
 from __future__ import annotations
