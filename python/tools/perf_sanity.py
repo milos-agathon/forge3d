@@ -18,7 +18,7 @@ Thresholds:
         and fail if steady p95 > budget_ms * --budget-mult (default 3.0).
 """
 from __future__ import annotations
-import argparse, csv, json, math, os, statistics as stats, sys, time
+import argparse, csv, json, math, os, statistics as stats, time
 from typing import List, Dict, Any
 
 try:

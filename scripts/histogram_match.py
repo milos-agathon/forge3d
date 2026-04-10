@@ -6,7 +6,6 @@ Maps the luminance distribution of a rendered image to match a reference.
 
 import numpy as np
 from PIL import Image
-from pathlib import Path
 import argparse
 
 

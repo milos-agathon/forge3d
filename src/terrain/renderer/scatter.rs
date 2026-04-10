@@ -1,5 +1,3 @@
-#![cfg(feature = "enable-gpu-instancing")]
-
 use super::draw::RenderTargets;
 use super::*;
 use crate::terrain::renderer::core::TERRAIN_DEPTH_FORMAT;

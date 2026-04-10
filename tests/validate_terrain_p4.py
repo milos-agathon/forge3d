@@ -11,7 +11,6 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 from PIL import Image
@@ -100,7 +99,7 @@ def create_water_mask(rgb: np.ndarray, luminance: np.ndarray) -> np.ndarray:
     use create_water_mask_from_debug_render() with debug mode 4.
     """
     hsv = rgb_to_hsv(rgb)
-    h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    h, s = hsv[..., 0], hsv[..., 1]
 
     # Water: blue-ish hue (0.5-0.7), high saturation, moderate value
     blue_hue = (h > 0.5) & (h < 0.75)
@@ -448,17 +447,6 @@ def validate_p4(
         },
     }
 
-    # Legacy format for validate_luminance_quantiles
-    ref_quantiles = {
-        "q01": 0.07669176906347275,
-        "q05": 0.10018510371446610,
-        "q25": 0.20886588096618652,
-        "q50": 0.34777727723121643,
-        "q75": 0.49392470717430115,
-        "q95": 0.64771070182323440,
-        "q99": 0.76940103113651510,
-    }
-
     # ═══════════════════════════════════════════════════════════════════════════
     # P1: Baseline sanity checks
     # ═══════════════════════════════════════════════════════════════════════════
@@ -685,7 +673,6 @@ def render_and_validate(render_mode: str, profile: str, output_dir: Path) -> dic
     """
     import subprocess
     import sys as _sys
-    import json
     import time
     
     output_dir.mkdir(parents=True, exist_ok=True)

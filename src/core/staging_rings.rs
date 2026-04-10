@@ -249,6 +249,12 @@ impl StagingRing {
     }
 }
 
+impl Drop for StagingRing {
+    fn drop(&mut self) {
+        global_tracker().clear_staging_stats();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,11 +326,5 @@ mod tests {
         let stats = ring.stats();
         // Should have attempted to advance (may fail due to fence not being ready)
         assert!(stats.buffer_stalls > 0 || allocated);
-    }
-}
-
-impl Drop for StagingRing {
-    fn drop(&mut self) {
-        global_tracker().clear_staging_stats();
     }
 }

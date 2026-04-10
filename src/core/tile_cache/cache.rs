@@ -97,7 +97,6 @@ impl TileCache {
             self.resident_tiles.insert(
                 tile_id,
                 CacheEntry {
-                    tile_id,
                     atlas_slot,
                     last_access: self.access_counter,
                     ref_count: 0,

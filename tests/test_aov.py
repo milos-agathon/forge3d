@@ -10,7 +10,6 @@ import os
 
 from forge3d.terrain_params import (
     AovSettings,
-    TerrainRenderParams,
     make_terrain_params_config,
 )
 from _terrain_runtime import terrain_rendering_available

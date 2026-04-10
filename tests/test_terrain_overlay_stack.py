@@ -3,14 +3,11 @@
 # Validates: OverlayLayerConfig, OverlaySettings, blend modes, z-ordering
 
 import pytest
-import numpy as np
-from pathlib import Path
 
 from forge3d.terrain_params import (
     OverlayBlendMode,
     OverlayLayerConfig,
     OverlaySettings,
-    TerrainRenderParams,
     make_terrain_params_config,
 )
 

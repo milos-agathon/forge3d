@@ -1,7 +1,6 @@
 """P4: Map plate layout, legend, and scale bar tests."""
 from __future__ import annotations
 
-import math
 
 import numpy as np
 import pytest

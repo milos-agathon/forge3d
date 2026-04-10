@@ -61,11 +61,6 @@ impl HybridPathTracer {
             entry_point: "main",
         });
 
-        Ok(Self {
-            shader,
-            layouts,
-            pipeline_layout,
-            pipeline,
-        })
+        Ok(Self { layouts, pipeline })
     }
 }

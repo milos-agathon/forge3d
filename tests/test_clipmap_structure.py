@@ -5,7 +5,6 @@ Exit criteria from docs/roadmap/roadmap.md:530:
 """
 
 import numpy as np
-import pytest
 
 
 class TestClipmapConfig:

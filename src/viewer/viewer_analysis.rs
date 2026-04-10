@@ -26,25 +26,6 @@ pub fn mean_luma_region(buf: &[u8], w: u32, h: u32, x0: u32, y0: u32, rw: u32, r
     }
 }
 
-/// Compute variance of luminance over entire RGBA8 image
-pub fn variance_luma(buf: &[u8], w: u32, h: u32) -> f32 {
-    let (w, h) = (w as usize, h as usize);
-    let n = (w * h).max(1);
-    let mut sum = 0.0f64;
-    let mut sum2 = 0.0f64;
-    for i in (0..(n * 4)).step_by(4) {
-        let r = buf[i] as f32;
-        let g = buf[i + 1] as f32;
-        let b = buf[i + 2] as f32;
-        let l = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0;
-        sum += l as f64;
-        sum2 += (l * l) as f64;
-    }
-    let mean = sum / n as f64;
-    let var = (sum2 / n as f64) - mean * mean;
-    var.max(0.0) as f32
-}
-
 /// Sobel-like gradient energy (used for blur effectiveness metric)
 pub fn gradient_energy(buf: &[u8], w: u32, h: u32) -> f32 {
     if w < 2 || h < 2 {

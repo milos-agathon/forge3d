@@ -1142,6 +1142,7 @@ fn select_level_index(levels: &[GpuScatterLevel], distance: f32) -> usize {
         .unwrap_or_else(|| levels.len().saturating_sub(1))
 }
 
+#[cfg(test)]
 fn select_level_index_from_distances(max_distances: &[f32], distance: f32) -> usize {
     max_distances
         .iter()
@@ -1430,7 +1431,7 @@ mod tests {
     #[test]
     fn mesh_height_max_uses_vertex_y_max() {
         // Vertices: y values [0.0, 1.5, 3.0]
-        let positions = vec![[0.0, 0.0, 0.0], [1.0, 1.5, 0.0], [0.0, 3.0, 1.0]];
+        let positions = [[0.0, 0.0, 0.0], [1.0, 1.5, 0.0], [0.0, 3.0, 1.0]];
         let y_max = positions
             .iter()
             .map(|p| p[1])

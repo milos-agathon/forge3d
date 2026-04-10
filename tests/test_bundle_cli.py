@@ -30,7 +30,6 @@ def test_save_bundle_flag_exists():
     """--save-bundle flag is recognized by argparse."""
     mod = _load_terrain_demo()
     # Create a minimal parser and check the flag exists
-    import argparse
     import sys
     
     # Temporarily modify sys.argv
@@ -60,7 +59,6 @@ def test_load_bundle_flag_exists():
 def test_was_cli_set_detects_explicit_flags():
     """_was_cli_set correctly detects explicitly set CLI flags."""
     mod = _load_terrain_demo()
-    import argparse
     import sys
     
     original_argv = sys.argv

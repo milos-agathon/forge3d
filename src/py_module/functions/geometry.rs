@@ -96,7 +96,7 @@ pub(super) fn register_geometry_py_functions(m: &Bound<'_, PyModule>) -> PyResul
         crate::render::instancing::geometry_instance_mesh_gpu_stub_py,
         m
     )?)?;
-    #[cfg(all(feature = "enable-gpu-instancing"))]
+    #[cfg(feature = "enable-gpu-instancing")]
     {
         m.add_function(wrap_pyfunction!(
             crate::render::instancing::geometry_instance_mesh_gpu_py,

@@ -3,7 +3,7 @@
 # Provides high-level interface for creating and rendering SDF scenes
 
 import numpy as np
-from typing import Tuple, List, Optional, Union, Dict, Any
+from typing import Tuple, List, Optional, Dict, Any
 from enum import Enum
 import warnings
 import os
@@ -460,7 +460,6 @@ class HybridRenderer:
                 max_steps = 64
                 min_distance = 0.001
 
-                hit = False
                 color = np.array([0.6, 0.7, 0.9])  # Sky color
 
                 for step in range(max_steps):
@@ -472,7 +471,6 @@ class HybridRenderer:
 
                     if distance < min_distance:
                         # Hit!
-                        hit = True
                         # Simple material colors
                         if material_id == 1:
                             color = np.array([0.8, 0.2, 0.2])  # Red

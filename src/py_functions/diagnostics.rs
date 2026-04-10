@@ -87,12 +87,12 @@ pub(crate) fn c5_build_framegraph_report(py: Python<'_>) -> PyResult<Py<PyDict>>
 
     // Compile + plan barriers
     fg.compile().map_err(PyErr::from)?;
-    let (_plan, barriers) = fg.get_execution_plan().map_err(PyErr::from)?;
+    let (_plan, _barriers) = fg.get_execution_plan().map_err(PyErr::from)?;
 
     // Metrics
     let metrics = fg.metrics();
     let alias_reuse = metrics.aliased_count > 0;
-    let barrier_ok = true || !barriers.is_empty();
+    let barrier_ok = true;
 
     let d = PyDict::new_bound(py);
     d.set_item("alias_reuse", alias_reuse)?;
@@ -197,7 +197,7 @@ pub(crate) fn c7_async_compute_demo(py: Python<'_>) -> PyResult<Py<PyDict>> {
 
     let pid = scheduler.submit_compute_pass(desc).map_err(PyErr::from)?;
     let _executed = scheduler.execute_queued_passes().map_err(PyErr::from)?;
-    let _ = scheduler.wait_for_passes(&[pid]).map_err(PyErr::from)?;
+    scheduler.wait_for_passes(&[pid]).map_err(PyErr::from)?;
 
     let metrics = scheduler.get_metrics();
     let d = PyDict::new_bound(py);

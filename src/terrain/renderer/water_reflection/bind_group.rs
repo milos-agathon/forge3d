@@ -121,7 +121,7 @@ impl TerrainScene {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("terrain.reflection_pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &*reflection_view_guard,
+                        view: &reflection_view_guard,
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -134,7 +134,7 @@ impl TerrainScene {
                         },
                     })],
                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &*reflection_depth_guard,
+                        view: &reflection_depth_guard,
                         depth_ops: Some(wgpu::Operations {
                             load: wgpu::LoadOp::Clear(1.0),
                             store: wgpu::StoreOp::Store,
@@ -214,7 +214,7 @@ impl TerrainScene {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&*reflection_view_guard),
+                    resource: wgpu::BindingResource::TextureView(&reflection_view_guard),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,

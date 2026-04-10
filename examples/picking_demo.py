@@ -19,15 +19,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
-import math
 import select
 import sys
 import time
 import socket
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
@@ -36,15 +33,12 @@ from forge3d.viewer_ipc import (
     find_viewer_binary,
     send_ipc,
     add_vector_overlay,
-    set_vector_overlays_enabled,
     poll_pick_events,
     set_lasso_mode,
-    get_lasso_state,
     clear_selection,
     set_labels_enabled,
     add_label,
     load_label_atlas,
-    set_label_zoom,
     set_label_zoom,
     set_max_visible_labels,
     set_oit_enabled,
@@ -96,10 +90,7 @@ def create_test_triangle_layer(sock: socket.socket):
     
     # Create a grid of triangles above the terrain
     rows, cols = 10, 10
-    spacing = 500.0
-    start_x = 138.7
-    start_y = 35.3
-    
+
     # Convert lat/lon approx to local units (just distinct positions)
     # Actually the viewer uses local coordinates if not georeferenced?
     # No, it uses the DEM coordinates. Mount Fuji DEM is lat/lon.

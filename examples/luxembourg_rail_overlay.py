@@ -271,14 +271,14 @@ def load_gpkg_lines(gpkg_path: Path, dem_path: Path, color: List[float], line_wi
         
         if geom.geom_type == 'LineString':
             coords = list(geom.coords)
-            _add_linestring_as_quads(coords, color, vertices, indices, 0,
+            _add_linestring_as_quads(coords, color, vertices, indices,
                           dem_min_x, dem_max_x, dem_min_y, dem_max_y, 
                           terrain_width, terrain_depth, line_width)
             
         elif geom.geom_type == 'MultiLineString':
             for line in geom.geoms:
                 coords = list(line.coords)
-                _add_linestring_as_quads(coords, color, vertices, indices, 0,
+                _add_linestring_as_quads(coords, color, vertices, indices,
                               dem_min_x, dem_max_x, dem_min_y, dem_max_y, 
                               terrain_width, terrain_depth, line_width)
     
@@ -286,8 +286,8 @@ def load_gpkg_lines(gpkg_path: Path, dem_path: Path, color: List[float], line_wi
     return vertices, indices
 
 
-def _add_linestring_as_quads(coords: list, color: list, vertices: list, indices: list, 
-                              vertex_offset: int, min_x: float, max_x: float, 
+def _add_linestring_as_quads(coords: list, color: list, vertices: list, indices: list,
+                              min_x: float, max_x: float,
                               min_y: float, max_y: float, terrain_width: float,
                               terrain_depth: float,
                               line_width: float = 10.0):
@@ -566,7 +566,6 @@ def load_gpkg_lines_sqlite(gpkg_path: Path, dem_path: Path, color: List[float], 
         try:
             with rasterio.open(dem_path) as dem:
                 dem_bounds = dem.bounds
-                dem_crs = dem.crs
                 # Use DEM bounds directly if they are in the same CRS as the data
                 # (native GPKG CRS, since we didn't reproject here)
                 norm_min_x = dem_bounds.left
@@ -582,7 +581,7 @@ def load_gpkg_lines_sqlite(gpkg_path: Path, dem_path: Path, color: List[float], 
     indices = []
 
     for pts in raw_lines:
-        _add_linestring_as_quads(pts, color, vertices, indices, 0,
+        _add_linestring_as_quads(pts, color, vertices, indices,
                       norm_min_x, norm_max_x, norm_min_y, norm_max_y,
                       terrain_width, terrain_depth, line_width)
     return vertices, indices

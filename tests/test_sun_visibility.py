@@ -13,7 +13,6 @@ import forge3d as f3d
 from _terrain_runtime import terrain_rendering_available
 from forge3d.terrain_params import (
     ClampSettings,
-    HeightAoSettings,
     IblSettings,
     LightSettings,
     LodSettings,

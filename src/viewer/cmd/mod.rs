@@ -5,20 +5,15 @@
 // This module dispatches ViewerCmd variants to specialized handler modules.
 // Each handler module focuses on a specific domain (GI, sky/fog, IBL, etc.)
 
-mod capture_handlers;
 mod effects_command;
 mod gi_command;
-mod gi_handlers;
 mod handler;
 mod ipc_command;
 mod labels_command;
 mod legacy_handler;
 mod pointcloud_command;
 mod scene_command;
-mod scene_handlers;
 mod scene_review_command;
-mod ssao_handlers;
-mod ssgi_handlers;
 mod terrain_command;
 mod vector_overlay_command;
 

@@ -52,7 +52,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 # Import shared utilities from forge3d package
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))

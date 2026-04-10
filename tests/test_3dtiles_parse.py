@@ -10,10 +10,8 @@ from pathlib import Path
 
 from forge3d.tiles3d import (
     load_tileset,
-    Tileset,
     Tile,
     BoundingVolume,
-    TileContent,
     _parse_bounding_volume,
     _parse_tile,
 )

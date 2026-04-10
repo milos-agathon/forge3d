@@ -229,9 +229,8 @@ pub fn compute_ssim(a: &[f32], b: &[f32]) -> f32 {
         cov /= n - 1.0;
     }
 
-    const L: f32 = 1.0;
-    const C1: f32 = 0.0001; // (0.01 * L)^2 with L=1
-    const C2: f32 = 0.0009; // (0.03 * L)^2 with L=1
+    const C1: f32 = 0.0001;
+    const C2: f32 = 0.0009;
 
     let numerator = (2.0 * mean_a * mean_b + C1) * (2.0 * cov + C2);
     let denominator = (mean_a.powi(2) + mean_b.powi(2) + C1) * (var_a + var_b + C2);

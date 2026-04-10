@@ -38,31 +38,6 @@ pub struct VolumetricUniformsStd140 {
     pub _pad0: u32,
 }
 
-/// P6: Volumetric fog uniforms matching shaders/volumetric.wgsl
-#[repr(C, align(16))]
-#[allow(dead_code)]
-#[derive(Clone, Copy)]
-pub struct VolumetricUniforms {
-    pub density: f32,
-    pub height_falloff: f32,
-    pub phase_g: f32,
-    pub max_steps: u32,
-    pub start_distance: f32,
-    pub max_distance: f32,
-    pub scattering_color: [f32; 3],
-    pub absorption: f32,
-    pub sun_direction: [f32; 3],
-    pub sun_intensity: f32,
-    pub ambient_color: [f32; 3],
-    pub temporal_alpha: f32,
-    pub use_shadows: u32,
-    pub jitter_strength: f32,
-    pub frame_index: u32,
-    pub _pad0: u32,
-    pub _pad1: u32,
-    pub _pad2: u32,
-}
-
 /// Camera uniforms for fog rendering
 #[repr(C, align(16))]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -106,7 +81,6 @@ pub struct P51CornellSceneState {
     pub fog_enabled: bool,
     pub viz_mode: super::viewer_enums::VizMode,
     pub gi_viz_mode: crate::cli::args::GiVizMode,
-    pub camera_mode: super::camera_controller::CameraMode,
     pub camera_eye: Vec3,
     pub camera_target: Vec3,
 }
@@ -121,24 +95,6 @@ pub struct SceneMesh {
 impl SceneMesh {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn push_vertex(
-        &mut self,
-        position: Vec3,
-        normal: Vec3,
-        uv: Vec2,
-        roughness: f32,
-        metallic: f32,
-    ) -> u32 {
-        let idx = self.vertices.len() as u32;
-        self.vertices.push(PackedVertex {
-            position: position.to_array(),
-            normal: normal.normalize_or_zero().to_array(),
-            uv: uv.to_array(),
-            rough_metal: [roughness, metallic],
-        });
-        idx
     }
 
     pub fn extend_with_mesh(

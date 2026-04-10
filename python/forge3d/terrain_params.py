@@ -155,7 +155,6 @@ class ShadowSettings:
         terrain_pbr_pom.wgsl (moment_maps binding exists but is never sampled).
         """
         if self.technique not in self.TERRAIN_SUPPORTED_TECHNIQUES:
-            unsupported = {"VSM", "EVSM", "MSM"}
             terrain_list = ", ".join(sorted(self.TERRAIN_SUPPORTED_TECHNIQUES - {"NONE"}))
             raise ValueError(
                 f"Shadow technique {self.technique!r} is not implemented for terrain rendering. "

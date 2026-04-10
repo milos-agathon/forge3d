@@ -4,7 +4,6 @@
 # This mirrors the merge order in examples/terrain_demo.py::_build_renderer_config.
 from __future__ import annotations
 
-from pathlib import Path
 
 from forge3d import presets
 from forge3d.config import load_renderer_config

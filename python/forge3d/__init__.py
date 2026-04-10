@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.23.1"
+__version__ = "1.23.2"
 version = __version__
 
 import numpy as np
@@ -31,7 +31,6 @@ from ._png import save_png as _save_png
 # Native module loading
 # -----------------------------------------------------------------------------
 from ._native import (
-    NATIVE_AVAILABLE as _NATIVE_AVAILABLE,
     get_native_module as _get_native_module,
 )
 from ._gpu import (
@@ -167,7 +166,7 @@ from . import terrain_scatter
 # Fallback Renderer class
 # -----------------------------------------------------------------------------
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 
 class Renderer:
@@ -450,6 +449,8 @@ __all__ = [
     "device_probe",
     "memory_metrics",
     "budget_remaining",
+    "utilization_ratio",
+    "override_memory_limit",
     # Image I/O
     "numpy_to_png",
     "png_to_numpy",
@@ -457,13 +458,17 @@ __all__ = [
     # Helpers
     "render_offscreen_rgba",
     "save_png_deterministic",
+    "rgba_to_png_bytes",
     "FrameDumper",
+    "dump_frame_sequence",
     # Modules
     "geometry",
     "io",
     "terrain_scatter",
     "animation",
     "camera_rigs",
+    "datasets",
+    "widgets",
     # Interactive viewer
     "open_viewer",
     "open_viewer_async",
@@ -499,6 +504,18 @@ __all__ = [
     "fetch_dem",
     "fetch_cityjson",
     "fetch_copc",
+    # P5-export: Vector Export (SVG/PDF)
+    "VectorScene",
+    "ExportVectorStyle",
+    "ExportLabelStyle",
+    "ExportPolygon",
+    "ExportPolyline",
+    "ExportLabel",
+    "ExportBounds",
+    "generate_svg",
+    "export_svg",
+    "export_pdf",
+    "validate_svg",
     # License management
     "set_license_key",
     "LicenseError",

@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn test_ltc_matrix_generation() {
-        let matrix = compute_ltc_matrix(0.5, 0.7854); // 45 degrees
+        let matrix = compute_ltc_matrix(0.5, std::f32::consts::FRAC_PI_4);
 
         // Matrix should be valid (not NaN or infinite)
         assert!(!matrix.x_axis.x.is_nan());

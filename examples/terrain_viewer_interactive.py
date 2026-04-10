@@ -101,7 +101,6 @@ except ImportError:
     class SunPosition: pass
 
 # P3: CRS reprojection utilities
-from forge3d.crs import proj_available, transform_coords, crs_to_epsg
 
 
 def main() -> int:

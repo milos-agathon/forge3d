@@ -45,7 +45,7 @@ fn atmosphere_params_has_correct_defaults() {
 #[test]
 fn renderer_config_has_correct_defaults() {
     let config = RendererConfig::default();
-    assert!(config.lighting.lights.len() > 0);
+    assert!(!config.lighting.lights.is_empty());
     assert_eq!(config.shading.brdf, BrdfModel::CookTorranceGGX);
     assert!(config.shadows.enabled);
     assert_eq!(config.gi.modes, vec![GiMode::None]);

@@ -1506,10 +1506,10 @@ impl TerrainRenderer {
             .map_err(|_| PyRuntimeError::new_err("offline_state mutex poisoned"))?;
         *guard = Some(state);
         work_result?;
-        Ok(Py::new(
+        Py::new(
             py,
             crate::OfflineBatchResult::new(total_samples, start.elapsed().as_secs_f64() * 1000.0),
-        )?)
+        )
     }
     #[pyo3(signature = (target_variance, tile_size=DEFAULT_METRIC_TILE_SIZE))]
     pub fn read_accumulation_metrics(
@@ -1645,7 +1645,7 @@ impl TerrainRenderer {
             .map_err(|_| PyRuntimeError::new_err("offline_state mutex poisoned"))?;
         *guard = Some(state);
 
-        Ok(Py::new(py, metrics_result?)?)
+        Py::new(py, metrics_result?)
     }
 
     #[pyo3(signature = ())]
@@ -1866,7 +1866,7 @@ impl TerrainRenderer {
         let texture =
             self.scene
                 .upload_rgba16_texture(width, height, &rgba, "terrain.offline.hdr_upload");
-        Ok(Py::new(
+        Py::new(
             py,
             crate::HdrFrame::new(
                 self.scene.device.clone(),
@@ -1875,7 +1875,7 @@ impl TerrainRenderer {
                 width,
                 height,
             ),
-        )?)
+        )
     }
 
     #[pyo3(signature = (hdr_frame))]
@@ -1938,7 +1938,7 @@ impl TerrainRenderer {
             OFFLINE_LDR_FORMAT,
         );
         self.end_offline_accumulation()?;
-        Ok(Py::new(py, frame)?)
+        Py::new(py, frame)
     }
 
     #[pyo3(signature = ())]

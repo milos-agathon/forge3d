@@ -137,7 +137,10 @@ pub(super) fn parse_core_params(params: &Bound<'_, PyAny>) -> PyResult<CoreTerra
         params.getattr("height_curve_power")?.as_gil_ref(),
         "height_curve_power",
     )?;
-    if !(height_curve_power > 0.0) {
+    if !matches!(
+        height_curve_power.partial_cmp(&0.0),
+        Some(std::cmp::Ordering::Greater)
+    ) {
         return Err(PyValueError::new_err(
             "height_curve_power must be greater than zero",
         ));

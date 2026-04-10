@@ -462,34 +462,24 @@ def upload_dem_to_gpu(dem: DEMData, session: Optional[Any] = None) -> DEMData:
 
     # Get GPU context
     if session is not None:
-        device = session.device
-        queue = session.queue
+        session.device
+        session.queue
     else:
         # Use global context
         from . import _gpu
-        device = _gpu.device()
-        queue = _gpu.queue()
+        _gpu.device()
+        _gpu.queue()
 
     # Create texture using native module
     height, width = data.shape
 
-    # Upload to GPU using TerrainSpike's upload mechanism
-    # or create a simple R32Float texture
-    try:
-        # Use the terrain module's texture creation if available
-        from . import _forge3d
-
-        # Create a simple wrapper or use existing texture creation
-        # For now, store the data and mark as ready for upload
-        dem.texture_view = {
-            "data": data,
-            "width": width,
-            "height": height,
-            "format": "R32Float",
-        }
-    except Exception as e:
-        print(f"Warning: Could not upload DEM to GPU: {e}")
-        dem.texture_view = None
+    # For now, store the data and mark as ready for upload.
+    dem.texture_view = {
+        "data": data,
+        "width": width,
+        "height": height,
+        "format": "R32Float",
+    }
 
     return dem
 

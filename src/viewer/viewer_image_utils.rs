@@ -144,35 +144,3 @@ pub fn flatten_rgba8_to_mean_luma(src: &[u8], w: u32, h: u32) -> Vec<u8> {
     }
     out
 }
-
-/// Apply 3x3 box blur to RGBA8 buffer
-pub fn blur_rgba8_box3x3(src: &[u8], w: u32, h: u32) -> Vec<u8> {
-    let w_us = w as usize;
-    let h_us = h as usize;
-    let mut out = vec![0u8; w_us * h_us * 4];
-    if w_us == 0 || h_us == 0 {
-        return out;
-    }
-    for y in 0..h_us {
-        for x in 0..w_us {
-            let idx = (y * w_us + x) * 4;
-            // Preserve alpha from source
-            out[idx + 3] = src[idx + 3];
-            for c in 0..3 {
-                let mut sum: u32 = 0;
-                let mut count: u32 = 0;
-                for dy in -1i32..=1 {
-                    let yy = (y as i32 + dy).clamp(0, (h_us - 1) as i32) as usize;
-                    for dx in -1i32..=1 {
-                        let xx = (x as i32 + dx).clamp(0, (w_us - 1) as i32) as usize;
-                        let si = (yy * w_us + xx) * 4 + c;
-                        sum += src[si] as u32;
-                        count += 1;
-                    }
-                }
-                out[idx + c] = (sum / count) as u8;
-            }
-        }
-    }
-    out
-}

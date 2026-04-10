@@ -69,4 +69,5 @@ def replace_name_in_key(key: Any, rename: Mapping[str, str]) -> Any:
 def get_scheduler(get: Any = None, collection: Any = None) -> Any:
     """Mirror dask.base.get_scheduler enough for xarray lock helpers."""
 
+    _ = collection  # Kept for dask-compatible call signatures.
     return get

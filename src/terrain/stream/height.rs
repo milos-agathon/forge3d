@@ -83,17 +83,6 @@ impl HeightMosaic {
         }
     }
 
-    fn evict_if_needed(&mut self) {
-        let capacity = (self.config.tiles_x * self.config.tiles_y) as usize;
-        while self.slot_map.len() > capacity {
-            if let Some(old) = self.lru.pop_front() {
-                self.slot_map.remove(&old);
-            } else {
-                break;
-            }
-        }
-    }
-
     fn find_free_slot(&self) -> Option<(u32, u32)> {
         let capacity = (self.config.tiles_x * self.config.tiles_y) as usize;
         if self.slot_map.len() >= capacity {

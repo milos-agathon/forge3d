@@ -245,9 +245,9 @@ impl TerrainMaterialVT {
             })
     }
 
-    fn selected_layer<'a>(
-        vt: &'a crate::terrain::render_params::TerrainVTSettingsNative,
-    ) -> Option<&'a crate::terrain::render_params::VTLayerFamilyNative> {
+    fn selected_layer(
+        vt: &crate::terrain::render_params::TerrainVTSettingsNative,
+    ) -> Option<&crate::terrain::render_params::VTLayerFamilyNative> {
         if !vt.enabled {
             return None;
         }

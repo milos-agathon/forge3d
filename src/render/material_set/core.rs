@@ -61,12 +61,6 @@ impl MaterialSet {
     pub fn get_material(&self, index: usize) -> Option<&crate::core::material::PbrMaterial> {
         self.materials.get(index)
     }
-
-    #[cfg(feature = "extension-module")]
-    #[allow(dead_code)]
-    pub(crate) fn texture_paths(&self) -> &[Option<String>] {
-        &self.texture_paths
-    }
 }
 
 pub(super) fn resolve_default_texture(file_name: &str) -> Option<String> {

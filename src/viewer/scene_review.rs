@@ -893,14 +893,6 @@ fn first_array3(map: &Map<String, Value>, keys: &[&str]) -> Option<[f32; 3]> {
         .find_map(|key| map.get(*key).and_then(value_as_array3))
 }
 
-fn value_as_array2(value: &Value) -> Option<[f32; 2]> {
-    let array = value.as_array()?;
-    (array.len() == 2).then_some([
-        array.first()?.as_f64()? as f32,
-        array.get(1)?.as_f64()? as f32,
-    ])
-}
-
 fn value_as_array3(value: &Value) -> Option<[f32; 3]> {
     let array = value.as_array()?;
     (array.len() == 3).then_some([

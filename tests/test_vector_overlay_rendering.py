@@ -214,7 +214,7 @@ class TestVectorOverlayVisibility:
         })
         
         # Hide it
-        resp = send_ipc(sock, {
+        send_ipc(sock, {
             "cmd": "set_vector_overlay_visible",
             "id": 0,
             "visible": False,
@@ -225,7 +225,7 @@ class TestVectorOverlayVisibility:
         """Set overlay opacity."""
         sock, _ = viewer_context
         
-        resp = send_ipc(sock, {
+        send_ipc(sock, {
             "cmd": "set_vector_overlay_opacity",
             "id": 0,
             "opacity": 0.5,

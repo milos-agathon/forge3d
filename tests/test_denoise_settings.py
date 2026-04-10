@@ -7,7 +7,6 @@ import pytest
 
 from forge3d.terrain_params import (
     DenoiseSettings,
-    TerrainRenderParams,
     make_terrain_params_config,
 )
 from forge3d.denoise import atrous_denoise

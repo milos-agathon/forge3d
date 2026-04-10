@@ -11,10 +11,8 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any
 
 import forge3d.terrain_pbr_pom as _impl  # type: ignore[import]
-from forge3d.terrain_pbr_pom import render_sunrise_to_noon_sequence
 
 # P0.3/M2: Sun ephemeris - calculate realistic sun position from location and time
 

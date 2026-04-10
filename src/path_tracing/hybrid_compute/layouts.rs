@@ -59,38 +59,6 @@ impl HybridPathTracer {
             entries: &[uniform_entry(0)],
         })
     }
-
-    #[allow(dead_code)]
-    fn create_aov_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("hybrid-pt-bgl4-aovs"),
-            entries: &[
-                texture_entry(0, wgpu::TextureFormat::Rgba16Float),
-                texture_entry(1, wgpu::TextureFormat::Rgba16Float),
-                texture_entry(2, wgpu::TextureFormat::R32Float),
-                texture_entry(3, wgpu::TextureFormat::Rgba16Float),
-                texture_entry(4, wgpu::TextureFormat::Rgba16Float),
-                texture_entry(5, wgpu::TextureFormat::Rgba16Float),
-                texture_entry(6, wgpu::TextureFormat::Rgba16Float),
-                texture_entry(7, wgpu::TextureFormat::Rgba8Unorm),
-            ],
-        })
-    }
-
-    #[allow(dead_code)]
-    fn create_hybrid_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("hybrid-pt-bgl5-hybrid"),
-            entries: &[
-                uniform_entry(0),
-                storage_entry(1, true),
-                storage_entry(2, true),
-                storage_entry(3, true),
-                storage_entry(4, true),
-                storage_entry(5, true),
-            ],
-        })
-    }
 }
 
 fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {

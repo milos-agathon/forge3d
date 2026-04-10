@@ -3,12 +3,10 @@
 Tests the DoF settings configuration and validates blur effect behavior.
 """
 import math
-import numpy as np
 import pytest
 
 from forge3d.terrain_params import (
     DofSettings,
-    TerrainRenderParams,
     make_terrain_params_config,
 )
 

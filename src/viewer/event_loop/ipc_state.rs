@@ -110,16 +110,6 @@ pub fn take_pending_bundle_save() -> Option<(String, Option<String>)> {
     }
 }
 
-/// Peek the pending bundle save request without consuming it.
-pub fn peek_pending_bundle_save() -> Option<(String, Option<String>)> {
-    let lock = PENDING_BUNDLE_SAVE.get_or_init(|| Mutex::new(None));
-    if let Ok(guard) = lock.lock() {
-        guard.clone()
-    } else {
-        None
-    }
-}
-
 /// Set a pending bundle save request.
 pub fn set_pending_bundle_save(path: String, name: Option<String>) {
     let lock = PENDING_BUNDLE_SAVE.get_or_init(|| Mutex::new(None));
@@ -134,16 +124,6 @@ pub fn take_pending_bundle_load() -> Option<String> {
     let lock = PENDING_BUNDLE_LOAD.get_or_init(|| Mutex::new(None));
     if let Ok(mut guard) = lock.lock() {
         guard.take()
-    } else {
-        None
-    }
-}
-
-/// Peek the pending bundle load request without consuming it.
-pub fn peek_pending_bundle_load() -> Option<String> {
-    let lock = PENDING_BUNDLE_LOAD.get_or_init(|| Mutex::new(None));
-    if let Ok(guard) = lock.lock() {
-        guard.clone()
     } else {
         None
     }

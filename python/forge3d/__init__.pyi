@@ -2,6 +2,7 @@
 # Type stubs for forge3d public Python API and fallbacks
 # Exists to mirror runtime signatures for IDEs and keep tooling aligned
 # RELEVANT FILES: python/forge3d/__init__.py, python/forge3d/config.py, src/render/params.rs, examples/terrain_demo.py
+# ruff: noqa: F401
 from __future__ import annotations
 from typing import Tuple, Optional, Sequence, Any, Dict, Literal, Mapping, Callable
 import os

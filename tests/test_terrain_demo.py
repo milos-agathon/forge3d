@@ -4,7 +4,6 @@
 # RELEVANT FILES: src/terrain_renderer.rs, src/material_set.rs, src/ibl_wrapper.rs, tools/validate_rows.py
 from __future__ import annotations
 
-import math
 import os
 import tempfile
 from pathlib import Path

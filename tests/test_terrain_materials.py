@@ -14,7 +14,6 @@ try:
     import forge3d
     from forge3d.terrain_params import (
         MaterialNoiseSettings,
-        TerrainRenderParams,
         MaterialLayerSettings,
         make_terrain_params_config,
     )

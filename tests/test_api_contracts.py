@@ -748,7 +748,7 @@ class TestOffscreenRenderRouting:
 
     def test_native_scene_detected_correctly(self):
         """_is_native_scene returns True for native Scene instances."""
-        from forge3d.helpers.offscreen import _is_native_scene, _NativeScene
+        from forge3d.helpers.offscreen import _NativeScene
         # _NativeScene should be the native Scene class when extension is loaded
         assert _NativeScene is not None, (
             "_NativeScene is None -- native module failed to load"
@@ -1166,7 +1166,6 @@ class TestPointCloudBuffer:
 
     def test_create_gpu_buffer_positions_only(self):
         """Positions without colors default to white (1.0, 1.0, 1.0)."""
-        import numpy as np
         positions = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
         pb = _native.PointBuffer(positions, None)
         gpu = pb.create_gpu_buffer()
@@ -1177,7 +1176,6 @@ class TestPointCloudBuffer:
 
     def test_create_gpu_buffer_with_colors(self):
         """Positions + colors properly interleaved, colors normalised."""
-        import numpy as np
         positions = [10.0, 20.0, 30.0]
         colors = [255, 0, 128]
         pb = _native.PointBuffer(positions, colors)
@@ -1196,14 +1194,12 @@ class TestPointCloudBuffer:
 
     def test_create_viewer_gpu_buffer_empty(self):
         """Empty buffer returns empty viewer buffer."""
-        import numpy as np
         pb = _native.PointBuffer([], None)
         vgpu = pb.create_viewer_gpu_buffer([0.0, 0.0, 0.0], [1.0, 1.0, 1.0])
         assert vgpu.shape == (0,)
 
     def test_create_viewer_gpu_buffer_layout(self):
         """Viewer buffer has 12 floats/point matching PointInstance3D."""
-        import numpy as np
         positions = [5.0, 100.0, 10.0]  # one point at y=100
         pb = _native.PointBuffer(positions, None)
         vgpu = pb.create_viewer_gpu_buffer([0.0, 0.0, 0.0], [10.0, 200.0, 20.0])
@@ -1229,7 +1225,6 @@ class TestPointCloudBuffer:
 
     def test_create_viewer_gpu_buffer_with_colors(self):
         """Viewer buffer includes normalised colors."""
-        import numpy as np
         pb = _native.PointBuffer([0.0, 50.0, 0.0], [128, 64, 255])
         vgpu = pb.create_viewer_gpu_buffer([0.0, 0.0, 0.0], [0.0, 100.0, 0.0])
         assert vgpu[4] == pytest.approx(128 / 255.0, rel=1e-3)
@@ -1238,7 +1233,6 @@ class TestPointCloudBuffer:
 
     def test_viewer_buffer_byte_count(self):
         """Viewer buffer is 48 bytes (12 floats * 4) per point."""
-        import numpy as np
         pb = _native.PointBuffer([0.0] * 9, None)  # 3 points
         vgpu = pb.create_viewer_gpu_buffer([0.0, 0.0, 0.0], [1.0, 1.0, 1.0])
         assert vgpu.shape == (3 * 12,)

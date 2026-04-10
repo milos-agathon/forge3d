@@ -1,7 +1,7 @@
 use crate::terrain::probes::baker::ProbeBaker;
-use crate::terrain::probes::types::{
-    ProbeError, ProbeGridDesc, ProbeIrradianceSet, ProbePlacement, SHL2,
-};
+#[cfg(test)]
+use crate::terrain::probes::types::ProbeGridDesc;
+use crate::terrain::probes::types::{ProbeError, ProbeIrradianceSet, ProbePlacement, SHL2};
 
 pub struct HeightfieldAnalyticalBaker {
     pub heightfield: Vec<f32>,
@@ -130,20 +130,6 @@ impl HeightfieldAnalyticalBaker {
         }
 
         sh
-    }
-
-    #[allow(dead_code)]
-    fn grid_for_test(dims: [u32; 2]) -> ProbeGridDesc {
-        ProbeGridDesc {
-            origin: [-50.0, -50.0],
-            spacing: [
-                100.0 / (dims[0].max(2) - 1) as f32,
-                100.0 / (dims[1].max(2) - 1) as f32,
-            ],
-            dims,
-            height_offset: 5.0,
-            influence_radius: 0.0,
-        }
     }
 }
 

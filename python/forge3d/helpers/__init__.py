@@ -10,10 +10,6 @@ in various contexts, including matplotlib integration for visualization
 and analysis workflows.
 """
 
-from typing import Optional, Any
-import warnings
-
-
 # Optional matplotlib display helpers
 try:
     from .mpl_display import (

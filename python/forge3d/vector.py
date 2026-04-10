@@ -5,7 +5,7 @@ functionality, including polygons, lines, points, and graphs.
 """
 
 import numpy as np
-from typing import Optional, List, Union, Tuple
+from typing import Optional, List, Tuple
 from ._forge3d import (
     add_polygons_py,
     add_lines_py, 

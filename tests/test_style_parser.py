@@ -16,7 +16,6 @@ from forge3d.style import (
     paint_to_vector_style,
     layout_to_label_style,
     apply_style,
-    StyleSpec,
     StyleLayer,
     PaintProps,
     LayoutProps,

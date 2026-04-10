@@ -11,7 +11,6 @@ from typing import Any, Dict, Optional, Tuple, Iterable, Mapping, Callable
 import numpy as np
 import time as _time
 
-from .materials import PbrMaterial
 from .denoise import atrous_denoise
 
 try:

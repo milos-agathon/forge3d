@@ -129,29 +129,3 @@ pub(super) fn load_laz_points(path: &str, max_points: usize) -> Result<LoadResul
         has_intensity: intensity_range > 0.0,
     })
 }
-
-#[allow(dead_code)]
-pub(super) fn elevation_color(t: f32) -> [f32; 4] {
-    let colors = [
-        [0.2, 0.4, 0.6, 1.0],
-        [0.3, 0.5, 0.2, 1.0],
-        [0.6, 0.6, 0.3, 1.0],
-        [0.5, 0.4, 0.3, 1.0],
-        [0.9, 0.9, 0.9, 1.0],
-    ];
-
-    let n = colors.len() - 1;
-    let idx = (t * n as f32).min(n as f32 - 0.001);
-    let i = idx.floor() as usize;
-    let frac = idx - i as f32;
-
-    let c0 = colors[i];
-    let c1 = colors[(i + 1).min(n)];
-
-    [
-        c0[0] + (c1[0] - c0[0]) * frac,
-        c0[1] + (c1[1] - c0[1]) * frac,
-        c0[2] + (c1[2] - c0[2]) * frac,
-        1.0,
-    ]
-}

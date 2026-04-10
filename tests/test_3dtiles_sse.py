@@ -6,7 +6,6 @@ Tests screen-space error computation and LOD traversal behavior.
 import pytest
 import json
 import tempfile
-from pathlib import Path
 
 from forge3d.tiles3d import (
     load_tileset,

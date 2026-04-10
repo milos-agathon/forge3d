@@ -16,7 +16,6 @@ import warnings
 
 # Optional matplotlib dependency
 try:
-    import matplotlib
     import matplotlib.pyplot as plt
     import matplotlib.axes as mpl_axes
     from matplotlib.image import AxesImage

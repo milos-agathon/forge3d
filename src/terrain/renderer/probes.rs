@@ -98,10 +98,11 @@ fn sample_height_for_placement(
         return 0.0;
     }
     if width == 1 || height == 1 {
-        return heightfield[0]
-            .is_finite()
-            .then_some(heightfield[0])
-            .unwrap_or(0.0);
+        return if heightfield[0].is_finite() {
+            heightfield[0]
+        } else {
+            0.0
+        };
     }
 
     let u = ((world_x / terrain_span) + 0.5).clamp(0.0, 1.0);
@@ -229,7 +230,7 @@ fn parse_hex_rgb(hex: &str) -> Option<[f32; 3]> {
 
 fn extract_reflection_overlay(params: &TerrainRenderParams) -> Option<ReflectionOverlay> {
     Python::with_gil(|py| {
-        for overlay_py in params.overlays() {
+        if let Some(overlay_py) = params.overlays().into_iter().next() {
             let overlay_ref = overlay_py.borrow(py);
             let colormap = overlay_ref.colormap_clone()?;
             let mut stops = Vec::with_capacity(colormap.stops.len());

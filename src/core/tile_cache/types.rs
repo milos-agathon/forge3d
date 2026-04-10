@@ -77,8 +77,6 @@ pub struct TileData {
 
 #[derive(Debug, Clone)]
 pub(super) struct CacheEntry {
-    #[allow(dead_code)]
-    pub(super) tile_id: TileId,
     pub(super) atlas_slot: AtlasSlot,
     pub(super) last_access: u64,
     pub(super) ref_count: u32,

@@ -20,7 +20,7 @@ Example:
 
 from __future__ import annotations
 
-from typing import Optional, Tuple, Union, TYPE_CHECKING
+from typing import Optional, Union, TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
@@ -150,10 +150,10 @@ def transform_coords(
 
 
 def reproject_geom(
-    geom: "BaseGeometry",
+    geom: BaseGeometry,
     from_crs: str,
     to_crs: str,
-) -> "BaseGeometry":
+) -> BaseGeometry:
     """Reproject a Shapely geometry from one CRS to another.
 
     Parameters
@@ -178,7 +178,6 @@ def reproject_geom(
     """
     try:
         from shapely import ops as shapely_ops
-        from shapely.geometry import shape, mapping
     except ImportError as e:
         raise ImportError("shapely is required for geometry reprojection") from e
 

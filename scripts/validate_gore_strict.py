@@ -2,7 +2,7 @@
 """Validator for GORE_STRICT_PROFILE terrain metrics."""
 import argparse
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Tuple
 
 import numpy as np
 from PIL import Image

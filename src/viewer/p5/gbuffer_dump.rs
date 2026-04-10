@@ -273,7 +273,6 @@ impl Viewer {
             fog_enabled: self.fog_enabled,
             viz_mode: self.viz_mode,
             gi_viz_mode: self.gi_viz_mode,
-            camera_mode: self.camera.mode(),
             camera_eye: self.camera.eye(),
             camera_target: self.camera.target(),
         };

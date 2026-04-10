@@ -10,7 +10,6 @@ import os
 import re
 import socket
 import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -585,7 +584,7 @@ class ViewerHandle:
     def __enter__(self) -> "ViewerHandle":
         return self
     
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(self, _exc_type, _exc_val, _exc_tb) -> None:
         self.close()
     
     @property

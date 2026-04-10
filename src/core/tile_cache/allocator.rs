@@ -90,12 +90,12 @@ impl AtlasAllocator {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn free_count(&self) -> usize {
         self.free_slots.len()
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(super) fn total_count(&self) -> usize {
         (self.slots_x * self.slots_y) as usize
     }

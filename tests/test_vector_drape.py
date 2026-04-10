@@ -9,9 +9,7 @@ import pytest
 
 # Try to import forge3d - skip tests if not available
 try:
-    import forge3d
     from forge3d.terrain_params import (
-        TerrainRenderParams,
         VectorOverlaySettings,
         make_terrain_params_config,
     )
@@ -309,10 +307,8 @@ class TestAcceptanceCriteria:
 
     def test_halo_contrast_parameters(self):
         """Test that halo parameters can achieve contrast > 2x."""
-        # Black halo on white terrain (or vice versa)
-        halo_color = (0.0, 0.0, 0.0, 1.0)  # Black
         terrain_luminance = 1.0  # White
-        
+
         # Contrast ratio = (L_bright + 0.05) / (L_dark + 0.05)
         halo_luminance = 0.0
         contrast = (terrain_luminance + 0.05) / (halo_luminance + 0.05)

@@ -14,7 +14,7 @@ Example:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple, TYPE_CHECKING
+from typing import Dict, Tuple, TYPE_CHECKING
 
 import numpy as np
 
@@ -171,7 +171,7 @@ class CogDataset:
         x: int,
         y: int,
         lod: int = 0,
-    ) -> "NDArray[np.float32]":
+    ) -> NDArray[np.float32]:
         """Read a single tile at specified coordinates and LOD.
         
         Args:
@@ -263,8 +263,7 @@ class CogDatasetFallback:
         x: int,
         y: int,
         lod: int = 0,
-    ) -> "NDArray[np.float32]":
-        import rasterio
+    ) -> NDArray[np.float32]:
         from rasterio.windows import Window
         
         cache_key = (x, y, lod)

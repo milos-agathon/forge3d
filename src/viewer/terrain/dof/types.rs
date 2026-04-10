@@ -11,7 +11,6 @@ pub struct DofUniforms {
 /// Depth of Field configuration
 #[derive(Debug, Clone)]
 pub struct DofConfig {
-    pub enabled: bool,
     pub focus_distance: f32,
     pub f_stop: f32,
     pub focal_length: f32,
@@ -25,7 +24,6 @@ pub struct DofConfig {
 impl Default for DofConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
             focus_distance: 500.0,
             f_stop: 5.6,
             focal_length: 50.0,

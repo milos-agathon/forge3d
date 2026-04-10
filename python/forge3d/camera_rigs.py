@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import math
-from typing import Iterable, Optional, Sequence, Tuple
+from typing import Iterable, Optional, Sequence
 
 from .animation import CameraAnimation, CameraKeyframe
 from .terrain_scatter import TerrainScatterSource

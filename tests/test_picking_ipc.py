@@ -9,14 +9,11 @@ Tests the Plan 3 picking functionality including:
 
 import pytest
 import sys
-import time
-import socket
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
 from forge3d.viewer_ipc import (
-    find_viewer_binary,
     launch_viewer,
     close_viewer,
     send_ipc,

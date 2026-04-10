@@ -85,87 +85,6 @@ pub(super) fn build_grid_xyuv(device: &wgpu::Device, n: u32) -> (wgpu::Buffer, w
 }
 // T33-END:build-grid-xyuv
 
-pub(super) fn build_grid_mesh(device: &wgpu::Device, n: u32) -> (wgpu::Buffer, wgpu::Buffer, u32) {
-    let n = n as usize;
-    let w = n;
-    let h = n;
-
-    let scale = 1.5f32;
-    let step_x = (2.0 * scale) / (w as f32 - 1.0);
-    let step_z = (2.0 * scale) / (h as f32 - 1.0);
-
-    let f = |x: f32, z: f32| -> f32 { (x * 1.3).sin() * 0.25 + (z * 1.1).cos() * 0.25 };
-
-    // positions
-    let mut pos = vec![0.0f32; w * h * 3];
-    for j in 0..h {
-        for i in 0..w {
-            let x = -scale + i as f32 * step_x;
-            let z = -scale + j as f32 * step_z;
-            let y = f(x, z);
-            let idx = (j * w + i) * 3;
-            pos[idx + 0] = x;
-            pos[idx + 1] = y;
-            pos[idx + 2] = z;
-        }
-    }
-
-    // normals via central differences
-    let mut nrm = vec![0.0f32; w * h * 3];
-    for j in 0..h {
-        for i in 0..w {
-            let i0 = if i > 0 { i - 1 } else { i };
-            let i1 = if i + 1 < w { i + 1 } else { i };
-            let j0 = if j > 0 { j - 1 } else { j };
-            let j1 = if j + 1 < h { j + 1 } else { j };
-
-            let p = |ii, jj| {
-                let k = (jj * w + ii) * 3;
-                glam::Vec3::new(pos[k], pos[k + 1], pos[k + 2])
-            };
-            let dx = p(i1, j) - p(i0, j);
-            let dz = p(i, j1) - p(i, j0);
-            let n = dz.cross(dx).normalize_or_zero();
-
-            let k = (j * w + i) * 3;
-            nrm[k] = n.x;
-            nrm[k + 1] = n.y;
-            nrm[k + 2] = n.z;
-        }
-    }
-
-    // interleave pos + nrm
-    let mut verts: Vec<f32> = Vec::with_capacity(w * h * 6);
-    for k in 0..(w * h) {
-        verts.extend_from_slice(&pos[k * 3..k * 3 + 3]);
-        verts.extend_from_slice(&nrm[k * 3..k * 3 + 3]);
-    }
-
-    // indices
-    let mut idx = Vec::<u32>::with_capacity((w - 1) * (h - 1) * 6);
-    for j in 0..h - 1 {
-        for i in 0..w - 1 {
-            let a = (j * w + i) as u32;
-            let b = (j * w + i + 1) as u32;
-            let c = ((j + 1) * w + i) as u32;
-            let d = ((j + 1) * w + i + 1) as u32;
-            idx.extend_from_slice(&[a, c, b, b, c, d]);
-        }
-    }
-
-    let vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("terrain-vbuf"),
-        contents: bytemuck::cast_slice(&verts),
-        usage: wgpu::BufferUsages::VERTEX,
-    });
-    let ibuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("terrain-ibuf"),
-        contents: bytemuck::cast_slice(&idx),
-        usage: wgpu::BufferUsages::INDEX,
-    });
-    (vbuf, ibuf, idx.len() as u32)
-}
-
 // MVP + light
 pub(super) fn build_view_matrices(width: u32, height: u32) -> (glam::Mat4, glam::Mat4, glam::Vec3) {
     let aspect = width as f32 / height as f32;
@@ -178,6 +97,8 @@ pub(super) fn build_view_matrices(width: u32, height: u32) -> (glam::Mat4, glam:
     let light = glam::Vec3::new(0.5, 1.0, 0.3).normalize();
     (view, proj, light)
 }
+
+// A2-END:terrain-module
 
 #[cfg(test)]
 mod tests {
@@ -228,41 +149,4 @@ mod tests {
             );
         }
     }
-}
-
-// A2-END:terrain-module
-
-// E3: Simple synthetic overlay from height — maps height to RGBA8 for demo
-pub(super) fn synth_overlay_from_height(height: &[f32], w: u32, h: u32) -> (Vec<u8>, f32, f32) {
-    let n = (w as usize) * (h as usize);
-    let mut min_v = f32::INFINITY;
-    let mut max_v = f32::NEG_INFINITY;
-    for &v in height.iter() {
-        if v.is_finite() {
-            if v < min_v {
-                min_v = v;
-            }
-            if v > max_v {
-                max_v = v;
-            }
-        }
-    }
-    if !min_v.is_finite() || !max_v.is_finite() || max_v <= min_v {
-        min_v = 0.0;
-        max_v = 1.0;
-    }
-    let inv = 1.0 / (max_v - min_v);
-    let mut out = vec![0u8; n * 4];
-    for i in 0..n {
-        let v = ((height[i] - min_v) * inv).clamp(0.0, 1.0);
-        // simple blue-green-brown ramp
-        let r = (v * 255.0) as u8;
-        let g = ((0.5 + 0.5 * v) * 255.0) as u8;
-        let b = ((1.0 - v) * 255.0) as u8;
-        out[i * 4 + 0] = r;
-        out[i * 4 + 1] = g;
-        out[i * 4 + 2] = b;
-        out[i * 4 + 3] = 255;
-    }
-    (out, min_v, max_v)
 }

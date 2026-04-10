@@ -318,7 +318,6 @@ def decode_b3dm(data: bytes) -> Dict[str, Any]:
         raise ValueError(f"Unsupported B3DM version: {version}")
 
     # Parse header
-    byte_length = int.from_bytes(data[8:12], "little")
     ft_json_len = int.from_bytes(data[12:16], "little")
     ft_bin_len = int.from_bytes(data[16:20], "little")
     bt_json_len = int.from_bytes(data[20:24], "little")

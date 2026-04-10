@@ -6,7 +6,6 @@ Exit criteria from docs/roadmap/roadmap.md:
 """
 
 import numpy as np
-import pytest
 
 
 class TestMorphWeightCalculation:
@@ -151,26 +150,8 @@ class TestTJunctionPrevention:
         config = ClipmapConfig(ring_count=4, ring_resolution=32, morph_range=0.3)
         mesh = clipmap_generate_py(config, (0.0, 0.0), 1000.0)
 
-        morph_data = mesh.morph_data()
-        uvs = mesh.uvs()
-
-        # Vertices with high morph weight (near outer boundary) should
-        # have UVs that align well with coarser grid
-        high_morph_mask = morph_data[:, 0] > 0.8
-        if np.sum(high_morph_mask) > 0:
-            high_morph_uvs = uvs[high_morph_mask]
-
-            # Check that UVs snap to reasonable grid (within tolerance)
-            # For a 32-resolution ring, grid spacing is ~1/32
-            grid_size = 1.0 / 32.0
-            for uv in high_morph_uvs[:10]:  # Sample first 10
-                u_frac = (uv[0] / grid_size) % 1.0
-                v_frac = (uv[1] / grid_size) % 1.0
-                # Should be close to grid point (0 or 1)
-                u_aligned = min(u_frac, 1.0 - u_frac) < 0.1
-                v_aligned = min(v_frac, 1.0 - v_frac) < 0.1
-                # At least one dimension should be aligned
-                # (This is a soft check - exact alignment depends on implementation)
+        mesh.morph_data()
+        mesh.uvs()
 
 
 class TestMorphRangeConfiguration:

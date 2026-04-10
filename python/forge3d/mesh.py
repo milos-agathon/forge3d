@@ -7,7 +7,7 @@ Provides functions for:
 3. GPU mesh upload for accelerated ray tracing
 """
 
-from typing import Dict, List, Tuple, Any, Optional, Union
+from typing import Dict, List, Tuple, Any
 import numpy as np
 import warnings
 

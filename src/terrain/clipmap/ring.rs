@@ -202,14 +202,6 @@ pub fn make_ring(
     (vertices, indices)
 }
 
-#[derive(Clone, Copy)]
-enum Corner {
-    TopLeft,
-    TopRight,
-    BottomLeft,
-    BottomRight,
-}
-
 fn add_corner_patch(
     _vertices: &mut Vec<ClipmapVertex>,
     _indices: &mut Vec<u32>,

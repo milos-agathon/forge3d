@@ -14,7 +14,6 @@ import os
 import re
 import socket
 import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -271,7 +270,7 @@ class TestTerrainViewerPbr:
             time.sleep(0.3)
             
             # Take snapshot in legacy mode
-            resp = send_ipc(sock, {
+            send_ipc(sock, {
                 "cmd": "snapshot",
                 "path": str(snap_path),
                 "width": 640,
@@ -567,7 +566,7 @@ class TestTerrainViewerPbr:
 
             time.sleep(0.5)
 
-            resp = send_ipc(sock, {
+            send_ipc(sock, {
                 "cmd": "snapshot",
                 "path": str(snap_path),
                 "width": 640,
@@ -631,7 +630,7 @@ class TestTerrainViewerPbr:
             time.sleep(0.5)
             
             # Take snapshot - crash would occur here during render
-            resp = send_ipc(sock, {
+            send_ipc(sock, {
                 "cmd": "snapshot",
                 "path": str(snap_path),
                 "width": 640,
@@ -673,7 +672,7 @@ class TestTerrainViewerPbr:
             
             time.sleep(0.5)
             
-            resp = send_ipc(sock, {
+            send_ipc(sock, {
                 "cmd": "snapshot",
                 "path": str(snap_path),
                 "width": 640,
@@ -710,7 +709,7 @@ class TestTerrainViewerPbr:
             
             time.sleep(0.5)
             
-            resp = send_ipc(sock, {
+            send_ipc(sock, {
                 "cmd": "snapshot",
                 "path": str(snap_path),
                 "width": 640,
@@ -739,8 +738,6 @@ class TestTerrainViewerPbr:
                 preserve_path = Path(tmpdir) / "preserve.png"
                 regular_again_path = Path(tmpdir) / "regular_again.png"
                 source_rgba = (214, 82, 38, 255)
-                source_rgb = np.asarray(source_rgba[:3], dtype=np.float32) / 255.0
-                source_norm = source_rgb / np.sum(source_rgb)
 
                 write_ridge_heightmap_tiff(terrain_path)
                 write_solid_overlay(overlay_path, source_rgba)

@@ -28,7 +28,7 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
-from forge3d.animation import CameraAnimation, RenderConfig
+from forge3d.animation import CameraAnimation
 from forge3d.viewer_ipc import set_oit_enabled
 
 # P0.3/M2: Sun ephemeris - calculate realistic sun position from location and time
@@ -198,7 +198,6 @@ def run_interactive_preview(
         static_sun_azimuth: Static sun azimuth when dynamic_sun=False (from ephemeris)
         static_sun_elevation: Static sun elevation when dynamic_sun=False (from ephemeris)
     """
-    from forge3d.viewer import open_viewer_async
     
     print(f"\nOpening interactive viewer with terrain: {dem_path.name}")
     print("Animation will loop continuously. Close window to exit.")
@@ -520,7 +519,6 @@ def export_animation_frames(
         mp4_quality: MP4 quality preset ('high', 'medium', 'low')
         cleanup_frames: Delete PNG frames after MP4 creation
     """
-    from forge3d.viewer import open_viewer_async
     
     print(f"\nExporting animation frames to: {output_dir}")
     print(f"Settings: {width}x{height} @ {fps} fps")

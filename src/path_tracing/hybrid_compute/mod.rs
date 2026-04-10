@@ -119,11 +119,7 @@ impl Default for HybridTracerParams {
 
 /// Hybrid path tracer implementation
 pub struct HybridPathTracer {
-    #[allow(dead_code)]
-    shader: wgpu::ShaderModule,
     layouts: HybridBindGroupLayouts,
-    #[allow(dead_code)]
-    pipeline_layout: wgpu::PipelineLayout,
     pipeline: wgpu::ComputePipeline,
 }
 

@@ -137,7 +137,6 @@ impl ViewerTerrainScene {
             if let Some(ref mut dof) = self.dof_pass {
                 let depth_view = self.depth_view.as_ref().unwrap();
                 let dof_cfg = dof::DofConfig {
-                    enabled: true,
                     focus_distance: self.pbr_config.dof.focus_distance,
                     f_stop: self.pbr_config.dof.f_stop,
                     focal_length: self.pbr_config.dof.focal_length,

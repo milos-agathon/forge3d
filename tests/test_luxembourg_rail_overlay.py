@@ -32,7 +32,6 @@ def test_add_linestring_as_quads_uses_dem_height_for_z_span() -> None:
         [1.0, 0.0, 0.0, 1.0],
         vertices,
         indices,
-        0,
         0.0,
         10.0,
         0.0,

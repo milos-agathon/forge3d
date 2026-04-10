@@ -9,7 +9,6 @@ and temporal stability. Verifies that:
 """
 
 import pytest
-import numpy as np
 from pathlib import Path
 import tempfile
 import os

@@ -16,11 +16,6 @@ import tempfile
 
 from forge3d.export import (
     VectorScene,
-    VectorStyle,
-    LabelStyle,
-    Polygon,
-    Polyline,
-    Label,
     Bounds,
     generate_svg,
     export_svg,

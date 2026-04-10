@@ -90,7 +90,7 @@ def check_zero_copy_compatibility(arr: np.ndarray, context: str = "") -> Dict[st
 # COMPREHENSIVE INPUT VALIDATION - R12 IMPLEMENTATION
 # ============================================================================
 
-from typing import Optional, Literal, Sequence
+from typing import Optional, Sequence
 
 # Validation constants
 MAX_ARRAY_DIM = 8192  # Maximum array dimension (aligned with _MAX_DIM)

@@ -8,7 +8,6 @@ These tests verify that:
 """
 
 import pytest
-import math
 from forge3d.terrain_demo import check_camera_sun_alignment
 from forge3d import presets
 

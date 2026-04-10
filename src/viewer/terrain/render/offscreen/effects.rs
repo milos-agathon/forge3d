@@ -86,7 +86,6 @@ impl ViewerTerrainScene {
                     .map(|t| t.cam_radius)
                     .unwrap_or(2000.0);
                 let dof_cfg = dof::DofConfig {
-                    enabled: true,
                     focus_distance: self.pbr_config.dof.focus_distance,
                     f_stop: self.pbr_config.dof.f_stop,
                     focal_length: self.pbr_config.dof.focal_length,

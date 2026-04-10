@@ -191,9 +191,5 @@ impl SsaoResources {
     pub(super) fn params(&self) -> (f32, f32, f32) {
         (self.radius, self.intensity, self.bias)
     }
-
-    fn blur_texture(&self) -> &wgpu::Texture {
-        &self.blur_texture
-    }
 }
 

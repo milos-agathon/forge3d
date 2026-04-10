@@ -97,7 +97,7 @@ impl TerrainRenderer {
             )
             .map_err(|e| PyRuntimeError::new_err(format!("Rendering failed: {:#}", e)))?;
 
-        Ok(Py::new(py, frame)?)
+        Py::new(py, frame)
     }
 
     #[pyo3(signature = (material_set, env_maps, params, heightmap, water_mask=None, time_seconds=0.0))]

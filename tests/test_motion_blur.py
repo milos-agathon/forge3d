@@ -2,12 +2,10 @@
 
 Tests the motion blur settings configuration and validates shutter accumulation behavior.
 """
-import math
 import pytest
 
 from forge3d.terrain_params import (
     MotionBlurSettings,
-    TerrainRenderParams,
     make_terrain_params_config,
 )
 

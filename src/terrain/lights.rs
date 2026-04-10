@@ -10,32 +10,6 @@ pub struct PointLight {
     pub _pad1: [f32; 3],
 }
 
-// E2: Per-tile uniforms (matches WGSL TileUniforms)
-#[repr(C, align(16))]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct TileUniformsCPU {
-    world_remap: [f32; 4], // (scale_x, scale_y, offset_x, offset_y)
-}
-
-// E1b: Tile slot UBO and mosaic params UBO (match WGSL TileSlot, MosaicParams)
-#[repr(C, align(16))]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct TileSlotCPU {
-    lod: u32,
-    x: u32,
-    y: u32,
-    slot: u32,
-}
-
-#[repr(C, align(16))]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct MosaicParamsCPU {
-    inv_tiles_x: f32,
-    inv_tiles_y: f32,
-    tiles_x: u32,
-    tiles_y: u32,
-}
-
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct SpotLight {

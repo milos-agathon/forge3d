@@ -10,7 +10,7 @@ import re
 import socket
 import tempfile
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional
 
 import numpy as np
 

@@ -4,7 +4,6 @@ Tests that OIT API is accessible and that OIT produces visually different
 output compared to standard alpha blending for overlapping transparent surfaces.
 """
 
-import hashlib
 import subprocess
 import sys
 from pathlib import Path

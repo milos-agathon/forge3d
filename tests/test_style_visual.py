@@ -8,17 +8,12 @@ different output compared to default styling.
 from __future__ import annotations
 
 import hashlib
-import json
-import tempfile
-from pathlib import Path
 
-import numpy as np
 import pytest
 
 from forge3d.style import (
     parse_style,
     apply_style,
-    layer_to_vector_style,
     VectorStyle,
     evaluate_color_expr,
     evaluate_number_expr,

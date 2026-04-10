@@ -61,7 +61,6 @@ See docs/buildings.md for full documentation.
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import socket
 import subprocess
@@ -69,9 +68,8 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Optional
 
-import numpy as np
 
 try:
     import rasterio
@@ -89,10 +87,7 @@ from forge3d.interactive import run_interactive_loop
 from forge3d.buildings import (
     add_buildings,
     add_buildings_cityjson,
-    Building,
     BuildingLayer,
-    BuildingMaterial,
-    infer_roof_type,
     material_from_name,
 )
 
@@ -109,7 +104,6 @@ def create_demo_buildings() -> Tuple[List[List[float]], List[int]]:
     grid_size = 5
     building_size = 50.0
     spacing = 70.0
-    base_height = 10.0
 
     heights = [
         15, 25, 12, 30, 18,

@@ -36,9 +36,9 @@ fn test_validate_config() {
 
 #[test]
 fn test_rgb_to_rgba_conversion() {
-    let rgb_data = vec![1.0, 0.5, 0.25, 0.75, 1.0, 0.5];
+    let rgb_data = [1.0, 0.5, 0.25, 0.75, 1.0, 0.5];
     let alpha = 0.8;
-    let expected_rgba = vec![1.0, 0.5, 0.25, 0.8, 0.75, 1.0, 0.5, 0.8];
+    let expected_rgba = [1.0, 0.5, 0.25, 0.8, 0.75, 1.0, 0.5, 0.8];
 
     let pixel_count = 2;
     let mut rgba_data = Vec::with_capacity(pixel_count * 4);
@@ -50,5 +50,5 @@ fn test_rgb_to_rgba_conversion() {
         rgba_data.push(alpha);
     }
 
-    assert_eq!(rgba_data, expected_rgba);
+    assert_eq!(rgba_data.as_slice(), expected_rgba);
 }

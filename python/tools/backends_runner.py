@@ -11,8 +11,8 @@ Examples:
   python python/tools/backends_runner.py --require-same --width 96 --height 96
 """
 from __future__ import annotations
-import argparse, hashlib, json, os, platform, subprocess, sys, time
-from dataclasses import dataclass, asdict
+import argparse, json, os, platform, subprocess, sys
+from dataclasses import dataclass
 from typing import Literal
 
 Backend = Literal["VULKAN", "DX12", "METAL", "GL"]
@@ -76,10 +76,8 @@ def run_once(backend: Backend, width: int, height: int, write_png: bool, out_dir
     code = CHILD_SNIPPET
     cmd = [sys.executable, "-c", code]
 
-    t0 = time.perf_counter()
     try:
         out = subprocess.check_output(cmd, env=env, stderr=subprocess.STDOUT, text=True, timeout=120)
-        dt = (time.perf_counter() - t0) * 1000.0
         line = out.strip().splitlines()[-1]
         sha, millis_str = line.split()
         return BackendResult(backend, "ok", sha, float(millis_str), None, os.path.basename(env.get("VF_PNG_PATH", "")) or None)

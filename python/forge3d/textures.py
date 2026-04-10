@@ -80,6 +80,7 @@ def build_pbr_textures(
     - metallic_roughness and normal are linear by default.
 
     """
+    _ = srgb_defaults
     bc = load_texture(base_color, srgb=True) if base_color is not None else None
     mr = (
         load_texture(metallic_roughness, srgb=False)

@@ -9,7 +9,6 @@ Tests the TAA implementation for:
 """
 
 import pytest
-import numpy as np
 from pathlib import Path
 
 # Skip if forge3d not built

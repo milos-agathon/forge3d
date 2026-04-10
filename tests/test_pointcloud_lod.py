@@ -4,14 +4,12 @@ Tests octree traversal and point budget enforcement.
 """
 
 import pytest
-import numpy as np
 
 from forge3d.pointcloud import (
     OctreeKey,
     OctreeBounds,
     OctreeNode,
     PointCloudRenderer,
-    VisibleNode,
 )
 
 

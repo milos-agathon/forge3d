@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-import argparse
 import math
 import os
 
@@ -525,7 +524,7 @@ def _apply_luminance_unsharp(frame, strength: float, sigma: float = 2.5):
     Returns:
         Modified frame with enhanced gradients
     """
-    from scipy.ndimage import gaussian_filter, sobel
+    from scipy.ndimage import gaussian_filter
     
     # Get numpy array from frame
     if hasattr(frame, "to_numpy"):

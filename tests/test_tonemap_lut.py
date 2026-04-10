@@ -9,9 +9,7 @@ import pytest
 
 # Try to import forge3d - skip tests if not available
 try:
-    import forge3d
     from forge3d.terrain_params import (
-        TerrainRenderParams,
         TonemapSettings,
         make_terrain_params_config,
     )

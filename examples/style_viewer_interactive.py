@@ -53,7 +53,6 @@ from forge3d.viewer_ipc import find_viewer_binary, send_ipc
 from forge3d.style import (
     load_style,
     layer_to_vector_style,
-    layer_to_label_style,
     StyleSpec,
 )
 

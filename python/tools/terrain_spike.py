@@ -1,7 +1,7 @@
 # A2-BEGIN:terrain-cli
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, sys
+import argparse
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
@@ -12,7 +12,8 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     try:
-        import sys; exe={'exe': sys.executable}; from forge3d import TerrainSpike
+        import sys
+        from forge3d import TerrainSpike
     except Exception as e:
         raise SystemExit(
             "TerrainSpike not available. Rebuild in THIS venv with:\n  export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1  # if Python 3.13\n  maturin develop --release --features terrain_spike\n(Current python: %(exe)s)" % {'exe': sys.executable}

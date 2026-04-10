@@ -490,9 +490,9 @@ class TestNativeScatterIntegration:
         )
         params = f3d.TerrainRenderParams(config)
 
-        baseline = renderer.render_terrain_pbr_pom(material_set, ibl, params, heightmap).to_numpy()
+        renderer.render_terrain_pbr_pom(material_set, ibl, params, heightmap).to_numpy()
         apply_to_renderer(renderer, [batch])
-        scattered = renderer.render_terrain_pbr_pom(material_set, ibl, params, heightmap).to_numpy()
+        renderer.render_terrain_pbr_pom(material_set, ibl, params, heightmap).to_numpy()
 
         stats = renderer.get_scatter_stats()
         memory = renderer.get_scatter_memory_report()

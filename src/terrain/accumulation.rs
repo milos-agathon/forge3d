@@ -212,28 +212,8 @@ impl JitterSequence {
         offsets
     }
 
-    /// Generate Halton sequence (alternative low-discrepancy sequence)
-    #[allow(dead_code)]
-    fn generate_halton_sequence(count: u32, seed: Option<u64>) -> Vec<(f32, f32)> {
-        if count <= 1 {
-            return vec![(0.0, 0.0)];
-        }
-
-        let start = seed.unwrap_or(0) as u32;
-        let mut offsets = Vec::with_capacity(count as usize);
-
-        for i in 0..count {
-            let idx = start + i + 1; // 1-indexed for Halton
-            let x = Self::halton(idx, 2);
-            let y = Self::halton(idx, 3);
-            // Map from [0,1] to [-0.5, 0.5]
-            offsets.push((x - 0.5, y - 0.5));
-        }
-
-        offsets
-    }
-
     /// Compute Halton sequence value for given index and base
+    #[cfg(test)]
     fn halton(mut index: u32, base: u32) -> f32 {
         let mut result = 0.0f32;
         let mut f = 1.0f32 / base as f32;

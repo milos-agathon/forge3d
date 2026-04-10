@@ -7,7 +7,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
 try:
-    import forge3d
     from forge3d import (
         RichPickResult, HighlightStyle, LassoState, HeightfieldHit, 
         SelectionStyle, PickResult
@@ -66,7 +65,8 @@ def test_heightfield_hit():
     """Test HeightfieldHit creation."""
     # Since we can't easily construct this from Python (it's mainly a return type),
     # we just check if the class exists and is importable, which we did.
-    pass
+    assert HeightfieldHit is not None
+    assert PickResult is not None
 
 def test_selection_style_plan2():
     """Test Plan 2 SelectionStyle (backward compatibility)."""

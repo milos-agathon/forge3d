@@ -5,7 +5,6 @@ different techniques (including VSM/EVSM/MSM) produce visually different outputs
 """
 
 import hashlib
-import tempfile
 from pathlib import Path
 
 import numpy as np

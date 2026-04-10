@@ -14,32 +14,6 @@ pub struct MotionBlurUniforms {
     pub sample_count: [f32; 4],
 }
 
-/// Motion blur configuration (mirrors pbr_renderer::MotionBlurConfig)
-#[derive(Debug, Clone)]
-pub struct MotionBlurConfig {
-    pub enabled: bool,
-    pub samples: u32,
-    pub shutter_open: f32,
-    pub shutter_close: f32,
-    pub cam_phi_delta: f32,
-    pub cam_theta_delta: f32,
-    pub cam_radius_delta: f32,
-}
-
-impl Default for MotionBlurConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            samples: 16,
-            shutter_open: 0.0,
-            shutter_close: 0.5,
-            cam_phi_delta: 0.0,
-            cam_theta_delta: 0.0,
-            cam_radius_delta: 0.0,
-        }
-    }
-}
-
 /// Motion blur accumulator for temporal frame blending
 pub struct MotionBlurAccumulator {
     device: Arc<wgpu::Device>,
@@ -47,12 +21,6 @@ pub struct MotionBlurAccumulator {
     bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     uniform_buffer: wgpu::Buffer,
-    // Accumulation texture (Rgba32Float for HDR accumulation)
-    accum_texture: Option<wgpu::Texture>,
-    accum_view: Option<wgpu::TextureView>,
-    current_size: (u32, u32),
-    current_sample: u32,
-    total_samples: u32,
 }
 
 impl MotionBlurAccumulator {
@@ -160,87 +128,7 @@ impl MotionBlurAccumulator {
             bind_group_layout,
             sampler,
             uniform_buffer,
-            accum_texture: None,
-            accum_view: None,
-            current_size: (0, 0),
-            current_sample: 0,
-            total_samples: 1,
         }
-    }
-
-    /// Ensure accumulation texture is allocated
-    fn ensure_textures(&mut self, width: u32, height: u32) {
-        if self.current_size != (width, height) || self.accum_texture.is_none() {
-            let accum_tex = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("motion_blur.accum"),
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba32Float,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
-            self.accum_view = Some(accum_tex.create_view(&wgpu::TextureViewDescriptor::default()));
-            self.accum_texture = Some(accum_tex);
-            self.current_size = (width, height);
-        }
-    }
-
-    /// Get the accumulation texture view for rendering
-    pub fn get_accum_view(&mut self, width: u32, height: u32) -> &wgpu::TextureView {
-        self.ensure_textures(width, height);
-        self.accum_view.as_ref().unwrap()
-    }
-
-    /// Begin a new motion blur accumulation sequence
-    pub fn begin_accumulation(&mut self, samples: u32, width: u32, height: u32) {
-        self.ensure_textures(width, height);
-        self.current_sample = 0;
-        self.total_samples = samples.max(1);
-    }
-
-    /// Check if accumulation is in progress
-    pub fn is_accumulating(&self) -> bool {
-        self.current_sample < self.total_samples
-    }
-
-    /// Get current sample index
-    pub fn current_sample(&self) -> u32 {
-        self.current_sample
-    }
-
-    /// Increment sample counter after a frame is rendered
-    pub fn advance_sample(&mut self) {
-        self.current_sample += 1;
-    }
-
-    /// Calculate interpolation factor for current sample
-    pub fn get_interpolation_t(&self, config: &MotionBlurConfig) -> f32 {
-        let shutter_range = config.shutter_close - config.shutter_open;
-        let sample_t = (self.current_sample as f32 + 0.5) / self.total_samples as f32;
-        config.shutter_open + shutter_range * sample_t
-    }
-
-    /// Get interpolated camera parameters for current sample
-    pub fn get_interpolated_camera(
-        &self,
-        config: &MotionBlurConfig,
-        base_phi: f32,
-        base_theta: f32,
-        base_radius: f32,
-    ) -> (f32, f32, f32) {
-        let t = self.get_interpolation_t(config);
-        let phi = base_phi + config.cam_phi_delta * t;
-        let theta = base_theta + config.cam_theta_delta * t;
-        let radius = base_radius + config.cam_radius_delta * t;
-        (phi, theta, radius)
     }
 
     /// Resolve the accumulated buffer to the final output

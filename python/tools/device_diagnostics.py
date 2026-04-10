@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import sys, os, json
+import sys, json
 from pathlib import Path
 
 # Repo-root import shim so `import forge3d` works when run from repo

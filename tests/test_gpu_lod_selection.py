@@ -6,7 +6,6 @@ Exit criteria from docs/roadmap/roadmap.md:
 """
 
 import numpy as np
-import pytest
 
 
 class TestLodSelectionBasics:

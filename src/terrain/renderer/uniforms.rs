@@ -20,20 +20,6 @@ pub(super) struct OverlayUniforms {
     pub(super) params5: [f32; 4],
 }
 
-impl OverlayUniforms {
-    #[allow(dead_code)]
-    pub(super) fn disabled() -> Self {
-        Self {
-            params0: [0.0; 4],
-            params1: [0.0; 4],
-            params2: [2.2, 1.0, 1.0, 1.0],
-            params3: [0.0, 0.0, 0.0, 0.0],
-            params4: [0.0, 2.0, 0.3, 0.1],
-            params5: [50.0, 200.0, 0.0, 0.0],
-        }
-    }
-}
-
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(super) struct FogUniforms {

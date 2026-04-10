@@ -34,7 +34,7 @@ def test_demo_main_applies_viewer_z_scale(tmp_path, monkeypatch: pytest.MonkeyPa
         def __enter__(self):
             return self
 
-        def __exit__(self, exc_type, exc, tb) -> None:
+        def __exit__(self, _exc_type, _exc, _tb) -> None:
             return None
 
         def set_z_scale(self, value: float) -> None:

@@ -460,6 +460,17 @@ fn write_performance_report(
     Ok(())
 }
 
+// Binary entry point
+#[tokio::main]
+async fn main() {
+    env_logger::init();
+
+    if let Err(e) = run_upload_policy_benchmark().await {
+        eprintln!("Benchmark failed: {}", e);
+        std::process::exit(1);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -481,16 +492,5 @@ mod tests {
         assert_eq!(write_policy.name(), "queue.writeBuffer");
         assert_eq!(mapped_policy.name(), "mappedAtCreation");
         assert_eq!(staging_policy.name(), "stagingRing");
-    }
-}
-
-// Binary entry point
-#[tokio::main]
-async fn main() {
-    env_logger::init();
-
-    if let Err(e) = run_upload_policy_benchmark().await {
-        eprintln!("Benchmark failed: {}", e);
-        std::process::exit(1);
     }
 }

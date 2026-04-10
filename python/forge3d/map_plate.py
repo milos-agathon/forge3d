@@ -4,7 +4,7 @@ This module provides the MapPlate class for composing terrain renders
 with titles, legends, scale bars, and inset maps into a single image.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 

@@ -36,7 +36,6 @@ from forge3d.viewer_ipc import (
     add_line_label,
     add_curved_label,
     add_callout,
-    clear_labels,
     set_labels_enabled,
     set_label_zoom,
     set_max_visible_labels,

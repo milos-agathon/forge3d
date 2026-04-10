@@ -8,7 +8,6 @@ from forge3d.terrain_params import (
     DensityVolumeSettings,
     VolumetricsSettings,
     SkySettings,
-    TerrainRenderParams,
     localized_haze_volume,
     make_terrain_params_config,
     plume_volume,

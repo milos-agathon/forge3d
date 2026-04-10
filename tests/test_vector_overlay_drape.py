@@ -3,7 +3,6 @@
 # Tests the Python API classes and validation
 
 import pytest
-import numpy as np
 from forge3d.terrain_params import (
     VectorVertex,
     VectorOverlayConfig,

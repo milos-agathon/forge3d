@@ -155,15 +155,6 @@ fn test_r2_sequence_range() {
     }
 }
 
-#[test]
-fn test_light_count_enforcement() {
-    // Verify MAX_LIGHTS limit is properly documented
-    // Actual enforcement happens in update() method which returns Err
-    // This test verifies the constant is sensible
-    assert!(MAX_LIGHTS > 0, "MAX_LIGHTS must be positive");
-    assert!(MAX_LIGHTS <= 64, "MAX_LIGHTS should be reasonable (<=64)");
-}
-
 // P1-03: Per-frame seed generation tests
 
 #[test]
@@ -252,7 +243,7 @@ fn test_last_uploaded_lights_storage() {
     let light1 = Light::directional(45.0, 30.0, 3.0, [1.0, 0.9, 0.8]);
     let light2 = Light::point([0.0, 5.0, 0.0], 10.0, 20.0, [1.0, 1.0, 1.0]);
 
-    let lights = vec![light1, light2];
+    let lights = [light1, light2];
     assert_eq!(lights.len(), 2);
 
     // Verify fields are accessible

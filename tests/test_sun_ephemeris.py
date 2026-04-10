@@ -336,8 +336,6 @@ class TestSunEphemerisPresetWiring:
         if spec is None or spec.loader is None:
             pytest.skip("Could not load terrain_demo module")
         
-        module = importlib.util.module_from_spec(spec)
-        
         # Read the file content directly to check for param_map keys
         content = Path("examples/terrain_demo.py").read_text()
         

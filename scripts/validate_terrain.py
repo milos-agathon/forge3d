@@ -7,10 +7,8 @@ All metrics are computed on non-water pixels only.
 """
 
 import numpy as np
-from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Tuple, Dict, List, Optional
-import colorsys
+from typing import Tuple, List, Optional
 
 
 @dataclass
@@ -227,7 +225,7 @@ def validate_r4_color_bands(rgb: np.ndarray, L: np.ndarray, mask: np.ndarray, re
         prev_h_mean = h_mean
 
 
-def validate_image(image_path: str, reference_mode: bool = False) -> ValidationReport:
+def validate_image(image_path: str) -> ValidationReport:
     """Run all validations on an image."""
     report = ValidationReport(image_path)
     
@@ -251,7 +249,7 @@ def compare_images(ref_path: str, target_path: str):
     print(f"\n{'='*60}")
     print("REFERENCE IMAGE ANALYSIS")
     print(f"{'='*60}")
-    ref_report = validate_image(ref_path, reference_mode=True)
+    ref_report = validate_image(ref_path)
     print(ref_report.summary())
     
     print(f"\n{'='*60}")
