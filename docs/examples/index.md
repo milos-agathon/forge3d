@@ -45,6 +45,7 @@ exposes CLI flags.
 | `pointcloud_viewer_interactive.py` | LAZ/LAS point-cloud viewing with size and color controls. | `ViewerHandle.load_point_cloud()`, point-cloud IPC |
 | `cog_streaming_demo.py` | Direct COG access for tile/window reads, stats, and benchmarking. | `forge3d.cog.open_cog()` |
 | `buildings_viewer_interactive.py` | Building import flows from GeoJSON, CityJSON, and 3D Tiles-backed sources. | `forge3d.buildings` |
+| `osm_city_demo.py` | OSM-driven city scene around a center point, using forge3d extrusion helpers and a deterministic preview renderer. | `forge3d.io.import_osm_buildings_from_geojson()` |
 
 ## Animation And Camera Automation
 

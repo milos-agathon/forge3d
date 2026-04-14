@@ -294,6 +294,7 @@ diag_out/
 temp/
 *.tmp
 *.temp
+.codex_tmp/
 
 # Profiling and performance data
 *.prof
