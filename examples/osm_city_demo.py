@@ -36,15 +36,15 @@ OVERPASS_URLS = (
 
 GREEN_LANDUSE = {"grass", "recreation_ground", "forest", "greenery"}
 COLORS = {
-    "building_low": (0xC8, 0x8A, 0x1E, 255),
-    "building_mid": (0xB7, 0x72, 0x0E, 255),
-    "building_high": (0x98, 0x59, 0x0A, 255),
-    "landuse": (0xB8, 0x9C, 0x3A, 255),
-    "park": (0x66, 0xA6, 0x1E, 255),
-    "road": (0x7E, 0x87, 0x92, 255),
-    "road_hi": (0xE6, 0xEB, 0xF1, 255),
-    "water": (0x3E, 0x8F, 0xE0, 225),
-    "base": (0xD8, 0xDD, 0xE3, 255),
+    "building_low": (0xF0, 0xC6, 0x38, 255),
+    "building_mid": (0xE4, 0xB1, 0x20, 255),
+    "building_high": (0xD0, 0x93, 0x16, 255),
+    "landuse": (0xCF, 0xC0, 0x50, 255),
+    "park": (0x6C, 0xC7, 0x38, 255),
+    "road": (0xB9, 0xC5, 0xD3, 255),
+    "road_hi": (0xEC, 0xF2, 0xFA, 255),
+    "water": (0x4F, 0xA9, 0xF2, 220),
+    "base": (0xD2, 0xDC, 0xEA, 255),
 }
 
 
@@ -53,7 +53,7 @@ class MeshLayer:
     positions: np.ndarray
     indices: np.ndarray
     rgba: tuple[int, int, int, int]
-    shadow_alpha: int = 50
+    shadow_alpha: int = 28
     specular: float = 0.0
 
 
@@ -63,6 +63,7 @@ class SurfaceLayer:
     rgba: tuple[int, int, int, int]
     elevation: float
     specular: float = 0.0
+    reflectivity: float = 0.0
 
 
 @dataclass
@@ -500,7 +501,7 @@ def set_layer_style(
     rgba: tuple[int, int, int, int],
     *,
     y_offset: float = 0.0,
-    shadow_alpha: int = 50,
+    shadow_alpha: int = 28,
     specular: float = 0.0,
 ) -> MeshLayer | None:
     if layer is None:
@@ -584,6 +585,7 @@ def build_city_scene(
         *,
         elevation: float,
         specular: float = 0.0,
+        reflectivity: float = 0.0,
     ) -> None:
         polygonal = _extract_polygonal(_fix_geom(geom))
         if polygonal is None or polygonal.is_empty:
@@ -594,6 +596,7 @@ def build_city_scene(
                 rgba=rgba,
                 elevation=float(elevation),
                 specular=float(specular),
+                reflectivity=float(reflectivity),
             )
         )
 
@@ -618,7 +621,8 @@ def build_city_scene(
             merge_surface_geometry(water_local, simplify_tolerance=0.9),
             COLORS["water"],
             elevation=-0.5,
-            specular=0.25,
+            specular=0.08,
+            reflectivity=0.16,
         )
 
     if roads_local:
@@ -675,7 +679,7 @@ def build_city_scene(
             set_layer_style(
                 mesh_from_geojson(geojson, default_height=12.0, height_key="_height_m"),
                 COLORS[color_key],
-                shadow_alpha=58,
+                shadow_alpha=30,
             )
         )
 
@@ -811,6 +815,30 @@ def fit_polygon(points_xy: np.ndarray, *, scale: float, offset_x: float, offset_
     ]
 
 
+def build_surface_mask(
+    parts: list[tuple[np.ndarray, list[np.ndarray]]],
+    *,
+    width: int,
+    height: int,
+    scale: float,
+    offset_x: float,
+    offset_y: float,
+) -> Image.Image:
+    mask = Image.new("L", (width, height), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    for exterior, holes in parts:
+        mask_draw.polygon(
+            fit_polygon(exterior[:, :2], scale=scale, offset_x=offset_x, offset_y=offset_y),
+            fill=255,
+        )
+        for hole in holes:
+            mask_draw.polygon(
+                fit_polygon(hole[:, :2], scale=scale, offset_x=offset_x, offset_y=offset_y),
+                fill=0,
+            )
+    return mask
+
+
 def shade_rgba(
     rgba: tuple[int, int, int, int],
     *,
@@ -824,13 +852,36 @@ def shade_rgba(
     if float(np.dot(normal, view_dir)) < 0.0:
         normal = -normal
     diffuse = max(0.0, float(np.dot(normal, light_dir)))
-    skylight = max(0.0, float(normal[1])) * 0.18
+    skylight = max(0.0, float(normal[1])) * 0.26
     half_vec = normalize(light_dir + view_dir)
-    highlight = max(0.0, float(np.dot(normal, half_vec))) ** 24 * float(specular)
-    shade = min(1.25, 0.28 + 0.62 * diffuse + skylight + highlight)
+    highlight = max(0.0, float(np.dot(normal, half_vec))) ** 18 * float(specular)
+    shade = min(1.18, 0.50 + 0.40 * diffuse + skylight + highlight)
     base = np.array(rgba[:3], dtype=np.float32)
     rgb = np.clip(base * shade, 0.0, 255.0).astype(np.uint8)
     return (int(rgb[0]), int(rgb[1]), int(rgb[2]), int(rgba[3]))
+
+
+def reflection_rgba(
+    rgba: tuple[int, int, int, int],
+    water_rgba: tuple[int, int, int, int],
+    *,
+    normal: np.ndarray,
+    light_dir: np.ndarray,
+    view_dir: np.ndarray,
+    reflectivity: float,
+) -> tuple[int, int, int, int]:
+    shaded = shade_rgba(
+        rgba,
+        normal=normal,
+        light_dir=light_dir,
+        view_dir=view_dir,
+        specular=0.0,
+    )
+    reflected = np.asarray(shaded[:3], dtype=np.float32)
+    water = np.asarray(water_rgba[:3], dtype=np.float32)
+    rgb = np.clip(0.42 * reflected + 0.58 * water, 0.0, 255.0).astype(np.uint8)
+    alpha = int(np.clip(82.0 * reflectivity, 0.0, 255.0))
+    return (int(rgb[0]), int(rgb[1]), int(rgb[2]), alpha)
 
 
 def render_preview(
@@ -850,11 +901,11 @@ def render_preview(
     shadow_draw = ImageDraw.Draw(shadow_image, "RGBA")
 
     radius = float(scene.radius)
-    eye = np.array([-radius * 2.0, radius * 1.55, -radius * 2.0], dtype=np.float32)
-    target = np.array([0.0, radius * 0.08, 0.0], dtype=np.float32)
+    eye = np.array([-radius * 2.05, radius * 1.85, -radius * 1.95], dtype=np.float32)
+    target = np.array([0.0, radius * 0.03, 0.0], dtype=np.float32)
     up = np.array([0.0, 1.0, 0.0], dtype=np.float32)
-    light_dir = normalize(np.array([-0.55, 1.0, -0.45], dtype=np.float32))
-    fov_deg = 35.0
+    light_dir = normalize(np.array([-0.24, 1.0, -0.20], dtype=np.float32))
+    fov_deg = 33.0
     view_dir = normalize(eye - target)
 
     surface_batches: list[tuple[SurfaceLayer, list[tuple[np.ndarray, list[np.ndarray]]]]] = []
@@ -894,19 +945,16 @@ def render_preview(
         height=render_height,
     )
 
+    reflective_surfaces: list[tuple[SurfaceLayer, Image.Image]] = []
     for surface, parts in surface_batches:
-        mask = Image.new("L", (render_width, render_height), 0)
-        mask_draw = ImageDraw.Draw(mask)
-        for exterior, holes in parts:
-            mask_draw.polygon(
-                fit_polygon(exterior[:, :2], scale=scale, offset_x=offset_x, offset_y=offset_y),
-                fill=255,
-            )
-            for hole in holes:
-                mask_draw.polygon(
-                    fit_polygon(hole[:, :2], scale=scale, offset_x=offset_x, offset_y=offset_y),
-                    fill=0,
-                )
+        mask = build_surface_mask(
+            parts,
+            width=render_width,
+            height=render_height,
+            scale=scale,
+            offset_x=offset_x,
+            offset_y=offset_y,
+        )
         shaded = shade_rgba(
             surface.rgba,
             normal=np.array([0.0, 1.0, 0.0], dtype=np.float32),
@@ -918,6 +966,55 @@ def render_preview(
         layer_image = Image.new("RGBA", (render_width, render_height), shaded[:3] + (0,))
         layer_image.putalpha(alpha)
         image = Image.alpha_composite(image, layer_image)
+        if surface.reflectivity > 0.0:
+            reflective_surfaces.append((surface, mask))
+
+    if reflective_surfaces and scene.meshes:
+        transparent = Image.new("RGBA", (render_width, render_height), (0, 0, 0, 0))
+        blur_radius = max(2, int(round(render_width / 1600)))
+        for surface, mask in reflective_surfaces:
+            reflection_image = Image.new("RGBA", (render_width, render_height), (0, 0, 0, 0))
+            reflection_draw = ImageDraw.Draw(reflection_image, "RGBA")
+            for layer in scene.meshes:
+                reflected_positions = np.asarray(layer.positions, dtype=np.float32).copy()
+                reflected_positions[:, 1] = (2.0 * surface.elevation) - reflected_positions[:, 1] - 0.02
+                reflected_projected = project_points(
+                    reflected_positions,
+                    eye=eye,
+                    target=target,
+                    up=up,
+                    width=render_width,
+                    height=render_height,
+                    fov_deg=fov_deg,
+                )
+                for tri in np.asarray(layer.indices, dtype=np.uint32):
+                    world = reflected_positions[tri]
+                    screen = reflected_projected[tri]
+                    if np.any(screen[:, 2] <= 1.0):
+                        continue
+                    raw_normal = np.cross(world[1] - world[0], world[2] - world[0])
+                    raw_length = float(np.linalg.norm(raw_normal))
+                    if raw_length <= 1e-6:
+                        continue
+                    rgba = reflection_rgba(
+                        layer.rgba,
+                        surface.rgba,
+                        normal=raw_normal,
+                        light_dir=light_dir,
+                        view_dir=eye - world.mean(axis=0),
+                        reflectivity=surface.reflectivity,
+                    )
+                    reflection_draw.polygon(
+                        fit_polygon(
+                            screen[:, :2],
+                            scale=scale,
+                            offset_x=offset_x,
+                            offset_y=offset_y,
+                        ),
+                        fill=rgba,
+                    )
+            reflection_image = reflection_image.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+            image = Image.alpha_composite(image, Image.composite(reflection_image, transparent, mask))
 
     shadow_triangles: list[tuple[float, list[tuple[float, float]], int]] = []
     triangles: list[tuple[float, list[tuple[float, float]], tuple[int, int, int, int]]] = []
@@ -981,10 +1078,10 @@ def render_preview(
             )
 
     for _, polygon, alpha in sorted(shadow_triangles, key=lambda entry: entry[0], reverse=True):
-        shadow_draw.polygon(polygon, fill=(18, 20, 24, alpha))
+        shadow_draw.polygon(polygon, fill=(44, 50, 58, alpha))
     if shadow_triangles:
         shadow_image = shadow_image.filter(
-            ImageFilter.GaussianBlur(radius=max(2, int(round(render_width / 900))))
+            ImageFilter.GaussianBlur(radius=max(3, int(round(render_width / 750))))
         )
         image = Image.alpha_composite(image, shadow_image)
 
@@ -995,7 +1092,7 @@ def render_preview(
     if supersample > 1:
         resampling = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
         image = image.resize((width, height), resample=resampling)
-        image = image.filter(ImageFilter.UnsharpMask(radius=1.0, percent=115, threshold=2))
+        image = image.filter(ImageFilter.UnsharpMask(radius=0.8, percent=90, threshold=2))
 
     image.save(out_path, optimize=True)
 
