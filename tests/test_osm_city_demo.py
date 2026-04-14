@@ -49,10 +49,12 @@ def test_infer_building_height_falls_back_to_levels_and_default():
 
 
 def test_building_bin_thresholds():
-    assert osm_city_demo.building_bin(12.0) == "low"
-    assert osm_city_demo.building_bin(12.01) == "mid"
-    assert osm_city_demo.building_bin(24.0) == "mid"
-    assert osm_city_demo.building_bin(24.01) == "high"
+    assert osm_city_demo.building_bin(15.0) == "low"
+    assert osm_city_demo.building_bin(15.01) == "mid"
+    assert osm_city_demo.building_bin(30.0) == "mid"
+    assert osm_city_demo.building_bin(30.01) == "high"
+    assert osm_city_demo.building_bin(45.0) == "high"
+    assert osm_city_demo.building_bin(45.01) == "landmark"
 
 
 def test_prepare_polygonal_geom_falls_back_when_simplify_collapses_area():
@@ -95,3 +97,30 @@ def test_crop_subject_uses_alpha_channel_bounds():
     image.alpha_composite(block, dest=(34, 28))
     cropped = osm_city_demo.crop_subject(image, threshold=10, pad_ratio=0.0, min_pad=0)
     assert cropped.size == (24, 18)
+
+
+def test_make_poster_background_shape_and_gradient_progression():
+    background = osm_city_demo.make_poster_background(96, 96)
+    assert background.mode == "RGBA"
+    assert background.size == (96, 96)
+    arr = osm_city_demo.np.asarray(background, dtype=osm_city_demo.np.uint8)
+    top_luma = float(arr[4, 48, :3].mean())
+    bottom_luma = float(arr[90, 48, :3].mean())
+    assert bottom_luma > top_luma
+
+
+def test_apply_depth_grade_rgba_moves_far_color_toward_background():
+    near = osm_city_demo.apply_depth_grade_rgba(
+        (220, 180, 80, 255),
+        radial_t=0.0,
+    )
+    far = osm_city_demo.apply_depth_grade_rgba(
+        (220, 180, 80, 255),
+        radial_t=1.0,
+    )
+    near_luma = sum(near[:3])
+    far_luma = sum(far[:3])
+    near_spread = max(near[:3]) - min(near[:3])
+    far_spread = max(far[:3]) - min(far[:3])
+    assert far_luma > near_luma
+    assert far_spread < near_spread
