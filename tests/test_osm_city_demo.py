@@ -8,6 +8,7 @@ import pytest
 
 pytest.importorskip("pyproj")
 pytest.importorskip("shapely")
+from PIL import Image
 from shapely.geometry import Polygon
 
 
@@ -80,3 +81,17 @@ def test_merge_surface_geometry_preserves_polygon_holes():
     parts = osm_city_demo._polygon_parts(merged)
     assert len(parts) == 1
     assert len(parts[0].interiors) == 1
+
+
+def test_alpha_bounds_returns_padded_subject_extent():
+    alpha = osm_city_demo.np.zeros((12, 14), dtype=osm_city_demo.np.uint8)
+    alpha[3:8, 4:10] = 255
+    assert osm_city_demo.alpha_bounds(alpha, threshold=10, pad=2) == (2, 1, 12, 10)
+
+
+def test_crop_subject_uses_alpha_channel_bounds():
+    image = Image.new("RGBA", (100, 80), (0, 0, 0, 0))
+    block = Image.new("RGBA", (24, 18), (255, 200, 40, 255))
+    image.alpha_composite(block, dest=(34, 28))
+    cropped = osm_city_demo.crop_subject(image, threshold=10, pad_ratio=0.0, min_pad=0)
+    assert cropped.size == (24, 18)

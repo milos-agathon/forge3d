@@ -36,15 +36,15 @@ OVERPASS_URLS = (
 
 GREEN_LANDUSE = {"grass", "recreation_ground", "forest", "greenery"}
 COLORS = {
-    "building_low": (0xF0, 0xC6, 0x38, 255),
-    "building_mid": (0xE4, 0xB1, 0x20, 255),
-    "building_high": (0xD0, 0x93, 0x16, 255),
-    "landuse": (0xCF, 0xC0, 0x50, 255),
-    "park": (0x6C, 0xC7, 0x38, 255),
-    "road": (0xB9, 0xC5, 0xD3, 255),
-    "road_hi": (0xEC, 0xF2, 0xFA, 255),
-    "water": (0x4F, 0xA9, 0xF2, 220),
-    "base": (0xD2, 0xDC, 0xEA, 255),
+    "building_low": (0xF3, 0xCA, 0x48, 255),
+    "building_mid": (0xE1, 0xAB, 0x26, 255),
+    "building_high": (0xBF, 0x79, 0x14, 255),
+    "landuse": (0xD9, 0xC7, 0x67, 255),
+    "park": (0x69, 0xC7, 0x4D, 255),
+    "road": (0xC5, 0xD1, 0xDE, 255),
+    "road_hi": (0xF7, 0xFA, 0xFD, 255),
+    "water": (0x57, 0xB4, 0xF4, 228),
+    "base": (0xE6, 0xEC, 0xF1, 255),
 }
 
 
@@ -53,7 +53,7 @@ class MeshLayer:
     positions: np.ndarray
     indices: np.ndarray
     rgba: tuple[int, int, int, int]
-    shadow_alpha: int = 28
+    shadow_alpha: int = 22
     specular: float = 0.0
 
 
@@ -501,7 +501,7 @@ def set_layer_style(
     rgba: tuple[int, int, int, int],
     *,
     y_offset: float = 0.0,
-    shadow_alpha: int = 28,
+    shadow_alpha: int = 22,
     specular: float = 0.0,
 ) -> MeshLayer | None:
     if layer is None:
@@ -621,8 +621,8 @@ def build_city_scene(
             merge_surface_geometry(water_local, simplify_tolerance=0.9),
             COLORS["water"],
             elevation=-0.5,
-            specular=0.08,
-            reflectivity=0.16,
+            specular=0.14,
+            reflectivity=0.24,
         )
 
     if roads_local:
@@ -679,7 +679,7 @@ def build_city_scene(
             set_layer_style(
                 mesh_from_geojson(geojson, default_height=12.0, height_key="_height_m"),
                 COLORS[color_key],
-                shadow_alpha=30,
+                shadow_alpha=28,
             )
         )
 
@@ -839,6 +839,143 @@ def build_surface_mask(
     return mask
 
 
+def alpha_bounds(
+    alpha: np.ndarray,
+    *,
+    threshold: int = 6,
+    pad: int = 0,
+) -> tuple[int, int, int, int] | None:
+    alpha = np.asarray(alpha, dtype=np.uint8)
+    mask = alpha > int(threshold)
+    if not np.any(mask):
+        return None
+    ys, xs = np.nonzero(mask)
+    height, width = alpha.shape
+    return (
+        max(0, int(xs.min()) - int(pad)),
+        max(0, int(ys.min()) - int(pad)),
+        min(width, int(xs.max()) + int(pad) + 1),
+        min(height, int(ys.max()) + int(pad) + 1),
+    )
+
+
+def crop_subject(
+    image: Image.Image,
+    *,
+    threshold: int = 6,
+    pad_ratio: float = 0.024,
+    min_pad: int = 12,
+) -> Image.Image:
+    alpha = np.asarray(image.getchannel("A"), dtype=np.uint8)
+    pad = max(int(min_pad), int(round(max(image.size) * float(pad_ratio))))
+    bbox = alpha_bounds(alpha, threshold=threshold, pad=pad)
+    if bbox is None:
+        return image
+    return image.crop(bbox)
+
+
+def resize_to_fit(
+    image: Image.Image,
+    *,
+    max_width: int,
+    max_height: int,
+) -> Image.Image:
+    scale = min(max_width / max(image.width, 1), max_height / max(image.height, 1))
+    target_size = (
+        max(1, int(round(image.width * scale))),
+        max(1, int(round(image.height * scale))),
+    )
+    if target_size == image.size:
+        return image
+    resampling = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+    return image.resize(target_size, resample=resampling)
+
+
+def make_poster_background(width: int, height: int) -> Image.Image:
+    xs = np.linspace(0.0, 1.0, width, dtype=np.float32)[None, :]
+    ys = np.linspace(0.0, 1.0, height, dtype=np.float32)[:, None]
+    top = np.array([0xC1, 0xCB, 0xD7], dtype=np.float32)
+    bottom = np.array([0xF2, 0xF0, 0xEA], dtype=np.float32)
+    rgb = top[None, None, :] * (1.0 - ys[:, :, None]) + bottom[None, None, :] * ys[:, :, None]
+
+    glow = np.exp(
+        -(
+            ((xs - 0.52) / 0.34) ** 2
+            + ((ys - 0.58) / 0.22) ** 2
+        )
+    )[:, :, None]
+    vignette = np.clip(
+        1.04
+        - 0.18 * np.sqrt(((xs - 0.5) / 0.82) ** 2 + ((ys - 0.5) / 0.88) ** 2),
+        0.84,
+        1.02,
+    )[:, :, None]
+    rgb = np.clip(rgb * vignette + glow * 16.0, 0.0, 255.0).astype(np.uint8)
+    alpha = np.full((height, width, 1), 255, dtype=np.uint8)
+    return Image.fromarray(np.concatenate([rgb, alpha], axis=2), mode="RGBA")
+
+
+def add_subject_shadow(
+    canvas: Image.Image,
+    subject: Image.Image,
+    *,
+    dest: tuple[int, int],
+) -> None:
+    max_dim = max(subject.size)
+    shadow_specs = (
+        ((70, 81, 96), 0.18, max(2, int(round(max_dim * 0.018))), (0.024, 0.050)),
+        ((90, 99, 112), 0.09, max(4, int(round(max_dim * 0.050))), (0.010, 0.084)),
+    )
+    subject_alpha = subject.getchannel("A")
+    for rgb, alpha_scale, blur_radius, offset_ratio in shadow_specs:
+        layer = Image.new("RGBA", subject.size, rgb + (0,))
+        layer.putalpha(
+            subject_alpha.point(lambda value, a=alpha_scale: int(round(value * a)))
+        )
+        layer = layer.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+        offset = (
+            dest[0] + int(round(subject.width * offset_ratio[0])),
+            dest[1] + int(round(subject.height * offset_ratio[1])),
+        )
+        canvas.alpha_composite(layer, dest=offset)
+
+
+def add_subject_halo(
+    canvas: Image.Image,
+    subject: Image.Image,
+    *,
+    dest: tuple[int, int],
+) -> None:
+    halo = Image.new("RGBA", subject.size, (255, 250, 242, 0))
+    halo.putalpha(subject.getchannel("A").point(lambda value: int(round(value * 0.10))))
+    halo = halo.filter(ImageFilter.GaussianBlur(radius=max(4, int(round(max(subject.size) * 0.035)))))
+    canvas.alpha_composite(halo, dest=dest)
+
+
+def compose_poster(
+    subject: Image.Image,
+    *,
+    width: int,
+    height: int,
+) -> Image.Image:
+    cropped = crop_subject(subject, pad_ratio=0.018, min_pad=8)
+    placed = resize_to_fit(
+        cropped,
+        max_width=max(1, int(round(width * 0.92))),
+        max_height=max(1, int(round(height * 0.80))),
+    )
+    placed = placed.filter(ImageFilter.UnsharpMask(radius=0.9, percent=85, threshold=2))
+    canvas = make_poster_background(width, height)
+    dest = (
+        (width - placed.width) // 2,
+        int(round(height * 0.60 - placed.height * 0.5)),
+    )
+    add_subject_shadow(canvas, placed, dest=dest)
+    add_subject_halo(canvas, placed, dest=dest)
+    canvas.alpha_composite(placed, dest=dest)
+    return canvas
+
+
 def shade_rgba(
     rgba: tuple[int, int, int, int],
     *,
@@ -852,10 +989,10 @@ def shade_rgba(
     if float(np.dot(normal, view_dir)) < 0.0:
         normal = -normal
     diffuse = max(0.0, float(np.dot(normal, light_dir)))
-    skylight = max(0.0, float(normal[1])) * 0.26
+    skylight = max(0.0, float(normal[1])) * 0.17
     half_vec = normalize(light_dir + view_dir)
-    highlight = max(0.0, float(np.dot(normal, half_vec))) ** 18 * float(specular)
-    shade = min(1.18, 0.50 + 0.40 * diffuse + skylight + highlight)
+    highlight = max(0.0, float(np.dot(normal, half_vec))) ** 20 * float(specular)
+    shade = min(1.16, 0.60 + 0.31 * diffuse + skylight + highlight)
     base = np.array(rgba[:3], dtype=np.float32)
     rgb = np.clip(base * shade, 0.0, 255.0).astype(np.uint8)
     return (int(rgb[0]), int(rgb[1]), int(rgb[2]), int(rgba[3]))
@@ -896,16 +1033,16 @@ def render_preview(
     supersample = max(1, int(supersample))
     render_width = max(1, width * supersample)
     render_height = max(1, height * supersample)
-    image = Image.new("RGBA", (render_width, render_height), (255, 255, 255, 255))
+    image = Image.new("RGBA", (render_width, render_height), (0, 0, 0, 0))
     shadow_image = Image.new("RGBA", (render_width, render_height), (0, 0, 0, 0))
     shadow_draw = ImageDraw.Draw(shadow_image, "RGBA")
 
     radius = float(scene.radius)
-    eye = np.array([-radius * 2.05, radius * 1.85, -radius * 1.95], dtype=np.float32)
-    target = np.array([0.0, radius * 0.03, 0.0], dtype=np.float32)
+    eye = np.array([-radius * 1.88, radius * 1.42, -radius * 1.58], dtype=np.float32)
+    target = np.array([0.0, radius * 0.10, 0.0], dtype=np.float32)
     up = np.array([0.0, 1.0, 0.0], dtype=np.float32)
-    light_dir = normalize(np.array([-0.24, 1.0, -0.20], dtype=np.float32))
-    fov_deg = 33.0
+    light_dir = normalize(np.array([-0.38, 0.95, -0.18], dtype=np.float32))
+    fov_deg = 30.8
     view_dir = normalize(eye - target)
 
     surface_batches: list[tuple[SurfaceLayer, list[tuple[np.ndarray, list[np.ndarray]]]]] = []
@@ -943,6 +1080,7 @@ def render_preview(
         fit_inputs,
         width=render_width,
         height=render_height,
+        margin_ratio=0.040,
     )
 
     reflective_surfaces: list[tuple[SurfaceLayer, Image.Image]] = []
@@ -1078,10 +1216,10 @@ def render_preview(
             )
 
     for _, polygon, alpha in sorted(shadow_triangles, key=lambda entry: entry[0], reverse=True):
-        shadow_draw.polygon(polygon, fill=(44, 50, 58, alpha))
+        shadow_draw.polygon(polygon, fill=(70, 76, 86, alpha))
     if shadow_triangles:
         shadow_image = shadow_image.filter(
-            ImageFilter.GaussianBlur(radius=max(3, int(round(render_width / 750))))
+            ImageFilter.GaussianBlur(radius=max(3, int(round(render_width / 680))))
         )
         image = Image.alpha_composite(image, shadow_image)
 
@@ -1092,8 +1230,7 @@ def render_preview(
     if supersample > 1:
         resampling = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
         image = image.resize((width, height), resample=resampling)
-        image = image.filter(ImageFilter.UnsharpMask(radius=0.8, percent=90, threshold=2))
-
+    image = compose_poster(image, width=width, height=height)
     image.save(out_path, optimize=True)
 
 
