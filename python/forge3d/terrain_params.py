@@ -1890,8 +1890,8 @@ class TerrainRenderParams:
         if self.msaa_samples not in {1, 2, 4, 8}:
             raise ValueError("msaa_samples must be 1, 2, 4, or 8")
 
-        if not 0.1 <= self.z_scale <= 10.0:
-            raise ValueError("z_scale must be 0.1-10.0")
+        if not 0.1 <= self.z_scale <= 50.0:
+            raise ValueError("z_scale must be 0.1-50.0")
 
         if len(self.cam_target) != 3:
             raise ValueError("cam_target must be [x, y, z]")

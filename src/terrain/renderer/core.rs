@@ -57,6 +57,7 @@ pub struct TerrainScene {
     pub(super) height_curve_lut_sampler: wgpu::Sampler,
     pub(super) color_format: wgpu::TextureFormat,
     pub(super) light_buffer: Arc<Mutex<LightBuffer>>,
+    pub(super) light_override: Mutex<Option<Vec<Light>>>,
     pub(super) noop_shadow: NoopShadow,
     pub(super) csm_renderer: crate::shadows::CsmRenderer,
     pub(super) shadow_depth_pipeline: wgpu::RenderPipeline,

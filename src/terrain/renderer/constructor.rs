@@ -458,6 +458,7 @@ impl TerrainScene {
             height_curve_lut_sampler,
             color_format,
             light_buffer: Arc::new(Mutex::new(light_buffer)),
+            light_override: Mutex::new(None),
             noop_shadow,
             csm_renderer,
             shadow_depth_pipeline,

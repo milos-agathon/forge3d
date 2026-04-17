@@ -21,13 +21,20 @@ impl TerrainScene {
         &self,
         decoded: &crate::terrain::render_params::DecodedTerrainSettings,
     ) -> Result<()> {
+        let override_lights = self
+            .light_override
+            .lock()
+            .map_err(|_| anyhow!("TerrainRenderer light override mutex poisoned"))?
+            .clone();
         let mut light_buffer_guard = self
             .light_buffer
             .lock()
             .map_err(|_| anyhow!("Light buffer mutex poisoned"))?;
         light_buffer_guard.next_frame();
 
-        let lights = if decoded.light.intensity > 0.0 {
+        let lights = if let Some(lights) = override_lights {
+            lights
+        } else if decoded.light.intensity > 0.0 {
             vec![Light {
                 kind: LightType::Directional.as_u32(),
                 intensity: decoded.light.intensity,

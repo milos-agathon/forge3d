@@ -27,6 +27,7 @@ exposes CLI flags.
 | `pnoa_river_showcase.py` | Pure-Python companion composition example for terrain storytelling and post-processing. | downstream composition around terrain assets |
 | `pnoa_river_showcase_video.py` | High-resolution cinematic terrain sequence with overlay styling and final video/frame assembly. | viewer path, `terrain_scatter.viewer_orbit_radius()` |
 | `terrain_atmosphere_path_demo.py` | Lower-level terrain-native rendering path without the interactive viewer. | `Session`, `TerrainRenderer`, `TerrainRenderParams`, `MaterialSet`, `IBL` |
+| `uk_ireland_lighthouse_map.py` | British Isles terrain poster rendered through `TerrainRenderer`, with OSM lighthouses driving night-time glow and spotlight placement. | `Session`, `TerrainRenderer`, Overpass, Terrarium DEM tiles |
 
 ## Overlays, Labels, Styles, And Picking
 

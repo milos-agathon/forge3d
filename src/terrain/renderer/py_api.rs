@@ -41,6 +41,13 @@ impl TerrainRenderer {
             }
         }
 
+        {
+            let mut override_guard = self.scene.light_override.lock().map_err(|e| {
+                PyRuntimeError::new_err(format!("Failed to lock light override: {}", e))
+            })?;
+            *override_guard = Some(native_lights.clone());
+        }
+
         let mut light_buffer =
             self.scene.light_buffer.lock().map_err(|e| {
                 PyRuntimeError::new_err(format!("Failed to lock light buffer: {}", e))

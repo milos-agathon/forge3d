@@ -229,3 +229,48 @@ def test_height_curve_lut_changes_output():
     b = frame_lut.to_numpy()
     # LUT should change geometry/normals enough to alter output
     assert np.any(a != b)
+
+
+def test_renderer_set_lights_survives_render_path_rebind():
+    session = f3d.Session(window=False)
+    renderer = f3d.TerrainRenderer(session)
+    material_set = f3d.MaterialSet.terrain_default()
+    cmap = f3d.Colormap1D.from_stops(
+        stops=[(0.0, "#000000"), (1.0, "#ffffff")],
+        domain=(0.0, 1.0),
+    )
+    overlay = f3d.OverlayLayer.from_colormap1d(cmap, strength=0.5)
+    config = _build_config(overlay)
+    config.light.intensity = 0.0
+    native_params = f3d.TerrainRenderParams(config)
+
+    heightmap = np.linspace(0.0, 1.0, 64 * 64, dtype=np.float32).reshape(64, 64)
+
+    with tempfile.NamedTemporaryFile(suffix=".hdr", delete=False) as tmp:
+        tmp.close()
+        _create_test_hdr(tmp.name)
+        ibl = f3d.IBL.from_hdr(tmp.name, intensity=1.0)
+    os.unlink(tmp.name)
+
+    renderer.set_lights(
+        [
+            {
+                "type": "point",
+                "position": [0.0, 0.0, 4.0],
+                "range": 12.0,
+                "intensity": 15.0,
+                "color": [1.0, 0.95, 0.9],
+            }
+        ]
+    )
+    _ = renderer.render_terrain_pbr_pom(
+        material_set=material_set,
+        env_maps=ibl,
+        params=native_params,
+        heightmap=heightmap,
+        target=None,
+    )
+
+    debug = renderer.light_debug_info()
+    assert "Count: 1 lights" in debug
+    assert "Light 0: Point" in debug
