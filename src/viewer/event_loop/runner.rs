@@ -56,38 +56,36 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
 
     let _ = event_loop.run(move |event, elwt| {
         match event {
-            Event::Resumed => {
+            Event::Resumed if viewer_opt.is_none() => {
                 // Initialize viewer on resume (required for some platforms)
-                if viewer_opt.is_none() {
-                    let v = pollster::block_on(Viewer::new(Arc::clone(&window), config.clone()));
-                    match v {
-                        Ok(v) => {
-                            viewer_opt = Some(v);
-                            last_frame = Instant::now();
-                            // If an initial terrain config was provided (via open_terrain_viewer),
-                            // attempt to attach a TerrainScene before applying CLI commands.
-                            #[cfg(feature = "extension-module")]
-                            if let Some(cfg) = INITIAL_TERRAIN_CONFIG.get() {
-                                if let Some(viewer) = viewer_opt.as_mut() {
-                                    if let Err(e) = viewer.load_terrain_from_config(cfg) {
-                                        eprintln!(
-                                            "[viewer] failed to load terrain scene from config: {}",
-                                            e
-                                        );
-                                    }
-                                }
-                            }
-                            // Apply any pending commands from CLI now that viewer exists
-                            for cmd in pending_cmds.drain(..) {
-                                if let Some(viewer) = viewer_opt.as_mut() {
-                                    viewer.handle_cmd(cmd);
+                let v = pollster::block_on(Viewer::new(Arc::clone(&window), config.clone()));
+                match v {
+                    Ok(v) => {
+                        viewer_opt = Some(v);
+                        last_frame = Instant::now();
+                        // If an initial terrain config was provided (via open_terrain_viewer),
+                        // attempt to attach a TerrainScene before applying CLI commands.
+                        #[cfg(feature = "extension-module")]
+                        if let Some(cfg) = INITIAL_TERRAIN_CONFIG.get() {
+                            if let Some(viewer) = viewer_opt.as_mut() {
+                                if let Err(e) = viewer.load_terrain_from_config(cfg) {
+                                    eprintln!(
+                                        "[viewer] failed to load terrain scene from config: {}",
+                                        e
+                                    );
                                 }
                             }
                         }
-                        Err(e) => {
-                            eprintln!("Failed to create viewer: {}", e);
-                            elwt.exit();
+                        // Apply any pending commands from CLI now that viewer exists
+                        for cmd in pending_cmds.drain(..) {
+                            if let Some(viewer) = viewer_opt.as_mut() {
+                                viewer.handle_cmd(cmd);
+                            }
                         }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to create viewer: {}", e);
+                        elwt.exit();
                     }
                 }
             }
@@ -104,15 +102,12 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                             WindowEvent::CloseRequested => {
                                 elwt.exit();
                             }
-                            WindowEvent::KeyboardInput {
-                                event: key_event, ..
-                            } => {
-                                if key_event.state == ElementState::Pressed {
-                                    if let PhysicalKey::Code(KeyCode::Escape) =
-                                        key_event.physical_key
-                                    {
-                                        elwt.exit();
-                                    }
+                            WindowEvent::KeyboardInput { event: key_event, .. }
+                                if key_event.state == ElementState::Pressed =>
+                            {
+                                if let PhysicalKey::Code(KeyCode::Escape) = key_event.physical_key
+                                {
+                                    elwt.exit();
                                 }
                             }
                             WindowEvent::Resized(physical_size) => {
@@ -298,15 +293,12 @@ pub fn run_viewer_with_ipc(
                             WindowEvent::CloseRequested => {
                                 elwt.exit();
                             }
-                            WindowEvent::KeyboardInput {
-                                event: key_event, ..
-                            } => {
-                                if key_event.state == ElementState::Pressed {
-                                    if let PhysicalKey::Code(KeyCode::Escape) =
-                                        key_event.physical_key
-                                    {
-                                        elwt.exit();
-                                    }
+                            WindowEvent::KeyboardInput { event: key_event, .. }
+                                if key_event.state == ElementState::Pressed =>
+                            {
+                                if let PhysicalKey::Code(KeyCode::Escape) = key_event.physical_key
+                                {
+                                    elwt.exit();
                                 }
                             }
                             WindowEvent::Resized(physical_size) => {

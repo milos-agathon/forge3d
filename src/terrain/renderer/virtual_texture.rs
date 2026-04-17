@@ -553,13 +553,11 @@ impl TerrainMaterialVTRuntime {
         let atlas_slots_total = (atlas_size / slot_size) * (atlas_size / slot_size);
         let slot_bytes = slot_size as usize * slot_size as usize * TERRAIN_VT_BYTES_PER_PIXEL;
         let budget_bytes = (residency_budget_mb * 1024.0 * 1024.0).floor() as usize;
-        let budget_pages = if slot_bytes == 0 {
-            0
-        } else {
-            (budget_bytes / slot_bytes).max(1) as u32
-        }
-        .min(atlas_slots_total)
-        .max(1);
+        let budget_pages = budget_bytes
+            .checked_div(slot_bytes)
+            .unwrap_or(0)
+            .max(1) as u32;
+        let budget_pages = budget_pages.min(atlas_slots_total).max(1);
 
         let mut tile_cache = TileCache::new(budget_pages as usize);
         tile_cache.configure_atlas(atlas_size, atlas_size, slot_size);

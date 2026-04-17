@@ -101,7 +101,7 @@ impl AsyncComputeScheduler {
             .filter(|(_, info)| info.status == ComputePassStatus::Queued)
             .map(|(&id, info)| (id, info.descriptor.priority))
             .collect();
-        queued.sort_by(|a, b| b.1.cmp(&a.1));
+        queued.sort_by_key(|entry| std::cmp::Reverse(entry.1));
         queued
     }
 

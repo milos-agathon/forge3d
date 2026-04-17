@@ -278,7 +278,7 @@ impl LabelManager {
 
         // Collect labels and sort by priority (higher priority first)
         let mut sorted_labels: Vec<_> = self.labels.values_mut().collect();
-        sorted_labels.sort_by(|a, b| b.style.priority.cmp(&a.style.priority));
+        sorted_labels.sort_by_key(|label| std::cmp::Reverse(label.style.priority));
 
         for label in sorted_labels {
             // Skip if we've reached max visible

@@ -146,7 +146,7 @@ pub fn declutter_greedy(
     config: &DeclutterConfig,
 ) -> DeclutterResult {
     // Sort by priority (descending)
-    candidates.sort_by(|a, b| b.priority.cmp(&a.priority));
+    candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.priority));
 
     let mut visible_labels = Vec::new();
     let mut positions = Vec::new();
