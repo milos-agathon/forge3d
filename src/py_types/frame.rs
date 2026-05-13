@@ -40,6 +40,7 @@ impl Frame {
         )
     }
 
+    #[cfg(feature = "images")]
     pub(crate) fn read_rgba_f32(&self) -> anyhow::Result<Vec<f32>> {
         match self.format {
             wgpu::TextureFormat::Rgba8Unorm
@@ -82,6 +83,7 @@ impl Frame {
         }
     }
 
+    #[cfg(feature = "images")]
     pub(crate) fn dimensions(&self) -> (u32, u32) {
         (self.width, self.height)
     }

@@ -14,7 +14,7 @@ def main():
         out_json = Path(args[args.index("--json") + 1])
 
     try:
-        import forge3d as f3d  # noqa: F401
+        import forge3d as f3d
         have_gpu = getattr(f3d, "Renderer", None) is not None
         
         # Get adapter and probe information

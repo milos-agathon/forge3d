@@ -124,7 +124,6 @@ def adjust_saturation(rgb: np.ndarray, target_mean_sat: float, mask: np.ndarray)
     L = compute_luminance(rgb)
     gray = np.stack([L, L, L], axis=-1)
     
-    # new_rgb = gray + sat_scale * (rgb - gray)
     # This scales saturation while preserving luminance approximately
     adjusted = gray + sat_scale * (rgb - gray)
     

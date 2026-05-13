@@ -225,6 +225,7 @@ class LazDataset:
         )
 
     def children(self, key: OctreeKey) -> List[OctreeNode]:
+        del key
         return []  # No hierarchy
 
 

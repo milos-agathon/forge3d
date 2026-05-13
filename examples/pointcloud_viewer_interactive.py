@@ -306,7 +306,7 @@ def main() -> int:
     # Drain viewer stdout in background to prevent pipe buffer deadlock
     def _drain_stdout():
         try:
-            for line in process.stdout:
+            for _line in process.stdout:
                 pass
         except Exception:
             pass

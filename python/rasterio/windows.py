@@ -15,5 +15,6 @@ class Window:
         self.height = int(height)
 
 def transform(window, base_transform):  # pragma: no cover - placeholder behavior
+    del window
     # Return the base transform unchanged for tests that don't assert exact values.
     return base_transform

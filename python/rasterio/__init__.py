@@ -61,6 +61,7 @@ if __forge3d_stub__:
     __version__ = "0.0-stub"
 
     def open(*args, **kwargs):
+        del args, kwargs
         raise ImportError(
             "Real rasterio package is required for this operation. "
             "Install with: pip install rasterio"

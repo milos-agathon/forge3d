@@ -148,7 +148,6 @@ class TestMotionVectorsIntegration:
         """
         # This would use the camera_animation_demo.py infrastructure
         # to verify velocity buffer output during animation
-        pass
 
 
 if __name__ == "__main__":

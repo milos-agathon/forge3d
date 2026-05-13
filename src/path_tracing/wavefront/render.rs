@@ -1,7 +1,9 @@
 use super::*;
+#[cfg(feature = "extension-module")]
 use crate::path_tracing::TracerParams;
 
 impl WavefrontScheduler {
+    #[cfg(feature = "extension-module")]
     pub fn render_frame(
         &mut self,
         _scene: &Scene,

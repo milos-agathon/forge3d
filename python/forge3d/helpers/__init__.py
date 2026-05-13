@@ -23,6 +23,7 @@ except ImportError:
     _HAS_MATPLOTLIB_DISPLAY = False
     
     def _matplotlib_display_unavailable(*args, **kwargs):
+        del args, kwargs
         raise ImportError(
             "Matplotlib is required for display helpers. "
             "Install with: pip install matplotlib"

@@ -11,6 +11,7 @@ import types
 import numpy as _np
 
 def linspace(start, stop, num, chunks=None, dtype=None):
+    del chunks
     return _np.linspace(start, stop, int(num), dtype=dtype)
 
 def meshgrid(x, y, indexing='xy'):
@@ -23,6 +24,7 @@ def broadcast_to(array, shape):
 random = types.ModuleType("dask.array.random")
 
 def _random_random(shape, chunks=None, dtype=None):
+    del chunks
     return _np.empty(shape, dtype=dtype)
 
 random.random = _random_random

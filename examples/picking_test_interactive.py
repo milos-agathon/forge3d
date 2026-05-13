@@ -167,7 +167,7 @@ def test_pick_event_polling(sock, verbose: bool = False) -> bool:
     return True
 
 
-def test_clear_selection(sock, verbose: bool = False) -> bool:
+def test_clear_selection(sock) -> bool:
     """Test selection clearing."""
     print("\n[TEST] Clear Selection")
     
@@ -282,7 +282,7 @@ def main():
         results.append(("Vertex Format", test_vertex_format(sock, args.verbose)))
         results.append(("Lasso Mode", test_lasso_mode(sock, args.verbose)))
         results.append(("Pick Event Polling", test_pick_event_polling(sock, args.verbose)))
-        results.append(("Clear Selection", test_clear_selection(sock, args.verbose)))
+        results.append(("Clear Selection", test_clear_selection(sock)))
         results.append(("Feature ID Extraction", test_feature_id_extraction(sock, args.verbose)))
         
         # Summary

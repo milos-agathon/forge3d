@@ -252,7 +252,6 @@ class TestDrapeVerticesFlatTerrain:
         4. Computes normal from terrain gradient
         """
         # This documents the expected behavior
-        pass
 
     def test_drape_outside_bounds_doc(self):
         """Document expected behavior: vertices outside terrain are clamped.
@@ -262,4 +261,3 @@ class TestDrapeVerticesFlatTerrain:
         - Height comes from edge of terrain
         """
         # This documents the expected behavior
-        pass

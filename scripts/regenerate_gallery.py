@@ -850,7 +850,7 @@ def render_07_flyover() -> None:
     angles = [0, 120, 240]
     frame_paths: list[Path] = []
 
-    for i, phi in enumerate(angles):
+    for _i, phi in enumerate(angles):
         tmp = WORK_DIR / f"07-frame-{phi}.png"
         run_example(f"07 frame {phi}deg", [
             "examples/terrain_viewer_interactive.py",

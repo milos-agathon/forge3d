@@ -29,7 +29,7 @@ import geopandas as gpd
 import netCDF4  # noqa: F401
 import numpy as np
 import rasterio
-import rioxarray  # noqa: F401
+import rioxarray
 import xarray as xr
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from rasterio.enums import Resampling

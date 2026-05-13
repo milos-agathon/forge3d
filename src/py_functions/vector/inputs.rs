@@ -13,6 +13,7 @@ pub(super) fn extract_xy_list(list: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<g
     }
 }
 
+#[cfg(feature = "weighted-oit")]
 pub(super) fn extract_rgba_list(list: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<[f32; 4]>> {
     if let Some(obj) = list {
         Ok(obj
@@ -25,6 +26,7 @@ pub(super) fn extract_rgba_list(list: Option<&Bound<'_, PyAny>>) -> PyResult<Vec
     }
 }
 
+#[cfg(feature = "weighted-oit")]
 pub(super) fn extract_f32_list(list: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f32>> {
     if let Some(obj) = list {
         Ok(obj.extract()?)

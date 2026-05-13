@@ -4,9 +4,11 @@
 
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
+#[cfg(feature = "extension-module")]
+use wgpu::Adapter;
 use wgpu::{
-    Adapter, BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, Queue, RenderPipeline,
-    Sampler, Surface, SurfaceConfiguration, Texture, TextureView,
+    BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, Queue, RenderPipeline, Sampler,
+    Surface, SurfaceConfiguration, Texture, TextureView,
 };
 use winit::keyboard::KeyCode;
 use winit::window::Window;
@@ -33,7 +35,7 @@ pub struct Viewer {
     pub(crate) surface: Surface<'static>,
     pub(crate) device: Arc<Device>,
     pub(crate) queue: Arc<Queue>,
-    #[cfg_attr(not(feature = "extension-module"), allow(dead_code))]
+    #[cfg(feature = "extension-module")]
     pub(crate) adapter: Arc<Adapter>,
     pub(crate) config: SurfaceConfiguration,
     pub(crate) camera: CameraController,

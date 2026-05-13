@@ -16,7 +16,7 @@ import numpy as np
 from PIL import Image, ImageChops, ImageCms, ImageDraw, ImageFilter, ImageFont
 from pyproj import Transformer
 from shapely import BufferCapStyle, BufferJoinStyle, affinity
-from shapely.geometry import GeometryCollection, LineString, MultiLineString, MultiPolygon, Point, Polygon, mapping
+from shapely.geometry import GeometryCollection, LineString, MultiPolygon, Point, Polygon, mapping
 from shapely.geometry.polygon import orient as orient_polygon
 from shapely.ops import polygonize, transform, unary_union
 

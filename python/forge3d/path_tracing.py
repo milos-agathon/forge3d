@@ -165,6 +165,7 @@ class PathTracer:
         return {"hits": int(self._scene_cache.hits), "misses": int(self._scene_cache.misses)}
 
     def add_sphere(self, center: tuple[float, float, float], radius: float, material_or_color) -> None:
+        del center, radius, material_or_color
         # Placeholder for API parity.
         return None
 
@@ -454,6 +455,7 @@ def render_aovs(
     height = int(height)
     if width <= 0 or height <= 0:
         raise ValueError("width and height must be positive")
+    del scene, camera, frames, use_gpu, mesh
 
     # Normalize requested AOV names
     req = [str(k).lower() for k in aovs]
@@ -745,12 +747,13 @@ class BvhHandle:
 
 def build_bvh(triangles=None, use_gpu=True, seed=None, *args, **kwargs) -> BvhHandle:
     """Build BVH (fallback implementation)."""
+    del args, kwargs
     if triangles is not None and len(triangles) == 0:
         raise ValueError("Cannot build BVH from empty primitive list")
 
     # Validate primitive format
     if triangles:
-        for i, tri in enumerate(triangles):
+        for _i, tri in enumerate(triangles):
             if not isinstance(tri, (list, tuple, np.ndarray)):
                 raise ValueError("Invalid primitive format")
             if len(tri) != 9 and len(tri) != 3:  # Support both flat and vertex format
@@ -760,6 +763,7 @@ def build_bvh(triangles=None, use_gpu=True, seed=None, *args, **kwargs) -> BvhHa
 
 def refit_bvh(bvh_handle, new_triangles, *args, **kwargs) -> None:
     """Refit BVH (fallback implementation)."""
+    del args, kwargs
     if not isinstance(bvh_handle, BvhHandle):
         raise ValueError("First argument must be a BvhHandle")
 

@@ -143,7 +143,6 @@ def _wait_for_snapshot(
 
 class ViewerError(Exception):
     """Error from viewer IPC communication."""
-    pass
 
 
 class ViewerHandle:
@@ -652,6 +651,7 @@ def open_viewer_async(
         >>> v.snapshot("output.png", width=3840, height=2160)
         >>> v.close()
     """
+    del title
     if sum(x is not None for x in (obj_path, gltf_path, terrain_path)) > 1:
         raise ValueError("obj_path, gltf_path, and terrain_path are mutually exclusive")
     

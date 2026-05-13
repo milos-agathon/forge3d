@@ -613,7 +613,7 @@ class TestViewerHandleHelpers:
                 (phi_deg, theta_deg, radius, fov_deg, target)
             )
         )
-        handle.snapshot = lambda path, width=None, height=None: snapshots.append(Path(path))  # type: ignore[method-assign]
+        handle.snapshot = lambda path, width=None, height=None: (width, height, snapshots.append(Path(path)))[2]  # type: ignore[method-assign]
 
         handle.render_animation(_Animation(), tmp_path, fps=2)
 
@@ -631,7 +631,7 @@ class TestViewerHandleHelpers:
     def test_get_terrain_volumetrics_report_returns_payload(self):
         """The helper returns the decoded terrain volumetrics report."""
         handle = ViewerHandle.__new__(ViewerHandle)
-        handle._send_command = lambda cmd: {  # type: ignore[attr-defined]
+        handle._send_command = lambda _cmd: {  # type: ignore[attr-defined]
             "ok": True,
             "terrain_volumetrics_report": {
                 "active_volume_count": 1,
@@ -647,7 +647,7 @@ class TestViewerHandleHelpers:
     def test_get_terrain_volumetrics_report_requires_payload(self):
         """Missing terrain volumetrics report data raises ViewerError."""
         handle = ViewerHandle.__new__(ViewerHandle)
-        handle._send_command = lambda cmd: {"ok": True}  # type: ignore[attr-defined]
+        handle._send_command = lambda _cmd: {"ok": True}  # type: ignore[attr-defined]
 
         with pytest.raises(ViewerError, match="returned no report data"):
             handle.get_terrain_volumetrics_report()

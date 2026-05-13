@@ -299,10 +299,10 @@ mod tests {
         let mut allocator = BigBufferAllocator::new(256);
 
         // Allocate all blocks
-        let (o1, _) = allocator.allocate_block(64).unwrap();
+        let _ = allocator.allocate_block(64).unwrap();
         let (o2, _) = allocator.allocate_block(64).unwrap();
         let (o3, _) = allocator.allocate_block(64).unwrap();
-        let (o4, _) = allocator.allocate_block(64).unwrap();
+        let _ = allocator.allocate_block(64).unwrap();
 
         // Free middle blocks
         allocator.deallocate_block(o2);

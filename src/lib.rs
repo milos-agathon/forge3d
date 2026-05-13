@@ -137,6 +137,7 @@ pub mod path_tracing;
 pub mod pipeline;
 pub mod render; // Rendering utilities (instancing)
 pub mod renderer;
+#[cfg(feature = "extension-module")]
 pub mod scene;
 pub mod sdf; // New SDF module
 pub mod shadows; // Shadow mapping implementations

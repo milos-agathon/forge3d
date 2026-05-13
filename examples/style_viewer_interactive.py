@@ -276,7 +276,7 @@ def _show_layer_info(layer) -> str:
     return "\n".join(lines)
 
 
-def run_style_interactive_loop(sock, process, args, spec: StyleSpec):
+def run_style_interactive_loop(sock, process, spec: StyleSpec):
     """Run interactive command loop with style support."""
     print(f"\n{'='*60}")
     print(f" STYLE VIEWER")
@@ -552,7 +552,7 @@ def main() -> int:
         return 1
     
     # Interactive mode
-    run_style_interactive_loop(sock, process, args, spec)
+    run_style_interactive_loop(sock, process, spec)
     
     sock.close()
     process.terminate()

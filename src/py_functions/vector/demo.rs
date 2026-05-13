@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(feature = "weighted-oit")]
 use crate::vector::api::{PointDef, PolylineDef, VectorStyle};
 
 #[cfg(feature = "extension-module")]

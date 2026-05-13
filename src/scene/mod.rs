@@ -1,9 +1,5 @@
 // T41-BEGIN:scene-module
 #![allow(deprecated)]
-// The Scene API is primarily exercised by the Python/offscreen entry points.
-// Keep non-extension Rust builds quiet when those call paths are intentionally absent.
-#![cfg_attr(not(feature = "extension-module"), allow(dead_code))]
-
 mod core;
 mod postfx_cpu;
 mod private_impl;

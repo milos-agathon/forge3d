@@ -10,6 +10,7 @@ def load_json(path: str, n: int = 256) -> Colormap:
     return from_stops(name, stops, n=n)
 
 def load_cpt(path: str, n: int = 256) -> Colormap:
+    del n
     try:
         from .providers import load_provider
         return load_provider("pycpt")(path)
