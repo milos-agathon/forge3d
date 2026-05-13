@@ -17,6 +17,26 @@ struct DenoiseUniforms {
 @group(0) @binding(2) var depth_tex: texture_depth_2d; // Depth for edge stopping
 @group(0) @binding(3) var<uniform> uniforms: DenoiseUniforms;
 
+fn kernel_weight(offset: i32) -> f32 {
+    switch offset {
+        case -2: {
+            return 0.0625;
+        }
+        case -1: {
+            return 0.25;
+        }
+        case 0: {
+            return 0.375;
+        }
+        case 1: {
+            return 0.25;
+        }
+        default: {
+            return 0.0625;
+        }
+    }
+}
+
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let dims = vec2<i32>(i32(uniforms.width), i32(uniforms.height));
@@ -33,7 +53,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var sum = vec4<f32>(0.0);
     var weight_sum = 0.0;
     
-    let kernel = array<f32, 5>(0.0625, 0.25, 0.375, 0.25, 0.0625);
     let step = i32(uniforms.step_width);
     
     // 5x5 loop
@@ -57,7 +76,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let w_depth = exp(-(d_diff * d_diff) / (uniforms.sigma_depth * uniforms.sigma_depth + 1e-5));
 
                 // Kernel weight
-                let w_kernel = kernel[i+2] * kernel[j+2];
+                let w_kernel = kernel_weight(i) * kernel_weight(j);
                 
                 let w = w_kernel * w_color * w_depth;
                 

@@ -113,6 +113,8 @@ def _wait_for_snapshot(
 ) -> None:
     """Wait for a viewer snapshot file to appear or be updated."""
     deadline = time.time() + max(timeout, poll_interval)
+    stable_signature: Optional[Tuple[int, int]] = None
+    stable_polls = 0
     while time.time() < deadline:
         try:
             stat = path.stat()
@@ -120,11 +122,19 @@ def _wait_for_snapshot(
             time.sleep(poll_interval)
             continue
 
-        if previous_mtime_ns is None:
-            if stat.st_size > 0:
+        is_fresh = previous_mtime_ns is None or stat.st_mtime_ns != previous_mtime_ns
+        if is_fresh and stat.st_size > 0:
+            signature = (int(stat.st_size), int(stat.st_mtime_ns))
+            if signature == stable_signature:
+                stable_polls += 1
+            else:
+                stable_signature = signature
+                stable_polls = 1
+            if stable_polls >= 2:
                 return
-        elif stat.st_mtime_ns != previous_mtime_ns and stat.st_size > 0:
-            return
+        else:
+            stable_signature = None
+            stable_polls = 0
 
         time.sleep(poll_interval)
 

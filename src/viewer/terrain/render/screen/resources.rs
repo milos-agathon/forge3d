@@ -33,8 +33,18 @@ impl ViewerTerrainScene {
                 || self.pbr_config.lens_effects.chromatic_aberration > 0.001
                 || self.pbr_config.lens_effects.vignette_strength > 0.001);
         let needs_volumetrics = self.pbr_config.volumetrics.is_effectively_enabled();
-        let needs_denoise = self.pbr_config.denoise.enabled;
+        let denoise_requested = self.pbr_config.denoise.enabled;
+        let needs_denoise = false;
         let needs_dof_scratch = needs_volumetrics && needs_post_process && !needs_dof;
+
+        if denoise_requested {
+            static WARN_SCREEN_DENOISE_DISABLED: std::sync::Once = std::sync::Once::new();
+            WARN_SCREEN_DENOISE_DISABLED.call_once(|| {
+                eprintln!(
+                    "[terrain] Screen-space denoise is currently disabled on the viewer path; skipping interactive denoise"
+                );
+            });
+        }
 
         if (needs_post_process || needs_volumetrics) && self.post_process.is_none() {
             self.init_post_process();

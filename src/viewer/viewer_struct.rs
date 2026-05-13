@@ -33,6 +33,7 @@ pub struct Viewer {
     pub(crate) surface: Surface<'static>,
     pub(crate) device: Arc<Device>,
     pub(crate) queue: Arc<Queue>,
+    #[cfg_attr(not(feature = "extension-module"), allow(dead_code))]
     pub(crate) adapter: Arc<Adapter>,
     pub(crate) config: SurfaceConfiguration,
     pub(crate) camera: CameraController,
