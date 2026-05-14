@@ -60,9 +60,93 @@ except Exception:
 if __forge3d_stub__:
     __version__ = "0.0-stub"
 
-    def open(*args, **kwargs):
-        del args, kwargs
-        raise ImportError(
-            "Real rasterio package is required for this operation. "
-            "Install with: pip install rasterio"
-        )
+    from pathlib import Path as _Path
+
+    import numpy as _np
+
+    _DATASETS: dict[str, dict[str, object]] = {}
+
+    class _Dataset:
+        def __init__(self, path, mode="r", **profile):
+            self.path = str(_Path(path))
+            self.mode = mode
+            self.closed = False
+            if "w" in mode:
+                self.profile = dict(profile)
+                self.width = int(profile["width"])
+                self.height = int(profile["height"])
+                self.count = int(profile.get("count", 1))
+                self.dtype = profile.get("dtype", "float32")
+                self.crs = profile.get("crs")
+                self.transform = profile.get("transform")
+                self.nodata = profile.get("nodata")
+                self._data = _np.zeros((self.count, self.height, self.width), dtype=self.dtype)
+            else:
+                try:
+                    record = _DATASETS[self.path]
+                except KeyError as exc:
+                    raise ImportError(
+                        "Real rasterio package is required for this operation. "
+                        "Install with: pip install rasterio"
+                    ) from exc
+                self.profile = dict(record["profile"])
+                self._data = _np.array(record["data"], copy=True)
+                self.count, self.height, self.width = self._data.shape
+                self.dtype = self.profile.get("dtype", str(self._data.dtype))
+                self.crs = self.profile.get("crs")
+                self.transform = self.profile.get("transform")
+                self.nodata = self.profile.get("nodata")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            self.close()
+            return False
+
+        def close(self):
+            if not self.closed and "w" in self.mode:
+                self.profile.update(
+                    width=self.width,
+                    height=self.height,
+                    count=self.count,
+                    dtype=str(self._data.dtype),
+                    crs=self.crs,
+                    transform=self.transform,
+                    nodata=self.nodata,
+                )
+                _DATASETS[self.path] = {
+                    "profile": dict(self.profile),
+                    "data": _np.array(self._data, copy=True),
+                }
+                _Path(self.path).touch()
+            self.closed = True
+
+        def write(self, data, indexes=None, **_kwargs):
+            array = _np.asarray(data)
+            if indexes is None:
+                if array.ndim == 2 and self.count == 1:
+                    self._data[0] = array
+                else:
+                    self._data[...] = array
+            else:
+                self._data[int(indexes) - 1] = array
+
+        def read(self, indexes=None, *, masked=False, out_dtype=None, **_kwargs):
+            if indexes is None:
+                data = _np.array(self._data, copy=True)
+            elif isinstance(indexes, (list, tuple)):
+                data = _np.array([self._data[int(index) - 1] for index in indexes], copy=True)
+            else:
+                data = _np.array(self._data[int(indexes) - 1], copy=True)
+            if out_dtype is not None:
+                data = data.astype(out_dtype)
+            if masked:
+                mask = _np.zeros(data.shape, dtype=bool)
+                if self.nodata is not None:
+                    mask = data == self.nodata
+                return _np.ma.array(data, mask=mask)
+            return data
+
+    def open(path, mode="r", **kwargs):
+        return _Dataset(path, mode, **kwargs)

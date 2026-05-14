@@ -1,5 +1,5 @@
 # python/rasterio/transform.py
-# Minimal transform stub exposing from_bounds and xy for tests/demos to patch.
+# Minimal transform stub exposing common constructors for tests/demos to patch.
 # Exists to make import targets resolvable during tests.
 # RELEVANT FILES:python/forge3d/ingest/xarray_adapter.py,python/forge3d/adapters/reproject.py
 
@@ -10,6 +10,12 @@ Stubbed transform utilities.
 class _Affine:
     def __init__(self, *args, **kwargs):
         self.params = (args, kwargs)
+
+    def __iter__(self):  # pragma: no cover
+        return iter(self.params[0])
+
+def from_origin(west, north, xsize, ysize):  # pragma: no cover
+    return _Affine(xsize, 0.0, west, 0.0, -ysize, north)
 
 def from_bounds(left, bottom, right, top, width, height):  # pragma: no cover
     return _Affine(left, bottom, right, top, width, height)
