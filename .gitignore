@@ -343,3 +343,6 @@ docs/_build/
 # Large data files
 landuse/landuse/glad_cropland_2019.tif
 examples/*
+!examples/germany_terrain_landcover_viewer.py
+!examples/khumbu_icefall_sentinel_timelapse.py
+!examples/turkiye_river_basins_3d.py

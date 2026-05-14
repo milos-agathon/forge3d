@@ -130,9 +130,13 @@ def _apply_json_preset(args: argparse.Namespace, preset_path: Path, cli_explicit
             args.detail_strength = detail_normals["detail_strength"]
 
 
-def _was_cli_set(arg_name: str) -> bool:
+def _was_cli_set(args_or_name: argparse.Namespace | str, arg_name: str | None = None) -> bool:
     """Check if an argument was explicitly set on the command line."""
     import sys
+
+    if arg_name is None:
+        arg_name = str(args_or_name)
+
     # Map arg_name to CLI flag variants
     flag_variants = [
         f"--{arg_name.replace('_', '-')}",

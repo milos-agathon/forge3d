@@ -76,7 +76,7 @@ impl HdrFrame {
         Ok(arr.into_pyarray_bound(py).into_gil_ref())
     }
 
-    fn save(&self, _py: Python<'_>, path: &str) -> PyResult<()> {
+    fn save(&self, py: Python<'_>, path: &str) -> PyResult<()> {
         let path_obj = Path::new(path);
         let ext = path_obj
             .extension()
@@ -91,7 +91,7 @@ impl HdrFrame {
 
         #[cfg(feature = "images")]
         {
-            _py.allow_threads(|| -> anyhow::Result<()> {
+            py.allow_threads(|| -> anyhow::Result<()> {
                 let data = self.read_rgba_f32()?;
                 exr_write::write_exr_rgba_f32(path_obj, self.width, self.height, &data, "beauty")
                     .map_err(anyhow::Error::msg)?;
