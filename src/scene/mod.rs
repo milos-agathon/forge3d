@@ -1,6 +1,5 @@
 // T41-BEGIN:scene-module
 #![allow(deprecated)]
-
 mod core;
 mod postfx_cpu;
 mod private_impl;

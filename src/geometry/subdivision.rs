@@ -301,6 +301,7 @@ pub fn subdivide_triangles_with_options(
     mesh
 }
 
+#[cfg(feature = "extension-module")]
 fn compute_max_edge_length(mesh: &MeshBuffers) -> f32 {
     let mut max_len = 0.0f32;
     for tri in mesh.indices.chunks_exact(3) {
@@ -319,6 +320,7 @@ fn compute_max_edge_length(mesh: &MeshBuffers) -> f32 {
     max_len
 }
 
+#[cfg(feature = "extension-module")]
 fn face_normal(p0: [f32; 3], p1: [f32; 3], p2: [f32; 3]) -> [f32; 3] {
     let ux = p1[0] - p0[0];
     let uy = p1[1] - p0[1];
@@ -337,6 +339,7 @@ fn face_normal(p0: [f32; 3], p1: [f32; 3], p2: [f32; 3]) -> [f32; 3] {
     }
 }
 
+#[cfg(feature = "extension-module")]
 fn max_dihedral_angle(mesh: &MeshBuffers) -> f32 {
     let mut edge_to_normals: HashMap<(u32, u32), Vec<[f32; 3]>> = HashMap::new();
     for tri in mesh.indices.chunks_exact(3) {
@@ -365,6 +368,7 @@ fn max_dihedral_angle(mesh: &MeshBuffers) -> f32 {
     max_angle
 }
 
+#[cfg(feature = "extension-module")]
 pub fn subdivide_adaptive(
     input: &MeshBuffers,
     edge_length_limit: Option<f32>,

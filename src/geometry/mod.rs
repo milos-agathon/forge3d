@@ -6,14 +6,18 @@
 //! - Mesh validation and welding
 //! - Coordinate transforms
 
+#[cfg(feature = "extension-module")]
 mod curves;
+#[cfg(feature = "extension-module")]
 mod displacement;
 mod extrude;
 pub mod grid;
 mod primitives;
 mod simplify;
 mod subdivision;
+#[cfg(feature = "extension-module")]
 mod tangents;
+#[cfg(feature = "extension-module")]
 mod thick_polyline;
 mod transform;
 pub mod transforms;

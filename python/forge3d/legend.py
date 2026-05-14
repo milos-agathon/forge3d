@@ -152,7 +152,7 @@ class Legend:
             bar_y = cfg.padding + title_height
             bar_pil = Image.fromarray(bar)
             img.paste(bar_pil, (bar_x, bar_y))
-            for i, (value, label) in enumerate(ticks):
+            for _i, (value, label) in enumerate(ticks):
                 t = (value - self.domain[0]) / (self.domain[1] - self.domain[0])
                 y = bar_y + int((1.0 - t) * (bar_h - 1))
                 tick_x0 = bar_x + bar_w
@@ -175,7 +175,7 @@ class Legend:
             bar_y = cfg.padding + title_height
             bar_pil = Image.fromarray(bar)
             img.paste(bar_pil, (bar_x, bar_y))
-            for i, (value, label) in enumerate(ticks):
+            for _i, (value, label) in enumerate(ticks):
                 t = (value - self.domain[0]) / (self.domain[1] - self.domain[0])
                 x = bar_x + int(t * (bar_h - 1))
                 tick_y0 = bar_y + bar_w

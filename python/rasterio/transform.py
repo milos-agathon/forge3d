@@ -15,5 +15,6 @@ def from_bounds(left, bottom, right, top, width, height):  # pragma: no cover
     return _Affine(left, bottom, right, top, width, height)
 
 def xy(transform, rows, cols, offset='center'):  # pragma: no cover
+    del transform, offset
     # Return simple evenly spaced coordinates based on indices for testing.
     return rows, cols

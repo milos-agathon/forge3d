@@ -168,9 +168,6 @@ class TestVectorOverlayLighting:
             "intensity": 1.0,
         })
         
-        # Snapshot (would need hash comparison for full test)
-        # snap1 = capture_snapshot(sock, "overlay_sun_east.png")
-        
         # Set sun to west (azimuth 270)
         send_ipc(sock, {
             "cmd": "set_terrain_sun",
@@ -178,9 +175,6 @@ class TestVectorOverlayLighting:
             "elevation_deg": 45,
             "intensity": 1.0,
         })
-        
-        # snap2 = capture_snapshot(sock, "overlay_sun_west.png")
-        # assert snap1 != snap2, "Overlay should change with sun direction"
 
 
 class TestVectorOverlayShadows:
@@ -194,7 +188,6 @@ class TestVectorOverlayShadows:
         """
         # This would require placing overlay in known shadow area
         # and comparing luminance to lit area
-        pass
 
 
 class TestVectorOverlayVisibility:

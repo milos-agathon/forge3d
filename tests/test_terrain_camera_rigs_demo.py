@@ -57,7 +57,7 @@ def test_demo_main_applies_viewer_z_scale(tmp_path, monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(
         demo.f3d,
         "open_viewer_async",
-        lambda **kwargs: _ViewerStub(),
+        lambda **_kwargs: _ViewerStub(),
     )
     monkeypatch.setattr(
         demo,

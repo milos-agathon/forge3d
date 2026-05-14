@@ -54,6 +54,7 @@ exposes CLI flags.
 | --- | --- | --- |
 | `camera_animation_demo.py` | Keyframe-based camera paths, interpolation preview, and frame export. | `forge3d.animation.CameraAnimation`, viewer IPC |
 | `terrain_camera_rigs_demo.py` | Higher-level terrain camera rigs such as orbit, rail, and follow shots. | `forge3d.camera_rigs`, viewer path |
+| `khumbu_icefall_sentinel_timelapse.py` | Multi-year Sentinel-2 time-series terrain animation over the Khumbu Icefall with a 5 m DEM render grid and MP4 output. | Microsoft Planetary Computer STAC, Copernicus DEM GLO-30, `open_viewer_async()`, `ffmpeg` |
 
 ## Notebooks
 

@@ -75,6 +75,7 @@ def get_device() -> Any:
             self.limits = {"max_texture_dimension": 16384}
 
         def create_virtual_texture(self, *args: Any, **kwargs: Any) -> "MockVirtualTexture":
+            del args, kwargs
             return MockVirtualTexture()
 
     return MockDevice()

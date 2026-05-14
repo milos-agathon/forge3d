@@ -77,13 +77,12 @@ pub(crate) fn numpy_to_exr(
         )));
     }
 
-    let height_u32 =
-        u32::try_from(height).map_err(|_| PyValueError::new_err("array height exceeds u32"))?;
-    let width_u32 =
-        u32::try_from(width).map_err(|_| PyValueError::new_err("array width exceeds u32"))?;
-
     #[cfg(feature = "images")]
     {
+        let height_u32 =
+            u32::try_from(height).map_err(|_| PyValueError::new_err("array height exceeds u32"))?;
+        let width_u32 =
+            u32::try_from(width).map_err(|_| PyValueError::new_err("array width exceeds u32"))?;
         let data = view.to_owned().into_raw_vec();
         let write_result = match channels {
             1 => exr_write::write_exr_scalar_f32(path_obj, width_u32, height_u32, &data, prefix),

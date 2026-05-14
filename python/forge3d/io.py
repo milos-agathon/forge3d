@@ -462,8 +462,8 @@ def upload_dem_to_gpu(dem: DEMData, session: Optional[Any] = None) -> DEMData:
 
     # Get GPU context
     if session is not None:
-        session.device
-        session.queue
+        _device = session.device
+        _queue = session.queue
     else:
         # Use global context
         from . import _gpu

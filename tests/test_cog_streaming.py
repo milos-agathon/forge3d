@@ -46,7 +46,7 @@ def skip_if_no_network():
 
 def get_test_dem() -> Path:
     """Get a local DEM for testing."""
-    for name, path in AVAILABLE_DEMS.items():
+    for _name, path in AVAILABLE_DEMS.items():
         if path.exists():
             return path
     pytest.skip("No test DEM available in assets/tif/")

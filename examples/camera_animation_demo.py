@@ -181,7 +181,6 @@ def run_interactive_preview(
     dynamic_sun: bool = True,
     sun_offset: float = 120.0,
     sun_intensity: float = 1.0,
-    debug_velocity: bool = False,
     taa_enabled: bool = False,
     taa_history_weight: float = 0.9,
     oit_mode: str | None = None,
@@ -247,7 +246,7 @@ def run_interactive_preview(
         import threading
         def drain_output():
             try:
-                for line in iter(process.stdout.readline, ""):
+                for _line in iter(process.stdout.readline, ""):
                     pass  # Discard output
             except:
                 pass
@@ -497,7 +496,6 @@ def export_animation_frames(
     sun_offset: float = 120.0,
     sun_intensity: float = 1.0,
     title: Optional[str] = None,
-    debug_velocity: bool = False,
     taa_enabled: bool = False,
     taa_history_weight: float = 0.9,
     oit_mode: str | None = None,
@@ -910,7 +908,6 @@ Examples:
             sun_offset=args.sun_offset,
             sun_intensity=args.sun_intensity,
             title=args.title,
-            debug_velocity=args.debug_velocity,
             taa_enabled=taa_enabled,
             taa_history_weight=args.taa_history_weight,
             oit_mode=args.oit,
@@ -925,7 +922,6 @@ Examples:
             dynamic_sun=not args.static_sun,
             sun_offset=args.sun_offset,
             sun_intensity=args.sun_intensity,
-            debug_velocity=args.debug_velocity,
             taa_enabled=taa_enabled,
             taa_history_weight=args.taa_history_weight,
             oit_mode=args.oit,

@@ -10,6 +10,7 @@ Stub pyproj interfaces for local testing.
 class CRS:  # pragma: no cover
     @classmethod
     def from_string(cls, s):
+        del s
         return cls()
 
 class Transformer:  # pragma: no cover
@@ -17,6 +18,7 @@ class Transformer:  # pragma: no cover
         pass
     @classmethod
     def from_crs(cls, src, dst, always_xy=False):
+        del src, dst, always_xy
         return cls()
     def transform(self, xs, ys):
         return xs, ys

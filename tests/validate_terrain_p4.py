@@ -92,7 +92,7 @@ def compute_gradient_magnitude(luminance: np.ndarray) -> np.ndarray:
     return np.sqrt(dx**2 + dy**2)
 
 
-def create_water_mask(rgb: np.ndarray, luminance: np.ndarray) -> np.ndarray:
+def create_water_mask(rgb: np.ndarray) -> np.ndarray:
     """Create water mask based on blue dominance and saturation (R0).
     
     This is a fallback heuristic method. For authoritative water masking,
@@ -289,7 +289,7 @@ def validate_p4(
     
     # Fallback to heuristic if shader-based mask not available
     if water_mask is None:
-        water_mask = create_water_mask(rgb, luminance)
+        water_mask = create_water_mask(rgb)
         if verbose:
             print("Water mask from heuristic (fallback)")
     
@@ -608,7 +608,7 @@ def validate_p4(
 
     # Print results
     if verbose:
-        for ms_name, ms in milestones.items():
+        for _ms_name, ms in milestones.items():
             status = "[PASS]" if ms.passed else "[FAIL]"
             print(f"\n{'='*60}")
             print(f"{ms.name}: {status}")

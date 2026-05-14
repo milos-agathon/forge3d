@@ -102,7 +102,10 @@ impl AovWriter {
     /// - HDR data (albedo, normal, depth, direct, indirect, emission) -> EXR
     /// - LDR data (visibility) -> PNG
     pub fn write_aov<P: AsRef<Path>>(aov_data: &AovData, path: P) -> Result<()> {
+        #[cfg(feature = "images")]
         let path = path.as_ref();
+        #[cfg(not(feature = "images"))]
+        let _ = path;
 
         match &aov_data.data {
             AovDataType::Float32(_) | AovDataType::Float32Single(_) => {

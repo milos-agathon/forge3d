@@ -37,7 +37,10 @@ impl Viewer {
         let surface = dev_res.surface;
         let device = dev_res.device;
         let queue = dev_res.queue;
+        #[cfg(feature = "extension-module")]
         let adapter = dev_res.adapter;
+        #[cfg(not(feature = "extension-module"))]
+        let _adapter = dev_res.adapter;
         let surface_config = dev_res.config;
         let adapter_name = dev_res.adapter_name;
 
@@ -118,6 +121,7 @@ impl Viewer {
             surface,
             device: device.clone(),
             queue: queue.clone(),
+            #[cfg(feature = "extension-module")]
             adapter,
             config: surface_config,
             camera: CameraController::new(),

@@ -126,7 +126,7 @@ class NorthArrow:
         """Draw compass rose style with N/S/E/W."""
         arrow_len = size // 2 - 12
         
-        for i, (label, angle_offset) in enumerate([("N", 0), ("E", 90), ("S", 180), ("W", 270)]):
+        for _i, (label, angle_offset) in enumerate([("N", 0), ("E", 90), ("S", 180), ("W", 270)]):
             angle = rot_rad + math.radians(angle_offset)
             
             # Arrow tip

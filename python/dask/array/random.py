@@ -10,4 +10,5 @@ Random utilities placeholder for dask.array.
 import numpy as _np
 
 def random(shape, chunks=None, dtype=None):
+    del chunks
     return _np.empty(shape, dtype=dtype)

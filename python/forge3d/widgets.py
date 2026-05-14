@@ -206,10 +206,12 @@ def _render_dem_preview(
 if _widgets is None:  # pragma: no cover - only executed without ipywidgets
     class _InlinePreview:  # type: ignore[no-redef]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
+            del args, kwargs
             raise ImportError(_missing_ipywidgets_message()) from _WIDGETS_IMPORT_ERROR
 
     class ViewerWidget:  # type: ignore[no-redef]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
+            del args, kwargs
             raise ImportError(_missing_ipywidgets_message()) from _WIDGETS_IMPORT_ERROR
 
 else:

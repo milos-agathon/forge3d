@@ -176,6 +176,7 @@ pub(super) fn read_u32_texture_to_py(
     Ok(array.into_py(py))
 }
 
+#[cfg(feature = "weighted-oit")]
 pub(super) fn read_single_u32_pixel(
     device: &wgpu::Device,
     queue: &wgpu::Queue,

@@ -11,8 +11,8 @@ Reference source: https://www.cesbio.cnrs.fr/multitemp/khumbu-icefall-in-4d/
 ## User-Approved Decisions
 
 - Data access: live download plus local cache, so the example is reproducible.
-- Imagery: real Sentinel-2 L2A time series, not a single image with synthetic time variation.
-- DEM: no-login public DEM only, using the crispest available source. Do not silently fall back to a softer DEM.
+- Imagery: real Sentinel-2 L2A time series, not a single image with synthetic time variation. The default date range was expanded to `2023-02-28` through `2026-02-28` so the 10 second output can use 240 sampled 24 fps frames.
+- DEM: no-login public DEM only, using the crispest available source. The default render grid is 5 m, upsampled from Copernicus GLO-30, and does not silently fall back to a softer DEM.
 - Visual direction: "Forge3d Polished", not a strict rayshader clone.
 
 ## Example Surface
@@ -31,12 +31,13 @@ Default cache:
 
 Core CLI:
 
-- `--start-date`, default `2018-11-01`
-- `--end-date`, default `2020-12-31`
-- `--max-scenes`, default `24`
+- `--start-date`, default `2023-02-28`
+- `--end-date`, default `2026-02-28`
+- `--max-scenes`, optional cap; default is no cap so the full selected span is used
 - `--cloud-cover`, default `35`
-- `--fps`, default `10`
-- `--duration`, optional; if omitted, frame count follows selected scenes
+- `--fps`, default `24`
+- `--duration`, default `10`
+- `--dem-resolution`, default `5.0`
 - `--size`, default `1600 1000`
 - `--preview-only`
 - `--frames-only`
@@ -60,10 +61,10 @@ Use Microsoft Planetary Computer STAC:
 
 - Endpoint: `https://planetarycomputer.microsoft.com/api/stac/v1/search`
 - Collection: `sentinel-2-l2a`
-- Bands/assets: prefer `visual` for true-color rendering. If needed, fall back to `B04`, `B03`, `B02`.
+- Bands/assets: prefer raw `B04`, `B03`, `B02` for true-color rendering because the web-ready `visual` COG can clip snow/cloud highlights in this AOI. Fall back to `visual` only when raw true-color bands are unavailable.
 - Search filter: AOI bbox, date range, `eo:cloud_cover <= --cloud-cover`.
 - Sort candidates chronologically.
-- Select up to `--max-scenes`, with light de-duplication by acquisition date so adjacent MGRS tile duplicates do not double-count one overpass.
+- Select all unique acquisition dates by default, with light de-duplication by acquisition date so adjacent MGRS tile duplicates do not double-count one overpass. If `--max-scenes` is provided, evenly sample that many dates from the full selected year.
 - Sign asset URLs through the Planetary Computer SAS signing API before reading COG assets.
 
 The script should download or window-read only the AOI, not entire Sentinel tiles. Cached outputs should be small clipped/reprojected GeoTIFF or PNG artifacts keyed by scene id, date, bbox, and target grid.
@@ -86,20 +87,23 @@ Do not use NSIDC HMA 8 m because it may require Earthdata/NSIDC access and viola
 1. Build a terrain GeoTIFF from the DEM crop in `EPSG:32645`, preserving metric shape.
 2. For each selected Sentinel scene, crop/reproject the RGB data to the DEM/render grid.
 3. Normalize RGB robustly:
-   - Use `visual` asset values as display RGB when available.
-   - For band fallback, percentile stretch each channel and apply gentle gamma/saturation.
+   - Use raw `B04`, `B03`, `B02` reflectance when available.
+   - Percentile stretch each channel and apply gentle gamma/saturation.
+   - Use `visual` asset values as display RGB only as a fallback.
    - Preserve snow/ice highlights without clipping large areas to flat white.
 4. Save each scene overlay as RGBA PNG.
 5. Open forge3d terrain through `open_viewer_async()`.
 6. Load each overlay, set camera/sun, snapshot a frame, then post-process:
-   - Add date label.
+   - Separate the terrain from a very light gray background.
+   - Add a dark base slab/contact shadow so the render reads as a physical terrain object.
+   - Add the polished date badge after grounding.
    - Apply subtle contrast/clarity pass if needed.
    - Keep composition cinematic and readable.
 7. Encode MP4 with `ffmpeg` when available; otherwise leave frames and preview.
 
 The camera should orbit gently across the time series, similar in spirit to the article's rotating view, but tuned for forge3d:
 
-- High oblique terrain view.
+- Lower oblique terrain view with tighter demo framing.
 - Strong relief and shadowing.
 - Clean background.
 - Stable target near the icefall center.

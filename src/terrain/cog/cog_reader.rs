@@ -245,7 +245,6 @@ fn decompress_tile(data: &[u8], compression: u16) -> Result<Vec<u8>, CogError> {
 fn decompress_lzw(data: &[u8]) -> Result<Vec<u8>, CogError> {
     const CLEAR_CODE: u16 = 256;
     const EOI_CODE: u16 = 257;
-    const FIRST_CODE: u16 = 258;
 
     let mut output = Vec::new();
     let mut table: Vec<Vec<u8>> = (0u16..256).map(|i| vec![i as u8]).collect();
@@ -256,12 +255,7 @@ fn decompress_lzw(data: &[u8]) -> Result<Vec<u8>, CogError> {
     let mut code_size = 9u8;
     let mut prev_code: Option<u16> = None;
 
-    loop {
-        let code = match bit_reader.read_bits(code_size) {
-            Some(c) => c,
-            None => break,
-        };
-
+    while let Some(code) = bit_reader.read_bits(code_size) {
         if code == EOI_CODE {
             break;
         }

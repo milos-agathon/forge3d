@@ -425,6 +425,7 @@ class HybridRenderer:
 
     def _render_native(self, scene: SdfScene, spheres: List) -> np.ndarray:
         """Render using native Rust implementation"""
+        del scene, spheres
         # Call into the native placeholder implementation provided by the Rust module
         # The function returns an (H, W, 4) uint8 numpy array
         try:
@@ -435,6 +436,7 @@ class HybridRenderer:
 
     def _render_cpu_fallback(self, scene: SdfScene, spheres: List) -> np.ndarray:
         """CPU fallback raymarching implementation"""
+        del spheres
         image = np.zeros((self.height, self.width, 4), dtype=np.uint8)
 
         # Simple CPU raymarching

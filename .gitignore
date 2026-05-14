@@ -342,3 +342,4 @@ docs/_build/
 
 # Large data files
 landuse/landuse/glad_cropland_2019.tif
+examples/*

@@ -228,7 +228,7 @@ class TestJitterSequence:
 class TestAccumulationAARendering:
     """Integration tests for accumulation AA rendering."""
 
-    def test_aa_samples_1_baseline_identical(self, simple_heightmap, basic_render_params):
+    def test_aa_samples_1_baseline_identical(self, basic_render_params):
         """
         Test that aa_samples=1 produces identical output to the baseline.
         This is the critical acceptance criterion: no AA should mean no change.
@@ -241,7 +241,7 @@ class TestAccumulationAARendering:
         assert basic_render_params.aa_samples == 1
         assert basic_render_params.aa_seed is None
 
-    def test_aa_samples_deterministic_with_seed(self, simple_heightmap):
+    def test_aa_samples_deterministic_with_seed(self):
         """
         Test that the same aa_seed produces identical results.
         This ensures reproducibility for offline rendering.

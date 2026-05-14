@@ -18,6 +18,7 @@ use crate::path_tracing::restir::{
     create_restir_gbuffer, create_restir_gbuffer_pos, empty_alias_entries_buffer,
     empty_light_samples_buffer,
 };
+#[cfg(feature = "extension-module")]
 use crate::scene::Scene;
 use glam::Mat4;
 use pipeline::WavefrontPipelines;

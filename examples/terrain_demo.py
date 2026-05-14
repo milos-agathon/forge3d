@@ -130,7 +130,7 @@ def _apply_json_preset(args: argparse.Namespace, preset_path: Path, cli_explicit
             args.detail_strength = detail_normals["detail_strength"]
 
 
-def _was_cli_set(args: argparse.Namespace, arg_name: str) -> bool:
+def _was_cli_set(arg_name: str) -> bool:
     """Check if an argument was explicitly set on the command line."""
     import sys
     # Map arg_name to CLI flag variants
@@ -467,20 +467,20 @@ def main() -> int:
         bundle = load_bundle(bundle_path)
         
         # Apply bundle settings (CLI args still take precedence)
-        if bundle.dem_path and not _was_cli_set(args, "dem"):
+        if bundle.dem_path and not _was_cli_set("dem"):
             args.dem = bundle.dem_path
-        if bundle.hdr_path and not _was_cli_set(args, "hdr"):
+        if bundle.hdr_path and not _was_cli_set("hdr"):
             args.hdr = bundle.hdr_path
         if bundle.preset:
             # Apply preset from bundle (CLI args override)
             for key, val in bundle.preset.items():
                 arg_name = key.replace("-", "_")
-                if hasattr(args, arg_name) and not _was_cli_set(args, arg_name):
+                if hasattr(args, arg_name) and not _was_cli_set(arg_name):
                     setattr(args, arg_name, val)
         if bundle.manifest.terrain:
-            if bundle.manifest.terrain.domain and not _was_cli_set(args, "colormap_domain"):
+            if bundle.manifest.terrain.domain and not _was_cli_set("colormap_domain"):
                 args.colormap_domain = list(bundle.manifest.terrain.domain)
-            if bundle.manifest.terrain.colormap and not _was_cli_set(args, "colormap"):
+            if bundle.manifest.terrain.colormap and not _was_cli_set("colormap"):
                 args.colormap = bundle.manifest.terrain.colormap
 
     # Handle JSON preset file (--preset path/to/preset.json)

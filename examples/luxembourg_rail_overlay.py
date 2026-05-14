@@ -1355,7 +1355,7 @@ def main() -> int:
             stable_count = 0
             
             # Wait up to 60 seconds for file to be written and stable
-            for i in range(120):
+            for _i in range(120):
                 time.sleep(0.5)
                 if snapshot_path.exists():
                     try:

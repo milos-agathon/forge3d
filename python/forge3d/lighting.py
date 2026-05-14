@@ -452,7 +452,7 @@ def create_test_scene(num_lights: int = 100,
 
     restir = RestirDI()
 
-    for i in range(num_lights):
+    for _i in range(num_lights):
         # Random position within scene bounds
         position = (
             np.random.uniform(-scene_bounds[0]/2, scene_bounds[0]/2),
@@ -972,4 +972,3 @@ __all__ = [
     "detect_peter_panning_cpu",
     "get_csm_controller"
 ]
-

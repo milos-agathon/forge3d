@@ -247,7 +247,7 @@ def pytest_sessionstart(session):
     _ensure_python_path()
     needs_bootstrap = False
     try:
-        import forge3d  # noqa: F401
+        import forge3d
 
         if _native_runtime_ready(forge3d):
             return
