@@ -72,7 +72,7 @@ pub enum IpcRequest {
     SetOverlayPreserveColors { preserve_colors: bool },
     ListOverlays,
     AddVectorOverlay {
-        name: String, vertices: Vec<[f32; 8]>, indices: Vec<u32>, #[serde(default = "default_primitive")] primitive: String,
+        #[serde(default)] id: Option<u32>, name: String, vertices: Vec<[f32; 8]>, indices: Vec<u32>, #[serde(default = "default_primitive")] primitive: String,
         #[serde(default)] drape: bool, #[serde(default = "default_drape_offset")] drape_offset: f32, #[serde(default = "default_opacity")] opacity: f32,
         #[serde(default = "default_depth_bias")] depth_bias: f32, #[serde(default = "default_line_width")] line_width: f32, #[serde(default = "default_point_size")] point_size: f32,
         #[serde(default)] z_order: i32,
@@ -94,13 +94,13 @@ pub enum IpcRequest {
         #[serde(default)] radius: Option<f32>,
     },
     AddLabel {
-        text: String, world_pos: [f32; 3], #[serde(default)] size: Option<f32>, #[serde(default)] color: Option<[f32; 4]>, #[serde(default)] halo_color: Option<[f32; 4]>,
+        #[serde(default)] id: Option<u64>, text: String, world_pos: [f32; 3], #[serde(default)] size: Option<f32>, #[serde(default)] color: Option<[f32; 4]>, #[serde(default)] halo_color: Option<[f32; 4]>,
         #[serde(default)] halo_width: Option<f32>, #[serde(default)] priority: Option<i32>, #[serde(default)] min_zoom: Option<f32>, #[serde(default)] max_zoom: Option<f32>,
         #[serde(default)] offset: Option<[f32; 2]>, #[serde(default)] rotation: Option<f32>, #[serde(default)] underline: Option<bool>, #[serde(default)] small_caps: Option<bool>,
         #[serde(default)] leader: Option<bool>, #[serde(default)] horizon_fade_angle: Option<f32>,
     },
     AddLineLabel {
-        text: String, polyline: Vec<[f32; 3]>, #[serde(default)] size: Option<f32>, #[serde(default)] color: Option<[f32; 4]>, #[serde(default)] halo_color: Option<[f32; 4]>,
+        #[serde(default)] id: Option<u64>, text: String, polyline: Vec<[f32; 3]>, #[serde(default)] size: Option<f32>, #[serde(default)] color: Option<[f32; 4]>, #[serde(default)] halo_color: Option<[f32; 4]>,
         #[serde(default)] halo_width: Option<f32>, #[serde(default)] priority: Option<i32>, #[serde(default)] placement: Option<String>, #[serde(default)] repeat_distance: Option<f32>,
         #[serde(default)] min_zoom: Option<f32>, #[serde(default)] max_zoom: Option<f32>,
     },
@@ -111,11 +111,11 @@ pub enum IpcRequest {
     SetLabelZoom { zoom: f32 },
     SetMaxVisibleLabels { max: usize },
     AddCurvedLabel {
-        text: String, polyline: Vec<[f32; 3]>, #[serde(default)] size: Option<f32>, #[serde(default)] color: Option<[f32; 4]>, #[serde(default)] halo_color: Option<[f32; 4]>,
+        #[serde(default)] id: Option<u64>, text: String, polyline: Vec<[f32; 3]>, #[serde(default)] size: Option<f32>, #[serde(default)] color: Option<[f32; 4]>, #[serde(default)] halo_color: Option<[f32; 4]>,
         #[serde(default)] halo_width: Option<f32>, #[serde(default)] priority: Option<i32>, #[serde(default)] tracking: Option<f32>, #[serde(default = "default_true")] center_on_path: bool,
     },
     AddCallout {
-        text: String, anchor: [f32; 3], #[serde(default)] offset: Option<[f32; 2]>, #[serde(default)] background_color: Option<[f32; 4]>, #[serde(default)] border_color: Option<[f32; 4]>,
+        #[serde(default)] id: Option<u64>, text: String, anchor: [f32; 3], #[serde(default)] offset: Option<[f32; 2]>, #[serde(default)] background_color: Option<[f32; 4]>, #[serde(default)] border_color: Option<[f32; 4]>,
         #[serde(default)] border_width: Option<f32>, #[serde(default)] corner_radius: Option<f32>, #[serde(default)] padding: Option<f32>, #[serde(default)] text_size: Option<f32>,
         #[serde(default)] text_color: Option<[f32; 4]>,
     },

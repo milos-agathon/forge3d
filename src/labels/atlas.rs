@@ -373,6 +373,7 @@ impl MsdfAtlas {
                             uv_min: [glyph.uv[0], glyph.uv[1]],
                             uv_max: [glyph.uv[2], glyph.uv[3]],
                             color: halo_color,
+                            rotation: 0.0,
                         });
 
                         halo_cursor_x += glyph.advance * scale;
@@ -398,6 +399,7 @@ impl MsdfAtlas {
                     uv_min: [glyph.uv[0], glyph.uv[1]],
                     uv_max: [glyph.uv[2], glyph.uv[3]],
                     color,
+                    rotation: 0.0,
                 });
 
                 cursor_x += glyph.advance * scale;

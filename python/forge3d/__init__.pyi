@@ -22,6 +22,7 @@ from .bundle import (
     load_bundle,
     save_bundle,
 )
+from .buildings import validate_building_layer_support
 from .terrain_params import (
     LightSettings,
     IblSettings,
@@ -45,6 +46,56 @@ from .terrain_params import (
     OfflineQualitySettings,
     VTLayerFamily,
     TerrainVTSettings,
+    validate_terrain_vt_support,
+)
+from .diagnostics import (
+    Diagnostic,
+    LayerSummary,
+    REQUIRED_DIAGNOSTIC_CODES,
+    RenderFailurePolicy,
+    SeverityPolicy,
+    SupportMatrixEntry,
+    ValidationReport,
+    crs_mismatch_diagnostic,
+    estimated_gpu_memory_diagnostic,
+    experimental_feature_diagnostic,
+    label_rejection_summary_diagnostic,
+    missing_glyphs_diagnostic,
+    placeholder_fallback_diagnostic,
+    pro_gated_path_diagnostic,
+    python_public_3dtiles_incomplete_diagnostic,
+    unsupported_style_field_diagnostic,
+    unsupported_style_layer_type_diagnostic,
+    validate_label_support,
+    vt_unsupported_family_diagnostic,
+)
+from .label_plan import (
+    AcceptedLabel,
+    KeepoutRegion,
+    LabelCandidate,
+    LabelPlan,
+    PriorityClass,
+    RejectedLabel,
+)
+from .map_scene import (
+    LabelLayer,
+    LightingPreset,
+    MapFurnitureLayer,
+    MapScene,
+    BuildingLayer as MapSceneBuildingLayer,
+    OrbitCamera,
+    OutputSpec,
+    PointCloudLayer,
+    RasterOverlay,
+    ReproducibilityProfile,
+    SceneRecipe,
+    TerrainSource,
+    VectorOverlay,
+)
+from .style import (
+    label_layer_contracts_from_style,
+    validate_style_support,
+    vector_overlay_configs_from_style,
 )
 
 PathLikeStr = os.PathLike[str] | str
@@ -1083,7 +1134,14 @@ class LabelStyle:
 # Interactive viewer wrapper
 from . import animation, camera_rigs, terrain_scatter
 from .terrain_scatter import ScatterWindSettings
-from .viewer import ViewerError, ViewerHandle, open_viewer, open_viewer_async, set_msaa
+from .viewer import (
+    LabelBatchResult,
+    ViewerError,
+    ViewerHandle,
+    open_viewer,
+    open_viewer_async,
+    set_msaa,
+)
 
 # Bundled datasets and fetch helpers
 from .datasets import (

@@ -12,9 +12,22 @@ impl Viewer {
         world_pos: (f32, f32, f32),
         style: Option<LabelStyle>,
     ) -> u64 {
+        self.add_label_with_id(None, text, world_pos, style)
+    }
+
+    /// Add a label at a world position with an externally allocated ID.
+    pub fn add_label_with_id(
+        &mut self,
+        id: Option<u64>,
+        text: &str,
+        world_pos: (f32, f32, f32),
+        style: Option<LabelStyle>,
+    ) -> u64 {
         let pos = Vec3::new(world_pos.0, world_pos.1, world_pos.2);
         let style = style.unwrap_or_default();
-        let id = self.label_manager.add_label(text.to_string(), pos, style);
+        let id =
+            self.label_manager
+                .add_label_with_id(id.map(LabelId), text.to_string(), pos, style);
         id.0
     }
 

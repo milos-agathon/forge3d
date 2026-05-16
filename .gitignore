@@ -1,8 +1,36 @@
 # AI files
 .claude
+.agents/
+.specify/
+!.specify/
+.specify/*
+!.specify/feature.json
 docs/prompt.md
+docs/superpowers/
+!docs/superpowers/
+docs/superpowers/*
+!docs/superpowers/state/
+docs/superpowers/state/*
+!docs/superpowers/state/*.md
 CLAUDE.md
 AGENTS.md
+
+# Spec Kit work products
+specs/
+!specs/
+specs/*
+!specs/001-diagnostics-support-matrices/
+specs/001-diagnostics-support-matrices/*
+!specs/001-diagnostics-support-matrices/**
+!specs/002-label-api-truth/
+specs/002-label-api-truth/*
+!specs/002-label-api-truth/**
+!specs/003-deterministic-label-plan/
+specs/003-deterministic-label-plan/*
+!specs/003-deterministic-label-plan/**
+!specs/004-mapscene-mvp/
+specs/004-mapscene-mvp/*
+!specs/004-mapscene-mvp/**
 
 # Git worktrees
 .worktrees/
@@ -343,6 +371,8 @@ docs/_build/
 # Large data files
 landuse/landuse/glad_cropland_2019.tif
 examples/*
+!examples/diagnostics_support_matrices_demo.py
+!examples/label_api_truth_basic.py
 !examples/germany_terrain_landcover_viewer.py
 !examples/khumbu_icefall_sentinel_timelapse.py
 !examples/turkiye_river_basins_3d.py

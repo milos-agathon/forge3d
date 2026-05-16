@@ -4,6 +4,7 @@ use crate::viewer::Viewer;
 pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
     match cmd {
         ViewerCmd::AddLabel {
+            id,
             text,
             world_pos,
             size,
@@ -63,7 +64,8 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 style.horizon_fade_angle = *angle;
             }
 
-            let id = viewer.add_label(
+            let id = viewer.add_label_with_id(
+                *id,
                 text,
                 (world_pos[0], world_pos[1], world_pos[2]),
                 Some(style),
@@ -72,6 +74,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             true
         }
         ViewerCmd::AddLineLabel {
+            id,
             text,
             polyline,
             size,
@@ -119,7 +122,8 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 .map(|point| Vec3::new(point[0], point[1], point[2]))
                 .collect();
             let repeat_distance = repeat_distance.unwrap_or(0.0);
-            let id = viewer.label_manager.add_line_label(
+            let id = viewer.label_manager.add_line_label_with_id(
+                (*id).map(crate::labels::LabelId),
                 text.clone(),
                 polyline,
                 style,
@@ -165,6 +169,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             true
         }
         ViewerCmd::AddCurvedLabel {
+            id,
             text,
             polyline,
             size,
@@ -199,7 +204,8 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 .iter()
                 .map(|point| Vec3::new(point[0], point[1], point[2]))
                 .collect();
-            let id = viewer.label_manager.add_line_label(
+            let id = viewer.label_manager.add_line_label_with_id(
+                (*id).map(crate::labels::LabelId),
                 text.clone(),
                 polyline,
                 style,
@@ -210,6 +216,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             true
         }
         ViewerCmd::AddCallout {
+            id,
             text,
             anchor,
             offset,
@@ -235,7 +242,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 style.flags.leader = true;
             }
             let world_pos = (anchor[0], anchor[1], anchor[2]);
-            let id = viewer.add_label(text, world_pos, Some(style));
+            let id = viewer.add_label_with_id(*id, text, world_pos, Some(style));
             println!("[label] added callout id={} text=\"{}\"", id, text);
             true
         }

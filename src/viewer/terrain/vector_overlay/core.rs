@@ -26,9 +26,13 @@ impl VectorOverlayStack {
 
     /// Add a vector overlay layer. Returns layer ID.
     pub fn add_layer(&mut self, layer: VectorOverlayLayer) -> u32 {
-        let id = self.next_id;
-        self.next_id += 1;
+        self.add_layer_with_id(None, layer)
+    }
 
+    /// Add a vector overlay layer with an externally allocated ID.
+    pub fn add_layer_with_id(&mut self, id: Option<u32>, layer: VectorOverlayLayer) -> u32 {
+        let id = id.unwrap_or(self.next_id);
+        self.next_id = self.next_id.max(id.saturating_add(1));
         // Create vertex buffer
         let vertex_buffer = self
             .device

@@ -25,10 +25,19 @@ fn vs_main(@location(0) quad_pos: vec2<f32>,
            @location(2) rect_max: vec2<f32>,
            @location(3) uv_min: vec2<f32>,
            @location(4) uv_max: vec2<f32>,
-           @location(5) color: vec4<f32>) -> VsOut {
+           @location(5) color: vec4<f32>,
+           @location(6) rotation: f32) -> VsOut {
   var out: VsOut;
   // Scale unit quad to rect in pixel space
-  let pos_px = mix(rect_min, rect_max, quad_pos);
+  let unrotated_px = mix(rect_min, rect_max, quad_pos);
+  let center_px = (rect_min + rect_max) * 0.5;
+  let local_px = unrotated_px - center_px;
+  let c = cos(rotation);
+  let s = sin(rotation);
+  let rotated_px = vec2<f32>(
+    local_px.x * c - local_px.y * s,
+    local_px.x * s + local_px.y * c);
+  let pos_px = center_px + rotated_px;
   let ndc = vec2<f32>(
     (pos_px.x / U.resolution.x) * 2.0 - 1.0,
     1.0 - (pos_px.y / U.resolution.y) * 2.0);

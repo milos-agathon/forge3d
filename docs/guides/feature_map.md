@@ -10,7 +10,7 @@ organized by workflow rather than by Rust module layout.
 | Interactive terrain viewing | `open_viewer_async`, `ViewerHandle`, `ViewerWidget` | `terrain_viewer_interactive.py`, `terrain_camera_rigs_demo.py` |
 | Terrain inputs and datasets | `mini_dem`, `fetch_dem`, `datasets`, `cog.open_cog` | `terrain_single_tile.py`, `cog_streaming_demo.py` |
 | Raster overlays | `ViewerHandle.load_overlay` | `swiss_terrain_landcover_viewer.py`, `bosnia_terrain_landcover_viewer.py`, `belgium_bivariate_climate_map.py` |
-| Vector overlays and labels | `viewer.send_ipc`, `viewer_ipc.add_vector_overlay`, `viewer_ipc.add_label` | `luxembourg_rail_overlay.py`, `fuji_labels_demo.py` |
+| Vector overlays and labels | `ViewerHandle.add_vector_overlay`, `ViewerHandle.add_label`, `ViewerHandle.add_labels`, `ViewerHandle.add_line_label`, `ViewerHandle.add_callout` | `luxembourg_rail_overlay.py`, `fuji_labels_demo.py` |
 | Picking and selection | `viewer_ipc` picking helpers | `picking_demo.py`, `picking_test_interactive.py` |
 | Point clouds | `ViewerHandle.load_point_cloud`, `forge3d.pointcloud` | `pointcloud_viewer_interactive.py` |
 | Camera automation | `forge3d.animation`, `forge3d.camera_rigs` | `camera_animation_demo.py`, `terrain_camera_rigs_demo.py` |
@@ -61,5 +61,7 @@ for one of those jobs.
 - Start with `open_viewer_async()` if you want a live scene.
 - Add `ViewerWidget` when the same workflow needs to run inside Jupyter.
 - Use `Scene` or `TerrainRenderer` when you need an explicit offscreen pipeline.
-- Use `viewer_ipc` only when the higher-level handle does not expose the command you need.
+- Use `ViewerHandle` methods for the public label workflow. Use `viewer_ipc`
+  only for advanced compatibility commands that do not yet have a truthful
+  high-level wrapper.
 - Reach for Pro modules only after you already have a stable viewer or renderer workflow.

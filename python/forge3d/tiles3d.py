@@ -21,6 +21,12 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Dict, Any
 import numpy as np
 
+from .diagnostics import (
+    LayerSummary,
+    ValidationReport,
+    python_public_3dtiles_incomplete_diagnostic,
+)
+
 
 @dataclass
 class BoundingVolume:
@@ -401,3 +407,31 @@ def decode_pnts(data: bytes) -> Dict[str, Any]:
         "normals": None,
         "point_count": points_length,
     }
+
+
+def validate_tiles3d_support(
+    tileset: Tileset,
+    *,
+    layer_id: str | None = None,
+) -> ValidationReport:
+    """Validate public Python 3D Tiles support before render preparation."""
+    effective_layer_id = layer_id or "tiles3d"
+    diag = python_public_3dtiles_incomplete_diagnostic(layer_id=effective_layer_id)
+    return ValidationReport(
+        diagnostics=[diag],
+        layer_summaries=[
+            LayerSummary(
+                layer_id=effective_layer_id,
+                layer_type="tiles3d",
+                support_level="underdeveloped",
+                diagnostic_codes=[diag.code],
+                object_count=tileset.tile_count,
+                details={
+                    "max_depth": tileset.max_depth,
+                    "tile_count": tileset.tile_count,
+                    "version": tileset.version,
+                },
+            )
+        ],
+        unsupported_features={"tiles3d.public_python_render": "underdeveloped"},
+    )

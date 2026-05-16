@@ -116,10 +116,26 @@ impl LabelManager {
         Ok(())
     }
 
+    fn allocate_id(&mut self, requested: Option<LabelId>) -> LabelId {
+        let id = requested.unwrap_or(LabelId(self.next_id));
+        self.next_id = self.next_id.max(id.0.saturating_add(1));
+        id
+    }
+
     /// Add a label at a world position.
     pub fn add_label(&mut self, text: String, world_pos: Vec3, style: LabelStyle) -> LabelId {
-        let id = LabelId(self.next_id);
-        self.next_id += 1;
+        self.add_label_with_id(None, text, world_pos, style)
+    }
+
+    /// Add a label at a world position, preserving an externally allocated ID.
+    pub fn add_label_with_id(
+        &mut self,
+        id: Option<LabelId>,
+        text: String,
+        world_pos: Vec3,
+        style: LabelStyle,
+    ) -> LabelId {
+        let id = self.allocate_id(id);
 
         let label = LabelData {
             id,
@@ -145,8 +161,20 @@ impl LabelManager {
         placement: LineLabelPlacement,
         repeat_distance: f32,
     ) -> LabelId {
-        let id = LabelId(self.next_id);
-        self.next_id += 1;
+        self.add_line_label_with_id(None, text, polyline, style, placement, repeat_distance)
+    }
+
+    /// Add a line label along a polyline, preserving an externally allocated ID.
+    pub fn add_line_label_with_id(
+        &mut self,
+        id: Option<LabelId>,
+        text: String,
+        polyline: Vec<Vec3>,
+        style: LabelStyle,
+        placement: LineLabelPlacement,
+        repeat_distance: f32,
+    ) -> LabelId {
+        let id = self.allocate_id(id);
 
         let line_label = LineLabelData {
             id,
@@ -433,7 +461,30 @@ impl LabelManager {
             line_label.visible = true;
             visible_count += 1;
 
-            // Line labels track rotation, but glyph rendering does not apply it yet.
+            // Emit one rotated atlas glyph quad per placed line-label glyph.
+            let mut color = line_label.style.color;
+            color[3] = color[3].clamp(0.0, 1.0);
+            for (ch, placement) in line_label
+                .text
+                .chars()
+                .zip(line_label.glyph_positions.iter())
+            {
+                if ch == ' ' {
+                    continue;
+                }
+                let mut instances = atlas.layout_text(
+                    &ch.to_string(),
+                    placement.screen_pos,
+                    line_label.style.size,
+                    color,
+                    line_label.style.halo_color,
+                    line_label.style.halo_width,
+                );
+                for instance in &mut instances {
+                    instance.rotation = placement.rotation;
+                }
+                self.visible_instances.extend(instances);
+            }
         }
 
         self.visible_instances.len()
