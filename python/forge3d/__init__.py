@@ -126,6 +126,7 @@ from .terrain_params import (
     OfflineQualitySettings,
     VTLayerFamily,
     TerrainVTSettings,
+    validate_terrain_vt_support,
 )
 from .offline import OfflineProgress, OfflineResult, render_offline
 from .denoise_oidn import oidn_available, oidn_denoise
@@ -354,6 +355,7 @@ from .buildings import (
     add_buildings,
     add_buildings_cityjson,
     add_buildings_3dtiles,
+    validate_building_layer_support,
     infer_roof_type,
     material_from_tags,
     material_from_name,
@@ -367,6 +369,9 @@ from .style import (
     parse_style,
     apply_style,
     parse_color,
+    validate_style_support,
+    vector_overlay_configs_from_style,
+    label_layer_contracts_from_style,
     paint_to_vector_style,
     layout_to_label_style,
     layer_to_vector_style,
@@ -377,6 +382,31 @@ from .style import (
     LabelStyle as StyleLabelStyle,
     PaintProps,
     LayoutProps,
+)
+
+# -----------------------------------------------------------------------------
+# Product diagnostics
+# -----------------------------------------------------------------------------
+from .diagnostics import (
+    Diagnostic,
+    LayerSummary,
+    REQUIRED_DIAGNOSTIC_CODES,
+    RenderFailurePolicy,
+    SeverityPolicy,
+    SupportMatrixEntry,
+    ValidationReport,
+    crs_mismatch_diagnostic,
+    estimated_gpu_memory_diagnostic,
+    experimental_feature_diagnostic,
+    label_rejection_summary_diagnostic,
+    missing_glyphs_diagnostic,
+    placeholder_fallback_diagnostic,
+    pro_gated_path_diagnostic,
+    python_public_3dtiles_incomplete_diagnostic,
+    unsupported_style_field_diagnostic,
+    unsupported_style_layer_type_diagnostic,
+    validate_label_support,
+    vt_unsupported_family_diagnostic,
 )
 
 # -----------------------------------------------------------------------------
@@ -433,6 +463,7 @@ __all__ = [
     "OfflineQualitySettings",
     "VTLayerFamily",
     "TerrainVTSettings",
+    "validate_terrain_vt_support",
     "OfflineProgress",
     "OfflineResult",
     "render_offline",
@@ -524,6 +555,9 @@ __all__ = [
     "parse_style",
     "apply_style",
     "parse_color",
+    "validate_style_support",
+    "vector_overlay_configs_from_style",
+    "label_layer_contracts_from_style",
     "paint_to_vector_style",
     "layout_to_label_style",
     "layer_to_vector_style",
@@ -534,6 +568,26 @@ __all__ = [
     "StyleLabelStyle",
     "PaintProps",
     "LayoutProps",
+    # Product diagnostics
+    "Diagnostic",
+    "LayerSummary",
+    "REQUIRED_DIAGNOSTIC_CODES",
+    "RenderFailurePolicy",
+    "SeverityPolicy",
+    "SupportMatrixEntry",
+    "ValidationReport",
+    "crs_mismatch_diagnostic",
+    "estimated_gpu_memory_diagnostic",
+    "experimental_feature_diagnostic",
+    "label_rejection_summary_diagnostic",
+    "missing_glyphs_diagnostic",
+    "placeholder_fallback_diagnostic",
+    "pro_gated_path_diagnostic",
+    "python_public_3dtiles_incomplete_diagnostic",
+    "unsupported_style_field_diagnostic",
+    "unsupported_style_layer_type_diagnostic",
+    "validate_label_support",
+    "vt_unsupported_family_diagnostic",
     # P3-reproject: CRS utilities
     "proj_available",
     "transform_coords",
@@ -548,6 +602,7 @@ __all__ = [
     "add_buildings",
     "add_buildings_cityjson",
     "add_buildings_3dtiles",
+    "validate_building_layer_support",
     "infer_roof_type",
     "material_from_tags",
     "material_from_name",

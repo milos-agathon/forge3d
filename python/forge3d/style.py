@@ -6,9 +6,11 @@ files into forge3d's native vector and label styles.
 
 Supported layer types (v1):
 - fill: Polygon fill with color, opacity, outline
-- line: Polyline with color, width, opacity  
-- symbol: Text labels with size, color, halo
-- background: Background color (informational only)
+- line: Polyline with color, width, opacity
+- circle: Point circles with color, radius, opacity
+
+This is local/provided feature styling, not streamed MVT rendering or full
+Mapbox Style Specification support.
 
 Example:
     >>> from forge3d.style import load_style, apply_style
@@ -25,6 +27,26 @@ from pathlib import Path
 from typing import Any
 
 from ._license import _check_pro_access
+from .diagnostics import (
+    LayerSummary,
+    ValidationReport,
+    experimental_feature_diagnostic,
+    unsupported_style_field_diagnostic,
+    unsupported_style_layer_type_diagnostic,
+)
+
+
+P0_SUPPORTED_STYLE_LAYER_TYPES = ("fill", "line", "circle")
+_SUPPORTED_PAINT_FIELDS = {
+    "fill": {"fill-color", "fill-opacity", "fill-outline-color"},
+    "line": {"line-color", "line-width", "line-opacity"},
+    "circle": {"circle-color", "circle-radius", "circle-opacity"},
+}
+_SUPPORTED_LAYOUT_FIELDS = {
+    "fill": {"visibility"},
+    "line": {"visibility"},
+    "circle": {"visibility"},
+}
 
 
 @dataclass
@@ -91,6 +113,8 @@ class StyleLayer:
     filter: list[Any] | None = None
     minzoom: float | None = None
     maxzoom: float | None = None
+    unsupported_paint_fields: tuple[str, ...] = field(default_factory=tuple)
+    unsupported_layout_fields: tuple[str, ...] = field(default_factory=tuple)
 
     def is_visible(self) -> bool:
         """Check if layer is visible."""
@@ -115,7 +139,7 @@ class StyleLayer:
 
 @dataclass
 class StyleSpec:
-    """Complete Mapbox GL Style specification."""
+    """Parsed Mapbox-style document for local/provided feature styling."""
     version: int = 8
     name: str = ""
     layers: list[StyleLayer] = field(default_factory=list)
@@ -203,6 +227,11 @@ def _parse_layer(data: dict) -> StyleLayer:
     """Parse a single layer from JSON, preserving raw expressions."""
     paint_data = data.get("paint", {})
     layout_data = data.get("layout", {})
+    layer_type = data.get("type", "unknown")
+    supported_paint_fields = _SUPPORTED_PAINT_FIELDS.get(layer_type, set())
+    supported_layout_fields = _SUPPORTED_LAYOUT_FIELDS.get(layer_type, set())
+    unsupported_paint_fields = tuple(sorted(set(paint_data.keys()) - supported_paint_fields))
+    unsupported_layout_fields = tuple(sorted(set(layout_data.keys()) - supported_layout_fields))
 
     # Store raw values to preserve expressions for later evaluation
     paint = PaintProps(
@@ -236,7 +265,7 @@ def _parse_layer(data: dict) -> StyleLayer:
 
     return StyleLayer(
         id=data.get("id", ""),
-        layer_type=data.get("type", "unknown"),
+        layer_type=layer_type,
         source=data.get("source"),
         source_layer=data.get("source-layer"),
         paint=paint,
@@ -244,7 +273,109 @@ def _parse_layer(data: dict) -> StyleLayer:
         filter=data.get("filter"),
         minzoom=data.get("minzoom"),
         maxzoom=data.get("maxzoom"),
+        unsupported_paint_fields=unsupported_paint_fields,
+        unsupported_layout_fields=unsupported_layout_fields,
     )
+
+
+def validate_style_support(style: StyleSpec | dict[str, Any]) -> ValidationReport:
+    """Validate P0 offline style support without claiming streamed MVT parity.
+
+    Supported P0 style validation covers local/provided feature styling for
+    ``fill``, ``line``, and ``circle`` layers. Unsupported layer types and
+    unsupported paint/layout fields are returned as structured diagnostics.
+    """
+    raw_layers: list[dict[str, Any]] | None = None
+    if isinstance(style, StyleSpec):
+        spec = style
+    else:
+        raw_layers = list(style.get("layers", []))
+        spec = parse_style(style)
+
+    diagnostics = []
+    layer_summaries = []
+    supported_features = {
+        "style.local_provided_features": "supported",
+        **{
+            f"style.layer.{layer_type}": "supported"
+            for layer_type in P0_SUPPORTED_STYLE_LAYER_TYPES
+        },
+    }
+    unsupported_features = {
+        "style.streamed_mvt": "non-goal",
+        "style.full_mapbox_spec": "unsupported",
+    }
+
+    raw_by_id = {
+        str(layer.get("id", "")): layer
+        for layer in raw_layers or []
+        if isinstance(layer, dict)
+    }
+    for index, layer in enumerate(spec.layers):
+        layer_id = layer.id or f"layer_{index}"
+        diagnostic_codes: list[str] = []
+
+        if layer.layer_type == "symbol":
+            diag = experimental_feature_diagnostic(
+                "symbol text layer",
+                layer_id=layer_id,
+            )
+            diagnostics.append(diag)
+            diagnostic_codes.append(diag.code)
+            support_level = "underdeveloped"
+            unsupported_features["style.layer.symbol"] = "underdeveloped"
+        elif layer.layer_type not in P0_SUPPORTED_STYLE_LAYER_TYPES:
+            diag = unsupported_style_layer_type_diagnostic(layer_id, layer.layer_type)
+            diagnostics.append(diag)
+            diagnostic_codes.append(diag.code)
+            support_level = "unsupported"
+        else:
+            support_level = "supported"
+            raw_layer = raw_by_id.get(layer.id)
+            if raw_layer is not None:
+                paint_fields = set((raw_layer.get("paint") or {}).keys())
+                unsupported_paint = paint_fields - _SUPPORTED_PAINT_FIELDS[layer.layer_type]
+                layout_fields = set((raw_layer.get("layout") or {}).keys())
+                unsupported_layout = layout_fields - _SUPPORTED_LAYOUT_FIELDS[layer.layer_type]
+            else:
+                unsupported_paint = set(layer.unsupported_paint_fields)
+                unsupported_layout = set(layer.unsupported_layout_fields)
+
+            if unsupported_paint:
+                diag = unsupported_style_field_diagnostic(
+                    layer_id,
+                    sorted(unsupported_paint),
+                    section="paint",
+                )
+                diagnostics.append(diag)
+                diagnostic_codes.append(diag.code)
+
+            if unsupported_layout:
+                diag = unsupported_style_field_diagnostic(
+                    layer_id,
+                    sorted(unsupported_layout),
+                    section="layout",
+                )
+                diagnostics.append(diag)
+                diagnostic_codes.append(diag.code)
+
+        layer_summaries.append(
+            LayerSummary(
+                layer_id=layer_id,
+                layer_type=layer.layer_type,
+                support_level=support_level,
+                diagnostic_codes=diagnostic_codes,
+            )
+        )
+
+    return ValidationReport(
+        diagnostics=diagnostics,
+        layer_summaries=layer_summaries,
+        supported_features=supported_features,
+        unsupported_features=unsupported_features,
+    )
+
+
 def evaluate_color_expr(
     value: Any,
     properties: dict[str, Any],
@@ -545,6 +676,158 @@ def apply_style(
             result.append((feature, VectorStyle()))
 
     return result
+
+
+def _style_coord_to_vertex(
+    coord: list[float] | tuple[float, ...],
+    color: tuple[float, float, float, float],
+    *,
+    feature_id: int,
+):
+    from .terrain_params import VectorVertex
+
+    x = float(coord[0])
+    z = float(coord[1]) if len(coord) > 1 else 0.0
+    y = float(coord[2]) if len(coord) > 2 else 0.0
+    return VectorVertex(x=x, y=y, z=z, r=color[0], g=color[1], b=color[2], a=color[3], feature_id=feature_id)
+
+
+def _feature_geometry_to_vector_overlay(
+    *,
+    name: str,
+    feature: dict[str, Any],
+    layer: StyleLayer,
+    vector_style: VectorStyle,
+    feature_id: int,
+):
+    from .terrain_params import PrimitiveType, VectorOverlayConfig
+
+    geometry = feature.get("geometry") or {}
+    geom_type = geometry.get("type")
+    coordinates = geometry.get("coordinates")
+    if not coordinates:
+        return None
+
+    if geom_type == "Point" and layer.layer_type == "circle":
+        color = vector_style.fill_color
+        return VectorOverlayConfig(
+            name=name,
+            vertices=[_style_coord_to_vertex(coordinates, color, feature_id=feature_id)],
+            indices=[0],
+            primitive=PrimitiveType.POINTS,
+            point_size=max(vector_style.point_size, 0.1),
+        )
+
+    if geom_type == "LineString" and layer.layer_type == "line":
+        color = vector_style.stroke_color
+        vertices = [
+            _style_coord_to_vertex(coord, color, feature_id=feature_id)
+            for coord in coordinates
+        ]
+        indices: list[int] = []
+        for idx in range(max(0, len(vertices) - 1)):
+            indices.extend([idx, idx + 1])
+        return VectorOverlayConfig(
+            name=name,
+            vertices=vertices,
+            indices=indices,
+            primitive=PrimitiveType.LINES,
+            line_width=max(vector_style.stroke_width, 0.1),
+        )
+
+    if geom_type == "Polygon" and layer.layer_type == "fill":
+        rings = coordinates
+        if not rings or len(rings[0]) < 3:
+            return None
+        color = vector_style.fill_color
+        ring = rings[0]
+        vertices = [
+            _style_coord_to_vertex(coord, color, feature_id=feature_id)
+            for coord in ring[:-1] if len(ring) > 3
+        ] or [
+            _style_coord_to_vertex(coord, color, feature_id=feature_id)
+            for coord in ring
+        ]
+        indices: list[int] = []
+        for idx in range(1, max(1, len(vertices) - 1)):
+            indices.extend([0, idx, idx + 1])
+        return VectorOverlayConfig(
+            name=name,
+            vertices=vertices,
+            indices=indices,
+            primitive=PrimitiveType.TRIANGLES,
+        )
+
+    return None
+
+
+def vector_overlay_configs_from_style(
+    style: StyleSpec | dict[str, Any],
+    features: list[dict[str, Any]],
+    source_layer: str | None = None,
+    zoom: float = 10.0,
+    *,
+    name_prefix: str = "style",
+):
+    """Convert supported local/provided style output to vector overlay configs."""
+    spec = style if isinstance(style, StyleSpec) else parse_style(style)
+    layers = spec.layers_for_source_layer(source_layer) if source_layer else spec.layers
+    layers = [
+        layer for layer in layers
+        if layer.is_visible()
+        and layer.in_zoom_range(zoom)
+        and layer.layer_type in P0_SUPPORTED_STYLE_LAYER_TYPES
+    ]
+
+    overlays = []
+    for feature_index, feature in enumerate(features):
+        props = feature.get("properties", {})
+        for layer in layers:
+            if not layer.matches_filter(props):
+                continue
+            vector_style = layer_to_vector_style(layer)
+            overlay = _feature_geometry_to_vector_overlay(
+                name=f"{name_prefix}.{layer.id}.{feature_index}",
+                feature=feature,
+                layer=layer,
+                vector_style=vector_style,
+                feature_id=feature_index,
+            )
+            if overlay is not None:
+                overlays.append(overlay)
+                break
+    return overlays
+
+
+def label_layer_contracts_from_style(
+    style: StyleSpec | dict[str, Any],
+    source_layer: str | None = None,
+    zoom: float = 10.0,
+) -> list[dict[str, Any]]:
+    """Return future LabelLayer-compatible contracts from symbol style layers."""
+    spec = style if isinstance(style, StyleSpec) else parse_style(style)
+    layers = spec.layers_for_source_layer(source_layer) if source_layer else spec.layers
+    contracts = []
+    for layer in layers:
+        if layer.layer_type != "symbol" or not layer.is_visible() or not layer.in_zoom_range(zoom):
+            continue
+        label_style = layer_to_label_style(layer)
+        contracts.append(
+            {
+                "layer_id": layer.id,
+                "source_layer": layer.source_layer,
+                "text_field": layer.layout.text_field,
+                "support_level": "underdeveloped",
+                "label_style": {
+                    "size": label_style.size,
+                    "color": label_style.color,
+                    "halo_color": label_style.halo_color,
+                    "halo_width": label_style.halo_width,
+                    "offset": label_style.offset,
+                },
+            }
+        )
+    return contracts
 
 
 def parse_color(color_str: str) -> tuple[float, float, float, float] | None:

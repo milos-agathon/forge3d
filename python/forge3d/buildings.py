@@ -25,6 +25,12 @@ from typing import Any
 import numpy as np
 
 from ._license import _check_pro_access
+from .diagnostics import (
+    LayerSummary,
+    ValidationReport,
+    placeholder_fallback_diagnostic,
+    python_public_3dtiles_incomplete_diagnostic,
+)
 
 # Try to import native module
 try:
@@ -556,6 +562,61 @@ def add_buildings_3dtiles(
     )
 
 
+def validate_building_layer_support(
+    layer: BuildingLayer,
+    *,
+    layer_id: str | None = None,
+) -> ValidationReport:
+    """Validate public building-layer support without claiming render success."""
+    effective_layer_id = layer_id or layer.name
+    diagnostics = []
+    diagnostic_codes: list[str] = []
+
+    for building in layer.buildings:
+        if building.vertex_count == 0 or building.triangle_count == 0:
+            diag = placeholder_fallback_diagnostic(
+                f"{layer.source_format} building fallback",
+                layer_id=effective_layer_id,
+                object_id=building.id,
+            )
+            diagnostics.append(diag)
+            diagnostic_codes.append(diag.code)
+
+    if layer.source_format == "3dtiles":
+        diag = python_public_3dtiles_incomplete_diagnostic(layer_id=effective_layer_id)
+        diagnostics.append(diag)
+        diagnostic_codes.append(diag.code)
+
+    support_level = "supported" if not diagnostics else "placeholder/fallback"
+    if layer.source_format == "3dtiles":
+        support_level = "underdeveloped"
+
+    return ValidationReport(
+        diagnostics=diagnostics,
+        layer_summaries=[
+            LayerSummary(
+                layer_id=effective_layer_id,
+                layer_type=f"building.{layer.source_format}",
+                support_level=support_level,
+                diagnostic_codes=diagnostic_codes,
+                object_count=layer.building_count,
+                bounds=layer.bounds(),
+                details={
+                    "source_format": layer.source_format,
+                    "total_triangles": layer.total_triangles,
+                    "total_vertices": layer.total_vertices,
+                },
+            )
+        ],
+        supported_features={"buildings.scalar_materials": "underdeveloped"},
+        unsupported_features={
+            "buildings.placeholder_fallback": "placeholder/fallback"
+        }
+        if diagnostics
+        else {},
+    )
+
+
 # ============================================================================
 # Module exports
 # ============================================================================
@@ -569,6 +630,7 @@ __all__ = [
     "add_buildings",
     "add_buildings_cityjson",
     "add_buildings_3dtiles",
+    "validate_building_layer_support",
     # Inference functions
     "infer_roof_type",
     "material_from_tags",
