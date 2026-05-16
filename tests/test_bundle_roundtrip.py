@@ -23,6 +23,11 @@ from forge3d.bundle import (
     load_bundle,
     save_bundle,
 )
+from forge3d.diagnostics import (
+    ValidationReport,
+    missing_glyphs_diagnostic,
+    unsupported_style_field_diagnostic,
+)
 
 pytestmark = pytest.mark.usefixtures("pro_license")
 
@@ -283,6 +288,31 @@ def test_scene_state_v2_roundtrip_preserves_variants_and_assets(tmp_path: Path):
     assert effective.preset == {"exposure": 3.0}
     assert len(effective.labels) == 2
     assert len(effective.raster_overlays) == 1
+
+
+def test_scene_bundle_roundtrip_preserves_validation_report(tmp_path: Path):
+    """Validation diagnostics persist in scene/state.json and load back losslessly."""
+    bundle_path = tmp_path / "diagnostics_state.forge3d"
+    report = ValidationReport(
+        diagnostics=[
+            missing_glyphs_diagnostic(["é"], layer_id="labels", object_id="city-1"),
+            unsupported_style_field_diagnostic("roads", ["line-gradient"], section="paint"),
+        ],
+        supported_features={"diagnostics": "supported"},
+        unsupported_features={"style.full_mapbox_spec": "unsupported"},
+    )
+
+    save_bundle(bundle_path, name="diagnostics_state", validation_report=report)
+
+    with (bundle_path / "scene" / "state.json").open(encoding="utf-8") as handle:
+        raw_state = json.load(handle)
+    assert raw_state["validation_report"] == report.to_dict()
+
+    loaded = load_bundle(bundle_path)
+    assert loaded.scene_state.validation_report is not None
+    assert loaded.scene_state.validation_report.to_dict() == report.to_dict()
+    assert loaded.validation_report is not None
+    assert loaded.validation_report.to_dict() == report.to_dict()
 
 
 def test_effective_scene_state_respects_variant_layers_and_manual_overrides(tmp_path: Path):

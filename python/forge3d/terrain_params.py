@@ -1348,6 +1348,44 @@ class TerrainVTSettings:
         return min(self.max_mip_levels, layer.full_pyramid_levels)
 
 
+def validate_terrain_vt_support(
+    settings: TerrainVTSettings,
+    *,
+    layer_id: str | None = None,
+):
+    """Validate terrain VT family support against the current native runtime."""
+    from .diagnostics import LayerSummary, ValidationReport, vt_unsupported_family_diagnostic
+
+    effective_layer_id = layer_id or "terrain.vt"
+    diagnostics = [
+        vt_unsupported_family_diagnostic(layer.family, layer_id=effective_layer_id)
+        for layer in settings.layers
+        if layer.family != "albedo"
+    ]
+    return ValidationReport(
+        diagnostics=diagnostics,
+        layer_summaries=[
+            LayerSummary(
+                layer_id=effective_layer_id,
+                layer_type="terrain.virtual_texture",
+                support_level="supported" if not diagnostics else "unsupported",
+                diagnostic_codes=[diag.code for diag in diagnostics],
+                details={
+                    "enabled": settings.enabled,
+                    "families": sorted(layer.family for layer in settings.layers),
+                    "native_supported_family": "albedo",
+                },
+            )
+        ],
+        supported_features={"vt.albedo": "supported"},
+        unsupported_features={
+            f"vt.{layer.family}": "missing"
+            for layer in settings.layers
+            if layer.family != "albedo"
+        },
+    )
+
+
 @dataclass
 class OverlayBlendMode:
     """Blend mode constants for overlay layers."""
@@ -2226,6 +2264,7 @@ __all__ = [
     "localized_haze_volume",
     "VTLayerFamily",
     "TerrainVTSettings",
+    "validate_terrain_vt_support",
     "OverlayBlendMode",
     "OverlayLayerConfig",
     "OverlaySettings",

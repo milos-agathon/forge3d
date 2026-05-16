@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from ._license import _check_pro_access
+from .diagnostics import ValidationReport
 
 BUNDLE_VERSION = 2
 BUNDLE_EXTENSION = "forge3d"
@@ -50,6 +51,18 @@ def _copy_json_mapping(value: Mapping[str, Any] | None, *, name: str) -> dict[st
     if not isinstance(value, Mapping):
         raise TypeError(f"{name} must be a mapping or None")
     return dict(_deepcopy_json(dict(value)))
+
+
+def _coerce_validation_report(
+    report: ValidationReport | Mapping[str, Any] | None,
+) -> ValidationReport | None:
+    if report is None:
+        return None
+    if isinstance(report, ValidationReport):
+        return ValidationReport.from_dict(report.to_dict())
+    if isinstance(report, Mapping):
+        return ValidationReport.from_dict(report)
+    raise TypeError("validation_report must be a ValidationReport, mapping, or None")
 
 
 def _coerce_bookmarks(
@@ -493,10 +506,12 @@ class SceneState:
     review_layers: list[ReviewLayer] = field(default_factory=list)
     variants: list[SceneVariant] = field(default_factory=list)
     active_variant_id: str | None = None
+    validation_report: ValidationReport | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.base, SceneBaseState):
             self.base = SceneBaseState.from_dict(self.base)
+        self.validation_report = _coerce_validation_report(self.validation_report)
         self.review_layers = [
             layer if isinstance(layer, ReviewLayer) else ReviewLayer.from_dict(layer)
             for layer in self.review_layers
@@ -517,6 +532,8 @@ class SceneState:
             data["variants"] = [variant.to_dict() for variant in self.variants]
         if self.active_variant_id is not None:
             data["active_variant_id"] = self.active_variant_id
+        if self.validation_report is not None:
+            data["validation_report"] = self.validation_report.to_dict()
         return data
 
     @classmethod
@@ -528,6 +545,7 @@ class SceneState:
             review_layers=data.get("review_layers", []),
             variants=data.get("variants", []),
             active_variant_id=data.get("active_variant_id"),
+            validation_report=data.get("validation_report"),
         )
 
 
@@ -745,6 +763,7 @@ def _prepare_scene_state_for_save(
         review_layers=review_layers,
         variants=scene_state.variants,
         active_variant_id=scene_state.active_variant_id,
+        validation_report=scene_state.validation_report,
     )
 
 
@@ -782,6 +801,7 @@ def _resolve_scene_state_after_load(scene_state: SceneState, *, bundle_path: Pat
         review_layers=review_layers,
         variants=scene_state.variants,
         active_variant_id=scene_state.active_variant_id,
+        validation_report=scene_state.validation_report,
     )
 
 
@@ -816,6 +836,7 @@ def _scene_state_with_legacy_kwargs(
         review_layers=state.review_layers,
         variants=state.variants,
         active_variant_id=state.active_variant_id,
+        validation_report=state.validation_report,
     )
 
 
@@ -878,6 +899,7 @@ class LoadedBundle:
     hdr_path: Path | None = None
     camera_bookmarks: list[CameraBookmark] = field(default_factory=list)
     scene_state: SceneState = field(default_factory=SceneState)
+    validation_report: ValidationReport | None = None
     _layer_visibility_overrides: dict[str, bool] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -886,6 +908,9 @@ class LoadedBundle:
             self.manifest = BundleManifest.from_dict(self.manifest)
         if not isinstance(self.scene_state, SceneState):
             self.scene_state = SceneState.from_dict(self.scene_state)
+        self.validation_report = _coerce_validation_report(
+            self.validation_report or self.scene_state.validation_report
+        )
         self.overlays = None if self.overlays is None else _coerce_vector_payloads(self.overlays, name="LoadedBundle.overlays")
         self.labels = None if self.labels is None else _coerce_labels(self.labels)
         self.preset = _copy_json_mapping(self.preset, name="LoadedBundle.preset")
@@ -978,6 +1003,7 @@ def save_bundle(
     camera_bookmarks: list[CameraBookmark] | None = None,
     hdr_path: str | Path | None = None,
     scene_state: SceneState | Mapping[str, Any] | None = None,
+    validation_report: ValidationReport | Mapping[str, Any] | None = None,
 ) -> Path:
     """[Pro] Save a scene bundle to disk."""
 
@@ -1022,6 +1048,8 @@ def save_bundle(
         camera_bookmarks=camera_bookmarks,
         hdr_path=hdr_path,
     )
+    if validation_report is not None:
+        state.validation_report = _coerce_validation_report(validation_report)
     state = _prepare_scene_state_for_save(
         state,
         bundle_path=bundle_path,
@@ -1147,6 +1175,7 @@ def load_bundle(path: str | Path, verify_checksums: bool = True) -> LoadedBundle
         hdr_path=hdr_resolved,
         camera_bookmarks=scene_state.base.camera_bookmarks,
         scene_state=scene_state,
+        validation_report=scene_state.validation_report,
     )
 
 

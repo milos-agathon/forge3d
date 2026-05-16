@@ -19,6 +19,14 @@ data loading, cartography, export, and the runnable examples in ``examples/``.
    :caption: Guides
 
    guides/feature_map
+   guides/offline_3d_map_rendering
+   guides/diagnostics_reference
+   guides/style_support_matrix
+   guides/label_support_matrix
+   guides/building_support_matrix
+   guides/tiles3d_support_matrix
+   guides/virtual_texturing_support_matrix
+   guides/competitive_positioning
    guides/data_and_scene_workflows
    guides/rendering_and_analysis
    terrain/offline-render-quality
