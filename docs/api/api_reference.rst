@@ -52,6 +52,31 @@ payload data. Unsupported payload backends return typed
    :members:
    :no-index:
 
+Typed MapScene API
+~~~~~~~~~~~~~~~~~~
+
+``forge3d.map_scene`` exposes the typed offline map-production contract. Use
+``MapScene`` with ``SceneRecipe`` or keyword recipe components to validate
+scene intent, compile deterministic label plans, write native/offscreen PNG
+output for fixture-backed MVP recipes, keep deterministic source-derived
+compatibility output for symbolic fixture recipes, and save deterministic review
+bundles.
+Unsupported, ``Pro-gated``,
+``placeholder/fallback``, ``experimental``, missing-source, and blocking
+diagnostic paths are reported before successful render completion.
+
+``MapScene.render`` performs validation before rendering, writes deterministic
+PNG output for supported terrain/raster/vector/label scene recipes, records the
+last backend on ``MapScene.last_render_backend``, and still blocks unsupported
+layer paths through typed diagnostics instead of representing them as successful
+renders. ``MapScene.save_bundle`` writes review metadata and diagnostics;
+blocked scenes are recorded as non-renderable instead of being represented as
+successful renders.
+
+.. automodule:: forge3d.map_scene
+   :members:
+   :no-index:
+
 .. automodule:: forge3d.viewer_ipc
    :members:
    :no-index:

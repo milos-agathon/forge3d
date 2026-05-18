@@ -5,7 +5,7 @@
 
 ## Summary
 
-Introduce the typed `MapScene` / `SceneRecipe` MVP workflow that validates a complete offline 3D map scene, compiles deterministic labels, renders PNG output, and saves a reproducible review bundle for supported layer types. The implementation must wrap existing forge3d substrate in `python/forge3d/viewer.py`, `python/forge3d/helpers/offscreen.py`, native `Scene.render_png`/`render_rgba`, `python/forge3d/terrain_params.py`, `style.py`, `buildings.py`, `pointcloud.py`, `bundle.py`, `crs.py`, `map_plate.py`, and native `src/scene`, `src/labels`, `src/import`, `src/tiles3d`, `src/pointcloud`, and `src/bundle`. New product API file paths are TBD until tasks inspect package exports.
+Introduce the typed `MapScene` / `SceneRecipe` MVP workflow that validates a complete offline 3D map scene, compiles deterministic labels, renders PNG output, and saves a reproducible review bundle for supported layer types. The implementation wraps existing forge3d substrate in `python/forge3d/helpers/offscreen.py`, `python/forge3d/bundle.py`, `python/forge3d/terrain_params.py`, `style.py`, `buildings.py`, `pointcloud.py`, `crs.py`, `map_plate.py`, and native `Scene.render_png`/`render_rgba` where available. The selected public product API path is `python/forge3d/map_scene.py`, exported through `python/forge3d/__init__.py` and `python/forge3d/__init__.pyi`.
 
 ## Technical Context
 

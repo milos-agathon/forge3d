@@ -4,20 +4,38 @@ These scenarios are validation targets for implementation.
 
 ## Terrain Plus Raster
 
+Run:
+
+```powershell
+python examples/mapscene_terrain_raster.py --output-dir examples/out/mapscene_terrain_raster --json
+```
+
 1. Create `MapScene` with `TerrainSource`, `RasterOverlay`, camera, lighting, and PNG `OutputSpec`.
 2. Run `validate()` and assert a structured `ValidationReport`.
-3. Run `render("terrain_raster.png")` and assert PNG output for a supported fixture.
-4. Run `save_bundle("terrain_raster.forge3d")` and compare deterministic manifest fields.
+3. Run `render("terrain_raster.png")` and assert deterministic native/offscreen PNG output is written for the generated `.npy` terrain and PNG raster recipe.
+4. Run `save_bundle("terrain_raster.forge3d")` and compare deterministic manifest fields plus review status.
 
 ## Terrain Plus Vector Plus Labels
+
+Run:
+
+```powershell
+python examples/mapscene_vector_labels.py --output-dir examples/out/mapscene_vector_labels --json
+```
 
 1. Create `VectorOverlay` from provided local features and style.
 2. Create `LabelLayer` with point/polygon labels and fixed seed.
 3. Validate style support and glyph coverage before render.
 4. Compile labels through `LabelPlan` during render preparation.
-5. Render PNG and save bundle.
+5. Confirm render writes native/offscreen PNG output while preserving label-plan diagnostics in the review bundle.
 
 ## Terrain Plus Buildings Plus Labels
+
+Run:
+
+```powershell
+python examples/mapscene_buildings_labels.py --output-dir examples/out/mapscene_buildings_labels --json
+```
 
 1. Add `BuildingLayer` intent with a known fixture.
 2. If native/public building path is available, validate geometry counts and renderability.

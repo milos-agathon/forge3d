@@ -4,8 +4,8 @@ build-backend = "maturin"
 
 [project]
 name = "forge3d"
-version = "1.23.2"
-description = "forge3d: Rust/WebGPU core with PyO3 bindings"
+version = "1.24.0"
+description = "forge3d: Rust/WebGPU 3D maps with diagnostics, labels, and reproducible scene bundles"
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.21",

@@ -3,11 +3,887 @@
 Source PRD: `docs/superpowers/plans/prd.md`  
 Constitution: `.specify/memory/constitution.md` v1.0.3  
 SpecKit playbook: `docs/superpowers/plans/speckit-playbook.md`  
-Current feature: `004-mapscene-mvp` implementation  
-Current SpecKit feature directory: `specs/004-mapscene-mvp`  
-Current git branch: `002-label-api-truth`  
+Current feature: `004-mapscene-mvp` R-029 remediation complete; P0-R4-AC2 native/offscreen render output verified
+Current SpecKit feature directory: `specs/004-mapscene-mvp` until the next feature handoff updates the active pointer
+Current git branch: `004-mapscene-mvp`
 Last known commit: `e26d1b9`  
-Last updated: 2026-05-16
+Last updated: 2026-05-18
+
+## 2026-05-18 Feature 004 Independent PRD Compliance Audit
+
+Target feature: `specs/004-mapscene-mvp`.
+
+This was an audit-only session. No product code was changed. The audit reviewed
+only feature `004` against the PRD, constitution, feature spec/plan/tasks,
+requirements matrix, changed-file summary, current implementation, support
+docs, and fresh local verification.
+
+Fresh verification:
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests/test_mapscene_recipe_contract.py tests/test_mapscene_validation.py tests/test_mapscene_support_status.py tests/test_mapscene_render_policy.py tests/test_mapscene_render_png.py tests/test_mapscene_save_bundle.py tests/test_mapscene_label_plan_integration.py tests/test_mapscene_examples.py tests/test_mapscene_quickstart.py tests/test_mapscene_docs.py -q
+```
+
+Observed result: `48 passed in 1.64s`.
+
+Compile verification:
+
+```powershell
+$env:PYTHONPATH='python'; python -m py_compile python\forge3d\map_scene.py tests\test_mapscene_render_png.py tests\test_mapscene_examples.py tests\test_mapscene_quickstart.py tests\test_mapscene_docs.py examples\mapscene_terrain_raster.py examples\mapscene_vector_labels.py examples\mapscene_buildings_labels.py
+```
+
+Observed result: exit `0`.
+
+Audit result: no new feature `004` P0-R4 blocker was found. P0-R4-AC1 through
+P0-R4-AC8 remain verified by concrete file/test/doc evidence. Remaining scope
+boundaries are later-owned or diagnostic-bearing rather than feature `004`
+blockers: point-cloud and supported-building render adapters, public 3D Tiles
+rendering, VT normal/mask runtime, textured PBR buildings, full Mapbox style
+parity, and feature `005` bundle load/render round trip.
+
+## 2026-05-17 Feature 004 Native/Offscreen Render Evidence Remediation
+
+Target feature: `specs/004-mapscene-mvp`.
+
+Selected finding: R-029 from the independent `004-mapscene-mvp` PRD compliance
+audit.
+
+This was a narrow post-audit fix. The prior T026-T029 source-derived adapter
+remains as deterministic compatibility output for symbolic fixture recipes, but
+it is no longer the evidence used to satisfy P0-R4-AC2. The fix wires
+fixture-backed supported terrain/raster/vector/label recipes through the native
+`Scene.render_rgba()` path and updates examples/docs/state accordingly.
+
+PRD acceptance criteria covered: `P0-R4-AC2`, `P0-R4-AC7`, `P0-R4-AC8`, and
+Constitution III/IV/V/VIII/X.
+
+Red verification before implementation:
+
+```powershell
+python -m pytest tests/test_mapscene_render_png.py::test_render_uses_native_offscreen_for_real_terrain_and_raster_assets -q
+```
+
+Observed red result: `1 failed`. The failure showed `MapScene.render()` still
+called `_render_source_derived_rgba(...)`; the test monkeypatched that function
+to raise, so no native/offscreen evidence existed for real fixture-backed
+terrain/raster/vector/label inputs.
+
+Implemented:
+
+- `python/forge3d/map_scene.py`: added `_render_native_offscreen_rgba(...)` and
+  related loaders. The native path creates a native `Scene`, uploads `.npy`
+  height data with `set_height_from_r32f`, uploads PNG raster overlays with
+  `set_raster_overlay`, applies orbit camera settings with
+  `set_camera_look_at`, calls the instance `render_rgba()` method, composites
+  inline vector/label layers, records `last_render_backend`, and stores that
+  backend in review-bundle metadata.
+- `tests/test_mapscene_render_png.py`: added the R-029 regression test using
+  real generated `.npy` terrain, PNG raster, inline vector data, a label layer,
+  a fixed reproducibility profile, and a monkeypatched source-derived fallback.
+- `examples/mapscene_terrain_raster.py` and
+  `examples/mapscene_vector_labels.py`: generate local fixture assets and
+  return `render_backend`; example/quickstart tests assert `native/offscreen`.
+- `docs/guides/offline_3d_map_rendering.md`,
+  `docs/api/api_reference.rst`,
+  `specs/004-mapscene-mvp/quickstart.md`, and
+  `specs/004-mapscene-mvp/contracts/mapscene-contract.md`: distinguish
+  native/offscreen fixture-backed output from source-derived compatibility
+  output.
+- `docs/superpowers/state/requirements-verification-matrix.md`,
+  `docs/superpowers/state/implementation-ledger.md`,
+  `docs/superpowers/state/current-context-pack.md`, and
+  `docs/superpowers/state/open-blockers.md`: update R-029 and P0-R4-AC2 state.
+
+Selected verification commands after implementation:
+
+```powershell
+python -m pytest tests/test_mapscene_render_png.py tests/test_mapscene_render_policy.py tests/test_mapscene_examples.py tests/test_mapscene_quickstart.py tests/test_mapscene_docs.py -q
+python -m pytest tests/test_mapscene_recipe_contract.py tests/test_mapscene_validation.py tests/test_mapscene_support_status.py tests/test_mapscene_label_plan_integration.py tests/test_mapscene_render_png.py tests/test_mapscene_render_policy.py tests/test_mapscene_save_bundle.py tests/test_mapscene_examples.py tests/test_mapscene_docs.py tests/test_mapscene_quickstart.py -q
+python -m py_compile python\forge3d\map_scene.py tests\test_mapscene_render_png.py tests\test_mapscene_examples.py tests\test_mapscene_quickstart.py tests\test_mapscene_docs.py examples\mapscene_terrain_raster.py examples\mapscene_vector_labels.py examples\mapscene_buildings_labels.py
+```
+
+Observed green results: focused render/docs/examples command `23 passed in
+0.98s`; full MapScene command `48 passed in 1.36s`; `py_compile` exited 0.
+
+Requirement status impact: R-029 moves from `Open` to `Mitigated in 004`.
+`P0-R4-AC2` remains `Verified`, now with native/offscreen fixture-backed render
+evidence instead of source-derived-only evidence. `P0-R1-AC2` and
+`P0-R1-AC3` remain blocked pending native label behavior or a human product
+decision.
+
+## 2026-05-17 Feature 004 Source-Derived PNG Render Completion
+
+Target feature: `specs/004-mapscene-mvp`.
+
+Selected task IDs: T026, T027, T028, and T029.
+
+This was one coherent RED/YELLOW remediation batch: T026 converted the blocked
+P0-R4-AC2 finding into source-derived PNG tests, T027 implemented the
+source-derived render adapter, T028 updated public docs/examples/contract
+wording, and T029 updated durable state. The batch is deliberately limited to
+the active feature `004` render truth gap and does not mix in the remaining
+feature `002` label blockers.
+
+PRD acceptance criteria covered: `P0-R4-AC2`, `P0-R4-AC7`, `P0-R4-AC8`, and
+Constitution III/IV/V/VII/VIII/X.
+
+Red verification before implementation:
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests/test_mapscene_render_png.py tests/test_mapscene_render_policy.py tests/test_mapscene_examples.py tests/test_mapscene_quickstart.py tests/test_mapscene_docs.py -q -p no:cacheprovider
+```
+
+Observed red result: `8 failed, 14 passed`. Failures showed the T022-T025
+blocked backend still failed the source-derived PNG acceptance path, supported
+examples did not produce PNG artifacts, and docs/API/quickstart wording was
+still stale.
+
+Implemented:
+
+- `python/forge3d/map_scene.py`: replaced the global render-backend
+  `placeholder_fallback` block with `_render_source_derived_rgba(...)` for
+  supported non-blocked MVP scenes, writes deterministic PNG output, records
+  `mapscene.render_backend` and `mapscene.render_png` as supported after a
+  successful write, and keeps layer-specific typed diagnostics for unsupported
+  vector path-loader, point-cloud, building, and other fallback paths.
+- `tests/test_mapscene_render_png.py`,
+  `tests/test_mapscene_render_policy.py`,
+  `tests/test_mapscene_examples.py`,
+  `tests/test_mapscene_quickstart.py`, and
+  `tests/test_mapscene_docs.py`: updated render, policy, example, quickstart,
+  and docs assertions for source-derived PNG output.
+- `docs/guides/offline_3d_map_rendering.md`,
+  `docs/api/api_reference.rst`,
+  `specs/004-mapscene-mvp/quickstart.md`, and
+  `specs/004-mapscene-mvp/contracts/mapscene-contract.md`: reworded the public
+  contract from blocked placeholder output to supported deterministic
+  source-derived PNG output for non-blocked MVP scenes.
+- `specs/004-mapscene-mvp/tasks.md`,
+  `docs/superpowers/state/requirements-verification-matrix.md`,
+  `docs/superpowers/state/implementation-ledger.md`,
+  `docs/superpowers/state/current-context-pack.md`, and
+  `docs/superpowers/state/open-blockers.md`: recorded T026-T029 evidence,
+  P0-R4-AC2 verified status, R-026 mitigation, remaining P0 label blockers, and
+  the next exact prompt.
+
+Selected verification commands after implementation:
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests/test_mapscene_render_png.py tests/test_mapscene_render_policy.py tests/test_mapscene_examples.py tests/test_mapscene_quickstart.py tests/test_mapscene_docs.py -q -p no:cacheprovider
+$env:PYTHONPATH='python'; python -m pytest tests/test_mapscene_recipe_contract.py tests/test_mapscene_validation.py tests/test_mapscene_support_status.py tests/test_mapscene_label_plan_integration.py tests/test_mapscene_render_png.py tests/test_mapscene_render_policy.py tests/test_mapscene_save_bundle.py tests/test_mapscene_examples.py tests/test_mapscene_docs.py tests/test_mapscene_quickstart.py -q -p no:cacheprovider
+$env:PYTHONPATH='python'; python -m py_compile python\forge3d\map_scene.py tests\test_mapscene_render_png.py tests\test_mapscene_examples.py tests\test_mapscene_quickstart.py tests\test_mapscene_docs.py examples\mapscene_terrain_raster.py examples\mapscene_vector_labels.py
+```
+
+Observed green results: focused command `22 passed in 0.56s`; full MapScene
+command `47 passed in 0.86s`; `py_compile` exited 0.
+
+Requirement status impact: `P0-R4-AC2` moves from `Blocked` to `Verified`.
+R-026 is mitigated for supported MVP terrain/raster/vector/label recipes.
+`P0-R4-AC1` through `P0-R4-AC8` are now all `Verified` for feature `004`.
+`P0-R1-AC2` and `P0-R1-AC3` remain blocked pending native label behavior or a
+human product decision.
+
+## 2026-05-17 Feature 004 RED/YELLOW Remediation Checkpoint
+
+Target feature: `specs/004-mapscene-mvp`.
+
+Selected task IDs: T022, T023, T024, and T025.
+
+This was one coherent remediation batch: T022 added render-truth and
+renderability RED tests, T023 implemented typed diagnostics and blocked the
+synthetic render path, T024 updated docs/API/quickstart/contract wording, and
+T025 updated durable state. The batch deliberately did not treat the
+recipe-sensitive compositor as real PNG render evidence.
+
+PRD acceptance criteria covered: `P0-R4-AC2`, `P0-R4-AC3`, `P0-R4-AC7`,
+`P0-R4-AC8`, and Constitution III/IV/V/VII/VIII/X.
+
+Red verification before implementation:
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests/test_mapscene_render_png.py tests/test_mapscene_validation.py tests/test_mapscene_support_status.py tests/test_mapscene_examples.py tests/test_mapscene_quickstart.py tests/test_mapscene_save_bundle.py -q -p no:cacheprovider
+```
+
+Observed red result: `11 failed, 22 passed`. Failures showed
+`MapScene.render()` still wrote synthetic PNG output, vector path-only layers,
+point-cloud layers, and supported building layers lacked renderability
+diagnostics, examples claimed render success, and bundles marked synthetic
+scenes renderable.
+
+Docs red verification:
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests/test_mapscene_docs.py tests/test_mapscene_quickstart.py -q -p no:cacheprovider
+```
+
+Observed red result after adding the docs assertion: `1 failed, 10 passed`.
+
+Implemented:
+
+- `python/forge3d/map_scene.py`: added `placeholder_fallback` diagnostics for
+  `mapscene.render_backend`, vector path loader, point-cloud MapScene render
+  path, and supported building render adapter. `MapScene.render()` now blocks
+  before writing synthetic PNG output. `MapScene.save_bundle()` stays
+  deterministic but records non-renderable review status when diagnostics block.
+- `tests/test_mapscene_render_png.py`,
+  `tests/test_mapscene_validation.py`,
+  `tests/test_mapscene_support_status.py`,
+  `tests/test_mapscene_render_policy.py`,
+  `tests/test_mapscene_save_bundle.py`,
+  `tests/test_mapscene_examples.py`,
+  `tests/test_mapscene_quickstart.py`, and
+  `tests/test_mapscene_docs.py`: updated tests for honest blocked render,
+  layer diagnostics, examples, quickstart, bundle renderability, and docs.
+- `examples/mapscene_terrain_raster.py` and
+  `examples/mapscene_vector_labels.py`: now return `blocked_by_diagnostics`
+  when render is blocked instead of claiming PNG success.
+- `docs/guides/offline_3d_map_rendering.md`,
+  `docs/api/api_reference.rst`,
+  `specs/004-mapscene-mvp/quickstart.md`, and
+  `specs/004-mapscene-mvp/contracts/mapscene-contract.md`: reworded render
+  support as current `placeholder/fallback` backend and bundle scope as review
+  metadata plus diagnostics.
+- `docs/superpowers/plans/2026-05-17-mapscene-red-yellow-remediation.md`:
+  saved the remediation plan used for this batch.
+- `specs/004-mapscene-mvp/tasks.md`,
+  `docs/superpowers/state/requirements-verification-matrix.md`,
+  `docs/superpowers/state/implementation-ledger.md`,
+  `docs/superpowers/state/current-context-pack.md`, and
+  `docs/superpowers/state/open-blockers.md`: recorded revised evidence and
+  current blocker state.
+
+Selected verification commands after implementation:
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests/test_mapscene_render_png.py tests/test_mapscene_validation.py tests/test_mapscene_support_status.py tests/test_mapscene_examples.py tests/test_mapscene_quickstart.py tests/test_mapscene_save_bundle.py -q -p no:cacheprovider
+$env:PYTHONPATH='python'; python -m pytest tests/test_mapscene_docs.py tests/test_mapscene_quickstart.py -q -p no:cacheprovider
+$env:PYTHONPATH='python'; python -m pytest tests/test_mapscene_recipe_contract.py tests/test_mapscene_validation.py tests/test_mapscene_support_status.py tests/test_mapscene_label_plan_integration.py tests/test_mapscene_render_png.py tests/test_mapscene_render_policy.py tests/test_mapscene_save_bundle.py tests/test_mapscene_examples.py tests/test_mapscene_docs.py tests/test_mapscene_quickstart.py -q -p no:cacheprovider
+$env:PYTHONPATH='python'; python -m py_compile python\forge3d\map_scene.py tests\test_mapscene_validation.py tests\test_mapscene_support_status.py tests\test_mapscene_render_png.py tests\test_mapscene_render_policy.py tests\test_mapscene_save_bundle.py tests\test_mapscene_examples.py tests\test_mapscene_quickstart.py examples\mapscene_terrain_raster.py examples\mapscene_vector_labels.py examples\mapscene_buildings_labels.py
+```
+
+Observed green results: focused command `33 passed`; docs/quickstart command
+`11 passed`; full MapScene command `47 passed in 0.84s`; `py_compile` exited 0.
+
+Requirement status impact: `P0-R4-AC2` moves from `Verified` to `Blocked`
+because no source-derived PNG render adapter is proven. `P0-R4-AC3` remains
+`Verified` for deterministic diagnostic review bundles, not full load/render
+round-trip. `P0-R4-AC7` and `P0-R4-AC8` have stronger no-op and support-honesty
+evidence. `P0-R1-AC2` and `P0-R1-AC3` remain blocked pending native label
+behavior or a human product decision.
+
+## 2026-05-17 Feature 004 Full MVP Verification And Closure Checkpoint
+
+Target feature: `specs/004-mapscene-mvp`.
+
+Selected task IDs: T019, T020, and T021.
+
+This was one coherent RED-only closure batch: T019 provides the full feature
+verification gate, T020 updates the PRD acceptance matrix from that exact
+evidence, and T021 updates continuity state plus the next prompt. No additional
+implementation tasks were started after the full verification passed.
+
+PRD acceptance criteria covered: `P0-R4-AC1` through `P0-R4-AC8`, Section 21,
+and Constitution VII/X.
+
+Selected verification command:
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests/test_mapscene_recipe_contract.py tests/test_mapscene_validation.py tests/test_mapscene_support_status.py tests/test_mapscene_label_plan_integration.py tests/test_mapscene_render_png.py tests/test_mapscene_render_policy.py tests/test_mapscene_save_bundle.py tests/test_mapscene_examples.py tests/test_mapscene_docs.py tests/test_mapscene_quickstart.py -q -p no:cacheprovider
+```
+
+Observed result: `44 passed in 0.84s`.
+
+Implemented:
+
+- `specs/004-mapscene-mvp/tasks.md`: marked T019, T020, and T021 complete with
+  the exact full-feature verification evidence.
+- `docs/superpowers/state/requirements-verification-matrix.md`: added the
+  T019-T021 evidence row and moved P0-R4-AC1 through P0-R4-AC8 from `Tested`
+  to `Verified`.
+- `docs/superpowers/state/implementation-ledger.md` and
+  `docs/superpowers/state/current-context-pack.md`: recorded the closure
+  evidence, residual blockers, worktree risk, and next exact prompt.
+
+Requirement status impact at that historical checkpoint: feature
+`004-mapscene-mvp` P0-R4 rows were marked `Verified`. T022-T025 later blocked
+the synthetic P0-R4-AC2 evidence, and T026-T029 then superseded that blocker
+with source-derived PNG render evidence. Current P0-R4-AC1 through P0-R4-AC8
+status is `Verified`; P1/P2 rows remain planned for later feature directories.
+`P0-R1-AC2` and `P0-R1-AC3` remain blocked pending native behavior or a human
+product decision; this closure does not alter those release-gate blockers.
+
+Residual risk: R-011 dirty worktree/change separation remains open before any
+commit or PR. `.specify/feature.json` still points to `specs/004-mapscene-mvp`
+at closure time, so the next feature handoff must update or confirm the active
+feature context before executing feature `005`.
+
+## 2026-05-17 Feature 004 Full Docs/Support Audit Checkpoint
+
+Target feature: `specs/004-mapscene-mvp`.
+
+Selected task IDs: T016 and T017.
+
+This was one coherent RED-only batch: T016 adds the full MVP docs/support audit
+coverage and T017 updates the offline MapScene guide plus support matrices to
+satisfy that audit. It closes the R-027 docs/support gap without starting T019
+full feature verification or final T020/T021 closure.
+
+PRD acceptance criteria covered: `P0-R4-AC8`, `P0-R4-AC7`, scoped
+`P0-R4-AC1`, Section 16, FR-021, and FR-022.
+
+Red verification before implementation:
+
+```powershell
+python -m pytest tests/test_mapscene_docs.py -q -p no:cacheprovider
+```
+
+Observed red result after correcting the audit parser: `4 failed, 3 passed`.
+Failures showed the offline MapScene guide lacked canonical example and support
+guide anchors, style/building/3D Tiles/VT support matrices had stale or missing
+current MapScene diagnostic/ownership wording, competitive positioning used
+umbrella support wording, and required non-goal boundary rows were absent.
+
+Implemented:
+
+- `tests/test_mapscene_docs.py`: added broad docs/support audit coverage for
+  canonical examples, guide links, support taxonomy, current MapScene
+  diagnostics/ownership, and competitive-positioning boundaries.
+- `docs/guides/offline_3d_map_rendering.md`: added canonical examples,
+  support references, and the selected example/quickstart verification command.
+- `docs/guides/style_support_matrix.md`,
+  `docs/guides/building_support_matrix.md`,
+  `docs/guides/tiles3d_support_matrix.md`,
+  `docs/guides/virtual_texturing_support_matrix.md`, and
+  `docs/guides/competitive_positioning.md`: updated current support rows and
+  overclaim boundaries without presenting P1/P2 gaps as supported.
+- `specs/004-mapscene-mvp/tasks.md`,
+  `docs/superpowers/state/requirements-verification-matrix.md`,
+  `docs/superpowers/state/implementation-ledger.md`, and
+  `docs/superpowers/state/current-context-pack.md`: recorded this docs/support
+  checkpoint.
+
+Selected verification commands after implementation:
+
+```powershell
+python -m pytest tests/test_mapscene_docs.py -q -p no:cacheprovider
+python -m pytest tests/test_mapscene_docs.py tests/test_mapscene_examples.py tests/test_mapscene_quickstart.py -q -p no:cacheprovider
+python -m pytest tests/test_mapscene_validation.py tests/test_mapscene_support_status.py tests/test_mapscene_docs.py -q -p no:cacheprovider
+python -m py_compile tests\test_mapscene_docs.py
+rg -n "T016|T017|MVP docs/support audit|Next Exact Prompt|P0-R4-AC7|P0-R4-AC8" docs/superpowers/state/requirements-verification-matrix.md docs/superpowers/state/implementation-ledger.md docs/superpowers/state/current-context-pack.md specs/004-mapscene-mvp/tasks.md
+```
+
+Observed green results: focused docs command `7 passed`;
+docs/examples/quickstart command `15 passed`; validation/support/docs command
+`23 passed`; `py_compile` exited 0; final state/evidence `rg` exited 0.
+
+Requirement status impact at that checkpoint: `P0-R4-AC7` and `P0-R4-AC8` had full
+docs/support audit evidence for feature `004`, and scoped `P0-R4-AC1`
+documentation evidence was stronger. No feature `004` `Verified` status was
+claimed then because T019/T020/T021 were still open.
+
+## 2026-05-17 Feature 004 Terrain CRS / Building Source Diagnostics Checkpoint
+
+Target feature: `specs/004-mapscene-mvp`.
+
+Selected task IDs: T006D, T006E, T016B, T017B, T020T, and T021T.
+
+This was one coherent RED-only batch: all selected tasks close validation and
+documentation truth gaps where missing terrain CRS and supported building source
+asset failures could produce a successful validation report or remain absent
+from the diagnostics reference. The batch does not start T019 full verification
+or the remaining broad T016/T017 docs/support audit.
+
+PRD acceptance criteria covered: `P0-R4-AC1`, `P0-R4-AC5`, `P0-R4-AC7`,
+scoped `P0-R4-AC8`, Section 21, and Constitution VII/X.
+
+Red verification before implementation:
+
+```powershell
+python -m pytest tests/test_mapscene_validation.py tests/test_mapscene_docs.py -q -p no:cacheprovider
+```
+
+Observed red result: `3 failed, 12 passed`. Failures showed terrain with
+missing CRS metadata and supported building layers with missing/unsupported
+source assets still returned `ok`, and `docs/guides/diagnostics_reference.md`
+did not document the scoped MapScene diagnostic inventory.
+
+Implemented:
+
+- `python/forge3d/map_scene.py`: added terrain `missing_crs` validation and
+  supported-building source path checks for `missing_external_asset` and
+  `unsupported_asset_format`.
+- `tests/test_mapscene_validation.py`: added terrain missing-CRS and supported
+  building-source failure regressions.
+- `tests/test_mapscene_docs.py` and `docs/guides/diagnostics_reference.md`:
+  added and satisfied a scoped diagnostic inventory audit.
+- `specs/004-mapscene-mvp/tasks.md`,
+  `docs/superpowers/state/requirements-verification-matrix.md`,
+  `docs/superpowers/state/implementation-ledger.md`, and
+  `docs/superpowers/state/current-context-pack.md`: recorded this scoped
+  checkpoint.
+
+Selected verification commands after implementation:
+
+```powershell
+python -m pytest tests/test_mapscene_validation.py tests/test_mapscene_docs.py -q -p no:cacheprovider
+python -m pytest tests/test_mapscene_validation.py tests/test_mapscene_support_status.py tests/test_mapscene_docs.py -q -p no:cacheprovider
+python -m pytest tests/test_mapscene_validation.py tests/test_mapscene_support_status.py tests/test_mapscene_save_bundle.py tests/test_mapscene_docs.py tests/test_mapscene_quickstart.py -q -p no:cacheprovider
+python -m py_compile python\forge3d\map_scene.py tests\test_mapscene_validation.py tests\test_mapscene_docs.py
+rg -n "T006D|T006E|T016B|T017B|T020T|T021T|missing_crs|missing_external_asset|unsupported_asset_format|Next Exact Prompt" specs/004-mapscene-mvp/tasks.md docs/superpowers/state/requirements-verification-matrix.md docs/superpowers/state/implementation-ledger.md docs/superpowers/state/current-context-pack.md
+```
+
+Observed green results: validation/docs command `15 passed`;
+validation/support/docs command `19 passed`; combined selected regression
+`26 passed`; `py_compile` exited 0; final state/evidence `rg` exited 0.
+
+Requirement status impact at that checkpoint: `P0-R4-AC1`, `P0-R4-AC5`,
+`P0-R4-AC7`, and scoped `P0-R4-AC8` received stronger no-op-prevention and docs
+evidence. No feature `004` `Verified` status was claimed because final
+verification and closure tasks remained open.
+
+## 2026-05-17 Feature 004 External Asset Diagnostics Checkpoint
+
+Target feature: `specs/004-mapscene-mvp`.
+
+Selected task IDs: T006B, T006C, T020S, and T021S.
+
+This was one coherent RED-only batch: all selected tasks close the no-op success
+risk where non-empty terrain, raster, and point-cloud paths could be treated as
+renderable recipe inputs even when the local asset was missing or the suffix was
+outside the MVP-supported set. The batch also updates continuity evidence for
+that same narrow asset-diagnostics fix. It does not start T016/T017 full
+docs/support audit, T019 full feature verification, T020 final matrix closure,
+or T021 final continuity closure.
+
+PRD acceptance criteria covered: `P0-R4-AC1`, `P0-R4-AC3`, `P0-R4-AC7`, Section
+21 bundle/diagnostic behavior, and Constitution VII/X. `P0-R1-AC2` and
+`P0-R1-AC3` remain `Blocked`; this checkpoint does not alter their release-gate
+state.
+
+Red verification before implementation:
+
+```powershell
+pytest tests/test_mapscene_validation.py tests/test_mapscene_save_bundle.py -q
+```
+
+Observed red result: `3 failed, 10 passed`. Failures showed
+`MapScene.validate()` returned `ok` for missing external assets and unsupported
+asset formats, and `MapScene.save_bundle()` returned `ok`/renderable for a
+missing-asset scene.
+
+Implemented:
+
+- `python/forge3d/map_scene.py`: added typed `missing_external_asset` and
+  `unsupported_asset_format` diagnostics for terrain, raster, and point-cloud
+  paths; blocked affected layer summaries as unsupported; preserved blocked
+  bundle renderability behavior through existing validation-report persistence.
+- `tests/test_mapscene_validation.py`: added missing external asset and
+  unsupported asset format red tests; made symbolic fixture paths explicit with
+  `asset_status: fixture`.
+- `tests/test_mapscene_save_bundle.py`: added missing-asset bundle persistence
+  regression; made symbolic fixture paths explicit with `asset_status: fixture`.
+- `tests/test_mapscene_support_status.py`,
+  `tests/test_mapscene_label_plan_integration.py`,
+  `tests/test_mapscene_render_png.py`, `tests/test_mapscene_render_policy.py`,
+  `tests/test_mapscene_quickstart.py`, and canonical MapScene examples: marked
+  symbolic fixture paths as intentional fixtures so strict local-asset checks do
+  not mask the behavior under test.
+- `specs/004-mapscene-mvp/tasks.md`,
+  `docs/superpowers/state/requirements-verification-matrix.md`,
+  `docs/superpowers/state/implementation-ledger.md`, and
+  `docs/superpowers/state/current-context-pack.md`: recorded this scoped
+  red-remediation checkpoint.
+
+Selected verification commands after implementation:
+
+```powershell
+pytest tests/test_mapscene_validation.py tests/test_mapscene_support_status.py tests/test_mapscene_save_bundle.py -q
+pytest tests/test_mapscene_recipe_contract.py tests/test_mapscene_validation.py tests/test_mapscene_support_status.py tests/test_mapscene_label_plan_integration.py tests/test_mapscene_render_png.py tests/test_mapscene_render_policy.py tests/test_mapscene_save_bundle.py tests/test_mapscene_examples.py tests/test_mapscene_docs.py tests/test_mapscene_quickstart.py -q
+python -m py_compile python\forge3d\map_scene.py tests\test_mapscene_validation.py tests\test_mapscene_save_bundle.py
+rg -n "T006B|T006C|T020S|T021S|missing_external_asset|unsupported_asset_format|Next Exact Prompt|P0-R1-AC2|P0-R1-AC3" specs/004-mapscene-mvp/tasks.md docs/superpowers/state/requirements-verification-matrix.md docs/superpowers/state/implementation-ledger.md docs/superpowers/state/current-context-pack.md docs/superpowers/state/open-blockers.md
+```
+
+Observed green results: focused validation/support/bundle command `17 passed`;
+combined selected MapScene command `37 passed`; `py_compile` exited 0; final
+state/evidence `rg` exited 0.
+
+Requirement status impact at that checkpoint: `P0-R4-AC1`, `P0-R4-AC3`, and `P0-R4-AC7` received
+stronger no-op-prevention and bundle-diagnostic evidence. `P1-R5-AC3` remains
+`Planned` for feature `005` because full missing-asset bundle round-trip
+coverage is outside that selected RED batch. No feature `004` `Verified` status
+was claimed then because T016/T017/T019/T020/T021 were still open.
+
+## 2026-05-17 Feature 004 Red-Only Remediation Checkpoint
+
+Target feature: `specs/004-mapscene-mvp`.
+
+Selected task IDs: T011A, T011B, T013A, T013B, T014, T015, T018,
+T020R, and T021R.
+
+This was one coherent RED-only batch: all selected tasks close evidence gaps
+from the prior analysis that prevented honest P0-R4 release claims without
+starting the remaining broad docs/support or final verification tasks. The
+batch covers recipe-sensitive PNG output, review-bundle source metadata,
+canonical typed examples, quickstart execution, and release-gate continuity
+honesty.
+
+PRD acceptance criteria covered: `P0-R4-AC2`, `P0-R4-AC3`, `P0-R4-AC8`,
+Section 16, Section 21, and Constitution III/IV/VII/X. `P0-R1-AC2` and
+`P0-R1-AC3` were reclassified as `Blocked` in the matrix because their current
+diagnostic-only behavior prevents no-op success but does not satisfy the exact
+acceptance criteria without implementation or a human product decision.
+
+No additional task IDs were started. Original T016/T017, T019, T020, and T021
+remain open for the full MVP docs/support audit, full feature verification,
+final matrix update, and final continuity closure.
+
+Red verification before implementation:
+
+```powershell
+pytest tests/test_mapscene_render_png.py -q
+pytest tests/test_mapscene_save_bundle.py -q
+pytest tests/test_mapscene_examples.py -q
+pytest tests/test_mapscene_quickstart.py -q
+```
+
+Observed red results: render PNG `1 failed, 2 passed` because different
+supported recipe data produced byte-identical PNG bytes; bundle `1 failed,
+1 passed` because `scene/layer_sources/terrain.json` was missing; examples
+`4 failed` because canonical examples were absent; quickstart `3 failed,
+1 passed` because quickstart/example execution coverage was absent.
+
+Implemented:
+
+- `python/forge3d/map_scene.py`: recipe-sensitive deterministic RGBA rendering
+  and non-label layer source metadata payloads for MapScene bundles.
+- `tests/test_mapscene_render_png.py`: recipe-sensitive render regression.
+- `tests/test_mapscene_save_bundle.py`: terrain, raster, vector, label, and
+  point-cloud source metadata assertions.
+- `tests/test_mapscene_examples.py` and `tests/test_mapscene_quickstart.py`:
+  canonical example and quickstart execution coverage.
+- `examples/mapscene_terrain_raster.py`,
+  `examples/mapscene_vector_labels.py`, and
+  `examples/mapscene_buildings_labels.py`: typed MapScene workflows with no raw
+  viewer IPC.
+- `.gitignore`: narrow exceptions so the selected MapScene examples are
+  Git-visible despite the repo-wide `examples/*` ignore rule.
+- `specs/004-mapscene-mvp/quickstart.md` and
+  `specs/004-mapscene-mvp/tasks.md`: targeted quickstart commands and scoped
+  red-remediation task evidence.
+- `docs/superpowers/state/requirements-verification-matrix.md`,
+  `docs/superpowers/state/open-blockers.md`,
+  `docs/superpowers/state/implementation-ledger.md`, and
+  `docs/superpowers/state/current-context-pack.md`: scoped matrix, blocker,
+  ledger, and continuity updates.
+
+Selected verification commands after implementation:
+
+```powershell
+pytest tests/test_mapscene_render_png.py tests/test_mapscene_render_policy.py -q
+pytest tests/test_mapscene_save_bundle.py -q
+pytest tests/test_mapscene_examples.py -q
+pytest tests/test_mapscene_quickstart.py -q
+pytest tests/test_mapscene_recipe_contract.py tests/test_mapscene_label_plan_integration.py tests/test_mapscene_validation.py tests/test_mapscene_support_status.py tests/test_mapscene_render_png.py tests/test_mapscene_render_policy.py tests/test_mapscene_save_bundle.py tests/test_mapscene_examples.py tests/test_mapscene_docs.py tests/test_mapscene_quickstart.py -q
+python -m py_compile python\forge3d\map_scene.py tests\test_mapscene_render_png.py tests\test_mapscene_save_bundle.py tests\test_mapscene_examples.py tests\test_mapscene_quickstart.py examples\mapscene_terrain_raster.py examples\mapscene_vector_labels.py examples\mapscene_buildings_labels.py
+rg -n "viewer_ipc|send_ipc" examples/mapscene_terrain_raster.py examples/mapscene_vector_labels.py examples/mapscene_buildings_labels.py
+git check-ignore -v examples/mapscene_terrain_raster.py examples/mapscene_vector_labels.py examples/mapscene_buildings_labels.py
+```
+
+Observed green results: render/render-policy `7 passed`; bundle `2 passed`;
+examples `4 passed`; quickstart `4 passed`; combined selected MapScene command
+`34 passed`; `py_compile` exited 0; raw IPC `rg` returned no matches; `git
+status --untracked-files=all` lists the three MapScene examples as untracked
+after the `.gitignore` exceptions.
+
+Requirement status impact at that checkpoint: `P0-R4-AC8` moved to `Tested`;
+`P0-R4-AC2` and `P0-R4-AC3` received stronger recipe-sensitive/renderable-data
+and source metadata evidence. No feature `004` `Verified` status was claimed
+then because T016/T017/T019/T020/T021 were still open.
+
+## 2026-05-17 Feature 004 Red/Yellow Remediation Batch
+
+Target feature: `specs/004-mapscene-mvp`.
+
+Selected task IDs: T006A, T009, T010, T011, T012, T013, T016A, and T017A.
+This is one coherent red/yellow remediation batch: it closes the analyzed
+source-data validation gap, wires the currently public render and bundle methods
+so they produce real artifacts or diagnostics, and removes stale public API/docs
+wording without starting canonical examples or quickstart tasks.
+
+The broader original T016/T017 docs/support tasks remained open at this
+checkpoint because canonical examples and quickstart evidence were still
+planned. Later T014/T015/T018 completed the examples and quickstart; T016/T017
+still own the full docs/support audit. Recording scoped T016A/T017A avoids
+claiming full AC8 docs/example closure for this earlier batch.
+
+Optional before-implement hook `/speckit.git.commit` was identified and not
+executed because it is optional and the worktree already contains unrelated or
+pre-existing dirty files.
+
+PRD acceptance criteria covered in this session: `P0-R4-AC1`, `P0-R4-AC2`,
+`P0-R4-AC3`, `P0-R4-AC4`, and `P0-R4-AC7`. At this checkpoint `P0-R4-AC8`,
+canonical examples, quickstart, full docs/support audit, final
+matrix/continuity closure, and MVP `Verified` status were still planned; later
+T014/T015/T018 moved AC8 to `Tested`.
+
+Red command:
+
+```powershell
+pytest tests/test_mapscene_validation.py tests/test_mapscene_support_status.py tests/test_mapscene_render_png.py tests/test_mapscene_render_policy.py tests/test_mapscene_save_bundle.py tests/test_mapscene_docs.py -q
+```
+
+Observed red result: `12 failed, 10 passed`. Failures covered missing
+source-identity/renderable-data diagnostics, unwired `MapScene.render()`,
+unwired `MapScene.save_bundle()`, missing `forge3d.map_scene` API docs, and
+stale feature-004 `TBD` wording.
+
+Implemented:
+
+- `python/forge3d/map_scene.py`: added `missing_source_identity` and
+  `missing_renderable_data` diagnostics, deterministic PNG rendering through
+  `python/forge3d/helpers/offscreen.py`, render warning/error/fatal policy
+  enforcement, deterministic MapScene review-bundle writing, compiled label plan
+  and label source reference persistence, and blocked-bundle renderability
+  metadata.
+- `tests/test_mapscene_validation.py`: added source identity and renderable-data
+  diagnostics tests.
+- `tests/test_mapscene_render_png.py`: added deterministic PNG render tests.
+- `tests/test_mapscene_render_policy.py`: added render policy/no-op tests.
+- `tests/test_mapscene_save_bundle.py`: added deterministic review-bundle tests.
+- `tests/test_mapscene_docs.py`: added scoped MapScene API/docs drift tests.
+- `tests/test_mapscene_support_status.py`: updated the blocking render/save guard
+  expectations to the implemented behavior.
+- `docs/guides/offline_3d_map_rendering.md`,
+  `docs/api/api_reference.rst`, `specs/004-mapscene-mvp/plan.md`, and
+  `specs/004-mapscene-mvp/contracts/mapscene-contract.md`: documented the
+  selected public `forge3d.map_scene` path and removed stale later-owned/TBD
+  wording for implemented MapScene API pieces.
+- `specs/004-mapscene-mvp/tasks.md`: marked T009-T013 complete and recorded
+  scoped remediation subtasks T006A/T016A/T017A; T014/T015/T016/T017/T018-T021
+  remain open.
+
+Green commands:
+
+```powershell
+pytest tests/test_mapscene_validation.py tests/test_mapscene_support_status.py tests/test_mapscene_render_png.py tests/test_mapscene_render_policy.py tests/test_mapscene_save_bundle.py tests/test_mapscene_docs.py -q
+```
+
+Result: `22 passed`.
+
+```powershell
+pytest tests/test_mapscene_recipe_contract.py tests/test_mapscene_label_plan_integration.py tests/test_mapscene_validation.py tests/test_mapscene_support_status.py tests/test_mapscene_render_png.py tests/test_mapscene_render_policy.py tests/test_mapscene_save_bundle.py tests/test_mapscene_docs.py -q
+```
+
+Result: `25 passed`.
+
+```powershell
+python -m py_compile python\forge3d\map_scene.py tests\test_mapscene_validation.py tests\test_mapscene_support_status.py tests\test_mapscene_render_png.py tests\test_mapscene_render_policy.py tests\test_mapscene_save_bundle.py tests\test_mapscene_docs.py
+```
+
+Result: exited 0.
+
+Requirement status impact: `P0-R4-AC2` and `P0-R4-AC3` move from `Planned` to
+`Tested`; `P0-R4-AC1`, `P0-R4-AC4`, and `P0-R4-AC7` receive stronger tested
+evidence. No `Verified` status is claimed because examples, quickstart, full
+docs/support audit, and full feature verification remain incomplete.
+
+## 2026-05-17 Feature 004 T007-T008 LabelPlan Integration Session
+
+Target feature: `specs/004-mapscene-mvp`.
+
+Selected task IDs: T007 and T008. This is one coherent dependency batch:
+MapScene LabelPlan integration and the validation-scope audit blockers it
+unblocks. T009-T021 were not started because render, bundle, examples, docs,
+quickstart, full verification, and final continuity depend on this checkpoint.
+
+Optional before-implement hook `/speckit.git.commit` was identified and not
+executed because it is optional and the worktree contains unrelated/user-owned
+dirty files.
+
+PRD acceptance criteria covered in this session: `P0-R4-AC1`, `P0-R4-AC4`,
+`P0-R4-AC5`, `P0-R4-AC6`, and `P0-R4-AC7`. This is validation and LabelPlan
+integration evidence only; it does not claim PNG render, bundle save, examples,
+docs, quickstart, or MVP-wide completion.
+
+Pre-edit state:
+
+```text
+## 004-mapscene-mvp...origin/004-mapscene-mvp
+ M AGENTS.md
+ M docs/superpowers/state/current-context-pack.md
+ M docs/superpowers/state/implementation-ledger.md
+ M docs/superpowers/state/open-blockers.md
+ M docs/superpowers/state/requirements-verification-matrix.md
+ D examples/turkiye_river_basins_3d.py
+ M logs/.3c2cf94182465f0d10df58878528dd39234a1134-audit.json
+ M python/forge3d/forge3d.pdb
+ M python/forge3d/map_scene.py
+ M specs/004-mapscene-mvp/tasks.md
+ M src/viewer/event_loop/runner.rs
+?? tests/test_mapscene_support_status.py
+?? tests/test_mapscene_validation.py
+?? tests/test_mount_hood_white_cloud_timelapse.py
+```
+
+T007 added `tests/test_mapscene_label_plan_integration.py` and added validation
+edge assertions to `tests/test_mapscene_validation.py`. The new tests cover:
+
+- deterministic `LabelPlan.compile()` integration during `MapScene.validate()`
+- `MapScene.compiled_label_plans` storage keyed by label layer ID
+- map-furniture keepouts feeding LabelPlan rejection behavior
+- `label_rejection_summary` diagnostics surfacing in the validation report
+- repeated fixed-input `validate().to_dict()` and plan payload equality
+- missing layer CRS metadata producing typed diagnostics instead of compatibility
+- building `geometry_count` contributing to GPU memory estimates
+
+Red verification:
+
+```powershell
+pytest tests/test_mapscene_label_plan_integration.py tests/test_mapscene_validation.py -q
+```
+
+Observed red result: `4 failed, 3 passed`. Failures were expected and came from
+missing `compiled_label_plans["labels"]`, missing CRS metadata reporting `ok`,
+missing `label_rejection_summary`, and absent building geometry memory estimate.
+
+T008 implemented the MapScene LabelPlan integration in
+`python/forge3d/map_scene.py`. The implementation compiles or rehydrates a
+`LabelPlan` for each `LabelLayer`, passes map-furniture keepouts, priority
+rules, typography, glyph atlas, output viewport, camera, terrain, and
+reproducibility seed, stores the plan in `compiled_label_plans`, and remaps plan
+diagnostics to the MapScene label layer. It also adds typed `missing_crs`
+diagnostics and building geometry-count memory estimates.
+
+Green verification:
+
+```powershell
+pytest tests/test_mapscene_label_plan_integration.py tests/test_mapscene_validation.py -q
+pytest tests/test_mapscene_label_plan_integration.py tests/test_mapscene_validation.py tests/test_mapscene_support_status.py tests/test_mapscene_recipe_contract.py -q
+python -m py_compile python\forge3d\map_scene.py tests\test_mapscene_label_plan_integration.py tests\test_mapscene_validation.py tests\test_mapscene_support_status.py tests\test_mapscene_recipe_contract.py
+```
+
+Observed results: focused LabelPlan/validation command `7 passed`; selected
+regression command `13 passed`; `py_compile` exited 0.
+
+Updated artifacts:
+
+- `tests/test_mapscene_label_plan_integration.py`
+- `tests/test_mapscene_validation.py`
+- `python/forge3d/map_scene.py`
+- `specs/004-mapscene-mvp/tasks.md`
+- `docs/superpowers/state/requirements-verification-matrix.md`
+- `docs/superpowers/state/implementation-ledger.md`
+- `docs/superpowers/state/current-context-pack.md`
+- `docs/superpowers/state/open-blockers.md`
+
+Requirement status impact: P0-R4-AC1, AC4, AC5, AC6, and AC7 are `Tested` for
+validation/LabelPlan integration scope. P0-R4-AC2, AC3, AC8, and full feature
+`Verified` status remain planned. Feature `004` tasks T007 and T008 are now
+marked `[X]`; the next incomplete task is T009 for deterministic PNG render
+tests.
+
+## 2026-05-17 Feature 004 T004-T006 Validation Adapters Session
+
+Target feature: `specs/004-mapscene-mvp`.
+
+Selected task IDs: T004, T005, and T006. No spec, plan, or task regeneration
+was performed. The optional before-implement git commit hook was identified in
+`.specify/extensions.yml` and not executed because it is optional and the
+worktree contains unrelated/user-owned dirty files.
+
+PRD acceptance criteria covered in this session: `P0-R4-AC1`, `P0-R4-AC5`,
+`P0-R4-AC6`, and `P0-R4-AC7`. This is validation-scope evidence only; it does
+not claim PNG render, bundle save, examples, docs, LabelPlan integration, or
+MVP-wide completion.
+
+Pre-edit state:
+
+```text
+## 004-mapscene-mvp...origin/004-mapscene-mvp
+ M AGENTS.md
+ D examples/turkiye_river_basins_3d.py
+ M logs/.3c2cf94182465f0d10df58878528dd39234a1134-audit.json
+ M python/forge3d/forge3d.pdb
+ M src/viewer/event_loop/runner.rs
+?? tests/test_mount_hood_white_cloud_timelapse.py
+```
+
+Checklist and SpecKit prerequisite state:
+
+```powershell
+.specify\scripts\powershell\check-prerequisites.ps1 -Json -RequireTasks -IncludeTasks
+```
+
+Observed result: active `FEATURE_DIR` resolved to
+`C:\Users\milos\forge3d\specs\004-mapscene-mvp` with available docs
+`research.md`, `data-model.md`, `contracts/`, `quickstart.md`, and `tasks.md`.
+`specs/004-mapscene-mvp/checklists/requirements.md` had 16 total items, 16
+complete, and 0 incomplete.
+
+T004 added `tests/test_mapscene_validation.py`. The tests cover structured
+`ValidationReport` output, `last_validation_report`, layer summaries,
+deterministic support summaries, CRS mismatch without implicit transforms,
+style support diagnostics, missing-glyph diagnostics, GPU memory estimates,
+warning/error/fatal blocking status, and unsupported output format diagnostics.
+
+T005 added `tests/test_mapscene_support_status.py`. The tests cover
+Pro-gated, placeholder/fallback, experimental, unsupported building intent,
+terrain VT non-albedo families, incomplete public 3D Tiles intent, unknown
+recipe layer diagnostics, and render/save no-op guards preserving blocking
+validation diagnostics without writing misleading artifacts.
+
+Red verification:
+
+```powershell
+pytest tests/test_mapscene_validation.py tests/test_mapscene_support_status.py -q
+```
+
+Observed red result: `8 failed`; all failures came from the placeholder
+`MapScene.validate()` returning status `ok` without the required diagnostics or
+layer summaries.
+
+T006 implemented MapScene validation adapters in `python/forge3d/map_scene.py`.
+The implementation reuses existing diagnostics/style/label/VT contracts and
+adds MapScene-specific validation glue for:
+
+- structured `ValidationReport` and `LayerSummary` output before render
+- no implicit CRS transforms
+- missing glyphs through `validate_label_support(...)`
+- style diagnostics through `validate_style_support(...)`
+- GPU memory estimates from output size, terrain/raster metadata, and point counts
+- Pro-gated, placeholder/fallback, experimental, and unsupported building intent
+- public 3D Tiles incomplete intent via `python_public_3dtiles_incomplete`
+- non-albedo VT families via `validate_terrain_vt_support(...)`
+- unsupported output format and unknown recipe layer diagnostics
+- render/save guard behavior that validates before raising until later render
+  and bundle tasks wire real output
+
+Green verification:
+
+```powershell
+pytest tests/test_mapscene_validation.py tests/test_mapscene_support_status.py -q
+pytest tests/test_mapscene_recipe_contract.py tests/test_mapscene_validation.py tests/test_mapscene_support_status.py -q
+python -m py_compile python\forge3d\map_scene.py tests\test_mapscene_validation.py tests\test_mapscene_support_status.py
+```
+
+Observed results: focused validation/support command `8 passed`; recipe
+regression plus validation/support command `10 passed`; `py_compile` exited 0.
+
+Updated artifacts:
+
+- `tests/test_mapscene_validation.py`
+- `tests/test_mapscene_support_status.py`
+- `python/forge3d/map_scene.py`
+- `specs/004-mapscene-mvp/tasks.md`
+- `docs/superpowers/state/requirements-verification-matrix.md`
+- `docs/superpowers/state/implementation-ledger.md`
+- `docs/superpowers/state/current-context-pack.md`
+
+Requirement status impact: P0-R4-AC1, P0-R4-AC5, P0-R4-AC6, and P0-R4-AC7
+are `Tested` in the requirements matrix for validation-scope evidence only.
+P0-R4-AC2, P0-R4-AC3, P0-R4-AC8, and full feature `Verified` status remain
+planned. Feature `004` tasks T004, T005, and T006 are now marked `[X]`; the
+next incomplete task is T007 for MapScene LabelPlan integration tests.
 
 ## 2026-05-16 Feature 002 Closure Audit / Verification Drift Session
 
@@ -1536,7 +2412,7 @@ Five PRD-aligned default clarifications were recorded in the current spec:
 | Continuity state read | Done |
 | Extension hooks checked | Done; before/after clarify commit hooks are optional and were not executed |
 | Feature `005` spec | Clarified and revalidated at `specs/005-map-assets-bundles-p1/spec.md` |
-| Requirements matrix | Feature `001` P0-R5/P0-R6 rows are `Verified`; feature `002` P0-R1-AC1/P0-R1-AC4/P0-R1-AC5/P0-R1-AC6 and P0-R2-AC1/P0-R2-AC2/P0-R2-AC3/P0-R2-AC5 are `Verified`; feature `002` P0-R1-AC2/P0-R1-AC3/P0-R2-AC4/P0-R2-AC6 are `Deferred with diagnostic`; feature `003` P0-R3-AC1 through P0-R3-AC8 are `Verified`; P0-R4 and remaining P1/P2 rows remain planned in later feature directories. |
+| Requirements matrix | Feature `001` P0-R5/P0-R6 rows are `Verified`; feature `002` P0-R1-AC1/P0-R1-AC4/P0-R1-AC5/P0-R1-AC6 and P0-R2-AC1/P0-R2-AC2/P0-R2-AC3/P0-R2-AC4/P0-R2-AC5/P0-R2-AC6 are `Verified`; feature `002` P0-R1-AC2/P0-R1-AC3 are `Blocked`; feature `003` P0-R3-AC1 through P0-R3-AC8 are `Verified`; feature `004` P0-R4-AC1 through P0-R4-AC8 are `Verified`; remaining P1/P2 rows remain planned in later feature directories. |
 | Feature `005` research inventory | Created at `specs/005-map-assets-bundles-p1/research.md` |
 | Feature `002` research inventory | Created at `specs/002-label-api-truth/research.md` |
 | Feature `003` research inventory | Created at `specs/003-deterministic-label-plan/research.md` |
@@ -1551,8 +2427,8 @@ Five PRD-aligned default clarifications were recorded in the current spec:
 | Feature `005` hostile plan review | Completed; `plan.md` amended to remove red review findings, document accepted yellow risks, and lock the exact PRD Section 11 API surface |
 | Feature `005` task coverage audit | Completed; `tasks.md` now records typed P0 dependency diagnostics, all-public-API docs/support coverage, and a detailed coverage audit table |
 | Feature `006` technical plan | Created with plan, data model, contract, quickstart, and research decisions |
-| Code implementation | Feature `001` diagnostics/support-matrix implementation completed through T035; feature `002` T001-T018 completed stable public create responses, high-level configuration diagnostics/state no-op handling, line glyph placement/rotation plus curved/terrain diagnostics, docs/support wording, quickstart/example smoke coverage, matrix update, and continuity update; feature `003` T001-T024 completed deterministic `LabelPlan` models, rejection reasons, point/polygon candidates, terrain sampling, keepouts, priority solving, payloads, docs, quickstart, matrix update, and continuity update. |
-| Product verification tests | Feature `001` completion-review command reported `63 passed`; feature `002` Phase 1 commands reported Python `6 passed` plus two Rust IPC tests at `1 passed` each; Phase 3 commands reported line/curved `2 passed`, line edge cases `2 passed`, diagnostics `5 passed`, combined path `4 passed`, Rust glyph-rotation `2 passed`, and Phase 1-3 label subset `19 passed`; Phase 4 docs command reported `5 passed`, quickstart command reported `4 passed`, and full T016 label command reported `28 passed`; feature `003` full T022 LabelPlan command reported `29 passed`. |
+| Code implementation | Feature `001` diagnostics/support-matrix implementation completed through T035; feature `002` T001-T018 completed stable public create responses, high-level configuration diagnostics/state no-op handling, line glyph placement/rotation plus curved/terrain diagnostics, docs/support wording, quickstart/example smoke coverage, matrix update, and continuity update; feature `003` T001-T024 completed deterministic `LabelPlan` models, rejection reasons, point/polygon candidates, terrain sampling, keepouts, priority solving, payloads, docs, quickstart, matrix update, and continuity update; feature `004` T001-T029 plus R-029 remediation completed typed MapScene construction, validation, LabelPlan integration, native/offscreen PNG rendering for fixture-backed MVP scenes, source-derived compatibility output, review-bundle source metadata, canonical examples, quickstart, docs/support audit, matrix update, and continuity update. |
+| Product verification tests | Feature `001` completion-review command reported `63 passed`; feature `002` full label command reported `28 passed`; feature `003` full T022 LabelPlan command reported `29 passed`; feature `004` focused native/render docs/examples command reported `23 passed` and full MapScene command reported `48 passed` with P0-R4-AC2 verified. |
 
 Follow-up `/speckit.clarify` review on 2026-05-15 rechecked the current
 feature spec against the PRD, constitution, and continuity artifacts. No
@@ -1626,8 +2502,10 @@ pre-render product diagnostics.
 
 ## Verification Commands
 
-No product tests were run. Feature `006` static inspection commands are
-recorded in `specs/006-material-vt-large-scene-p2/research.md`. Earlier specification
+Latest product verification for feature `004` is recorded in the
+source-derived PNG render completion section above. Older feature `006` static
+inspection commands are recorded in
+`specs/006-material-vt-large-scene-p2/research.md`. Earlier specification
 validation commands:
 
 ```powershell
@@ -1651,28 +2529,43 @@ Observed validation state:
 ## Current Git State Observed
 
 ```text
-## 002-label-api-truth...origin/002-label-api-truth
+## 004-mapscene-mvp...origin/004-mapscene-mvp
  M .gitignore
  M AGENTS.md
- M docs/index.rst
+ M docs/api/api_reference.rst
+ M docs/guides/building_support_matrix.md
+ M docs/guides/competitive_positioning.md
+ M docs/guides/diagnostics_reference.md
+ M docs/guides/offline_3d_map_rendering.md
+ M docs/guides/style_support_matrix.md
+ M docs/guides/tiles3d_support_matrix.md
+ M docs/guides/virtual_texturing_support_matrix.md
+ M docs/superpowers/state/current-context-pack.md
+ M docs/superpowers/state/implementation-ledger.md
+ M docs/superpowers/state/open-blockers.md
+ M docs/superpowers/state/requirements-verification-matrix.md
  D examples/turkiye_river_basins_3d.py
  M logs/.3c2cf94182465f0d10df58878528dd39234a1134-audit.json
- M python/forge3d/viewer.py
- M python/forge3d/viewer.pyi
- M src/core/text_overlay.rs
- M src/labels/atlas.rs
- M src/labels/mod.rs
- M src/scene/py_api/native_text.rs
- M src/shaders/text_overlay.wgsl
- M src/viewer/hud.rs
-?? docs/superpowers/state/current-context-pack.md
-?? docs/superpowers/state/implementation-ledger.md
-?? docs/superpowers/state/open-blockers.md
-?? docs/superpowers/state/requirements-verification-matrix.md
-?? specs/002-label-api-truth/tasks.md
-?? tests/test_label_api_diagnostics.py
-?? tests/test_label_api_line_curved_paths.py
-?? tests/test_label_api_line_edge_cases.py
+ M python/forge3d/forge3d.pdb
+ M python/forge3d/map_scene.py
+ M specs/004-mapscene-mvp/contracts/mapscene-contract.md
+ M specs/004-mapscene-mvp/plan.md
+ M specs/004-mapscene-mvp/quickstart.md
+ M specs/004-mapscene-mvp/tasks.md
+ M src/viewer/event_loop/runner.rs
+?? examples/mapscene_buildings_labels.py
+?? examples/mapscene_terrain_raster.py
+?? examples/mapscene_vector_labels.py
+?? tests/test_mapscene_docs.py
+?? tests/test_mapscene_examples.py
+?? tests/test_mapscene_label_plan_integration.py
+?? tests/test_mapscene_quickstart.py
+?? tests/test_mapscene_render_png.py
+?? tests/test_mapscene_render_policy.py
+?? tests/test_mapscene_save_bundle.py
+?? tests/test_mapscene_support_status.py
+?? tests/test_mapscene_validation.py
+?? tests/test_mount_hood_white_cloud_timelapse.py
 ```
 
 The dirty workspace contains unrelated or pre-existing feature changes. Do not
@@ -1684,9 +2577,13 @@ revert them. Use LFS-filter-disabled status if default `git status` hits the
 ```text
 [$speckit-implement](C:\Users\milos\forge3d\.agents\skills\speckit-implement\SKILL.md)
 
-Continue feature `004-mapscene-mvp` from T004 MapScene validation report tests.
-Do not reopen feature `002-label-api-truth` unless new SpecKit tasks are
-created for deferred diagnostic outcomes. Do not claim MVP-wide completion
-while P0-R4 remains incomplete, and keep R-011 dirty worktree/change separation
-open before commit or PR.
+Implement only the remaining P0 label blockers P0-R1-AC2 and P0-R1-AC3:
+make `set_label_typography` mutate measurable native/layout state and make
+`set_declutter_algorithm` either change placement behavior or return an
+explicit unsupported typed error accepted by the PRD. Before coding, identify
+selected task IDs, why they form a coherent batch, PRD acceptance criteria
+covered, and verification commands. Preserve feature `004` R-029 native/offscreen
+render evidence plus source-derived compatibility output, keep P0-R4-AC2
+`Verified`, and keep R-011 dirty worktree/change separation open before commit
+or PR.
 ```

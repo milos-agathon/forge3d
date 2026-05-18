@@ -1,6 +1,6 @@
 # Contract: MapScene MVP
 
-Final module path is TBD. Public behavior:
+Public module path: `forge3d.map_scene`, re-exported from the top-level `forge3d` package. Public behavior:
 
 ```python
 scene = MapScene(
@@ -20,7 +20,7 @@ bundle_result = scene.save_bundle("map.forge3d")
 Contract rules:
 
 - `validate()` returns `ValidationReport` before render.
-- `render()` performs validation if needed and writes PNG only for supported non-blocked scenes.
+- `render()` performs validation if needed, prefers the native/offscreen PNG path for fixture-backed supported MVP scenes, records the concrete backend on `MapScene.last_render_backend`, and keeps deterministic source-derived compatibility output for symbolic fixture recipes.
 - Warning diagnostics continue by default; fail-on-warning blocks warnings; errors/fatals always block.
 - No implicit CRS transforms are applied.
 - `save_bundle()` writes deterministic review intent for supported layer types and preserves diagnostics.
