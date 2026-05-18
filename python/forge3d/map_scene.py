@@ -107,6 +107,9 @@ def _glyphs_from_atlas(glyph_atlas: Mapping[str, Any] | None) -> set[str] | None
 
 def _dimension_memory_bytes(metadata: Mapping[str, Any] | None, *, channels: int = 4) -> int | None:
     data = _metadata_dict(metadata)
+    explicit = _explicit_memory_bytes(data)
+    if explicit is not None:
+        return explicit
     width = data.get("width")
     height = data.get("height")
     if width is None or height is None:
@@ -121,6 +124,20 @@ def _dimension_memory_bytes(metadata: Mapping[str, Any] | None, *, channels: int
     if width_i <= 0 or height_i <= 0:
         return None
     return width_i * height_i * channels
+
+
+def _explicit_memory_bytes(metadata: Mapping[str, Any] | None) -> int | None:
+    data = _metadata_dict(metadata)
+    for key in ("memory_estimate_bytes", "estimated_memory_bytes", "gpu_memory_bytes"):
+        if key not in data:
+            continue
+        try:
+            value = int(data[key])
+        except (TypeError, ValueError):
+            continue
+        if value >= 0:
+            return value
+    return None
 
 
 def _point_cloud_memory_bytes(point_count: int | None) -> int | None:
@@ -458,6 +475,18 @@ def _p2_building_texture_diagnostics(
             )
             strongest_support = "placeholder/fallback"
 
+    if not diagnostics:
+        first_intent = details["textured_materials"][0]
+        diagnostics.append(
+            _unsupported_feature_diagnostic(
+                "building textured PBR render path",
+                layer_id=layer_id,
+                object_id=str(first_intent["object_id"]),
+            )
+        )
+        strongest_support = "unsupported"
+
+    details["textured_material_status"] = strongest_support or "unsupported"
     return diagnostics, details, strongest_support
 
 
@@ -501,6 +530,92 @@ def _p2_resource_availability_diagnostics(
             strongest_support = "unsupported"
 
     return diagnostics, details, strongest_support
+
+
+def _large_scene_resource_summary(
+    layer_summaries: Sequence[LayerSummary],
+    *,
+    estimated_memory: int | None,
+    diagnostics: Sequence[Diagnostic],
+) -> LayerSummary:
+    memory_estimates = [
+        {
+            "layer_id": summary.layer_id,
+            "layer_type": summary.layer_type,
+            "memory_estimate_bytes": int(summary.memory_estimate_bytes),
+        }
+        for summary in layer_summaries
+        if summary.memory_estimate_bytes is not None
+    ]
+    memory_estimates.sort(key=lambda item: (item["layer_id"], item["layer_type"]))
+
+    cache_lod_status: list[dict[str, Any]] = []
+    unavailable_stats: list[dict[str, Any]] = []
+    instancing_status: dict[str, Any] = {}
+    for summary in layer_summaries:
+        details = _metadata_dict(summary.details)
+        cache_lod: dict[str, Any] = {"layer_id": summary.layer_id, "layer_type": summary.layer_type}
+        has_cache_lod = False
+        for key in ("cache_stats", "cache_budget", "lod", "unavailable_cache_lod_stats"):
+            if key in details:
+                cache_lod[key] = _json_safe(details[key])
+                has_cache_lod = True
+        if has_cache_lod:
+            cache_lod_status.append(cache_lod)
+        if "unavailable_cache_lod_stats" in details:
+            unavailable_stats.append(
+                {
+                    "layer_id": summary.layer_id,
+                    "stats": sorted(str(item) for item in details["unavailable_cache_lod_stats"]),
+                }
+            )
+        if "instancing_status" in details:
+            instancing_status[summary.layer_id] = _json_safe(details["instancing_status"])
+        if summary.memory_estimate_bytes is None:
+            unavailable_stats.append({"layer_id": summary.layer_id, "stats": ["memory"]})
+
+    bottleneck_layers = [
+        {
+            "layer_id": item["layer_id"],
+            "layer_type": item["layer_type"],
+            "memory_estimate_bytes": item["memory_estimate_bytes"],
+        }
+        for item in sorted(
+            memory_estimates,
+            key=lambda value: (-int(value["memory_estimate_bytes"]), value["layer_type"], value["layer_id"]),
+        )
+        if int(item["memory_estimate_bytes"]) > 0
+    ]
+    bottleneck_layer_types: list[str] = []
+    for item in bottleneck_layers:
+        layer_type = str(item["layer_type"])
+        if layer_type not in bottleneck_layer_types:
+            bottleneck_layer_types.append(layer_type)
+
+    diagnostic_codes = sorted({diagnostic.code for diagnostic in diagnostics})
+    if any(diagnostic.code == "unsupported_instancing_path" for diagnostic in diagnostics):
+        support_level = "unsupported"
+    elif unavailable_stats or any(diagnostic.code == "unavailable_cache_lod_stats" for diagnostic in diagnostics):
+        support_level = "underdeveloped"
+    else:
+        support_level = "supported"
+
+    return LayerSummary(
+        layer_id="large_scene.resources",
+        layer_type="large_scene_resource_summary",
+        support_level=support_level,
+        diagnostic_codes=diagnostic_codes,
+        memory_estimate_bytes=estimated_memory,
+        details={
+            "memory_estimates": memory_estimates,
+            "total_estimated_gpu_memory_bytes": estimated_memory,
+            "cache_lod_status": sorted(cache_lod_status, key=lambda item: item["layer_id"]),
+            "instancing_status": instancing_status,
+            "unavailable_stats": sorted(unavailable_stats, key=lambda item: item["layer_id"]),
+            "bottleneck_layers": bottleneck_layers,
+            "bottleneck_layer_types": bottleneck_layer_types,
+        },
+    )
 
 
 def _source_kind(source: Any, metadata: Mapping[str, Any] | None) -> str | None:
@@ -888,11 +1003,25 @@ def _composite_recipe_layers(
     for layer in recipe.layers:
         layer_id = _layer_id(layer, "layer")
         if isinstance(layer, RasterOverlay) and include_raster:
-            color = np.array(_rgb(layer.to_dict(), salt="raster"), dtype=np.uint8)
-            alpha = max(0.0, min(1.0, float(layer.opacity))) * 0.45
-            mask = ((xx + yy + _hash_int(layer.to_dict(), salt="raster-mask")) % 5) < 3
-            blended = (base[..., :3].astype(np.float32) * (1.0 - alpha) + color * alpha).astype(np.uint8)
-            base[..., :3] = np.where(mask[..., None], blended, base[..., :3])
+            overlay = _load_native_raster_overlay(layer)
+            alpha = max(0.0, min(1.0, float(layer.opacity)))
+            if overlay is not None:
+                src_h, src_w = overlay.shape[:2]
+                sample_y = np.clip((yy * src_h // max(height, 1)), 0, src_h - 1)
+                sample_x = np.clip((xx * src_w // max(width, 1)), 0, src_w - 1)
+                sampled = overlay[sample_y, sample_x]
+                sampled_alpha = (sampled[..., 3:4].astype(np.float32) / 255.0) * alpha
+                blended = (
+                    base[..., :3].astype(np.float32) * (1.0 - sampled_alpha)
+                    + sampled[..., :3].astype(np.float32) * sampled_alpha
+                )
+                base[..., :3] = np.clip(blended, 0.0, 255.0).astype(np.uint8)
+            else:
+                color = np.array(_rgb(layer.to_dict(), salt="raster"), dtype=np.uint8)
+                fallback_alpha = alpha * 0.45
+                mask = ((xx + yy + _hash_int(layer.to_dict(), salt="raster-mask")) % 5) < 3
+                blended = (base[..., :3].astype(np.float32) * (1.0 - fallback_alpha) + color * fallback_alpha).astype(np.uint8)
+                base[..., :3] = np.where(mask[..., None], blended, base[..., :3])
         elif isinstance(layer, VectorOverlay):
             color = _rgb(layer.to_dict(), salt="vector")
             for feature in layer.features or ():
@@ -1056,7 +1185,7 @@ def _render_native_offscreen_rgba(recipe: "SceneRecipe", plans: Mapping[str, Any
     if rgba.dtype != np.uint8:
         rgba = rgba.astype(np.uint8)
     base = np.ascontiguousarray(rgba.copy())
-    return _composite_recipe_layers(base, recipe, plans, include_raster=False, include_point_cloud=False)
+    return _composite_recipe_layers(base, recipe, plans, include_raster=True, include_point_cloud=False)
 
 
 @dataclass
@@ -2126,6 +2255,25 @@ class MapScene:
             )
 
         terrain_support_level = "supported"
+        terrain_details = {
+            "crs": scene_crs,
+            "elevation_sampling_available": bool(terrain.elevation_sampling_available),
+            "path": terrain.path,
+        }
+        terrain_resource_diagnostics, terrain_resource_details, terrain_resource_support = (
+            _p2_resource_availability_diagnostics(
+                terrain.metadata,
+                layer_id="terrain",
+                layer_type="terrain_source",
+            )
+        )
+        if terrain_resource_diagnostics:
+            diagnostics.extend(terrain_resource_diagnostics)
+            terrain_details.update(terrain_resource_details)
+            if any(diagnostic.code == "unavailable_cache_lod_stats" for diagnostic in terrain_resource_diagnostics):
+                unsupported_features["terrain.cache_lod_stats"] = "underdeveloped"
+            if terrain_resource_support == "underdeveloped":
+                terrain_support_level = "underdeveloped"
         if not _has_identity_path_or_metadata(terrain.path, terrain.metadata):
             diagnostics.append(
                 _missing_source_identity_diagnostic(
@@ -2160,11 +2308,7 @@ class MapScene:
                 support_level=terrain_support_level,
                 diagnostic_codes=_diagnostic_codes_for_layer(diagnostics, "terrain"),
                 memory_estimate_bytes=terrain_memory,
-                details={
-                    "crs": scene_crs,
-                    "elevation_sampling_available": bool(terrain.elevation_sampling_available),
-                    "path": terrain.path,
-                },
+                details=terrain_details,
             )
         )
         supported_features["layer.terrain"] = "supported"
@@ -2356,6 +2500,7 @@ class MapScene:
             elif isinstance(layer, Tiles3DLayer):
                 layer_type = "tiles3d_layer"
                 object_count = None
+                layer_memory = _explicit_memory_bytes(layer.metadata)
                 source_path = _source_path(layer.source)
                 source_kind = _source_kind(layer.source, layer.metadata)
                 details = {
@@ -2486,9 +2631,10 @@ class MapScene:
                     layer.metadata,
                     layer_id=layer_id,
                 )
+                if texture_details:
+                    details.update(texture_details)
                 if texture_diagnostics:
                     layer_diagnostics.extend(texture_diagnostics)
-                    details.update(texture_details)
                     if any(diagnostic.code == "missing_texture_path" for diagnostic in texture_diagnostics):
                         unsupported_features["buildings.missing_texture_path"] = "unsupported"
                     if any(diagnostic.code == "missing_uvs" for diagnostic in texture_diagnostics):
@@ -2497,6 +2643,8 @@ class MapScene:
                         unsupported_features["buildings.unsupported_texture_format"] = "unsupported"
                     if any(diagnostic.code == "placeholder_fallback" for diagnostic in texture_diagnostics):
                         unsupported_features["buildings.textured_material_fallback"] = "placeholder/fallback"
+                    if any(diagnostic.code == "unsupported_feature" for diagnostic in texture_diagnostics):
+                        unsupported_features["buildings.textured_pbr"] = "unsupported"
                     if texture_support == "unsupported":
                         support_level = "unsupported"
                     elif texture_support == "placeholder/fallback" and support_level not in {"unsupported", "Pro-gated"}:
@@ -2558,6 +2706,15 @@ class MapScene:
                     estimated_memory,
                     budget,
                     layer_id="scene",
+                )
+            )
+
+        if bool(diagnostics_policy.get("large_scene_summary")):
+            layer_summaries.append(
+                _large_scene_resource_summary(
+                    layer_summaries,
+                    estimated_memory=estimated_memory,
+                    diagnostics=diagnostics,
                 )
             )
 

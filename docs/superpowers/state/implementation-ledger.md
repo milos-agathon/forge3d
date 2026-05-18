@@ -3,11 +3,82 @@
 Source PRD: `docs/superpowers/plans/prd.md`  
 Constitution: `.specify/memory/constitution.md` v1.0.3  
 SpecKit playbook: `docs/superpowers/plans/speckit-playbook.md`  
-Current feature: `005-map-assets-bundles-p1` P1 remediation complete and global P0 label blockers resolved; only workspace hygiene blocker R-036/R-011 remains before commit/PR
+Current feature: `006-material-vt-large-scene-p2` Milestone 5 implemented/diagnosed with full P2 verification passing; active branch pointer still remains on feature `005`
 Current SpecKit feature directory: `specs/005-map-assets-bundles-p1`; `.specify/feature.json` / prerequisite script now resolve to feature `005`
 Current git branch: `005-map-assets-bundles-p1`
 Last known commit: `a864985`  
 Last updated: 2026-05-18
+
+## 2026-05-18 Feature 006 Milestone 5: Material, VT, Advanced Labels, And Large-Scene Polish
+
+Target feature: `specs/006-material-vt-large-scene-p2`.
+
+Scope completed:
+- VT normal/mask runtime gap remains explicitly diagnosed before render with
+  deterministic `vt_unsupported_family` affected IDs (`vt.normal`, `vt.mask`);
+  albedo-only VT remains valid.
+- Textured PBR building intent is not rendered end to end; `MapScene.validate`
+  now reports explicit unsupported textured-PBR render-path diagnostics for
+  texture+UV intent, and missing texture path, missing UVs, unsupported format,
+  scalar fallback, and Pro-gated cases remain structured and render-blocking.
+- `LabelPlan.compile()` now supports deterministic repeated line-label
+  candidates, cartographic priority presets, road/line placement metadata, and
+  leader-line candidate metadata. Curved path text and complex-script shaping
+  are non-MVP-blocking diagnostic deferrals through `experimental_feature`.
+- Large-scene diagnostics are available through opt-in
+  `diagnostics_policy={"large_scene_summary": True}` and normalize memory
+  estimates, cache/LOD availability, instancing status, unavailable stats, and
+  deterministic bottleneck layer types into `large_scene.resources`.
+- P2 support docs now include exact VT/building/label/large-scene support
+  boundaries and avoid parity claims with Blender, Unreal, Cesium, Mapbox GL,
+  hosted streaming, or web-first engines.
+
+RED evidence captured before implementation:
+- P2 docs group:
+  `PYTHONPATH=python python -m pytest tests\test_p2_vt_docs.py tests\test_p2_building_texture_docs.py tests\test_p2_large_scene_docs.py tests\test_p2_support_docs.py -q`
+  reported `8 failed` before docs updates.
+- Building texture group:
+  `PYTHONPATH=python python -m pytest tests\test_p2_textured_building_mapscene.py tests\test_p2_building_texture_diagnostics.py -q`
+  reported `4 failed` before MapScene texture diagnostics were tightened.
+- Advanced label group:
+  `PYTHONPATH=python python -m pytest tests\test_p2_advanced_labels_repeated_curved.py tests\test_p2_advanced_label_rules.py tests\test_p2_complex_shaping_decision.py -q`
+  reported `5 failed, 1 passed` before `LabelPlan` advanced behavior and
+  diagnostics were added.
+- Large-scene group:
+  `PYTHONPATH=python python -m pytest tests\test_p2_large_scene_memory.py tests\test_p2_large_scene_cache_lod_instancing.py tests\test_p2_large_scene_bottlenecks.py -q`
+  reported `5 failed` before `large_scene.resources` summaries existed.
+
+GREEN verification:
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests\test_p2_diagnostics_contract.py tests\test_p2_vt_family_validation.py tests\test_p2_vt_docs.py tests\test_p2_textured_building_mapscene.py tests\test_p2_building_texture_diagnostics.py tests\test_p2_building_texture_docs.py tests\test_p2_advanced_labels_repeated_curved.py tests\test_p2_advanced_label_rules.py tests\test_p2_complex_shaping_decision.py tests\test_p2_large_scene_memory.py tests\test_p2_large_scene_cache_lod_instancing.py tests\test_p2_large_scene_bottlenecks.py tests\test_p2_large_scene_docs.py tests\test_p2_determinism_noop.py tests\test_p2_support_docs.py tests\test_p2_quickstart.py -q
+```
+
+Observed on latest rerun: `35 passed in 0.93s`.
+
+Additional verification:
+
+```powershell
+$env:PYTHONPATH='python'; python -m py_compile python\forge3d\map_scene.py python\forge3d\label_plan.py python\forge3d\terrain_params.py tests\test_p2_diagnostics_contract.py tests\test_p2_vt_family_validation.py tests\test_p2_vt_docs.py tests\test_p2_textured_building_mapscene.py tests\test_p2_building_texture_diagnostics.py tests\test_p2_building_texture_docs.py tests\test_p2_advanced_labels_repeated_curved.py tests\test_p2_advanced_label_rules.py tests\test_p2_complex_shaping_decision.py tests\test_p2_large_scene_memory.py tests\test_p2_large_scene_cache_lod_instancing.py tests\test_p2_large_scene_bottlenecks.py tests\test_p2_large_scene_docs.py tests\test_p2_determinism_noop.py tests\test_p2_support_docs.py tests\test_p2_quickstart.py
+```
+
+Observed: exit `0`.
+
+State updates:
+- `specs/006-material-vt-large-scene-p2/tasks.md` now marks T004-T031 `[X]`
+  with RED/GREEN evidence and continuity-update evidence.
+- `docs/superpowers/state/requirements-verification-matrix.md` now records P2
+  rows as `Verified` or `Deferred with diagnostic` according to actual
+  evidence.
+- `docs/superpowers/state/open-blockers.md` marks R-012, R-013, and R-014
+  mitigated for Milestone 5.
+
+Residual notes:
+- VT normal/mask and textured PBR building rendering are diagnostic deferrals,
+  not native runtime implementations.
+- Curved text rendering and complex-script shaping are diagnostic deferrals.
+- Large-scene summaries are opt-in to avoid changing existing MapScene summary
+  contracts unexpectedly.
 
 ## 2026-05-18 Feature 002 P0 Label Blocker Remediation
 
@@ -2797,7 +2868,7 @@ Five PRD-aligned default clarifications were recorded in the current spec:
 | Continuity state read | Done |
 | Extension hooks checked | Done; before/after clarify commit hooks are optional and were not executed |
 | Feature `005` spec | Clarified and revalidated at `specs/005-map-assets-bundles-p1/spec.md` |
-| Requirements matrix | Feature `001` P0-R5/P0-R6 rows are `Verified`; feature `002` P0-R1-AC1 through P0-R1-AC6 and P0-R2-AC1 through P0-R2-AC6 are `Verified`; feature `003` P0-R3-AC1 through P0-R3-AC8 are `Verified`; feature `004` P0-R4-AC1 through P0-R4-AC8 are `Verified`; feature `005` P1-R1 through P1-R5 acceptance rows are `Verified`; P2 rows remain planned in later feature directories. |
+| Requirements matrix | Feature `001` P0-R5/P0-R6 rows are `Verified`; feature `002` P0-R1-AC1 through P0-R1-AC6 and P0-R2-AC1 through P0-R2-AC6 are `Verified`; feature `003` P0-R3-AC1 through P0-R3-AC8 are `Verified`; feature `004` P0-R4-AC1 through P0-R4-AC8 are `Verified`; feature `005` P1-R1 through P1-R5 acceptance rows are `Verified`; feature `006` P2-R1 and P2-R4 rows are `Verified`, P2-R2 textured runtime rows are `Deferred with diagnostic`, and P2-R3 curved/shaping rows are `Deferred with diagnostic`. |
 | Feature `005` research inventory | Created at `specs/005-map-assets-bundles-p1/research.md` |
 | Feature `002` research inventory | Created at `specs/002-label-api-truth/research.md` |
 | Feature `003` research inventory | Created at `specs/003-deterministic-label-plan/research.md` |
@@ -2812,8 +2883,8 @@ Five PRD-aligned default clarifications were recorded in the current spec:
 | Feature `005` hostile plan review | Completed; `plan.md` amended to remove red review findings, document accepted yellow risks, and lock the exact PRD Section 11 API surface |
 | Feature `005` task coverage audit | Completed; `tasks.md` now records typed P0 dependency diagnostics, all-public-API docs/support coverage, and a detailed coverage audit table |
 | Feature `006` technical plan | Created with plan, data model, contract, quickstart, and research decisions |
-| Code implementation | Feature `001` diagnostics/support-matrix implementation completed through T035; feature `002` T001-T018 completed stable public create responses, high-level configuration diagnostics/state no-op handling, line glyph placement/rotation plus curved/terrain diagnostics, docs/support wording, quickstart/example smoke coverage, matrix update, and continuity update; feature `003` T001-T024 completed deterministic `LabelPlan` models, rejection reasons, point/polygon candidates, terrain sampling, keepouts, priority solving, payloads, docs, quickstart, matrix update, and continuity update; feature `004` T001-T029 plus R-029 remediation completed typed MapScene construction, validation, LabelPlan integration, native/offscreen PNG rendering for fixture-backed MVP scenes, source-derived compatibility output, review-bundle source metadata, canonical examples, quickstart, docs/support audit, matrix update, and continuity update. |
-| Product verification tests | Feature `001` completion-review command reported `63 passed`; feature `002` full label command reported `28 passed`; feature `003` full T022 LabelPlan command reported `29 passed`; feature `004` focused native/render docs/examples command reported `23 passed` and full MapScene command reported `48 passed` with P0-R4-AC2 verified. |
+| Code implementation | Feature `001` diagnostics/support-matrix implementation completed through T035; feature `002` T001-T018 completed stable public create responses, high-level configuration diagnostics/state no-op handling, line glyph placement/rotation plus curved/terrain diagnostics, docs/support wording, quickstart/example smoke coverage, matrix update, and continuity update; feature `003` T001-T024 completed deterministic `LabelPlan` models, rejection reasons, point/polygon candidates, terrain sampling, keepouts, priority solving, payloads, docs, quickstart, matrix update, and continuity update; feature `004` T001-T029 plus R-029 remediation completed typed MapScene construction, validation, LabelPlan integration, native/offscreen PNG rendering for fixture-backed MVP scenes, source-derived compatibility output, review-bundle source metadata, canonical examples, quickstart, docs/support audit, matrix update, and continuity update; feature `005` T001-T069 completed P1 labels/buildings/3D Tiles/bundle scope; feature `006` T001-T031 completed Milestone 5 implemented-or-diagnosed P2 scope. |
+| Product verification tests | Feature `001` completion-review command reported `63 passed`; feature `002` full label command reported `28 passed`; feature `003` full T022 LabelPlan command reported `29 passed`; feature `004` focused native/render docs/examples command reported `23 passed` and full MapScene command reported `48 passed` with P0-R4-AC2 verified; feature `005` P1 command reported `51 passed`; feature `006` full P2 command reported `35 passed in 0.93s`. |
 
 Follow-up `/speckit.clarify` review on 2026-05-15 rechecked the current
 feature spec against the PRD, constitution, and continuity artifacts. No

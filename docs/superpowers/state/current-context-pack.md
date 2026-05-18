@@ -17,15 +17,23 @@ symbolic fixture recipes, and diagnostic-bearing unsupported layer paths.
 ## Current SpecKit Feature
 
 Active implementation target for this checkpoint:
-`specs/005-map-assets-bundles-p1`.
+`specs/006-material-vt-large-scene-p2` Milestone 5, while the git branch and
+SpecKit pointer still remain on feature `005`.
 
 SpecKit pointer status: `.specify/feature.json` now targets
 `specs/005-map-assets-bundles-p1`, and the prerequisite script now resolves
 feature `005` for implementation commands.
 
-Feature `006-material-vt-large-scene-p2` is the next P2 blocker target by
-open-blocker dependency order, but the active SpecKit pointer has not been
-moved from feature `005` in this checkpoint.
+Feature `006-material-vt-large-scene-p2` Milestone 5 is now implemented or
+explicitly diagnosed through T029. The active SpecKit pointer has not been moved
+from feature `005`, so future `/speckit.implement` prerequisite scripts may
+still resolve to `005` unless the pointer is changed deliberately.
+
+Independent feature `006` PRD compliance audit on 2026-05-18 reran the focused
+P2 command and observed `35 passed in 0.97s`; `py_compile` for the changed P2
+modules/tests exited `0`. Per human direction on 2026-05-18, the deleted
+canonical MapScene examples / P0-R4-AC8 issue is not tracked as a blocker for
+this checkpoint.
 
 Feature `004` task execution remains complete through T029, and R-029 remains
 remediated with native/offscreen fixture-backed render evidence.
@@ -65,19 +73,25 @@ R-036/R-011 are mitigated for PR hygiene by staging only intended
 feature/blocker-scope changes and leaving unrelated/generated/user-owned paths
 unstaged. R-037 is mitigated because the global P0 label rows are now verified.
 
-Feature `006-material-vt-large-scene-p2`: T001 is now marked `[X]`. This was
-an inspection-only gate for `[P2-R1-AC1] [P2-R2-AC1] [P2-R3-AC1]
-[P2-R4-AC1]`; no product code changed and no P2 acceptance row moved to green.
-The required inspection command found concrete P0/P1 extension paths:
-`python/forge3d/map_scene.py` for `MapScene` validation/bundle/layer summaries,
-`python/forge3d/diagnostics.py` for `Diagnostic` and `ValidationReport`,
-`python/forge3d/label_plan.py` for `LabelPlan.compile`,
-`python/forge3d/terrain_params.py` plus native VT files for albedo-only VT
-runtime, building texture substrate in `python/forge3d/buildings.py`,
-`python/forge3d/textures.py`, `python/forge3d/materials.py`, `src/io/gltf_read.rs`,
-and `src/io/obj_read.rs`, and fragmented large-scene stats in point-cloud,
-3D Tiles, geometry, instancing, and terrain renderer paths. R-012, R-013, and
-R-014 remain open for feature `006` implementation.
+Feature `006-material-vt-large-scene-p2`: T001-T031 are now marked `[X]`.
+T004/T005 keep VT normal/mask as deterministic `vt_unsupported_family`
+diagnostic deferrals with `vt.normal`/`vt.mask` affected IDs. T006/T007 update
+VT docs. T008-T012 add textured building tests/docs and explicit unsupported
+diagnostics for texture+UV intent, missing texture path, missing UVs,
+unsupported texture format, scalar fallback, and Pro-gated textured paths.
+T013-T018 add deterministic repeated line-label placement, cartographic priority
+presets, leader-line candidate metadata, and diagnostic deferrals for curved
+labels and complex-script shaping. T019-T024 add opt-in `large_scene.resources`
+summaries plus large-scene docs. T025-T028 add determinism/no-op and quickstart
+coverage. T029 full P2 verification reported `35 passed in 0.93s` on the
+latest rerun. T030 updated the requirements verification matrix and diagnostic
+inventory; T031 updated the implementation ledger, current context pack, and
+open-blockers state.
+
+Current P2 status: P2-R1 and P2-R4 rows are `Verified`; P2-R2 texture runtime
+rows are `Deferred with diagnostic` where end-to-end textured PBR rendering is
+still unsupported; P2-R3 repeated/rules rows are `Verified`, while curved text
+and complex-script shaping are `Deferred with diagnostic`.
 
 Feature `006` T002 and T003 are now marked `[X]`. T002 added
 `tests/test_p2_diagnostics_contract.py`; RED verification reported `4 failed`
@@ -90,7 +104,9 @@ for `missing_texture_path`, `missing_uvs`, `unsupported_texture_format`,
 and `python/forge3d/__init__.pyi`, and wired metadata adapters in
 `python/forge3d/map_scene.py`. GREEN verification reported P2 diagnostics
 `4 passed`, focused P1 regression `15 passed`, and product/test `py_compile`
-exit `0`. No P2 acceptance row is complete yet.
+exit `0`. Later T004-T031 completed the Milestone 5 scope, so the P2
+acceptance rows now use `Verified` or `Deferred with diagnostic` according to
+the current matrix.
 
 Feature `005` now has verified evidence for:
 - Label ingestion: point/line/polygon candidates, CRS transform through
@@ -176,10 +192,10 @@ Feature `005`:
   `$env:PYTHONPATH='python'; python -m pytest tests\test_p1_label_layer_geometry.py -q`
   -> RED `4 failed`, then GREEN `4 passed in 0.18s` after implementation.
 
-P2 rows remain planned in later feature directories. Feature `006` T001-T003
-dependency/diagnostic foundation is complete, but P2-R1 through P2-R4 remain
-`Planned` until VT, textured-building fixture, large-scene, docs, quickstart,
-and full P2 verification tasks exist.
+Historical note: Feature `006` T001-T003 completed the dependency/diagnostic
+foundation first. The later Milestone 5 pass completed T004-T031, so P2-R1
+through P2-R4 are no longer planned-only; the current matrix records verified
+and diagnostic-deferred outcomes.
 
 Independent feature `004` PRD compliance audit refresh and R-029 remediation on 2026-05-17:
 - Fresh command:
@@ -933,13 +949,11 @@ New/updated feature `004` paths from the T019-T021 closure checkpoint include:
   reported full label command `28 passed in 2.37s`, focused Rust command `1 passed`,
   `cargo check -q` exit `0`, `cargo fmt -- --check` exit `0`, and Python
   `py_compile` exit `0`.
-- R-012/R-013/R-014: still open for feature `006`. T001 confirmed extension
-  paths and no missing P0/P1 foundation. T002/T003 added typed P2 diagnostic
-  factories and MapScene metadata adapters for building texture, cache/LOD
-  unavailability, and unsupported instancing, narrowing R-013/R-014. VT
-  normal/mask no-silent-skip tests remain T004/T005; textured building fixtures,
-  full large-scene summaries, docs, quickstart, and full P2 verification remain
-  unimplemented.
+- R-012/R-013/R-014: mitigated in feature `006` by focused P2 tests/docs and
+  diagnostic-bearing implementation. VT normal/mask remain unsupported
+  diagnostic deferrals, textured PBR buildings remain unsupported diagnostic
+  deferrals, and large-scene summaries are opt-in via
+  `diagnostics_policy={"large_scene_summary": True}`.
 - Feature `004` 2026-05-18 audit found no new P0-R4 blocker; keep the
   diagnostic-bearing/later-owned scope boundaries listed above explicit in any
   follow-up docs or PR text.
@@ -982,10 +996,8 @@ New/updated feature `004` paths from the T019-T021 closure checkpoint include:
 ```text
 [$speckit-implement](C:\Users\milos\forge3d\.agents\skills\speckit-implement\SKILL.md)
 
-Feature `006-material-vt-large-scene-p2` T001-T003 are complete. Continue with
-the next incomplete task group only: T004 `[P] [P2-R1-AC1] [P2-R1-AC2]
-[P2-R1-AC3]` VT family validation and no-silent-skip tests, then T005
-implementation only after T004 has RED evidence. Keep existing staged feature
-`005-map-assets-bundles-p1` scope intact and leave unrelated/generated
-unstaged paths alone.
+Feature `006-material-vt-large-scene-p2` has focused P2 verification evidence.
+Continue only with requested follow-up scope. Keep unrelated/generated paths
+separated; P2 diagnostic deferrals for VT normal/mask, textured PBR buildings,
+curved text, and complex-script shaping remain intentional documented outcomes.
 ```

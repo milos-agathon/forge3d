@@ -27,6 +27,7 @@ data loading, cartography, export, and the runnable examples in ``examples/``.
    guides/building_support_matrix
    guides/tiles3d_support_matrix
    guides/virtual_texturing_support_matrix
+   guides/large_scene_support
    guides/competitive_positioning
    guides/data_and_scene_workflows
    guides/rendering_and_analysis

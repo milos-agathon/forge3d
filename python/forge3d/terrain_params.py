@@ -1358,7 +1358,11 @@ def validate_terrain_vt_support(
 
     effective_layer_id = layer_id or "terrain.vt"
     diagnostics = [
-        vt_unsupported_family_diagnostic(layer.family, layer_id=effective_layer_id)
+        vt_unsupported_family_diagnostic(
+            layer.family,
+            layer_id=effective_layer_id,
+            object_id=f"vt.{layer.family}",
+        )
         for layer in settings.layers
         if layer.family != "albedo"
     ]
@@ -1379,7 +1383,7 @@ def validate_terrain_vt_support(
         ],
         supported_features={"vt.albedo": "supported"},
         unsupported_features={
-            f"vt.{layer.family}": "missing"
+            f"vt.{layer.family}": "unsupported"
             for layer in settings.layers
             if layer.family != "albedo"
         },

@@ -22,10 +22,13 @@ deterministic review bundles.
 | `MapScene.save_bundle` review bundle | `underdeveloped` | Writes deterministic review metadata, recipe intent, validation report, label plans, and label source references. Blocking diagnostics are preserved and marked non-renderable. |
 | Deterministic LabelPlan | `supported` | `LabelPlan.compile` produces stable accepted/rejected labels, diagnostics, bounds, seed, and render/export payloads for fixed inputs. |
 | Unsupported-path validation | `underdeveloped` | `Pro-gated`, `placeholder/fallback`, `experimental`, `unsupported`, and incomplete integration paths must remain diagnostic-bearing. |
+| Material, VT, and large-scene polish | `underdeveloped` | P2 gaps are diagnosed before render: VT normal/mask as `vt_unsupported_family`, textured building material intent through texture/UV/fallback diagnostics, and large scenes through memory/cache/LOD/instancing summaries. |
 | Web-first hosted tile delivery | `non-goal` | Offline map production remains the scope. |
 
 Unsupported, `Pro-gated`, `placeholder/fallback`, `experimental`, or
 `underdeveloped` paths must be reported before successful render completion.
+The current product does not render textured PBR buildings end to end; scalar
+fallback is not textured PBR support and must remain diagnostic-bearing.
 
 `MapScene.render("map.png")` performs validation if needed and writes PNG output
 for supported terrain/raster/vector/label recipes. Real `.npy` terrain and PNG
@@ -65,4 +68,5 @@ Use the linked guides as the support contract for MVP review:
 - `guides/building_support_matrix`
 - `guides/tiles3d_support_matrix`
 - `guides/virtual_texturing_support_matrix`
+- `guides/large_scene_support`
 - `guides/competitive_positioning`

@@ -14,6 +14,8 @@
 | Upside-down line handling | `supported` | Reverse line paths are normalized so glyph rotations stay upright, with `upside_down_adjusted` recorded per glyph. | Documentation boundary; no diagnostic for supported flat line handling. |
 | Terrain-elevated line labels | `experimental` | Terrain sampling is not owned by feature `002`; requests such as `terrain_mode="sample"` return diagnostics instead of silently flattening. | `experimental_feature`. |
 | Deterministic LabelPlan | `supported` | `LabelPlan.compile(...)` produces deterministic accepted/rejected plan data, point and polygon candidates, terrain-aware point elevations where sampled, keepout and priority rejection details, and render/export payloads. | `missing_glyphs`, `label_rejection_summary`; unsupported backends return `placeholder_fallback`. |
+| Advanced repeated line labels | `underdeveloped` | P2 product planning adds deterministic repeat-distance output where line geometry can be compiled; unavailable render integration remains diagnosed before render. | `experimental_feature` or `label_rejection_summary` where applicable. |
+| Advanced curved labels and complex-script shaping | `experimental` | Curved path text and HarfBuzz-compatible shaping are non-MVP-blocking unless prioritized with end-to-end tests. They must be diagnosed before render rather than treated as silent success. | `experimental_feature`. |
 
 The feature `002` public workflow uses high-level `ViewerHandle` methods and
 does not require raw IPC for basic label creation, configuration, line labels,
