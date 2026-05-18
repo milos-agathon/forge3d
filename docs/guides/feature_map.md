@@ -16,6 +16,7 @@ organized by workflow rather than by Rust module layout.
 | Camera automation | `forge3d.animation`, `forge3d.camera_rigs` | `camera_animation_demo.py`, `terrain_camera_rigs_demo.py` |
 | Terrain quality controls | `terrain_params`, `presets`, `terrain_scatter` | `terrain_atmosphere_path_demo.py`, `pnoa_river_showcase_video.py` |
 | Native/offscreen rendering | `Scene`, `Session`, `TerrainRenderer`, `render_offline` | `terrain_atmosphere_path_demo.py`, `triangle_png.py` |
+| Typed map scenes | `MapScene`, `LabelLayer`, `MapSceneBuildingLayer`, `Tiles3DLayer`, `MapScene.save_bundle`, `MapScene.load_bundle` | `mapscene_terrain_raster.py`, `mapscene_vector_labels.py`, `mapscene_buildings_labels.py` |
 | Geometry, mesh, vector, SDF, path tracing | `geometry`, `mesh`, `vector`, `sdf`, `path_tracing` | API-level usage; not every module has a dedicated showcase script |
 | Device and memory diagnostics | `has_gpu`, `device_probe`, `mem` | diagnostics and tooling flows rather than gallery scripts |
 
@@ -39,6 +40,12 @@ The main package surface splits naturally into a few groups:
 - Terrain and asset loading: `forge3d.datasets`, `forge3d.crs`, `forge3d.cog`, `forge3d.pointcloud`, `forge3d.tiles3d`
 - Production-oriented scene assets: `forge3d.buildings`, `forge3d.style`, `forge3d.bundle`, `forge3d.map_plate`, `forge3d.export`
 - Lower-level rendering and geometry: `forge3d.geometry`, `forge3d.io`, `forge3d.mesh`, `forge3d.vector`, `forge3d.sdf`, `forge3d.path_tracing`, `forge3d.lighting`
+
+`forge3d.map_scene` is the typed offline map-production surface. P1 asset
+adapters such as `LabelLayer`, `MapSceneBuildingLayer`, and `Tiles3DLayer` are
+`underdeveloped` until their feature `005` story tests complete, and unsupported
+or incomplete paths must remain diagnostic-bearing rather than silently
+renderable.
 
 ## What The Examples Directory Actually Covers
 

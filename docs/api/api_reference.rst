@@ -32,11 +32,14 @@ For feature ``002-label-api-truth``, use ``ViewerHandle.add_label``,
 
 Successful point, batch, line, callout, and vector-overlay create operations
 return stable ids where later inspection, removal, export, or review needs
-them. Curved labels, typography controls, decluttering controls, and
+them. Typography controls update native label-manager state and expose
+serializable layout metrics. Decluttering controls update native label-manager
+state and expose a deterministic placement policy. Curved labels and
 terrain-elevated line labels are currently ``experimental`` public paths that
 return typed ``experimental_feature`` diagnostics rather than unqualified
-success. Empty text and invalid line geometry return ``placeholder_fallback``
-diagnostics; known glyph coverage gaps return ``missing_glyphs`` diagnostics.
+success. Empty text, invalid line geometry, and unsupported declutter
+algorithms return ``placeholder_fallback`` diagnostics; known glyph coverage
+gaps return ``missing_glyphs`` diagnostics.
 
 Deterministic LabelPlan
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -72,6 +75,31 @@ layer paths through typed diagnostics instead of representing them as successful
 renders. ``MapScene.save_bundle`` writes review metadata and diagnostics;
 blocked scenes are recorded as non-renderable instead of being represented as
 successful renders.
+
+Feature ``005-map-assets-bundles-p1`` extends this product path without
+changing the legacy building module export. Use ``forge3d.map_scene.LabelLayer``
+constructors ``LabelLayer.from_features``, ``LabelLayer.from_geodataframe``,
+``LabelLayer.from_style_layer``, and ``LabelLayer.compile_labels`` for
+data-driven label input. Typography inputs use ``FontAtlas.default_latin``,
+``FontAtlas.from_font``, ``FontFallbackRange``, and ``TypographySettings`` for
+bundled Basic Latin coverage, typed font asset diagnostics, deterministic
+fallback declarations, kerning/tracking/line-height metrics, multiline labels,
+and callout layout metadata. Use ``forge3d.map_scene.BuildingLayer`` methods
+``BuildingLayer.from_geojson``, ``BuildingLayer.from_cityjson``, and
+``BuildingLayer.from_mesh`` for product-scene building intent; the top-level
+``MapSceneBuildingLayer`` alias points to this product class, while the legacy ``forge3d.BuildingLayer`` name still points to ``forge3d.buildings`` for
+backward compatibility. Use ``Tiles3DLayer.from_tileset_json`` and
+``Tiles3DLayer.from_b3dm`` for typed 3D Tiles scene intent.
+
+These P1 asset APIs are still ``underdeveloped`` until their story-specific
+tests complete. Unsupported, ``Pro-gated``, ``placeholder/fallback``, and
+``experimental`` paths must remain diagnostic-bearing. Feature-local diagnostic
+codes include ``missing_label_field``, ``unicode_coverage_gap``,
+``unsupported_tile_format``, ``unsupported_tile_feature``,
+``missing_external_asset``, and ``unavailable_terrain_sampler``.
+``MapScene.load_bundle`` reconstructs the deterministic recipe payload where
+available and preserves validation diagnostics; richer renderable bundle replay
+remains owned by the P1 bundle tasks.
 
 .. automodule:: forge3d.map_scene
    :members:

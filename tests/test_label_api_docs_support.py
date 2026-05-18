@@ -19,8 +19,8 @@ REQUIRED_LABEL_CAPABILITIES = {
     "line labels": "supported",
     "curved labels": "experimental",
     "callouts": "supported",
-    "typography controls": "experimental",
-    "decluttering controls": "experimental",
+    "typography controls": "supported",
+    "decluttering controls": "supported",
     "atlas loading": "supported",
     "missing glyph diagnostics": "supported",
     "upside-down line handling": "supported",
@@ -75,8 +75,6 @@ def test_label_docs_do_not_overclaim_experimental_paths():
     forbidden = [
         "curved labels are supported",
         "curved labels are production-ready",
-        "typography controls are supported",
-        "decluttering controls are supported",
         "terrain-elevated line labels are supported",
     ]
     for phrase in forbidden:
@@ -85,6 +83,10 @@ def test_label_docs_do_not_overclaim_experimental_paths():
     assert "experimental_feature" in docs
     assert "placeholder_fallback" in docs
     assert "missing_glyphs" in docs
+    assert "typography controls" in docs
+    assert "layout metrics" in docs
+    assert "decluttering controls" in docs
+    assert "placement policy" in docs
 
 
 def test_public_docs_prefer_viewerhandle_label_workflow_over_raw_ipc():

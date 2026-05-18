@@ -7,6 +7,7 @@ EXAMPLES = {
     "vector_labels": Path("examples/mapscene_vector_labels.py"),
     "buildings_labels": Path("examples/mapscene_buildings_labels.py"),
     "bundled_datasets_showcase": Path("examples/mapscene_bundled_datasets_showcase.py"),
+    "p1_assets_bundle_showcase": Path("examples/mapscene_p1_assets_bundle_showcase.py"),
 }
 
 
@@ -92,4 +93,29 @@ def test_bundled_datasets_showcase_covers_specs_001_to_004(tmp_path):
     assert payload["support_levels"]["mapscene.render_png"] == "supported"
     assert payload["support_levels"]["mapscene.save_bundle"] == "supported"
     assert Path(payload["png_path"]).exists()
+    assert Path(payload["bundle_path"]).exists()
+
+
+def test_p1_assets_bundle_showcase_covers_spec_005(tmp_path):
+    module = _load_example(EXAMPLES["p1_assets_bundle_showcase"])
+
+    payload = module.run_example(tmp_path)
+
+    assert payload["validation_status"] == "error"
+    assert payload["render_status"] == "blocked_by_diagnostics"
+    assert payload["bundle_status"] == "error"
+    assert payload["roundtrip_status"] == "error"
+    assert payload["dataset_names"] == ["mini_dem", "sample_boundaries", "sample-buildings"]
+    assert payload["accepted_label_ids"] == [
+        "p1-boundary-0",
+        "p1-boundary-1",
+        "p1-boundary-2",
+    ]
+    assert payload["rejected_label_reasons"] == {"p1-title-collision": "keepout_region"}
+    assert "label_rejection_summary" in payload["diagnostic_codes"]
+    assert "unsupported_tile_feature" in payload["diagnostic_codes"]
+    assert payload["support_levels"]["mapscene.save_bundle"] == "supported"
+    assert payload["support_levels"]["layer.tiles3d_intent"] == "underdeveloped"
+    assert payload["unsupported_features"]["tiles3d.feature"] == "unsupported"
+    assert not Path(payload["png_path"]).exists()
     assert Path(payload["bundle_path"]).exists()

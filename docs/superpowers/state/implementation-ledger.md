@@ -3,11 +3,396 @@
 Source PRD: `docs/superpowers/plans/prd.md`  
 Constitution: `.specify/memory/constitution.md` v1.0.3  
 SpecKit playbook: `docs/superpowers/plans/speckit-playbook.md`  
-Current feature: `004-mapscene-mvp` R-029 remediation complete; P0-R4-AC2 native/offscreen render output verified
-Current SpecKit feature directory: `specs/004-mapscene-mvp` until the next feature handoff updates the active pointer
-Current git branch: `004-mapscene-mvp`
-Last known commit: `e26d1b9`  
+Current feature: `005-map-assets-bundles-p1` P1 remediation complete and global P0 label blockers resolved; only workspace hygiene blocker R-036/R-011 remains before commit/PR
+Current SpecKit feature directory: `specs/005-map-assets-bundles-p1`; `.specify/feature.json` / prerequisite script now resolve to feature `005`
+Current git branch: `005-map-assets-bundles-p1`
+Last known commit: `a864985`  
 Last updated: 2026-05-18
+
+## 2026-05-18 Feature 002 P0 Label Blocker Remediation
+
+Target feature: `specs/002-label-api-truth`.
+
+Selected task IDs:
+- T005 `[P0-R1-AC2] [P0-R1-AC3] [P0-R1-AC6]`: add typography and declutter truthfulness tests.
+- T007 `[P0-R1-AC2] [P0-R1-AC3] [P0-R1-AC4] [P0-R1-AC6]`: implement truthful label configuration methods.
+- T016 `[P0-R1-AC1..AC6] [P0-R2-AC1..AC6]`, T017 `[P0-R1-AC1..AC6] [P0-R2-AC1..AC6]`, and T018 `[P0-R1-AC4] [P0-R1-AC6] [P0-R2-AC4]`: refresh docs/support/quickstart evidence.
+
+Rationale: feature `005` T001-T069 were already marked complete and verified,
+but strict completion remained blocked by global P0 rows P0-R1-AC2 and
+P0-R1-AC3. This pass addressed the next incomplete blocker group in dependency
+order instead of starting new P1/P2 scope.
+
+Implemented tests first:
+- `tests/test_label_api_configuration_truth.py::test_set_label_typography_mutates_state_and_layout_metrics`
+- `tests/test_label_api_configuration_truth.py::test_set_declutter_algorithm_mutates_placement_policy_state`
+- `src/labels/mod.rs::tests::test_label_manager_typography_and_declutter_state_mutate`
+- `tests/test_label_api_docs_support.py` support-level and wording checks
+- `tests/test_label_api_quickstart.py` payload assertions for layout metrics and placement policy
+
+RED verification:
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests\test_label_api_configuration_truth.py -q
+```
+
+Observed: `2 failed` before implementation because typography and declutter
+still returned `experimental_feature` diagnostics.
+
+```powershell
+cargo test test_label_manager_typography_and_declutter_state_mutate -q
+```
+
+Observed: compile failure before implementation because `LabelManager`
+typography and declutter state methods were missing.
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests\test_label_api_docs_support.py -q
+```
+
+Observed: `2 failed, 3 passed` before implementation because docs still
+classified typography and declutter as `experimental`.
+
+Implemented:
+- `python/forge3d/viewer.py`: `set_label_typography(...)` now sends the typed
+  command, updates serializable typography state, and exposes deterministic
+  layout metrics; `set_declutter_algorithm(...)` now sends the typed command,
+  records deterministic placement policy state, and returns `placeholder_fallback`
+  for unsupported algorithm names instead of no-op success.
+- `src/labels/mod.rs`: `LabelManager` now owns typography and declutter state,
+  exposes setters/getters, and computes deterministic typography layout width
+  with the existing typography and kerning helpers.
+- `src/viewer/cmd/labels_command.rs`: viewer commands now forward typography
+  and declutter settings into `LabelManager`.
+- `docs/guides/label_support_matrix.md`, `docs/api/api_reference.rst`,
+  `specs/002-label-api-truth/quickstart.md`, and
+  `examples/label_api_truth_basic.py`: updated the public support boundary and
+  quickstart payload evidence.
+- `docs/superpowers/state/requirements-verification-matrix.md`,
+  `docs/superpowers/state/open-blockers.md`, and
+  `docs/superpowers/state/current-context-pack.md`: moved P0-R1-AC2/P0-R1-AC3
+  to verified and mitigated R-028/R-037.
+
+GREEN verification:
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests\test_label_api_configuration_truth.py -q
+```
+
+Observed: `2 passed`.
+
+```powershell
+cargo test test_label_manager_typography_and_declutter_state_mutate -q
+```
+
+Observed: `1 passed`.
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests\test_label_api_docs_support.py -q
+```
+
+Observed: `5 passed`.
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests\test_label_api_quickstart.py -q
+```
+
+Observed: `4 passed`.
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests\test_label_api_public_workflow.py tests\test_label_api_stable_ids.py tests\test_label_api_configuration_truth.py tests\test_label_api_state_noops.py tests\test_label_api_line_curved_paths.py tests\test_label_api_line_edge_cases.py tests\test_label_api_diagnostics.py tests\test_label_api_docs_support.py tests\test_label_api_quickstart.py -q
+```
+
+Observed: `28 passed`.
+
+```powershell
+cargo check -q
+cargo fmt -- --check
+$env:PYTHONPATH='python'; python -m py_compile python\forge3d\viewer.py tests\test_label_api_configuration_truth.py tests\test_label_api_docs_support.py tests\test_label_api_quickstart.py examples\label_api_truth_basic.py
+```
+
+Observed: all exited `0`.
+
+Requirement status impact:
+- P0-R1-AC2: `Verified`.
+- P0-R1-AC3: `Verified`.
+- R-028: mitigated.
+- R-037: mitigated.
+- Curved labels and terrain-elevated line labels remain diagnostic-bearing
+  through `experimental_feature`; typography and declutter are no longer
+  diagnostic-only paths.
+- R-036/R-011 dirty-worktree separation remains open before commit/PR.
+
+Speckit analyze gate:
+- `.specify\scripts\powershell\check-prerequisites.ps1 -Json -RequireTasks -IncludeTasks`
+  returned feature `005` with `research.md`, `data-model.md`, `contracts/`,
+  `quickstart.md`, and `tasks.md`.
+- Optional `before_analyze` and `after_analyze` hooks exist for
+  `/speckit.git.commit`; they were not executed because they are optional and
+  the worktree still needs R-036/R-011 separation.
+- Read-only artifact analysis found 38 FRs, 16 SCs, 69 task IDs, zero unchecked
+  task boxes, no unresolved placeholder/TODO markers, and no missing P1
+  acceptance-criterion task coverage.
+- Matrix continuity check found no P1 rows with non-verified statuses.
+- No Critical/High `/speckit.analyze` issue remains for feature `005`; the
+  remaining open item is workspace hygiene, not a spec/plan/tasks consistency
+  blocker.
+
+## 2026-05-18 Feature 005 RED/YELLOW Remediation T009-T069
+
+Target feature: `specs/005-map-assets-bundles-p1`.
+
+Scope:
+- Fixed audit blockers R-030 through R-035 across label ingestion, typography/font handling, building workflow support honesty, 3D Tiles public integration, and bundle round-trip coverage.
+- Did not add new product scope. Incomplete line labels, building render adapters, 3D Tiles runtime parity, textured PBR, and complex-script shaping remain diagnostic-bearing or documented as out of P1 runtime scope.
+- R-036 remains open because the worktree still contains unrelated or unattributed dirty files that must be separated before commit/PR.
+
+Implemented tests first:
+- `tests/test_p1_label_layer_crs_terrain.py`
+- `tests/test_p1_label_expressions_plan_diagnostics.py`
+- `tests/test_p1_typography_font_support.py`
+- `tests/test_p1_building_workflow_support.py`
+- `tests/test_p1_tiles3d_support.py`
+- `tests/test_p1_bundle_roundtrip.py`
+
+Implemented:
+- `python/forge3d/map_scene.py`: CRS transform through `forge3d.crs.transform_coords`, terrain sampling hooks, glyph-aware label validation, `FontAtlas`, `FontFallbackRange`, `TypographySettings`, textured PBR unsupported diagnostics, 3D Tiles cache/LOD metadata, unsupported tile feature summaries, and P1 bundle `supported_export_settings`.
+- `python/forge3d/diagnostics.py`: label validation now treats `placement_kind` line/curved labels as diagnostic-bearing.
+- `python/forge3d/__init__.py` and `python/forge3d/__init__.pyi`: exported the P1 typography classes.
+- `docs/api/api_reference.rst` and `docs/guides/data_and_scene_workflows.md`: documented P1 typography boundaries, complex-script shaping deferral, scalar PBR review metadata, textured PBR unsupported status, and existing 3D Tiles no-Cesium-parity scope.
+- `specs/005-map-assets-bundles-p1/tasks.md`: marked T009-T069 `[X]` and recorded completion evidence.
+- `docs/superpowers/state/requirements-verification-matrix.md`: moved P1-R1 through P1-R5 acceptance rows to `Verified` with exact test evidence.
+
+Verification:
+
+```powershell
+$p1 = rg --files tests | Where-Object { $_ -match 'test_p1_.*\.py$' }; python -m pytest @p1 -q
+```
+
+Observed: `51 passed in 3.87s`.
+
+```powershell
+$p1 = rg --files tests | Where-Object { $_ -match 'test_p1_.*\.py$' }; python -m pytest tests\test_mapscene_validation.py tests\test_mapscene_save_bundle.py tests\test_mapscene_render_png.py tests\test_mapscene_docs.py tests\test_mapscene_examples.py tests\test_mapscene_quickstart.py tests\test_mapscene_recipe_contract.py tests\test_mapscene_render_policy.py tests\test_mapscene_support_status.py tests\test_mapscene_label_plan_integration.py @p1 -q
+```
+
+Observed: `101 passed in 25.35s`.
+
+```powershell
+python -m py_compile python\forge3d\map_scene.py python\forge3d\diagnostics.py python\forge3d\__init__.py tests\test_p1_label_layer_crs_terrain.py tests\test_p1_label_expressions_plan_diagnostics.py tests\test_p1_typography_font_support.py tests\test_p1_building_workflow_support.py tests\test_p1_tiles3d_support.py tests\test_p1_bundle_roundtrip.py
+```
+
+Observed: exit code `0`.
+
+Requirement status impact:
+- P1-R1-AC1 through P1-R1-AC6: `Verified`.
+- P1-R2-AC1 through P1-R2-AC7: `Verified`.
+- P1-R3-AC1 through P1-R3-AC6: `Verified`.
+- P1-R4-AC1 through P1-R4-AC6: `Verified`.
+- P1-R5-AC1 through P1-R5-AC5: `Verified`.
+- R-030 through R-035: mitigated/closed by evidence above.
+- R-036: still open pending dirty-worktree separation.
+
+## 2026-05-18 Feature 005 T007-T008 LabelLayer Geometry Ingestion
+
+Target feature: `specs/005-map-assets-bundles-p1`.
+
+Selected task IDs:
+- T007 `[P1-R1-AC1] [P0-R5-AC6]`: add LabelLayer geometry ingestion tests.
+- T008 `[P1-R1-AC1] [P0-R5-AC6]`: implement LabelLayer geometry ingestion.
+
+Rationale: T001-T006 were already marked complete; T007 is the next incomplete
+task in dependency order, and T008 is its paired implementation task.
+
+Pre-edit state:
+- Branch/status: `005-map-assets-bundles-p1...origin/005-map-assets-bundles-p1`
+  with existing dirty workspace changes.
+- Feature prerequisites: `.specify\scripts\powershell\check-prerequisites.ps1 -Json -RequireTasks -IncludeTasks`
+  resolved `FEATURE_DIR` to `C:\Users\milos\forge3d\specs\005-map-assets-bundles-p1`.
+- Checklist: `specs/005-map-assets-bundles-p1/checklists/requirements.md`
+  reported `16` total, `16` completed, `0` incomplete.
+- Optional git hook: `.specify/extensions.yml` lists optional
+  `/speckit.git.commit` before/after implement; it was not executed in this
+  dirty worktree session.
+
+Test-first evidence:
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests\test_p1_label_layer_geometry.py -q
+```
+
+Observed RED result: `4 failed`. Failures showed `LabelLayer.from_features`
+preserved input order, accepted invalid/unsupported geometry as labels, lacked
+`geometry_type` / `placement_kind` payload fields, and reported a missing text
+field before unsupported geometry validation in the style-layer path.
+
+Implemented:
+- `tests/test_p1_label_layer_geometry.py`: new T007 tests for deterministic
+  point/line/polygon candidate ingestion, invalid/empty geometry diagnostics,
+  unsupported geometry diagnostics with affected feature IDs, GeoDataFrame-like
+  geometry ingestion, and style-layer text-field geometry ingestion.
+- `python/forge3d/map_scene.py`: added geometry validation helpers for
+  `Point`, `LineString`, and `Polygon`; invalid geometry now emits
+  `placeholder_fallback` diagnostics with `object_id`; unsupported geometry now
+  emits `unsupported_feature` diagnostics with `object_id`; accepted label
+  payloads include `geometry_type` and `placement_kind`; accepted labels are
+  deterministically sorted.
+- `specs/005-map-assets-bundles-p1/tasks.md`: marked T007 and T008 `[X]` with
+  exact evidence.
+- `docs/superpowers/state/requirements-verification-matrix.md`: moved
+  P1-R1-AC1 from `Planned` to `Tested`, not `Verified`, because later
+  docs/example/cross-feature tasks T064-T067 remain open.
+
+Verification after implementation:
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests\test_p1_label_layer_geometry.py -q
+```
+
+Observed GREEN result: `4 passed in 0.18s`.
+
+Requirement status impact:
+- P1-R1-AC1 is now `Tested`.
+- P1-R1-AC2 through P1-R1-AC6 remain `Planned`.
+- R-030 remains open but narrowed: geometry ingestion evidence now exists;
+  CRS, terrain sampling, expression, LabelPlan integration, and missing
+  field/glyph validation still require T009-T016.
+
+## 2026-05-18 Feature 005 Independent PRD Compliance Audit
+
+Target feature: `specs/005-map-assets-bundles-p1`.
+
+This was an audit/state session. No product code was changed. The audit
+reviewed feature `005` against the PRD, constitution, feature spec/plan/tasks,
+requirements matrix, changed-file summary, current implementation, support
+docs, and fresh local verification.
+
+Fresh verification:
+
+```powershell
+python -m pytest tests\test_p1_prerequisite_contracts.py tests\test_p1_diagnostics_contract.py tests\test_p1_fixture_inventory.py tests\test_p1_docs_support_matrix.py tests\test_p1_bundle_guardrails.py tests\test_p1_red_yellow_remediation.py -q
+```
+
+Observed result: `18 passed in 1.18s`.
+
+Selected regression verification:
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests\test_mapscene_recipe_contract.py tests\test_mapscene_validation.py tests\test_mapscene_support_status.py tests\test_mapscene_label_plan_integration.py tests\test_mapscene_render_png.py tests\test_mapscene_render_policy.py tests\test_mapscene_save_bundle.py -q
+```
+
+Observed result: `34 passed in 0.62s`.
+
+Compile verification:
+
+```powershell
+python -m py_compile python\forge3d\diagnostics.py python\forge3d\map_scene.py python\forge3d\__init__.py tests\test_p1_prerequisite_contracts.py tests\test_p1_diagnostics_contract.py tests\test_p1_fixture_inventory.py tests\test_p1_docs_support_matrix.py tests\test_p1_bundle_guardrails.py tests\test_p1_red_yellow_remediation.py
+```
+
+Observed result: exit `0`.
+
+Audit result: feature `005` is not complete. Current evidence verifies only
+Phase 1 API/diagnostic/docs/bundle guardrails. P1-R1 through P1-R5 remain
+`Planned`; T007 through T069 remain open; and full P1 story implementation,
+docs, diagnostics, and bundle round-trip evidence are still required.
+
+State updates:
+
+- `docs/superpowers/state/open-blockers.md`: added R-030 through R-036 for
+  unverified LabelLayer ingestion, typography/font handling, building workflow,
+  public 3D Tiles workflow, bundle round-trip, matrix-completion guard, and
+  worktree separation.
+- `docs/superpowers/state/current-context-pack.md`: recorded the audit result,
+  fresh command evidence, and next-task guardrail that feature `005` must
+  continue at T007 without claiming P1 story completion.
+
+## 2026-05-18 Feature 005 Phase 1 Prerequisite Gate
+
+Target feature: `specs/005-map-assets-bundles-p1`.
+
+Selected task IDs: T001, T002, T003, T005, and T006. T004 was intentionally
+left open because support-matrix wording audits can run independently after the
+Phase 1 API and diagnostic surface is stable.
+
+Pre-edit repository state:
+
+```text
+branch: 005-map-assets-bundles-p1
+ M AGENTS.md
+ D examples/turkiye_river_basins_3d.py
+ M logs/.3c2cf94182465f0d10df58878528dd39234a1134-audit.json
+ M python/forge3d/forge3d.pdb
+ M src/viewer/event_loop/runner.rs
+?? tests/test_mount_hood_white_cloud_timelapse.py
+```
+
+SpecKit prerequisite note: `.specify/scripts/powershell/check-prerequisites.ps1
+-Json -RequireTasks -IncludeTasks` still resolved `FEATURE_DIR` to
+`specs/004-mapscene-mvp`. This session used the explicit user-requested
+feature artifacts under `specs/005-map-assets-bundles-p1`. The 005 checklist
+passed with `16` complete and `0` incomplete. The optional
+`before_implement` git commit hook was not executed because the worktree
+contains unrelated/user-owned changes.
+
+Red verification before implementation:
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests\test_p1_prerequisite_contracts.py -q
+$env:PYTHONPATH='python'; python -m pytest tests\test_p1_diagnostics_contract.py -q
+$env:PYTHONPATH='python'; python -m pytest tests\test_p1_fixture_inventory.py -q
+```
+
+Observed RED/fixture results: prerequisite contracts reported `2 failed, 1
+passed` because `Tiles3DLayer` and P1 API methods were missing; diagnostics
+reported `2 failed` because feature-local diagnostic factories were missing;
+fixture inventory reported `3 passed`.
+
+Implemented:
+
+- `tests/test_p1_prerequisite_contracts.py`: public product-contract tests for
+  P0-owned diagnostics, label planning, MapScene, `LabelLayer`, product
+  building-layer path, `Tiles3DLayer`, `MapScene.save_bundle()`, and
+  `MapScene.load_bundle()`.
+- `tests/test_p1_diagnostics_contract.py`: serialization and fail-on-warning
+  tests for `missing_label_field`, `unicode_coverage_gap`,
+  `unsupported_tile_format`, `unsupported_tile_feature`,
+  `missing_external_asset`, and `unavailable_terrain_sampler`.
+- `tests/test_p1_fixture_inventory.py`: deterministic synthetic label and
+  tileset fixtures plus checked-in default atlas/building fixture inventory.
+- `python/forge3d/diagnostics.py`: added the feature-local P1 diagnostic code
+  inventory and factory helpers.
+- `python/forge3d/map_scene.py`: added `LabelLayer.from_features()`,
+  `from_geodataframe()`, `from_style_layer()`, and `compile_labels()`; added
+  product `BuildingLayer.from_geojson()`, `from_cityjson()`, and
+  `from_mesh()` constructors; added `Tiles3DLayer` plus validation wiring; and
+  added deterministic `MapScene.load_bundle()` reconstruction from
+  `scene/mapscene_recipe.json`.
+- `python/forge3d/__init__.py` and `python/forge3d/__init__.pyi`: exported
+  `Tiles3DLayer`.
+- `.gitignore`: unignored `specs/005-map-assets-bundles-p1/**` so task/state
+  edits for feature 005 are Git-visible.
+- `specs/005-map-assets-bundles-p1/tasks.md`: marked T001, T002, T003, T005,
+  and T006 complete with exact evidence.
+- `docs/superpowers/state/requirements-verification-matrix.md`: added Phase 1
+  evidence row without marking any P1 story acceptance row `Verified`.
+
+Selected verification after implementation:
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests\test_p1_prerequisite_contracts.py tests\test_p1_diagnostics_contract.py tests\test_p1_fixture_inventory.py -q
+$env:PYTHONPATH='python'; python -m pytest tests\test_mapscene_recipe_contract.py tests\test_mapscene_validation.py tests\test_mapscene_support_status.py tests\test_mapscene_label_plan_integration.py tests\test_mapscene_render_png.py tests\test_mapscene_render_policy.py tests\test_mapscene_save_bundle.py -q
+$env:PYTHONPATH='python'; python -m py_compile python\forge3d\diagnostics.py python\forge3d\map_scene.py python\forge3d\__init__.py tests\test_p1_prerequisite_contracts.py tests\test_p1_diagnostics_contract.py tests\test_p1_fixture_inventory.py
+rg -n "class Diagnostic|class ValidationReport|class LabelPlan|class MapScene|def save_bundle|def load_bundle" python src docs\superpowers\state
+```
+
+Observed green results: P1 Phase 1 command `8 passed`; MapScene regression
+subset `34 passed`; `py_compile` exited `0`; ownership `rg` found the P0 owner
+paths in `python/forge3d/diagnostics.py`, `python/forge3d/label_plan.py`, and
+`python/forge3d/map_scene.py`.
+
+Requirement status impact: Phase 1 prerequisite contract evidence is present.
+P1 story rows remain `Planned` because story-specific implementation, docs,
+and bundle round-trip tasks are still open. No P1 row is `Verified` from this
+batch.
 
 ## 2026-05-18 Feature 004 Independent PRD Compliance Audit
 
@@ -2412,7 +2797,7 @@ Five PRD-aligned default clarifications were recorded in the current spec:
 | Continuity state read | Done |
 | Extension hooks checked | Done; before/after clarify commit hooks are optional and were not executed |
 | Feature `005` spec | Clarified and revalidated at `specs/005-map-assets-bundles-p1/spec.md` |
-| Requirements matrix | Feature `001` P0-R5/P0-R6 rows are `Verified`; feature `002` P0-R1-AC1/P0-R1-AC4/P0-R1-AC5/P0-R1-AC6 and P0-R2-AC1/P0-R2-AC2/P0-R2-AC3/P0-R2-AC4/P0-R2-AC5/P0-R2-AC6 are `Verified`; feature `002` P0-R1-AC2/P0-R1-AC3 are `Blocked`; feature `003` P0-R3-AC1 through P0-R3-AC8 are `Verified`; feature `004` P0-R4-AC1 through P0-R4-AC8 are `Verified`; remaining P1/P2 rows remain planned in later feature directories. |
+| Requirements matrix | Feature `001` P0-R5/P0-R6 rows are `Verified`; feature `002` P0-R1-AC1 through P0-R1-AC6 and P0-R2-AC1 through P0-R2-AC6 are `Verified`; feature `003` P0-R3-AC1 through P0-R3-AC8 are `Verified`; feature `004` P0-R4-AC1 through P0-R4-AC8 are `Verified`; feature `005` P1-R1 through P1-R5 acceptance rows are `Verified`; P2 rows remain planned in later feature directories. |
 | Feature `005` research inventory | Created at `specs/005-map-assets-bundles-p1/research.md` |
 | Feature `002` research inventory | Created at `specs/002-label-api-truth/research.md` |
 | Feature `003` research inventory | Created at `specs/003-deterministic-label-plan/research.md` |
@@ -2572,18 +2957,287 @@ The dirty workspace contains unrelated or pre-existing feature changes. Do not
 revert them. Use LFS-filter-disabled status if default `git status` hits the
 `python/forge3d/forge3d.pdb` clean-filter access error.
 
+## 2026-05-18 Feature 005 Red/Yellow Remediation Session
+
+Scope: fixed only the red/yellow findings from the feature
+`005-map-assets-bundles-p1` consistency audit, without adding new product
+scope or marking P1 story acceptance rows verified.
+
+Pre-edit status:
+- Branch `005-map-assets-bundles-p1` was dirty.
+- `.specify/feature.json` pointed at `specs/004-mapscene-mvp`, and
+  `.specify\scripts\powershell\check-prerequisites.ps1 -Json -RequireTasks -IncludeTasks`
+  returned `FEATURE_DIR` as `specs/004-mapscene-mvp`.
+- Initial focused RED command:
+  `$env:PYTHONPATH='python'; python -m pytest tests\test_p1_diagnostics_contract.py tests\test_p1_fixture_inventory.py tests\test_p1_prerequisite_contracts.py tests\test_p1_docs_support_matrix.py tests\test_p1_bundle_guardrails.py tests\test_p1_red_yellow_remediation.py -q`
+  reported `7 failed, 11 passed`. Expected failures covered missing P1 docs
+  wording, stale SpecKit pointer, missing task evidence markers, and stale
+  state evidence. Two failures were test setup errors from omitted
+  `MapScene` camera/lighting and were corrected before artifact fixes.
+
+Changes made:
+- Updated `.specify/feature.json` to target
+  `specs/005-map-assets-bundles-p1`, fixing the SpecKit prerequisite pointer.
+- Extended `tests/test_p1_diagnostics_contract.py` to cover the full PRD P0
+  diagnostic inventory and deterministic `ValidationReport` serialization.
+- Extended `tests/test_p1_fixture_inventory.py` with a deterministic bundle
+  fixture manifest check.
+- Extended `tests/test_p1_prerequisite_contracts.py` with the explicit
+  compatibility decision: product `forge3d.map_scene.BuildingLayer` is exposed
+  top-level as `MapSceneBuildingLayer`, while legacy `forge3d.BuildingLayer`
+  remains the `forge3d.buildings.BuildingLayer`.
+- Added `tests/test_p1_docs_support_matrix.py` to audit local/provided feature
+  styling scope, support terms, unsupported diagnostics, and no full Mapbox GL
+  or Cesium runtime parity claims.
+- Added `tests/test_p1_bundle_guardrails.py` to lock deterministic
+  `MapScene.save_bundle()` layer-source/label-source/review payload behavior
+  and missing external asset diagnostics without claiming full P1 bundle
+  completion.
+- Added `tests/test_p1_red_yellow_remediation.py` to keep the SpecKit pointer,
+  task evidence, docs, matrix, ledger, and current-context continuity from
+  drifting again.
+- Updated `docs/guides/data_and_scene_workflows.md`,
+  `docs/guides/feature_map.md`, and `docs/api/api_reference.rst` with P1
+  support-boundary wording, feature-local diagnostic codes, local/provided
+  style scope, and the building compatibility alias.
+- Updated `specs/005-map-assets-bundles-p1/tasks.md`: T004 is now `[X]`, and
+  T003/T005/T006 carry red/yellow remediation evidence. T007+ story tasks
+  remain open.
+- Updated this ledger, `docs/superpowers/state/requirements-verification-matrix.md`,
+  and `docs/superpowers/state/current-context-pack.md`.
+
+Current requirement-status impact:
+- Red/yellow remediation findings R1-R8 and Y1-Y4 are addressed by tests,
+  docs, task evidence, and state updates.
+- P1-R1 through P1-R5 acceptance rows remain `Planned`; no feature `005` story
+  row is `Verified` by prerequisite or remediation evidence alone.
+
+Fresh verification after remediation:
+- `$env:PYTHONPATH='python'; python -m pytest tests\test_p1_diagnostics_contract.py tests\test_p1_fixture_inventory.py tests\test_p1_prerequisite_contracts.py tests\test_p1_docs_support_matrix.py tests\test_p1_bundle_guardrails.py tests\test_p1_red_yellow_remediation.py -q`
+  -> `18 passed in 0.81s`.
+- `$env:PYTHONPATH='python'; python -m pytest tests\test_mapscene_recipe_contract.py tests\test_mapscene_validation.py tests\test_mapscene_support_status.py tests\test_mapscene_label_plan_integration.py tests\test_mapscene_render_png.py tests\test_mapscene_render_policy.py tests\test_mapscene_save_bundle.py -q`
+  -> `34 passed in 0.52s`.
+- `$env:PYTHONPATH='python'; python -m py_compile python\forge3d\diagnostics.py python\forge3d\map_scene.py python\forge3d\__init__.py tests\test_p1_diagnostics_contract.py tests\test_p1_fixture_inventory.py tests\test_p1_prerequisite_contracts.py tests\test_p1_docs_support_matrix.py tests\test_p1_bundle_guardrails.py tests\test_p1_red_yellow_remediation.py`
+  -> exited `0`.
+- `.specify\scripts\powershell\check-prerequisites.ps1 -Json -RequireTasks -IncludeTasks`
+  -> `FEATURE_DIR` resolved to `C:\Users\milos\forge3d\specs\005-map-assets-bundles-p1` with `tasks.md` available.
+
 ## Next Exact Prompt
 
 ```text
 [$speckit-implement](C:\Users\milos\forge3d\.agents\skills\speckit-implement\SKILL.md)
 
-Implement only the remaining P0 label blockers P0-R1-AC2 and P0-R1-AC3:
-make `set_label_typography` mutate measurable native/layout state and make
-`set_declutter_algorithm` either change placement behavior or return an
-explicit unsupported typed error accepted by the PRD. Before coding, identify
-selected task IDs, why they form a coherent batch, PRD acceptance criteria
-covered, and verification commands. Preserve feature `004` R-029 native/offscreen
-render evidence plus source-derived compatibility output, keep P0-R4-AC2
-`Verified`, and keep R-011 dirty worktree/change separation open before commit
-or PR.
+Feature `006-material-vt-large-scene-p2` T001 is complete. Continue with the
+next incomplete task group only: T002 `[P] [P2-R1-AC2] [P2-R2-AC2]
+[P2-R2-AC3] [P2-R2-AC4] [P2-R4-AC2] [P2-R4-AC3]` diagnostic contract tests,
+then T003 adapters only after T002 has RED evidence. Keep existing staged
+feature `005` scope intact and leave unrelated/generated unstaged paths alone.
 ```
+
+## 2026-05-18 Feature 005 Blocker Cleanup Session
+
+Scope: fixed the remaining blocker group after all feature `005` task groups
+were already `[X]`. No product code was changed in this cleanup slice.
+
+Task ID and PRD tags:
+- R-036/R-011 blocker cleanup, tagged to Constitution VII/X and feature `005`
+  continuity.
+
+Pre-cleanup evidence:
+- `.specify\scripts\powershell\check-prerequisites.ps1 -Json -RequireTasks -IncludeTasks`
+  resolved `FEATURE_DIR` to `C:\Users\milos\forge3d\specs\005-map-assets-bundles-p1`.
+- Checklist status: `specs/005-map-assets-bundles-p1/checklists/requirements.md`
+  had `16` total, `16` completed, `0` incomplete.
+- `tasks.md` had no unchecked feature tasks; T001 through T069 were `[X]`.
+- `git status --short --untracked-files=all` showed intended feature and
+  blocker changes mixed with unrelated/generated/user-owned paths.
+
+Cleanup performed:
+- Used Git staging as the separation mechanism without reverting any user-owned
+  changes.
+- Staged intended feature/blocker scope only:
+  feature `005` specs/tests, feature `002` typography/declutter remediation,
+  product API/docs/state updates, and `.specify`/`.gitignore` visibility
+  changes.
+- Left unrelated/generated/user-owned paths unstaged:
+  `AGENTS.md`, deleted `examples/turkiye_river_basins_3d.py`,
+  `logs/.3c2cf94182465f0d10df58878528dd39234a1134-audit.json`,
+  `python/forge3d/forge3d.pdb`, `src/viewer/event_loop/runner.rs`, and
+  untracked `tests/test_mount_hood_white_cloud_timelapse.py`.
+- Updated `docs/superpowers/state/open-blockers.md` to mark R-036 mitigated by
+  staged/unstaged separation.
+- Updated `docs/superpowers/state/current-context-pack.md` and
+  `docs/superpowers/state/requirements-verification-matrix.md` with the
+  separation evidence.
+
+Verification:
+- `git diff --cached --name-status` lists only staged intended feature/blocker
+  scope.
+- `git diff --name-status` lists only the unstaged unrelated/generated tracked
+  changes named above.
+- `git status --short --untracked-files=all` shows the untracked Mount Hood
+  timelapse test remains unstaged.
+- `$env:PYTHONPATH='python'; $p1 = rg --files tests | Where-Object { $_ -match 'test_p1_.*\.py$' }; python -m pytest @p1 -q`
+  -> `51 passed in 2.17s`.
+- `$env:PYTHONPATH='python'; $p1 = rg --files tests | Where-Object { $_ -match 'test_p1_.*\.py$' }; python -m pytest tests\test_mapscene_validation.py tests\test_mapscene_save_bundle.py tests\test_mapscene_render_png.py tests\test_mapscene_docs.py tests\test_mapscene_examples.py tests\test_mapscene_quickstart.py tests\test_mapscene_recipe_contract.py tests\test_mapscene_render_policy.py tests\test_mapscene_support_status.py tests\test_mapscene_label_plan_integration.py @p1 -q`
+  -> `101 passed in 4.34s`.
+- `$env:PYTHONPATH='python'; python -m pytest tests\test_label_api_public_workflow.py tests\test_label_api_stable_ids.py tests\test_label_api_configuration_truth.py tests\test_label_api_state_noops.py tests\test_label_api_line_curved_paths.py tests\test_label_api_line_edge_cases.py tests\test_label_api_diagnostics.py tests\test_label_api_docs_support.py tests\test_label_api_quickstart.py -q`
+  -> `28 passed in 2.37s`.
+- `cargo test test_label_manager_typography_and_declutter_state_mutate -q`
+  -> `1 passed`.
+- `cargo check -q` -> exit `0`.
+- `cargo fmt -- --check` -> exit `0`.
+- Python `py_compile` for updated product modules and P1/label tests -> exit
+  `0`.
+- Read-only `/speckit.analyze` gate rerun:
+  `.specify\scripts\powershell\check-prerequisites.ps1 -Json -RequireTasks -IncludeTasks`
+  resolved feature `005`; unchecked tasks `0`; P1 rows `30`; P1 rows not
+  verified `0`; feature `005` open blockers `0`; placeholder hits `0`; status
+  `PASS`.
+
+Requirement-status impact:
+- No PRD acceptance status changed in this cleanup slice.
+- P1-R1 through P1-R5 remain `Verified`.
+- Global P0 release-gate rows remain green after the prior label remediation.
+
+## 2026-05-18 Feature 006 T001 Dependency Inspection Session
+
+Target feature: `specs/006-material-vt-large-scene-p2`.
+
+Task ID and PRD tags:
+- T001 `[P2-R1-AC1] [P2-R2-AC1] [P2-R3-AC1] [P2-R4-AC1]`: inspect P0/P1 product API dependencies before source edits.
+
+Execution note:
+- `.specify\scripts\powershell\check-prerequisites.ps1 -Json -RequireTasks -IncludeTasks`
+  still resolves the active SpecKit pointer to feature `005`; this T001 pass
+  used the explicit feature `006` task file because the remaining open blockers
+  R-012 through R-014 are feature `006` P2 scope.
+- No product source file was changed. This task is an inspection gate.
+
+Required verification:
+
+```powershell
+rg -n "MapScene|Diagnostic|LabelPlan|virtual texture|normal|mask|texture|uv|cache|lod|instancing|ResourceSummary" python src docs/superpowers/state
+```
+
+Observed result: command exited `0` and found the expected P0/P1 owner paths.
+
+Inspection findings:
+- `python/forge3d/map_scene.py` owns `MapScene`, validation, bundle load/save,
+  P1 `BuildingLayer`, and P1 `Tiles3DLayer`. It is the extension path for P2
+  scene validation and resource summaries.
+- `python/forge3d/diagnostics.py` owns `Diagnostic`, `ValidationReport`,
+  `vt_unsupported_family_diagnostic`, and `estimated_gpu_memory_diagnostic`.
+  P2-specific factories such as `missing_texture_path`, `missing_uvs`,
+  `unsupported_texture_format`, `unavailable_cache_lod_stats`, and
+  `unsupported_instancing_path` are not implemented yet.
+- `python/forge3d/label_plan.py` owns `LabelPlan.compile`; advanced repeated,
+  curved, rule-preset, leader-line, and shaping work must extend this product
+  contract or emit typed diagnostics.
+- VT extension paths are `python/forge3d/terrain_params.py`,
+  `src/terrain/render_params/native_vt.rs`, and
+  `src/terrain/renderer/virtual_texture.rs`. Inspection confirms Python accepts
+  `normal` and `mask`, while native runtime pages only `albedo`.
+- Building texture extension paths are `python/forge3d/buildings.py`,
+  `python/forge3d/textures.py`, `python/forge3d/materials.py`,
+  `src/io/gltf_read.rs`, and `src/io/obj_read.rs`. Inspection confirms scalar
+  building material support and general texture/UV substrate, but no P2 typed
+  building texture diagnostics.
+- Large-scene extension paths are `python/forge3d/pointcloud.py`,
+  `python/forge3d/tiles3d.py`, `python/forge3d/geometry.py`,
+  `src/pointcloud/renderer.rs`, `src/tiles3d/renderer.rs`,
+  `src/scene/py_api/instanced_mesh.rs`, and `src/terrain/renderer/py_api.rs`.
+  Inspection confirms fragmented cache/LOD/memory/instancing stats, but no
+  unified `LargeSceneResourceSummary`.
+
+Requirement-status impact:
+- No `p0_dependency_missing` or `p1_dependency_missing` blocker was opened.
+- T001 is complete in `specs/006-material-vt-large-scene-p2/tasks.md`.
+- P2-R1 through P2-R4 acceptance rows remain `Planned`; R-012, R-013, and
+  R-014 remain open until T002/T003 and downstream feature slices add tests,
+  adapters, docs, and verification.
+
+## 2026-05-18 Feature 006 T002-T003 P2 Diagnostic Contract Session
+
+Target feature: `specs/006-material-vt-large-scene-p2`.
+
+Task IDs and PRD tags:
+- T002 `[P2-R1-AC2] [P2-R2-AC2] [P2-R2-AC3] [P2-R2-AC4] [P2-R4-AC2] [P2-R4-AC3]`: add P2 feature-local diagnostic code tests.
+- T003 `[P2-R1-AC2] [P2-R2-AC2] [P2-R2-AC3] [P2-R2-AC4] [P2-R4-AC2] [P2-R4-AC3]`: implement P2 diagnostic adapters.
+
+T002 RED evidence:
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests\test_p2_diagnostics_contract.py -q
+```
+
+Observed before implementation: `4 failed`. Failures showed
+`P2_FEATURE_DIAGNOSTIC_CODES`, `missing_texture_path_diagnostic`,
+`missing_uvs_diagnostic`, `unsupported_texture_format_diagnostic`,
+`unavailable_cache_lod_stats_diagnostic`, and
+`unsupported_instancing_path_diagnostic` were not importable, and
+`MapScene.validate()` did not emit P2 building texture, cache/LOD, or
+instancing diagnostics.
+
+Implemented:
+- `tests/test_p2_diagnostics_contract.py`: structured serialization and
+  deterministic-order tests for the P2 diagnostic inventory plus MapScene
+  pre-render tests for building texture intent, cache/LOD unavailability, and
+  unsupported instancing paths.
+- `python/forge3d/diagnostics.py`: added `P2_FEATURE_DIAGNOSTIC_CODES` and
+  factories for `missing_texture_path`, `missing_uvs`,
+  `unsupported_texture_format`, `unavailable_cache_lod_stats`, and
+  `unsupported_instancing_path`.
+- `python/forge3d/map_scene.py`: added metadata adapters for building
+  `textured_materials` intent and generic layer
+  `unavailable_cache_lod_stats` / `instancing` metadata. These produce typed
+  diagnostics and layer-summary details without classifying unavailable paths
+  as supported.
+- `python/forge3d/__init__.py` and `python/forge3d/__init__.pyi`: exported the
+  P2 diagnostic inventory and factory helpers.
+- `specs/006-material-vt-large-scene-p2/tasks.md`: marked T002 and T003 `[X]`
+  with RED/GREEN evidence.
+- `docs/superpowers/state/requirements-verification-matrix.md`,
+  `docs/superpowers/state/open-blockers.md`, and
+  `docs/superpowers/state/current-context-pack.md`: recorded the diagnostic
+  foundation evidence and remaining P2 gaps.
+
+GREEN verification:
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests\test_p2_diagnostics_contract.py -q
+```
+
+Observed: `4 passed`.
+
+```powershell
+$env:PYTHONPATH='python'; python -m pytest tests\test_p1_diagnostics_contract.py tests\test_p1_building_workflow_support.py tests\test_p1_tiles3d_support.py -q
+```
+
+Observed: `15 passed`.
+
+```powershell
+$env:PYTHONPATH='python'; python -m py_compile python\forge3d\diagnostics.py python\forge3d\map_scene.py python\forge3d\__init__.py tests\test_p2_diagnostics_contract.py
+```
+
+Observed: exit `0`.
+
+```powershell
+$env:PYTHONPATH='python'; @'
+import forge3d as f3d
+for name in ["P2_FEATURE_DIAGNOSTIC_CODES","missing_texture_path_diagnostic","missing_uvs_diagnostic","unsupported_texture_format_diagnostic","unavailable_cache_lod_stats_diagnostic","unsupported_instancing_path_diagnostic"]:
+    assert hasattr(f3d, name), name
+print("p2 exports ok")
+'@ | python -
+```
+
+Observed: `p2 exports ok`.
+
+Requirement-status impact:
+- P2 diagnostic foundations are tested for P2-R2-AC2, P2-R2-AC3,
+  P2-R2-AC4, P2-R4-AC2, and P2-R4-AC3.
+- No P2 acceptance row is `Verified`; rows remain `Planned` until downstream
+  VT, textured-building fixture, large-scene, docs, quickstart, and full P2
+  verification tasks complete.
+- R-013 and R-014 are narrowed but remain open. R-012 remains open because VT
+  no-silent-skip tests and MapScene VT family validation are still T004/T005.

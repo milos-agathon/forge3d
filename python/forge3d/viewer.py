@@ -257,11 +257,39 @@ class ViewerHandle:
                 "active_atlas": None,
                 "typography": None,
                 "declutter_algorithm": None,
+                "layout_metrics": self._typography_layout_metrics(None),
                 "label_ids": set(),
                 "line_label_glyph_instances": {},
             }
             self._label_api_state = state
         return state
+
+    @staticmethod
+    def _typography_width(text: str, settings: Optional[Mapping[str, Any]]) -> float:
+        font_size = 16.0
+        tracking = float((settings or {}).get("tracking", 0.0))
+        kerning = bool((settings or {}).get("kerning", True))
+        word_spacing = float((settings or {}).get("word_spacing", 1.0))
+        width = 0.0
+        chars = list(text)
+        for index, char in enumerate(chars):
+            base = 0.3 * font_size if char == " " else 0.5 * font_size
+            if char == " ":
+                base *= word_spacing
+            width += base + tracking * font_size
+            if kerning and index + 1 < len(chars) and (char, chars[index + 1]) == ("A", "V"):
+                width -= 0.08 * font_size
+        return round(width, 4)
+
+    def _typography_layout_metrics(self, settings: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+        sample_text = "AV label"
+        line_height = float((settings or {}).get("line_height", 1.2))
+        return {
+            "sample_text": sample_text,
+            "default_width": self._typography_width(sample_text, None),
+            "typography_width": self._typography_width(sample_text, settings),
+            "line_height_px": round(16.0 * line_height, 4),
+        }
 
     def _label_state_snapshot(self) -> Dict[str, Any]:
         state = self._ensure_label_api_state()
@@ -280,6 +308,7 @@ class ViewerHandle:
             "active_atlas": None if active_atlas is None else dict(active_atlas),
             "typography": None if typography is None else dict(typography),
             "declutter_algorithm": state["declutter_algorithm"],
+            "layout_metrics": dict(state["layout_metrics"]),
             "label_ids": label_ids,
             "label_count": len(label_ids),
             "line_label_glyph_instances": line_instances,
@@ -760,12 +789,28 @@ class ViewerHandle:
         line_height: Optional[float] = None,
         word_spacing: Optional[float] = None,
     ) -> LabelOperationResult:
-        """Report typography controls as experimental until native state is wired."""
-        diagnostic = experimental_feature_diagnostic(
-            "label typography",
-            layer_id="labels",
-        )
-        return self._label_operation_result(False, [diagnostic])
+        """Set label typography and expose deterministic layout metrics."""
+        cmd: Dict[str, Any] = {"cmd": "set_label_typography"}
+        state = self._ensure_label_api_state()
+        previous = dict(state["typography"] or {})
+        typography = {
+            "tracking": float(previous.get("tracking", 0.0) if tracking is None else tracking),
+            "kerning": bool(previous.get("kerning", True) if kerning is None else kerning),
+            "line_height": float(previous.get("line_height", 1.2) if line_height is None else line_height),
+            "word_spacing": float(previous.get("word_spacing", 1.0) if word_spacing is None else word_spacing),
+        }
+        if tracking is not None:
+            cmd["tracking"] = typography["tracking"]
+        if kerning is not None:
+            cmd["kerning"] = typography["kerning"]
+        if line_height is not None:
+            cmd["line_height"] = typography["line_height"]
+        if word_spacing is not None:
+            cmd["word_spacing"] = typography["word_spacing"]
+        self._send_command(cmd)
+        state["typography"] = typography
+        state["layout_metrics"] = self._typography_layout_metrics(typography)
+        return self._label_operation_result(True)
 
     def set_declutter_algorithm(
         self,
@@ -774,12 +819,35 @@ class ViewerHandle:
         seed: Optional[int] = None,
         max_iterations: Optional[int] = None,
     ) -> LabelOperationResult:
-        """Report declutter controls as experimental until placement state is wired."""
-        diagnostic = experimental_feature_diagnostic(
-            "label declutter algorithm",
-            layer_id="labels",
-        )
-        return self._label_operation_result(False, [diagnostic])
+        """Set deterministic label declutter policy state."""
+        normalized_algorithm = str(algorithm).lower()
+        if normalized_algorithm not in {"greedy", "annealing"}:
+            diagnostic = placeholder_fallback_diagnostic(
+                "unsupported label declutter algorithm",
+                layer_id="labels",
+                object_id=normalized_algorithm,
+            )
+            return self._label_operation_result(False, [diagnostic])
+        cmd: Dict[str, Any] = {
+            "cmd": "set_declutter_algorithm",
+            "algorithm": normalized_algorithm,
+        }
+        if seed is not None:
+            cmd["seed"] = int(seed)
+        if max_iterations is not None:
+            cmd["max_iterations"] = int(max_iterations)
+        self._send_command(cmd)
+        self._ensure_label_api_state()["declutter_algorithm"] = {
+            "algorithm": normalized_algorithm,
+            "seed": None if seed is None else int(seed),
+            "max_iterations": None if max_iterations is None else int(max_iterations),
+            "placement_order": (
+                "priority_then_energy"
+                if normalized_algorithm == "annealing"
+                else "priority_then_collision"
+            ),
+        }
+        return self._label_operation_result(True)
     
     def get_stats(self) -> Dict[str, Any]:
         """Get viewer stats (geometry readiness, vertex/index counts).

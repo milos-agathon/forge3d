@@ -47,8 +47,10 @@ def test_label_api_truth_example_runs_and_reports_expected_support_statuses():
     assert payload["state_after_clear"]["enabled"] is True
     assert payload["diagnostics"]["curved_labels"] == ["experimental_feature"]
     assert payload["diagnostics"]["terrain_elevated_line_labels"] == ["experimental_feature"]
-    assert payload["diagnostics"]["typography_controls"] == ["experimental_feature"]
-    assert payload["diagnostics"]["decluttering_controls"] == ["experimental_feature"]
+    assert payload["diagnostics"]["typography_controls"] == []
+    assert payload["diagnostics"]["decluttering_controls"] == []
+    assert payload["typography_state"]["layout_metrics"]["typography_width"] > payload["typography_state"]["layout_metrics"]["default_width"]
+    assert payload["declutter_state"]["declutter_algorithm"]["placement_order"] == "priority_then_energy"
     assert payload["diagnostics"]["missing_glyphs"] == ["missing_glyphs"]
 
 
@@ -69,4 +71,6 @@ def test_label_api_truth_quickstart_points_to_runnable_example():
     assert "examples/label_api_truth_basic.py --json" in text
     assert "ViewerHandle.add_label" in text
     assert "experimental_feature" in text
+    assert "layout metrics" in text
+    assert "placement policy" in text
     assert "missing_glyphs" in text

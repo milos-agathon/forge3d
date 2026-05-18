@@ -33,6 +33,25 @@ REQUIRED_DIAGNOSTIC_CODES = frozenset(
         "label_rejection_summary",
     }
 )
+P1_FEATURE_DIAGNOSTIC_CODES = frozenset(
+    {
+        "missing_label_field",
+        "unicode_coverage_gap",
+        "unsupported_tile_format",
+        "unsupported_tile_feature",
+        "missing_external_asset",
+        "unavailable_terrain_sampler",
+    }
+)
+P2_FEATURE_DIAGNOSTIC_CODES = frozenset(
+    {
+        "missing_texture_path",
+        "missing_uvs",
+        "unsupported_texture_format",
+        "unavailable_cache_lod_stats",
+        "unsupported_instancing_path",
+    }
+)
 
 _STATUS_RANK = {"ok": 0, "info": 0, "warning": 1, "error": 2, "fatal": 3}
 _DIAGNOSTIC_SORT_RANK = {"fatal": 0, "error": 1, "warning": 2, "info": 3}
@@ -379,6 +398,225 @@ def label_rejection_summary_diagnostic(
     )
 
 
+def missing_label_field_diagnostic(
+    field: str,
+    *,
+    layer_id: str | None = None,
+    object_id: str | None = None,
+) -> Diagnostic:
+    return Diagnostic(
+        code="missing_label_field",
+        severity="error",
+        message="Label text expression references a missing feature field.",
+        remediation="Provide the referenced property or change the label text expression.",
+        support_level="unsupported",
+        layer_id=layer_id,
+        object_id=object_id,
+        details={"field": str(field)},
+    )
+
+
+def unicode_coverage_gap_diagnostic(
+    missing_glyphs: Sequence[str],
+    *,
+    layer_id: str | None = None,
+    object_id: str | None = None,
+) -> Diagnostic:
+    glyphs = sorted(str(glyph) for glyph in missing_glyphs)
+    return Diagnostic(
+        code="unicode_coverage_gap",
+        severity="warning",
+        message="Label text contains Unicode code points outside configured atlas coverage.",
+        remediation="Load an atlas or fallback range covering the missing code points before rendering.",
+        support_level="underdeveloped",
+        layer_id=layer_id,
+        object_id=object_id,
+        details={"count": len(glyphs), "missing_glyphs": glyphs},
+    )
+
+
+def unsupported_tile_format_diagnostic(
+    tile_format: str,
+    *,
+    layer_id: str | None = None,
+    object_id: str | None = None,
+    supported_formats: Sequence[str] = ("tileset.json", "b3dm"),
+) -> Diagnostic:
+    return Diagnostic(
+        code="unsupported_tile_format",
+        severity="error",
+        message="3D Tiles source uses a format that is not supported by the public MapScene workflow.",
+        remediation="Use a supported local tileset JSON or B3DM fixture, or keep the layer diagnostic-only.",
+        support_level="unsupported",
+        layer_id=layer_id,
+        object_id=object_id,
+        details={
+            "format": str(tile_format),
+            "supported_formats": sorted(str(value) for value in supported_formats),
+        },
+    )
+
+
+def unsupported_tile_feature_diagnostic(
+    feature: str,
+    *,
+    layer_id: str | None = None,
+    object_id: str | None = None,
+) -> Diagnostic:
+    return Diagnostic(
+        code="unsupported_tile_feature",
+        severity="error",
+        message="3D Tiles content requires a feature not supported by the public MapScene workflow.",
+        remediation="Remove the unsupported tile feature or use a documented supported local fixture.",
+        support_level="unsupported",
+        layer_id=layer_id,
+        object_id=object_id,
+        details={"feature": str(feature)},
+    )
+
+
+def missing_external_asset_diagnostic(
+    layer_type: str,
+    *,
+    layer_id: str | None = None,
+    object_id: str | None = None,
+    path: str,
+) -> Diagnostic:
+    return Diagnostic(
+        code="missing_external_asset",
+        severity="error",
+        message="Scene or bundle references an external asset that cannot be found.",
+        remediation="Provide the referenced asset or update the scene/bundle to point at an available file.",
+        support_level="unsupported",
+        layer_id=layer_id,
+        object_id=object_id,
+        details={"layer_type": str(layer_type), "path": str(path)},
+    )
+
+
+def missing_texture_path_diagnostic(
+    path: str,
+    *,
+    layer_id: str | None = None,
+    object_id: str | None = None,
+    material_id: str | None = None,
+) -> Diagnostic:
+    details: dict[str, Any] = {"path": str(path)}
+    if material_id is not None:
+        details["material_id"] = str(material_id)
+    return Diagnostic(
+        code="missing_texture_path",
+        severity="error",
+        message="Building material references a texture path that is missing or unreadable.",
+        remediation="Provide the referenced texture asset or remove the textured-material intent before rendering.",
+        support_level="unsupported",
+        layer_id=layer_id,
+        object_id=object_id,
+        details=details,
+    )
+
+
+def missing_uvs_diagnostic(
+    *,
+    layer_id: str | None = None,
+    object_id: str | None = None,
+    material_id: str | None = None,
+) -> Diagnostic:
+    details: dict[str, Any] = {}
+    if material_id is not None:
+        details["material_id"] = str(material_id)
+    return Diagnostic(
+        code="missing_uvs",
+        severity="error",
+        message="Building material requests a texture but the affected geometry has no usable UVs.",
+        remediation="Provide UV coordinates for the textured geometry or use an explicit scalar-material fallback.",
+        support_level="unsupported",
+        layer_id=layer_id,
+        object_id=object_id,
+        details=details,
+    )
+
+
+def unsupported_texture_format_diagnostic(
+    texture_format: str,
+    *,
+    layer_id: str | None = None,
+    object_id: str | None = None,
+    path: str | None = None,
+    supported_formats: Sequence[str] = ("jpg", "jpeg", "png", "tif", "tiff"),
+) -> Diagnostic:
+    details: dict[str, Any] = {
+        "format": str(texture_format).lower().lstrip("."),
+        "supported_formats": sorted(str(value).lower().lstrip(".") for value in supported_formats),
+    }
+    if path is not None:
+        details["path"] = str(path)
+    return Diagnostic(
+        code="unsupported_texture_format",
+        severity="error",
+        message="Building material texture uses a format that is not supported by the current MapScene workflow.",
+        remediation="Use a documented supported texture format or keep the textured material diagnostic-only.",
+        support_level="unsupported",
+        layer_id=layer_id,
+        object_id=object_id,
+        details=details,
+    )
+
+
+def unavailable_cache_lod_stats_diagnostic(
+    layer_type: str,
+    unavailable_stats: Sequence[str],
+    *,
+    layer_id: str | None = None,
+    object_id: str | None = None,
+) -> Diagnostic:
+    stats = sorted(str(stat) for stat in unavailable_stats)
+    return Diagnostic(
+        code="unavailable_cache_lod_stats",
+        severity="warning",
+        message="Requested cache or LOD statistics are not available for this layer.",
+        remediation="Use available layer metadata only, or add a renderer/stat source before relying on these stats.",
+        support_level="underdeveloped",
+        layer_id=layer_id,
+        object_id=object_id,
+        details={"layer_type": str(layer_type), "unavailable_stats": stats},
+    )
+
+
+def unsupported_instancing_path_diagnostic(
+    path: str,
+    *,
+    layer_id: str | None = None,
+    object_id: str | None = None,
+) -> Diagnostic:
+    return Diagnostic(
+        code="unsupported_instancing_path",
+        severity="error",
+        message="Requested MapScene instancing workflow is not supported in this configuration.",
+        remediation="Use a supported non-instanced workflow or enable a documented instancing path with tests.",
+        support_level="unsupported",
+        layer_id=layer_id,
+        object_id=object_id,
+        details={"path": str(path)},
+    )
+
+
+def unavailable_terrain_sampler_diagnostic(
+    *,
+    layer_id: str | None = None,
+    object_id: str | None = None,
+) -> Diagnostic:
+    return Diagnostic(
+        code="unavailable_terrain_sampler",
+        severity="warning",
+        message="Terrain-height sampling was requested but no terrain sampler is available.",
+        remediation="Provide a terrain sampler or choose a label terrain policy that does not require sampling.",
+        support_level="underdeveloped",
+        layer_id=layer_id,
+        object_id=object_id,
+    )
+
+
 def validate_label_support(
     labels: Sequence[Mapping[str, Any]],
     *,
@@ -397,7 +635,7 @@ def validate_label_support(
 
     for index, label in enumerate(labels):
         object_id = str(label.get("id", f"label_{index}"))
-        kind = str(label.get("kind", "point"))
+        kind = str(label.get("kind", label.get("placement_kind", "point")))
         text = str(label.get("text", ""))
 
         if kind in {"line", "curved"}:
@@ -590,6 +828,8 @@ class ValidationReport:
 __all__ = [
     "Diagnostic",
     "LayerSummary",
+    "P1_FEATURE_DIAGNOSTIC_CODES",
+    "P2_FEATURE_DIAGNOSTIC_CODES",
     "REQUIRED_DIAGNOSTIC_CODES",
     "RenderFailurePolicy",
     "SeverityPolicy",
@@ -601,12 +841,23 @@ __all__ = [
     "estimated_gpu_memory_diagnostic",
     "experimental_feature_diagnostic",
     "label_rejection_summary_diagnostic",
+    "missing_external_asset_diagnostic",
     "missing_glyphs_diagnostic",
+    "missing_label_field_diagnostic",
+    "missing_texture_path_diagnostic",
+    "missing_uvs_diagnostic",
     "placeholder_fallback_diagnostic",
     "pro_gated_path_diagnostic",
     "python_public_3dtiles_incomplete_diagnostic",
+    "unicode_coverage_gap_diagnostic",
+    "unavailable_cache_lod_stats_diagnostic",
+    "unavailable_terrain_sampler_diagnostic",
+    "unsupported_instancing_path_diagnostic",
     "unsupported_style_field_diagnostic",
     "unsupported_style_layer_type_diagnostic",
+    "unsupported_texture_format_diagnostic",
+    "unsupported_tile_feature_diagnostic",
+    "unsupported_tile_format_diagnostic",
     "validate_label_support",
     "vt_unsupported_family_diagnostic",
 ]

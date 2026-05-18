@@ -77,9 +77,15 @@ def _running_on_unsupported_hosted_macos_ci() -> bool:
     return os.environ.get("GITHUB_ACTIONS") == "true" and platform.system() == "Darwin"
 
 
+def _running_on_unsupported_hosted_windows_ci() -> bool:
+    # Hosted Windows runners can crash inside adapter probing before tests have
+    # a chance to skip terrain image cases cleanly.
+    return os.environ.get("GITHUB_ACTIONS") == "true" and platform.system() == "Windows"
+
+
 @lru_cache(maxsize=1)
 def terrain_rendering_available() -> bool:
-    if _running_on_unsupported_hosted_macos_ci():
+    if _running_on_unsupported_hosted_macos_ci() or _running_on_unsupported_hosted_windows_ci():
         return False
 
     if not f3d.has_gpu() or not all(hasattr(f3d, name) for name in REQUIRED_SYMBOLS):
