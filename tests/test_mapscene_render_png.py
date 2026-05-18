@@ -124,7 +124,7 @@ def test_render_output_changes_when_source_data_changes(tmp_path):
     assert first_path.read_bytes() != second_path.read_bytes()
 
 
-def test_render_uses_native_offscreen_for_real_terrain_and_raster_assets(tmp_path, monkeypatch):
+def _native_asset_scene(tmp_path):
     terrain_path = tmp_path / "terrain.npy"
     heightmap = np.linspace(0.0, 1.0, 64, dtype=np.float32).reshape(8, 8)
     np.save(terrain_path, heightmap)
@@ -137,7 +137,7 @@ def test_render_uses_native_offscreen_for_real_terrain_and_raster_assets(tmp_pat
     raster[..., 3] = 255
     save_png_deterministic(raster_path, raster)
 
-    scene = f3d.MapScene(
+    return f3d.MapScene(
         terrain=f3d.TerrainSource(
             path=str(terrain_path),
             crs="EPSG:32610",
@@ -183,6 +183,38 @@ def test_render_uses_native_offscreen_for_real_terrain_and_raster_assets(tmp_pat
         ],
     )
 
+
+def test_render_uses_native_offscreen_for_real_terrain_and_raster_assets(tmp_path, monkeypatch):
+    scene = _native_asset_scene(tmp_path)
+
+    class FakeNativeScene:
+        def __init__(self, width, height):
+            self.width = width
+            self.height = height
+            self.heightmap = None
+            self.overlay = None
+
+        def set_height_from_r32f(self, heightmap):
+            self.heightmap = heightmap
+
+        def set_camera_look_at(self, *_args):
+            return None
+
+        def set_raster_overlay(self, overlay, *_args):
+            self.overlay = overlay
+
+        def render_rgba(self):
+            assert self.heightmap is not None
+            assert self.overlay is not None
+            rgba = np.zeros((self.height, self.width, 4), dtype=np.uint8)
+            rgba[..., 0] = 16
+            rgba[..., 1] = 48
+            rgba[..., 2] = 96
+            rgba[..., 3] = 255
+            return rgba
+
+    monkeypatch.setattr(map_scene, "_native_scene_class", lambda: FakeNativeScene)
+
     def fail_source_derived_render(*_args, **_kwargs):
         raise AssertionError("source-derived fallback was used for fixture-backed native render")
 
@@ -198,3 +230,26 @@ def test_render_uses_native_offscreen_for_real_terrain_and_raster_assets(tmp_pat
     assert report.supported_features["mapscene.render_backend"] == "supported"
     assert scene.last_render_backend == "native/offscreen"
     assert scene.compiled_label_plans["labels"].accepted
+
+
+def test_render_falls_back_when_native_adapter_is_unavailable(tmp_path, monkeypatch):
+    scene = _native_asset_scene(tmp_path)
+
+    class PanicException(BaseException):
+        pass
+
+    PanicException.__module__ = "pyo3_runtime"
+
+    class UnavailableNativeScene:
+        def __init__(self, *_args):
+            raise PanicException("No suitable GPU adapter")
+
+    monkeypatch.setattr(map_scene, "_native_scene_class", lambda: UnavailableNativeScene)
+    output_path = tmp_path / "fallback.png"
+
+    report = scene.render(str(output_path))
+
+    assert output_path.exists()
+    assert report.status == "ok"
+    assert report.supported_features["mapscene.render_png"] == "supported"
+    assert scene.last_render_backend == "source-derived"

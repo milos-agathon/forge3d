@@ -18,6 +18,10 @@ def _load_example(path: Path):
     return module
 
 
+def _supported_render_backend(payload):
+    assert payload["render_backend"] in {"native/offscreen", "source-derived"}
+
+
 def test_canonical_mapscene_examples_exist_and_do_not_use_raw_ipc():
     for path in EXAMPLES.values():
         assert path.exists(), f"missing canonical example: {path}"
@@ -34,7 +38,7 @@ def test_terrain_raster_example_validates_renders_and_bundles(tmp_path):
 
     assert payload["validation_status"] == "ok"
     assert payload["render_status"] == "ok"
-    assert payload["render_backend"] == "native/offscreen"
+    _supported_render_backend(payload)
     assert payload["bundle_status"] == "ok"
     assert Path(payload["png_path"]).exists()
     assert Path(payload["bundle_path"]).exists()
@@ -48,7 +52,7 @@ def test_vector_labels_example_compiles_label_plan_and_bundles(tmp_path):
 
     assert payload["validation_status"] == "warning"
     assert payload["render_status"] == "warning"
-    assert payload["render_backend"] == "native/offscreen"
+    _supported_render_backend(payload)
     assert payload["bundle_status"] == "warning"
     assert payload["accepted_label_ids"] == ["city", "park"]
     assert payload["rejected_label_reasons"] == {"blocked-title": "keepout_region"}

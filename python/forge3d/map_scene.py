@@ -592,6 +592,15 @@ def _native_scene_class() -> Any | None:
     return getattr(native_module, "Scene", None)
 
 
+def _is_native_adapter_unavailable(exc: BaseException) -> bool:
+    exc_type = type(exc)
+    return (
+        exc_type.__module__ == "pyo3_runtime"
+        and exc_type.__name__ == "PanicException"
+        and "No suitable GPU adapter" in str(exc)
+    )
+
+
 def _load_native_heightmap(terrain: "TerrainSource") -> Any | None:
     if not terrain.path:
         return None
@@ -654,20 +663,25 @@ def _render_native_offscreen_rgba(recipe: "SceneRecipe", plans: Mapping[str, Any
     import numpy as np
 
     output = recipe.output
-    native_scene = scene_cls(int(output.width), int(output.height))
-    native_scene.set_height_from_r32f(heightmap)
-    _apply_native_camera(native_scene, recipe.camera)
+    try:
+        native_scene = scene_cls(int(output.width), int(output.height))
+        native_scene.set_height_from_r32f(heightmap)
+        _apply_native_camera(native_scene, recipe.camera)
 
-    for layer in recipe.layers:
-        if not isinstance(layer, RasterOverlay):
-            continue
-        overlay = _load_native_raster_overlay(layer)
-        if overlay is None:
+        for layer in recipe.layers:
+            if not isinstance(layer, RasterOverlay):
+                continue
+            overlay = _load_native_raster_overlay(layer)
+            if overlay is None:
+                return None
+            alpha = max(0.0, min(1.0, float(layer.opacity)))
+            native_scene.set_raster_overlay(overlay, alpha, None, None)
+
+        rgba = np.asarray(native_scene.render_rgba())
+    except BaseException as exc:
+        if _is_native_adapter_unavailable(exc):
             return None
-        alpha = max(0.0, min(1.0, float(layer.opacity)))
-        native_scene.set_raster_overlay(overlay, alpha, None, None)
-
-    rgba = np.asarray(native_scene.render_rgba())
+        raise
     if rgba.ndim != 3 or rgba.shape[2] != 4:
         raise RuntimeError("MapScene native/offscreen render returned an invalid RGBA image")
     if rgba.dtype != np.uint8:

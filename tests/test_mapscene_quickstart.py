@@ -35,7 +35,7 @@ def test_quickstart_vector_labels_scenario_is_executable(tmp_path):
 
     assert first["validation_status"] == "warning"
     assert first["render_status"] == "warning"
-    assert first["render_backend"] == "native/offscreen"
+    assert first["render_backend"] in {"native/offscreen", "source-derived"}
     assert first["accepted_label_ids"] == second["accepted_label_ids"]
     assert first["rejected_label_reasons"] == second["rejected_label_reasons"]
     assert Path(first["png_path"]).exists()
