@@ -94,10 +94,6 @@ def run_basic_workflow() -> dict[str, Any]:
         raise RuntimeError("curved labels unexpectedly returned a production id")
     if not isinstance(terrain, LabelOperationResult):
         raise RuntimeError("terrain line labels unexpectedly returned a production id")
-    if not isinstance(typography, LabelOperationResult):
-        raise RuntimeError("typography unexpectedly returned a production id")
-    if not isinstance(declutter, LabelOperationResult):
-        raise RuntimeError("declutter unexpectedly returned a production id")
     if not isinstance(missing_glyph, LabelOperationResult):
         raise RuntimeError("missing glyph example unexpectedly returned a production id")
 
@@ -109,6 +105,8 @@ def run_basic_workflow() -> dict[str, Any]:
         "overlay_id": int(overlay_id),
         "line_glyph_ordering_keys": [glyph["ordering_key"] for glyph in line_glyphs],
         "line_glyph_rotations": [round(float(glyph["rotation"]), 6) for glyph in line_glyphs],
+        "typography_state": typography.state,
+        "declutter_state": declutter.state,
         "state_disabled": state_disabled,
         "state_after_clear": state_after_clear,
         "diagnostics": {

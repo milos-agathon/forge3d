@@ -31,6 +31,12 @@ specs/003-deterministic-label-plan/*
 !specs/004-mapscene-mvp/
 specs/004-mapscene-mvp/*
 !specs/004-mapscene-mvp/**
+!specs/005-map-assets-bundles-p1/
+specs/005-map-assets-bundles-p1/*
+!specs/005-map-assets-bundles-p1/**
+!specs/006-material-vt-large-scene-p2/
+specs/006-material-vt-large-scene-p2/*
+!specs/006-material-vt-large-scene-p2/**
 
 # Git worktrees
 .worktrees/

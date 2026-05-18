@@ -59,7 +59,7 @@
   - Files: `tests/test_label_api_configuration_truth.py`, `python/forge3d/viewer.py`, `src/labels/typography.rs`, `src/labels/declutter.rs`, `src/viewer/cmd/labels_command.rs`
   - Action: Add tests proving `set_label_typography()` and `set_declutter_algorithm()` mutate real state, affect layout/render metrics or serializable state, or return typed unsupported/experimental diagnostics.
   - Verification: `pytest tests/test_label_api_configuration_truth.py -q`
-  - Done evidence: Tests fail if setters acknowledge success while leaving state unchanged.
+  - Done evidence: Tests fail if setters acknowledge success while leaving state unchanged. 2026-05-18 remediation updated these tests to require typography layout metrics and declutter placement-policy state instead of diagnostic-only deferral.
   - Dependencies: T001
 
 - [X] T006 [P] [PRD: P0-R1-AC4, P0-R1-AC6] Add atlas, enabled-state, clear, and remove no-op tests.
@@ -79,7 +79,7 @@
   - Files: `python/forge3d/viewer.py`, `python/forge3d/viewer.pyi`, `python/forge3d/viewer_ipc.py`, `src/viewer/cmd/labels_command.rs`, `src/labels/typography.rs`, `src/labels/declutter.rs`, expected `python/forge3d/diagnostics.py`
   - Action: Wire public setters to real label state where available; otherwise return feature `001` diagnostics with `experimental_feature`, `unsupported`, or `placeholder_fallback` support classification.
   - Verification: `pytest tests/test_label_api_configuration_truth.py tests/test_label_api_state_noops.py tests/test_label_api_public_workflow.py -q`
-  - Done evidence: Configuration tests pass and every unsupported setter fails honestly.
+  - Done evidence: Configuration tests pass and every unsupported setter fails honestly. 2026-05-18 remediation wires typography and declutter setters to public/native state, with unsupported declutter algorithms returning typed `placeholder_fallback`.
   - Dependencies: T004, T005, T006
 
 ## Phase 3: Line, Curved, and Terrain Label Truth
@@ -173,7 +173,7 @@
   - Files: `tests/test_label_api_public_workflow.py`, `tests/test_label_api_stable_ids.py`, `tests/test_label_api_configuration_truth.py`, `tests/test_label_api_state_noops.py`, `tests/test_label_api_line_curved_paths.py`, `tests/test_label_api_line_edge_cases.py`, `tests/test_label_api_diagnostics.py`, `tests/test_label_api_docs_support.py`, `tests/test_label_api_quickstart.py`
   - Action: Run the full label API feature test set and record the result summary.
   - Verification: `pytest tests/test_label_api_public_workflow.py tests/test_label_api_stable_ids.py tests/test_label_api_configuration_truth.py tests/test_label_api_state_noops.py tests/test_label_api_line_curved_paths.py tests/test_label_api_line_edge_cases.py tests/test_label_api_diagnostics.py tests/test_label_api_docs_support.py tests/test_label_api_quickstart.py -q`
-  - Done evidence: All feature tests pass or blockers are recorded with exact failing commands.
+  - Done evidence: All feature tests pass or blockers are recorded with exact failing commands. 2026-05-18 full label command reported `28 passed` after P0-R1-AC2/P0-R1-AC3 remediation.
   - Dependencies: T015
 
 - [X] T017 [PRD: P0-R1-AC1, P0-R1-AC2, P0-R1-AC3, P0-R1-AC4, P0-R1-AC5, P0-R1-AC6, P0-R2-AC1, P0-R2-AC2, P0-R2-AC3, P0-R2-AC4, P0-R2-AC5, P0-R2-AC6] Update requirements verification matrix.
@@ -183,7 +183,7 @@
   - Files: `docs/superpowers/state/requirements-verification-matrix.md`
   - Action: Update P0-R1 and P0-R2 rows with exact API, test, docs, diagnostics, and command evidence; do not mark `Verified` without successful verification output.
   - Verification: `rg -n "P0-R1-AC[1-6]|P0-R2-AC[1-6]|002-label-api-truth|tests/test_label_api" docs/superpowers/state/requirements-verification-matrix.md`
-  - Done evidence: Matrix rows reference concrete artifacts and statuses match evidence.
+  - Done evidence: Matrix rows reference concrete artifacts and statuses match evidence. 2026-05-18 matrix marks P0-R1-AC2 and P0-R1-AC3 `Verified` with public/native typography and declutter evidence.
   - Dependencies: T016
 
 - [X] T018 [PRD: P0-R1-AC4, P0-R1-AC6, P0-R2-AC4] Update implementation ledger and current context pack.
@@ -193,7 +193,7 @@
   - Files: `docs/superpowers/state/implementation-ledger.md`, `docs/superpowers/state/current-context-pack.md`
   - Action: Record completed tasks, verification commands, stable ID behavior, no-op/unsupported/experimental decisions, docs evidence, and any remaining label blockers.
   - Verification: `rg -n "002-label-api-truth|P0-R1|P0-R2|experimental_feature|placeholder_fallback|viewer_ipc" docs/superpowers/state/implementation-ledger.md docs/superpowers/state/current-context-pack.md`
-  - Done evidence: Ledger and context pack contain current outcomes and no unverified success claims.
+  - Done evidence: Ledger and context pack contain current outcomes and no unverified success claims. 2026-05-18 continuity state records R-028/R-037 mitigated and keeps curved/terrain label deferrals diagnostic-bearing.
   - Dependencies: T017
 
 ## Dependencies and Execution Order

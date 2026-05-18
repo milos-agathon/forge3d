@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.24.0"
+__version__ = "1.25.0"
 version = __version__
 
 import numpy as np
@@ -390,6 +390,7 @@ from .style import (
 from .diagnostics import (
     Diagnostic,
     LayerSummary,
+    P2_FEATURE_DIAGNOSTIC_CODES,
     REQUIRED_DIAGNOSTIC_CODES,
     RenderFailurePolicy,
     SeverityPolicy,
@@ -400,11 +401,16 @@ from .diagnostics import (
     experimental_feature_diagnostic,
     label_rejection_summary_diagnostic,
     missing_glyphs_diagnostic,
+    missing_texture_path_diagnostic,
+    missing_uvs_diagnostic,
     placeholder_fallback_diagnostic,
     pro_gated_path_diagnostic,
     python_public_3dtiles_incomplete_diagnostic,
+    unavailable_cache_lod_stats_diagnostic,
+    unsupported_instancing_path_diagnostic,
     unsupported_style_field_diagnostic,
     unsupported_style_layer_type_diagnostic,
+    unsupported_texture_format_diagnostic,
     validate_label_support,
     vt_unsupported_family_diagnostic,
 )
@@ -425,6 +431,8 @@ from .label_plan import (
 # Typed MapScene recipe contract
 # -----------------------------------------------------------------------------
 from .map_scene import (
+    FontAtlas,
+    FontFallbackRange,
     LabelLayer,
     LightingPreset,
     MapFurnitureLayer,
@@ -437,6 +445,8 @@ from .map_scene import (
     ReproducibilityProfile,
     SceneRecipe,
     TerrainSource,
+    Tiles3DLayer,
+    TypographySettings,
     VectorOverlay,
 )
 
@@ -603,6 +613,7 @@ __all__ = [
     # Product diagnostics
     "Diagnostic",
     "LayerSummary",
+    "P2_FEATURE_DIAGNOSTIC_CODES",
     "REQUIRED_DIAGNOSTIC_CODES",
     "RenderFailurePolicy",
     "SeverityPolicy",
@@ -613,11 +624,16 @@ __all__ = [
     "experimental_feature_diagnostic",
     "label_rejection_summary_diagnostic",
     "missing_glyphs_diagnostic",
+    "missing_texture_path_diagnostic",
+    "missing_uvs_diagnostic",
     "placeholder_fallback_diagnostic",
     "pro_gated_path_diagnostic",
     "python_public_3dtiles_incomplete_diagnostic",
+    "unavailable_cache_lod_stats_diagnostic",
+    "unsupported_instancing_path_diagnostic",
     "unsupported_style_field_diagnostic",
     "unsupported_style_layer_type_diagnostic",
+    "unsupported_texture_format_diagnostic",
     "validate_label_support",
     "vt_unsupported_family_diagnostic",
     # Deterministic label planning
@@ -633,8 +649,12 @@ __all__ = [
     "TerrainSource",
     "RasterOverlay",
     "VectorOverlay",
+    "FontAtlas",
+    "FontFallbackRange",
+    "TypographySettings",
     "LabelLayer",
     "PointCloudLayer",
+    "Tiles3DLayer",
     "MapSceneBuildingLayer",
     "MapFurnitureLayer",
     "OrbitCamera",

@@ -252,19 +252,30 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             true
         }
         ViewerCmd::SetLabelTypography {
-            tracking: _,
-            kerning: _,
-            line_height: _,
-            word_spacing: _,
+            tracking,
+            kerning,
+            line_height,
+            word_spacing,
         } => {
+            viewer
+                .label_manager
+                .set_typography(*tracking, *kerning, *line_height, *word_spacing);
             println!("[label] typography settings updated");
             true
         }
         ViewerCmd::SetDeclutterAlgorithm {
             algorithm,
-            seed: _,
-            max_iterations: _,
+            seed,
+            max_iterations,
         } => {
+            let algorithm_kind = if algorithm.eq_ignore_ascii_case("annealing") {
+                crate::labels::DeclutterAlgorithm::Annealing
+            } else {
+                crate::labels::DeclutterAlgorithm::Greedy
+            };
+            viewer
+                .label_manager
+                .set_declutter_algorithm(algorithm_kind, *seed, *max_iterations);
             println!("[label] declutter algorithm set to: {}", algorithm);
             true
         }

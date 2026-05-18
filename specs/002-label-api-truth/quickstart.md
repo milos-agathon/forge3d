@@ -25,13 +25,12 @@ python examples/label_api_truth_basic.py --json
 
 1. Prepare two labels whose layout changes under typography or declutter settings.
 2. Call `ViewerHandle.set_label_typography(...)` and compare layout/render or
-   serialized state. In feature `002`, assert a typed `experimental_feature`
-   diagnostic rather than success because native typography mutation is not yet
-   wired.
+   serialized state. In feature `002`, the call updates native label-manager
+   typography state and exposes deterministic layout metrics for the configured
+   tracking, kerning, line-height, and word-spacing controls.
 3. Call `ViewerHandle.set_declutter_algorithm(...)` and compare placement
-   behavior. In feature `002`, assert a typed `experimental_feature`
-   diagnostic rather than success because alternate placement behavior is not
-   yet wired.
+   behavior. In feature `002`, the call updates native label-manager declutter
+   state and records a deterministic placement policy for supported algorithms.
 
 ## Line And Curved Labels
 

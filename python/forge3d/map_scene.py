@@ -16,9 +16,20 @@ from .diagnostics import (
     crs_mismatch_diagnostic,
     estimated_gpu_memory_diagnostic,
     experimental_feature_diagnostic,
+    missing_texture_path_diagnostic,
+    missing_external_asset_diagnostic,
+    missing_label_field_diagnostic,
+    missing_uvs_diagnostic,
     placeholder_fallback_diagnostic,
     pro_gated_path_diagnostic,
     python_public_3dtiles_incomplete_diagnostic,
+    unicode_coverage_gap_diagnostic,
+    unavailable_cache_lod_stats_diagnostic,
+    unavailable_terrain_sampler_diagnostic,
+    unsupported_instancing_path_diagnostic,
+    unsupported_texture_format_diagnostic,
+    unsupported_tile_feature_diagnostic,
+    unsupported_tile_format_diagnostic,
     validate_label_support,
 )
 
@@ -189,7 +200,12 @@ def _virtual_texture_report_from_metadata(metadata: Mapping[str, Any] | None) ->
     return validate_terrain_vt_support(settings, layer_id="terrain.vt")
 
 
-def _unsupported_feature_diagnostic(feature: str, *, layer_id: str | None = None) -> Diagnostic:
+def _unsupported_feature_diagnostic(
+    feature: str,
+    *,
+    layer_id: str | None = None,
+    object_id: str | None = None,
+) -> Diagnostic:
     return Diagnostic(
         code="unsupported_feature",
         severity="error",
@@ -197,6 +213,7 @@ def _unsupported_feature_diagnostic(feature: str, *, layer_id: str | None = None
         remediation="Remove the feature or use a documented supported MapScene path.",
         support_level="unsupported",
         layer_id=layer_id,
+        object_id=object_id,
         details={"feature": feature},
     )
 
@@ -275,18 +292,7 @@ _TERRAIN_ASSET_EXTENSIONS = (".tif", ".tiff", ".npy")
 _RASTER_ASSET_EXTENSIONS = (".tif", ".tiff", ".png", ".jpg", ".jpeg")
 _POINT_CLOUD_ASSET_EXTENSIONS = (".las", ".laz", ".copc", ".ept.json")
 _BUILDING_ASSET_EXTENSIONS = (".geojson", ".json", ".fgb", ".gpkg", ".shp")
-def _missing_external_asset_diagnostic(layer_type: str, *, layer_id: str, path: str) -> Diagnostic:
-    return Diagnostic(
-        code="missing_external_asset",
-        severity="error",
-        message="MapScene layer references an external asset that cannot be found before rendering.",
-        remediation="Provide an existing local asset path or mark intentional fixtures with asset_status='fixture'.",
-        support_level="unsupported",
-        layer_id=layer_id,
-        details={"layer_type": layer_type, "path": path},
-    )
-
-
+_BUILDING_TEXTURE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
 def _unsupported_asset_format_diagnostic(
     layer_type: str,
     *,
@@ -350,9 +356,151 @@ def _asset_path_diagnostics(
         return diagnostics
 
     if not Path(path_value).exists():
-        diagnostics.append(_missing_external_asset_diagnostic(layer_type, layer_id=layer_id, path=path_value))
+        diagnostics.append(missing_external_asset_diagnostic(layer_type, layer_id=layer_id, path=path_value))
 
     return diagnostics
+
+
+def _texture_format_from_path(path: str | None) -> str | None:
+    if not path:
+        return None
+    suffix = Path(str(path)).suffix.lower().lstrip(".")
+    return suffix or None
+
+
+def _texture_path_available(path: str | None, metadata: Mapping[str, Any] | None) -> bool:
+    if not path:
+        return False
+    path_value = str(path)
+    return _is_external_uri(path_value) or _declares_available_asset(metadata) or Path(path_value).exists()
+
+
+def _iter_textured_material_intents(metadata: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    data = _metadata_dict(metadata)
+    intents = data.get("textured_materials")
+    if intents is None:
+        single = data.get("textured_material") or data.get("texture_material")
+        intents = [single] if isinstance(single, Mapping) else []
+    if not isinstance(intents, Sequence) or isinstance(intents, (str, bytes)):
+        return []
+    result: list[dict[str, Any]] = []
+    for item in intents:
+        if isinstance(item, Mapping):
+            result.append(_metadata(item))
+    return result
+
+
+def _p2_building_texture_diagnostics(
+    metadata: Mapping[str, Any] | None,
+    *,
+    layer_id: str,
+) -> tuple[list[Diagnostic], dict[str, Any], str | None]:
+    diagnostics: list[Diagnostic] = []
+    details: dict[str, Any] = {}
+    strongest_support: str | None = None
+    intents = _iter_textured_material_intents(metadata)
+    if not intents:
+        return diagnostics, details, strongest_support
+
+    details["textured_materials"] = []
+    for index, intent in enumerate(intents):
+        material_id = str(intent.get("material_id") or f"material_{index}")
+        object_id = str(intent.get("object_id") or material_id)
+        texture_path = intent.get("albedo_texture") or intent.get("texture_path")
+        texture_path_value = str(texture_path) if texture_path else ""
+        texture_format = str(
+            intent.get("texture_format") or _texture_format_from_path(texture_path_value) or "unknown"
+        ).lower().lstrip(".")
+        uv_available = bool(intent.get("uv_available", intent.get("has_uvs", False)))
+        scalar_fallback = bool(intent.get("scalar_fallback") or intent.get("fallback") == "scalar")
+
+        details["textured_materials"].append(
+            {
+                "material_id": material_id,
+                "object_id": object_id,
+                "albedo_texture": texture_path_value,
+                "texture_format": texture_format,
+                "uv_available": uv_available,
+                "scalar_fallback": scalar_fallback,
+            }
+        )
+
+        if not _texture_path_available(texture_path_value, metadata):
+            diagnostics.append(
+                missing_texture_path_diagnostic(
+                    texture_path_value,
+                    layer_id=layer_id,
+                    object_id=object_id,
+                    material_id=material_id,
+                )
+            )
+            strongest_support = "unsupported"
+        if not uv_available:
+            diagnostics.append(missing_uvs_diagnostic(layer_id=layer_id, object_id=object_id, material_id=material_id))
+            strongest_support = "unsupported"
+        if texture_format and f".{texture_format}" not in _BUILDING_TEXTURE_EXTENSIONS:
+            diagnostics.append(
+                unsupported_texture_format_diagnostic(
+                    texture_format,
+                    layer_id=layer_id,
+                    object_id=object_id,
+                    path=texture_path_value or None,
+                )
+            )
+            strongest_support = "unsupported"
+        if scalar_fallback:
+            diagnostics.append(
+                placeholder_fallback_diagnostic(
+                    "building textured material scalar fallback",
+                    layer_id=layer_id,
+                    object_id=object_id,
+                )
+            )
+            strongest_support = "placeholder/fallback"
+
+    return diagnostics, details, strongest_support
+
+
+def _p2_resource_availability_diagnostics(
+    metadata: Mapping[str, Any] | None,
+    *,
+    layer_id: str,
+    layer_type: str,
+) -> tuple[list[Diagnostic], dict[str, Any], str | None]:
+    data = _metadata_dict(metadata)
+    diagnostics: list[Diagnostic] = []
+    details: dict[str, Any] = {}
+    strongest_support: str | None = None
+
+    unavailable_stats = data.get("unavailable_cache_lod_stats") or data.get("unavailable_stats")
+    if unavailable_stats:
+        if isinstance(unavailable_stats, str):
+            stats = [unavailable_stats]
+        else:
+            stats = [str(item) for item in unavailable_stats]
+        diagnostics.append(
+            unavailable_cache_lod_stats_diagnostic(layer_type, stats, layer_id=layer_id)
+        )
+        details["unavailable_cache_lod_stats"] = sorted(stats)
+        strongest_support = "underdeveloped"
+
+    instancing = data.get("instancing") or data.get("instancing_status")
+    if isinstance(instancing, Mapping):
+        requested = bool(instancing.get("requested", True))
+        support_level = str(instancing.get("support_level", instancing.get("status", ""))).strip()
+        path = str(instancing.get("path") or f"{layer_type} instancing")
+        details["instancing_status"] = _metadata(instancing)
+        if requested and support_level in {"unsupported", "missing", "unavailable"}:
+            diagnostics.append(
+                unsupported_instancing_path_diagnostic(
+                    path,
+                    layer_id=layer_id,
+                    object_id=str(instancing.get("object_id") or "instancing"),
+                )
+            )
+            strongest_support = "unsupported"
+
+    return diagnostics, details, strongest_support
 
 
 def _source_kind(source: Any, metadata: Mapping[str, Any] | None) -> str | None:
@@ -438,6 +586,227 @@ def _diagnostic_for_layer(diagnostic: Diagnostic, layer_id: str) -> Diagnostic:
         payload["layer_id"] = layer_id
         return Diagnostic.from_dict(payload)
     return diagnostic
+
+
+def _feature_geometry(feature: Mapping[str, Any]) -> Mapping[str, Any]:
+    geometry = feature.get("geometry")
+    if isinstance(geometry, Mapping):
+        return geometry
+    geometry_type = feature.get("geometry_type") or feature.get("type")
+    coordinates = feature.get("coordinates") or feature.get("position") or feature.get("world_pos")
+    if geometry_type and coordinates is not None:
+        return {"type": str(geometry_type), "coordinates": coordinates}
+    return {}
+
+
+def _is_coordinate(value: Any) -> bool:
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        return False
+    if len(value) < 2:
+        return False
+    try:
+        float(value[0])
+        float(value[1])
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _valid_geometry(geometry: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    geometry_type = str(geometry.get("type", "") or "")
+    coordinates = geometry.get("coordinates")
+    geometry_key = geometry_type.lower()
+    if geometry_key == "point":
+        return ("Point", "point") if _is_coordinate(coordinates) else (None, None)
+    if geometry_key == "linestring":
+        if (
+            isinstance(coordinates, Sequence)
+            and not isinstance(coordinates, (str, bytes))
+            and len(coordinates) >= 2
+            and all(_is_coordinate(point) for point in coordinates)
+        ):
+            return "LineString", "line"
+        return None, None
+    if geometry_key == "polygon":
+        if not isinstance(coordinates, Sequence) or isinstance(coordinates, (str, bytes)) or not coordinates:
+            return None, None
+        outer = coordinates[0]
+        if (
+            isinstance(outer, Sequence)
+            and not isinstance(outer, (str, bytes))
+            and len(outer) >= 4
+            and all(_is_coordinate(point) for point in outer)
+        ):
+            return "Polygon", "polygon"
+        return None, None
+    if geometry_type:
+        return geometry_type, None
+    return None, None
+
+
+def _feature_properties(feature: Mapping[str, Any]) -> Mapping[str, Any]:
+    properties = feature.get("properties")
+    if isinstance(properties, Mapping):
+        return properties
+    return {str(key): value for key, value in feature.items() if key not in {"geometry", "coordinates", "type"}}
+
+
+def _feature_id(feature: Mapping[str, Any], index: int) -> str:
+    return str(feature.get("id") or feature.get("feature_id") or feature.get("source_id") or f"feature-{index}")
+
+
+def _style_text_expression(style_layer: Any) -> Any:
+    if isinstance(style_layer, Mapping):
+        layout = style_layer.get("layout")
+        if isinstance(layout, Mapping):
+            return layout.get("text-field")
+        return style_layer.get("text") or style_layer.get("text_field")
+    layout = getattr(style_layer, "layout", None)
+    if layout is not None:
+        return getattr(layout, "text_field", None)
+    return getattr(style_layer, "text", None) or getattr(style_layer, "text_field", None)
+
+
+def _label_text_from_expression(expression: Any, properties: Mapping[str, Any]) -> tuple[str, str | None]:
+    if expression is None:
+        expression = "name"
+    if isinstance(expression, str):
+        if expression.startswith("{") and expression.endswith("}") and len(expression) > 2:
+            field = expression[1:-1]
+            if field not in properties:
+                return "", field
+            return str(properties[field]), None
+        if expression in properties:
+            return str(properties[expression]), None
+        return str(expression), None
+    try:
+        from .style_expressions import EvalContext, evaluate
+
+        value = evaluate(expression, EvalContext(properties=dict(properties)))
+    except Exception:
+        return "", str(expression)
+    if value is None:
+        if isinstance(expression, Sequence) and not isinstance(expression, (str, bytes)) and len(expression) >= 2:
+            return "", str(expression[1])
+        return "", str(expression)
+    return str(value), None
+
+
+def _transform_label_geometry(
+    geometry: Mapping[str, Any],
+    *,
+    from_crs: str | None,
+    to_crs: str | None,
+) -> Mapping[str, Any]:
+    if not from_crs or not to_crs or _same_crs(from_crs, to_crs):
+        return geometry
+
+    import numpy as np
+
+    from .crs import transform_coords
+
+    geometry_type = str(geometry.get("type", ""))
+    coordinates = geometry.get("coordinates")
+    if geometry_type == "Point" and _is_coordinate(coordinates):
+        xy = np.asarray([[float(coordinates[0]), float(coordinates[1])]], dtype=np.float64)
+        transformed = transform_coords(xy, from_crs, to_crs)[0]
+        updated = [float(transformed[0]), float(transformed[1])]
+        if len(coordinates) > 2:
+            updated.append(float(coordinates[2]))
+        return {"type": geometry_type, "coordinates": updated}
+    if geometry_type == "LineString" and isinstance(coordinates, Sequence) and not isinstance(coordinates, (str, bytes)):
+        points = [point for point in coordinates if _is_coordinate(point)]
+        transformed = transform_coords(
+            np.asarray([[float(point[0]), float(point[1])] for point in points], dtype=np.float64),
+            from_crs,
+            to_crs,
+        )
+        updated = []
+        for point, xy in zip(points, transformed):
+            new_point = [float(xy[0]), float(xy[1])]
+            if len(point) > 2:
+                new_point.append(float(point[2]))
+            updated.append(new_point)
+        return {"type": geometry_type, "coordinates": updated}
+    if geometry_type == "Polygon" and isinstance(coordinates, Sequence) and not isinstance(coordinates, (str, bytes)):
+        rings = []
+        for ring in coordinates:
+            if not isinstance(ring, Sequence) or isinstance(ring, (str, bytes)):
+                rings.append(ring)
+                continue
+            points = [point for point in ring if _is_coordinate(point)]
+            if not points:
+                rings.append([])
+                continue
+            transformed = transform_coords(
+                np.asarray([[float(point[0]), float(point[1])] for point in points], dtype=np.float64),
+                from_crs,
+                to_crs,
+            )
+            updated_ring = []
+            for point, xy in zip(points, transformed):
+                new_point = [float(xy[0]), float(xy[1])]
+                if len(point) > 2:
+                    new_point.append(float(point[2]))
+                updated_ring.append(new_point)
+            rings.append(updated_ring)
+        return {"type": geometry_type, "coordinates": rings}
+    return geometry
+
+
+def _call_label_terrain_sampler(sampler: Any, coordinates: Sequence[Any]) -> Mapping[str, Any]:
+    if sampler is None or not callable(sampler):
+        return {}
+    x = float(coordinates[0])
+    y = float(coordinates[1])
+    z = float(coordinates[2]) if len(coordinates) > 2 else 0.0
+    for args in ((x, y, z), (x, y), (coordinates,)):
+        try:
+            result = sampler(*args)
+        except TypeError:
+            continue
+        if isinstance(result, Mapping):
+            return _metadata(result)
+        if result is not None:
+            return {"elevation": float(result), "source": type(sampler).__name__, "visible": True}
+    return {}
+
+
+def _sample_label_geometry(
+    geometry: Mapping[str, Any],
+    *,
+    terrain_sampler: Any | None,
+) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+    coordinates = geometry.get("coordinates")
+    if str(geometry.get("type")) != "Point" or not _is_coordinate(coordinates):
+        return geometry, {}
+    sample = _call_label_terrain_sampler(terrain_sampler, coordinates)
+    if "elevation" not in sample:
+        return geometry, sample
+    updated = [float(coordinates[0]), float(coordinates[1]), float(sample["elevation"])]
+    return {"type": "Point", "coordinates": updated}, sample
+
+
+def _atlas_glyph_set(glyph_atlas: Any) -> set[str] | None:
+    if glyph_atlas is None:
+        return None
+    if hasattr(glyph_atlas, "glyphs"):
+        return {str(glyph) for glyph in getattr(glyph_atlas, "glyphs")}
+    if isinstance(glyph_atlas, Mapping):
+        glyphs = glyph_atlas.get("glyphs")
+        if isinstance(glyphs, Mapping):
+            result = set()
+            for key in glyphs:
+                try:
+                    result.add(chr(int(key)))
+                except (TypeError, ValueError):
+                    result.add(str(key))
+            return result
+        if isinstance(glyphs, (set, frozenset, list, tuple)):
+            return {chr(glyph) if isinstance(glyph, int) else str(glyph) for glyph in glyphs}
+    if isinstance(glyph_atlas, (set, frozenset, list, tuple)):
+        return {chr(glyph) if isinstance(glyph, int) else str(glyph) for glyph in glyph_atlas}
+    return None
 
 
 def _render_payload(recipe: "SceneRecipe") -> dict[str, Any]:
@@ -749,6 +1118,232 @@ class VectorOverlay:
         }
 
 
+@dataclass(frozen=True)
+class FontFallbackRange:
+    name: str
+    start: int
+    end: int
+    font_family: str
+
+    def __post_init__(self) -> None:
+        if int(self.end) < int(self.start):
+            raise ValueError("FontFallbackRange end must be greater than or equal to start")
+
+    def covers(self, char: str) -> bool:
+        if not char:
+            return False
+        codepoint = ord(str(char)[0])
+        return int(self.start) <= codepoint <= int(self.end)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": str(self.name),
+            "start": int(self.start),
+            "end": int(self.end),
+            "font_family": str(self.font_family),
+        }
+
+
+@dataclass
+class FontAtlas:
+    glyphs: set[str] = field(default_factory=set)
+    font_size: int = 24
+    line_height: int = 32
+    baseline: int = 24
+    coverage: Mapping[str, Any] | None = None
+    source_path: str | None = None
+    fallbacks: Sequence[FontFallbackRange | Mapping[str, Any]] = field(default_factory=tuple)
+    diagnostics: Sequence[Diagnostic | Mapping[str, Any]] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        self.glyphs = {str(glyph) for glyph in self.glyphs}
+        self.coverage = _metadata(self.coverage)
+        self.fallbacks = tuple(
+            fallback
+            if isinstance(fallback, FontFallbackRange)
+            else FontFallbackRange(
+                str(fallback["name"]),
+                int(fallback["start"]),
+                int(fallback["end"]),
+                str(fallback["font_family"]),
+            )
+            for fallback in self.fallbacks
+        )
+        self.fallbacks = tuple(sorted(self.fallbacks, key=lambda item: (item.start, item.end, item.name)))
+        self.diagnostics = [
+            diagnostic if isinstance(diagnostic, Diagnostic) else Diagnostic.from_dict(diagnostic)
+            for diagnostic in self.diagnostics
+        ]
+
+    @classmethod
+    def default_latin(
+        cls,
+        *,
+        fallbacks: Sequence[FontFallbackRange | Mapping[str, Any]] | None = None,
+    ) -> "FontAtlas":
+        atlas_path = Path(__file__).resolve().parents[2] / "assets" / "fonts" / "default_atlas.json"
+        if atlas_path.exists():
+            with atlas_path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            glyphs = {chr(int(key)) for key in payload.get("glyphs", {})}
+            source_path = str(atlas_path)
+        else:
+            payload = {"font_size": 24, "line_height": 32, "baseline": 24}
+            glyphs = {chr(codepoint) for codepoint in range(32, 128)}
+            source_path = None
+        return cls(
+            glyphs=glyphs,
+            font_size=int(payload.get("font_size", 24)),
+            line_height=int(payload.get("line_height", 32)),
+            baseline=int(payload.get("baseline", 24)),
+            coverage={"start": 32, "end": 127, "name": "Basic Latin"},
+            source_path=source_path,
+            fallbacks=fallbacks or (),
+        )
+
+    @classmethod
+    def from_font(
+        cls,
+        path: str | Path,
+        *,
+        ranges: Sequence[FontFallbackRange | Mapping[str, Any]] | None = None,
+        font_size: int = 24,
+        line_height: int | None = None,
+    ) -> "FontAtlas":
+        font_path = Path(path)
+        if not font_path.exists():
+            return cls(
+                font_size=font_size,
+                line_height=line_height or int(round(font_size * 4 / 3)),
+                baseline=font_size,
+                source_path=str(font_path),
+                fallbacks=ranges or (),
+                diagnostics=[
+                    missing_external_asset_diagnostic(
+                        "font_atlas",
+                        object_id=str(path),
+                        path=str(font_path),
+                    )
+                ],
+            )
+        glyphs: set[str] = set()
+        for fallback in ranges or ():
+            item = fallback if isinstance(fallback, FontFallbackRange) else FontFallbackRange(
+                str(fallback["name"]),
+                int(fallback["start"]),
+                int(fallback["end"]),
+                str(fallback["font_family"]),
+            )
+            glyphs.update(chr(codepoint) for codepoint in range(item.start, item.end + 1))
+        if not glyphs:
+            glyphs = set("".join(chr(codepoint) for codepoint in range(32, 128)))
+        return cls(
+            glyphs=glyphs,
+            font_size=font_size,
+            line_height=line_height or int(round(font_size * 4 / 3)),
+            baseline=font_size,
+            coverage={"source": "font_file", "path": str(font_path)},
+            source_path=str(font_path),
+            fallbacks=ranges or (),
+        )
+
+    def covers(self, char: str) -> bool:
+        return str(char) in self.glyphs or self.fallback_for(str(char)) is not None
+
+    def fallback_for(self, char: str) -> FontFallbackRange | None:
+        for fallback in self.fallbacks:
+            if fallback.covers(char):
+                return fallback
+        return None
+
+    def validate_text(self, text: str, *, layer_id: str | None = None, object_id: str | None = None) -> list[Diagnostic]:
+        missing = sorted({char for char in str(text) if not self.covers(char)})
+        if not missing:
+            return []
+        return [unicode_coverage_gap_diagnostic(missing, layer_id=layer_id, object_id=object_id)]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "glyphs": sorted(self.glyphs),
+            "font_size": int(self.font_size),
+            "line_height": int(self.line_height),
+            "baseline": int(self.baseline),
+            "coverage": _metadata(self.coverage),
+            "source_path": self.source_path,
+            "fallbacks": [fallback.to_dict() for fallback in self.fallbacks],
+            "diagnostics": [diagnostic.to_dict() for diagnostic in self.diagnostics],
+        }
+
+
+@dataclass(frozen=True)
+class TypographySettings:
+    font_size: int = 24
+    kerning: bool = True
+    tracking: float = 0.0
+    line_height: float | None = None
+    multiline: bool = False
+    callout: bool = False
+    callout_offset: Sequence[float] = (0.0, 0.0)
+
+    def measure_text(self, text: str) -> dict[str, Any]:
+        lines = str(text).splitlines() or [""]
+        char_width = float(self.font_size) * 0.6
+        line_widths = []
+        kerning_applied = False
+        for line in lines:
+            width = len(line) * char_width
+            if line:
+                width += len(line) * float(self.tracking)
+            if self.kerning:
+                pair_count = sum(1 for pair in zip(line, line[1:]) if "".join(pair) in {"AV", "VA", "To"})
+                if pair_count:
+                    width -= pair_count * float(self.font_size) * 0.1
+                    kerning_applied = True
+            line_widths.append(max(0.0, width))
+        line_height = float(self.line_height if self.line_height is not None else self.font_size * 4 / 3)
+        return {
+            "width": max(line_widths) if line_widths else 0.0,
+            "height": line_height * len(lines),
+            "line_count": len(lines),
+            "line_height": line_height,
+            "kerning_applied": kerning_applied,
+            "tracking": float(self.tracking),
+        }
+
+    def layout_label(self, text: str, *, anchor: Sequence[float]) -> dict[str, Any]:
+        lines = str(text).splitlines() or [""]
+        if not self.multiline:
+            lines = [" ".join(lines)]
+        anchor_values = [float(value) for value in anchor]
+        while len(anchor_values) < 3:
+            anchor_values.append(0.0)
+        offset = [float(value) for value in self.callout_offset[:2]]
+        while len(offset) < 2:
+            offset.append(0.0)
+        label_anchor = [anchor_values[0] + offset[0], anchor_values[1] + offset[1], anchor_values[2]]
+        return {
+            "lines": lines,
+            "metrics": self.measure_text("\n".join(lines)),
+            "callout": {
+                "enabled": bool(self.callout),
+                "anchor": anchor_values[:3],
+                "label_anchor": label_anchor,
+                "offset": offset[:2],
+            },
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "font_size": int(self.font_size),
+            "kerning": bool(self.kerning),
+            "tracking": float(self.tracking),
+            "line_height": self.line_height,
+            "multiline": bool(self.multiline),
+            "callout": bool(self.callout),
+            "callout_offset": _sequence(self.callout_offset),
+        }
+
+
 @dataclass
 class LabelLayer:
     layer_id: str
@@ -758,6 +1353,198 @@ class LabelLayer:
     priority_rules: Sequence[Any] | None = None
     plan: Any | None = None
     metadata: Mapping[str, Any] | None = None
+    diagnostics: Sequence[Diagnostic | Mapping[str, Any]] | None = None
+
+    @classmethod
+    def from_features(
+        cls,
+        features: Sequence[Mapping[str, Any]],
+        *,
+        text: Any = "name",
+        crs: str | None = None,
+        target_crs: str | None = None,
+        terrain_sampling: str = "auto",
+        terrain_sampler: Any | None = None,
+        typography: Mapping[str, Any] | None = None,
+        layer_id: str = "labels",
+        glyph_atlas: Mapping[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> "LabelLayer":
+        labels: list[dict[str, Any]] = []
+        diagnostics: list[Diagnostic] = []
+        for index, feature in enumerate(features or ()):
+            feature_id = _feature_id(feature, index)
+            geometry = _feature_geometry(feature)
+            geometry_type, placement_kind = _valid_geometry(geometry)
+            if geometry_type is None:
+                diagnostics.append(
+                    placeholder_fallback_diagnostic(
+                        "label invalid geometry",
+                        layer_id=layer_id,
+                        object_id=feature_id,
+                    )
+                )
+                continue
+            if placement_kind is None:
+                diagnostics.append(
+                    _unsupported_feature_diagnostic(
+                        f"label geometry type {geometry_type}",
+                        layer_id=layer_id,
+                        object_id=feature_id,
+                    )
+                )
+                continue
+
+            transformed_geometry = _transform_label_geometry(geometry, from_crs=crs, to_crs=target_crs)
+            sampled_geometry = transformed_geometry
+            terrain_sample: Mapping[str, Any] = {}
+            if terrain_sampling == "required" and terrain_sampler is not None:
+                sampled_geometry, terrain_sample = _sample_label_geometry(
+                    transformed_geometry,
+                    terrain_sampler=terrain_sampler,
+                )
+
+            properties = _feature_properties(feature)
+            label_text, missing_field = _label_text_from_expression(text, properties)
+            if missing_field is not None:
+                diagnostics.append(
+                    missing_label_field_diagnostic(
+                        missing_field,
+                        layer_id=layer_id,
+                        object_id=feature_id,
+                    )
+                )
+                continue
+
+            if terrain_sampling == "required" and terrain_sampler is None:
+                diagnostics.append(unavailable_terrain_sampler_diagnostic(layer_id=layer_id, object_id=feature_id))
+
+            label_record = {
+                "id": feature_id,
+                "source_id": feature_id,
+                "text": label_text,
+                "geometry": _json_safe(sampled_geometry),
+                "geometry_type": geometry_type,
+                "placement_kind": placement_kind,
+                "properties": _metadata(properties),
+                "terrain_mode": "required" if terrain_sampling == "required" else terrain_sampling,
+            }
+            if terrain_sample:
+                label_record["terrain_sample"] = _metadata(terrain_sample)
+            labels.append(label_record)
+
+        labels.sort(
+            key=lambda label: (
+                str(label.get("id", "")),
+                str(label.get("geometry_type", "")),
+                str(label.get("text", "")),
+            )
+        )
+        layer_metadata = _metadata(metadata)
+        if crs is not None:
+            layer_metadata["crs"] = target_crs or crs
+            if target_crs is not None and not _same_crs(crs, target_crs):
+                layer_metadata["source_crs"] = crs
+        layer_metadata["terrain_sampling"] = terrain_sampling
+        return cls(
+            layer_id=layer_id,
+            labels=labels,
+            glyph_atlas=glyph_atlas,
+            typography=typography,
+            metadata=layer_metadata,
+            diagnostics=diagnostics,
+        )
+
+    @classmethod
+    def from_geodataframe(
+        cls,
+        gdf: Any,
+        *,
+        text: Any = "name",
+        crs: str | None = None,
+        target_crs: str | None = None,
+        terrain_sampling: str = "auto",
+        terrain_sampler: Any | None = None,
+        typography: Mapping[str, Any] | None = None,
+        layer_id: str = "labels",
+        glyph_atlas: Mapping[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> "LabelLayer":
+        if not hasattr(gdf, "iterrows"):
+            raise TypeError("LabelLayer.from_geodataframe requires a GeoDataFrame-like object")
+        features: list[dict[str, Any]] = []
+        for index, row in gdf.iterrows():
+            properties = {
+                str(key): row[key]
+                for key in getattr(gdf, "columns", ())
+                if str(key) != "geometry"
+            }
+            geometry = row.get("geometry") if hasattr(row, "get") else getattr(row, "geometry", None)
+            if hasattr(geometry, "__geo_interface__"):
+                geometry_payload = geometry.__geo_interface__
+            else:
+                geometry_payload = geometry
+            features.append(
+                {
+                    "type": "Feature",
+                    "id": str(index),
+                    "properties": properties,
+                    "geometry": geometry_payload,
+                }
+            )
+        effective_crs = crs or str(getattr(gdf, "crs", "") or "") or None
+        return cls.from_features(
+            features,
+            text=text,
+            crs=effective_crs,
+            target_crs=target_crs,
+            terrain_sampling=terrain_sampling,
+            terrain_sampler=terrain_sampler,
+            typography=typography,
+            layer_id=layer_id,
+            glyph_atlas=glyph_atlas,
+            metadata=metadata,
+        )
+
+    @classmethod
+    def from_style_layer(
+        cls,
+        features: Sequence[Mapping[str, Any]],
+        style_layer: Any,
+        *,
+        crs: str | None = None,
+        target_crs: str | None = None,
+        terrain_sampling: str = "auto",
+        terrain_sampler: Any | None = None,
+        layer_id: str = "labels",
+        glyph_atlas: Mapping[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> "LabelLayer":
+        return cls.from_features(
+            features,
+            text=_style_text_expression(style_layer) or "name",
+            crs=crs,
+            target_crs=target_crs,
+            terrain_sampling=terrain_sampling,
+            terrain_sampler=terrain_sampler,
+            layer_id=layer_id,
+            glyph_atlas=glyph_atlas,
+            metadata=metadata,
+        )
+
+    def compile_labels(self, camera: Any, viewport: Any, terrain: Any | None = None) -> Any:
+        from .label_plan import LabelPlan
+
+        return LabelPlan.compile(
+            labels=self.labels or (),
+            camera=camera,
+            viewport=viewport,
+            terrain=terrain,
+            priority_rules=self.priority_rules or (),
+            typography=self.typography or {},
+            glyph_atlas=self.glyph_atlas,
+            seed=int(_metadata_dict(self.metadata).get("seed", 0)),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -769,6 +1556,10 @@ class LabelLayer:
             "priority_rules": _sequence(self.priority_rules),
             "plan": _json_safe(self.plan) if self.plan is not None else None,
             "metadata": _metadata(self.metadata),
+            "diagnostics": [
+                diagnostic.to_dict() if isinstance(diagnostic, Diagnostic) else _json_safe(diagnostic)
+                for diagnostic in (self.diagnostics or ())
+            ],
         }
 
 
@@ -801,6 +1592,63 @@ class BuildingLayer:
     material_status: str | None = None
     metadata: Mapping[str, Any] | None = None
 
+    @classmethod
+    def from_geojson(
+        cls,
+        path: str | Path,
+        **options: Any,
+    ) -> "BuildingLayer":
+        metadata = _metadata(options.pop("metadata", None))
+        metadata.update(_metadata(options))
+        metadata.setdefault("source_format", "geojson")
+        return cls(
+            layer_id=str(metadata.pop("layer_id", None) or Path(path).stem or "buildings"),
+            source={"path": str(path), "source_format": "geojson"},
+            support_level=str(metadata.pop("support_level", "underdeveloped")),
+            geometry_count=metadata.pop("geometry_count", None),
+            bounds=metadata.pop("bounds", None),
+            material_status=str(metadata.pop("material_status", "scalar_pbr_underdeveloped")),
+            metadata=metadata,
+        )
+
+    @classmethod
+    def from_cityjson(
+        cls,
+        path: str | Path,
+        **options: Any,
+    ) -> "BuildingLayer":
+        metadata = _metadata(options.pop("metadata", None))
+        metadata.update(_metadata(options))
+        metadata.setdefault("source_format", "cityjson")
+        return cls(
+            layer_id=str(metadata.pop("layer_id", None) or Path(path).stem or "buildings"),
+            source={"path": str(path), "source_format": "cityjson"},
+            support_level=str(metadata.pop("support_level", "underdeveloped")),
+            geometry_count=metadata.pop("geometry_count", None),
+            bounds=metadata.pop("bounds", None),
+            material_status=str(metadata.pop("material_status", "scalar_pbr_underdeveloped")),
+            metadata=metadata,
+        )
+
+    @classmethod
+    def from_mesh(
+        cls,
+        path: str | Path | None = None,
+        **options: Any,
+    ) -> "BuildingLayer":
+        metadata = _metadata(options.pop("metadata", None))
+        metadata.update(_metadata(options))
+        metadata.setdefault("source_format", "mesh")
+        return cls(
+            layer_id=str(metadata.pop("layer_id", None) or (Path(path).stem if path else "buildings.mesh")),
+            source={"path": str(path), "source_format": "mesh"} if path else {"source_format": "mesh"},
+            support_level=str(metadata.pop("support_level", "unsupported")),
+            geometry_count=metadata.pop("geometry_count", None),
+            bounds=metadata.pop("bounds", None),
+            material_status=str(metadata.pop("material_status", "unsupported")),
+            metadata=metadata,
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "kind": "building_layer",
@@ -815,6 +1663,78 @@ class BuildingLayer:
 
 
 MapSceneBuildingLayer = BuildingLayer
+
+
+@dataclass
+class Tiles3DLayer:
+    layer_id: str
+    source: str | Mapping[str, Any] | None = None
+    support_level: str = "underdeveloped"
+    lod: Mapping[str, Any] | None = None
+    cache_budget: int | None = None
+    cache_stats: Mapping[str, Any] | None = None
+    metadata: Mapping[str, Any] | None = None
+    diagnostics: Sequence[Diagnostic | Mapping[str, Any]] | None = None
+
+    @classmethod
+    def from_tileset_json(
+        cls,
+        path: str | Path,
+        *,
+        lod: Mapping[str, Any] | None = None,
+        cache_budget: int | None = None,
+        cache_stats: Mapping[str, Any] | None = None,
+        layer_id: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> "Tiles3DLayer":
+        data = _metadata(metadata)
+        data.setdefault("source_format", "tileset.json")
+        return cls(
+            layer_id=layer_id or Path(path).stem or "tiles3d",
+            source={"path": str(path), "source_format": "tileset.json"},
+            lod=lod,
+            cache_budget=cache_budget,
+            cache_stats=cache_stats,
+            metadata=data,
+        )
+
+    @classmethod
+    def from_b3dm(
+        cls,
+        path: str | Path,
+        *,
+        lod: Mapping[str, Any] | None = None,
+        cache_budget: int | None = None,
+        cache_stats: Mapping[str, Any] | None = None,
+        layer_id: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> "Tiles3DLayer":
+        data = _metadata(metadata)
+        data.setdefault("source_format", "b3dm")
+        return cls(
+            layer_id=layer_id or Path(path).stem or "tiles3d",
+            source={"path": str(path), "source_format": "b3dm"},
+            lod=lod,
+            cache_budget=cache_budget,
+            cache_stats=cache_stats,
+            metadata=data,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": "tiles3d_layer",
+            "layer_id": str(self.layer_id),
+            "source": _json_safe(self.source),
+            "support_level": self.support_level,
+            "lod": _metadata(self.lod),
+            "cache_budget": self.cache_budget,
+            "cache_stats": _metadata(self.cache_stats),
+            "metadata": _metadata(self.metadata),
+            "diagnostics": [
+                diagnostic.to_dict() if isinstance(diagnostic, Diagnostic) else _json_safe(diagnostic)
+                for diagnostic in (self.diagnostics or ())
+            ],
+        }
 
 
 @dataclass
@@ -1016,6 +1936,156 @@ class MapScene:
     def to_dict(self) -> dict[str, Any]:
         return {"kind": "map_scene", "recipe": self.recipe.to_dict()}
 
+    @staticmethod
+    def _layer_from_dict(data: Mapping[str, Any]) -> Any:
+        kind = str(data.get("kind", ""))
+        if kind == "raster_overlay":
+            return RasterOverlay(
+                layer_id=str(data["layer_id"]),
+                path=data.get("path"),
+                crs=data.get("crs"),
+                opacity=float(data.get("opacity", 1.0)),
+                metadata=data.get("metadata") or {},
+            )
+        if kind == "vector_overlay":
+            return VectorOverlay(
+                layer_id=str(data["layer_id"]),
+                path=data.get("path"),
+                features=data.get("features") or (),
+                crs=data.get("crs"),
+                style=data.get("style") or {},
+                style_support=data.get("style_support") or {},
+                metadata=data.get("metadata") or {},
+            )
+        if kind == "label_layer":
+            return LabelLayer(
+                layer_id=str(data["layer_id"]),
+                labels=data.get("labels") or (),
+                glyph_atlas=data.get("glyph_atlas") or {},
+                typography=data.get("typography") or {},
+                priority_rules=data.get("priority_rules") or (),
+                plan=data.get("plan"),
+                metadata=data.get("metadata") or {},
+                diagnostics=data.get("diagnostics") or (),
+            )
+        if kind == "point_cloud_layer":
+            return PointCloudLayer(
+                layer_id=str(data["layer_id"]),
+                path=data.get("path"),
+                crs=data.get("crs"),
+                point_count=data.get("point_count"),
+                metadata=data.get("metadata") or {},
+            )
+        if kind == "building_layer":
+            return BuildingLayer(
+                layer_id=str(data["layer_id"]),
+                source=data.get("source"),
+                support_level=str(data.get("support_level", "underdeveloped")),
+                geometry_count=data.get("geometry_count"),
+                bounds=data.get("bounds"),
+                material_status=data.get("material_status"),
+                metadata=data.get("metadata") or {},
+            )
+        if kind == "tiles3d_layer":
+            return Tiles3DLayer(
+                layer_id=str(data["layer_id"]),
+                source=data.get("source"),
+                support_level=str(data.get("support_level", "underdeveloped")),
+                lod=data.get("lod") or {},
+                cache_budget=data.get("cache_budget"),
+                cache_stats=data.get("cache_stats") or {},
+                metadata=data.get("metadata") or {},
+                diagnostics=data.get("diagnostics") or (),
+            )
+        return dict(data)
+
+    @classmethod
+    def _recipe_from_dict(cls, data: Mapping[str, Any]) -> SceneRecipe:
+        terrain_data = data.get("terrain") or {}
+        camera_data = data.get("camera") or {}
+        lighting_data = data.get("lighting") or {}
+        output_data = data.get("output") or {}
+        furniture_data = data.get("map_furniture")
+        reproducibility_data = data.get("reproducibility_profile")
+        return SceneRecipe(
+            terrain=TerrainSource(
+                path=terrain_data.get("path"),
+                crs=terrain_data.get("crs"),
+                metadata=terrain_data.get("metadata") or {},
+                elevation_sampling_available=bool(terrain_data.get("elevation_sampling_available", False)),
+            ),
+            camera=OrbitCamera(
+                target=camera_data.get("target") or (0.0, 0.0, 0.0),
+                distance=float(camera_data.get("distance", 1.0)),
+                azimuth_deg=float(camera_data.get("azimuth_deg", 0.0)),
+                elevation_deg=float(camera_data.get("elevation_deg", 45.0)),
+                fov_deg=float(camera_data.get("fov_deg", 45.0)),
+                near=camera_data.get("near"),
+                far=camera_data.get("far"),
+            ),
+            lighting=LightingPreset(
+                name=str(lighting_data.get("name", "default")),
+                sun_direction=lighting_data.get("sun_direction"),
+                intensity=float(lighting_data.get("intensity", 1.0)),
+                settings=lighting_data.get("settings") or {},
+            ),
+            layers=tuple(cls._layer_from_dict(layer) for layer in data.get("layers") or ()),
+            output=OutputSpec(
+                width=int(output_data.get("width", 1)),
+                height=int(output_data.get("height", 1)),
+                format=str(output_data.get("format", "png")),
+                path=output_data.get("path"),
+                metadata=output_data.get("metadata") or {},
+            ),
+            map_furniture=(
+                MapFurnitureLayer(
+                    title=furniture_data.get("title"),
+                    legend=furniture_data.get("legend") or {},
+                    scale_bar=furniture_data.get("scale_bar") or {},
+                    north_arrow=furniture_data.get("north_arrow") or {},
+                    keepouts=furniture_data.get("keepouts") or (),
+                    metadata=furniture_data.get("metadata") or {},
+                )
+                if isinstance(furniture_data, Mapping)
+                else None
+            ),
+            render_policy=str(data.get("render_policy", RenderFailurePolicy.CONTINUE_ON_WARNING)),
+            diagnostics_policy=data.get("diagnostics_policy") or {},
+            reproducibility_profile=(
+                ReproducibilityProfile(
+                    seed=int(reproducibility_data.get("seed", 0)),
+                    camera=reproducibility_data.get("camera") or {},
+                    output_size=reproducibility_data.get("output_size") or (),
+                    terrain_transform=reproducibility_data.get("terrain_transform") or {},
+                    style_hashes=reproducibility_data.get("style_hashes") or {},
+                    asset_hashes_or_ids=reproducibility_data.get("asset_hashes_or_ids") or {},
+                    renderer_backend=reproducibility_data.get("renderer_backend"),
+                    pixel_tolerance=reproducibility_data.get("pixel_tolerance"),
+                )
+                if isinstance(reproducibility_data, Mapping)
+                else None
+            ),
+        )
+
+    @classmethod
+    def load_bundle(cls, path: str | Path) -> "MapScene":
+        bundle_path = Path(path)
+        recipe_path = bundle_path / "scene" / "mapscene_recipe.json"
+        if not recipe_path.exists():
+            raise FileNotFoundError(f"MapScene bundle recipe not found: {recipe_path}")
+        with recipe_path.open("r", encoding="utf-8") as handle:
+            recipe_payload = json.load(handle)
+        scene = cls(recipe=cls._recipe_from_dict(recipe_payload))
+        scene.last_bundle_path = str(bundle_path)
+        state_path = bundle_path / "scene" / "state.json"
+        if state_path.exists():
+            with state_path.open("r", encoding="utf-8") as handle:
+                state_payload = json.load(handle)
+            report_payload = state_payload.get("validation_report")
+            if isinstance(report_payload, Mapping):
+                scene.last_validation_report = ValidationReport.from_dict(report_payload)
+        return scene
+
     def validate(self) -> ValidationReport:
         self.compiled_label_plans = {}
         diagnostics: list[Diagnostic] = []
@@ -1194,6 +2264,10 @@ class MapScene:
                 object_count = len(labels)
                 details = {"label_count": object_count}
                 supported_features["layer.label_layer"] = "supported"
+                layer_diagnostics.extend(
+                    diagnostic if isinstance(diagnostic, Diagnostic) else Diagnostic.from_dict(diagnostic)
+                    for diagnostic in (layer.diagnostics or ())
+                )
                 if not _has_labels_or_plan(layer):
                     layer_diagnostics.append(
                         _missing_renderable_data_diagnostic(
@@ -1206,7 +2280,7 @@ class MapScene:
                     support_level = "unsupported"
                 label_report = validate_label_support(
                     labels,
-                    atlas_glyphs=None,
+                    atlas_glyphs=_atlas_glyph_set(layer.glyph_atlas),
                     layer_id=layer_id,
                 )
                 _merge_report(
@@ -1220,6 +2294,15 @@ class MapScene:
                     plan = _label_plan_from_layer(layer, recipe=self.recipe, terrain=terrain)
                     self.compiled_label_plans[layer_id] = plan
                     plan_diagnostics = [_diagnostic_for_layer(diagnostic, layer_id) for diagnostic in plan.diagnostics]
+                    existing_diagnostic_keys = {
+                        (diagnostic.code, diagnostic.layer_id, diagnostic.object_id)
+                        for diagnostic in diagnostics
+                    }
+                    plan_diagnostics = [
+                        diagnostic
+                        for diagnostic in plan_diagnostics
+                        if (diagnostic.code, diagnostic.layer_id, diagnostic.object_id) not in existing_diagnostic_keys
+                    ]
                     diagnostics.extend(plan_diagnostics)
                     details["compiled_label_plan"] = {
                         "accepted_count": len(plan.accepted),
@@ -1270,6 +2353,64 @@ class MapScene:
                     )
                     unsupported_features["point_cloud.mapscene_render"] = "placeholder/fallback"
                     support_level = "placeholder/fallback"
+            elif isinstance(layer, Tiles3DLayer):
+                layer_type = "tiles3d_layer"
+                object_count = None
+                source_path = _source_path(layer.source)
+                source_kind = _source_kind(layer.source, layer.metadata)
+                details = {
+                    "source_kind": source_kind,
+                    "cache_budget": layer.cache_budget,
+                    "cache_stats": _metadata(layer.cache_stats),
+                    "lod": _metadata(layer.lod),
+                }
+                supported_features["layer.tiles3d_intent"] = "underdeveloped"
+                support_level = layer.support_level
+                layer_diagnostics.extend(
+                    diagnostic if isinstance(diagnostic, Diagnostic) else Diagnostic.from_dict(diagnostic)
+                    for diagnostic in (layer.diagnostics or ())
+                )
+                if layer.source is None and not _metadata_dict(layer.metadata):
+                    layer_diagnostics.append(
+                        _missing_source_identity_diagnostic(
+                            layer_type,
+                            layer_id=layer_id,
+                            source_fields=("source", "metadata"),
+                        )
+                    )
+                    unsupported_features["tiles3d.source_identity"] = "unsupported"
+                    support_level = "unsupported"
+                else:
+                    if source_path:
+                        if not source_path.lower().endswith(("tileset.json", ".b3dm")):
+                            layer_diagnostics.append(
+                                unsupported_tile_format_diagnostic(
+                                    Path(source_path).suffix.lstrip(".") or source_kind or "unknown",
+                                    layer_id=layer_id,
+                                    object_id=source_path,
+                                )
+                            )
+                            unsupported_features["tiles3d.format"] = "unsupported"
+                            support_level = "unsupported"
+                        layer_diagnostics.extend(
+                            _asset_path_diagnostics(
+                                layer_type,
+                                layer_id=layer_id,
+                                path=source_path,
+                                metadata=layer.metadata,
+                                supported_extensions=("tileset.json", ".b3dm"),
+                            )
+                        )
+                    for feature in _metadata_dict(layer.metadata).get("unsupported_features", ()) or ():
+                        layer_diagnostics.append(
+                            unsupported_tile_feature_diagnostic(str(feature), layer_id=layer_id)
+                        )
+                        unsupported_features["tiles3d.feature"] = "unsupported"
+                        support_level = "unsupported"
+                    if support_level != "unsupported":
+                        layer_diagnostics.append(python_public_3dtiles_incomplete_diagnostic(layer_id=layer_id))
+                        unsupported_features["tiles3d.public_python_render"] = "underdeveloped"
+                        support_level = "underdeveloped"
             elif isinstance(layer, BuildingLayer):
                 layer_type = "building_layer"
                 object_count = layer.geometry_count
@@ -1324,6 +2465,11 @@ class MapScene:
                 if layer.support_level == "Pro-gated":
                     layer_diagnostics.append(pro_gated_path_diagnostic("building layer", layer_id=layer_id))
                     unsupported_features["buildings.pro_gated_path"] = "Pro-gated"
+                if str(layer.material_status or "").lower() in {"textured_pbr_unsupported", "textured pbr unsupported"}:
+                    layer_diagnostics.append(
+                        _unsupported_feature_diagnostic("building textured PBR", layer_id=layer_id)
+                    )
+                    unsupported_features["buildings.textured_pbr"] = "unsupported"
                 elif layer.support_level == "placeholder/fallback" or (
                     layer.geometry_count == 0 and layer.support_level not in {"experimental", "underdeveloped"}
                 ):
@@ -1336,11 +2482,47 @@ class MapScene:
                 elif layer.support_level == "unsupported":
                     layer_diagnostics.append(_unsupported_feature_diagnostic("building layer", layer_id=layer_id))
                     unsupported_features["buildings.unsupported"] = "unsupported"
+                texture_diagnostics, texture_details, texture_support = _p2_building_texture_diagnostics(
+                    layer.metadata,
+                    layer_id=layer_id,
+                )
+                if texture_diagnostics:
+                    layer_diagnostics.extend(texture_diagnostics)
+                    details.update(texture_details)
+                    if any(diagnostic.code == "missing_texture_path" for diagnostic in texture_diagnostics):
+                        unsupported_features["buildings.missing_texture_path"] = "unsupported"
+                    if any(diagnostic.code == "missing_uvs" for diagnostic in texture_diagnostics):
+                        unsupported_features["buildings.missing_uvs"] = "unsupported"
+                    if any(diagnostic.code == "unsupported_texture_format" for diagnostic in texture_diagnostics):
+                        unsupported_features["buildings.unsupported_texture_format"] = "unsupported"
+                    if any(diagnostic.code == "placeholder_fallback" for diagnostic in texture_diagnostics):
+                        unsupported_features["buildings.textured_material_fallback"] = "placeholder/fallback"
+                    if texture_support == "unsupported":
+                        support_level = "unsupported"
+                    elif texture_support == "placeholder/fallback" and support_level not in {"unsupported", "Pro-gated"}:
+                        support_level = "placeholder/fallback"
             else:
                 layer_diagnostics.append(_unsupported_layer_type_diagnostic(layer, layer_id=layer_id))
                 unsupported_features["layer.unknown"] = "unsupported"
                 support_level = "unsupported"
                 details = {"python_type": type(layer).__name__}
+
+            resource_diagnostics, resource_details, resource_support = _p2_resource_availability_diagnostics(
+                getattr(layer, "metadata", None),
+                layer_id=layer_id,
+                layer_type=layer_type,
+            )
+            if resource_diagnostics:
+                layer_diagnostics.extend(resource_diagnostics)
+                details.update(resource_details)
+                if any(diagnostic.code == "unavailable_cache_lod_stats" for diagnostic in resource_diagnostics):
+                    unsupported_features[f"{layer_type}.cache_lod_stats"] = "underdeveloped"
+                if any(diagnostic.code == "unsupported_instancing_path" for diagnostic in resource_diagnostics):
+                    unsupported_features[f"{layer_type}.instancing"] = "unsupported"
+                if resource_support == "unsupported":
+                    support_level = "unsupported"
+                elif resource_support == "underdeveloped" and support_level == "supported":
+                    support_level = "underdeveloped"
 
             if layer_memory is not None:
                 total_memory += layer_memory
@@ -1518,6 +2700,11 @@ class MapScene:
             "map_furniture": self.recipe.map_furniture.to_dict() if self.recipe.map_furniture is not None else None,
             "supported_features": dict(report.supported_features or {}),
             "unsupported_features": dict(report.unsupported_features or {}),
+            "supported_export_settings": {
+                "bundle_schema": "forge3d.mapscene.review.v1",
+                "label_plan_persistence": True,
+                "output_formats": ["png"],
+            },
             "compiled_label_plan_ids": sorted(self.compiled_label_plans),
             "source_layer_ids": [],
             "last_render_path": self.last_render_path,
@@ -1583,8 +2770,12 @@ __all__ = [
     "TerrainSource",
     "RasterOverlay",
     "VectorOverlay",
+    "FontAtlas",
+    "FontFallbackRange",
+    "TypographySettings",
     "LabelLayer",
     "PointCloudLayer",
+    "Tiles3DLayer",
     "BuildingLayer",
     "MapSceneBuildingLayer",
     "MapFurnitureLayer",
