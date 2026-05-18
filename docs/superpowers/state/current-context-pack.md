@@ -996,8 +996,9 @@ New/updated feature `004` paths from the T019-T021 closure checkpoint include:
 ```text
 [$speckit-implement](C:\Users\milos\forge3d\.agents\skills\speckit-implement\SKILL.md)
 
-Feature `006-material-vt-large-scene-p2` has focused P2 verification evidence.
-Continue only with requested follow-up scope. Keep unrelated/generated paths
-separated; P2 diagnostic deferrals for VT normal/mask, textured PBR buildings,
-curved text, and complex-script shaping remain intentional documented outcomes.
+Feature `006-material-vt-large-scene-p2` has focused P2 verification evidence
+while SpecKit prerequisites still resolve `005-map-assets-bundles-p1`. Continue
+only with requested follow-up scope. Keep unrelated/generated paths separated;
+P2 diagnostic deferrals for VT normal/mask, textured PBR buildings, curved text,
+and complex-script shaping remain intentional documented outcomes.
 ```
