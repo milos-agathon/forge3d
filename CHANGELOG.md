@@ -6,6 +6,16 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.26.0] - 2026-05-18
+### Added
+- Implemented Spec 006 P2 material, virtual-texture, and large-scene polish: deterministic VT family validation, textured-building material diagnostics, advanced static label planning, and large-scene resource summaries.
+- Added P2 support diagnostics for unsupported VT families, missing texture paths, missing UVs, unsupported texture formats, unavailable cache/LOD stats, unsupported instancing paths, estimated GPU memory, experimental label paths, and explicit scalar/material fallbacks.
+- Added support docs and audit coverage for VT normal/mask status, building texture prerequisites and fallback behavior, advanced labels, large-scene offline scope, and non-MVP-blocking P2 deferrals.
+
+### Changed
+- Updated package metadata to describe forge3d's P2 material/VT diagnostics, advanced labels, large-scene summaries, and reproducible offline map bundles.
+- Bumped the package version to `1.26.0`.
+
 ## [1.25.0] - 2026-05-18
 ### Added
 - Implemented Spec 005 P1 map asset workflows: data-driven `LabelLayer` ingestion from features, typography coverage and fallback declarations, public `MapSceneBuildingLayer` and `Tiles3DLayer` scene adapters, and deterministic map-scene bundle round-trip state.

@@ -10,6 +10,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from .diagnostics import (
     Diagnostic,
+    experimental_feature_diagnostic,
     label_rejection_summary_diagnostic,
     missing_glyphs_diagnostic,
     placeholder_fallback_diagnostic,
@@ -27,6 +28,15 @@ REJECTION_REASONS = (
     "invalid_geometry",
     "unsupported_geometry_type",
     "empty_text",
+)
+
+CARTOGRAPHIC_PRIORITY_PRESET = (
+    {"name": "annotations", "rank": 10},
+    {"name": "roads", "rank": 20},
+    {"name": "rivers", "rank": 30},
+    {"name": "peaks", "rank": 40},
+    {"name": "cities", "rank": 50},
+    {"name": "capitals", "rank": 60},
 )
 
 
@@ -135,6 +145,16 @@ def _rects_intersect(left: Sequence[float] | None, right: Sequence[float] | None
 def _requires_terrain(record: Mapping[str, Any]) -> bool:
     mode = str(record.get("terrain_mode", "")).lower()
     return bool(record.get("requires_terrain")) or mode in {"required", "sample", "terrain"}
+
+
+def _requires_complex_shaping(text: str) -> bool:
+    return any(
+        ("\u0590" <= char <= "\u08ff")
+        or ("\u0900" <= char <= "\u0dff")
+        or ("\ufb50" <= char <= "\ufdff")
+        or ("\ufe70" <= char <= "\ufeff")
+        for char in text
+    )
 
 
 def _call_terrain_sampler(terrain: Any, coords: Sequence[float]) -> Mapping[str, Any]:
@@ -266,7 +286,113 @@ def _point_label_candidates(
             },
         )
 
+    if bool(record.get("leader_line")) or str(record.get("placement_preset", "")).lower() in {"callout", "leader"}:
+        leader_anchor = [x + offset, y - offset, z]
+        candidates.insert(
+            0,
+            LabelCandidate(
+                candidate_id=f"{label_id}:leader",
+                candidate_type="leader_line",
+                anchor=leader_anchor,
+                score=score + 0.01,
+                bounds=[leader_anchor[0], leader_anchor[1], leader_anchor[0], leader_anchor[1]],
+                terrain_sample=terrain_sample,
+                details={
+                    "leader_line": True,
+                    "placement_preset": str(record.get("placement_preset", "callout")),
+                    "anchor": [x, y, z],
+                    "offset_px": offset,
+                },
+                ordering_key=f"{ordering_key}:00:leader",
+            ),
+        )
+
     return candidates
+
+
+def _line_points(geometry: Mapping[str, Any]) -> list[list[float]] | None:
+    coordinates = geometry.get("coordinates")
+    if not isinstance(coordinates, Sequence) or isinstance(coordinates, (str, bytes)):
+        return None
+    points = []
+    for value in coordinates:
+        coords = _coordinates(value)
+        if coords is None:
+            return None
+        points.append(coords)
+    return points if len(points) >= 2 else None
+
+
+def _interpolate_line(points: Sequence[Sequence[float]], distance: float) -> list[float]:
+    remaining = max(0.0, distance)
+    for left, right in zip(points, points[1:]):
+        dx = right[0] - left[0]
+        dy = right[1] - left[1]
+        dz = right[2] - left[2]
+        segment = math.sqrt((dx * dx) + (dy * dy) + (dz * dz))
+        if segment <= 0.0:
+            continue
+        if remaining <= segment:
+            t = remaining / segment
+            return [left[0] + dx * t, left[1] + dy * t, left[2] + dz * t]
+        remaining -= segment
+    return list(points[-1])
+
+
+def _line_length(points: Sequence[Sequence[float]]) -> float:
+    total = 0.0
+    for left, right in zip(points, points[1:]):
+        total += math.sqrt(
+            ((right[0] - left[0]) ** 2)
+            + ((right[1] - left[1]) ** 2)
+            + ((right[2] - left[2]) ** 2)
+        )
+    return total
+
+
+def _line_label_candidates(
+    *,
+    label_id: str,
+    geometry: Mapping[str, Any],
+    score: float,
+    ordering_key: str,
+    record: Mapping[str, Any],
+    terrain_sample: Mapping[str, Any],
+) -> tuple[LabelCandidate, list[LabelCandidate]] | None:
+    points = _line_points(geometry)
+    if points is None:
+        return None
+    length = _line_length(points)
+    if length <= 0.0:
+        return None
+    repeat_distance = max(0.0, _number(record.get("repeat_distance"), default=0.0))
+    if repeat_distance <= 0.0:
+        distances = [length * 0.5]
+    else:
+        count = max(1, int(math.floor(length / repeat_distance)) + 1)
+        distances = [index * repeat_distance for index in range(count)]
+    candidates: list[LabelCandidate] = []
+    preset = str(record.get("placement_preset", "line"))
+    for index, distance in enumerate(distances):
+        anchor = _interpolate_line(points, distance)
+        candidates.append(
+            LabelCandidate(
+                candidate_id=f"{label_id}:repeat-{index}",
+                candidate_type="line_repeat",
+                anchor=anchor,
+                score=score - (index * 0.001),
+                bounds=[anchor[0], anchor[1], anchor[0], anchor[1]],
+                terrain_sample=terrain_sample,
+                details={
+                    "repeat_distance": repeat_distance,
+                    "distance_along": round(distance, 6),
+                    "line_length": round(length, 6),
+                    "placement_preset": preset,
+                },
+                ordering_key=f"{ordering_key}:{index:02d}:line-repeat",
+            )
+        )
+    return candidates[0], candidates
 
 
 def _polygon_ring(geometry: Mapping[str, Any]) -> list[list[float]] | None:
@@ -607,6 +733,19 @@ class PriorityClass:
         )
 
 
+def _priority_payload(priority_rules: Sequence[PriorityClass | Mapping[str, Any]] | str | None) -> list[dict[str, Any]]:
+    if priority_rules is None:
+        return []
+    if isinstance(priority_rules, str):
+        if priority_rules == "cartographic":
+            return [dict(item) for item in CARTOGRAPHIC_PRIORITY_PRESET]
+        raise ValueError(f"Unknown priority preset: {priority_rules!r}")
+    return [
+        item.to_dict() if isinstance(item, PriorityClass) else PriorityClass.from_dict(item).to_dict()
+        for item in priority_rules
+    ]
+
+
 @dataclass
 class LabelPlan:
     accepted: Sequence[AcceptedLabel | Mapping[str, Any]]
@@ -664,10 +803,7 @@ class LabelPlan:
             region.to_dict() if isinstance(region, KeepoutRegion) else KeepoutRegion.from_dict(region).to_dict()
             for region in keepouts
         ]
-        priority_payload = [
-            item.to_dict() if isinstance(item, PriorityClass) else PriorityClass.from_dict(item).to_dict()
-            for item in (priority_rules or ())
-        ]
+        priority_payload = _priority_payload(priority_rules)
         priority_ranks = {str(item["name"]): int(item["rank"]) for item in priority_payload}
         atlas_glyphs = _glyph_set(glyph_atlas)
         accepted: list[AcceptedLabel] = []
@@ -693,6 +829,26 @@ class LabelPlan:
                 )
                 continue
 
+            if _requires_complex_shaping(text):
+                diagnostics.append(
+                    experimental_feature_diagnostic(
+                        "complex-script shaping",
+                        layer_id="labels",
+                        object_id=label_id,
+                    )
+                )
+                rejected.append(
+                    RejectedLabel(
+                        label_id=label_id,
+                        source_id=source_id,
+                        reason="unsupported_geometry_type",
+                        diagnostic_refs=["experimental_feature"],
+                        ordering_key=ordering_key,
+                        details={"shaping": "complex_script"},
+                    )
+                )
+                continue
+
             missing = sorted({char for char in text if atlas_glyphs is not None and char not in atlas_glyphs})
             if missing:
                 missing_by_label[label_id] = missing
@@ -712,6 +868,26 @@ class LabelPlan:
             geometry_type = str(geometry.get("type", record.get("geometry_type", "Point")))
             geometry_type_key = geometry_type.lower()
             terrain_sample = _terrain_sample(record, terrain, label_id)
+
+            if bool(record.get("curved_text")) or str(record.get("placement_preset", "")).lower() == "curved":
+                diagnostics.append(
+                    experimental_feature_diagnostic(
+                        "advanced curved labels",
+                        layer_id="labels",
+                        object_id=label_id,
+                    )
+                )
+                rejected.append(
+                    RejectedLabel(
+                        label_id=label_id,
+                        source_id=source_id,
+                        reason="unsupported_geometry_type",
+                        diagnostic_refs=["experimental_feature"],
+                        ordering_key=ordering_key,
+                        details={"placement": "curved_text"},
+                    )
+                )
+                continue
 
             if geometry_type_key == "point":
                 coords = _coordinates(geometry.get("coordinates", record.get("position", record.get("world_pos"))))
@@ -743,6 +919,43 @@ class LabelPlan:
                     terrain_sample=terrain_sample,
                 )
                 candidate = candidates[0]
+            elif geometry_type_key == "linestring":
+                preset = str(record.get("placement_preset", "")).lower()
+                if "repeat_distance" not in record and preset not in {"road", "river", "line"}:
+                    rejected.append(
+                        RejectedLabel(
+                            label_id=label_id,
+                            source_id=source_id,
+                            reason="unsupported_geometry_type",
+                            ordering_key=ordering_key,
+                            details={"geometry_type": geometry_type},
+                        )
+                    )
+                    continue
+                line_candidates = _line_label_candidates(
+                    label_id=label_id,
+                    geometry=geometry,
+                    score=_priority_score(record, priority_ranks),
+                    ordering_key=ordering_key,
+                    record=record,
+                    terrain_sample=terrain_sample,
+                )
+                if line_candidates is None:
+                    rejected.append(
+                        RejectedLabel(
+                            label_id=label_id,
+                            source_id=source_id,
+                            reason="invalid_geometry",
+                            ordering_key=ordering_key,
+                        )
+                    )
+                    continue
+                candidate, candidates = line_candidates
+                x, y, z = candidate.anchor
+                xs = [point[0] for point in _line_points(geometry) or [candidate.anchor]]
+                ys = [point[1] for point in _line_points(geometry) or [candidate.anchor]]
+                screen_bounds = [min(xs), min(ys), max(xs), max(ys)]
+                world_bounds = [min(xs), min(ys), z, max(xs), max(ys), z]
             elif geometry_type_key == "polygon":
                 polygon_candidates = _polygon_label_candidates(
                     label_id=label_id,

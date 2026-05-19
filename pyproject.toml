@@ -4,8 +4,8 @@ build-backend = "maturin"
 
 [project]
 name = "forge3d"
-version = "1.25.0"
-description = "forge3d: Rust/WebGPU 3D maps with P1 asset layers, diagnostics, labels, 3D Tiles review, and reproducible scene bundles"
+version = "1.26.0"
+description = "forge3d: Rust/WebGPU offline 3D maps with P2 material/VT diagnostics, advanced labels, large-scene summaries, and reproducible bundles"
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.21",
