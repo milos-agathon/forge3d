@@ -103,3 +103,12 @@ def test_default_dataset_base_url_uses_live_repository_path():
 
     assert "milos-agathon/forge3d" in datasets._DEFAULT_DATASET_BASE_URL
     assert "github.com/forge3d/forge3d" not in datasets._DEFAULT_DATASET_BASE_URL
+
+
+def test_default_dataset_base_url_uses_github_lfs_media_endpoint():
+    """Remote asset downloads should fetch Git LFS media, not pointer files."""
+
+    assert datasets._DEFAULT_DATASET_BASE_URL == (
+        "https://media.githubusercontent.com/media/milos-agathon/forge3d/main/assets/"
+    )
+    assert "raw.githubusercontent.com" not in datasets._DEFAULT_DATASET_BASE_URL
