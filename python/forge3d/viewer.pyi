@@ -2,6 +2,18 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
 from .bundle import LoadedBundle
+from .diagnostics import Diagnostic
+
+
+class LabelBatchResult:
+    ids: list[Optional[int]]
+    diagnostics: list[Diagnostic]
+
+
+class LabelOperationResult:
+    ok: bool
+    diagnostics: list[Diagnostic]
+    state: dict[str, Any]
 
 
 class ViewerError(Exception): ...
@@ -17,6 +29,104 @@ class ViewerHandle:
         cleanup_paths: Optional[list[Path]] = ...,
     ) -> None: ...
     def send_ipc(self, cmd: dict[str, Any]) -> dict[str, Any]: ...
+    def load_label_atlas(
+        self,
+        atlas_png_path: str | Path,
+        metrics_json_path: str | Path,
+    ) -> LabelOperationResult: ...
+    def add_label(
+        self,
+        text: str,
+        world_pos: tuple[float, float, float],
+        size: Optional[float] = ...,
+        color: Optional[tuple[float, float, float, float]] = ...,
+        halo_color: Optional[tuple[float, float, float, float]] = ...,
+        halo_width: Optional[float] = ...,
+        priority: Optional[int] = ...,
+        min_zoom: Optional[float] = ...,
+        max_zoom: Optional[float] = ...,
+        offset: Optional[tuple[float, float]] = ...,
+        rotation: Optional[float] = ...,
+        underline: Optional[bool] = ...,
+        small_caps: Optional[bool] = ...,
+        leader: Optional[bool] = ...,
+        horizon_fade_angle: Optional[float] = ...,
+    ) -> int | LabelOperationResult: ...
+    def add_labels(self, labels: Sequence[dict[str, Any]]) -> LabelBatchResult: ...
+    def add_line_label(
+        self,
+        text: str,
+        polyline: Sequence[tuple[float, float, float]],
+        size: Optional[float] = ...,
+        color: Optional[tuple[float, float, float, float]] = ...,
+        halo_color: Optional[tuple[float, float, float, float]] = ...,
+        halo_width: Optional[float] = ...,
+        priority: Optional[int] = ...,
+        placement: str = ...,
+        repeat_distance: Optional[float] = ...,
+        min_zoom: Optional[float] = ...,
+        max_zoom: Optional[float] = ...,
+        terrain_mode: Optional[str] = ...,
+    ) -> int | LabelOperationResult: ...
+    def add_curved_label(
+        self,
+        text: str,
+        path: Sequence[tuple[float, float, float]],
+        *,
+        size: Optional[float] = ...,
+        color: Optional[tuple[float, float, float, float]] = ...,
+        halo_color: Optional[tuple[float, float, float, float]] = ...,
+        halo_width: Optional[float] = ...,
+        priority: Optional[int] = ...,
+        tracking: Optional[float] = ...,
+        center_on_path: Optional[bool] = ...,
+    ) -> LabelOperationResult: ...
+    def add_callout(
+        self,
+        text: str,
+        anchor: tuple[float, float, float],
+        offset: tuple[float, float] = ...,
+        background_color: Optional[tuple[float, float, float, float]] = ...,
+        border_color: Optional[tuple[float, float, float, float]] = ...,
+        border_width: Optional[float] = ...,
+        corner_radius: Optional[float] = ...,
+        padding: Optional[float] = ...,
+        text_size: Optional[float] = ...,
+        text_color: Optional[tuple[float, float, float, float]] = ...,
+    ) -> int | LabelOperationResult: ...
+    def add_vector_overlay(
+        self,
+        name: str,
+        vertices: Sequence[Sequence[float]],
+        indices: Sequence[int],
+        primitive: str = ...,
+        drape: bool = ...,
+        drape_offset: float = ...,
+        opacity: float = ...,
+        depth_bias: float = ...,
+        line_width: float = ...,
+        point_size: float = ...,
+        z_order: int = ...,
+    ) -> int: ...
+    def set_labels_enabled(self, enabled: bool) -> LabelOperationResult: ...
+    def clear_labels(self) -> LabelOperationResult: ...
+    def remove_label(self, label_id: int) -> LabelOperationResult: ...
+    def set_label_typography(
+        self,
+        *,
+        tracking: Optional[float] = ...,
+        kerning: Optional[bool] = ...,
+        line_height: Optional[float] = ...,
+        word_spacing: Optional[float] = ...,
+    ) -> LabelOperationResult: ...
+    def set_declutter_algorithm(
+        self,
+        algorithm: str,
+        *,
+        seed: Optional[int] = ...,
+        max_iterations: Optional[int] = ...,
+    ) -> LabelOperationResult: ...
+    def label_configuration_state(self) -> dict[str, Any]: ...
     def get_stats(self) -> dict[str, Any]: ...
     def get_terrain_volumetrics_report(self) -> dict[str, Any]: ...
     def load_obj(self, path: str | Path) -> None: ...

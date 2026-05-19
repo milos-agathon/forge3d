@@ -43,6 +43,7 @@ pub struct TextInstance {
     pub uv_min: [f32; 2],   // u0, v0 in atlas
     pub uv_max: [f32; 2],   // u1, v1 in atlas
     pub color: [f32; 4],    // rgba in linear 0..1
+    pub rotation: f32,      // radians around rect center in screen space
 }
 
 pub struct TextOverlayRenderer {
@@ -174,7 +175,8 @@ impl TextOverlayRenderer {
                 2 => Float32x2, // rect_max
                 3 => Float32x2, // uv_min
                 4 => Float32x2, // uv_max
-                5 => Float32x4  // color
+                5 => Float32x4, // color
+                6 => Float32    // rotation
             ],
         };
 

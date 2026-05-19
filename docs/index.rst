@@ -20,6 +20,7 @@ data loading, cartography, export, and the runnable examples in ``examples/``.
 
    guides/feature_map
    guides/offline_3d_map_rendering
+   guides/label_plan_guide
    guides/diagnostics_reference
    guides/style_support_matrix
    guides/label_support_matrix

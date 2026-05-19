@@ -20,6 +20,7 @@ pub fn push_rect(
         uv_min: [0.0, 0.0],
         uv_max: [1.0, 1.0],
         color,
+        rotation: 0.0,
     });
 }
 

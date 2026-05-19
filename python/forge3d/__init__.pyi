@@ -51,6 +51,7 @@ from .terrain_params import (
 from .diagnostics import (
     Diagnostic,
     LayerSummary,
+    P2_FEATURE_DIAGNOSTIC_CODES,
     REQUIRED_DIAGNOSTIC_CODES,
     RenderFailurePolicy,
     SeverityPolicy,
@@ -61,13 +62,45 @@ from .diagnostics import (
     experimental_feature_diagnostic,
     label_rejection_summary_diagnostic,
     missing_glyphs_diagnostic,
+    missing_texture_path_diagnostic,
+    missing_uvs_diagnostic,
     placeholder_fallback_diagnostic,
     pro_gated_path_diagnostic,
     python_public_3dtiles_incomplete_diagnostic,
+    unavailable_cache_lod_stats_diagnostic,
+    unsupported_instancing_path_diagnostic,
     unsupported_style_field_diagnostic,
     unsupported_style_layer_type_diagnostic,
+    unsupported_texture_format_diagnostic,
     validate_label_support,
     vt_unsupported_family_diagnostic,
+)
+from .label_plan import (
+    AcceptedLabel,
+    KeepoutRegion,
+    LabelCandidate,
+    LabelPlan,
+    PriorityClass,
+    RejectedLabel,
+)
+from .map_scene import (
+    FontAtlas,
+    FontFallbackRange,
+    LabelLayer,
+    LightingPreset,
+    MapFurnitureLayer,
+    MapScene,
+    BuildingLayer as MapSceneBuildingLayer,
+    OrbitCamera,
+    OutputSpec,
+    PointCloudLayer,
+    RasterOverlay,
+    ReproducibilityProfile,
+    SceneRecipe,
+    TerrainSource,
+    Tiles3DLayer,
+    TypographySettings,
+    VectorOverlay,
 )
 from .style import (
     label_layer_contracts_from_style,
@@ -1111,7 +1144,14 @@ class LabelStyle:
 # Interactive viewer wrapper
 from . import animation, camera_rigs, terrain_scatter
 from .terrain_scatter import ScatterWindSettings
-from .viewer import ViewerError, ViewerHandle, open_viewer, open_viewer_async, set_msaa
+from .viewer import (
+    LabelBatchResult,
+    ViewerError,
+    ViewerHandle,
+    open_viewer,
+    open_viewer_async,
+    set_msaa,
+)
 
 # Bundled datasets and fetch helpers
 from .datasets import (

@@ -101,7 +101,7 @@ pub enum ViewerCmd {
     SetOverlaysEnabled { enabled: bool }, SetOverlaySolid { solid: bool },
     SetOverlayPreserveColors { preserve_colors: bool }, ListOverlays,
     AddVectorOverlay {
-        name: String, vertices: Vec<[f32; 8]>, indices: Vec<u32>, primitive: String, drape: bool,
+        id: Option<u32>, name: String, vertices: Vec<[f32; 8]>, indices: Vec<u32>, primitive: String, drape: bool,
         drape_offset: f32, opacity: f32, depth_bias: f32, line_width: f32, point_size: f32, z_order: i32,
     },
     RemoveVectorOverlay { id: u32 }, SetVectorOverlayVisible { id: u32, visible: bool },
@@ -119,13 +119,13 @@ pub enum ViewerCmd {
         radius: Option<f32>,
     },
     AddLabel {
-        text: String, world_pos: [f32; 3], size: Option<f32>, color: Option<[f32; 4]>,
+        id: Option<u64>, text: String, world_pos: [f32; 3], size: Option<f32>, color: Option<[f32; 4]>,
         halo_color: Option<[f32; 4]>, halo_width: Option<f32>, priority: Option<i32>,
         min_zoom: Option<f32>, max_zoom: Option<f32>, offset: Option<[f32; 2]>, rotation: Option<f32>,
         underline: Option<bool>, small_caps: Option<bool>, leader: Option<bool>, horizon_fade_angle: Option<f32>,
     },
     AddLineLabel {
-        text: String, polyline: Vec<[f32; 3]>, size: Option<f32>, color: Option<[f32; 4]>,
+        id: Option<u64>, text: String, polyline: Vec<[f32; 3]>, size: Option<f32>, color: Option<[f32; 4]>,
         halo_color: Option<[f32; 4]>, halo_width: Option<f32>, priority: Option<i32>,
         placement: Option<String>, repeat_distance: Option<f32>, min_zoom: Option<f32>, max_zoom: Option<f32>,
     },
@@ -133,12 +133,12 @@ pub enum ViewerCmd {
     LoadLabelAtlas { atlas_png_path: String, metrics_json_path: String },
     SetLabelZoom { zoom: f32 }, SetMaxVisibleLabels { max: usize },
     AddCurvedLabel {
-        text: String, polyline: Vec<[f32; 3]>, size: Option<f32>, color: Option<[f32; 4]>,
+        id: Option<u64>, text: String, polyline: Vec<[f32; 3]>, size: Option<f32>, color: Option<[f32; 4]>,
         halo_color: Option<[f32; 4]>, halo_width: Option<f32>, priority: Option<i32>,
         tracking: Option<f32>, center_on_path: bool,
     },
     AddCallout {
-        text: String, anchor: [f32; 3], offset: Option<[f32; 2]>, background_color: Option<[f32; 4]>,
+        id: Option<u64>, text: String, anchor: [f32; 3], offset: Option<[f32; 2]>, background_color: Option<[f32; 4]>,
         border_color: Option<[f32; 4]>, border_width: Option<f32>, corner_radius: Option<f32>,
         padding: Option<f32>, text_size: Option<f32>, text_color: Option<[f32; 4]>,
     },

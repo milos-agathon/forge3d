@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import socket
@@ -13,12 +14,19 @@ import subprocess
 import tempfile
 import threading
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
 from ._viewer_binary import find_viewer_binary as _resolve_viewer_binary
+from .diagnostics import (
+    Diagnostic,
+    experimental_feature_diagnostic,
+    missing_glyphs_diagnostic,
+    placeholder_fallback_diagnostic,
+)
 
 # Import Renderer and MSAA config with fallbacks for standalone testing
 try:
@@ -145,6 +153,23 @@ class ViewerError(Exception):
     """Error from viewer IPC communication."""
 
 
+@dataclass(frozen=True)
+class LabelBatchResult:
+    """Ordered result for a high-level batch label create request."""
+
+    ids: List[Optional[int]]
+    diagnostics: List[Diagnostic] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class LabelOperationResult:
+    """Truthful result for a high-level label state/configuration operation."""
+
+    ok: bool
+    diagnostics: List[Diagnostic] = field(default_factory=list)
+    state: Dict[str, Any] = field(default_factory=dict)
+
+
 class ViewerHandle:
     """Handle to a non-blocking interactive viewer subprocess.
     
@@ -213,6 +238,616 @@ class ViewerHandle:
     def send_ipc(self, cmd: Dict[str, Any]) -> Dict[str, Any]:
         """Send a raw IPC command to the viewer and return the decoded response."""
         return self._send_command(cmd)
+
+    def _allocate_label_id(self) -> int:
+        next_id = int(getattr(self, "_next_public_label_id", 1))
+        self._next_public_label_id = next_id + 1
+        return next_id
+
+    def _allocate_vector_overlay_id(self) -> int:
+        next_id = int(getattr(self, "_next_public_vector_overlay_id", 1))
+        self._next_public_vector_overlay_id = next_id + 1
+        return next_id
+
+    def _ensure_label_api_state(self) -> Dict[str, Any]:
+        state = getattr(self, "_label_api_state", None)
+        if state is None:
+            state = {
+                "enabled": True,
+                "active_atlas": None,
+                "typography": None,
+                "declutter_algorithm": None,
+                "layout_metrics": self._typography_layout_metrics(None),
+                "label_ids": set(),
+                "line_label_glyph_instances": {},
+            }
+            self._label_api_state = state
+        return state
+
+    @staticmethod
+    def _typography_width(text: str, settings: Optional[Mapping[str, Any]]) -> float:
+        font_size = 16.0
+        tracking = float((settings or {}).get("tracking", 0.0))
+        kerning = bool((settings or {}).get("kerning", True))
+        word_spacing = float((settings or {}).get("word_spacing", 1.0))
+        width = 0.0
+        chars = list(text)
+        for index, char in enumerate(chars):
+            base = 0.3 * font_size if char == " " else 0.5 * font_size
+            if char == " ":
+                base *= word_spacing
+            width += base + tracking * font_size
+            if kerning and index + 1 < len(chars) and (char, chars[index + 1]) == ("A", "V"):
+                width -= 0.08 * font_size
+        return round(width, 4)
+
+    def _typography_layout_metrics(self, settings: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+        sample_text = "AV label"
+        line_height = float((settings or {}).get("line_height", 1.2))
+        return {
+            "sample_text": sample_text,
+            "default_width": self._typography_width(sample_text, None),
+            "typography_width": self._typography_width(sample_text, settings),
+            "line_height_px": round(16.0 * line_height, 4),
+        }
+
+    def _label_state_snapshot(self) -> Dict[str, Any]:
+        state = self._ensure_label_api_state()
+        label_ids = sorted(int(label_id) for label_id in state["label_ids"])
+        active_atlas = state["active_atlas"]
+        typography = state["typography"]
+        line_instances = {
+            str(int(label_id)): [dict(glyph) for glyph in glyphs]
+            for label_id, glyphs in sorted(
+                state["line_label_glyph_instances"].items(),
+                key=lambda item: int(item[0]),
+            )
+        }
+        return {
+            "enabled": bool(state["enabled"]),
+            "active_atlas": None if active_atlas is None else dict(active_atlas),
+            "typography": None if typography is None else dict(typography),
+            "declutter_algorithm": state["declutter_algorithm"],
+            "layout_metrics": dict(state["layout_metrics"]),
+            "label_ids": label_ids,
+            "label_count": len(label_ids),
+            "line_label_glyph_instances": line_instances,
+        }
+
+    def label_configuration_state(self) -> Dict[str, Any]:
+        """Return the public serializable label configuration/state snapshot."""
+        return self._label_state_snapshot()
+
+    def _label_operation_result(
+        self,
+        ok: bool,
+        diagnostics: Optional[Sequence[Diagnostic]] = None,
+    ) -> LabelOperationResult:
+        return LabelOperationResult(
+            ok=bool(ok),
+            diagnostics=list(diagnostics or []),
+            state=self._label_state_snapshot(),
+        )
+
+    def _send_stable_create(self, cmd: Dict[str, Any], object_name: str) -> int:
+        response = self._send_command(cmd)
+        if "id" not in response:
+            raise ViewerError(
+                f"{cmd['cmd']} reported success without a stable {object_name} id"
+            )
+        created_id = int(response["id"])
+        if created_id != int(cmd["id"]):
+            raise ViewerError(
+                f"{cmd['cmd']} returned {object_name} id {created_id}, expected {cmd['id']}"
+            )
+        return created_id
+
+    def _send_label_create(self, cmd: Dict[str, Any]) -> int:
+        return self._send_stable_create(cmd, "label")
+
+    def _text_diagnostic(
+        self,
+        text: str,
+        *,
+        feature: str,
+        object_id: str = "pending",
+    ) -> Optional[Diagnostic]:
+        if not str(text):
+            return placeholder_fallback_diagnostic(
+                feature,
+                layer_id="labels",
+                object_id=object_id,
+            )
+        missing = sorted({char for char in str(text) if ord(char) > 0x7F})
+        if missing:
+            return missing_glyphs_diagnostic(
+                missing,
+                layer_id="labels",
+                object_id=object_id,
+            )
+        return None
+
+    @staticmethod
+    def _normalize_line_path(
+        polyline: Sequence[Tuple[float, float, float]]
+    ) -> List[Tuple[float, float, float]]:
+        return [
+            (float(point[0]), float(point[1]), float(point[2]))
+            for point in polyline
+        ]
+
+    @staticmethod
+    def _line_path_length(polyline: Sequence[Tuple[float, float, float]]) -> float:
+        length = 0.0
+        for start, end in zip(polyline, polyline[1:]):
+            dx = end[0] - start[0]
+            dz = end[2] - start[2]
+            length += math.hypot(dx, dz)
+        return length
+
+    @staticmethod
+    def _normalize_label_rotation(rotation: float) -> Tuple[float, bool]:
+        while rotation <= -math.pi:
+            rotation += math.tau
+        while rotation > math.pi:
+            rotation -= math.tau
+        if rotation > math.pi / 2.0:
+            return rotation - math.pi, True
+        if rotation < -math.pi / 2.0:
+            return rotation + math.pi, True
+        return rotation, False
+
+    def _line_path_diagnostic(
+        self,
+        polyline: Sequence[Tuple[float, float, float]],
+        *,
+        object_id: str = "pending",
+    ) -> Optional[Diagnostic]:
+        if len(polyline) < 2 or self._line_path_length(polyline) <= 0.0:
+            return placeholder_fallback_diagnostic(
+                "invalid line label path",
+                layer_id="labels",
+                object_id=object_id,
+            )
+        return None
+
+    def _build_line_glyph_instances(
+        self,
+        label_id: int,
+        text: str,
+        polyline: Sequence[Tuple[float, float, float]],
+    ) -> List[Dict[str, Any]]:
+        glyphs = [char for char in str(text) if char != " "]
+        if not glyphs:
+            return []
+
+        total_length = self._line_path_length(polyline)
+        offsets = [
+            total_length * ((index + 0.5) / len(glyphs))
+            for index in range(len(glyphs))
+        ]
+        instances: List[Dict[str, Any]] = []
+        offset_index = 0
+        accumulated = 0.0
+
+        for start, end in zip(polyline, polyline[1:]):
+            dx = end[0] - start[0]
+            dy = end[1] - start[1]
+            dz = end[2] - start[2]
+            segment_length = math.hypot(dx, dz)
+            if segment_length <= 0.0:
+                continue
+            while (
+                offset_index < len(offsets)
+                and offsets[offset_index] <= accumulated + segment_length
+            ):
+                local_t = (offsets[offset_index] - accumulated) / segment_length
+                position = [
+                    start[0] + dx * local_t,
+                    start[1] + dy * local_t,
+                    start[2] + dz * local_t,
+                ]
+                rotation, adjusted = self._normalize_label_rotation(math.atan2(dz, dx))
+                instances.append(
+                    {
+                        "label_id": int(label_id),
+                        "glyph": glyphs[offset_index],
+                        "position": [float(value) for value in position],
+                        "rotation": float(rotation),
+                        "ordering_key": f"{int(label_id)}:{offset_index:04d}",
+                        "upside_down_adjusted": bool(adjusted),
+                    }
+                )
+                offset_index += 1
+            accumulated += segment_length
+
+        return instances
+
+    def load_label_atlas(
+        self,
+        atlas_png_path: Union[str, Path],
+        metrics_json_path: Union[str, Path],
+    ) -> LabelOperationResult:
+        """Load a label atlas through the public high-level viewer API."""
+        self._send_command(
+            {
+                "cmd": "load_label_atlas",
+                "atlas_png_path": str(atlas_png_path),
+                "metrics_json_path": str(metrics_json_path),
+            }
+        )
+        self._ensure_label_api_state()["active_atlas"] = {
+            "atlas_png_path": str(atlas_png_path),
+            "metrics_json_path": str(metrics_json_path),
+        }
+        return self._label_operation_result(True)
+
+    def add_label(
+        self,
+        text: str,
+        world_pos: Tuple[float, float, float],
+        size: Optional[float] = None,
+        color: Optional[Tuple[float, float, float, float]] = None,
+        halo_color: Optional[Tuple[float, float, float, float]] = None,
+        halo_width: Optional[float] = None,
+        priority: Optional[int] = None,
+        min_zoom: Optional[float] = None,
+        max_zoom: Optional[float] = None,
+        offset: Optional[Tuple[float, float]] = None,
+        rotation: Optional[float] = None,
+        underline: Optional[bool] = None,
+        small_caps: Optional[bool] = None,
+        leader: Optional[bool] = None,
+        horizon_fade_angle: Optional[float] = None,
+    ) -> Union[int, LabelOperationResult]:
+        """Create a point label and return its stable public label ID."""
+        diagnostic = self._text_diagnostic(str(text), feature="empty label text")
+        if diagnostic is not None:
+            return self._label_operation_result(False, [diagnostic])
+        label_id = self._allocate_label_id()
+        cmd: Dict[str, Any] = {
+            "cmd": "add_label",
+            "id": label_id,
+            "text": str(text),
+            "world_pos": [float(world_pos[0]), float(world_pos[1]), float(world_pos[2])],
+        }
+        if size is not None:
+            cmd["size"] = float(size)
+        if color is not None:
+            cmd["color"] = [float(v) for v in color]
+        if halo_color is not None:
+            cmd["halo_color"] = [float(v) for v in halo_color]
+        if halo_width is not None:
+            cmd["halo_width"] = float(halo_width)
+        if priority is not None:
+            cmd["priority"] = int(priority)
+        if min_zoom is not None:
+            cmd["min_zoom"] = float(min_zoom)
+        if max_zoom is not None:
+            cmd["max_zoom"] = float(max_zoom)
+        if offset is not None:
+            cmd["offset"] = [float(offset[0]), float(offset[1])]
+        if rotation is not None:
+            cmd["rotation"] = float(rotation)
+        if underline is not None:
+            cmd["underline"] = bool(underline)
+        if small_caps is not None:
+            cmd["small_caps"] = bool(small_caps)
+        if leader is not None:
+            cmd["leader"] = bool(leader)
+        if horizon_fade_angle is not None:
+            cmd["horizon_fade_angle"] = float(horizon_fade_angle)
+        created_id = self._send_label_create(cmd)
+        self._ensure_label_api_state()["label_ids"].add(created_id)
+        return created_id
+
+    def add_labels(self, labels: Sequence[Mapping[str, Any]]) -> LabelBatchResult:
+        """Create labels in input order, preserving per-input diagnostics."""
+        ids: List[Optional[int]] = []
+        diagnostics: List[Diagnostic] = []
+        for index, label in enumerate(labels):
+            text = str(label.get("text", ""))
+            if not text:
+                ids.append(None)
+                diagnostics.append(
+                    placeholder_fallback_diagnostic(
+                        "empty label text",
+                        layer_id=str(label.get("layer_id", "labels")),
+                        object_id=str(label.get("id", index)),
+                    )
+                )
+                continue
+            try:
+                result = self.add_label(
+                    text,
+                    tuple(label.get("world_pos", (0.0, 0.0, 0.0))),  # type: ignore[arg-type]
+                    size=label.get("size"),
+                    color=label.get("color"),
+                    halo_color=label.get("halo_color"),
+                    halo_width=label.get("halo_width"),
+                    priority=label.get("priority"),
+                    min_zoom=label.get("min_zoom"),
+                    max_zoom=label.get("max_zoom"),
+                    offset=label.get("offset"),
+                    rotation=label.get("rotation"),
+                    underline=label.get("underline"),
+                    small_caps=label.get("small_caps"),
+                    leader=label.get("leader"),
+                    horizon_fade_angle=label.get("horizon_fade_angle"),
+                )
+                if isinstance(result, LabelOperationResult):
+                    ids.append(None)
+                    diagnostics.extend(result.diagnostics)
+                else:
+                    ids.append(result)
+            except ViewerError as exc:
+                ids.append(None)
+                diagnostics.append(
+                    placeholder_fallback_diagnostic(
+                        str(exc),
+                        layer_id=str(label.get("layer_id", "labels")),
+                        object_id=str(label.get("id", index)),
+                    )
+                )
+        return LabelBatchResult(ids=ids, diagnostics=diagnostics)
+
+    def add_line_label(
+        self,
+        text: str,
+        polyline: Sequence[Tuple[float, float, float]],
+        size: Optional[float] = None,
+        color: Optional[Tuple[float, float, float, float]] = None,
+        halo_color: Optional[Tuple[float, float, float, float]] = None,
+        halo_width: Optional[float] = None,
+        priority: Optional[int] = None,
+        placement: str = "center",
+        repeat_distance: Optional[float] = None,
+        min_zoom: Optional[float] = None,
+        max_zoom: Optional[float] = None,
+        terrain_mode: Optional[str] = None,
+    ) -> Union[int, LabelOperationResult]:
+        """Create a line label and return its stable public label ID."""
+        normalized_polyline = self._normalize_line_path(polyline)
+        if terrain_mode not in (None, "none", "flat"):
+            diagnostic = experimental_feature_diagnostic(
+                "terrain-elevated line labels",
+                layer_id="labels",
+            )
+            return self._label_operation_result(False, [diagnostic])
+        diagnostic = self._text_diagnostic(str(text), feature="empty line label text")
+        if diagnostic is not None:
+            return self._label_operation_result(False, [diagnostic])
+        diagnostic = self._line_path_diagnostic(normalized_polyline)
+        if diagnostic is not None:
+            return self._label_operation_result(False, [diagnostic])
+
+        label_id = self._allocate_label_id()
+        cmd: Dict[str, Any] = {
+            "cmd": "add_line_label",
+            "id": label_id,
+            "text": str(text),
+            "polyline": [[float(p[0]), float(p[1]), float(p[2])] for p in normalized_polyline],
+            "placement": str(placement),
+        }
+        if size is not None:
+            cmd["size"] = float(size)
+        if color is not None:
+            cmd["color"] = [float(v) for v in color]
+        if halo_color is not None:
+            cmd["halo_color"] = [float(v) for v in halo_color]
+        if halo_width is not None:
+            cmd["halo_width"] = float(halo_width)
+        if priority is not None:
+            cmd["priority"] = int(priority)
+        if repeat_distance is not None:
+            cmd["repeat_distance"] = float(repeat_distance)
+        if min_zoom is not None:
+            cmd["min_zoom"] = float(min_zoom)
+        if max_zoom is not None:
+            cmd["max_zoom"] = float(max_zoom)
+        created_id = self._send_label_create(cmd)
+        state = self._ensure_label_api_state()
+        state["label_ids"].add(created_id)
+        state["line_label_glyph_instances"][created_id] = self._build_line_glyph_instances(
+            created_id,
+            str(text),
+            normalized_polyline,
+        )
+        return created_id
+
+    def add_curved_label(
+        self,
+        text: str,
+        path: Sequence[Tuple[float, float, float]],
+        *,
+        size: Optional[float] = None,
+        color: Optional[Tuple[float, float, float, float]] = None,
+        halo_color: Optional[Tuple[float, float, float, float]] = None,
+        halo_width: Optional[float] = None,
+        priority: Optional[int] = None,
+        tracking: Optional[float] = None,
+        center_on_path: Optional[bool] = None,
+    ) -> LabelOperationResult:
+        """Return an experimental diagnostic until curved glyph rendering is production-ready."""
+        diagnostic = experimental_feature_diagnostic(
+            "curved labels",
+            layer_id="labels",
+        )
+        return self._label_operation_result(False, [diagnostic])
+
+    def add_callout(
+        self,
+        text: str,
+        anchor: Tuple[float, float, float],
+        offset: Tuple[float, float] = (0.0, -50.0),
+        background_color: Optional[Tuple[float, float, float, float]] = None,
+        border_color: Optional[Tuple[float, float, float, float]] = None,
+        border_width: Optional[float] = None,
+        corner_radius: Optional[float] = None,
+        padding: Optional[float] = None,
+        text_size: Optional[float] = None,
+        text_color: Optional[Tuple[float, float, float, float]] = None,
+    ) -> Union[int, LabelOperationResult]:
+        """Create a callout label and return its stable public label ID."""
+        diagnostic = self._text_diagnostic(str(text), feature="empty callout text")
+        if diagnostic is not None:
+            return self._label_operation_result(False, [diagnostic])
+        label_id = self._allocate_label_id()
+        cmd: Dict[str, Any] = {
+            "cmd": "add_callout",
+            "id": label_id,
+            "text": str(text),
+            "anchor": [float(anchor[0]), float(anchor[1]), float(anchor[2])],
+            "offset": [float(offset[0]), float(offset[1])],
+        }
+        if background_color is not None:
+            cmd["background_color"] = [float(v) for v in background_color]
+        if border_color is not None:
+            cmd["border_color"] = [float(v) for v in border_color]
+        if border_width is not None:
+            cmd["border_width"] = float(border_width)
+        if corner_radius is not None:
+            cmd["corner_radius"] = float(corner_radius)
+        if padding is not None:
+            cmd["padding"] = float(padding)
+        if text_size is not None:
+            cmd["text_size"] = float(text_size)
+        if text_color is not None:
+            cmd["text_color"] = [float(v) for v in text_color]
+        created_id = self._send_label_create(cmd)
+        self._ensure_label_api_state()["label_ids"].add(created_id)
+        return created_id
+
+    def add_vector_overlay(
+        self,
+        name: str,
+        vertices: Sequence[Sequence[float]],
+        indices: Sequence[int],
+        primitive: str = "triangles",
+        drape: bool = True,
+        drape_offset: float = 0.5,
+        opacity: float = 1.0,
+        depth_bias: float = 0.001,
+        line_width: float = 2.0,
+        point_size: float = 5.0,
+        z_order: int = 0,
+    ) -> int:
+        """Create a vector overlay and return its stable public overlay ID."""
+        overlay_id = self._allocate_vector_overlay_id()
+        cmd: Dict[str, Any] = {
+            "cmd": "add_vector_overlay",
+            "id": overlay_id,
+            "name": str(name),
+            "vertices": [[float(value) for value in vertex] for vertex in vertices],
+            "indices": [int(index) for index in indices],
+            "primitive": str(primitive),
+            "drape": bool(drape),
+            "drape_offset": float(drape_offset),
+            "opacity": float(opacity),
+            "depth_bias": float(depth_bias),
+            "line_width": float(line_width),
+            "point_size": float(point_size),
+            "z_order": int(z_order),
+        }
+        return self._send_stable_create(cmd, "vector overlay")
+
+    def set_labels_enabled(self, enabled: bool) -> LabelOperationResult:
+        """Set label visibility through the public high-level viewer API."""
+        self._send_command({"cmd": "set_labels_enabled", "enabled": bool(enabled)})
+        self._ensure_label_api_state()["enabled"] = bool(enabled)
+        return self._label_operation_result(True)
+
+    def clear_labels(self) -> LabelOperationResult:
+        """Clear labels through the public high-level viewer API."""
+        self._send_command({"cmd": "clear_labels"})
+        state = self._ensure_label_api_state()
+        state["label_ids"].clear()
+        state["line_label_glyph_instances"].clear()
+        return self._label_operation_result(True)
+
+    def remove_label(self, label_id: int) -> LabelOperationResult:
+        """Remove a known public label ID or return a diagnostic for no-op removal."""
+        label_id = int(label_id)
+        state = self._ensure_label_api_state()
+        if label_id not in state["label_ids"]:
+            diagnostic = placeholder_fallback_diagnostic(
+                "remove unknown label",
+                layer_id="labels",
+                object_id=str(label_id),
+            )
+            return self._label_operation_result(False, [diagnostic])
+        self._send_command({"cmd": "remove_label", "id": label_id})
+        state["label_ids"].remove(label_id)
+        state["line_label_glyph_instances"].pop(label_id, None)
+        return self._label_operation_result(True)
+
+    def set_label_typography(
+        self,
+        *,
+        tracking: Optional[float] = None,
+        kerning: Optional[bool] = None,
+        line_height: Optional[float] = None,
+        word_spacing: Optional[float] = None,
+    ) -> LabelOperationResult:
+        """Set label typography and expose deterministic layout metrics."""
+        cmd: Dict[str, Any] = {"cmd": "set_label_typography"}
+        state = self._ensure_label_api_state()
+        previous = dict(state["typography"] or {})
+        typography = {
+            "tracking": float(previous.get("tracking", 0.0) if tracking is None else tracking),
+            "kerning": bool(previous.get("kerning", True) if kerning is None else kerning),
+            "line_height": float(previous.get("line_height", 1.2) if line_height is None else line_height),
+            "word_spacing": float(previous.get("word_spacing", 1.0) if word_spacing is None else word_spacing),
+        }
+        if tracking is not None:
+            cmd["tracking"] = typography["tracking"]
+        if kerning is not None:
+            cmd["kerning"] = typography["kerning"]
+        if line_height is not None:
+            cmd["line_height"] = typography["line_height"]
+        if word_spacing is not None:
+            cmd["word_spacing"] = typography["word_spacing"]
+        self._send_command(cmd)
+        state["typography"] = typography
+        state["layout_metrics"] = self._typography_layout_metrics(typography)
+        return self._label_operation_result(True)
+
+    def set_declutter_algorithm(
+        self,
+        algorithm: str,
+        *,
+        seed: Optional[int] = None,
+        max_iterations: Optional[int] = None,
+    ) -> LabelOperationResult:
+        """Set deterministic label declutter policy state."""
+        normalized_algorithm = str(algorithm).lower()
+        if normalized_algorithm not in {"greedy", "annealing"}:
+            diagnostic = placeholder_fallback_diagnostic(
+                "unsupported label declutter algorithm",
+                layer_id="labels",
+                object_id=normalized_algorithm,
+            )
+            return self._label_operation_result(False, [diagnostic])
+        cmd: Dict[str, Any] = {
+            "cmd": "set_declutter_algorithm",
+            "algorithm": normalized_algorithm,
+        }
+        if seed is not None:
+            cmd["seed"] = int(seed)
+        if max_iterations is not None:
+            cmd["max_iterations"] = int(max_iterations)
+        self._send_command(cmd)
+        self._ensure_label_api_state()["declutter_algorithm"] = {
+            "algorithm": normalized_algorithm,
+            "seed": None if seed is None else int(seed),
+            "max_iterations": None if max_iterations is None else int(max_iterations),
+            "placement_order": (
+                "priority_then_energy"
+                if normalized_algorithm == "annealing"
+                else "priority_then_collision"
+            ),
+        }
+        return self._label_operation_result(True)
     
     def get_stats(self) -> Dict[str, Any]:
         """Get viewer stats (geometry readiness, vertex/index counts).

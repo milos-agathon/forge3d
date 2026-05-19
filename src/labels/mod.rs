@@ -61,6 +61,9 @@ pub struct LabelManager {
     enabled: bool,
     current_zoom: f32,
     max_visible_labels: usize,
+    typography: TypographySettings,
+    declutter_algorithm: DeclutterAlgorithm,
+    declutter_config: DeclutterConfig,
 }
 
 impl LabelManager {
@@ -78,6 +81,9 @@ impl LabelManager {
             enabled: true,
             current_zoom: 1.0,
             max_visible_labels: 500,
+            typography: TypographySettings::default(),
+            declutter_algorithm: DeclutterAlgorithm::default(),
+            declutter_config: DeclutterConfig::default(),
         }
     }
 
@@ -116,10 +122,26 @@ impl LabelManager {
         Ok(())
     }
 
+    fn allocate_id(&mut self, requested: Option<LabelId>) -> LabelId {
+        let id = requested.unwrap_or(LabelId(self.next_id));
+        self.next_id = self.next_id.max(id.0.saturating_add(1));
+        id
+    }
+
     /// Add a label at a world position.
     pub fn add_label(&mut self, text: String, world_pos: Vec3, style: LabelStyle) -> LabelId {
-        let id = LabelId(self.next_id);
-        self.next_id += 1;
+        self.add_label_with_id(None, text, world_pos, style)
+    }
+
+    /// Add a label at a world position, preserving an externally allocated ID.
+    pub fn add_label_with_id(
+        &mut self,
+        id: Option<LabelId>,
+        text: String,
+        world_pos: Vec3,
+        style: LabelStyle,
+    ) -> LabelId {
+        let id = self.allocate_id(id);
 
         let label = LabelData {
             id,
@@ -145,8 +167,20 @@ impl LabelManager {
         placement: LineLabelPlacement,
         repeat_distance: f32,
     ) -> LabelId {
-        let id = LabelId(self.next_id);
-        self.next_id += 1;
+        self.add_line_label_with_id(None, text, polyline, style, placement, repeat_distance)
+    }
+
+    /// Add a line label along a polyline, preserving an externally allocated ID.
+    pub fn add_line_label_with_id(
+        &mut self,
+        id: Option<LabelId>,
+        text: String,
+        polyline: Vec<Vec3>,
+        style: LabelStyle,
+        placement: LineLabelPlacement,
+        repeat_distance: f32,
+    ) -> LabelId {
+        let id = self.allocate_id(id);
 
         let line_label = LineLabelData {
             id,
@@ -222,6 +256,70 @@ impl LabelManager {
     /// Set maximum number of visible labels.
     pub fn set_max_visible(&mut self, max: usize) {
         self.max_visible_labels = max;
+    }
+
+    /// Set global typography state for future label layout.
+    pub fn set_typography(
+        &mut self,
+        tracking: Option<f32>,
+        kerning: Option<bool>,
+        line_height: Option<f32>,
+        word_spacing: Option<f32>,
+    ) -> TypographySettings {
+        if let Some(value) = tracking {
+            self.typography.tracking = value;
+        }
+        if let Some(value) = kerning {
+            self.typography.kerning = value;
+        }
+        if let Some(value) = line_height {
+            self.typography.line_height = value;
+        }
+        if let Some(value) = word_spacing {
+            self.typography.word_spacing = value;
+        }
+        self.typography
+    }
+
+    /// Return current typography settings.
+    pub fn typography(&self) -> TypographySettings {
+        self.typography
+    }
+
+    /// Deterministic layout metric used by tests and validation paths.
+    pub fn layout_metric_width(text: &str, font_size: f32, settings: &TypographySettings) -> f32 {
+        let base_advances: Vec<f32> = text
+            .chars()
+            .map(|ch| if ch == ' ' { 0.3 } else { 0.5 })
+            .collect();
+        let mut kerning_table = KerningTable::new();
+        kerning_table.load_common_latin_pairs();
+        typography::compute_advances_with_typography(
+            text,
+            &base_advances,
+            font_size,
+            settings,
+            Some(&kerning_table),
+        )
+        .iter()
+        .sum()
+    }
+
+    /// Set label declutter policy state.
+    pub fn set_declutter_algorithm(
+        &mut self,
+        algorithm: DeclutterAlgorithm,
+        seed: Option<u64>,
+        max_iterations: Option<usize>,
+    ) -> (DeclutterAlgorithm, DeclutterConfig) {
+        self.declutter_algorithm = algorithm;
+        if let Some(value) = seed {
+            self.declutter_config.seed = value;
+        }
+        if let Some(value) = max_iterations {
+            self.declutter_config.max_iterations = value;
+        }
+        (self.declutter_algorithm, self.declutter_config.clone())
     }
 
     /// Resize for new screen dimensions.
@@ -433,7 +531,30 @@ impl LabelManager {
             line_label.visible = true;
             visible_count += 1;
 
-            // Line labels track rotation, but glyph rendering does not apply it yet.
+            // Emit one rotated atlas glyph quad per placed line-label glyph.
+            let mut color = line_label.style.color;
+            color[3] = color[3].clamp(0.0, 1.0);
+            for (ch, placement) in line_label
+                .text
+                .chars()
+                .zip(line_label.glyph_positions.iter())
+            {
+                if ch == ' ' {
+                    continue;
+                }
+                let mut instances = atlas.layout_text(
+                    &ch.to_string(),
+                    placement.screen_pos,
+                    line_label.style.size,
+                    color,
+                    line_label.style.halo_color,
+                    line_label.style.halo_width,
+                );
+                for instance in &mut instances {
+                    instance.rotation = placement.rotation;
+                }
+                self.visible_instances.extend(instances);
+            }
         }
 
         self.visible_instances.len()
@@ -467,5 +588,32 @@ impl LabelManager {
     /// Get visible instance count.
     pub fn visible_count(&self) -> usize {
         self.visible_instances.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_label_manager_typography_and_declutter_state_mutate() {
+        let mut manager = LabelManager::new(800, 600);
+
+        let typography = manager.set_typography(Some(0.25), Some(true), Some(1.3), Some(2.0));
+        assert_eq!(typography.tracking, 0.25);
+        assert!(typography.kerning);
+        assert_eq!(typography.line_height, 1.3);
+        assert_eq!(typography.word_spacing, 2.0);
+
+        let default_width =
+            LabelManager::layout_metric_width("AV label", 16.0, &TypographySettings::default());
+        let typography_width = LabelManager::layout_metric_width("AV label", 16.0, &typography);
+        assert!(typography_width > default_width);
+
+        let (algorithm, config) =
+            manager.set_declutter_algorithm(DeclutterAlgorithm::Annealing, Some(123), Some(50));
+        assert_eq!(algorithm, DeclutterAlgorithm::Annealing);
+        assert_eq!(config.seed, 123);
+        assert_eq!(config.max_iterations, 50);
     }
 }
