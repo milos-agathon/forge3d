@@ -1,7 +1,7 @@
 from pathlib import Path
 
 
-QUICKSTART = Path("specs/003-deterministic-label-plan/quickstart.md")
+QUICKSTART = Path("docs/guides/label_plan_guide.md")
 
 
 def test_label_plan_quickstart_names_public_api_and_required_scenarios():

@@ -6,7 +6,10 @@ from pathlib import Path
 
 
 EXAMPLE = Path("examples/label_api_truth_basic.py")
-QUICKSTART = Path("specs/002-label-api-truth/quickstart.md")
+PUBLIC_DOCS = [
+    Path("docs/api/api_reference.rst"),
+    Path("docs/guides/label_support_matrix.md"),
+]
 
 
 def _load_example_module():
@@ -66,7 +69,7 @@ def test_label_api_truth_workflow_is_deterministic_for_fixed_inputs():
 
 
 def test_label_api_truth_quickstart_points_to_runnable_example():
-    text = QUICKSTART.read_text(encoding="utf-8")
+    text = "\n".join(path.read_text(encoding="utf-8") for path in PUBLIC_DOCS)
 
     assert "examples/label_api_truth_basic.py --json" in text
     assert "ViewerHandle.add_label" in text
