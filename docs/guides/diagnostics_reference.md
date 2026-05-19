@@ -20,6 +20,14 @@ Each diagnostic contains:
 
 | Code | Minimum output-affecting severity | Support level | Trigger |
 | --- | --- | --- | --- |
+| `missing_crs` | `error` | `unsupported` | Terrain, layer, or asset CRS is required for a render path and was not provided. |
+| `missing_source_identity` | `error` | `unsupported` | A layer or asset lacks a stable source identifier needed for bundle review. |
+| `missing_renderable_data` | `error` | `placeholder/fallback` | A layer has no geometry, raster pixels, labels, tiles, or other renderable payload. |
+| `missing_external_asset` | `error` | `missing` | A referenced file or bundled external asset cannot be resolved. |
+| `unsupported_asset_format` | `error` | `unsupported` | An asset extension or declared format is outside the public MapScene subset. |
+| `unsupported_output_format` | `error` | `unsupported` | Requested output is outside the supported offline PNG path. |
+| `unsupported_layer_type` | `error` | `unsupported` | A MapScene layer type is not part of the typed public scene contract. |
+| `unsupported_feature` | `error` | `unsupported` | A requested feature is known but not supported by the public workflow. |
 | `crs_mismatch` | `error` | `unsupported` | Layer CRS differs from scene or terrain CRS and no transform was provided. |
 | `missing_glyphs` | `warning` | `underdeveloped` | Labels reference glyphs missing from the active atlas. |
 | `unsupported_style_field` | `warning` | `unsupported` | A supported style layer uses paint or layout fields forge3d does not consume. |
