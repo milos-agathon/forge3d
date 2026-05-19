@@ -1,9 +1,9 @@
 [package]
 name = "forge3d"
-version = "1.25.0"
+version = "1.26.0"
 edition = "2021"
 autoexamples = false
-description = "GPU-accelerated 3D terrain and map-scene asset rendering with diagnostics and reproducible bundles"
+description = "GPU-accelerated offline 3D map rendering with material/VT diagnostics, advanced labels, large-scene summaries, and reproducible bundles"
 license = "Apache-2.0 OR MIT"
 readme = "README.md"
 repository = "https://github.com/milos-agathon/forge3d"

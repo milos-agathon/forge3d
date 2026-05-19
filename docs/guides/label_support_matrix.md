@@ -2,17 +2,28 @@
 
 | Capability | Support level | Scope | Diagnostics |
 | --- | --- | --- | --- |
-| Point labels | `supported` | `ViewerHandle.add_label` creates stable ids for point labels through the public workflow, not raw IPC. | `missing_glyphs` diagnostic for atlas gaps. |
-| Line labels | `supported` | `ViewerHandle.add_line_label` validates line geometry and emits deterministic glyph ordering keys. | `placeholder_fallback` diagnostic for invalid geometry. |
-| Curved labels | `experimental` | `ViewerHandle.add_curved_label` is public but not production-stable. | `experimental_feature` diagnostic. |
-| Callouts | `supported` | `ViewerHandle.add_callout` creates stable ids for point-attached callout labels. | `missing_glyphs` diagnostic for atlas gaps. |
-| Typography controls | `supported` | `ViewerHandle.set_label_typography` updates layout metrics for tracking, line height, and alignment. | Typography layout metrics are returned for review. |
-| Decluttering controls | `supported` | `ViewerHandle.set_declutter_algorithm` records deterministic placement policy settings. | Placement policy state is returned for review. |
-| Atlas loading | `supported` | `ViewerHandle.load_label_atlas` records atlas and metrics paths for subsequent label validation. | `missing_glyphs` diagnostic when coverage is insufficient. |
-| Missing glyph diagnostics | `supported` | Known glyph coverage gaps are reported through typed diagnostics. | `missing_glyphs` diagnostic. |
-| Upside-down line handling | `supported` | Line glyph rotation and ordering are normalized for deterministic line-label placement. | Diagnostic-bearing invalid geometry remains `placeholder_fallback`. |
-| Terrain-elevated line labels | `experimental` | Terrain-elevated line-label behavior is exposed only as an experimental public path. | `experimental_feature` diagnostic. |
-| Deterministic LabelPlan | `supported` | Offline point and polygon candidates compile through `LabelPlan.compile` with reviewable accepted/rejected output. | `label_rejection_summary`; unsupported backends return `placeholder_fallback`. |
+| Point labels | `supported` | `ViewerHandle.add_label(...)` returns a stable id for accepted ASCII point-label text and records public label state. | `missing_glyphs` for known atlas coverage gaps; `placeholder_fallback` for empty text. |
+| Batch point labels | `supported` | `ViewerHandle.add_labels(...)` preserves input order, returns stable ids for accepted labels, and returns per-label diagnostics for rejected entries. | `placeholder_fallback`, `missing_glyphs`. |
+| Line labels | `supported` | `ViewerHandle.add_line_label(...)` returns a stable id for valid flat paths and records deterministic glyph instances with tangent rotation. | `placeholder_fallback` for invalid paths; `experimental_feature` for unavailable terrain sampling. |
+| Curved labels | `experimental` | `ViewerHandle.add_curved_label(...)` is public but returns a typed diagnostic until curved glyph rendering is production-stable. | `experimental_feature`. |
+| Callouts | `supported` | `ViewerHandle.add_callout(...)` returns a stable id for accepted callout text and anchor data. | `missing_glyphs`, `placeholder_fallback`. |
+| Typography controls | `supported` | `ViewerHandle.set_label_typography(...)` updates native label-manager typography state, records serializable settings, and exposes deterministic layout metrics for the configured tracking, kerning, line-height, and word-spacing controls. | Invalid future controls must fail with typed diagnostics instead of no-op success. |
+| Decluttering controls | `supported` | `ViewerHandle.set_declutter_algorithm(...)` updates native label-manager declutter state and records a deterministic placement policy for `greedy` or `annealing` with seed and max-iteration settings. | Unsupported algorithm names return `placeholder_fallback` rather than no-op success. |
+| Atlas loading | `supported` | `ViewerHandle.load_label_atlas(...)` records active atlas PNG and metrics paths in serializable viewer label state. | Future atlas validation may add `missing_glyphs` or atlas-format diagnostics. |
+| Missing glyph diagnostics | `supported` | Known non-ASCII glyph gaps are reported before sending create commands to the viewer. | `missing_glyphs`. |
+| Upside-down line handling | `supported` | Reverse line paths are normalized so glyph rotations stay upright, with `upside_down_adjusted` recorded per glyph. | Documentation boundary; no diagnostic for supported flat line handling. |
+| Terrain-elevated line labels | `experimental` | Terrain sampling is not owned by feature `002`; requests such as `terrain_mode="sample"` return diagnostics instead of silently flattening. | `experimental_feature`. |
+| Deterministic LabelPlan | `supported` | `LabelPlan.compile(...)` produces deterministic accepted/rejected plan data, point and polygon candidates, terrain-aware point elevations where sampled, keepout and priority rejection details, and render/export payloads. | `missing_glyphs`, `label_rejection_summary`; unsupported backends return `placeholder_fallback`. |
+| Advanced repeated line labels | `underdeveloped` | P2 product planning adds deterministic repeat-distance output where line geometry can be compiled; unavailable render integration remains diagnosed before render. | `experimental_feature` or `label_rejection_summary` where applicable. |
+| Advanced curved labels and complex-script shaping | `experimental` | Curved path text and HarfBuzz-compatible shaping are non-MVP-blocking unless prioritized with end-to-end tests. They must be diagnosed before render rather than treated as silent success. | `experimental_feature`. |
 
-No label command should report success while doing nothing. Unsupported or
-unverified label behavior must produce typed diagnostics or explicit failure.
+The feature `002` public workflow uses high-level `ViewerHandle` methods and
+does not require raw IPC for basic label creation, configuration, line labels,
+callouts, vector-overlay creation, or clear/remove workflows. Existing raw IPC
+helpers remain an advanced compatibility surface, but they are not the MVP
+label API truth contract.
+
+Successful create calls return a stable id where users need update, inspect,
+remove, export, or review workflows. No label command should report success
+while doing nothing. Unsupported or unverified label behavior must produce
+typed diagnostics or explicit failure.
