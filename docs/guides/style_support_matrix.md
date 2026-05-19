@@ -8,7 +8,7 @@ rendering and it is not complete Mapbox style parity.
 | `fill` layers | `supported` | Local/provided polygon features with `fill-color`, `fill-opacity`, and `fill-outline-color`. | `unsupported_style_field` for unsupported paint/layout fields. |
 | `line` layers | `supported` | Local/provided line features with `line-color`, `line-width`, and `line-opacity`. | `unsupported_style_field` for unsupported paint/layout fields. |
 | `circle` layers | `supported` | Local/provided point features with `circle-color`, `circle-radius`, and `circle-opacity`. | `unsupported_style_field` for unsupported paint/layout fields. |
-| `symbol` text layers | `underdeveloped` | Existing style-to-label helpers can preserve some text styling, but production LabelLayer integration is owned by later features. | `experimental_feature` or label diagnostics when used in production workflows. |
+| `symbol` text layers | `underdeveloped` | `LabelPlan` and `MapScene.validate` preserve deterministic label intent while production typography coverage remains diagnostic-bearing. | `experimental_feature` or label diagnostics when used in production workflows. |
 | Other style layer types | `unsupported` | Heatmap, raster, hillshade, fill-extrusion, background, and other layer types are outside the P0 local-feature subset. | `unsupported_style_layer_type`. |
 | Streamed vector tiles | `non-goal` | Hosted/live tile delivery is outside this feature. | Documentation boundary, not a render path. |
 
