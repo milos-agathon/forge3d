@@ -19,7 +19,7 @@ TARGETS = [
     ("pypi", "https://pypi.org/project/forge3d/"),
     (
         "datasets",
-        "https://raw.githubusercontent.com/milos-agathon/forge3d/main/assets/tif/dem_rainier.tif",
+        "https://media.githubusercontent.com/media/milos-agathon/forge3d/main/assets/tif/dem_rainier.tif",
     ),
 ]
 
