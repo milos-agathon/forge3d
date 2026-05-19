@@ -29,6 +29,9 @@ For feature ``002-label-api-truth``, use ``ViewerHandle.add_label``,
 ``ViewerHandle.set_labels_enabled``, ``ViewerHandle.clear_labels``,
 ``ViewerHandle.remove_label``, ``ViewerHandle.set_label_typography``, and
 ``ViewerHandle.set_declutter_algorithm``.
+Run ``python examples/label_api_truth_basic.py --json`` to exercise the public
+workflow and inspect deterministic ids, diagnostics, layout metrics, and
+placement policy output.
 
 Successful point, batch, line, callout, and vector-overlay create operations
 return stable ids where later inspection, removal, export, or review needs

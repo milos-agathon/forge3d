@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 
@@ -110,43 +109,39 @@ def test_public_docs_prefer_viewerhandle_label_workflow_over_raw_ipc():
 
 
 def test_label_contract_matches_current_viewerhandle_signatures():
-    contract = _read("specs/002-label-api-truth/contracts/label-api-contract.md")
+    contract = _read("docs/api/api_reference.rst")
 
     expected_fragments = [
-        "viewer.add_label(text: str, world_pos: tuple[float, float, float]",
-        "viewer.add_line_label(text: str, polyline: Sequence[Point3]",
-        "viewer.add_curved_label(text: str, path: Sequence[Point3]",
-        "viewer.load_label_atlas(atlas_png_path: str | Path, metrics_json_path: str | Path)",
-        "viewer.add_labels(labels: Sequence[Mapping[str, object]]) -> LabelBatchResult",
-        "viewer.set_label_typography(*, tracking: float | None",
-        "viewer.set_declutter_algorithm(algorithm: str, *, seed: int | None",
+        "ViewerHandle.add_label",
+        "ViewerHandle.add_line_label",
+        "ViewerHandle.add_curved_label",
+        "ViewerHandle.load_label_atlas",
+        "ViewerHandle.add_labels",
+        "ViewerHandle.set_label_typography",
+        "ViewerHandle.set_declutter_algorithm",
+        "layout metrics",
+        "placement policy",
     ]
     for fragment in expected_fragments:
         assert fragment in contract
 
     stale_fragments = [
-        "position: tuple",
-        "path: Sequence[Point3], **style) -> str | DiagnosticResult",
+        "viewer.add_label(text: str, world_pos: tuple[float, float, float]",
         "load_label_atlas(path:",
-        "settings: Mapping[str, object]",
+        "viewer_ipc.add_label",
     ]
     for fragment in stale_fragments:
         assert fragment not in contract
 
 
-def test_label_api_truth_artifacts_exist_independently_of_active_feature_pointer():
-    payload = json.loads(_read(".specify/feature.json"))
-
-    active_feature = Path(payload["feature_directory"])
-    assert payload["feature_directory"].startswith("specs/")
-    assert active_feature.exists()
-
-    label_api_truth_dir = Path("specs/002-label-api-truth")
-    for relative_path in [
-        "spec.md",
-        "plan.md",
-        "tasks.md",
-        "contracts/label-api-contract.md",
-        "quickstart.md",
+def test_label_api_truth_artifacts_live_in_public_docs_not_speckit_state():
+    for public_path in [
+        "examples/label_api_truth_basic.py",
+        "docs/guides/label_support_matrix.md",
+        "docs/guides/label_plan_guide.md",
+        "docs/api/api_reference.rst",
     ]:
-        assert (label_api_truth_dir / relative_path).exists()
+        assert Path(public_path).exists()
+
+    assert not Path(".specify/feature.json").exists()
+    assert not Path("specs/002-label-api-truth").exists()
