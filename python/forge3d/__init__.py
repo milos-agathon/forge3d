@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.23.2"
+__version__ = "1.25.0"
 version = __version__
 
 import numpy as np
@@ -142,7 +142,7 @@ from .path_tracing import PathTracer, make_camera
 # -----------------------------------------------------------------------------
 # Interactive Viewer API
 # -----------------------------------------------------------------------------
-from .viewer import open_viewer, open_viewer_async, ViewerHandle
+from .viewer import LabelBatchResult, ViewerHandle, open_viewer, open_viewer_async
 from . import viewer_ipc, colors, interactive, datasets, widgets
 from .datasets import (
     available as available_datasets,
@@ -390,6 +390,7 @@ from .style import (
 from .diagnostics import (
     Diagnostic,
     LayerSummary,
+    P2_FEATURE_DIAGNOSTIC_CODES,
     REQUIRED_DIAGNOSTIC_CODES,
     RenderFailurePolicy,
     SeverityPolicy,
@@ -400,13 +401,53 @@ from .diagnostics import (
     experimental_feature_diagnostic,
     label_rejection_summary_diagnostic,
     missing_glyphs_diagnostic,
+    missing_texture_path_diagnostic,
+    missing_uvs_diagnostic,
     placeholder_fallback_diagnostic,
     pro_gated_path_diagnostic,
     python_public_3dtiles_incomplete_diagnostic,
+    unavailable_cache_lod_stats_diagnostic,
+    unsupported_instancing_path_diagnostic,
     unsupported_style_field_diagnostic,
     unsupported_style_layer_type_diagnostic,
+    unsupported_texture_format_diagnostic,
     validate_label_support,
     vt_unsupported_family_diagnostic,
+)
+
+# -----------------------------------------------------------------------------
+# Deterministic label planning
+# -----------------------------------------------------------------------------
+from .label_plan import (
+    AcceptedLabel,
+    KeepoutRegion,
+    LabelCandidate,
+    LabelPlan,
+    PriorityClass,
+    RejectedLabel,
+)
+
+# -----------------------------------------------------------------------------
+# Typed MapScene recipe contract
+# -----------------------------------------------------------------------------
+from .map_scene import (
+    FontAtlas,
+    FontFallbackRange,
+    LabelLayer,
+    LightingPreset,
+    MapFurnitureLayer,
+    MapScene,
+    BuildingLayer as MapSceneBuildingLayer,
+    OrbitCamera,
+    OutputSpec,
+    PointCloudLayer,
+    RasterOverlay,
+    ReproducibilityProfile,
+    SceneRecipe,
+    TerrainSource,
+    Tiles3DLayer,
+    TypographySettings,
+    VectorOverlay,
 )
 
 # -----------------------------------------------------------------------------
@@ -504,6 +545,7 @@ __all__ = [
     "open_viewer",
     "open_viewer_async",
     "ViewerHandle",
+    "LabelBatchResult",
     "ViewerWidget",
     "widgets_available",
     # P4: Map Plate / Creator Workflow
@@ -571,6 +613,7 @@ __all__ = [
     # Product diagnostics
     "Diagnostic",
     "LayerSummary",
+    "P2_FEATURE_DIAGNOSTIC_CODES",
     "REQUIRED_DIAGNOSTIC_CODES",
     "RenderFailurePolicy",
     "SeverityPolicy",
@@ -581,13 +624,43 @@ __all__ = [
     "experimental_feature_diagnostic",
     "label_rejection_summary_diagnostic",
     "missing_glyphs_diagnostic",
+    "missing_texture_path_diagnostic",
+    "missing_uvs_diagnostic",
     "placeholder_fallback_diagnostic",
     "pro_gated_path_diagnostic",
     "python_public_3dtiles_incomplete_diagnostic",
+    "unavailable_cache_lod_stats_diagnostic",
+    "unsupported_instancing_path_diagnostic",
     "unsupported_style_field_diagnostic",
     "unsupported_style_layer_type_diagnostic",
+    "unsupported_texture_format_diagnostic",
     "validate_label_support",
     "vt_unsupported_family_diagnostic",
+    # Deterministic label planning
+    "AcceptedLabel",
+    "KeepoutRegion",
+    "LabelCandidate",
+    "LabelPlan",
+    "PriorityClass",
+    "RejectedLabel",
+    # Typed MapScene recipe contract
+    "MapScene",
+    "SceneRecipe",
+    "TerrainSource",
+    "RasterOverlay",
+    "VectorOverlay",
+    "FontAtlas",
+    "FontFallbackRange",
+    "TypographySettings",
+    "LabelLayer",
+    "PointCloudLayer",
+    "Tiles3DLayer",
+    "MapSceneBuildingLayer",
+    "MapFurnitureLayer",
+    "OrbitCamera",
+    "LightingPreset",
+    "OutputSpec",
+    "ReproducibilityProfile",
     # P3-reproject: CRS utilities
     "proj_available",
     "transform_coords",

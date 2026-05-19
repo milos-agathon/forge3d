@@ -5,6 +5,7 @@ use super::super::request::IpcRequest;
 pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
     match req {
         IpcRequest::AddLabel {
+            id,
             text,
             world_pos,
             size,
@@ -21,6 +22,7 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             leader,
             horizon_fade_angle,
         } => Some(ViewerCmd::AddLabel {
+            id: *id,
             text: text.clone(),
             world_pos: *world_pos,
             size: *size,
@@ -38,6 +40,7 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             horizon_fade_angle: *horizon_fade_angle,
         }),
         IpcRequest::AddLineLabel {
+            id,
             text,
             polyline,
             size,
@@ -50,6 +53,7 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             min_zoom,
             max_zoom,
         } => Some(ViewerCmd::AddLineLabel {
+            id: *id,
             text: text.clone(),
             polyline: polyline.clone(),
             size: *size,
@@ -79,6 +83,7 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             Some(ViewerCmd::SetMaxVisibleLabels { max: *max })
         }
         IpcRequest::AddCurvedLabel {
+            id,
             text,
             polyline,
             size,
@@ -89,6 +94,7 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             tracking,
             center_on_path,
         } => Some(ViewerCmd::AddCurvedLabel {
+            id: *id,
             text: text.clone(),
             polyline: polyline.clone(),
             size: *size,
@@ -100,6 +106,7 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             center_on_path: *center_on_path,
         }),
         IpcRequest::AddCallout {
+            id,
             text,
             anchor,
             offset,
@@ -111,6 +118,7 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             text_size,
             text_color,
         } => Some(ViewerCmd::AddCallout {
+            id: *id,
             text: text.clone(),
             anchor: *anchor,
             offset: *offset,

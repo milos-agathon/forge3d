@@ -68,6 +68,7 @@ impl Scene {
                 uv_min,
                 uv_max,
                 color,
+                rotation: 0.0,
             });
         Ok(())
     }
@@ -114,6 +115,7 @@ impl Scene {
                 uv_min,
                 uv_max,
                 color,
+                rotation: 0.0,
             });
         Ok(())
     }

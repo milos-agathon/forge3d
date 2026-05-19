@@ -257,6 +257,62 @@ mod tests {
     }
 
     #[test]
+    fn test_response_serialization_with_created_id() {
+        let resp = IpcResponse::with_id(42);
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains(r#""ok":true"#));
+        assert!(json.contains(r#""id":42"#));
+    }
+
+    #[test]
+    fn test_parse_label_and_overlay_create_ids() {
+        let label_json = r#"{"cmd":"add_label","id":42,"text":"City","world_pos":[1.0,2.0,3.0]}"#;
+        let req = parse_ipc_request(label_json).unwrap();
+        match &req {
+            IpcRequest::AddLabel { id, text, .. } => {
+                assert_eq!(*id, Some(42));
+                assert_eq!(text, "City");
+            }
+            _ => panic!("Expected AddLabel"),
+        }
+
+        let cmd = ipc_request_to_viewer_cmd(&req).unwrap().unwrap();
+        match cmd {
+            crate::viewer::viewer_enums::ViewerCmd::AddLabel { id, text, .. } => {
+                assert_eq!(id, Some(42));
+                assert_eq!(text, "City");
+            }
+            _ => panic!("Expected ViewerCmd::AddLabel"),
+        }
+
+        let overlay_json = r#"{
+            "cmd":"add_vector_overlay",
+            "id":7,
+            "name":"label-halo",
+            "vertices":[[0.0,0.0,0.0,1.0,1.0,1.0,1.0,0.0]],
+            "indices":[0],
+            "primitive":"points"
+        }"#;
+        let req = parse_ipc_request(overlay_json).unwrap();
+        match &req {
+            IpcRequest::AddVectorOverlay { id, name, .. } => {
+                assert_eq!(*id, Some(7));
+                assert_eq!(name, "label-halo");
+            }
+            _ => panic!("Expected AddVectorOverlay"),
+        }
+
+        let cmd = ipc_request_to_viewer_cmd(&req).unwrap().unwrap();
+        match cmd {
+            crate::viewer::viewer_enums::ViewerCmd::AddVectorOverlay { id, name, .. } => {
+                assert_eq!(id, Some(7));
+                assert_eq!(name, "label-halo");
+            }
+            _ => panic!("Expected ViewerCmd::AddVectorOverlay"),
+        }
+    }
+
+    #[test]
     fn test_parse_set_scene_review_state() {
         let json = r#"{
             "cmd":"set_scene_review_state",

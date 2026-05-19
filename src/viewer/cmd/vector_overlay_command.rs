@@ -4,6 +4,7 @@ use crate::viewer::Viewer;
 pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
     match cmd {
         ViewerCmd::AddVectorOverlay {
+            id,
             name,
             vertices,
             indices,
@@ -48,7 +49,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                     z_order: *z_order,
                 };
 
-                let id = terrain_viewer.add_vector_overlay(layer);
+                let id = terrain_viewer.add_vector_overlay_with_id(*id, layer);
                 println!(
                     "[vector_overlay] Added '{}' with {} vertices (id={})",
                     name,

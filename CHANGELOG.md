@@ -6,6 +6,28 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.25.0] - 2026-05-18
+### Added
+- Implemented Spec 005 P1 map asset workflows: data-driven `LabelLayer` ingestion from features, typography coverage and fallback declarations, public `MapSceneBuildingLayer` and `Tiles3DLayer` scene adapters, and deterministic map-scene bundle round-trip state.
+- Added structured P1 diagnostics for missing label fields, Unicode coverage gaps, unsupported tile formats/features, missing external assets, unavailable terrain sampling, Pro-gated paths, and placeholder/fallback paths.
+- Added `examples/mapscene_p1_assets_bundle_showcase.py`, which uses repo datasets plus a local synthetic tileset to exercise labels, typography, buildings, 3D Tiles review metadata, validation diagnostics, and bundle reload.
+
+### Changed
+- Updated package metadata to describe forge3d's P1 map asset layers, 3D Tiles review support, diagnostics, and reproducible bundle workflow.
+- Bumped the package version to `1.25.0`.
+
+## [1.24.0] - 2026-05-18
+### Added
+- Implemented specs 001-004 for offline 3D map workflows: structured diagnostics/support matrices, label API truthfulness, deterministic `LabelPlan`, and the typed `MapScene` MVP.
+- Added public `Diagnostic`, `ValidationReport`, support-status, and render-failure policy contracts with deterministic serialization and bundle-ready reporting.
+- Added deterministic label planning with priority classes, keepouts, accepted/rejected label summaries, and validation diagnostics.
+- Added `MapScene`, `SceneRecipe`, typed terrain/raster/vector/label/building/point-cloud recipe objects, pre-render validation, PNG rendering, and deterministic review-bundle save support.
+- Added canonical MapScene examples plus `examples/mapscene_bundled_datasets_showcase.py`, which uses the bundled `mini_dem` and `sample_boundaries` datasets to exercise specs 001-004 together.
+
+### Changed
+- Updated package metadata to describe forge3d as a Rust/WebGPU 3D map engine with diagnostics, labels, and reproducible scene bundles.
+- Bumped the package version to `1.24.0`.
+
 ## [1.23.0] - 2026-03-30
 ### Added
 - `pip install forge3d` now installs the `interactive_viewer` command, so standard viewer usage no longer requires a separate `cargo build --release --bin interactive_viewer` step.

@@ -40,6 +40,7 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
         }
         IpcRequest::ListOverlays => Some(ViewerCmd::ListOverlays),
         IpcRequest::AddVectorOverlay {
+            id,
             name,
             vertices,
             indices,
@@ -52,6 +53,7 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             point_size,
             z_order,
         } => Some(ViewerCmd::AddVectorOverlay {
+            id: *id,
             name: name.clone(),
             vertices: vertices.clone(),
             indices: indices.clone(),

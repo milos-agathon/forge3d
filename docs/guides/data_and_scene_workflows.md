@@ -91,8 +91,27 @@ Examples:
 ### 2. Style translation and 2D vector scenes
 
 Use `forge3d.style` when you need Mapbox-style parsing and translation into
-forge3d vector or label settings. Use `forge3d.vector` and `forge3d.export`
-when you need 2D vector scenes or export workflows.
+forge3d vector or label settings for local/provided feature styling. This is
+not full Mapbox GL parity and does not stream MVT tiles. The documented P0
+style subset is `fill, line, and circle`; unsupported style fields and layer
+types must surface as `unsupported_style_field` and
+`unsupported_style_layer_type` diagnostics before render.
+
+For feature `005-map-assets-bundles-p1`, typed data-driven labels live in
+`forge3d.map_scene.LabelLayer` through `from_features`, `from_geodataframe`,
+`from_style_layer`, and `compile_labels`. These APIs feed the product
+`MapScene`/`LabelPlan` path and are `underdeveloped` until story-specific P1
+tests complete.
+
+P1 typography support is explicit about what is available. Use
+`FontAtlas.default_latin` for the bundled Basic Latin atlas,
+`FontAtlas.from_font` for TTF/OTF atlas setup or typed asset diagnostics,
+`FontFallbackRange` for deterministic fallback declarations, and
+`TypographySettings` for kerning, tracking, line-height, multiline, and callout
+layout metadata. complex-script shaping is documented as a future design path
+and is not P1-blocking; unsupported Unicode coverage must be reported before
+render through typed diagnostics such as `unicode_coverage_gap` or
+`missing_glyphs`.
 
 Example:
 
@@ -134,6 +153,21 @@ pipeline.
 
 `forge3d.tiles3d` is the lower-level module for 3D Tiles parsing and traversal.
 Use it when you need direct control rather than the building convenience layer.
+The typed product-scene path is `forge3d.map_scene.Tiles3DLayer`, including
+`Tiles3DLayer.from_tileset_json` and `Tiles3DLayer.from_b3dm`. This is not full Cesium runtime parity; unsupported formats, unsupported B3DM/GLB features, and
+incomplete public render paths must report `unsupported_tile_format`,
+`unsupported_tile_feature`, or `python_public_3dtiles_incomplete` diagnostics.
+
+The product-scene building adapter is `forge3d.map_scene.BuildingLayer`, also
+available as the top-level `MapSceneBuildingLayer` alias. The legacy
+`forge3d.BuildingLayer` name remains the `forge3d.buildings` class for
+backward compatibility. Product-scene building paths stay `underdeveloped`,
+`Pro-gated`, `placeholder/fallback`, or `unsupported` unless the selected path
+has specific test evidence.
+scalar PBR material metadata is supported as review and summary data on the
+typed building layer. textured PBR is not implemented end to end in the public
+MapScene path; requests for textured PBR must remain diagnostic-bearing with
+`unsupported_feature` rather than silently falling back to untextured geometry.
 
 ## Scene Bundles
 
@@ -142,9 +176,17 @@ Bundles are the packaging format for portable scene state:
 - `save_bundle()` writes a `.forge3d` directory
 - `load_bundle()` reads it back
 - `ViewerHandle.load_bundle()` installs it into a live viewer
+- `MapScene.save_bundle()` writes deterministic recipe, review, layer-source,
+  label-source, and validation-report payloads for typed map scenes
+- `MapScene.load_bundle()` reloads the saved recipe and diagnostics where the
+  assets are available
 
 This is the path for repeatable scene variants, saved bookmarks, and shipping a
-reviewable scene between machines. See `terrain_demo.py` and Python tutorial 04.
+reviewable scene between machines. Missing external bundle assets remain
+diagnostic-bearing through `missing_external_asset`; bundle save/load must not
+turn missing, unsupported, `Pro-gated`, `placeholder/fallback`, or
+`experimental` asset state into successful renderability. See `terrain_demo.py`
+and Python tutorial 04.
 
 ## Example Map
 

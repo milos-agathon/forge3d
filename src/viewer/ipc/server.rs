@@ -38,6 +38,21 @@ pub struct IpcServerHandle {
     pub shutdown_tx: mpsc::Sender<()>,
 }
 
+fn created_id_for_request(req: &IpcRequest) -> Option<u64> {
+    match req {
+        IpcRequest::AddLabel { id: Some(id), .. }
+        | IpcRequest::AddLineLabel { id: Some(id), .. }
+        | IpcRequest::AddCurvedLabel { id: Some(id), .. }
+        | IpcRequest::AddCallout { id: Some(id), .. } => Some(*id),
+        IpcRequest::AddVectorOverlay { id: Some(id), .. } => Some(u64::from(*id)),
+        _ => None,
+    }
+}
+
+fn success_response_for_request(req: &IpcRequest) -> IpcResponse {
+    created_id_for_request(req).map_or_else(IpcResponse::success, IpcResponse::with_id)
+}
+
 /// Start the IPC server thread that accepts connections and forwards commands
 /// to the viewer via the provided sender.
 ///
@@ -235,7 +250,7 @@ where
                                                 if let Some(snapshot) = snapshot {
                                                     update_scene_review_state(snapshot);
                                                 }
-                                                IpcResponse::success()
+                                                success_response_for_request(&req)
                                             }
                                             Err(e) => {
                                                 eprintln!("[IPC] Command error: {}", e);
@@ -273,7 +288,7 @@ where
                                         Ok(Some(cmd)) => match cmd_sender(cmd) {
                                             Ok(()) => {
                                                 update_active_scene_variant(Some(variant_id));
-                                                IpcResponse::success()
+                                                success_response_for_request(&req)
                                             }
                                             Err(e) => {
                                                 eprintln!("[IPC] Command error: {}", e);
@@ -309,7 +324,7 @@ where
                                 } else {
                                     match ipc_request_to_viewer_cmd(&req) {
                                         Ok(Some(cmd)) => match cmd_sender(cmd) {
-                                            Ok(()) => IpcResponse::success(),
+                                            Ok(()) => success_response_for_request(&req),
                                             Err(e) => {
                                                 eprintln!("[IPC] Command error: {}", e);
                                                 IpcResponse::error(e)
@@ -327,7 +342,7 @@ where
                             }
                             _ => match ipc_request_to_viewer_cmd(&req) {
                                 Ok(Some(cmd)) => match cmd_sender(cmd) {
-                                    Ok(()) => IpcResponse::success(),
+                                    Ok(()) => success_response_for_request(&req),
                                     Err(e) => {
                                         eprintln!("[IPC] Command error: {}", e);
                                         IpcResponse::error(e)

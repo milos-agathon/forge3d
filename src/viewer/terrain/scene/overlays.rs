@@ -124,7 +124,17 @@ impl ViewerTerrainScene {
 
     /// Add a vector overlay layer. Returns layer ID.
     /// If drape is true and terrain is loaded, vertices will be draped onto terrain.
-    pub fn add_vector_overlay(&mut self, mut layer: VectorOverlayLayer) -> u32 {
+    pub fn add_vector_overlay(&mut self, layer: VectorOverlayLayer) -> u32 {
+        self.add_vector_overlay_with_id(None, layer)
+    }
+
+    /// Add a vector overlay layer with an externally allocated ID.
+    /// If drape is true and terrain is loaded, vertices will be draped onto terrain.
+    pub fn add_vector_overlay_with_id(
+        &mut self,
+        id: Option<u32>,
+        mut layer: VectorOverlayLayer,
+    ) -> u32 {
         self.ensure_vector_overlay_stack();
 
         // If draping requested and terrain is loaded, drape the vertices
@@ -149,7 +159,10 @@ impl ViewerTerrainScene {
         }
 
         if let Some(ref mut stack) = self.vector_overlay_stack {
-            stack.add_layer(layer)
+            match id {
+                Some(id) => stack.add_layer_with_id(Some(id), layer),
+                None => stack.add_layer(layer),
+            }
         } else {
             0
         }

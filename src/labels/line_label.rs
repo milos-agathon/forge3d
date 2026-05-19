@@ -114,10 +114,12 @@ fn place_glyphs_along_path(
         // Find position and tangent at current offset
         if let Some((pos, tangent)) = sample_path_at_offset(points, current_offset + advance * 0.5)
         {
-            let rotation = tangent.atan2(1.0);
+            let rotation = tangent;
 
-            // Flip text if it would be upside down
-            let rotation = if rotation.abs() > std::f32::consts::FRAC_PI_2 {
+            // Flip text if it would be upside down, keeping the angle normalized.
+            let rotation = if rotation > std::f32::consts::FRAC_PI_2 {
+                rotation - std::f32::consts::PI
+            } else if rotation < -std::f32::consts::FRAC_PI_2 {
                 rotation + std::f32::consts::PI
             } else {
                 rotation
@@ -247,5 +249,21 @@ mod tests {
         assert!((pos[0] - 5.0).abs() < 0.001);
         assert!((pos[1] - 0.0).abs() < 0.001);
         assert!(tangent.abs() < 0.001); // Horizontal line
+    }
+
+    #[test]
+    fn test_glyph_rotation_follows_diagonal_tangent() {
+        let points = [[0.0, 0.0], [10.0, 10.0]];
+        let placements = place_glyphs_along_path(&points, &[1.0], 12.0, 1.0);
+        assert_eq!(placements.len(), 1);
+        assert!((placements[0].rotation - std::f32::consts::FRAC_PI_4).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_glyph_rotation_flips_upside_down_reverse_line() {
+        let points = [[10.0, 0.0], [0.0, 0.0]];
+        let placements = place_glyphs_along_path(&points, &[1.0], 12.0, 1.0);
+        assert_eq!(placements.len(), 1);
+        assert!(placements[0].rotation.abs() < 0.001);
     }
 }

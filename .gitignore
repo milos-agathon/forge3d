@@ -344,6 +344,12 @@ docs/_build/
 landuse/landuse/glad_cropland_2019.tif
 examples/*
 !examples/diagnostics_support_matrices_demo.py
+!examples/label_api_truth_basic.py
+!examples/mapscene_terrain_raster.py
+!examples/mapscene_vector_labels.py
+!examples/mapscene_buildings_labels.py
+!examples/mapscene_bundled_datasets_showcase.py
+!examples/mapscene_p1_assets_bundle_showcase.py
 !examples/germany_terrain_landcover_viewer.py
 !examples/khumbu_icefall_sentinel_timelapse.py
 !examples/turkiye_river_basins_3d.py

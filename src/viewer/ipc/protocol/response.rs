@@ -9,6 +9,8 @@ pub struct IpcResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stats: Option<ViewerStats>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pick_events: Option<Vec<crate::picking::PickEvent>>,
@@ -31,6 +33,7 @@ impl IpcResponse {
         Self {
             ok: true,
             error: None,
+            id: None,
             stats: None,
             pick_events: None,
             lasso_state: None,
@@ -46,6 +49,7 @@ impl IpcResponse {
         Self {
             ok: false,
             error: Some(msg.into()),
+            id: None,
             stats: None,
             pick_events: None,
             lasso_state: None,
@@ -61,6 +65,7 @@ impl IpcResponse {
         Self {
             ok: true,
             error: None,
+            id: None,
             stats: Some(stats),
             pick_events: None,
             lasso_state: None,
@@ -76,6 +81,7 @@ impl IpcResponse {
         Self {
             ok: true,
             error: None,
+            id: None,
             stats: None,
             pick_events: Some(events),
             lasso_state: None,
@@ -91,6 +97,7 @@ impl IpcResponse {
         Self {
             ok: true,
             error: None,
+            id: None,
             stats: None,
             pick_events: None,
             lasso_state: None,
@@ -106,6 +113,7 @@ impl IpcResponse {
         Self {
             ok: true,
             error: None,
+            id: None,
             stats: None,
             pick_events: None,
             lasso_state: Some(state),
@@ -121,6 +129,7 @@ impl IpcResponse {
         Self {
             ok: true,
             error: None,
+            id: None,
             stats: None,
             pick_events: None,
             lasso_state: None,
@@ -136,6 +145,7 @@ impl IpcResponse {
         Self {
             ok: true,
             error: None,
+            id: None,
             stats: None,
             pick_events: None,
             lasso_state: None,
@@ -151,6 +161,7 @@ impl IpcResponse {
         Self {
             ok: true,
             error: None,
+            id: None,
             stats: None,
             pick_events: None,
             lasso_state: None,
@@ -166,6 +177,7 @@ impl IpcResponse {
         Self {
             ok: true,
             error: None,
+            id: None,
             stats: None,
             pick_events: None,
             lasso_state: None,
@@ -174,6 +186,22 @@ impl IpcResponse {
             scene_variants: None,
             review_layers: None,
             active_scene_variant: Some(active_scene_variant),
+        }
+    }
+
+    pub fn with_id(id: u64) -> Self {
+        Self {
+            ok: true,
+            error: None,
+            id: Some(id),
+            stats: None,
+            pick_events: None,
+            lasso_state: None,
+            bundle_request: None,
+            terrain_volumetrics_report: None,
+            scene_variants: None,
+            review_layers: None,
+            active_scene_variant: None,
         }
     }
 }
