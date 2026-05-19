@@ -36,7 +36,7 @@ raster assets prefer the native/offscreen path; symbolic fixture recipes remain
 on deterministic source-derived compatibility output. `MapScene.save_bundle("map.forge3d")`
 records the recipe, diagnostics, support summaries, label plans, source
 references, camera, lighting, output, render backend, and renderability status
-without requiring raw IPC.
+through the public Python API.
 
 ## Canonical Examples
 

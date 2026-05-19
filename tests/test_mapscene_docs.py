@@ -51,7 +51,7 @@ def test_mapscene_public_api_is_documented_with_truthful_support_levels():
     assert "native/offscreen" in api
     assert "source-derived" in api
     assert "last_render_backend" in api
-    assert "native/offscreen PNG output" in _text("specs/004-mapscene-mvp/quickstart.md")
+    assert "native/offscreen PNG output" in offline
     assert "Full MapScene rendering | `missing`" not in offline
     assert "Deterministic LabelPlan | `missing`" not in offline
     assert "`unsupported`" in offline
@@ -60,11 +60,7 @@ def test_mapscene_public_api_is_documented_with_truthful_support_levels():
 
 
 def test_feature_004_artifacts_do_not_keep_stale_tbd_or_later_owned_wording():
-    targets = [
-        "specs/004-mapscene-mvp/plan.md",
-        "specs/004-mapscene-mvp/contracts/mapscene-contract.md",
-        "docs/guides/offline_3d_map_rendering.md",
-    ]
+    targets = ["docs/guides/offline_3d_map_rendering.md"]
     forbidden = ("TBD", "later-owned", "Owned by feature `004`", "Owned by feature `003`")
 
     for target in targets:

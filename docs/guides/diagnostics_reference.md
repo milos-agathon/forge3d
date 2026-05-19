@@ -31,6 +31,14 @@ Each diagnostic contains:
 | `python_public_3dtiles_incomplete` | `error` | `underdeveloped` | Public Python 3D Tiles workflow cannot complete render preparation. |
 | `estimated_gpu_memory` | `warning` | `supported` | Estimated GPU memory exceeds the configured budget. |
 | `label_rejection_summary` | `warning` | `underdeveloped` | Label placement rejected candidates and exposes reason counts. |
+| `missing_crs` | `error` | `unsupported` | A layer or scene component requires CRS-aware validation but no CRS was supplied. |
+| `missing_source_identity` | `error` | `unsupported` | A recipe layer has no stable source path, inline data, or source identity for validation and bundle review. |
+| `missing_renderable_data` | `error` | `unsupported` | A layer declares a render path but provides no renderable source data. |
+| `missing_external_asset` | `error` | `unsupported` | A scene or bundle references an external asset that cannot be found. |
+| `unsupported_asset_format` | `error` | `unsupported` | A source asset uses a file format outside the documented public MapScene workflow. |
+| `unsupported_output_format` | `error` | `unsupported` | A requested output format is outside the current PNG-oriented public render path. |
+| `unsupported_layer_type` | `error` | `unsupported` | A recipe contains a layer type that MapScene validation cannot route. |
+| `unsupported_feature` | `error` | `unsupported` | A requested feature exists as intent but has no supported public render implementation. |
 
 ## Render Policy
 

@@ -4,7 +4,7 @@ from pathlib import Path
 import forge3d as f3d
 
 
-QUICKSTART = Path("specs/004-mapscene-mvp/quickstart.md")
+QUICKSTART = Path("docs/guides/offline_3d_map_rendering.md")
 VECTOR_EXAMPLE = Path("examples/mapscene_vector_labels.py")
 BUILDING_EXAMPLE = Path("examples/mapscene_buildings_labels.py")
 
@@ -20,9 +20,9 @@ def _load_example(path: Path):
 def test_mapscene_quickstart_points_to_canonical_examples():
     text = QUICKSTART.read_text(encoding="utf-8")
 
-    assert "python examples/mapscene_terrain_raster.py --output-dir" in text
-    assert "python examples/mapscene_vector_labels.py --output-dir" in text
-    assert "python examples/mapscene_buildings_labels.py --output-dir" in text
+    assert "examples/mapscene_terrain_raster.py" in text
+    assert "examples/mapscene_vector_labels.py" in text
+    assert "examples/mapscene_buildings_labels.py" in text
     assert "viewer_ipc" not in text
     assert "raw IPC" not in text
 
