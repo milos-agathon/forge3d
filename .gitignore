@@ -342,7 +342,6 @@ docs/_build/
 
 # Large data files
 landuse/landuse/glad_cropland_2019.tif
-examples/*
 !examples/diagnostics_support_matrices_demo.py
 !examples/label_api_truth_basic.py
 !examples/mapscene_terrain_raster.py
