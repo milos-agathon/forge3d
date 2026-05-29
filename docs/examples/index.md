@@ -47,6 +47,7 @@ exposes CLI flags.
 | `cog_streaming_demo.py` | Direct COG access for tile/window reads, stats, and benchmarking. | `forge3d.cog.open_cog()` |
 | `buildings_viewer_interactive.py` | Building import flows from GeoJSON, CityJSON, and 3D Tiles-backed sources. | `forge3d.buildings` |
 | `osm_city_demo.py` | OSM-driven city scene around a center point, using forge3d extrusion helpers and a deterministic preview renderer. | `forge3d.io.import_osm_buildings_from_geojson()` |
+| `rotterdam_solar_potential_shadow_study.py` | Rotterdam 3D BAG LoD2.2 roof solar suitability with LoD1.2 fallback coverage, selected-time shadows, and optional day-cycle export. | 3D BAG WFS, PVGIS, OSM context, deterministic preview renderer |
 
 ## Animation And Camera Automation
 
@@ -75,6 +76,8 @@ than standalone demos:
 
 ## Where To Go Next
 
+- Use the [3D Map Project Ideas](3d-map-project-ideas.md) page for candidate
+  future examples that do not duplicate the current catalog.
 - Use the [Feature Map](../guides/feature_map.md) to choose the right module family.
 - Use the [Tutorials](../tutorials/index.md) for guided onboarding.
 - Use the [API Reference](../api/api_reference.rst) when you already know the workflow and need the exact symbol.
