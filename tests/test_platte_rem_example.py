@@ -4,6 +4,13 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
+
+pytest.importorskip("rasterio.enums")
+pytest.importorskip("rasterio.io")
+pytest.importorskip("rasterio.transform")
+pytest.importorskip("rasterio.warp")
+pytest.importorskip("rasterio.windows")
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES_DIR = ROOT / "examples"
