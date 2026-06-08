@@ -40,6 +40,11 @@ AGGREGATION_FACTOR = 30
 DENSITY_THRESHOLDS = np.array([1.0, 5.0, 10.0, 50.0, 100.0, 500.0, 1000.0], dtype=np.float32)
 LEGEND_TITLE = "People per 30km^2"
 LEGEND_LABELS = ("0", "1>", "5>", "10>", "50>", "100>", "500>", "1000>")
+TITLE_TEXT = "The Humanity Globe: World Population Density, 30km^2 Grid"
+DATA_CREDIT = "Data: 2020 GPW-v4"
+CREATED_CREDIT = "Created with forge3d"
+REFERENCE_CREDIT = "Reference: @tylermorganwall"
+INITIAL_CENTER_LONGITUDE = -100.0
 FALLBACK_TURBO7 = np.array(
     [
         [109, 76, 134],
@@ -192,6 +197,81 @@ def aggregate_30sec_to_15min(source_path: Path, out_path: Path) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with rasterio.open(out_path, "w", **profile) as dst:
         dst.write(out, 1)
+
+
+def orbit_longitude(frame_index: int, total_frames: int) -> float:
+    total = max(1, int(total_frames))
+    return INITIAL_CENTER_LONGITUDE + 360.0 * (int(frame_index) / float(total))
+
+
+def sphere_lat_lon(size: int, center_lon: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    size = int(size)
+    coords = (np.arange(size, dtype=np.float32) + 0.5) / float(size)
+    x = (coords[None, :] - 0.5) * 2.0
+    y = (0.5 - coords[:, None]) * 2.0
+    radius = 0.72
+    sx = x / radius
+    sy = y / radius
+    rr = sx * sx + sy * sy
+    visible = rr <= 1.0
+    z = np.sqrt(np.clip(1.0 - rr, 0.0, 1.0)).astype(np.float32)
+    lat_column = np.degrees(np.arcsin(np.clip(sy, -1.0, 1.0))).astype(np.float32)
+    lon_offset = np.degrees(np.arctan2(sx, np.maximum(z, 1e-6))).astype(np.float32)
+    lon = ((float(center_lon) + lon_offset + 180.0) % 360.0 - 180.0).astype(np.float32)
+    lat = np.broadcast_to(lat_column, z.shape).astype(np.float32)
+    sx_full = np.broadcast_to(sx, z.shape).astype(np.float32)
+    sy_full = np.broadcast_to(sy, z.shape).astype(np.float32)
+    normals = np.stack([sx_full, sy_full, z], axis=2)
+    normals[~visible] = 0.0
+    return visible, lat, lon, normals
+
+
+def sample_classes(classes: np.ndarray, lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
+    h, w = classes.shape
+    row = np.clip(((90.0 - lat) / 180.0 * h).astype(np.int32), 0, h - 1)
+    col = np.clip(((lon + 180.0) / 360.0 * w).astype(np.int32), 0, w - 1)
+    return classes[row, col]
+
+
+def _light(normals: np.ndarray) -> np.ndarray:
+    light_dir = np.array([-0.45, 0.35, 0.82], dtype=np.float32)
+    light_dir /= np.linalg.norm(light_dir)
+    lambert = np.clip((normals * light_dir.reshape(1, 1, 3)).sum(axis=2), 0.0, 1.0)
+    rim = np.power(np.clip(1.0 - normals[:, :, 2], 0.0, 1.0), 2.0)
+    return np.clip(0.38 + 0.52 * lambert + 0.12 * rim, 0.0, 1.0)
+
+
+def render_frame(
+    density: np.ndarray,
+    *,
+    frame_index: int,
+    total_frames: int,
+    size: int = DEFAULT_SIZE,
+    include_text: bool = True,
+) -> np.ndarray:
+    size = int(size)
+    classes = classify_density(density)
+    visible, lat, lon, normals = sphere_lat_lon(size, orbit_longitude(frame_index, total_frames))
+    sampled = sample_classes(classes, lat, lon)
+    palette = turbo_class_palette()
+    rgb = np.zeros((size, size, 3), dtype=np.float32)
+    base = palette[0].astype(np.float32)
+    light = _light(normals)
+    rgb[visible] = base * light[visible, None]
+    positive = visible & (sampled > 0)
+    if positive.any():
+        color = palette[sampled]
+        boost = np.clip(0.92 + 0.20 * (1.0 - normals[:, :, 2]), 0.85, 1.18)
+        rgb[positive] = np.clip(color[positive].astype(np.float32) * boost[positive, None], 0.0, 255.0)
+    alpha = np.full((size, size, 1), 255, dtype=np.uint8)
+    frame = np.dstack([np.clip(rgb, 0.0, 255.0).astype(np.uint8), alpha])
+    if include_text:
+        frame = compose_frame_text(frame)
+    return frame
+
+
+def compose_frame_text(frame: np.ndarray) -> np.ndarray:
+    return frame
 
 
 def main() -> int:

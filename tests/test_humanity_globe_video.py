@@ -116,3 +116,39 @@ def test_legend_labels_match_reference_text() -> None:
 
     assert module.LEGEND_TITLE == "People per 30km^2"
     assert module.LEGEND_LABELS == ("0", "1>", "5>", "10>", "50>", "100>", "500>", "1000>")
+
+
+def test_orbit_longitude_completes_single_rotation() -> None:
+    module = load_module()
+
+    values = [module.orbit_longitude(i, 720) for i in (0, 180, 360, 540, 719)]
+
+    assert values[0] == pytest.approx(-100.0)
+    assert values[1] == pytest.approx(-10.0)
+    assert values[2] == pytest.approx(80.0)
+    assert values[3] == pytest.approx(170.0)
+    assert values[4] < 260.0
+
+
+def test_sphere_lat_lon_center_tracks_orbit_longitude() -> None:
+    module = load_module()
+
+    visible, lat, lon, normals = module.sphere_lat_lon(size=9, center_lon=-100.0)
+
+    assert visible[4, 4]
+    assert lat[4, 4] == pytest.approx(0.0, abs=1e-6)
+    assert lon[4, 4] == pytest.approx(-100.0, abs=1e-6)
+    assert normals.shape == (9, 9, 3)
+
+
+def test_render_frame_with_tiny_synthetic_grid_returns_rgba() -> None:
+    module = load_module()
+    density = np.zeros((18, 36), dtype=np.float32)
+    density[7:11, 14:20] = 1200.0
+
+    frame = module.render_frame(density, frame_index=0, total_frames=4, size=96, include_text=False)
+
+    assert frame.shape == (96, 96, 4)
+    assert frame.dtype == np.uint8
+    assert int(frame[:, :, 3].min()) == 255
+    assert int(frame[:, :, :3].max()) > 175
