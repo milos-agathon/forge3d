@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import subprocess
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 from _import_shim import ensure_repo_import
 
@@ -270,8 +273,97 @@ def render_frame(
     return frame
 
 
+def _font(size: int, *, bold: bool = False) -> ImageFont.ImageFont:
+    font_name = "segoeuib.ttf" if bold else "segoeui.ttf"
+    font_path = Path("C:/Windows/Fonts") / font_name
+    try:
+        return ImageFont.truetype(str(font_path), size)
+    except OSError:
+        return ImageFont.load_default()
+
+
 def compose_frame_text(frame: np.ndarray) -> np.ndarray:
-    return frame
+    image = Image.fromarray(frame, mode="RGBA")
+    draw = ImageDraw.Draw(image)
+    w, h = image.size
+    title_font = _font(max(14, int(w * 0.028)))
+    label_font = _font(max(10, int(w * 0.019)), bold=True)
+    small_font = _font(max(8, int(w * 0.014)))
+
+    draw.text((int(w * 0.02), int(h * 0.018)), TITLE_TEXT, fill=(238, 238, 238, 255), font=title_font)
+
+    legend_x = int(w * 0.078)
+    legend_y = int(h * 0.872)
+    cell_w = max(10, int(w * 0.105))
+    cell_h = max(6, int(h * 0.05))
+    draw.text((legend_x, legend_y - int(h * 0.042)), LEGEND_TITLE, fill=(245, 245, 245, 255), font=label_font)
+    palette = turbo_class_palette()
+    for idx, label in enumerate(LEGEND_LABELS):
+        x0 = legend_x + idx * cell_w
+        color = tuple(int(v) for v in palette[idx]) + (255,)
+        draw.rectangle((x0, legend_y, x0 + cell_w, legend_y + cell_h), fill=color)
+        draw.text((x0 + int(cell_w * 0.38), legend_y + int(cell_h * 0.18)), label, fill=(0, 0, 0, 255), font=small_font)
+
+    credit_y = int(h * 0.952)
+    draw.text((int(w * 0.02), credit_y), DATA_CREDIT, fill=(220, 220, 220, 255), font=small_font)
+    draw.text((int(w * 0.02), credit_y + int(h * 0.022)), CREATED_CREDIT, fill=(220, 220, 220, 255), font=small_font)
+    ref_text = REFERENCE_CREDIT
+    bbox = draw.textbbox((0, 0), ref_text, font=label_font)
+    draw.text(
+        (w - (bbox[2] - bbox[0]) - int(w * 0.02), credit_y + int(h * 0.012)),
+        ref_text,
+        fill=(0, 140, 255, 255),
+        font=label_font,
+    )
+    return np.asarray(image, dtype=np.uint8)
+
+
+def frame_path(frames_dir: Path, frame_index: int) -> Path:
+    return Path(frames_dir) / f"frame_{int(frame_index):04d}.png"
+
+
+def write_frame(path: Path, frame: np.ndarray) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    f3d.numpy_to_png(path, np.ascontiguousarray(frame, dtype=np.uint8))
+
+
+def build_ffmpeg_command(frames_dir: Path, output_path: Path, *, fps: int) -> list[str]:
+    return [
+        "ffmpeg",
+        "-y",
+        "-framerate",
+        str(int(fps)),
+        "-i",
+        str(Path(frames_dir) / "frame_%04d.png"),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
+
+
+def encode_mp4(frames_dir: Path, output_path: Path, *, fps: int) -> bool:
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        print("[HumanityGlobe] ffmpeg was not found; leaving PNG frames on disk.")
+        return False
+    cmd = build_ffmpeg_command(frames_dir, output_path, fps=fps)
+    cmd[0] = ffmpeg
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise SystemExit(f"ffmpeg failed:\n{result.stderr[-1200:]}")
+    return True
+
+
+def render_preview(density: np.ndarray, preview_path: Path, *, size: int = DEFAULT_SIZE) -> None:
+    write_frame(preview_path, render_frame(density, frame_index=0, total_frames=1, size=size, include_text=True))
 
 
 def main() -> int:

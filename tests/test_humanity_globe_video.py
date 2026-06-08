@@ -152,3 +152,53 @@ def test_render_frame_with_tiny_synthetic_grid_returns_rgba() -> None:
     assert frame.dtype == np.uint8
     assert int(frame[:, :, 3].min()) == 255
     assert int(frame[:, :, :3].max()) > 175
+
+
+def test_frame_path_is_deterministic(tmp_path: Path) -> None:
+    module = load_module()
+
+    assert module.frame_path(tmp_path, 7).name == "frame_0007.png"
+
+
+def test_ffmpeg_command_uses_reference_encoding_settings(tmp_path: Path) -> None:
+    module = load_module()
+
+    cmd = module.build_ffmpeg_command(tmp_path / "frames", tmp_path / "out.mp4", fps=25)
+
+    assert cmd[:4] == ["ffmpeg", "-y", "-framerate", "25"]
+    assert "-c:v" in cmd
+    assert "libx264" in cmd
+    assert "-pix_fmt" in cmd
+    assert "yuv420p" in cmd
+    assert "+faststart" in cmd
+    assert str(tmp_path / "out.mp4") == cmd[-1]
+
+
+def test_write_frame_uses_forge3d_png_writer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    module = load_module()
+    calls = []
+
+    def fake_numpy_to_png(path, array):
+        calls.append((Path(path), np.asarray(array).shape))
+
+    monkeypatch.setattr(module.f3d, "numpy_to_png", fake_numpy_to_png)
+
+    frame = np.zeros((12, 12, 4), dtype=np.uint8)
+    module.write_frame(tmp_path / "frame_0000.png", frame)
+
+    assert calls == [(tmp_path / "frame_0000.png", (12, 12, 4))]
+
+
+def test_render_preview_writes_preview_png(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    module = load_module()
+    written = []
+
+    def fake_write_frame(path, frame):
+        written.append((Path(path), frame.shape))
+
+    monkeypatch.setattr(module, "write_frame", fake_write_frame)
+    density = np.zeros((18, 36), dtype=np.float32)
+
+    module.render_preview(density, tmp_path / "preview.png", size=64)
+
+    assert written == [(tmp_path / "preview.png", (64, 64, 4))]
