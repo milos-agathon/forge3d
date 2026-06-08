@@ -74,3 +74,45 @@ def test_parse_args_accepts_explicit_frame_override(monkeypatch: pytest.MonkeyPa
     assert args.frames == 25
     assert args.size == 360
     assert module.frame_count(args) == 25
+
+
+def test_density_classification_matches_reference_thresholds() -> None:
+    module = load_module()
+    values = np.array([[0.0, 0.5, 1.0, 1.1, 5.1, 10.1, 50.1, 100.1, 500.1, 1000.1]], dtype=np.float32)
+
+    classes = module.classify_density(values)
+
+    assert classes.tolist() == [[0, 0, 0, 1, 2, 3, 4, 5, 6, 7]]
+
+
+def test_validate_15min_grid_accepts_reference_shape() -> None:
+    module = load_module()
+    data = np.zeros((720, 1440), dtype=np.float32)
+
+    module.validate_15min_grid(data)
+
+
+def test_validate_15min_grid_rejects_wrong_shape() -> None:
+    module = load_module()
+    data = np.zeros((10, 20), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="Expected 15-minute GPW grid"):
+        module.validate_15min_grid(data)
+
+
+def test_turbo_palette_has_reference_class_count_and_uint8_values() -> None:
+    module = load_module()
+
+    palette = module.turbo_class_palette()
+
+    assert palette.shape == (8, 3)
+    assert palette.dtype == np.uint8
+    assert palette[0].tolist() == [175, 175, 175]
+    assert len({tuple(row) for row in palette[1:]}) == 7
+
+
+def test_legend_labels_match_reference_text() -> None:
+    module = load_module()
+
+    assert module.LEGEND_TITLE == "People per 30km^2"
+    assert module.LEGEND_LABELS == ("0", "1>", "5>", "10>", "50>", "100>", "500>", "1000>")

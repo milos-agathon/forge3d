@@ -10,7 +10,12 @@ Data source family: GPW-v4 population density, revision 11, 2020.
 from __future__ import annotations
 
 import argparse
+import json
+import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
+
+import numpy as np
 
 from _import_shim import ensure_repo_import
 
@@ -28,6 +33,32 @@ DEFAULT_GPW_15MIN = REPO_ROOT / "data" / "gpw_v4_population_density_rev11_2020_1
 DEFAULT_SIZE = 720
 DEFAULT_FPS = 25
 DEFAULT_DURATION = 28.8
+GPW_30SEC_URL = "https://pacific-data.sprep.org/system/files/Global_2020_PopulationDensity30sec_GPWv4.tiff"
+EXPECTED_15MIN_SHAPE = (720, 1440)
+EXPECTED_30SEC_SHAPE = (21600, 43200)
+AGGREGATION_FACTOR = 30
+DENSITY_THRESHOLDS = np.array([1.0, 5.0, 10.0, 50.0, 100.0, 500.0, 1000.0], dtype=np.float32)
+LEGEND_TITLE = "People per 30km^2"
+LEGEND_LABELS = ("0", "1>", "5>", "10>", "50>", "100>", "500>", "1000>")
+FALLBACK_TURBO7 = np.array(
+    [
+        [109, 76, 134],
+        [116, 173, 239],
+        [52, 214, 207],
+        [183, 230, 121],
+        [247, 222, 91],
+        [246, 142, 64],
+        [209, 55, 36],
+    ],
+    dtype=np.uint8,
+)
+
+
+@dataclass(frozen=True)
+class GpwData:
+    path: Path
+    derived: bool
+    source: str
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,6 +84,114 @@ def frame_count(args: argparse.Namespace) -> int:
     if args.frames is not None:
         return max(1, int(args.frames))
     return max(1, int(round(float(args.fps) * float(args.duration))))
+
+
+def classify_density(values: np.ndarray) -> np.ndarray:
+    data = np.asarray(values, dtype=np.float32)
+    safe = np.where(np.isfinite(data), data, 0.0)
+    classes = np.zeros(safe.shape, dtype=np.uint8)
+    for idx, threshold in enumerate(DENSITY_THRESHOLDS, start=1):
+        classes[safe > threshold] = idx
+    return classes
+
+
+def validate_15min_grid(data: np.ndarray) -> None:
+    if tuple(data.shape) != EXPECTED_15MIN_SHAPE:
+        raise ValueError(
+            f"Expected 15-minute GPW grid with shape {EXPECTED_15MIN_SHAPE}, got {tuple(data.shape)}"
+        )
+
+
+def turbo_class_palette() -> np.ndarray:
+    base = np.array([[175, 175, 175]], dtype=np.uint8)
+    try:
+        import matplotlib.colormaps as colormaps
+
+        cmap = colormaps["turbo"]
+        xs = np.linspace(0.04, 0.92, 7, dtype=np.float32)
+        turbo = np.round(np.asarray(cmap(xs), dtype=np.float32)[:, :3] * 255.0).astype(np.uint8)
+    except Exception:
+        turbo = FALLBACK_TURBO7.copy()
+    return np.vstack([base, turbo]).astype(np.uint8)
+
+
+def resolve_gpw_source(args: argparse.Namespace) -> GpwData:
+    candidates = []
+    if args.gpw_tif is not None:
+        candidates.append(Path(args.gpw_tif))
+    candidates.extend([DEFAULT_GPW_15MIN, Path(args.cache_dir) / DEFAULT_GPW_15MIN.name])
+    for candidate in candidates:
+        if candidate.exists():
+            return GpwData(candidate, derived=False, source=str(candidate))
+    derived_path = derive_15min_gpw(Path(args.cache_dir), force=bool(args.force))
+    return GpwData(derived_path, derived=True, source=GPW_30SEC_URL)
+
+
+def derive_15min_gpw(cache_dir: Path, *, force: bool = False) -> Path:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    out_path = cache_dir / DEFAULT_GPW_15MIN.name
+    metadata_path = out_path.with_suffix(out_path.suffix + ".json")
+    if out_path.exists() and not force:
+        return out_path
+    source_path = cache_dir / "Global_2020_PopulationDensity30sec_GPWv4.tiff"
+    if not source_path.exists() or force:
+        download_path = source_path.with_suffix(source_path.suffix + ".download")
+        if download_path.exists():
+            download_path.unlink()
+        try:
+            urllib.request.urlretrieve(GPW_30SEC_URL, download_path)
+            download_path.replace(source_path)
+        except Exception as exc:
+            if download_path.exists():
+                download_path.unlink()
+            raise SystemExit(
+                "Missing GPW-v4 15-minute raster. Provide --gpw-tif pointing to "
+                "gpw_v4_population_density_rev11_2020_15_min.tif, or allow download "
+                f"from {GPW_30SEC_URL}. Download failed: {exc}"
+            ) from exc
+    aggregate_30sec_to_15min(source_path, out_path)
+    metadata_path.write_text(
+        json.dumps(
+            {"source": GPW_30SEC_URL, "aggregation": "mean 30x30 cells", "shape": list(EXPECTED_15MIN_SHAPE)},
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return out_path
+
+
+def aggregate_30sec_to_15min(source_path: Path, out_path: Path) -> None:
+    try:
+        import rasterio
+        from rasterio.transform import from_origin
+    except ModuleNotFoundError as exc:
+        raise SystemExit(
+            "rasterio is required to derive the 15-minute GPW raster. Install rasterio or pass --gpw-tif."
+        ) from exc
+
+    with rasterio.open(source_path) as src:
+        if (src.height, src.width) != EXPECTED_30SEC_SHAPE:
+            raise ValueError(
+                f"Expected 30-arc-second GPW raster shape {EXPECTED_30SEC_SHAPE}, got {(src.height, src.width)}"
+            )
+        profile = src.profile.copy()
+        out = np.zeros(EXPECTED_15MIN_SHAPE, dtype=np.float32)
+        for out_row in range(EXPECTED_15MIN_SHAPE[0]):
+            window = rasterio.windows.Window(0, out_row * AGGREGATION_FACTOR, src.width, AGGREGATION_FACTOR)
+            block = src.read(1, window=window, masked=True).astype(np.float32)
+            row = block.reshape(AGGREGATION_FACTOR, EXPECTED_15MIN_SHAPE[1], AGGREGATION_FACTOR).mean(axis=(0, 2))
+            out[out_row, :] = np.asarray(row.filled(0.0) if hasattr(row, "filled") else row, dtype=np.float32)
+    profile.update(
+        width=EXPECTED_15MIN_SHAPE[1],
+        height=EXPECTED_15MIN_SHAPE[0],
+        dtype="float32",
+        count=1,
+        compress="deflate",
+        transform=from_origin(-180.0, 90.0, 0.25, 0.25),
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with rasterio.open(out_path, "w", **profile) as dst:
+        dst.write(out, 1)
 
 
 def main() -> int:
