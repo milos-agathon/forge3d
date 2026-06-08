@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import urllib.request
+from functools import lru_cache
 from pathlib import Path
 from typing import NamedTuple
 
@@ -256,11 +257,29 @@ def render_frame(
     size: int = DEFAULT_SIZE,
     include_text: bool = True,
 ) -> np.ndarray:
+    return render_frame_classes(
+        classify_density(density),
+        frame_index=frame_index,
+        total_frames=total_frames,
+        size=size,
+        include_text=include_text,
+    )
+
+
+def render_frame_classes(
+    classes: np.ndarray,
+    *,
+    frame_index: int,
+    total_frames: int,
+    size: int = DEFAULT_SIZE,
+    include_text: bool = True,
+    palette: np.ndarray | None = None,
+) -> np.ndarray:
     size = int(size)
-    classes = classify_density(density)
     visible, lat, lon, normals = sphere_lat_lon(size, orbit_longitude(frame_index, total_frames))
     sampled = sample_classes(classes, lat, lon)
-    palette = turbo_class_palette()
+    if palette is None:
+        palette = turbo_class_palette()
     rgb = np.zeros((size, size, 3), dtype=np.float32)
     base = palette[0].astype(np.float32)
     light = _light(normals)
@@ -277,6 +296,7 @@ def render_frame(
     return frame
 
 
+@lru_cache(maxsize=16)
 def _font(size: int, *, bold: bool = False) -> ImageFont.ImageFont:
     font_name = "segoeuib.ttf" if bold else "segoeui.ttf"
     font_path = Path("C:/Windows/Fonts") / font_name
@@ -367,7 +387,16 @@ def encode_mp4(frames_dir: Path, output_path: Path, *, fps: int) -> bool:
 
 
 def render_preview(density: np.ndarray, preview_path: Path, *, size: int = DEFAULT_SIZE) -> None:
-    write_frame(preview_path, render_frame(density, frame_index=0, total_frames=1, size=size, include_text=True))
+    classes = classify_density(density)
+    frame = render_frame_classes(
+        classes,
+        frame_index=0,
+        total_frames=1,
+        size=size,
+        include_text=True,
+        palette=turbo_class_palette(),
+    )
+    write_frame(preview_path, frame)
 
 
 def load_density(path: Path) -> np.ndarray:
@@ -397,8 +426,17 @@ def clear_frames(frames_dir: Path) -> None:
 
 def render_frames(density: np.ndarray, frames_dir: Path, *, size: int, total_frames: int) -> None:
     clear_frames(frames_dir)
+    classes = classify_density(density)
+    palette = turbo_class_palette()
     for index in range(total_frames):
-        frame = render_frame(density, frame_index=index, total_frames=total_frames, size=size, include_text=True)
+        frame = render_frame_classes(
+            classes,
+            frame_index=index,
+            total_frames=total_frames,
+            size=size,
+            include_text=True,
+            palette=palette,
+        )
         write_frame(frame_path(frames_dir, index), frame)
         print(f"\r[HumanityGlobe] frame {index + 1}/{total_frames}", end="", flush=True)
     print()
