@@ -25,27 +25,18 @@ def load_module():
 
     forge3d_stub.numpy_to_png = numpy_to_png
     examples_dir = str(EXAMPLE_PATH.parent)
-    added_examples_dir = False
+    had_examples_dir = examples_dir in sys.path
     previous_forge3d = sys.modules.get("forge3d")
-    previous_module = sys.modules.get(spec.name)
-    if examples_dir not in sys.path:
-        sys.path.insert(0, examples_dir)
-        added_examples_dir = True
     sys.modules["forge3d"] = forge3d_stub
-    sys.modules[spec.name] = module
     try:
         assert spec.loader is not None
         spec.loader.exec_module(module)
     finally:
-        if previous_module is None:
-            sys.modules.pop(spec.name, None)
-        else:
-            sys.modules[spec.name] = previous_module
         if previous_forge3d is None:
             sys.modules.pop("forge3d", None)
         else:
             sys.modules["forge3d"] = previous_forge3d
-        if added_examples_dir:
+        if not had_examples_dir and examples_dir in sys.path:
             sys.path.remove(examples_dir)
     return module
 
@@ -202,3 +193,49 @@ def test_render_preview_writes_preview_png(tmp_path: Path, monkeypatch: pytest.M
     module.render_preview(density, tmp_path / "preview.png", size=64)
 
     assert written == [(tmp_path / "preview.png", (64, 64, 4))]
+
+
+def test_load_density_reads_valid_15min_grid(tmp_path: Path) -> None:
+    module = load_module()
+    rasterio = pytest.importorskip("rasterio")
+    path = tmp_path / "gpw.tif"
+    data = np.ones(module.EXPECTED_15MIN_SHAPE, dtype=np.float32)
+    with rasterio.open(path, "w", driver="GTiff", width=data.shape[1], height=data.shape[0], count=1, dtype="float32") as dst:
+        dst.write(data, 1)
+
+    loaded = module.load_density(path)
+
+    assert loaded.shape == module.EXPECTED_15MIN_SHAPE
+    assert loaded.dtype == np.float32
+
+
+def test_render_video_preview_only_resolves_data_and_writes_preview(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_module()
+    args = types.SimpleNamespace(
+        gpw_tif=None,
+        output=tmp_path / "out.mp4",
+        preview=tmp_path / "preview.png",
+        cache_dir=tmp_path / "cache",
+        size=32,
+        fps=25,
+        duration=28.8,
+        frames=None,
+        preview_only=True,
+        frames_only=False,
+        keep_frames=False,
+        force=False,
+    )
+    density = np.zeros((18, 36), dtype=np.float32)
+    calls = []
+
+    monkeypatch.setattr(module, "resolve_gpw_source", lambda _args: module.GpwData(tmp_path / "synthetic.tif", False, "synthetic"))
+    monkeypatch.setattr(module, "load_density", lambda _path: density)
+    monkeypatch.setattr(module, "render_preview", lambda data, path, size: calls.append((data.shape, Path(path), size)))
+
+    output_path, preview_path = module.render_video(args)
+
+    assert output_path is None
+    assert preview_path == tmp_path / "preview.png"
+    assert calls == [((18, 36), tmp_path / "preview.png", 32)]

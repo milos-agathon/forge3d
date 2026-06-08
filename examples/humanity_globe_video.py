@@ -13,12 +13,17 @@ import argparse
 import json
 import shutil
 import subprocess
+import sys
 import urllib.request
-from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+
+EXAMPLES_DIR = Path(__file__).resolve().parent
+if str(EXAMPLES_DIR) not in sys.path:
+    sys.path.insert(0, str(EXAMPLES_DIR))
 
 from _import_shim import ensure_repo_import
 
@@ -62,8 +67,7 @@ FALLBACK_TURBO7 = np.array(
 )
 
 
-@dataclass(frozen=True)
-class GpwData:
+class GpwData(NamedTuple):
     path: Path
     derived: bool
     source: str
@@ -366,9 +370,74 @@ def render_preview(density: np.ndarray, preview_path: Path, *, size: int = DEFAU
     write_frame(preview_path, render_frame(density, frame_index=0, total_frames=1, size=size, include_text=True))
 
 
+def load_density(path: Path) -> np.ndarray:
+    try:
+        import rasterio
+    except ModuleNotFoundError as exc:
+        raise SystemExit(
+            "rasterio is required to read GPW GeoTIFF data. Install rasterio or pass a prepared --gpw-tif path."
+        ) from exc
+
+    with rasterio.open(path) as src:
+        data = src.read(1).astype(np.float32)
+    validate_15min_grid(data)
+    data[~np.isfinite(data)] = 0.0
+    data = np.clip(data, 0.0, None)
+    if float(data.max()) <= 0.0:
+        raise ValueError("GPW density raster contains no positive population-density values.")
+    return data
+
+
+def clear_frames(frames_dir: Path) -> None:
+    if frames_dir.exists():
+        for path in frames_dir.glob("frame_*.png"):
+            path.unlink()
+    frames_dir.mkdir(parents=True, exist_ok=True)
+
+
+def render_frames(density: np.ndarray, frames_dir: Path, *, size: int, total_frames: int) -> None:
+    clear_frames(frames_dir)
+    for index in range(total_frames):
+        frame = render_frame(density, frame_index=index, total_frames=total_frames, size=size, include_text=True)
+        write_frame(frame_path(frames_dir, index), frame)
+        print(f"\r[HumanityGlobe] frame {index + 1}/{total_frames}", end="", flush=True)
+    print()
+
+
+def render_video(args: argparse.Namespace) -> tuple[Path | None, Path]:
+    gpw = resolve_gpw_source(args)
+    print(f"[HumanityGlobe] GPW source: {gpw.source}")
+    if gpw.derived:
+        print("[HumanityGlobe] Derived 15-minute grid by aggregating GPW-v4 30-arc-second cells.")
+    density = load_density(gpw.path)
+    args.preview.parent.mkdir(parents=True, exist_ok=True)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+
+    if args.preview_only:
+        render_preview(density, args.preview, size=int(args.size))
+        return None, args.preview
+
+    frames_dir = args.output.parent / "frames"
+    total_frames = frame_count(args)
+    render_frames(density, frames_dir, size=int(args.size), total_frames=total_frames)
+    render_preview(density, args.preview, size=int(args.size))
+    if args.frames_only:
+        return None, args.preview
+
+    encoded = encode_mp4(frames_dir, args.output, fps=int(args.fps))
+    if encoded and not args.keep_frames:
+        for path in frames_dir.glob("frame_*.png"):
+            path.unlink()
+    return (args.output if encoded else None), args.preview
+
+
 def main() -> int:
-    parse_args()
-    raise SystemExit("Rendering is implemented in later tasks.")
+    args = parse_args()
+    output_path, preview_path = render_video(args)
+    print(f"[HumanityGlobe] Preview: {preview_path}")
+    if output_path is not None:
+        print(f"[HumanityGlobe] MP4: {output_path}")
+    return 0
 
 
 if __name__ == "__main__":
