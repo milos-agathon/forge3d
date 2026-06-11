@@ -2157,9 +2157,9 @@ class HybridSmokeSimulator:
             max(7.0, min(self.density.shape) / 38.0),
         )
         injected = (broad_feed + regional_feed) * np.clip(0.62 + 0.46 * texture, 0.34, 1.12)
-        residual = advected * 0.993 + injected
+        residual = advected * 0.990 + injected
         residual = _hybrid_downwind_stream(residual, amount=0.055, wind=wind)
-        residual = _pil_blur_float(np.clip(residual, 0.0, 1.15), 1.65)
+        residual = _pil_blur_float(np.clip(residual, 0.0, 1.15), 1.40)
         self.residual_haze = np.clip(residual * self._border, 0.0, 1.15).astype(np.float32)
 
     def interpolated_state(self, alpha: float = 1.0) -> HybridSmokeState:
