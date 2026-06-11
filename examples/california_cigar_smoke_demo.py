@@ -1796,6 +1796,31 @@ def _hybrid_wind_field(
     return u.astype(np.float32), v.astype(np.float32)
 
 
+def _hybrid_convective_uplift(
+    shape: tuple[int, int],
+    sources: list,
+    frame_index: float,
+    heat_radius_multiplier: float = 12.0,
+    max_uplift: float = 2.5,
+) -> np.ndarray:
+    """Compute upward velocity field from active heat sources."""
+    height, width = shape
+    scale = min(width, height) / 408.0
+    uplift = np.zeros(shape, dtype=np.float32)
+    x, y = _pixel_grids(shape)
+    for source in sources:
+        if frame_index < source.start_frame or frame_index > source.end_frame:
+            continue
+        heat_radius = source.radius_px * heat_radius_multiplier
+        dx = x - source.x
+        dy = y - source.y
+        dist_sq = dx * dx + dy * dy
+        influence = np.exp(-dist_sq / (2.0 * heat_radius * heat_radius))
+        strength = source.strength * source.heat
+        uplift -= influence * strength * max_uplift * scale  # negative = upward
+    return uplift.astype(np.float32)
+
+
 def _hybrid_crosswind_spread(
     field: np.ndarray,
     amount: float = 0.16,
@@ -2059,6 +2084,9 @@ class HybridSmokeSimulator:
             altitude = _hybrid_layer_altitude(layer_index)
             wind = _hybrid_layer_wind_vector(layer_index)
             u, v = _hybrid_wind_field(frame, self.density.shape, self.seed, layer_index=layer_index)
+            # Add convective uplift near heat sources (stronger at lower altitudes)
+            convective_v = _hybrid_convective_uplift(self.density.shape, self.sources, frame)
+            v = v + convective_v * (1.0 - 0.4 * altitude)
             density = _bilinear_sample(self.layer_density[layer_index], x - u, y - v)
             age_mass = _bilinear_sample(self.layer_age_mass[layer_index], x - u, y - v)
             age = np.divide(age_mass, density, out=np.zeros_like(density), where=density > 1.0e-7)
@@ -2070,15 +2098,15 @@ class HybridSmokeSimulator:
             density = np.clip(density * base_decay * age_decay, 0.0, 6.0)
             age_mass = density * age
 
-            diffusion_mix = 0.108 + 0.082 * altitude
+            diffusion_mix = 0.065 + 0.050 * altitude
             blurred_density = _box_blur_3x3(density, passes=1)
             blurred_age_mass = _box_blur_3x3(age_mass, passes=1)
             density = density * (1.0 - diffusion_mix) + blurred_density * diffusion_mix
             age_mass = age_mass * (1.0 - diffusion_mix) + blurred_age_mass * diffusion_mix
             density = _hybrid_downwind_stream(density, amount=0.150 + 0.064 * altitude, wind=wind)
             age_mass = _hybrid_downwind_stream(age_mass, amount=0.150 + 0.064 * altitude, wind=wind)
-            density = _hybrid_crosswind_spread(density, amount=0.050 + 0.055 * altitude, wind=wind)
-            age_mass = _hybrid_crosswind_spread(age_mass, amount=0.050 + 0.055 * altitude, wind=wind)
+            density = _hybrid_crosswind_spread(density, amount=0.032 + 0.038 * altitude, wind=wind)
+            age_mass = _hybrid_crosswind_spread(age_mass, amount=0.032 + 0.038 * altitude, wind=wind)
             local_age = np.divide(age_mass, density, out=np.zeros_like(density), where=density > 1.0e-7)
             age_shear = (0.34 + 0.20 * altitude) * _smoothstep(10.0, 118.0, local_age)
             if np.any(age_shear > 0.001):
@@ -2149,7 +2177,7 @@ class HybridSmokeSimulator:
         age = np.divide(self.age_mass, self.density, out=np.zeros_like(self.density), where=self.density > 1.0e-7)
         old_smoke = self.density * _smoothstep(28.0, HYBRID_SMOKE_MAX_AGE_FRAMES * 0.68, age)
         high_slab = self.layer_density[layer_index] if self.layer_density.size else self.density
-        haze_feed = np.clip(old_smoke * 0.0125 + high_slab * 0.0042 + self.density * 0.0028, 0.0, 1.0)
+        haze_feed = np.clip(old_smoke * 0.008 + high_slab * 0.003 + self.density * 0.002, 0.0, 1.0)
         broad_feed = _pil_blur_float(haze_feed, max(5.5, min(self.density.shape) / 42.0))
         regional_feed = _pil_blur_float(haze_feed, max(12.0, min(self.density.shape) / 16.0)) * 0.22
         texture = _pil_blur_float(
@@ -2286,12 +2314,39 @@ def _hybrid_smoke_field_rgba(
     charcoal = np.array([95.0, 85.0, 75.0], dtype=np.float32)
     charcoal_t = _smoothstep(0.65, 0.92, age_t)
     base_rgb = base_rgb * (1.0 - charcoal_t[..., None] * 0.45) + charcoal * (charcoal_t[..., None] * 0.45)
+
+    # Self-shadowing: accumulate density along light direction (upper-left)
+    light_dir = np.array([0.6, -0.8], dtype=np.float32)  # from upper-left
+    shadow_offset = int(max(3.0, min(width, height) / 80.0))
+    shadow_accum = np.zeros_like(density)
+    for step in range(1, 6):
+        ox = int(light_dir[0] * shadow_offset * step)
+        oy = int(light_dir[1] * shadow_offset * step)
+        shifted = np.roll(np.roll(broad, ox, axis=1), oy, axis=0)
+        shadow_accum += shifted * (0.35 / step)
+    shadow_factor = 1.0 - 0.35 * _smoothstep(0.1, 1.2, shadow_accum) * (1.0 - source_core * 0.6)
+
     source_mix = np.clip(source_core * 0.46 + fresh_band * 0.42 + ridge_norm * 0.10, 0.0, 0.84)
     base_rgb = base_rgb * (1.0 - source_mix[..., None]) + milky * source_mix[..., None]
     fresh = (1.0 - _smoothstep(16.0, 74.0, age)) * _smoothstep(0.18, 1.18, norm)
     base_rgb += fresh[..., None] * np.array([12.0, 11.0, 6.0], dtype=np.float32)
     base_rgb += (broad_texture[..., None] - 0.5) * 9.0 * coverage[..., None]
     base_rgb += np.asarray(color_bias, dtype=np.float32)[None, None, :]
+    # Apply self-shadowing
+    base_rgb = base_rgb * shadow_factor[..., None]
+
+    # Atmospheric perspective: distance fade based on age and downwind position
+    # Older smoke and smoke farther downwind loses contrast and desaturates
+    distance_factor = _smoothstep(0.0, float(width), flow_along)  # 0=near, 1=far downwind
+    age_distance = _smoothstep(60.0, HYBRID_SMOKE_MAX_AGE_FRAMES * 0.7, age)
+    atmo_fade = 0.5 * distance_factor + 0.5 * age_distance
+    atmo_fade = _smoothstep(0.2, 0.9, atmo_fade) * (1.0 - source_core * 0.8)
+    # Desaturate: blend toward gray
+    gray = np.mean(base_rgb, axis=-1, keepdims=True)
+    base_rgb = base_rgb * (1.0 - atmo_fade[..., None] * 0.4) + gray * (atmo_fade[..., None] * 0.4)
+    # Reduce contrast: blend toward mid-gray (128)
+    base_rgb = base_rgb * (1.0 - atmo_fade[..., None] * 0.25) + 145.0 * (atmo_fade[..., None] * 0.25)
+
     rgb = np.clip(base_rgb, 0.0, 245.0)
     visible = alpha > 0.0
     rgba[..., 0] = np.where(visible, rgb[..., 0], 0.0).astype(np.uint8)
