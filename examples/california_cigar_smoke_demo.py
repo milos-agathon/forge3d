@@ -2149,7 +2149,7 @@ class HybridSmokeSimulator:
         age = np.divide(self.age_mass, self.density, out=np.zeros_like(self.density), where=self.density > 1.0e-7)
         old_smoke = self.density * _smoothstep(28.0, HYBRID_SMOKE_MAX_AGE_FRAMES * 0.68, age)
         high_slab = self.layer_density[layer_index] if self.layer_density.size else self.density
-        haze_feed = np.clip(old_smoke * 0.015 + high_slab * 0.0058 + self.density * 0.0032, 0.0, 1.0)
+        haze_feed = np.clip(old_smoke * 0.0125 + high_slab * 0.0050 + self.density * 0.0028, 0.0, 1.0)
         broad_feed = _pil_blur_float(haze_feed, max(5.5, min(self.density.shape) / 42.0))
         regional_feed = _pil_blur_float(haze_feed, max(12.0, min(self.density.shape) / 16.0)) * 0.22
         texture = _pil_blur_float(
