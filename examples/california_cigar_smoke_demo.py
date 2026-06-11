@@ -1781,14 +1781,14 @@ def _hybrid_wind_field(
         np.sin(math.tau * (0.18 * xn - 0.31 * yn) + 0.004 * t + phase * 0.33)
         + np.cos(math.tau * (0.27 * xn + 0.20 * yn) - 0.003 * t + phase * 1.21)
     ).astype(np.float32)
-    u += (0.44 * scale * (1.0 + 0.35 * altitude) * synoptic).astype(np.float32)
-    v += (0.20 * scale * (1.0 + 0.28 * altitude) * np.sin(math.tau * (0.22 * xn + 0.24 * yn) - 0.006 * t + phase)).astype(np.float32)
+    u += (0.36 * scale * (1.0 + 0.35 * altitude) * synoptic).astype(np.float32)
+    v += (0.16 * scale * (1.0 + 0.28 * altitude) * np.sin(math.tau * (0.22 * xn + 0.24 * yn) - 0.006 * t + phase)).astype(np.float32)
     lane_texture = _pil_blur_float(
         _advected_smoke_texture(shape, int(round(t * 0.72)), seed + 6011 + layer_index * 811),
         max(3.4, 8.5 * scale),
     )
     lane_gy, lane_gx = np.gradient(lane_texture)
-    lane_amp = (22.0 + 9.0 * altitude) * scale
+    lane_amp = (26.0 + 11.0 * altitude) * scale
     u += (lane_gy * lane_amp).astype(np.float32)
     v += (-lane_gx * lane_amp * 0.82).astype(np.float32)
     u = np.clip(u, -0.48 * scale, (4.20 + 0.70 * altitude) * scale)
@@ -1909,10 +1909,11 @@ def _inject_hybrid_sources(
         core = np.exp(-(dx * dx + dy * dy) / (2.0 * (radius * 1.02) ** 2))
         tail_gate = _smoothstep(-radius * 0.35, radius * 1.20, along) * (along <= tail)
         curl_offset = radius * (
-            2.4 * np.sin(along / max(radius * 8.8, 1.0) + source.seed * 0.017 + frame_index * 0.025)
-            + 3.8 * along_frac * np.sin(along / max(radius * 17.0, 1.0) + source.seed * 0.009)
+            2.8 * np.sin(along / max(radius * 8.0, 1.0) + source.seed * 0.017 + frame_index * 0.025)
+            + 4.5 * along_frac * np.sin(along / max(radius * 15.0, 1.0) + source.seed * 0.009)
+            + 2.0 * (along_frac ** 0.7) * np.sin(along / max(radius * 28.0, 1.0) + source.seed * 0.005 + frame_index * 0.012)
         )
-        tail_width = radius * (1.08 + 3.65 * along_frac**0.84)
+        tail_width = radius * (1.15 + 4.2 * along_frac**0.75)
         plume_tail = (
             np.exp(-np.maximum(along, 0.0) / max(radius * 17.5, 1.0))
             * np.exp(-((cross - curl_offset) ** 2) / (2.0 * tail_width * tail_width + 1.0e-6))
