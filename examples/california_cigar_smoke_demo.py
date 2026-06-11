@@ -2156,7 +2156,7 @@ class HybridSmokeSimulator:
             _advected_smoke_texture(self.density.shape, frame_index, self.seed + 12829),
             max(7.0, min(self.density.shape) / 38.0),
         )
-        injected = (broad_feed + regional_feed) * np.clip(0.66 + 0.34 * texture, 0.42, 1.06)
+        injected = (broad_feed + regional_feed) * np.clip(0.62 + 0.46 * texture, 0.34, 1.12)
         residual = advected * 0.993 + injected
         residual = _hybrid_downwind_stream(residual, amount=0.055, wind=wind)
         residual = _pil_blur_float(np.clip(residual, 0.0, 1.15), 1.65)
