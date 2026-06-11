@@ -2204,9 +2204,9 @@ def _hybrid_smoke_field_rgba(
     if not np.any(density > 0.0):
         return rgba
 
-    fine = _pil_blur_float(density, 1.45)
-    medium = _pil_blur_float(density, 5.2)
-    broad = _pil_blur_float(density, 15.0)
+    fine = _pil_blur_float(density, 1.8)
+    medium = _pil_blur_float(density, 6.5)
+    broad = _pil_blur_float(density, 18.0)
     sheet = np.clip(density * 0.50 + fine * 0.30 + medium * 0.15 + broad * 0.05, 0.0, None)
     positive = sheet[sheet > 0.0]
     scale_value = max(float(np.percentile(positive, 98.8)) if positive.size else 1.0, 1.0e-5)
@@ -2248,7 +2248,7 @@ def _hybrid_smoke_field_rgba(
     filament_mask *= 1.0 - 0.20 * holes * edge_weight
     filament_mask = np.clip(filament_mask, 0.66, 1.16)
 
-    alpha_shape = _smoothstep(0.020, 1.0, norm) ** 1.02
+    alpha_shape = _smoothstep(0.012, 1.3, norm) ** 0.90
     source_core = _smoothstep(0.98, 1.62, norm) ** 1.16
     detail_density = np.clip(density - medium * 0.62, 0.0, None)
     detail_positive = detail_density[detail_density > 0.0]
@@ -2267,10 +2267,10 @@ def _hybrid_smoke_field_rgba(
     )
     alpha += 52.0 * fresh_band * filament_mask * np.clip(0.78 + 0.18 * texture, 0.62, 1.04)
     alpha *= 0.52 + 0.50 * _smoothstep(0.52, 1.42, norm)
-    alpha *= 1.0 - 0.18 * holes * edge_weight * (1.0 - 0.30 * source_core)
+    alpha *= 1.0 - 0.10 * holes * edge_weight * (1.0 - 0.30 * source_core)
     alpha *= _smoothstep(0.004, 0.070, broad + medium * 0.20)
     alpha *= float(alpha_multiplier)
-    alpha = _pil_blur_float(alpha.astype(np.float32), 0.74)
+    alpha = _pil_blur_float(alpha.astype(np.float32), 1.1)
     alpha = np.clip(alpha, 0.0, HYBRID_SMOKE_MAX_ALPHA)
     alpha = np.where(alpha >= 2.0, alpha, 0.0)
 
