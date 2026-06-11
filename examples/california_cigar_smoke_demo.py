@@ -2149,14 +2149,14 @@ class HybridSmokeSimulator:
         age = np.divide(self.age_mass, self.density, out=np.zeros_like(self.density), where=self.density > 1.0e-7)
         old_smoke = self.density * _smoothstep(28.0, HYBRID_SMOKE_MAX_AGE_FRAMES * 0.68, age)
         high_slab = self.layer_density[layer_index] if self.layer_density.size else self.density
-        haze_feed = np.clip(old_smoke * 0.0125 + high_slab * 0.0050 + self.density * 0.0028, 0.0, 1.0)
+        haze_feed = np.clip(old_smoke * 0.0125 + high_slab * 0.0042 + self.density * 0.0028, 0.0, 1.0)
         broad_feed = _pil_blur_float(haze_feed, max(5.5, min(self.density.shape) / 42.0))
         regional_feed = _pil_blur_float(haze_feed, max(12.0, min(self.density.shape) / 16.0)) * 0.22
         texture = _pil_blur_float(
             _advected_smoke_texture(self.density.shape, frame_index, self.seed + 12829),
             max(7.0, min(self.density.shape) / 38.0),
         )
-        injected = (broad_feed + regional_feed) * np.clip(0.62 + 0.46 * texture, 0.34, 1.12)
+        injected = (broad_feed + regional_feed) * np.clip(0.62 + 0.50 * texture, 0.34, 1.12)
         residual = advected * 0.990 + injected
         residual = _hybrid_downwind_stream(residual, amount=0.055, wind=wind)
         residual = _pil_blur_float(np.clip(residual, 0.0, 1.15), 1.40)
@@ -2276,14 +2276,14 @@ def _hybrid_smoke_field_rgba(
     alpha = np.where(alpha >= 2.0, alpha, 0.0)
 
     density_t = _smoothstep(0.026, 1.20, norm)
-    old_blue = np.array([96.0, 108.0, 126.0], dtype=np.float32)
+    old_blue = np.array([140.0, 120.0, 100.0], dtype=np.float32)
     thin_gray = np.array([158.0, 164.0, 168.0], dtype=np.float32)
     milky = np.array([242.0, 238.0, 224.0], dtype=np.float32)
     age_t = _smoothstep(60.0, HYBRID_SMOKE_MAX_AGE_FRAMES * 0.85, age)
     base_rgb = old_blue * (1.0 - density_t[..., None]) + thin_gray * density_t[..., None]
     base_rgb = base_rgb * (1.0 - age_t[..., None] * 0.32) + old_blue * (age_t[..., None] * 0.32)
     # Charcoal blend for very old smoke
-    charcoal = np.array([72.0, 78.0, 86.0], dtype=np.float32)
+    charcoal = np.array([95.0, 85.0, 75.0], dtype=np.float32)
     charcoal_t = _smoothstep(0.65, 0.92, age_t)
     base_rgb = base_rgb * (1.0 - charcoal_t[..., None] * 0.45) + charcoal * (charcoal_t[..., None] * 0.45)
     source_mix = np.clip(source_core * 0.46 + fresh_band * 0.42 + ridge_norm * 0.10, 0.0, 0.84)
@@ -2463,20 +2463,20 @@ def hybrid_fire_sources_rgba(
             continue
         pulse = 0.72 + 0.28 * math.sin(frame_index * 0.44 + source.seed * 0.031 + idx)
         radius = max(0.75, source.radius_px * 0.22)
-        halo_radius = radius * (3.4 + 2.1 * float(bloom_scale)) * max(0.70, float(bloom_scale))
+        halo_radius = radius * (4.2 + 2.4 * float(bloom_scale)) * max(0.70, float(bloom_scale))
         alpha = int(np.clip((70.0 + 74.0 * source.strength * source.heat) * pulse, 28, 205))
         wide_radius = halo_radius * (1.9 + 0.30 * float(bloom_scale))
         wide_draw.ellipse(
             (source.x - wide_radius, source.y - wide_radius, source.x + wide_radius, source.y + wide_radius),
-            fill=(255, 98, 24, int(alpha * (0.048 + 0.038 * float(bloom_scale)))),
+            fill=(255, 85, 20, int(alpha * (0.058 + 0.045 * float(bloom_scale)))),
         )
         halo_draw.ellipse(
             (source.x - halo_radius, source.y - halo_radius, source.x + halo_radius, source.y + halo_radius),
-            fill=(255, 108, 32, int(alpha * (0.13 + 0.08 * float(bloom_scale)))),
+            fill=(255, 95, 25, int(alpha * (0.15 + 0.10 * float(bloom_scale)))),
         )
         if glow_only:
             continue
-        core_alpha = int(np.clip(alpha * float(core_alpha_scale), 0, 255))
+        core_alpha = int(np.clip(alpha * float(core_alpha_scale) * 0.75, 0, 255))
         draw.ellipse(
             (source.x - radius, source.y - radius, source.x + radius, source.y + radius),
             fill=(255, 118, 28, core_alpha),

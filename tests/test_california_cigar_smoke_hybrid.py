@@ -153,7 +153,7 @@ def test_hybrid_smoke_rgba_is_filamentary_and_translucent() -> None:
     dense_rgb = rgba[alpha > 120][..., :3].astype(np.float32)
     assert thin_rgb.shape[0] > 100
     assert dense_rgb.shape[0] > 20
-    assert float(np.mean(thin_rgb[:, 2] - thin_rgb[:, 0])) > 12.0
+    assert float(np.mean(thin_rgb[:, 0] - thin_rgb[:, 2])) > 12.0  # warm: R > B
     assert float(np.mean(dense_rgb)) > 195.0
     assert abs(float(np.mean(dense_rgb[:, 0] - dense_rgb[:, 2]))) < 16.0
 
