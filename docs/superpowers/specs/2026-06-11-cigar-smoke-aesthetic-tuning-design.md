@@ -114,14 +114,34 @@ alpha_shape = _smoothstep(0.012, 1.3, norm) ** 0.90
 
 **Strategy:** Reduce multiplier first, preserve internal texture. Only shift thresholds if multiplier reduction alone is insufficient.
 
+`holes` affects three places in the code:
+1. `texture_gain *= 1.0 - 0.28 * holes * edge_weight` (line ~2245)
+2. `filament_mask *= 1.0 - 0.20 * holes * edge_weight` (line ~2248)
+3. `alpha *= 1.0 - 0.18 * holes * edge_weight * (1.0 - 0.30 * source_core)` (line ~2270)
+
+**Pass 1:** Only change the final alpha multiplier. Leave `texture_gain` and `filament_mask` unchanged to preserve internal texture.
+
 ```python
-# Current hole influence on alpha
-1.0 - 0.18 * holes * edge_weight
+# Current (line ~2270)
+alpha *= 1.0 - 0.18 * holes * edge_weight * (1.0 - 0.30 * source_core)
 
 # First pass: reduce multiplier only
-1.0 - 0.10 * holes * edge_weight  # range: 0.10 - 0.12
+alpha *= 1.0 - 0.10 * holes * edge_weight * (1.0 - 0.30 * source_core)  # range: 0.10 - 0.12
+```
 
-# Only if needed: also soften hole calculation thresholds
+**Pass 2 (only if needed):** If hard breakup persists after pass 1, also reduce `texture_gain` and `filament_mask` multipliers conservatively:
+
+```python
+# texture_gain (line ~2245): 0.28 -> 0.18-0.22
+texture_gain *= 1.0 - 0.20 * holes * edge_weight
+
+# filament_mask (line ~2248): 0.20 -> 0.12-0.16
+filament_mask *= 1.0 - 0.14 * holes * edge_weight
+```
+
+**Pass 3 (last resort):** Only shift hole calculation thresholds if multiplier reductions are insufficient:
+
+```python
 holes = _smoothstep(0.18, 0.78, 1.0 - broad_texture) * ...  # was 0.12, 0.70
 ```
 
@@ -162,12 +182,28 @@ tail_width = radius * (1.15 + 4.2 * along_frac**0.75)
 
 ### Wind Field Adjustments
 
-```python
-# Increase lane texture influence for coherent curved paths
-lane_amp = (26.0 + 11.0 * altitude) * scale  # was (22.0 + 9.0 * altitude)
+**Location:** `_hybrid_wind_field()` (lines ~1784-1791)
 
-# Reduce synoptic noise that breaks up flow lanes
-synoptic_amplitude = 0.36 * scale  # was 0.44 * scale
+The synoptic noise is applied inline to `u` and `v` separately:
+
+```python
+# Current (lines 1784-1785)
+u += (0.44 * scale * (1.0 + 0.35 * altitude) * synoptic).astype(np.float32)
+v += (0.20 * scale * (1.0 + 0.28 * altitude) * np.sin(...)).astype(np.float32)
+
+# Proposed: reduce synoptic noise that breaks up flow lanes
+u += (0.36 * scale * (1.0 + 0.35 * altitude) * synoptic).astype(np.float32)  # was 0.44
+v += (0.16 * scale * (1.0 + 0.28 * altitude) * np.sin(...)).astype(np.float32)  # was 0.20
+```
+
+Lane texture amplitude (line ~1791):
+
+```python
+# Current
+lane_amp = (22.0 + 9.0 * altitude) * scale
+
+# Proposed: increase for coherent curved paths
+lane_amp = (26.0 + 11.0 * altitude) * scale
 ```
 
 **Rationale:** Increasing `lane_amp` and reducing synoptic noise creates coherent flow lanes, which is the core visual characteristic of the reference.
@@ -255,12 +291,24 @@ fill=(255, 108, 32, int(alpha * (0.13 + 0.08 * bloom_scale)))   # was (255, 98, 
 
 ### Final Blur
 
-```python
-# Current
-wide_halo.filter(GaussianBlur(radius=max(2.0, size / 92.0 * bloom_scale)))
+**Location:** lines ~2484-2487
 
-# Proposed: more diffuse
-wide_halo.filter(GaussianBlur(radius=max(3.0, size / 75.0 * bloom_scale)))
+```python
+# Current (lines 2484-2487)
+wide_halo = wide_halo.filter(
+    ImageFilter.GaussianBlur(radius=max(2.0, min(width, height) / 92.0 * max(0.8, float(bloom_scale))))
+)
+halo = halo.filter(ImageFilter.GaussianBlur(radius=max(1.0, min(width, height) / 210.0 * max(0.8, float(bloom_scale)))))
+wide_halo.alpha_composite(halo)
+halo = wide_halo
+
+# Proposed: more diffuse bloom
+wide_halo = wide_halo.filter(
+    ImageFilter.GaussianBlur(radius=max(3.0, min(width, height) / 75.0 * max(0.8, float(bloom_scale))))
+)
+halo = halo.filter(ImageFilter.GaussianBlur(radius=max(1.5, min(width, height) / 160.0 * max(0.8, float(bloom_scale)))))
+wide_halo.alpha_composite(halo)
+halo = wide_halo
 ```
 
 ---
@@ -276,6 +324,22 @@ After each section, render test frames and verify:
 | Streamers | 120 | Curved ribbons visible, not sine-wave artifacts |
 | Lifecycle | 180 | Three generations visible (fresh, mid, haze) |
 | Fire bloom | 60 | Orange glow visible through smoke overlay |
+
+### Regression Tests
+
+The existing test suite in `tests/test_california_cigar_smoke_hybrid.py` provides automated guardrails for this tuning:
+
+- **Alpha coverage assertions:** Ensure smoke doesn't disappear or become a flat blanket
+- **Gradient checks:** Verify edge softness produces smooth falloff
+- **Dense color validation:** Confirm milky cores remain bright
+- **Temporal coherence:** Check age-based generation separation
+- **Fire visibility:** Assert source glow transmits through smoke layer
+
+Run the test suite after each section to catch regressions early:
+
+```bash
+python -m pytest tests/test_california_cigar_smoke_hybrid.py -v
+```
 
 ## Rollback Strategy
 
