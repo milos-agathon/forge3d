@@ -1558,10 +1558,10 @@ def _hybrid_border_fade(shape: tuple[int, int]) -> np.ndarray:
 
 def _hybrid_lifecycle_alpha(age_frames: np.ndarray) -> np.ndarray:
     age = np.asarray(age_frames, dtype=np.float32)
-    birth = 0.18 + 0.82 * _smoothstep(0.0, 9.0, age)
-    mature = 1.0 - 0.16 * _smoothstep(36.0, 118.0, age)
+    birth = 0.12 + 0.88 * _smoothstep(0.0, 6.0, age)
+    mature = 1.0 - 0.20 * _smoothstep(30.0, 100.0, age)
     fade_end = min(HYBRID_SMOKE_MAX_AGE_FRAMES - 28.0, 236.0)
-    old_fade = 1.0 - _smoothstep(136.0, fade_end, age) ** 0.72
+    old_fade = 1.0 - _smoothstep(145.0, fade_end, age) ** 0.75
     return np.clip(birth * mature * old_fade, 0.0, 1.0).astype(np.float32)
 
 
@@ -2064,8 +2064,8 @@ class HybridSmokeSimulator:
             age = np.divide(age_mass, density, out=np.zeros_like(density), where=density > 1.0e-7)
             age = np.where(density > 1.0e-7, age + 1.0, 0.0).astype(np.float32)
 
-            old_smoke_decay = 0.034 + 0.018 * altitude
-            base_decay = 0.988 - 0.005 * altitude
+            old_smoke_decay = 0.028 + 0.015 * altitude
+            base_decay = 0.991 - 0.004 * altitude
             age_decay = 1.0 - old_smoke_decay * _smoothstep(150.0, HYBRID_SMOKE_MAX_AGE_FRAMES + 24.0, age)
             density = np.clip(density * base_decay * age_decay, 0.0, 6.0)
             age_mass = density * age
@@ -2149,7 +2149,7 @@ class HybridSmokeSimulator:
         age = np.divide(self.age_mass, self.density, out=np.zeros_like(self.density), where=self.density > 1.0e-7)
         old_smoke = self.density * _smoothstep(28.0, HYBRID_SMOKE_MAX_AGE_FRAMES * 0.68, age)
         high_slab = self.layer_density[layer_index] if self.layer_density.size else self.density
-        haze_feed = np.clip(old_smoke * 0.012 + high_slab * 0.0048 + self.density * 0.0026, 0.0, 1.0)
+        haze_feed = np.clip(old_smoke * 0.015 + high_slab * 0.0058 + self.density * 0.0032, 0.0, 1.0)
         broad_feed = _pil_blur_float(haze_feed, max(5.5, min(self.density.shape) / 42.0))
         regional_feed = _pil_blur_float(haze_feed, max(12.0, min(self.density.shape) / 16.0)) * 0.22
         texture = _pil_blur_float(
