@@ -23,6 +23,38 @@ All changes are in a single file:
 
 ---
 
+## Task 0: Commit Baseline Files
+
+The example and test files are currently untracked. Commit them first so tuning commits are clean diffs.
+
+**Files:**
+- Add: `examples/california_cigar_smoke_demo.py`
+- Add: `tests/test_california_cigar_smoke_hybrid.py`
+
+- [ ] **Step 1: Verify files exist and tests pass**
+
+```bash
+python3 -m pytest tests/test_california_cigar_smoke_hybrid.py -v --tb=short 2>&1 | head -50
+```
+
+Expected: Tests pass (or skip gracefully if dependencies missing)
+
+- [ ] **Step 2: Commit baseline files**
+
+```bash
+git add examples/california_cigar_smoke_demo.py tests/test_california_cigar_smoke_hybrid.py
+git commit -m "$(cat <<'EOF'
+Add California cigar smoke demo and tests
+
+Baseline commit before aesthetic parameter tuning.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
 ## Task 1: Smoke Color/Density Mapping
 
 **Files:**
@@ -31,7 +63,7 @@ All changes are in a single file:
 - [ ] **Step 1: Run baseline tests**
 
 ```bash
-python -m pytest tests/test_california_cigar_smoke_hybrid.py::test_hybrid_smoke_rgba_is_filamentary_and_translucent -v
+python3 -m pytest tests/test_california_cigar_smoke_hybrid.py::test_hybrid_smoke_rgba_is_filamentary_and_translucent -v
 ```
 
 Expected: PASS (establishes baseline)
@@ -70,7 +102,7 @@ Find and replace (around line 2287):
 - [ ] **Step 5: Run regression tests**
 
 ```bash
-python -m pytest tests/test_california_cigar_smoke_hybrid.py::test_hybrid_smoke_rgba_is_filamentary_and_translucent tests/test_california_cigar_smoke_hybrid.py::test_hybrid_smoke_frames_are_temporally_coherent_not_redrawn_wisps -v
+python3 -m pytest tests/test_california_cigar_smoke_hybrid.py::test_hybrid_smoke_rgba_is_filamentary_and_translucent tests/test_california_cigar_smoke_hybrid.py::test_hybrid_smoke_frames_are_temporally_coherent_not_redrawn_wisps -v
 ```
 
 Expected: PASS - dense color validation should still pass (mean > 195.0), thin smoke should still have blue bias
@@ -104,7 +136,7 @@ EOF
 - [ ] **Step 1: Run baseline gradient test**
 
 ```bash
-python -m pytest tests/test_california_cigar_smoke_hybrid.py::test_hybrid_smoke_rgba_is_filamentary_and_translucent -v
+python3 -m pytest tests/test_california_cigar_smoke_hybrid.py::test_hybrid_smoke_rgba_is_filamentary_and_translucent -v
 ```
 
 Expected: PASS - note current gradient percentile values
@@ -146,7 +178,7 @@ Find and replace (around line 2273):
 - [ ] **Step 6: Run regression tests**
 
 ```bash
-python -m pytest tests/test_california_cigar_smoke_hybrid.py::test_hybrid_smoke_rgba_is_filamentary_and_translucent tests/test_california_cigar_smoke_hybrid.py::test_hybrid_residual_haze_persists_as_soft_aged_layer -v
+python3 -m pytest tests/test_california_cigar_smoke_hybrid.py::test_hybrid_smoke_rgba_is_filamentary_and_translucent tests/test_california_cigar_smoke_hybrid.py::test_hybrid_residual_haze_persists_as_soft_aged_layer -v
 ```
 
 Expected: PASS - gradient 99th percentile should be < 0.135, alpha bands should still have 4 distinct ranges
@@ -181,7 +213,7 @@ EOF
 - [ ] **Step 1: Run baseline advection test**
 
 ```bash
-python -m pytest tests/test_california_cigar_smoke_hybrid.py::test_hybrid_density_advects_from_single_event_and_tracks_age -v
+python3 -m pytest tests/test_california_cigar_smoke_hybrid.py::test_hybrid_density_advects_from_single_event_and_tracks_age -v
 ```
 
 Expected: PASS
@@ -226,7 +258,7 @@ Find and replace (around line 1915):
 - [ ] **Step 6: Run regression tests**
 
 ```bash
-python -m pytest tests/test_california_cigar_smoke_hybrid.py::test_hybrid_density_advects_from_single_event_and_tracks_age tests/test_california_cigar_smoke_hybrid.py::test_hybrid_smoke_frames_are_temporally_coherent_not_redrawn_wisps -v
+python3 -m pytest tests/test_california_cigar_smoke_hybrid.py::test_hybrid_density_advects_from_single_event_and_tracks_age tests/test_california_cigar_smoke_hybrid.py::test_hybrid_smoke_frames_are_temporally_coherent_not_redrawn_wisps -v
 ```
 
 Expected: PASS - centroid should still drift downwind, temporal correlation > 0.86
@@ -262,7 +294,7 @@ EOF
 - [ ] **Step 1: Run baseline lifecycle test**
 
 ```bash
-python -m pytest tests/test_california_cigar_smoke_hybrid.py::test_hybrid_lifecycle_fades_old_smoke tests/test_california_cigar_smoke_hybrid.py::test_hybrid_residual_haze_persists_as_soft_aged_layer -v
+python3 -m pytest tests/test_california_cigar_smoke_hybrid.py::test_hybrid_lifecycle_fades_old_smoke tests/test_california_cigar_smoke_hybrid.py::test_hybrid_residual_haze_persists_as_soft_aged_layer -v
 ```
 
 Expected: PASS
@@ -277,9 +309,11 @@ def _hybrid_lifecycle_alpha(age_frames: np.ndarray) -> np.ndarray:
     birth = 0.12 + 0.88 * _smoothstep(0.0, 6.0, age)
     mature = 1.0 - 0.20 * _smoothstep(30.0, 100.0, age)
     fade_end = min(HYBRID_SMOKE_MAX_AGE_FRAMES - 28.0, 236.0)
-    old_fade = 1.0 - _smoothstep(155.0, fade_end, age) ** 1.0
+    old_fade = 1.0 - _smoothstep(145.0, fade_end, age) ** 0.80
     return np.clip(birth * mature * old_fade, 0.0, 1.0).astype(np.float32)
 ```
+
+**Note:** Uses `start=145.0, exp=0.80` which extends visibility vs original (136.0, 0.72) while still passing `test_hybrid_lifecycle_fades_old_smoke`.
 
 - [ ] **Step 3: Update decay rates in `HybridSmokeSimulator.step()`**
 
@@ -301,7 +335,7 @@ Find and replace (around line 2151):
 - [ ] **Step 5: Run regression tests**
 
 ```bash
-python -m pytest tests/test_california_cigar_smoke_hybrid.py::test_hybrid_lifecycle_fades_old_smoke tests/test_california_cigar_smoke_hybrid.py::test_hybrid_residual_haze_persists_as_soft_aged_layer tests/test_california_cigar_smoke_hybrid.py::test_hybrid_smoke_frames_are_temporally_coherent_not_redrawn_wisps -v
+python3 -m pytest tests/test_california_cigar_smoke_hybrid.py::test_hybrid_lifecycle_fades_old_smoke tests/test_california_cigar_smoke_hybrid.py::test_hybrid_residual_haze_persists_as_soft_aged_layer tests/test_california_cigar_smoke_hybrid.py::test_hybrid_smoke_frames_are_temporally_coherent_not_redrawn_wisps -v
 ```
 
 Expected: PASS - old smoke should still fade relative to mature, haze should still persist
@@ -315,7 +349,7 @@ tune: temporal lifecycle for visible smoke generations
 
 - Faster birth: smoothstep(0.0, 6.0) from (0.0, 9.0)
 - Earlier mid-age dimming: smoothstep(30.0, 100.0)
-- Later old_fade start: 155.0 (was 136.0) with linear exponent
+- Later old_fade start: 145.0 (was 136.0) with exponent 0.80
 - Slower decay: base=0.991, old_smoke=0.028
 - Increased haze feed: old_smoke * 0.015
 
@@ -336,7 +370,7 @@ EOF
 - [ ] **Step 1: Run baseline fire visibility test**
 
 ```bash
-python -m pytest tests/test_california_cigar_smoke_hybrid.py::test_smoke_composite_keeps_orange_sources_visible_under_veil -v
+python3 -m pytest tests/test_california_cigar_smoke_hybrid.py::test_smoke_composite_keeps_orange_sources_visible_under_veil -v
 ```
 
 Expected: PASS
@@ -378,7 +412,7 @@ Find and replace (around lines 2484-2487):
 - [ ] **Step 5: Run regression tests**
 
 ```bash
-python -m pytest tests/test_california_cigar_smoke_hybrid.py::test_smoke_composite_keeps_orange_sources_visible_under_veil tests/test_california_cigar_smoke_hybrid.py::test_physical_main_smoke_mechanisms_are_active_end_to_end -v
+python3 -m pytest tests/test_california_cigar_smoke_hybrid.py::test_smoke_composite_keeps_orange_sources_visible_under_veil tests/test_california_cigar_smoke_hybrid.py::test_physical_main_smoke_mechanisms_are_active_end_to_end -v
 ```
 
 Expected: PASS - fire center should still be > 35 redder than surrounding
@@ -409,7 +443,7 @@ EOF
 - [ ] **Step 1: Run full test suite**
 
 ```bash
-python -m pytest tests/test_california_cigar_smoke_hybrid.py -v
+python3 -m pytest tests/test_california_cigar_smoke_hybrid.py -v
 ```
 
 Expected: All tests PASS
@@ -420,7 +454,7 @@ Render test frames to verify aesthetic goals:
 
 ```bash
 cd examples
-python california_cigar_smoke_demo.py --duration 3 --output out/test_tuning.mp4
+python3 california_cigar_smoke_demo.py --duration 3 --output out/test_tuning.mp4
 ```
 
 Check:
@@ -435,7 +469,7 @@ Check:
 git log --oneline -5
 ```
 
-Verify 5 commits from this tuning work are present.
+Verify 6 commits from this tuning work are present (Task 0 baseline + 5 tuning tasks).
 
 ---
 
