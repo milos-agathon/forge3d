@@ -2463,16 +2463,16 @@ def hybrid_fire_sources_rgba(
             continue
         pulse = 0.72 + 0.28 * math.sin(frame_index * 0.44 + source.seed * 0.031 + idx)
         radius = max(0.75, source.radius_px * 0.22)
-        halo_radius = radius * (2.8 + 1.8 * float(bloom_scale)) * max(0.65, float(bloom_scale))
+        halo_radius = radius * (3.4 + 2.1 * float(bloom_scale)) * max(0.70, float(bloom_scale))
         alpha = int(np.clip((70.0 + 74.0 * source.strength * source.heat) * pulse, 28, 205))
-        wide_radius = halo_radius * (1.68 + 0.22 * float(bloom_scale))
+        wide_radius = halo_radius * (1.9 + 0.30 * float(bloom_scale))
         wide_draw.ellipse(
             (source.x - wide_radius, source.y - wide_radius, source.x + wide_radius, source.y + wide_radius),
-            fill=(255, 86, 18, int(alpha * (0.035 + 0.030 * float(bloom_scale)))),
+            fill=(255, 98, 24, int(alpha * (0.048 + 0.038 * float(bloom_scale)))),
         )
         halo_draw.ellipse(
             (source.x - halo_radius, source.y - halo_radius, source.x + halo_radius, source.y + halo_radius),
-            fill=(255, 98, 24, int(alpha * (0.11 + 0.07 * float(bloom_scale)))),
+            fill=(255, 108, 32, int(alpha * (0.13 + 0.08 * float(bloom_scale)))),
         )
         if glow_only:
             continue
@@ -2487,9 +2487,9 @@ def hybrid_fire_sources_rgba(
             fill=(255, 226, 104, min(255, core_alpha + 42)),
         )
     wide_halo = wide_halo.filter(
-        ImageFilter.GaussianBlur(radius=max(2.0, min(width, height) / 92.0 * max(0.8, float(bloom_scale))))
+        ImageFilter.GaussianBlur(radius=max(3.0, min(width, height) / 75.0 * max(0.8, float(bloom_scale))))
     )
-    halo = halo.filter(ImageFilter.GaussianBlur(radius=max(1.0, min(width, height) / 210.0 * max(0.8, float(bloom_scale)))))
+    halo = halo.filter(ImageFilter.GaussianBlur(radius=max(1.5, min(width, height) / 160.0 * max(0.8, float(bloom_scale)))))
     wide_halo.alpha_composite(halo)
     halo = wide_halo
     if not glow_only:
