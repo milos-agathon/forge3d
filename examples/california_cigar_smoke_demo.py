@@ -2275,16 +2275,20 @@ def _hybrid_smoke_field_rgba(
     alpha = np.where(alpha >= 2.0, alpha, 0.0)
 
     density_t = _smoothstep(0.026, 1.20, norm)
-    old_blue = np.array([108.0, 121.0, 136.0], dtype=np.float32)
-    thin_gray = np.array([164.0, 172.0, 174.0], dtype=np.float32)
-    milky = np.array([236.0, 235.0, 225.0], dtype=np.float32)
-    age_t = _smoothstep(40.0, HYBRID_SMOKE_MAX_AGE_FRAMES, age)
+    old_blue = np.array([96.0, 108.0, 126.0], dtype=np.float32)
+    thin_gray = np.array([158.0, 164.0, 168.0], dtype=np.float32)
+    milky = np.array([242.0, 238.0, 224.0], dtype=np.float32)
+    age_t = _smoothstep(60.0, HYBRID_SMOKE_MAX_AGE_FRAMES * 0.85, age)
     base_rgb = old_blue * (1.0 - density_t[..., None]) + thin_gray * density_t[..., None]
     base_rgb = base_rgb * (1.0 - age_t[..., None] * 0.32) + old_blue * (age_t[..., None] * 0.32)
+    # Charcoal blend for very old smoke
+    charcoal = np.array([72.0, 78.0, 86.0], dtype=np.float32)
+    charcoal_t = _smoothstep(0.65, 0.92, age_t)
+    base_rgb = base_rgb * (1.0 - charcoal_t[..., None] * 0.45) + charcoal * (charcoal_t[..., None] * 0.45)
     source_mix = np.clip(source_core * 0.46 + fresh_band * 0.42 + ridge_norm * 0.10, 0.0, 0.84)
     base_rgb = base_rgb * (1.0 - source_mix[..., None]) + milky * source_mix[..., None]
     fresh = (1.0 - _smoothstep(16.0, 74.0, age)) * _smoothstep(0.18, 1.18, norm)
-    base_rgb += fresh[..., None] * np.array([16.0, 15.0, 10.0], dtype=np.float32)
+    base_rgb += fresh[..., None] * np.array([12.0, 11.0, 6.0], dtype=np.float32)
     base_rgb += (broad_texture[..., None] - 0.5) * 9.0 * coverage[..., None]
     base_rgb += np.asarray(color_bias, dtype=np.float32)[None, None, :]
     rgb = np.clip(base_rgb, 0.0, 245.0)
