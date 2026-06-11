@@ -1909,7 +1909,7 @@ def _inject_hybrid_sources(
         core = np.exp(-(dx * dx + dy * dy) / (2.0 * (radius * 1.02) ** 2))
         tail_gate = _smoothstep(-radius * 0.35, radius * 1.20, along) * (along <= tail)
         curl_offset = radius * (
-            2.8 * np.sin(along / max(radius * 8.0, 1.0) + source.seed * 0.017 + frame_index * 0.025)
+            3.1 * np.sin(along / max(radius * 8.0, 1.0) + source.seed * 0.017 + frame_index * 0.025)
             + 4.5 * along_frac * np.sin(along / max(radius * 15.0, 1.0) + source.seed * 0.009)
             + 2.0 * (along_frac ** 0.7) * np.sin(along / max(radius * 28.0, 1.0) + source.seed * 0.005 + frame_index * 0.012)
         )
