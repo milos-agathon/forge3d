@@ -32,6 +32,8 @@ except ImportError:
 # Find project root
 PROJECT_ROOT = Path(__file__).parent.parent
 
+pytestmark = pytest.mark.interactive_viewer
+
 
 def find_viewer_binary() -> Path:
     """Find the interactive_viewer binary."""

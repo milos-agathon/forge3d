@@ -12,6 +12,8 @@ import pytest
 DEMO_DEM = Path(__file__).parent.parent / "python" / "forge3d" / "data" / "mini_dem.npy"
 DEMO_HDR = Path(__file__).parent.parent / "assets" / "hdri" / "snow_field_4k.hdr"
 
+pytestmark = pytest.mark.offscreen
+
 
 def _render_with_probe(
     camera_mode: str,

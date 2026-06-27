@@ -223,6 +223,7 @@ def _save_geotiff(dem: np.ndarray, path: Path) -> None:
 
 
 @pytest.mark.skipif(not _rasterio_available(), reason="rasterio not installed")
+@pytest.mark.offscreen
 class TestShadowTechniqueDifferentiation:
     """Test that different shadow techniques produce different outputs.
 
