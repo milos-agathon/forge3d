@@ -141,6 +141,7 @@ pub mod renderer;
 pub mod scene;
 pub mod sdf; // New SDF module
 pub mod shadows; // Shadow mapping implementations
+pub mod smoke; // Physical smoke volumes, simulation, and reference rendering
 pub mod terrain;
 pub mod uv; // UV unwrap helpers (planar, spherical)
 pub mod textures {}

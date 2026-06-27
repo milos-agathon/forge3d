@@ -101,7 +101,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                         terrain.cam_phi_deg = *v;
                     }
                     if let Some(v) = theta {
-                        terrain.cam_theta_deg = v.clamp(5.0, 85.0);
+                        terrain.cam_theta_deg = v.clamp(0.0, 85.0);
                     }
                     if let Some(v) = radius {
                         terrain.cam_radius = v.clamp(100.0, 50000.0);

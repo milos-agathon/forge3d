@@ -10,6 +10,7 @@ projected volume ray marching.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import shutil
@@ -20,6 +21,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import date, timedelta
+from fractions import Fraction
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -42,15 +45,70 @@ CACHE = ROOT / "examples" / ".cache" / "california_wildfire_smoke"
 DEM_PATH = CACHE / "california_osm_r165475_terrarium_z8_max900.tif"
 OVERLAY_PATH = CACHE / "california_osm_r165475_terrarium_z8_max900_dark_relief_overlay.png"
 META_PATH = CACHE / "california_osm_r165475_terrarium_z8_max900.json"
+REGIONAL_DEM_PATH = CACHE / "california_osm_r165475_terrarium_z8_max1700.tif"
+REGIONAL_OVERLAY_PATH = CACHE / "california_osm_r165475_terrarium_z8_max1700_dark_relief_overlay.png"
+REGIONAL_META_PATH = CACHE / "california_osm_r165475_terrarium_z8_max1700.json"
 OUT_DIR = ROOT / "examples" / "out" / "california_cigar_smoke"
 DEFAULT_OUTPUT = OUT_DIR / "august_complex_cigar_smoke_8s.mp4"
 DEFAULT_PREVIEW = OUT_DIR / "august_complex_cigar_smoke_8s.preview.png"
+REFERENCE_VIDEO_DEFAULT = ROOT / "rapidsave.com_oc_heat_and_smoke_the_recordbreaking_2023-pezptq0xr7ub1.mp4"
+REFERENCE_FIRST30_AUDIT_DIR = OUT_DIR / "reference_first30_every_frame_audit"
+REFERENCE_EXACT_AUDIT_DIR = OUT_DIR / "reference_exact_smoke_audit"
+REFERENCE_EXACT_CACHE = ROOT / "examples" / ".cache" / "california_cigar_smoke" / "reference_exact"
+REFERENCE_EXACT_FRAMES_DIR = REFERENCE_EXACT_CACHE / "frames"
+REFERENCE_EXACT_MASKS_DIR = REFERENCE_EXACT_CACHE / "masks"
+REFERENCE_EXACT_SMOKE_DIR = REFERENCE_EXACT_CACHE / "smoke"
 
 WEB_MERCATOR_LIMIT = 20037508.342789244
 FPS = 30
 DURATION_SECONDS = 8
 WIDTH = 960
 HEIGHT = 540
+REFERENCE_EXACT_FRAME_COUNT = 900
+REFERENCE_EXACT_FPS = 30
+REFERENCE_EXACT_WIDTH = 1920
+REFERENCE_EXACT_HEIGHT = 1080
+REFERENCE_EXACT_START_DATE = date(2023, 1, 1)
+REFERENCE_EXACT_TIMELINE_DAYS = 272
+REFERENCE_EXACT_START_AREA_HA = 5_900.0
+REFERENCE_EXACT_END_AREA_HA = 12_300_000.0
+REFERENCE_EXACT_ARTIFACT_SCHEMA_VERSION = "reference-exact-smoke-v1"
+REFERENCE_EXACT_COLOR_POLICY = {
+    "decode_colorspace": "bt709",
+    "decode_pixel_format": "rgb24 PNG",
+    "alpha_policy": "smoke alpha excludes UI/text, hot fire cores, frame borders, and stable blue-water background",
+    "rgba_policy": "smoke_rgba PNG stores premultiplied RGB plus 8-bit alpha for screen-space over compositing",
+    "frame_mapping": "nearest source frame at 30 fps, clipped to manifest frame range",
+}
+REFERENCE_EXACT_ACCEPTANCE_THRESHOLDS = {
+    "all_frame_count": 900.0,
+    "minimum_smoke_mask_iou": 0.985,
+    "median_smoke_mask_iou": 0.995,
+    "maximum_alpha_mae": 3.0,
+    "median_alpha_mae": 1.0,
+    "maximum_smoke_rgb_mae": 4.0,
+    "median_smoke_rgb_mae": 1.5,
+    "maximum_smoke_centroid_error_px": 2.0,
+    "coverage_curve_correlation": 0.995,
+    "frame_delta_curve_correlation": 0.990,
+    "event_boundary_frame_error_max": 1.0,
+    "ui_leakage_fraction": 0.0,
+    "fire_leakage_fraction": 0.002,
+    "background_false_positive_fraction": 0.002,
+}
+REFERENCE_EXACT_MANUAL_REVIEW_THRESHOLDS = {
+    "smoke_reconstruction_mae": 1.0,
+    "dense_smoke_hole_fraction": 0.015,
+    "continuity_iou_min": 0.08,
+    "continuity_min_coverage": 0.010,
+    "continuity_max_frame_delta_luma": 0.006,
+}
+REFERENCE_EXACT_DECODED_LABEL_THRESHOLDS = {
+    "minimum_active_region_fraction": 0.50,
+    "minimum_median_region_luma_contrast": 0.055,
+    "minimum_median_region_edge_fraction": 0.0025,
+    "minimum_median_region_bright_fraction": 0.0010,
+}
 HYBRID_SMOKE_WIDTH = 520
 HYBRID_SMOKE_HEIGHT = 408
 HYBRID_SMOKE_MAX_AGE_FRAMES = 306.0
@@ -60,10 +118,301 @@ HYBRID_SMOKE_LAYER_COUNT = 3
 HYBRID_SMOKE_LAYER_WEIGHTS = (0.56, 0.30, 0.14)
 HYBRID_SMOKE_RENDER_LAYER_ALPHA = (0.74, 0.58, 0.44)
 HYBRID_SMOKE_RESIDUAL_HAZE_MAX_ALPHA = 42
+HYBRID_FIRE_SMOLDER_MIN_FRAMES = 24
+HYBRID_FIRE_SMOLDER_MAX_FRAMES = 68
+SOURCE_WISP_MAX_ALPHA = 142
+SOURCE_WISP_MAX_PARTICLES = 700
+SOURCE_WISP_MAX_EMITTERS = 58
+SOURCE_WISP_REFERENCE_MAX_PARTICLES = 1150
+SOURCE_WISP_REFERENCE_MAX_EMITTERS = 132
+SOURCE_WISP_EMIT_INTERVAL_FRAMES = 3
+SOURCE_WISP_SOURCE_DELAY_FRAMES = 2
+SOURCE_WISP_MIN_RADIUS_PX = 0.82
+SOURCE_WISP_LIFETIME_FRAMES = (38, 76)
+SOURCE_WISP_AUDIT_TIMES = (1.0, 3.5, 5.5, 7.0)
+REFERENCE_FILM_CONTACT_SHEET_TIMES = (0.0, 3.0, 6.0, 9.0, 12.0, 15.0, 18.0, 21.0, 24.0, 27.0, 29.5)
+SOURCE_WISP_EMITTER_MODES = ("synthetic", "fire-core")
+SOURCE_WISP_MORPHOLOGY_GATE_MIN_TIME_SECONDS = 2.0
+SOURCE_WISP_AGE_BANDS = {
+    "fresh_stem": (0.00, 0.26),
+    "transition_plume": (0.24, 0.62),
+    "old_tail": (0.56, 1.01),
+}
+TARGET_RENDER_PRESET = "source-wisp-reference"
+LEGACY_RENDER_PRESET = "legacy-combined"
+BRUSH_BUNDLE_RENDER_PRESET = "source-wisp-brush-baseline"
+REFERENCE_FILM_RENDER_PRESET = "reference-film"
+REFERENCE_EXACT_SMOKE_RENDER_PRESET = "reference-exact-smoke"
+TERRAIN_SLAB_COMPOSITION_MODE = "terrain-slab"
+MAP_FILM_COMPOSITION_MODE = "map-film"
+LOCAL_DELIVERY_PROFILE = "local-960"
+REFERENCE_DELIVERY_PROFILE = "reference-1080p"
+DELIVERY_PROFILES = {
+    LOCAL_DELIVERY_PROFILE: {
+        "size": (WIDTH, HEIGHT),
+        "crf": 17,
+        "video_bitrate": None,
+    },
+    REFERENCE_DELIVERY_PROFILE: {
+        "size": (1920, 1080),
+        "crf": 16,
+        "video_bitrate": "2600k",
+        "maxrate": "3200k",
+        "bufsize": "5200k",
+    },
+}
+SMOKE_RENDER_PRESETS = {
+    TARGET_RENDER_PRESET: {
+        "source_wisps": True,
+        "physical_smoke": False,
+        "source_wisp_emitter_mode": "fire-core",
+        "physical_emitter_mode": "fire-core",
+        "source_wisp_max_particles": SOURCE_WISP_REFERENCE_MAX_PARTICLES,
+        "source_wisp_max_emitters": SOURCE_WISP_REFERENCE_MAX_EMITTERS,
+        "source_wisp_warmup_mode": "visible-only",
+        "source_wisp_plume_ribbons": True,
+        "broad_smoke_alpha": 0.025,
+        "physical_alpha": 0.0,
+        "physical_max_sources": 96,
+        "composition_mode": TERRAIN_SLAB_COMPOSITION_MODE,
+        "delivery_profile": LOCAL_DELIVERY_PROFILE,
+        "regional_smoke": False,
+        "map_grade": "local",
+        "duration_seconds": DURATION_SECONDS,
+        "audit_required_for_acceptance": True,
+    },
+    LEGACY_RENDER_PRESET: {
+        "source_wisps": True,
+        "physical_smoke": True,
+        "source_wisp_emitter_mode": "synthetic",
+        "physical_emitter_mode": "synthetic",
+        "source_wisp_max_particles": SOURCE_WISP_MAX_PARTICLES,
+        "source_wisp_max_emitters": SOURCE_WISP_MAX_EMITTERS,
+        "source_wisp_warmup_mode": "full",
+        "source_wisp_plume_ribbons": False,
+        "broad_smoke_alpha": 0.28,
+        "physical_alpha": 0.58,
+        "physical_max_sources": 32,
+        "composition_mode": TERRAIN_SLAB_COMPOSITION_MODE,
+        "delivery_profile": LOCAL_DELIVERY_PROFILE,
+        "regional_smoke": False,
+        "map_grade": "local",
+        "duration_seconds": DURATION_SECONDS,
+        "audit_required_for_acceptance": False,
+    },
+    BRUSH_BUNDLE_RENDER_PRESET: {
+        "source_wisps": True,
+        "physical_smoke": False,
+        "source_wisp_emitter_mode": "fire-core",
+        "physical_emitter_mode": "fire-core",
+        "source_wisp_max_particles": SOURCE_WISP_REFERENCE_MAX_PARTICLES,
+        "source_wisp_max_emitters": SOURCE_WISP_REFERENCE_MAX_EMITTERS,
+        "source_wisp_warmup_mode": "visible-only",
+        "source_wisp_plume_ribbons": False,
+        "broad_smoke_alpha": 0.025,
+        "physical_alpha": 0.0,
+        "physical_max_sources": 96,
+        "composition_mode": TERRAIN_SLAB_COMPOSITION_MODE,
+        "delivery_profile": LOCAL_DELIVERY_PROFILE,
+        "regional_smoke": False,
+        "map_grade": "local",
+        "duration_seconds": DURATION_SECONDS,
+        "audit_required_for_acceptance": False,
+    },
+    REFERENCE_FILM_RENDER_PRESET: {
+        "source_wisps": True,
+        "physical_smoke": False,
+        "source_wisp_emitter_mode": "fire-core",
+        "physical_emitter_mode": "fire-core",
+        "source_wisp_max_particles": SOURCE_WISP_REFERENCE_MAX_PARTICLES,
+        "source_wisp_max_emitters": SOURCE_WISP_REFERENCE_MAX_EMITTERS,
+        "source_wisp_warmup_mode": "visible-only",
+        "source_wisp_plume_ribbons": True,
+        "broad_smoke_alpha": 0.68,
+        "physical_alpha": 0.0,
+        "physical_max_sources": 96,
+        "composition_mode": MAP_FILM_COMPOSITION_MODE,
+        "delivery_profile": REFERENCE_DELIVERY_PROFILE,
+        "regional_smoke": True,
+        "map_grade": "reference-film",
+        "duration_seconds": 30.0,
+        "audit_required_for_acceptance": False,
+    },
+    REFERENCE_EXACT_SMOKE_RENDER_PRESET: {
+        "source_wisps": False,
+        "physical_smoke": False,
+        "source_wisp_emitter_mode": "fire-core",
+        "physical_emitter_mode": "fire-core",
+        "source_wisp_max_particles": SOURCE_WISP_REFERENCE_MAX_PARTICLES,
+        "source_wisp_max_emitters": SOURCE_WISP_REFERENCE_MAX_EMITTERS,
+        "source_wisp_warmup_mode": "visible-only",
+        "source_wisp_plume_ribbons": True,
+        "broad_smoke_alpha": 0.0,
+        "physical_alpha": 0.0,
+        "physical_max_sources": 0,
+        "composition_mode": MAP_FILM_COMPOSITION_MODE,
+        "delivery_profile": REFERENCE_DELIVERY_PROFILE,
+        "regional_smoke": False,
+        "map_grade": "reference-exact",
+        "duration_seconds": 30.0,
+        "audit_required_for_acceptance": True,
+    },
+}
+SOURCE_WISP_AUDIT_THRESHOLDS = {
+    "minimum_attached_source_fraction": 0.58,
+    "minimum_screen_attached_source_fraction": 0.52,
+    "minimum_active_fire_emitters": 16.0,
+    "minimum_emitter_bbox_fraction": 0.012,
+    "minimum_source_wisp_component_count": 4.0,
+    "maximum_smoke_carpet_component_fraction": 0.34,
+    "maximum_low_frequency_haze_fraction": 0.30,
+    "minimum_strand_to_haze_ratio": 0.18,
+    "minimum_fire_core_visibility_fraction": 0.62,
+    "minimum_combined_strand_retention": 0.74,
+    "minimum_encoded_strand_like_fraction": 0.0035,
+    "maximum_late_low_frequency_haze_fraction": 0.20,
+    "minimum_morphology_band_coverage_fraction": 0.00012,
+    "minimum_transition_width_growth_ratio": 1.12,
+    "minimum_old_tail_width_growth_ratio": 1.42,
+    "maximum_old_tail_alpha_p90_fraction": 1.55,
+    "maximum_old_tail_endpoint_alpha_fraction": 0.44,
+    "minimum_old_tail_coverage_growth_ratio": 2.50,
+    "minimum_old_tail_edge_softness_px": 1.05,
+    "minimum_old_tail_diffuse_to_core_area_ratio": 1.10,
+    "maximum_brush_bundle_score": 0.44,
+    "minimum_encoded_soft_tail_like_fraction": 0.0025,
+}
+REFERENCE_FILM_AUDIT_THRESHOLDS = {
+    "minimum_full_bleed_frame_coverage": 0.985,
+    "minimum_map_quad_area_fraction": 0.985,
+    "minimum_median_smoke_coverage_fraction": 0.16,
+    "maximum_median_smoke_coverage_fraction": 0.78,
+    "minimum_median_regional_smoke_coverage_fraction": 0.08,
+    "minimum_median_dense_regional_smoke_fraction": 0.004,
+    "maximum_median_dense_regional_smoke_fraction": 0.35,
+    "minimum_median_fire_core_pixel_count": 24.0,
+    "maximum_median_hot_fire_fraction": 0.035,
+    "minimum_post_smoke_fire_visibility_fraction": 0.18,
+    "minimum_active_fire_temporal_change_ratio": 0.10,
+    "maximum_median_fire_mark_radius_px": 3.5,
+    "minimum_median_halo_core_area_ratio": 1.35,
+    "maximum_median_halo_core_area_ratio": 48.0,
+    "minimum_median_mid_scale_smoke_fraction": 0.015,
+    "minimum_smoke_centroid_motion_fraction": 0.004,
+    "minimum_median_distributed_fire_cluster_count": 4.0,
+    "minimum_median_fire_spread_grid_cell_count": 3.0,
+    "minimum_median_far_fire_core_fraction": 0.045,
+    "maximum_median_primary_fire_dominance_fraction": 0.86,
+    "minimum_median_regional_smoke_texture_score": 0.0015,
+    "maximum_median_regional_smoke_axis_band_score": 0.24,
+    "maximum_median_regional_smoke_contour_band_score": 0.62,
+    "maximum_median_regional_smoke_ring_score": 0.92,
+    "minimum_median_label_contrast_delta": 0.070,
+    "maximum_median_label_smoke_overlap_fraction": 0.68,
+    "maximum_median_label_fire_overlap_fraction": 0.08,
+    "minimum_median_label_text_pixel_fraction": 0.0010,
+    "minimum_temporal_date_span_days": 20.0,
+    "minimum_median_date_step_days": 2.0,
+    "maximum_median_date_step_days": 7.0,
+    "minimum_burned_area_growth_ratio": 4.0,
+    "minimum_median_temporal_luma_delta": 0.0035,
+    "minimum_encoded_smoke_like_fraction": 0.040,
+    "minimum_encoded_soft_tail_like_fraction": 0.0012,
+    "minimum_delivery_width": 1920.0,
+    "minimum_delivery_height": 1080.0,
+    "minimum_delivery_bitrate_bps": 1_900_000.0,
+    "maximum_delivery_bitrate_bps": 3_400_000.0,
+}
+REFERENCE_FILM_REGIONAL_FIRE_ANCHORS = (
+    (0.18, 0.49, 0.96, 0.00),
+    (0.28, 0.34, 0.48, 0.11),
+    (0.39, 0.63, 0.38, 0.27),
+    (0.52, 0.43, 0.32, 0.18),
+    (0.63, 0.72, 0.44, 0.36),
+    (0.76, 0.55, 0.36, 0.52),
+    (0.84, 0.29, 0.30, 0.68),
+)
+SOURCE_WISP_ACCEPTED_ARTIFACTS = (
+    "final_mp4",
+    "preview_png",
+    "reference_generated_frame_sheet",
+    "ablation_sheets",
+    "source_wisp_audit_json",
+    "exact_cli_command",
+)
+REFERENCE_FILM_ACCEPTED_ARTIFACTS = (
+    "final_1080p_mp4",
+    "preview_png",
+    "source_wisp_audit_json",
+    "reference_film_first_30s_contact_sheet",
+    "reference_film_frame_reports",
+    "reference_film_gate_report",
+    "exact_cli_command",
+)
+REFERENCE_FILM_VISUAL_SIGNOFF_CONTRACT = {
+    "status": "human_review_required_after_automated_gates",
+    "reviewer_role": "designer/dataviz reviewer",
+    "required_artifacts": [
+        "final_1080p_mp4",
+        "preview_png",
+        "reference_film_first_30s_contact_sheet",
+        "source_wisp_audit_json",
+    ],
+    "scorecard": [
+        {
+            "criterion": "geographic_spread",
+            "automated_evidence": [
+                "median_distributed_fire_cluster_count",
+                "median_fire_spread_grid_cell_count",
+                "median_far_fire_core_fraction",
+                "median_primary_fire_dominance_fraction",
+            ],
+            "human_pass_standard": "Fire activity must read beyond one local August Complex cluster in the first-30s contact sheet.",
+        },
+        {
+            "criterion": "regional_smoke_naturalism",
+            "automated_evidence": [
+                "median_regional_smoke_texture_score",
+                "median_regional_smoke_axis_band_score",
+            ],
+            "human_pass_standard": "Broad smoke must show flow lanes, holes, soft edges, and no obvious rectangular or contour-band artifacts.",
+        },
+        {
+            "criterion": "narrative_cadence",
+            "automated_evidence": [
+                "temporal_date_span_days",
+                "median_date_step_days",
+                "burned_area_growth_ratio",
+                "active_fire_temporal_change_ratio",
+            ],
+            "human_pass_standard": "Each contact-sheet row should read as a new daily/event step, not as only second-by-second plume drift.",
+        },
+        {
+            "criterion": "typography_hierarchy",
+            "automated_evidence": [
+                "median_label_contrast_delta",
+                "median_label_smoke_overlap_fraction",
+                "median_label_fire_overlap_fraction",
+            ],
+            "human_pass_standard": "Labels must remain readable while staying subordinate to fire, smoke, and terrain.",
+        },
+        {
+            "criterion": "terrain_context",
+            "automated_evidence": [
+                "full_bleed_frame_coverage_fraction",
+                "map_quad_area_fraction",
+                "delivery_width_px",
+                "delivery_height_px",
+            ],
+            "human_pass_standard": "The frame must read as a full-bleed map film with enough terrain/coastline context for regional transport.",
+        },
+    ],
+}
+FIRE_CORE_EMITTER_INTENSITY_THRESHOLD = 0.16
 PHYSICAL_SMOKE_DIMS = (84, 22, 66)
 PHYSICAL_SMOKE_RENDER_SIZE = (284, 216)
 PHYSICAL_SMOKE_MAX_ALPHA = 154
-PHYSICAL_SMOKE_MAX_SOURCES = 12
+PHYSICAL_SMOKE_MAX_SOURCES = 32
 PHYSICAL_SMOKE_HISTORY_STRIDE = 6
 PHYSICAL_SMOKE_HISTORY_MAX_AGE_FRAMES = 156
 PHYSICAL_SMOKE_HISTORY_MAX_LAYERS = 12
@@ -85,6 +434,12 @@ HRRR_SMOKE_FORECAST_HOURS = tuple(range(0, 19))
 HRRR_SMOKE_GUIDANCE_STRENGTH = 0.22
 HRRR_SMOKE_PANEL_CROP_FRAC = (0.014, 0.128, 0.994, 0.870)
 HRRR_SMOKE_CA_SUBSET_FRAC = (0.055, 0.300, 0.295, 0.690)
+REFERENCE_FILM_START_DATE = date(2020, 8, 16)
+REFERENCE_FILM_TIMELINE_DAYS = 44
+REFERENCE_FILM_START_AREA_HA = 6_700.0
+REFERENCE_FILM_REGIONAL_SMOKE_MAX_ALPHA = 255
+REFERENCE_FILM_DENSE_REGIONAL_SMOKE_ALPHA_THRESHOLD = 24
+REFERENCE_FILM_FIRE_POINT_LIMIT = 220
 _SMOKE_TEXTURE_CACHE: dict[tuple[tuple[int, int], int], tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
 _PIXEL_GRID_CACHE: dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
 
@@ -106,6 +461,15 @@ class TerrainPlate:
     fire_xy: tuple[float, float]
     fire_uv: tuple[float, float]
     texture_size: tuple[int, int]
+    bounds_mercator: tuple[float, float, float, float] | None = None
+    extent_kind: str = "local"
+
+
+@dataclass(frozen=True)
+class ReferenceFilmFrameInfo:
+    progress: float
+    date_label: str
+    burned_area_ha: float
 
 
 @dataclass(frozen=True)
@@ -123,6 +487,7 @@ class HybridSmokeSource:
     heat: float = 1.0
     smoke_rate: float = 1.0
     altitude_bias: float = 0.0
+    flame_end_frame: int | None = None
 
 
 @dataclass
@@ -134,12 +499,67 @@ class HybridSmokeState:
     residual_haze: np.ndarray | None = None
 
 
+@dataclass
+class SourceWispPuff:
+    source_index: int
+    x: float
+    y: float
+    origin_x: float
+    origin_y: float
+    vx: float
+    vy: float
+    age_frames: float
+    lifetime_frames: float
+    radius_px: float
+    base_radius_px: float
+    alpha: float
+    base_alpha: float
+    heat: float
+    intensity: float
+    breakup_seed: int
+    breakup_phase: float
+
+
+@dataclass(frozen=True)
+class SourceWispState:
+    puffs: tuple[SourceWispPuff, ...]
+    map_size: tuple[int, int]
+    emitters: tuple[HybridSmokeSource, ...] = ()
+
+
 @dataclass(frozen=True)
 class HrrrSmokeGuidance:
     frames: tuple[np.ndarray, ...]
     runtime: str
     plot_type: str
     source_label: str
+
+
+@dataclass(frozen=True)
+class ReferenceSmokeEventState:
+    event_id: str
+    start_frame: int
+    peak_frame: int
+    end_frame: int
+    coverage_peak: float
+    centroid_path: tuple[tuple[int, float, float, float], ...]
+    dominant_axis_degrees: float
+    date_label: str
+    source_size: tuple[int, int] = (REFERENCE_EXACT_WIDTH, REFERENCE_EXACT_HEIGHT)
+
+
+@dataclass(frozen=True)
+class ObservedSmokeSource:
+    source_kind: str
+    source_label: str
+    frames: tuple[np.ndarray, ...] = ()
+    event_states: tuple[ReferenceSmokeEventState, ...] = ()
+    cache_dir: str | None = None
+    requested_source: str = "auto"
+    guidance_cadence_frames: float = 12.0
+    timeline_frame_count: int = REFERENCE_EXACT_FRAME_COUNT
+    disclosure_label: str = "Data: CAL FIRE perimeter, synthetic smoke field"
+    approximate: bool = True
 
 
 @dataclass
@@ -154,6 +574,9 @@ class PhysicalSmokeMainEffect:
     substeps: int
     backend: str
     seed: int = HYBRID_SMOKE_SEED
+    base_sources: list[HybridSmokeSource] = field(default_factory=list)
+    emitter_mode: str = "synthetic"
+    max_sources: int = PHYSICAL_SMOKE_MAX_SOURCES
     history: list[tuple[int, np.ndarray]] = field(default_factory=list)
     previous_render_frame: int | None = None
     previous_render_rgba: np.ndarray | None = None
@@ -677,7 +1100,25 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Render an 8-second August Complex hybrid smoke demo.")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--preview", type=Path, default=DEFAULT_PREVIEW)
+    parser.add_argument(
+        "--render-preset",
+        choices=tuple(SMOKE_RENDER_PRESETS),
+        default=TARGET_RENDER_PRESET,
+        help="Resolve smoke layer ownership, emitter source, and audit defaults for the render.",
+    )
     parser.add_argument("--size", type=int, nargs=2, default=(WIDTH, HEIGHT), metavar=("W", "H"))
+    parser.add_argument(
+        "--composition-mode",
+        choices=(TERRAIN_SLAB_COMPOSITION_MODE, MAP_FILM_COMPOSITION_MODE),
+        default=None,
+        help="Use the local oblique terrain slab or full-bleed reference map-film composition.",
+    )
+    parser.add_argument(
+        "--delivery-profile",
+        choices=tuple(DELIVERY_PROFILES),
+        default=None,
+        help="Resolve output size and encode settings for local or 1080p reference-film delivery.",
+    )
     parser.add_argument("--fps", type=int, default=FPS)
     parser.add_argument("--duration", type=float, default=DURATION_SECONDS)
     parser.add_argument("--warmup-seconds", type=float, default=3.0)
@@ -693,8 +1134,14 @@ def parse_args() -> argparse.Namespace:
         default=PHYSICAL_SMOKE_RENDER_SIZE,
         metavar=("W", "H"),
     )
-    parser.add_argument("--physical-max-sources", type=int, default=PHYSICAL_SMOKE_MAX_SOURCES)
+    parser.add_argument("--physical-max-sources", type=int, default=None)
     parser.add_argument("--physical-substeps", type=int, default=1)
+    parser.add_argument(
+        "--physical-emitter-mode",
+        choices=SOURCE_WISP_EMITTER_MODES,
+        default=None,
+        help="Use static synthetic sources or per-frame pre-bloom fire-core/front emitters for physical smoke.",
+    )
     parser.add_argument(
         "--physical-smoke-backend",
         choices=("auto", "native", "numpy"),
@@ -703,6 +1150,63 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--physical-smoke", action="store_true", dest="physical_smoke")
     parser.add_argument("--no-physical-smoke", action="store_false", dest="physical_smoke")
+    parser.add_argument("--source-wisps", action="store_true", dest="source_wisps")
+    parser.add_argument("--no-source-wisps", action="store_false", dest="source_wisps")
+    parser.add_argument("--source-wisp-max-particles", type=int, default=None)
+    parser.add_argument("--source-wisp-max-emitters", type=int, default=None)
+    parser.add_argument(
+        "--source-wisp-emitter-mode",
+        choices=SOURCE_WISP_EMITTER_MODES,
+        default=None,
+        help="Use static synthetic sources or dynamic pre-bloom fire-core/front pixels for source wisps.",
+    )
+    parser.add_argument(
+        "--source-wisp-warmup-mode",
+        choices=("full", "visible-only"),
+        default=None,
+        help="Whether source-attached wisps inherit the simulation warmup or start fresh on frame 0.",
+    )
+    parser.add_argument("--source-wisp-plume-ribbons", action="store_true", dest="source_wisp_plume_ribbons")
+    parser.add_argument("--no-source-wisp-plume-ribbons", action="store_false", dest="source_wisp_plume_ribbons")
+    parser.add_argument("--regional-smoke", action="store_true", dest="regional_smoke")
+    parser.add_argument("--no-regional-smoke", action="store_false", dest="regional_smoke")
+    parser.add_argument(
+        "--observed-smoke-source",
+        choices=("auto", "reference-cache", "hrrr", "procedural"),
+        default="auto",
+        help="Source for the broad regional smoke layer in reference-film mode.",
+    )
+    parser.add_argument("--broad-smoke-alpha", type=float, default=None)
+    parser.add_argument("--physical-alpha", type=float, default=None)
+    parser.add_argument(
+        "--smoke-ablation",
+        choices=("combined", "broad-only", "physical-only", "source-wisps-only", "no-broad"),
+        default="combined",
+        help="Render a smoke component ablation while preserving fire/terrain timing.",
+    )
+    parser.add_argument("--audit-dir", type=Path, default=None)
+    parser.add_argument("--audit-frame-times", type=float, nargs="+", default=SOURCE_WISP_AUDIT_TIMES)
+    parser.add_argument("--enforce-audit-gates", action="store_true", dest="enforce_audit_gates")
+    parser.add_argument("--no-enforce-audit-gates", action="store_false", dest="enforce_audit_gates")
+    parser.add_argument(
+        "--reference-video",
+        type=Path,
+        default=REFERENCE_VIDEO_DEFAULT,
+    )
+    parser.add_argument("--reference-smoke-cache", type=Path, default=REFERENCE_EXACT_CACHE)
+    parser.add_argument(
+        "--reference-smoke-mode",
+        choices=("exact", "procedural"),
+        default=None,
+        help="Use decoded reference smoke playback or the procedural reference-film smoke approximation.",
+    )
+    parser.add_argument("--reference-smoke-start-frame", type=int, default=0)
+    parser.add_argument("--reference-smoke-frame-count", type=int, default=None)
+    parser.add_argument(
+        "--prepare-reference-smoke-cache",
+        action="store_true",
+        help="Decode and derive the native first-30s reference-exact smoke cache, then exit.",
+    )
     parser.add_argument("--hrrr-smoke-dir", type=Path, default=CACHE / "hrrr_smoke")
     parser.add_argument("--hrrr-runtime", default=HRRR_SMOKE_RUNTIME)
     parser.add_argument("--hrrr-plot-type", default=HRRR_SMOKE_PLOT_TYPE)
@@ -710,8 +1214,94 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fetch-hrrr-smoke", action="store_true")
     parser.add_argument("--volume-detail", action="store_true", dest="volume_detail")
     parser.add_argument("--no-volume-detail", action="store_false", dest="volume_detail")
-    parser.set_defaults(volume_detail=False, physical_smoke=True)
-    return parser.parse_args()
+    parser.set_defaults(
+        volume_detail=False,
+        physical_smoke=None,
+        source_wisps=None,
+        source_wisp_plume_ribbons=None,
+        regional_smoke=None,
+        enforce_audit_gates=None,
+    )
+    args = parser.parse_args()
+    return _apply_smoke_render_preset(args)
+
+
+def _apply_smoke_render_preset(args: argparse.Namespace) -> argparse.Namespace:
+    preset = SMOKE_RENDER_PRESETS[str(args.render_preset)]
+    for name in (
+        "source_wisps",
+        "physical_smoke",
+        "source_wisp_emitter_mode",
+        "physical_emitter_mode",
+        "source_wisp_max_particles",
+        "source_wisp_max_emitters",
+        "source_wisp_warmup_mode",
+        "source_wisp_plume_ribbons",
+        "broad_smoke_alpha",
+        "physical_alpha",
+        "physical_max_sources",
+        "composition_mode",
+        "delivery_profile",
+        "regional_smoke",
+    ):
+        if getattr(args, name, None) is None:
+            setattr(args, name, preset[name])
+    delivery = DELIVERY_PROFILES[str(args.delivery_profile)]
+    default_size = tuple(int(v) for v in delivery["size"])
+    if tuple(map(int, args.size)) == (WIDTH, HEIGHT) and default_size != (WIDTH, HEIGHT):
+        args.size = default_size
+    if float(args.duration) == float(DURATION_SECONDS):
+        args.duration = float(preset["duration_seconds"])
+    if args.reference_smoke_mode is None:
+        args.reference_smoke_mode = (
+            "exact" if str(args.render_preset) == REFERENCE_EXACT_SMOKE_RENDER_PRESET else "procedural"
+        )
+    if args.reference_smoke_frame_count is None:
+        args.reference_smoke_frame_count = (
+            REFERENCE_EXACT_FRAME_COUNT
+            if str(args.reference_smoke_mode) == "exact"
+            else max(1, int(round(float(args.duration) * int(args.fps))))
+        )
+    if getattr(args, "enforce_audit_gates", None) is None:
+        args.enforce_audit_gates = False
+    args.encode_policy = {
+        "delivery_profile": str(args.delivery_profile),
+        "size": tuple(map(int, args.size)),
+        "crf": int(delivery["crf"]),
+        "video_bitrate": delivery["video_bitrate"],
+        "maxrate": delivery.get("maxrate"),
+        "bufsize": delivery.get("bufsize"),
+        "color_primaries": "bt709",
+        "color_trc": "bt709",
+        "colorspace": "bt709",
+    }
+    args.layer_policy = {
+        "render_preset": str(args.render_preset),
+        "composition_mode": str(args.composition_mode),
+        "delivery_profile": str(args.delivery_profile),
+        "source_wisp_emitter_mode": str(args.source_wisp_emitter_mode),
+        "physical_emitter_mode": str(args.physical_emitter_mode),
+        "source_wisp_max_particles": int(args.source_wisp_max_particles),
+        "source_wisp_max_emitters": int(args.source_wisp_max_emitters),
+        "source_wisp_warmup_mode": str(args.source_wisp_warmup_mode),
+        "source_wisp_plume_ribbons": bool(args.source_wisp_plume_ribbons),
+        "broad_smoke_alpha": float(args.broad_smoke_alpha),
+        "physical_alpha": float(args.physical_alpha),
+        "physical_max_sources": int(args.physical_max_sources),
+        "regional_smoke": bool(args.regional_smoke),
+        "observed_smoke_source": str(args.observed_smoke_source),
+        "map_grade": str(preset["map_grade"]),
+        "duration_seconds": float(args.duration),
+        "source_wisps_primary": str(args.render_preset) == TARGET_RENDER_PRESET,
+        "reference_film_target": str(args.render_preset) == REFERENCE_FILM_RENDER_PRESET,
+        "reference_exact_smoke_target": str(args.render_preset) == REFERENCE_EXACT_SMOKE_RENDER_PRESET,
+        "reference_smoke_mode": str(args.reference_smoke_mode),
+        "reference_smoke_cache": str(args.reference_smoke_cache),
+        "reference_smoke_start_frame": int(args.reference_smoke_start_frame),
+        "reference_smoke_frame_count": int(args.reference_smoke_frame_count),
+        "audit_required_for_acceptance": bool(preset["audit_required_for_acceptance"]),
+    }
+    return args
 
 
 def lonlat_to_web_mercator(lon: float, lat: float) -> tuple[float, float]:
@@ -790,10 +1380,69 @@ def terrain_crop_mercator_bounds() -> tuple[float, float, float, float]:
     return float(x0), float(y_bottom), float(x1), float(y_top)
 
 
-def enhance_terrain_texture(texture: Image.Image, dem: np.ndarray) -> Image.Image:
-    rgb = np.asarray(texture.convert("RGB"), dtype=np.float32) / 255.0
-    valid = np.isfinite(dem)
-    terrain = np.where(valid, dem, np.nanmedian(dem[valid]) if np.any(valid) else 0.0)
+def regional_reference_extent() -> tuple[Image.Image, np.ndarray, tuple[float, float], tuple[float, float, float, float]]:
+    if not (REGIONAL_DEM_PATH.exists() and REGIONAL_OVERLAY_PATH.exists() and REGIONAL_META_PATH.exists()):
+        texture, dem, fire = crop_fire_extent()
+        return texture, dem, fire, terrain_crop_mercator_bounds()
+    meta = json.loads(REGIONAL_META_PATH.read_text(encoding="utf-8"))
+    west, south, east, north = (float(v) for v in meta["bounds_mercator"])
+    overlay = Image.open(REGIONAL_OVERLAY_PATH).convert("RGBA")
+    dem = np.asarray(Image.open(REGIONAL_DEM_PATH), dtype=np.float32)
+    fire_x, fire_y = fire_pixel((west, south, east, north), overlay.size)
+
+    alpha = np.asarray(overlay.getchannel("A"), dtype=np.uint8) > 8
+    valid_y, valid_x = np.where(alpha)
+    target_aspect = 16.0 / 9.0
+    if valid_x.size:
+        valid_w = int(valid_x.max() - valid_x.min() + 1)
+        min_w = min(overlay.width, 900)
+        crop_w = min(overlay.width, max(min_w, int(round(valid_w * 0.84))))
+    else:
+        crop_w = overlay.width
+    crop_w = max(1, int(crop_w))
+    target_aspect = 16.0 / 9.0
+    crop_h = min(overlay.height, int(round(crop_w / target_aspect)))
+    if crop_h >= overlay.height:
+        crop_h = overlay.height
+        crop_w = min(overlay.width, int(round(crop_h * target_aspect)))
+    # Keep broad coastal/terrain context while preventing the event from being stranded
+    # in a half-empty no-data frame.
+    left = int(np.clip(round(fire_x - crop_w * 0.22), 0, overlay.width - crop_w))
+    top = int(np.clip(round(fire_y - crop_h * 0.45), 0, overlay.height - crop_h))
+    box = (left, top, left + crop_w, top + crop_h)
+    crop_overlay = overlay.crop(box)
+    crop_dem = dem[top : top + crop_h, left : left + crop_w]
+    fire_in_crop = (fire_x - left, fire_y - top)
+    x0 = west + left / max(overlay.width - 1, 1) * (east - west)
+    x1 = west + (left + crop_w - 1) / max(overlay.width - 1, 1) * (east - west)
+    y_top = north - top / max(overlay.height - 1, 1) * (north - south)
+    y_bottom = north - (top + crop_h - 1) / max(overlay.height - 1, 1) * (north - south)
+    return (
+        enhance_terrain_texture(crop_overlay, crop_dem, fill_dem_without_overlay=True),
+        crop_dem,
+        fire_in_crop,
+        (float(x0), float(y_bottom), float(x1), float(y_top)),
+    )
+
+
+def enhance_terrain_texture(
+    texture: Image.Image,
+    dem: np.ndarray,
+    *,
+    fill_dem_without_overlay: bool = False,
+) -> Image.Image:
+    rgba = np.asarray(texture.convert("RGBA"), dtype=np.float32) / 255.0
+    rgb = rgba[..., :3]
+    source_alpha = np.clip(rgba[..., 3], 0.0, 1.0)
+    dem_valid = np.isfinite(dem) & (dem > -5000.0)
+    valid = dem_valid & (source_alpha > 0.035)
+    if np.any(valid):
+        fill_value = float(np.nanmedian(dem[valid]))
+    elif np.any(dem_valid):
+        fill_value = float(np.nanmedian(dem[dem_valid]))
+    else:
+        fill_value = 0.0
+    terrain = np.where(dem_valid, dem, fill_value)
     lo, hi = np.percentile(terrain[valid], [2, 98]) if np.any(valid) else (0.0, 1.0)
     norm = np.clip((terrain - lo) / max(hi - lo, 1e-6), 0.0, 1.0)
     gy, gx = np.gradient(norm)
@@ -808,7 +1457,27 @@ def enhance_terrain_texture(texture: Image.Image, dem: np.ndarray) -> Image.Imag
         + ash * (norm[..., None] ** 1.85)
     )
     relief_detail = np.clip(0.76 + luma * 0.26, 0.72, 1.02)
-    out = np.clip(grade * shade[..., None] * relief_detail[..., None] * 0.88, 0.0, 1.0)
+    dem_grade = np.clip(grade * shade[..., None] * relief_detail[..., None] * 0.88, 0.0, 1.0)
+    source_relief = np.clip(rgb * np.clip(0.92 + (shade - 0.62) * 0.18, 0.82, 1.10)[..., None], 0.0, 1.0)
+    enhanced = np.clip(source_relief * 0.26 + dem_grade * 0.74, 0.0, 1.0)
+    if fill_dem_without_overlay:
+        dem_only = np.clip(dem_grade * 0.96 + charcoal * 0.18, 0.0, 1.0)
+        dem_mask = np.clip(_pil_blur_float(dem_valid.astype(np.float32), 2.0), 0.0, 1.0)[..., None]
+        alpha_mask = np.clip(source_alpha, 0.0, 1.0)[..., None]
+        enhanced = np.clip(
+            dem_only * np.clip(dem_mask - alpha_mask, 0.0, 1.0)
+            + enhanced * np.maximum(alpha_mask, 1.0 - np.clip(dem_mask - alpha_mask, 0.0, 1.0)),
+            0.0,
+            1.0,
+        )
+    soft_mask = np.clip(_pil_blur_float(source_alpha, 1.6), 0.0, 1.0)[..., None]
+    if fill_dem_without_overlay:
+        soft_mask = np.maximum(
+            soft_mask,
+            np.clip(_pil_blur_float(dem_valid.astype(np.float32), 2.2), 0.0, 0.82)[..., None],
+        )
+    background = np.array([0.030, 0.045, 0.046], dtype=np.float32)
+    out = np.clip(background * (1.0 - soft_mask) + enhanced * soft_mask, 0.0, 1.0)
     return Image.fromarray(np.round(out * 255.0).astype(np.uint8), mode="RGB").convert("RGBA")
 
 
@@ -854,6 +1523,71 @@ def terrain_plate(width: int, height: int) -> TerrainPlate:
         fire_xy=fire_screen,
         fire_uv=fire_uv,
         texture_size=texture.size,
+        bounds_mercator=terrain_crop_mercator_bounds(),
+        extent_kind="local",
+    )
+
+
+def _reference_map_grade(texture: Image.Image, size: tuple[int, int]) -> Image.Image:
+    """Create a full-bleed dark map plate for the reference-film composition."""
+    width, height = map(int, size)
+    base = texture.resize((width, height), Image.Resampling.BICUBIC).convert("RGB")
+    arr = np.asarray(base, dtype=np.float32) / 255.0
+    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+    x = xx / max(width - 1, 1)
+    y = yy / max(height - 1, 1)
+    luma = np.sum(arr * np.array([0.299, 0.587, 0.114], dtype=np.float32), axis=2)
+    relief = np.clip(arr * 1.12 + luma[..., None] * 0.18, 0.0, 1.0)
+    cool_shadow = np.array([0.030, 0.046, 0.060], dtype=np.float32)
+    land = np.array([0.105, 0.110, 0.103], dtype=np.float32)
+    terrain = cool_shadow * 0.55 + land * 0.45 + relief * np.array([0.18, 0.20, 0.19], dtype=np.float32)
+    west_light = np.clip(1.0 - x, 0.0, 1.0) ** 1.8
+    ocean_glow = np.array([0.040, 0.110, 0.150], dtype=np.float32) * west_light[..., None] * 0.72
+    vignette = 1.0 - 0.42 * np.clip(((x - 0.48) / 0.74) ** 2 + ((y - 0.50) / 0.80) ** 2, 0.0, 1.0)
+    graded = np.clip((terrain + ocean_glow) * vignette[..., None], 0.0, 1.0)
+    return Image.fromarray(np.round(graded * 255.0).astype(np.uint8), mode="RGB").convert("RGBA")
+
+
+def map_film_plate(width: int, height: int) -> TerrainPlate:
+    """Return a full-bleed map plate with identity layer projection."""
+    texture, _dem, fire_crop, bounds = regional_reference_extent()
+    image = _reference_map_grade(texture, (width, height))
+    fire_uv = (fire_crop[0] / texture.width, fire_crop[1] / texture.height)
+    fire_xy = (fire_uv[0] * (width - 1), fire_uv[1] * (height - 1))
+    return TerrainPlate(
+        image=image,
+        quad=[(0.0, 0.0), (float(width - 1), 0.0), (float(width - 1), float(height - 1)), (0.0, float(height - 1))],
+        fire_xy=fire_xy,
+        fire_uv=fire_uv,
+        texture_size=texture.size,
+        bounds_mercator=bounds,
+        extent_kind="regional-california",
+    )
+
+
+def reference_film_frame_info(frame_index: int, frame_count: int) -> ReferenceFilmFrameInfo:
+    progress = float(np.clip(float(frame_index) / max(float(frame_count - 1), 1.0), 0.0, 1.0))
+    day_index = int(round(progress * REFERENCE_FILM_TIMELINE_DAYS))
+    current_date = REFERENCE_FILM_START_DATE + timedelta(days=day_index)
+    area_t = float(_smoothstep(0.0, 1.0, progress))
+    burned_area = REFERENCE_FILM_START_AREA_HA * (1.0 - area_t) + AUGUST_COMPLEX.final_area_ha * area_t
+    return ReferenceFilmFrameInfo(
+        progress=progress,
+        date_label=current_date.isoformat(),
+        burned_area_ha=float(burned_area),
+    )
+
+
+def reference_exact_frame_info(frame_index: int, frame_count: int = REFERENCE_EXACT_FRAME_COUNT) -> ReferenceFilmFrameInfo:
+    progress = float(np.clip(float(frame_index) / max(float(frame_count - 1), 1.0), 0.0, 1.0))
+    day_index = int(round(progress * REFERENCE_EXACT_TIMELINE_DAYS))
+    current_date = REFERENCE_EXACT_START_DATE + timedelta(days=day_index)
+    area_t = float(_smoothstep(0.0, 1.0, progress))
+    burned_area = REFERENCE_EXACT_START_AREA_HA * (1.0 - area_t) + REFERENCE_EXACT_END_AREA_HA * area_t
+    return ReferenceFilmFrameInfo(
+        progress=progress,
+        date_label=current_date.isoformat(),
+        burned_area_ha=float(burned_area),
     )
 
 
@@ -1306,7 +2040,11 @@ def _download_hrrr_raw_smoke_grib(
     dest.write_bytes(payload)
 
 
-def _hrrr_raw_smoke_grib_to_density(grib_path: Path, map_size: tuple[int, int]) -> np.ndarray:
+def _hrrr_raw_smoke_grib_to_density(
+    grib_path: Path,
+    map_size: tuple[int, int],
+    bounds_mercator: tuple[float, float, float, float] | None = None,
+) -> np.ndarray:
     try:
         import rasterio
         from rasterio.enums import Resampling
@@ -1317,7 +2055,8 @@ def _hrrr_raw_smoke_grib_to_density(grib_path: Path, map_size: tuple[int, int]) 
 
     width, height = map(int, map_size)
     dst = np.zeros((height, width), dtype=np.float32)
-    dst_transform = from_bounds(*terrain_crop_mercator_bounds(), width, height)
+    dst_bounds = bounds_mercator if bounds_mercator is not None else terrain_crop_mercator_bounds()
+    dst_transform = from_bounds(*dst_bounds, width, height)
     try:
         with rasterio.open(grib_path) as src:
             source = src.read(1).astype(np.float32, copy=False)
@@ -1419,6 +2158,7 @@ def _load_hrrr_raw_smoke_guidance(
     fetch: bool = False,
     raw_base_url: str = HRRR_SMOKE_RAW_BASE_URL,
     field: str = HRRR_SMOKE_RAW_FIELD,
+    bounds_mercator: tuple[float, float, float, float] | None = None,
 ) -> HrrrSmokeGuidance | None:
     frames: list[np.ndarray] = []
     for hour in forecast_hours:
@@ -1437,7 +2177,7 @@ def _load_hrrr_raw_smoke_guidance(
                 continue
         if not path.exists():
             continue
-        density = _hrrr_raw_smoke_grib_to_density(path, map_size)
+        density = _hrrr_raw_smoke_grib_to_density(path, map_size, bounds_mercator=bounds_mercator)
         if np.any(density > 0.0):
             frames.append(density.astype(np.float32, copy=False))
 
@@ -1458,6 +2198,7 @@ def load_hrrr_smoke_guidance(
     fetch: bool = False,
     prefer_raw: bool = True,
     raw_base_url: str = HRRR_SMOKE_RAW_BASE_URL,
+    bounds_mercator: tuple[float, float, float, float] | None = None,
 ) -> HrrrSmokeGuidance | None:
     if prefer_raw:
         raw_guidance = _load_hrrr_raw_smoke_guidance(
@@ -1467,6 +2208,7 @@ def load_hrrr_smoke_guidance(
             forecast_hours=forecast_hours,
             fetch=fetch,
             raw_base_url=raw_base_url,
+            bounds_mercator=bounds_mercator,
         )
         if raw_guidance is not None:
             return raw_guidance
@@ -1519,6 +2261,168 @@ def load_hrrr_smoke_guidance(
         return None
     label = f"HRRR-Smoke {runtime} {plot_type} ({len(frames)} cached frames)"
     return HrrrSmokeGuidance(tuple(frames), str(runtime), str(plot_type), label)
+
+
+def _reference_event_source_size(cache_dir: Path) -> tuple[int, int]:
+    candidates = (
+        Path(cache_dir) / "smoke" / "smoke_rgba_0000.png",
+        Path(cache_dir) / "frames" / "frame_0000.png",
+    )
+    for path in candidates:
+        if path.exists():
+            try:
+                with Image.open(path) as image:
+                    return tuple(map(int, image.size))
+            except OSError:
+                continue
+    return (REFERENCE_EXACT_WIDTH, REFERENCE_EXACT_HEIGHT)
+
+
+def _coerce_reference_smoke_event(
+    payload: dict[str, object],
+    source_size: tuple[int, int],
+) -> ReferenceSmokeEventState | None:
+    try:
+        start_frame = int(payload["start_frame"])
+        peak_frame = int(payload["peak_frame"])
+        end_frame = int(payload["end_frame"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    start_frame = max(0, min(start_frame, end_frame))
+    end_frame = max(start_frame, end_frame)
+    peak_frame = int(np.clip(peak_frame, start_frame, end_frame))
+    coverage_peak = float(payload.get("coverage_peak", 0.0))
+    if not math.isfinite(coverage_peak):
+        coverage_peak = 0.0
+
+    centroid_path: list[tuple[int, float, float, float]] = []
+    for item in payload.get("centroid_path", []):
+        if not isinstance(item, dict):
+            continue
+        try:
+            frame = int(item.get("frame", peak_frame))
+            x_px = float(item.get("x_px", source_size[0] * 0.5))
+            y_px = float(item.get("y_px", source_size[1] * 0.5))
+            coverage = float(item.get("coverage", coverage_peak))
+        except (TypeError, ValueError):
+            continue
+        if not all(math.isfinite(v) for v in (x_px, y_px, coverage)):
+            continue
+        centroid_path.append((frame, x_px, y_px, max(0.0, coverage)))
+    if not centroid_path:
+        centroid_path.append((peak_frame, source_size[0] * 0.5, source_size[1] * 0.48, max(coverage_peak, 0.01)))
+    centroid_path = sorted(centroid_path, key=lambda item: item[0])
+
+    return ReferenceSmokeEventState(
+        event_id=str(payload.get("event_id", f"reference-event-{start_frame:04d}")),
+        start_frame=start_frame,
+        peak_frame=peak_frame,
+        end_frame=end_frame,
+        coverage_peak=max(0.0, coverage_peak),
+        centroid_path=tuple(centroid_path),
+        dominant_axis_degrees=float(payload.get("dominant_axis_degrees", 0.0)),
+        date_label=str(payload.get("date_label", "")),
+        source_size=tuple(map(int, source_size)),
+    )
+
+
+def load_reference_smoke_event_states(cache_dir: Path) -> tuple[ReferenceSmokeEventState, ...]:
+    events_path = Path(cache_dir) / "reference_smoke_events.json"
+    if not events_path.exists():
+        return ()
+    payload = json.loads(events_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, list):
+        return ()
+    source_size = _reference_event_source_size(Path(cache_dir))
+    events = [
+        event
+        for item in payload
+        if isinstance(item, dict)
+        for event in (_coerce_reference_smoke_event(item, source_size),)
+        if event is not None
+    ]
+    return tuple(events)
+
+
+def make_observed_smoke_source(
+    args: argparse.Namespace,
+    map_size: tuple[int, int],
+    hrrr_guidance: HrrrSmokeGuidance | None,
+    *,
+    visible_frame_count: int,
+) -> ObservedSmokeSource:
+    requested = str(getattr(args, "observed_smoke_source", "auto"))
+    reference_film_target = bool(getattr(args, "layer_policy", {}).get("reference_film_target", False))
+    cache_dir = Path(getattr(args, "reference_smoke_cache", REFERENCE_EXACT_CACHE))
+    events: tuple[ReferenceSmokeEventState, ...] = ()
+    if requested == "reference-cache" or (requested == "auto" and reference_film_target):
+        events = load_reference_smoke_event_states(cache_dir)
+        if events:
+            return ObservedSmokeSource(
+                source_kind="reference-derived-events",
+                source_label=f"reference-derived smoke events ({len(events)} cached event windows)",
+                event_states=events,
+                cache_dir=str(cache_dir),
+                requested_source=requested,
+                timeline_frame_count=max(1, int(visible_frame_count)),
+                disclosure_label="Data: CAL FIRE perimeter, reference-derived smoke timing, procedural smoke opacity",
+                approximate=True,
+            )
+        if requested == "reference-cache":
+            raise RuntimeError(f"reference-cache observed smoke source requires {cache_dir / 'reference_smoke_events.json'}")
+
+    if hrrr_guidance is not None and requested in {"auto", "hrrr"}:
+        cadence = max(1.0, float(visible_frame_count) / max(len(hrrr_guidance.frames) - 1, 1))
+        return ObservedSmokeSource(
+            source_kind="hrrr-smoke",
+            source_label=hrrr_guidance.source_label,
+            frames=hrrr_guidance.frames,
+            requested_source=requested,
+            guidance_cadence_frames=cadence,
+            timeline_frame_count=max(1, int(visible_frame_count)),
+            disclosure_label="Data: CAL FIRE perimeter, HRRR-Smoke guidance",
+            approximate=False,
+        )
+    if requested == "hrrr":
+        raise RuntimeError("hrrr observed smoke source requested but no HRRR-Smoke guidance frames are available")
+
+    width, height = map(int, map_size)
+    return ObservedSmokeSource(
+        source_kind="procedural-fallback",
+        source_label=f"deterministic procedural regional smoke ribbons ({width}x{height})",
+        requested_source=requested,
+        guidance_cadence_frames=12.0,
+        timeline_frame_count=max(1, int(visible_frame_count)),
+        disclosure_label="Data: CAL FIRE perimeter, synthetic smoke field",
+        approximate=True,
+    )
+
+
+def observed_smoke_source_report(source: ObservedSmokeSource) -> dict[str, object]:
+    return {
+        "source_kind": source.source_kind,
+        "source_label": source.source_label,
+        "requested_source": source.requested_source,
+        "cache_dir": source.cache_dir,
+        "guidance_frame_count": len(source.frames),
+        "event_count": len(source.event_states),
+        "guidance_cadence_frames": float(source.guidance_cadence_frames),
+        "timeline_frame_count": int(source.timeline_frame_count),
+        "disclosure_label": source.disclosure_label,
+        "approximate": bool(source.approximate),
+        "events": [
+            {
+                "event_id": event.event_id,
+                "start_frame": int(event.start_frame),
+                "peak_frame": int(event.peak_frame),
+                "end_frame": int(event.end_frame),
+                "coverage_peak": float(event.coverage_peak),
+                "date_label": event.date_label,
+                "dominant_axis_degrees": float(event.dominant_axis_degrees),
+            }
+            for event in source.event_states[:12]
+        ],
+    }
 
 
 def _advected_smoke_texture(shape: tuple[int, int], frame_index: int, seed: int) -> np.ndarray:
@@ -1673,6 +2577,7 @@ def make_hybrid_smoke_sources(
     map_size: tuple[int, int],
     total_frames: int = 120,
     seed: int = HYBRID_SMOKE_SEED,
+    visible_start_frame: int = 0,
 ) -> list[HybridSmokeSource]:
     width, height = map(int, map_size)
     if width <= 8 or height <= 8:
@@ -1681,6 +2586,14 @@ def make_hybrid_smoke_sources(
     fire_x = float(fire_uv[0]) * (width - 1)
     fire_y = float(fire_uv[1]) * (height - 1)
     scale = min(width, height) / 408.0
+    visible_start = max(0, int(visible_start_frame))
+    visible_end = max(visible_start, int(total_frames) - 1)
+    visible_span = max(1, visible_end - visible_start + 1)
+    if visible_start > 0:
+        flame_end_min = max(visible_start - int(round(0.16 * visible_span)), 8)
+    else:
+        flame_end_min = max(12, int(round(0.42 * visible_span)))
+    flame_end_max = max(flame_end_min + 12, visible_start + int(round(0.92 * visible_span)))
     wind = np.array([1.0, -0.38], dtype=np.float32)
     wind /= max(float(np.linalg.norm(wind)), 1.0e-6)
     cross = np.array([-wind[1], wind[0]], dtype=np.float32)
@@ -1703,6 +2616,16 @@ def make_hybrid_smoke_sources(
             y = float(np.clip(center[1] + jitter[1], 3.0, height - 4.0))
             start_limit = max(1, min(30, int(total_frames * 0.24)))
             start_frame = 0 if source_index < 6 else int(rng.integers(0, start_limit))
+            flame_phase = float(rng.uniform(0.0, 1.0))
+            cluster_delay = min(0.16, cluster_index * 0.035)
+            flame_end = int(
+                round(
+                    flame_end_min
+                    + (flame_end_max - flame_end_min) * np.clip(flame_phase + cluster_delay, 0.0, 1.0)
+                )
+            )
+            flame_end = max(flame_end, start_frame + int(rng.integers(22, 46)))
+            smolder_tail = int(rng.integers(HYBRID_FIRE_SMOLDER_MIN_FRAMES, HYBRID_FIRE_SMOLDER_MAX_FRAMES + 1))
             radius = float(rng.uniform(4.2, 9.4) * scale * (0.92 + 0.20 * cluster_strength))
             strength = float(cluster_strength * rng.uniform(0.50, 1.08))
             burst_period = float(rng.uniform(32.0, 78.0))
@@ -1714,7 +2637,7 @@ def make_hybrid_smoke_sources(
                     strength=strength,
                     radius_px=max(1.8, radius),
                     start_frame=start_frame,
-                    end_frame=int(total_frames) + 300,
+                    end_frame=flame_end + smolder_tail,
                     seed=int(seed + source_index * 101 + cluster_index * 17),
                     burst_period_frames=burst_period,
                     burst_phase_frames=float(rng.uniform(0.0, burst_period)),
@@ -1722,6 +2645,7 @@ def make_hybrid_smoke_sources(
                     heat=float(np.clip(0.74 + 0.48 * cluster_strength + rng.normal(0.0, 0.10), 0.42, 1.55)),
                     smoke_rate=float(np.clip(0.72 + 0.38 * cluster_strength + rng.normal(0.0, 0.08), 0.44, 1.46)),
                     altitude_bias=altitude_bias,
+                    flame_end_frame=flame_end,
                 )
             )
             source_index += 1
@@ -1811,12 +2735,15 @@ def _hybrid_convective_uplift(
     for source in sources:
         if frame_index < source.start_frame or frame_index > source.end_frame:
             continue
+        flame = _source_flame_lifecycle_weight(source, int(frame_index))
+        if flame <= 0.01:
+            continue
         heat_radius = source.radius_px * heat_radius_multiplier
         dx = x - source.x
         dy = y - source.y
         dist_sq = dx * dx + dy * dy
         influence = np.exp(-dist_sq / (2.0 * heat_radius * heat_radius))
-        strength = source.strength * source.heat
+        strength = source.strength * source.heat * flame
         uplift -= influence * strength * max_uplift * scale  # negative = upward
     return uplift.astype(np.float32)
 
@@ -1875,6 +2802,51 @@ def _source_burst_envelope(source: HybridSmokeSource, frame_index: int) -> float
     return float(np.clip(0.06 + 1.62 * ember + 0.24 * surge * ember, 0.04, 1.92))
 
 
+def _source_flame_end_frame(source: HybridSmokeSource) -> int:
+    if source.flame_end_frame is None:
+        return int(source.end_frame)
+    return int(source.flame_end_frame)
+
+
+def _source_flame_lifecycle_weight(source: HybridSmokeSource, frame_index: int) -> float:
+    start = float(source.start_frame)
+    flame_end = float(_source_flame_end_frame(source))
+    frame = float(frame_index)
+    if frame < start or frame > flame_end + 8.0:
+        return 0.0
+    attack = float(_smoothstep(start, start + 5.0, frame))
+    fade = 1.0 - float(_smoothstep(flame_end - 9.0, flame_end + 6.0, frame))
+    return float(np.clip(attack * fade, 0.0, 1.0))
+
+
+def _source_smolder_lifecycle_weight(source: HybridSmokeSource, frame_index: int) -> float:
+    flame_end = float(_source_flame_end_frame(source))
+    end = float(max(source.end_frame, _source_flame_end_frame(source)))
+    frame = float(frame_index)
+    if frame < flame_end - 4.0 or frame > end:
+        return 0.0
+    rise = float(_smoothstep(flame_end - 4.0, flame_end + 10.0, frame))
+    fade = 1.0 - float(_smoothstep(end - 18.0, end + 1.0, frame))
+    return float(np.clip(rise * fade, 0.0, 1.0))
+
+
+def _source_smoke_activity_weight(source: HybridSmokeSource, frame_index: int) -> float:
+    flame = _source_flame_lifecycle_weight(source, frame_index)
+    smolder = _source_smolder_lifecycle_weight(source, frame_index)
+    return float(np.clip(max(flame, 0.36 * smolder), 0.0, 1.0))
+
+
+def _source_burn_scar_weight(source: HybridSmokeSource, frame_index: int) -> float:
+    frame = float(frame_index)
+    start = float(source.start_frame)
+    flame_end = float(_source_flame_end_frame(source))
+    if frame < start + 4.0:
+        return 0.0
+    burn_span = max(flame_end - start, 1.0)
+    scar_start = start + min(7.0, burn_span * 0.18)
+    return float(np.clip(_smoothstep(scar_start, flame_end + 18.0, frame), 0.0, 1.0))
+
+
 def _source_layer_weight(
     source: HybridSmokeSource,
     layer_index: int,
@@ -1911,6 +2883,9 @@ def _inject_hybrid_sources(
 
     for source_index, source in enumerate(sources):
         if frame_index < source.start_frame or frame_index > source.end_frame:
+            continue
+        source_activity = _source_smoke_activity_weight(source, frame_index)
+        if source_activity <= 0.01:
             continue
         layer_weight = _source_layer_weight(source, layer_index, layer_count)
         if layer_weight <= 0.012:
@@ -1993,7 +2968,7 @@ def _inject_hybrid_sources(
             + 0.0018 * (1.0 + 3.10 * altitude) * regional_sheet
             + 0.0220 * (1.0 + 0.48 * altitude) * (streamer_a + streamer_b)
         )
-        addition = (addition * burst * filament_gain * hole_cut).astype(np.float32)
+        addition = (addition * burst * source_activity * filament_gain * hole_cut).astype(np.float32)
         out_density[y0:y1, x0:x1] += addition
         plume_age = np.clip(
             6.5 + 14.0 * altitude + np.maximum(along, 0.0) / max(radius * (0.95 + 0.42 * altitude), 1.0),
@@ -2405,6 +3380,3795 @@ def composite_main_smoke_maps(
     return combined
 
 
+def _sample_float_field(field: np.ndarray, x: float, y: float) -> float:
+    sample_x = np.asarray([[float(x)]], dtype=np.float32)
+    sample_y = np.asarray([[float(y)]], dtype=np.float32)
+    return float(_bilinear_sample(field, sample_x, sample_y)[0, 0])
+
+
+def _copy_source_wisp_puff(puff: SourceWispPuff) -> SourceWispPuff:
+    return SourceWispPuff(
+        source_index=int(puff.source_index),
+        x=float(puff.x),
+        y=float(puff.y),
+        origin_x=float(puff.origin_x),
+        origin_y=float(puff.origin_y),
+        vx=float(puff.vx),
+        vy=float(puff.vy),
+        age_frames=float(puff.age_frames),
+        lifetime_frames=float(puff.lifetime_frames),
+        radius_px=float(puff.radius_px),
+        base_radius_px=float(puff.base_radius_px),
+        alpha=float(puff.alpha),
+        base_alpha=float(puff.base_alpha),
+        heat=float(puff.heat),
+        intensity=float(puff.intensity),
+        breakup_seed=int(puff.breakup_seed),
+        breakup_phase=float(puff.breakup_phase),
+    )
+
+
+class SourceWispSimulator:
+    """Small source-attached smoke puffs spawned from live flame and smolder sources."""
+
+    def __init__(
+        self,
+        map_size: tuple[int, int],
+        sources: list[HybridSmokeSource],
+        seed: int = HYBRID_SMOKE_SEED,
+        *,
+        max_particles: int = SOURCE_WISP_MAX_PARTICLES,
+        max_emitters: int = SOURCE_WISP_MAX_EMITTERS,
+        emit_interval_frames: int = SOURCE_WISP_EMIT_INTERVAL_FRAMES,
+        emitter_mode: str = "synthetic",
+    ) -> None:
+        width, height = map(int, map_size)
+        if width <= 8 or height <= 8:
+            raise ValueError("source wisp map must be larger than 8x8")
+        if emitter_mode not in SOURCE_WISP_EMITTER_MODES:
+            raise ValueError(f"source wisp emitter mode must be one of {SOURCE_WISP_EMITTER_MODES}")
+        self.map_size = (width, height)
+        self.shape = (height, width)
+        self.sources = list(sources)
+        self.seed = int(seed)
+        self.max_particles = max(0, int(max_particles))
+        self.max_emitters = max(0, int(max_emitters))
+        self.emit_interval_frames = max(1, int(emit_interval_frames))
+        self.emitter_mode = str(emitter_mode)
+        self.puffs: list[SourceWispPuff] = []
+        self.current_emitters: tuple[HybridSmokeSource, ...] = ()
+        self.frame_index = 0
+
+    def step(self, frame_index: int | None = None) -> SourceWispState:
+        frame = self.frame_index if frame_index is None else int(frame_index)
+        self.current_emitters = tuple(self._emitter_sources_for_frame(frame))
+        self._advect_puffs(frame)
+        self._spawn_puffs(frame)
+        self._trim_particles()
+        self.frame_index = frame + 1
+        return self.state()
+
+    def state(self) -> SourceWispState:
+        return SourceWispState(
+            puffs=tuple(_copy_source_wisp_puff(puff) for puff in self.puffs),
+            map_size=self.map_size,
+            emitters=tuple(self.current_emitters),
+        )
+
+    def _emitter_sources_for_frame(self, frame_index: int) -> list[HybridSmokeSource]:
+        if self.emitter_mode == "fire-core":
+            return fire_core_emitter_sources(
+                self.sources,
+                frame_index,
+                self.map_size,
+                max_emitters=max(self.max_emitters, 1),
+                seed=self.seed + 9137,
+            )
+        return list(self.sources)
+
+    def _advect_puffs(self, frame_index: int) -> None:
+        if not self.puffs:
+            return
+        height, width = self.shape
+        scale = min(width, height) / 408.0
+        low_u, low_v = _hybrid_wind_field(frame_index, self.shape, self.seed + 3607, layer_index=0)
+        high_layer = min(HYBRID_SMOKE_LAYER_COUNT - 1, 2)
+        high_u, high_v = _hybrid_wind_field(frame_index + 4.0, self.shape, self.seed + 4211, layer_index=high_layer)
+        kept: list[SourceWispPuff] = []
+        for puff in self.puffs:
+            lifetime = max(float(puff.lifetime_frames), 1.0)
+            age = float(puff.age_frames) + 1.0
+            age_frac = float(np.clip(age / lifetime, 0.0, 1.0))
+            if age >= lifetime:
+                continue
+
+            altitude_mix = float(_smoothstep(0.18, 0.84, age_frac))
+            vx = (1.0 - altitude_mix) * _sample_float_field(low_u, puff.x, puff.y) + altitude_mix * _sample_float_field(high_u, puff.x, puff.y)
+            vy = (1.0 - altitude_mix) * _sample_float_field(low_v, puff.x, puff.y) + altitude_mix * _sample_float_field(high_v, puff.x, puff.y)
+            wind_len = max(math.hypot(vx, vy), 1.0e-5)
+            cross_x = -vy / wind_len
+            cross_y = vx / wind_len
+            curl = math.sin(puff.breakup_phase + frame_index * 0.104 + age * 0.29)
+            tumble = math.sin(puff.breakup_phase * 1.7 + frame_index * 0.067 + age * 0.53)
+            buoyancy = (1.0 - float(_smoothstep(5.0, 26.0, age))) * (0.56 + 0.24 * puff.heat) * scale
+            shear = float(_smoothstep(9.0, lifetime * 0.72, age)) * (0.20 + 0.14 * puff.heat)
+            target_vx = vx * (0.22 + 0.18 * shear) + cross_x * curl * (0.34 + 0.18 * (1.0 - age_frac)) * scale
+            target_vy = vy * (0.20 + 0.22 * shear) + cross_y * tumble * 0.22 * scale - buoyancy
+            puff.vx = puff.vx * 0.54 + target_vx * 0.46
+            puff.vy = puff.vy * 0.54 + target_vy * 0.46
+            puff.x += puff.vx
+            puff.y += puff.vy
+            puff.age_frames = age
+            puff.radius_px = max(
+                SOURCE_WISP_MIN_RADIUS_PX * scale,
+                puff.base_radius_px * (1.0 + 2.10 * (age_frac ** 0.72)),
+            )
+            puff.alpha = puff.base_alpha * ((1.0 - age_frac) ** 1.32) * (1.0 - 0.14 * float(_smoothstep(0.54, 0.96, age_frac)))
+            margin = max(12.0, 28.0 * scale)
+            if puff.alpha > 0.9 and -margin <= puff.x <= width + margin and -margin <= puff.y <= height + margin:
+                kept.append(puff)
+        self.puffs = kept
+
+    def _spawn_puffs(self, frame_index: int) -> None:
+        if self.max_particles <= 0 or self.max_emitters <= 0:
+            return
+        emission_frame = int(frame_index) - SOURCE_WISP_SOURCE_DELAY_FRAMES
+        if emission_frame < 0:
+            return
+        height, width = self.shape
+        scale = min(width, height) / 408.0
+        wind = _hybrid_layer_wind_vector(0)
+        cross = np.array([-wind[1], wind[0]], dtype=np.float32)
+        emitters = self._emitter_sources_for_frame(emission_frame)
+        candidates: list[tuple[float, int, HybridSmokeSource, float, float]] = []
+        for source_index, source in enumerate(emitters):
+            if emission_frame < source.start_frame or emission_frame > source.end_frame:
+                continue
+            if (frame_index + source.seed) % self.emit_interval_frames != 0:
+                continue
+            flame = _source_flame_lifecycle_weight(source, emission_frame)
+            smolder = _source_smolder_lifecycle_weight(source, emission_frame)
+            if flame <= 0.018 and smolder <= 0.05:
+                continue
+            burst = _source_burst_envelope(source, emission_frame)
+            flame_signal = source.strength * source.heat * source.smoke_rate * flame
+            smolder_signal = source.strength * source.smoke_rate * smolder * 0.22
+            intensity = (flame_signal + smolder_signal) * (0.62 + 0.38 * burst)
+            if intensity <= 0.018:
+                continue
+            candidates.append((float(intensity), source_index, source, float(flame), float(smolder)))
+        if not candidates:
+            return
+        candidates.sort(key=lambda item: (item[0], item[2].heat, -item[1]), reverse=True)
+        selected = candidates[: self.max_emitters]
+        rng = np.random.default_rng(self.seed + frame_index * 173)
+        for intensity, source_index, source, flame, smolder in selected:
+            if len(self.puffs) >= self.max_particles:
+                break
+            spawn_count = 1 + int(intensity > 0.88 and flame > 0.20 and (frame_index + source_index) % 4 == 0)
+            for _ in range(spawn_count):
+                if len(self.puffs) >= self.max_particles:
+                    break
+                local_rng = np.random.default_rng(source.seed + frame_index * 379 + source_index * 47 + len(self.puffs))
+                lateral = float(local_rng.normal(0.0, 0.34 * max(source.radius_px, 1.0)))
+                along = float(local_rng.normal(0.10 * source.radius_px, 0.22 * max(source.radius_px, 1.0)))
+                lift = float(local_rng.uniform(0.20, 0.70) * source.radius_px)
+                x = float(np.clip(source.x + cross[0] * lateral + wind[0] * along, 1.0, width - 2.0))
+                y = float(np.clip(source.y + cross[1] * lateral + wind[1] * along - lift, 1.0, height - 2.0))
+                base_radius = max(SOURCE_WISP_MIN_RADIUS_PX * scale, source.radius_px * float(local_rng.uniform(0.085, 0.17)))
+                lifetime_lo, lifetime_hi = SOURCE_WISP_LIFETIME_FRAMES
+                lifetime = float(local_rng.integers(lifetime_lo, lifetime_hi + 1))
+                lifetime *= float(np.clip(0.86 + 0.22 * source.heat + 0.10 * rng.random(), 0.78, 1.22))
+                source_alpha = 30.0 + 66.0 * float(np.clip(intensity, 0.0, 1.25))
+                source_alpha *= 0.66 + 0.34 * flame + 0.10 * smolder
+                base_alpha = float(np.clip(source_alpha, 18.0, SOURCE_WISP_MAX_ALPHA))
+                initial_vx = float(wind[0] * 0.18 * scale + cross[0] * local_rng.normal(0.0, 0.06 * scale))
+                initial_vy = float(wind[1] * 0.12 * scale - (0.34 + 0.16 * source.heat) * scale)
+                self.puffs.append(
+                    SourceWispPuff(
+                        source_index=source_index,
+                        x=x,
+                        y=y,
+                        origin_x=float(source.x),
+                        origin_y=float(source.y),
+                        vx=initial_vx,
+                        vy=initial_vy,
+                        age_frames=0.0,
+                        lifetime_frames=lifetime,
+                        radius_px=base_radius,
+                        base_radius_px=base_radius,
+                        alpha=base_alpha,
+                        base_alpha=base_alpha,
+                        heat=float(source.heat),
+                        intensity=float(intensity),
+                        breakup_seed=int(source.seed + frame_index * 31 + source_index * 101),
+                        breakup_phase=float(local_rng.uniform(0.0, math.tau)),
+                    )
+                )
+
+    def _trim_particles(self) -> None:
+        if len(self.puffs) <= self.max_particles:
+            return
+        self.puffs.sort(
+            key=lambda puff: (
+                puff.alpha * (1.0 - float(np.clip(puff.age_frames / max(puff.lifetime_frames, 1.0), 0.0, 1.0))),
+                -puff.age_frames,
+            ),
+            reverse=True,
+        )
+        del self.puffs[self.max_particles :]
+
+
+def source_wisps_rgba(
+    state: SourceWispState,
+    frame_index: int,
+    *,
+    seed: int = HYBRID_SMOKE_SEED,
+    alpha_scale: float = 1.0,
+    plume_ribbons: bool = True,
+) -> np.ndarray:
+    width, height = map(int, state.map_size)
+    rgb_premul = np.zeros((height, width, 3), dtype=np.float32)
+    alpha_accum = np.zeros((height, width), dtype=np.float32)
+    if not state.puffs:
+        return np.zeros((height, width, 4), dtype=np.uint8)
+    texture = _advected_smoke_texture((height, width), frame_index, seed + 7043)
+    fine_texture = texture - _pil_blur_float(texture, max(0.8, min(width, height) / 260.0))
+    wind = _hybrid_layer_wind_vector(0)
+    scale = min(width, height) / 408.0
+
+    for puff in state.puffs:
+        if puff.alpha <= 0.8:
+            continue
+        lifetime = max(float(puff.lifetime_frames), 1.0)
+        age_frac = float(np.clip(puff.age_frames / lifetime, 0.0, 1.0))
+        motion = np.array(
+            [
+                puff.x - puff.origin_x + puff.vx * 3.4 + wind[0] * (1.0 + 3.6 * age_frac) * scale,
+                puff.y - puff.origin_y + puff.vy * 3.4 + wind[1] * (1.0 + 3.6 * age_frac) * scale,
+            ],
+            dtype=np.float32,
+        )
+        norm = float(np.linalg.norm(motion))
+        if norm < 1.0e-4:
+            axis = np.array([wind[0], wind[1] - 0.22], dtype=np.float32)
+            axis /= max(float(np.linalg.norm(axis)), 1.0e-6)
+        else:
+            axis = motion / norm
+        cross = np.array([-axis[1], axis[0]], dtype=np.float32)
+        radius = max(float(puff.radius_px), SOURCE_WISP_MIN_RADIUS_PX * scale)
+        plume_t = float(_smoothstep(0.28, 0.90, age_frac)) if plume_ribbons else 0.0
+        old_t = float(_smoothstep(0.50, 0.96, age_frac)) if plume_ribbons else 0.0
+        strand_len = max(
+            radius * 2.8,
+            radius * (4.2 + 10.8 * age_frac + 4.2 * plume_t) + math.hypot(puff.vx, puff.vy) * 2.2,
+        )
+        strand_width = max(
+            SOURCE_WISP_MIN_RADIUS_PX * scale * 0.58,
+            radius * (0.22 + 0.62 * age_frac + 0.38 * plume_t),
+        )
+        pad = int(math.ceil(strand_len + strand_width * 5.0 + 3.0))
+        x0 = max(0, int(math.floor(puff.x - pad)))
+        x1 = min(width, int(math.ceil(puff.x + pad)))
+        y0 = max(0, int(math.floor(puff.y - pad)))
+        y1 = min(height, int(math.ceil(puff.y + pad)))
+        if x0 >= x1 or y0 >= y1:
+            continue
+        yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
+        dx = xx - np.float32(puff.x)
+        dy = yy - np.float32(puff.y)
+        along = dx * axis[0] + dy * axis[1]
+        lateral = dx * cross[0] + dy * cross[1]
+        curl = strand_width * (
+            0.80 * (1.0 - age_frac) * np.sin(along / max(strand_len * 0.42, 1.0) + puff.breakup_phase + frame_index * 0.042)
+            + 0.38 * np.sin(along / max(strand_len * 0.24, 1.0) + puff.breakup_phase * 1.9)
+        )
+        core = np.exp(
+            -((along + strand_len * 0.12) ** 2) / (2.0 * strand_len * strand_len + 1.0e-6)
+            -((lateral - curl) ** 2) / (2.0 * strand_width * strand_width + 1.0e-6)
+        )
+        source_gate = _smoothstep(-strand_len * 0.78, -strand_len * 0.12, along)
+        head_gate = 1.0 - _smoothstep(strand_len * 0.46, strand_len * 0.92, along)
+        strand = core * np.maximum(source_gate, 0.36) * head_gate
+        tex = texture[y0:y1, x0:x1]
+        fine = fine_texture[y0:y1, x0:x1]
+        striation = 0.5 + 0.5 * np.sin(
+            lateral / max(strand_width * 0.96, 1.0)
+            + along / max(strand_len * 0.22, 1.0)
+            + puff.breakup_phase
+            + frame_index * 0.033
+        )
+        erosion_noise = np.clip(tex * 0.54 + striation * 0.34 + fine * 0.24 + 0.10, 0.0, 1.0)
+        erosion = _smoothstep(0.50 - 0.16 * age_frac, 0.95, erosion_noise)
+        fragment = 1.0 - (0.26 + 0.64 * age_frac) * erosion * _smoothstep(0.10, 0.76, strand)
+        filament_gain = np.clip(0.68 + 0.44 * striation + 0.26 * fine, 0.26, 1.20)
+        brush_limiter = 1.0 - 0.42 * old_t
+        wisp_alpha = (
+            strand
+            * fragment
+            * filament_gain
+            * float(puff.alpha)
+            * float(alpha_scale)
+            * brush_limiter
+            * (1.0 - 0.18 * float(_smoothstep(0.72, 0.98, age_frac)))
+        )
+        if plume_ribbons and plume_t > 0.0:
+            ribbon_len = strand_len * (1.10 + 0.78 * plume_t)
+            ribbon_along_t = np.clip((along + ribbon_len * 0.42) / max(ribbon_len * 1.42, 1.0), 0.0, 1.0)
+            endpoint_fade = (
+                _smoothstep(-ribbon_len * 0.50, -ribbon_len * 0.12, along)
+                * (1.0 - _smoothstep(ribbon_len * 0.38, ribbon_len * 0.98, along))
+            )
+            ribbon_width = strand_width * (1.32 + 3.45 * plume_t * (0.18 + ribbon_along_t**0.88))
+            ribbon_curl = curl + ribbon_width * (
+                0.20 * np.sin(along / max(ribbon_len * 0.30, 1.0) + puff.breakup_phase * 1.37)
+                + 0.13 * np.sin(along / max(ribbon_len * 0.15, 1.0) + frame_index * 0.023)
+            )
+            ribbon_body = np.exp(
+                -((lateral - ribbon_curl) ** 2) / (2.0 * ribbon_width * ribbon_width + 1.0e-6)
+            )
+            edge_noise = np.clip(
+                tex * 0.38
+                + fine * 0.24
+                + 0.22
+                + 0.16
+                * np.sin(
+                    lateral / max(strand_width * 1.8, 1.0)
+                    - along / max(ribbon_len * 0.16, 1.0)
+                    + puff.breakup_phase * 0.73
+                ),
+                0.0,
+                1.0,
+            )
+            holes = 1.0 - (0.22 + 0.48 * plume_t) * _smoothstep(0.50, 0.92, edge_noise) * _smoothstep(
+                0.16, 0.84, ribbon_along_t
+            )
+            ribbon_filaments = np.clip(
+                0.62
+                + 0.28
+                * np.sin(
+                    lateral / max(strand_width * 0.90, 1.0)
+                    + along / max(ribbon_len * 0.22, 1.0)
+                    + puff.breakup_phase
+                )
+                + 0.18 * fine,
+                0.22,
+                1.10,
+            )
+            ribbon_source_alpha = min(
+                float(puff.base_alpha) * ((1.0 - age_frac) ** 0.92),
+                float(puff.alpha) * 1.32,
+            )
+            ribbon_alpha = (
+                ribbon_body
+                * endpoint_fade
+                * holes
+                * ribbon_filaments
+                * ribbon_source_alpha
+                * (0.14 + 0.22 * plume_t)
+                * float(alpha_scale)
+            )
+            ribbon_alpha = np.clip(ribbon_alpha, 0.0, 48.0)
+            wisp_alpha = np.clip(wisp_alpha + ribbon_alpha * (1.0 - wisp_alpha / 255.0), 0.0, SOURCE_WISP_MAX_ALPHA)
+        wisp_alpha = np.clip(wisp_alpha, 0.0, SOURCE_WISP_MAX_ALPHA)
+        wisp_alpha = np.where(wisp_alpha >= 1.2, wisp_alpha, 0.0)
+        if not np.any(wisp_alpha > 0.0):
+            continue
+
+        fresh_color = np.array([240.0, 235.0, 217.0], dtype=np.float32)
+        milk_color = np.array([198.0, 204.0, 202.0], dtype=np.float32)
+        old_color = np.array([118.0, 130.0, 144.0], dtype=np.float32)
+        warm_light = np.array([20.0, 12.0, 0.0], dtype=np.float32) * (1.0 - age_frac) * min(puff.heat, 1.45)
+        cool_t = float(_smoothstep(0.46, 0.96, age_frac))
+        mid_t = float(_smoothstep(0.10, 0.64, age_frac))
+        rgb = fresh_color * (1.0 - mid_t) + milk_color * mid_t
+        rgb = rgb * (1.0 - cool_t) + old_color * cool_t
+        rgb = rgb + warm_light
+        rgb = np.clip(rgb, 0.0, 246.0) / 255.0
+
+        a = np.clip(wisp_alpha / 255.0, 0.0, 1.0).astype(np.float32)
+        existing_a = alpha_accum[y0:y1, x0:x1]
+        existing_rgb = rgb_premul[y0:y1, x0:x1]
+        top_rgb = rgb[None, None, :] * a[..., None]
+        rgb_premul[y0:y1, x0:x1] = top_rgb + existing_rgb * (1.0 - a[..., None])
+        alpha_accum[y0:y1, x0:x1] = a + existing_a * (1.0 - a)
+
+    rgba = np.zeros((height, width, 4), dtype=np.uint8)
+    rgb_unpremul = np.divide(
+        rgb_premul,
+        alpha_accum[..., None],
+        out=np.zeros_like(rgb_premul),
+        where=alpha_accum[..., None] > 1.0e-6,
+    )
+    rgba[..., :3] = np.clip(np.round(rgb_unpremul * 255.0), 0.0, 255.0).astype(np.uint8)
+    rgba[..., 3] = np.clip(np.round(alpha_accum * 255.0), 0.0, SOURCE_WISP_MAX_ALPHA).astype(np.uint8)
+    return rgba
+
+
+def _source_wisp_age_fraction(puff: SourceWispPuff) -> float:
+    return float(np.clip(float(puff.age_frames) / max(float(puff.lifetime_frames), 1.0), 0.0, 1.0))
+
+
+def _source_wisp_age_band_state(
+    state: SourceWispState,
+    age_min: float,
+    age_max: float,
+) -> SourceWispState:
+    puffs = tuple(
+        puff for puff in state.puffs
+        if float(age_min) <= _source_wisp_age_fraction(puff) < float(age_max)
+    )
+    return SourceWispState(puffs=puffs, map_size=state.map_size, emitters=state.emitters)
+
+
+def _weighted_percentile(values: np.ndarray, weights: np.ndarray, percentile: float) -> float:
+    flat_values = np.asarray(values, dtype=np.float32).reshape(-1)
+    flat_weights = np.clip(np.asarray(weights, dtype=np.float32).reshape(-1), 0.0, None)
+    valid = np.isfinite(flat_values) & np.isfinite(flat_weights) & (flat_weights > 0.0)
+    if not np.any(valid):
+        return 0.0
+    flat_values = flat_values[valid]
+    flat_weights = flat_weights[valid]
+    order = np.argsort(flat_values)
+    sorted_values = flat_values[order]
+    sorted_weights = flat_weights[order]
+    cumulative = np.cumsum(sorted_weights)
+    target = float(np.clip(percentile, 0.0, 100.0)) * 0.01 * float(cumulative[-1])
+    index = int(np.searchsorted(cumulative, target, side="left"))
+    index = min(max(index, 0), len(sorted_values) - 1)
+    return float(sorted_values[index])
+
+
+def _component_labels(mask: np.ndarray) -> tuple[np.ndarray, int]:
+    binary = np.asarray(mask, dtype=bool)
+    if not np.any(binary):
+        return np.zeros(binary.shape, dtype=np.int32), 0
+    try:
+        from scipy import ndimage  # type: ignore
+
+        labels, count = ndimage.label(binary)
+        return labels.astype(np.int32, copy=False), int(count)
+    except Exception:
+        labels = np.zeros(binary.shape, dtype=np.int32)
+        height, width = binary.shape
+        count = 0
+        for y0, x0 in np.argwhere(binary):
+            if labels[int(y0), int(x0)] != 0:
+                continue
+            count += 1
+            stack = [(int(y0), int(x0))]
+            labels[int(y0), int(x0)] = count
+            while stack:
+                y, x = stack.pop()
+                for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                    if 0 <= ny < height and 0 <= nx < width and binary[ny, nx] and labels[ny, nx] == 0:
+                        labels[ny, nx] = count
+                        stack.append((ny, nx))
+        return labels, count
+
+
+def _smoke_alpha_region_percentiles(alpha: np.ndarray) -> dict[str, float]:
+    values = np.asarray(alpha, dtype=np.float32)
+    smoke = values[values > 1.5]
+    if smoke.size == 0:
+        return {
+            "smoke_region_alpha_p50": 0.0,
+            "smoke_region_alpha_p90": 0.0,
+            "smoke_region_alpha_p95": 0.0,
+        }
+    return {
+        "smoke_region_alpha_p50": float(np.percentile(smoke, 50.0)),
+        "smoke_region_alpha_p90": float(np.percentile(smoke, 90.0)),
+        "smoke_region_alpha_p95": float(np.percentile(smoke, 95.0)),
+    }
+
+
+def _alpha_band_morphology_metrics(alpha: np.ndarray, screen_wind: np.ndarray) -> dict[str, float]:
+    values = np.asarray(alpha, dtype=np.float32)
+    mask = values > 2.0
+    if values.ndim != 2 or not np.any(mask):
+        return {
+            "coverage_fraction": 0.0,
+            "component_count": 0.0,
+            "width_px": 0.0,
+            "length_px": 0.0,
+            "alpha_p50": 0.0,
+            "alpha_p90": 0.0,
+            "alpha_p95": 0.0,
+            "endpoint_alpha": 0.0,
+            "edge_softness_px": 0.0,
+            "diffuse_to_core_area_ratio": 0.0,
+            "hard_endpoint_fraction": 0.0,
+        }
+    height, width = values.shape
+    wind = np.asarray(screen_wind, dtype=np.float32)
+    wind /= max(float(np.linalg.norm(wind)), 1.0e-6)
+    cross = np.array([-wind[1], wind[0]], dtype=np.float32)
+    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+    along_all = xx * wind[0] + yy * wind[1]
+    lateral_all = xx * cross[0] + yy * cross[1]
+    labels, count = _component_labels(mask)
+    widths: list[float] = []
+    lengths: list[float] = []
+    endpoint_alphas: list[float] = []
+    endpoint_weights: list[float] = []
+    edge_softness_values: list[float] = []
+    edge_weights: list[float] = []
+    diffuse_area = 0.0
+    core_area = 0.0
+    hard_endpoint_area = 0.0
+    endpoint_area = 0.0
+    kept_components = 0
+    for label in range(1, count + 1):
+        comp = labels == label
+        area = int(np.count_nonzero(comp))
+        if area < 4:
+            continue
+        kept_components += 1
+        comp_alpha = values[comp]
+        comp_weights = np.maximum(comp_alpha, 1.0)
+        comp_lateral = lateral_all[comp]
+        comp_along = along_all[comp]
+        comp_width = max(
+            0.0,
+            _weighted_percentile(comp_lateral, comp_weights, 90.0)
+            - _weighted_percentile(comp_lateral, comp_weights, 10.0),
+        )
+        comp_length = max(
+            0.0,
+            _weighted_percentile(comp_along, comp_weights, 95.0)
+            - _weighted_percentile(comp_along, comp_weights, 5.0),
+        )
+        comp_p90 = float(np.percentile(comp_alpha, 90.0))
+        endpoint_cut = _weighted_percentile(comp_along, comp_weights, 84.0)
+        endpoint = comp & (along_all >= endpoint_cut)
+        endpoint_values = values[endpoint]
+        endpoint_mean = float(np.mean(endpoint_values)) if endpoint_values.size else 0.0
+        diffuse_hi = max(5.0, comp_p90 * 0.48)
+        core_lo = max(10.0, comp_p90 * 0.66)
+        diffuse_count = float(np.count_nonzero((comp_alpha > 2.0) & (comp_alpha <= diffuse_hi)))
+        core_count = float(np.count_nonzero(comp_alpha >= core_lo))
+        diffuse_area += diffuse_count
+        core_area += core_count
+        endpoint_area += float(endpoint_values.size)
+        if endpoint_values.size:
+            hard_endpoint_area += float(np.count_nonzero(endpoint_values >= max(16.0, comp_p90 * 0.72)))
+        edge_ratio = diffuse_count / max(core_count, 1.0)
+        edge_softness = min(max(comp_width, 0.0), max(0.0, edge_ratio * max(comp_width, 1.0) * 0.34))
+        widths.append(comp_width)
+        lengths.append(comp_length)
+        endpoint_alphas.append(endpoint_mean)
+        endpoint_weights.append(float(max(endpoint_values.size, 1)))
+        edge_softness_values.append(edge_softness)
+        edge_weights.append(float(area))
+
+    smoke_values = values[mask]
+    area_weights = np.asarray(edge_weights, dtype=np.float32)
+    if not widths or area_weights.size == 0:
+        mean_width = mean_length = endpoint_alpha = edge_softness = 0.0
+    else:
+        widths_a = np.asarray(widths, dtype=np.float32)
+        lengths_a = np.asarray(lengths, dtype=np.float32)
+        endpoint_a = np.asarray(endpoint_alphas, dtype=np.float32)
+        endpoint_w = np.asarray(endpoint_weights, dtype=np.float32)
+        edge_a = np.asarray(edge_softness_values, dtype=np.float32)
+        mean_width = float(np.sum(widths_a * area_weights) / max(float(np.sum(area_weights)), 1.0e-6))
+        mean_length = float(np.sum(lengths_a * area_weights) / max(float(np.sum(area_weights)), 1.0e-6))
+        endpoint_alpha = float(np.sum(endpoint_a * endpoint_w) / max(float(np.sum(endpoint_w)), 1.0e-6))
+        edge_softness = float(np.sum(edge_a * area_weights) / max(float(np.sum(area_weights)), 1.0e-6))
+    return {
+        "coverage_fraction": float(np.count_nonzero(mask) / max(values.size, 1)),
+        "component_count": float(kept_components),
+        "width_px": mean_width,
+        "length_px": mean_length,
+        "alpha_p50": float(np.percentile(smoke_values, 50.0)),
+        "alpha_p90": float(np.percentile(smoke_values, 90.0)),
+        "alpha_p95": float(np.percentile(smoke_values, 95.0)),
+        "endpoint_alpha": endpoint_alpha,
+        "edge_softness_px": edge_softness,
+        "diffuse_to_core_area_ratio": float(diffuse_area / max(core_area, 1.0)),
+        "hard_endpoint_fraction": float(hard_endpoint_area / max(endpoint_area, 1.0)),
+    }
+
+
+def source_wisp_morphology_report(
+    state: SourceWispState | None,
+    frame_index: int,
+    plate: TerrainPlate,
+    output_size: tuple[int, int],
+    *,
+    seed: int = HYBRID_SMOKE_SEED,
+    plume_ribbons: bool = True,
+    warped_wisps: np.ndarray | None = None,
+) -> dict[str, float]:
+    report = {
+        "morphology_stage_coverage_fraction": 0.0,
+        "fresh_stem_width_px": 0.0,
+        "transition_plume_width_px": 0.0,
+        "old_tail_width_px": 0.0,
+        "transition_width_growth_ratio": 0.0,
+        "old_tail_width_growth_ratio": 0.0,
+        "old_tail_alpha_p90_fraction": 0.0,
+        "old_tail_endpoint_alpha_fraction": 0.0,
+        "old_tail_coverage_growth_ratio": 0.0,
+        "old_tail_edge_softness_px": 0.0,
+        "old_tail_diffuse_to_core_area_ratio": 0.0,
+        "old_tail_hard_endpoint_fraction": 0.0,
+        "brush_bundle_score": 1.0,
+        "smoke_region_alpha_p50": 0.0,
+        "smoke_region_alpha_p90": 0.0,
+        "smoke_region_alpha_p95": 0.0,
+    }
+    if state is None or not state.puffs:
+        return report
+    screen_wind = _screen_wind_vector(plate, state.map_size)
+    if warped_wisps is None:
+        all_wisps = source_wisps_rgba(state, frame_index, seed=seed, plume_ribbons=plume_ribbons)
+        warped_wisps = np.asarray(warp_map_layer_to_plate(all_wisps, plate, output_size), dtype=np.uint8)
+    report.update(_smoke_alpha_region_percentiles(np.asarray(warped_wisps, dtype=np.uint8)[..., 3]))
+
+    band_metrics: dict[str, dict[str, float]] = {}
+    for band_name, (age_min, age_max) in SOURCE_WISP_AGE_BANDS.items():
+        band_state = _source_wisp_age_band_state(state, age_min, age_max)
+        if not band_state.puffs:
+            metrics = _alpha_band_morphology_metrics(np.zeros((output_size[1], output_size[0]), dtype=np.float32), screen_wind)
+        else:
+            band_rgba = source_wisps_rgba(
+                band_state,
+                frame_index,
+                seed=seed,
+                plume_ribbons=plume_ribbons,
+            )
+            warped_band = np.asarray(warp_map_layer_to_plate(band_rgba, plate, output_size), dtype=np.uint8)
+            metrics = _alpha_band_morphology_metrics(warped_band[..., 3].astype(np.float32), screen_wind)
+        band_metrics[band_name] = metrics
+        for metric_name, value in metrics.items():
+            report[f"{band_name}_{metric_name}"] = float(value)
+
+    fresh = band_metrics["fresh_stem"]
+    transition = band_metrics["transition_plume"]
+    old = band_metrics["old_tail"]
+    fresh_width = max(float(fresh["width_px"]), 1.0e-6)
+    transition_width = float(transition["width_px"])
+    old_width = float(old["width_px"])
+    fresh_alpha = max(float(fresh["alpha_p90"]), 1.0)
+    transition_ratio = transition_width / fresh_width
+    old_ratio = old_width / fresh_width
+    old_alpha_fraction = float(old["alpha_p90"]) / fresh_alpha
+    old_endpoint_fraction = float(old["endpoint_alpha"]) / fresh_alpha
+    coverage_growth = float(old["coverage_fraction"]) / max(float(fresh["coverage_fraction"]), 1.0e-6)
+    diffuse_ratio = float(old["diffuse_to_core_area_ratio"])
+    brush_score = (
+        0.52 * float(1.0 / max(coverage_growth, 0.05))
+        + 0.28 * float(fresh_width / max(old_width, fresh_width * 0.18))
+        + 0.20 * old_endpoint_fraction
+    )
+    report.update(
+        {
+            "morphology_stage_coverage_fraction": float(
+                min(
+                    fresh["coverage_fraction"],
+                    transition["coverage_fraction"],
+                    old["coverage_fraction"],
+                )
+            ),
+            "fresh_stem_width_px": float(fresh_width),
+            "transition_plume_width_px": float(transition_width),
+            "old_tail_width_px": float(old_width),
+            "transition_width_growth_ratio": float(transition_ratio),
+            "old_tail_width_growth_ratio": float(old_ratio),
+            "old_tail_alpha_p90_fraction": float(old_alpha_fraction),
+            "old_tail_endpoint_alpha_fraction": float(old_endpoint_fraction),
+            "old_tail_coverage_growth_ratio": float(coverage_growth),
+            "old_tail_edge_softness_px": float(old["edge_softness_px"]),
+            "old_tail_diffuse_to_core_area_ratio": float(diffuse_ratio),
+            "old_tail_hard_endpoint_fraction": float(old["hard_endpoint_fraction"]),
+            "brush_bundle_score": float(brush_score),
+        }
+    )
+    return report
+
+
+def composite_source_wisps(base: Image.Image, wisp_layer: Image.Image) -> Image.Image:
+    base_arr = np.asarray(base.convert("RGBA"), dtype=np.float32)
+    wisp_arr = np.asarray(wisp_layer.convert("RGBA"), dtype=np.float32)
+    alpha = np.clip(wisp_arr[..., 3:4] / 255.0, 0.0, 1.0)
+    if not np.any(alpha > 0.0):
+        return base.copy()
+    terrain = base_arr[..., :3] / 255.0
+    smoke = wisp_arr[..., :3] / 255.0
+    warm_signal = np.clip((terrain[..., 0:1] - terrain[..., 2:3]) * 1.35 + (terrain[..., 1:2] - terrain[..., 2:3]) * 0.22, 0.0, 1.0)
+    fire_lift = np.array([1.0, 0.62, 0.24], dtype=np.float32)[None, None, :] * warm_signal * alpha * 0.32
+    lit_smoke = np.clip(smoke + fire_lift, 0.0, 1.0)
+    optical = alpha ** 0.88
+    out_rgb = terrain * (1.0 - optical * 0.78) + lit_smoke * optical * 0.92
+    out_rgb += terrain * warm_signal * alpha * 0.10
+    out = base_arr.copy()
+    out[..., :3] = np.clip(np.round(out_rgb * 255.0), 0.0, 255.0)
+    out[..., 3] = 255.0
+    return Image.fromarray(out.astype(np.uint8), mode="RGBA")
+
+
+def source_wisp_attachment_report(
+    wisp_rgba: np.ndarray,
+    sources: list[HybridSmokeSource],
+    frame_index: int,
+) -> dict[str, float]:
+    alpha = np.asarray(wisp_rgba, dtype=np.uint8)[..., 3].astype(np.float32)
+    active_sources = [
+        source for source in sources
+        if _source_flame_lifecycle_weight(source, frame_index) > 0.04
+    ]
+    report = {
+        "active_source_count": float(len(active_sources)),
+        "attached_source_count": 0.0,
+        "coverage_fraction": float(np.count_nonzero(alpha > 0.0) / max(alpha.size, 1)),
+        "downwind_dx": 0.0,
+        "downwind_dy": 0.0,
+    }
+    if not active_sources or not np.any(alpha > 0.0):
+        return report
+    height, width = alpha.shape
+    wind = _hybrid_layer_wind_vector(0)
+    cross = np.array([-wind[1], wind[0]], dtype=np.float32)
+    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+    alpha_sum = max(float(np.sum(alpha)), 1.0e-6)
+    source_weights = np.asarray([max(source.strength * source.heat, 0.01) for source in active_sources], dtype=np.float32)
+    source_total = max(float(np.sum(source_weights)), 1.0e-6)
+    source_x = float(np.sum(np.asarray([source.x for source in active_sources], dtype=np.float32) * source_weights) / source_total)
+    source_y = float(np.sum(np.asarray([source.y for source in active_sources], dtype=np.float32) * source_weights) / source_total)
+    report["downwind_dx"] = float(np.sum(xx * alpha) / alpha_sum - source_x)
+    report["downwind_dy"] = float(np.sum(yy * alpha) / alpha_sum - source_y)
+    attached = 0
+    for source in active_sources:
+        dx = xx - np.float32(source.x)
+        dy = yy - np.float32(source.y)
+        along = dx * wind[0] + dy * wind[1]
+        lateral = dx * cross[0] + dy * cross[1]
+        radius = max(float(source.radius_px) * 5.5, 5.0)
+        mask = (along > -float(source.radius_px) * 2.0) & (along < radius * 2.8) & (np.abs(lateral) < radius)
+        if np.count_nonzero(alpha[mask] > 5.0) >= 3:
+            attached += 1
+    report["attached_source_count"] = float(attached)
+    return report
+
+
+def _audit_frame_indexes(frame_count: int, fps: int, times: tuple[float, ...] | list[float]) -> dict[int, float]:
+    indexes: dict[int, float] = {}
+    for time_s in times:
+        idx = int(np.clip(round(float(time_s) * max(int(fps), 1)), 0, max(int(frame_count) - 1, 0)))
+        indexes[idx] = float(time_s)
+    return indexes
+
+
+def _reference_film_audit_frame_indexes(frame_count: int, fps: int) -> dict[int, float]:
+    last_time = max(float(frame_count - 1) / max(float(fps), 1.0), 0.0)
+    times = [time_s for time_s in REFERENCE_FILM_CONTACT_SHEET_TIMES if float(time_s) <= last_time + 1.0e-6]
+    if not times:
+        times = [0.0]
+    return _audit_frame_indexes(frame_count, fps, times)
+
+
+def _quad_area_fraction(quad: list[tuple[float, float]], output_size: tuple[int, int]) -> float:
+    if len(quad) < 3:
+        return 0.0
+    pts = np.asarray(quad, dtype=np.float64)
+    x = pts[:, 0]
+    y = pts[:, 1]
+    area = 0.5 * abs(float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
+    width, height = map(float, output_size)
+    return float(area / max(width * height, 1.0))
+
+
+def _frame_label_time(frame_time: float) -> str:
+    return f"{float(frame_time):04.1f}s".replace(".", "p")
+
+
+def _draw_label_bar(image: Image.Image, label: str) -> Image.Image:
+    labeled = Image.new("RGBA", (image.width, image.height + 28), (12, 14, 16, 255))
+    labeled.alpha_composite(image.convert("RGBA"), (0, 28))
+    draw = ImageDraw.Draw(labeled, "RGBA")
+    draw.rectangle((0, 0, image.width, 28), fill=(18, 21, 23, 255))
+    draw.text((9, 7), label, fill=(226, 229, 224, 255), font=load_font(13, bold=True))
+    return labeled
+
+
+def _compose_labeled_sheet(items: list[tuple[str, Image.Image]], columns: int = 2) -> Image.Image:
+    if not items:
+        return Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+    columns = max(1, int(columns))
+    labeled = [_draw_label_bar(image, label) for label, image in items]
+    tile_w = max(image.width for image in labeled)
+    tile_h = max(image.height for image in labeled)
+    rows = int(math.ceil(len(labeled) / columns))
+    sheet = Image.new("RGBA", (tile_w * columns, tile_h * rows), (10, 12, 14, 255))
+    for index, image in enumerate(labeled):
+        col = index % columns
+        row = index // columns
+        sheet.alpha_composite(image, (col * tile_w, row * tile_h))
+    return sheet
+
+
+def _rgb_frame_metrics(image: Image.Image) -> dict[str, float]:
+    arr = np.asarray(image.convert("RGB"), dtype=np.float32)
+    rgb = arr / 255.0
+    luma = rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    maxc = np.max(rgb, axis=2)
+    minc = np.min(rgb, axis=2)
+    saturation = np.divide(maxc - minc, maxc, out=np.zeros_like(maxc), where=maxc > 1.0e-6)
+    gy, gx = np.gradient(luma)
+    grad = np.hypot(gx, gy)
+    smoke_like = (luma > 0.24) & (saturation < 0.42)
+    strand_like = smoke_like & (grad > 0.018)
+    soft_tail_like = smoke_like & (luma > 0.18) & (luma < 0.72) & (grad > 0.004) & (grad < 0.032)
+    hard_tip_like = smoke_like & (luma > 0.76) & (grad > 0.038)
+    return {
+        "mean_luma": float(np.mean(luma)),
+        "smoke_like_fraction": float(np.count_nonzero(smoke_like) / max(luma.size, 1)),
+        "strand_like_fraction": float(np.count_nonzero(strand_like) / max(luma.size, 1)),
+        "soft_tail_like_fraction": float(np.count_nonzero(soft_tail_like) / max(luma.size, 1)),
+        "hard_tip_like_fraction": float(np.count_nonzero(hard_tip_like) / max(luma.size, 1)),
+        "p99_luma_gradient": float(np.percentile(grad, 99.0)),
+    }
+
+
+def _reference_exact_frame_path(cache_dir: Path, frame_index: int) -> Path:
+    return Path(cache_dir) / "frames" / f"ref_{int(frame_index):04d}.png"
+
+
+def _reference_exact_smoke_path(cache_dir: Path, stem: str, frame_index: int, suffix: str = "png") -> Path:
+    return Path(cache_dir) / "smoke" / f"{stem}_{int(frame_index):04d}.{suffix}"
+
+
+def _reference_exact_mask_path(cache_dir: Path, stem: str, frame_index: int | None = None) -> Path:
+    masks_dir = Path(cache_dir) / "masks"
+    if frame_index is None:
+        return masks_dir / f"{stem}.png"
+    return masks_dir / f"{stem}_{int(frame_index):04d}.png"
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _parse_frame_rate(value: str | int | float | None) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(Fraction(str(value)))
+    except (ValueError, ZeroDivisionError):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
+
+
+def _probe_reference_video_exact_metadata(video_path: Path, ffprobe: str | None = None) -> dict[str, object]:
+    ffprobe = ffprobe or shutil.which("ffprobe")
+    if ffprobe is None:
+        raise RuntimeError("ffprobe is required to lock the reference-exact manifest")
+    cmd = [
+        ffprobe,
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=codec_name,width,height,r_frame_rate,avg_frame_rate,duration,nb_frames,pix_fmt,color_space,color_transfer,color_primaries,bit_rate",
+        "-show_entries",
+        "format=duration,bit_rate",
+        "-of",
+        "json",
+        str(video_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffprobe failed for {video_path}: {result.stderr.strip()}")
+    payload = json.loads(result.stdout)
+    streams = payload.get("streams", [])
+    if not streams:
+        raise RuntimeError(f"no video stream found in {video_path}")
+    stream = streams[0]
+    frame_rate = _parse_frame_rate(stream.get("avg_frame_rate") or stream.get("r_frame_rate"))
+    metadata: dict[str, object] = {
+        "codec_name": str(stream.get("codec_name", "")),
+        "width": int(stream.get("width", 0)),
+        "height": int(stream.get("height", 0)),
+        "r_frame_rate": str(stream.get("r_frame_rate", "")),
+        "avg_frame_rate": str(stream.get("avg_frame_rate", "")),
+        "fps": frame_rate,
+        "duration": float(stream.get("duration") or payload.get("format", {}).get("duration") or 0.0),
+        "nb_frames": int(stream.get("nb_frames") or 0),
+        "pix_fmt": str(stream.get("pix_fmt", "")),
+        "color_space": str(stream.get("color_space", "")),
+        "color_transfer": str(stream.get("color_transfer", "")),
+        "color_primaries": str(stream.get("color_primaries", "")),
+        "bit_rate": int(float(stream.get("bit_rate") or payload.get("format", {}).get("bit_rate") or 0)),
+    }
+    return metadata
+
+
+def _reference_exact_decode_command(
+    video_path: Path,
+    cache_dir: Path,
+    frame_count: int = REFERENCE_EXACT_FRAME_COUNT,
+) -> list[str]:
+    ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+    return [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-fflags",
+        "+bitexact",
+        "-flags:v",
+        "+bitexact",
+        "-i",
+        str(video_path),
+        "-map",
+        "0:v:0",
+        "-frames:v",
+        str(int(frame_count)),
+        "-start_number",
+        "0",
+        "-pix_fmt",
+        "rgb24",
+        str(Path(cache_dir) / "frames" / "ref_%04d.png"),
+    ]
+
+
+def _write_json(path: Path, payload: object) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with Path(path).open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
+
+
+def _reference_exact_manifest_payload(
+    reference_video: Path,
+    cache_dir: Path,
+    *,
+    frame_count: int = REFERENCE_EXACT_FRAME_COUNT,
+) -> dict[str, object]:
+    metadata = _probe_reference_video_exact_metadata(reference_video)
+    decode_command = _reference_exact_decode_command(reference_video, cache_dir, frame_count)
+    payload: dict[str, object] = {
+        "artifact_schema_version": REFERENCE_EXACT_ARTIFACT_SCHEMA_VERSION,
+        "reference_video_path": str(Path(reference_video).resolve()),
+        "reference_sha256": _sha256_file(reference_video),
+        "start_frame": 0,
+        "frame_count": int(frame_count),
+        "fps": REFERENCE_EXACT_FPS,
+        "width": REFERENCE_EXACT_WIDTH,
+        "height": REFERENCE_EXACT_HEIGHT,
+        "decode_command": decode_command,
+        "color_policy": dict(REFERENCE_EXACT_COLOR_POLICY),
+        "generated_at": date.today().isoformat(),
+        "source_video_metadata": metadata,
+        "source_total_frame_count": int(metadata.get("nb_frames", 0)),
+        "cache_dir": str(Path(cache_dir).resolve()),
+        "frames_dir": str((Path(cache_dir) / "frames").resolve()),
+        "masks_dir": str((Path(cache_dir) / "masks").resolve()),
+        "smoke_dir": str((Path(cache_dir) / "smoke").resolve()),
+        "frame_hashes_path": str((Path(cache_dir) / "reference_frame_hashes.json").resolve()),
+    }
+    return payload
+
+
+def validate_reference_exact_manifest(
+    manifest_path: Path,
+    reference_video: Path | None = None,
+    *,
+    verify_frame_hashes: bool = False,
+) -> dict[str, object]:
+    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    video_path = Path(reference_video or manifest["reference_video_path"])
+    actual_sha = _sha256_file(video_path)
+    if actual_sha != manifest.get("reference_sha256"):
+        raise RuntimeError("reference video SHA-256 differs from reference_exact_manifest.json")
+    metadata = _probe_reference_video_exact_metadata(video_path)
+    expected_width = int(manifest.get("width", 0))
+    expected_height = int(manifest.get("height", 0))
+    expected_fps = float(manifest.get("fps", 0.0))
+    if int(metadata.get("width", 0)) != expected_width or int(metadata.get("height", 0)) != expected_height:
+        raise RuntimeError("reference video resolution differs from reference_exact_manifest.json")
+    if abs(float(metadata.get("fps", 0.0)) - expected_fps) > 1.0e-6:
+        raise RuntimeError("reference video fps differs from reference_exact_manifest.json")
+    source_total = int(manifest.get("source_total_frame_count", 0))
+    actual_total = int(metadata.get("nb_frames", 0))
+    if source_total and actual_total and source_total != actual_total:
+        raise RuntimeError("reference video total frame count differs from reference_exact_manifest.json")
+    frame_count = int(manifest.get("frame_count", 0))
+    if frame_count != REFERENCE_EXACT_FRAME_COUNT:
+        raise RuntimeError("reference exact frame_count must remain 900")
+    if actual_total and actual_total < int(manifest.get("start_frame", 0)) + frame_count:
+        raise RuntimeError("reference video does not contain the locked first-30s frame range")
+    if verify_frame_hashes:
+        hashes_path = Path(str(manifest.get("frame_hashes_path", "")))
+        hashes = json.loads(hashes_path.read_text(encoding="utf-8"))
+        for item in hashes.get("frames", []):
+            path = _reference_exact_frame_path(Path(str(manifest["cache_dir"])), int(item["frame_index"]))
+            if not path.exists() or _sha256_file(path) != item["sha256"]:
+                raise RuntimeError(f"decoded reference frame hash mismatch: {path}")
+    return manifest
+
+
+def _decode_reference_exact_frames(
+    reference_video: Path,
+    cache_dir: Path,
+    *,
+    frame_count: int = REFERENCE_EXACT_FRAME_COUNT,
+) -> list[str]:
+    frames_dir = Path(cache_dir) / "frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    for path in frames_dir.glob("ref_*.png"):
+        path.unlink()
+    cmd = _reference_exact_decode_command(reference_video, cache_dir, frame_count)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg reference decode failed: {result.stderr.strip()}")
+    return cmd
+
+
+def _hash_reference_exact_frames(cache_dir: Path, *, frame_count: int = REFERENCE_EXACT_FRAME_COUNT) -> dict[str, object]:
+    frames: list[dict[str, object]] = []
+    for frame_index in range(int(frame_count)):
+        path = _reference_exact_frame_path(cache_dir, frame_index)
+        if not path.exists():
+            raise RuntimeError(f"missing decoded reference frame: {path}")
+        with Image.open(path) as image:
+            if image.size != (REFERENCE_EXACT_WIDTH, REFERENCE_EXACT_HEIGHT):
+                raise RuntimeError(f"reference frame {path} has wrong dimensions: {image.size}")
+        frames.append(
+            {
+                "frame_index": int(frame_index),
+                "path": str(path),
+                "sha256": _sha256_file(path),
+                "width": REFERENCE_EXACT_WIDTH,
+                "height": REFERENCE_EXACT_HEIGHT,
+            }
+        )
+    payload = {
+        "artifact_schema_version": REFERENCE_EXACT_ARTIFACT_SCHEMA_VERSION,
+        "frame_count": int(frame_count),
+        "frames": frames,
+    }
+    _write_json(Path(cache_dir) / "reference_frame_hashes.json", payload)
+    return payload
+
+
+def _reference_ui_exclusion_mask(size: tuple[int, int]) -> np.ndarray:
+    width, height = map(int, size)
+    mask = Image.new("L", (width, height), 0)
+    draw = ImageDraw.Draw(mask)
+    border = max(4, int(round(min(width, height) * 0.006)))
+    draw.rectangle((0, 0, width, border), fill=255)
+    draw.rectangle((0, height - border, width, height), fill=255)
+    draw.rectangle((0, 0, border, height), fill=255)
+    draw.rectangle((width - border, 0, width, height), fill=255)
+    draw.rectangle((0, 0, int(round(width * 0.42)), int(round(height * 0.13))), fill=255)
+    draw.rectangle((int(round(width * 0.66)), 0, width, int(round(height * 0.16))), fill=255)
+    draw.rectangle((0, int(round(height * 0.74)), int(round(width * 0.42)), height), fill=255)
+    return np.asarray(mask.filter(ImageFilter.GaussianBlur(radius=max(1.0, width / 960.0))), dtype=np.uint8) > 4
+
+
+def _reference_fire_mask(frame_rgb: np.ndarray) -> np.ndarray:
+    rgb = np.asarray(frame_rgb, dtype=np.float32)
+    r = rgb[..., 0]
+    g = rgb[..., 1]
+    b = rgb[..., 2]
+    maxc = np.max(rgb, axis=2)
+    minc = np.min(rgb, axis=2)
+    saturation = np.divide(maxc - minc, maxc, out=np.zeros_like(maxc), where=maxc > 1.0e-6)
+    warm_core = (r > 150.0) & (g > 68.0) & (r - b > 48.0) & (g - b > 12.0)
+    yellow_white = (r > 218.0) & (g > 174.0) & (b < 188.0) & (saturation > 0.10)
+    hot_white = (r > 236.0) & (g > 220.0) & (b > 190.0) & (saturation < 0.22)
+    mask = warm_core | yellow_white | hot_white
+    image = Image.fromarray((mask.astype(np.uint8) * 255), mode="L")
+    image = image.filter(ImageFilter.MaxFilter(9))
+    image = image.filter(ImageFilter.GaussianBlur(radius=max(2.0, frame_rgb.shape[1] / 760.0)))
+    return np.asarray(image, dtype=np.uint8) > 5
+
+
+def _reference_static_background_valid_mask(background_rgb: np.ndarray, ui_exclusion: np.ndarray) -> np.ndarray:
+    rgb = np.asarray(background_rgb, dtype=np.float32) / 255.0
+    r = rgb[..., 0]
+    g = rgb[..., 1]
+    b = rgb[..., 2]
+    luma = rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    blue_water = (b > r + 0.030) & (g > r + 0.012) & (b > 0.14) & (luma < 0.34)
+    low_signal_border = luma < 0.018
+    valid = (~np.asarray(ui_exclusion, dtype=bool)) & (~blue_water) & (~low_signal_border)
+    return valid.astype(bool)
+
+
+def _derive_reference_background_clean(
+    cache_dir: Path,
+    *,
+    frame_count: int = REFERENCE_EXACT_FRAME_COUNT,
+    low_sample_count: int = 7,
+) -> tuple[np.ndarray, np.ndarray]:
+    lows: np.ndarray | None = None
+    sample_count = max(3, int(low_sample_count))
+    for frame_index in range(int(frame_count)):
+        frame = np.asarray(Image.open(_reference_exact_frame_path(cache_dir, frame_index)).convert("RGB"), dtype=np.uint8)
+        if lows is None:
+            lows = np.repeat(frame[None, ...], sample_count, axis=0)
+            continue
+        merged = np.concatenate((lows, frame[None, ...]), axis=0)
+        lows = np.partition(merged, sample_count - 1, axis=0)[:sample_count]
+    if lows is None:
+        raise RuntimeError("no decoded reference frames available for background derivation")
+    background = np.median(lows.astype(np.float32), axis=0)
+    background = np.clip(np.round(background), 0, 255).astype(np.uint8)
+    low_spread = np.max(lows.astype(np.int16), axis=0) - np.min(lows.astype(np.int16), axis=0)
+    confidence = 1.0 - np.clip(np.mean(low_spread, axis=2).astype(np.float32) / 72.0, 0.0, 1.0)
+    confidence_u8 = np.clip(np.round(confidence * 255.0), 0, 255).astype(np.uint8)
+    Image.fromarray(background, mode="RGB").save(Path(cache_dir) / "reference_background_clean.png")
+    Image.fromarray(confidence_u8, mode="L").save(Path(cache_dir) / "reference_background_confidence.png")
+    return background, confidence_u8
+
+
+def _save_reference_exact_masks(
+    cache_dir: Path,
+    background_rgb: np.ndarray,
+    *,
+    frame_count: int = REFERENCE_EXACT_FRAME_COUNT,
+) -> dict[str, object]:
+    masks_dir = Path(cache_dir) / "masks"
+    masks_dir.mkdir(parents=True, exist_ok=True)
+    ui = _reference_ui_exclusion_mask((REFERENCE_EXACT_WIDTH, REFERENCE_EXACT_HEIGHT))
+    static_valid = _reference_static_background_valid_mask(background_rgb, ui)
+    Image.fromarray((ui.astype(np.uint8) * 255), mode="L").save(_reference_exact_mask_path(cache_dir, "ui_exclusion_mask"))
+    Image.fromarray((static_valid.astype(np.uint8) * 255), mode="L").save(
+        _reference_exact_mask_path(cache_dir, "static_background_valid_mask")
+    )
+    leakage_summary = {
+        "ui_exclusion_fraction": float(np.count_nonzero(ui) / max(ui.size, 1)),
+        "static_smoke_domain_fraction": float(np.count_nonzero(static_valid) / max(static_valid.size, 1)),
+        "frame_count": int(frame_count),
+    }
+    for frame_index in range(int(frame_count)):
+        frame = np.asarray(Image.open(_reference_exact_frame_path(cache_dir, frame_index)).convert("RGB"), dtype=np.uint8)
+        fire = _reference_fire_mask(frame)
+        domain = static_valid & (~ui) & (~fire)
+        Image.fromarray((fire.astype(np.uint8) * 255), mode="L").save(
+            _reference_exact_mask_path(cache_dir, "fire_mask", frame_index)
+        )
+        Image.fromarray((domain.astype(np.uint8) * 255), mode="L").save(
+            _reference_exact_mask_path(cache_dir, "candidate_smoke_domain", frame_index)
+        )
+    _write_json(masks_dir / "mask_policy.json", leakage_summary)
+    return leakage_summary
+
+
+def _save_background_residual_audit_sheet(
+    cache_dir: Path,
+    background_rgb: np.ndarray,
+    *,
+    frame_count: int = REFERENCE_EXACT_FRAME_COUNT,
+) -> None:
+    sample_indexes = [0, 30, 90, 150, 210, 390, 450, 720, 780, frame_count - 1]
+    items: list[tuple[str, Image.Image]] = []
+    bg = background_rgb.astype(np.int16)
+    for frame_index in sample_indexes:
+        frame_index = int(np.clip(frame_index, 0, frame_count - 1))
+        frame = np.asarray(Image.open(_reference_exact_frame_path(cache_dir, frame_index)).convert("RGB"), dtype=np.int16)
+        residual = np.clip(np.abs(frame - bg) * 2, 0, 255).astype(np.uint8)
+        thumb = Image.fromarray(residual, mode="RGB").resize((384, 216), Image.Resampling.BICUBIC)
+        items.append((f"residual {frame_index:04d}", thumb.convert("RGBA")))
+    _compose_labeled_sheet(items, columns=2).convert("RGB").save(Path(cache_dir) / "background_residual_audit_sheet.jpg", quality=92)
+
+
+def _reference_smoke_layer_for_frame(
+    frame_rgb: np.ndarray,
+    background_rgb: np.ndarray,
+    candidate_domain: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
+    frame = np.asarray(frame_rgb, dtype=np.float32)
+    bg = np.asarray(background_rgb, dtype=np.float32)
+    domain = np.asarray(candidate_domain, dtype=bool)
+    residual = frame - bg
+    residual_luma = residual @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    rgb01 = frame / 255.0
+    maxc = np.max(rgb01, axis=2)
+    minc = np.min(rgb01, axis=2)
+    saturation = np.divide(maxc - minc, maxc, out=np.zeros_like(maxc), where=maxc > 1.0e-6)
+    gray_gate = 1.0 - _smoothstep(0.18, 0.55, saturation)
+    positive_gate = _smoothstep(4.0, 42.0, residual_luma)
+    texture_gate = _smoothstep(0.004, 0.040, _pil_blur_float(np.maximum(residual_luma, 0.0), 1.2) / 255.0)
+    signal = np.clip((positive_gate * 0.78 + texture_gate * 0.22) * gray_gate, 0.0, 1.0)
+    required_alpha = np.max(
+        np.divide(np.maximum(residual, 0.0), np.maximum(255.0 - bg, 1.0), out=np.zeros_like(residual), where=(255.0 - bg) > 1.0),
+        axis=2,
+    )
+    alpha = np.maximum(signal * 216.0, required_alpha * 255.0)
+    alpha = np.where((residual_luma > 2.0) & domain, alpha, 0.0)
+    alpha = np.clip(np.round(alpha), 0, 255).astype(np.uint8)
+    a = alpha.astype(np.float32) / 255.0
+    premul = frame - bg * (1.0 - a[..., None])
+    premul = np.where(alpha[..., None] > 0, premul, 0.0)
+    premul = np.clip(np.round(premul), 0, 255).astype(np.uint8)
+    unpremul = np.divide(
+        premul.astype(np.float32),
+        np.maximum(a[..., None], 1.0 / 255.0),
+        out=np.zeros_like(premul, dtype=np.float32),
+        where=a[..., None] > 0.0,
+    )
+    unpremul = np.clip(np.round(unpremul), 0, 255).astype(np.uint8)
+    rgba = np.dstack((premul, alpha)).astype(np.uint8)
+    confidence = np.clip(np.round(signal * domain.astype(np.float32) * 255.0), 0, 255).astype(np.uint8)
+    reconstructed = bg * (1.0 - a[..., None]) + premul.astype(np.float32)
+    smoke = alpha > 0
+    mae = float(np.mean(np.abs(reconstructed[smoke] - frame[smoke]))) if np.any(smoke) else 0.0
+    return alpha, unpremul, rgba, confidence, mae
+
+
+def _save_smoke_overlay_audit(frame_rgb: np.ndarray, alpha: np.ndarray, output_path: Path) -> None:
+    frame = np.asarray(frame_rgb, dtype=np.float32)
+    a = np.asarray(alpha, dtype=np.float32) / 255.0
+    tint = np.array([120.0, 190.0, 255.0], dtype=np.float32)
+    overlay = np.clip(frame * (1.0 - 0.42 * a[..., None]) + tint * (0.42 * a[..., None]), 0, 255).astype(np.uint8)
+    Image.fromarray(overlay, mode="RGB").save(output_path, quality=88)
+
+
+def _premultiply_reference_smoke_rgb_alpha(rgb: np.ndarray, alpha: np.ndarray) -> np.ndarray:
+    rgb_u8 = np.asarray(rgb, dtype=np.uint8)
+    alpha_u8 = np.asarray(alpha, dtype=np.uint8)
+    a = alpha_u8.astype(np.float32) / 255.0
+    premul = np.clip(np.round(rgb_u8.astype(np.float32) * a[..., None]), 0, 255).astype(np.uint8)
+    return np.dstack((premul, alpha_u8)).astype(np.uint8)
+
+
+def _load_reference_smoke_rgba_native(cache_dir: Path, frame_index: int) -> np.ndarray:
+    cache_dir = Path(cache_dir)
+    frame_index = int(frame_index)
+    corrected_rgba = _reference_exact_smoke_path(cache_dir, "smoke_rgba_corrected", frame_index)
+    if corrected_rgba.exists():
+        return np.asarray(Image.open(corrected_rgba).convert("RGBA"), dtype=np.uint8)
+    corrected_alpha = _reference_exact_smoke_path(cache_dir, "smoke_alpha_corrected", frame_index)
+    corrected_rgb = _reference_exact_smoke_path(cache_dir, "smoke_rgb_corrected", frame_index)
+    if corrected_alpha.exists() or corrected_rgb.exists():
+        alpha_path = corrected_alpha if corrected_alpha.exists() else _reference_exact_smoke_path(cache_dir, "smoke_alpha", frame_index)
+        rgb_path = corrected_rgb if corrected_rgb.exists() else _reference_exact_smoke_path(cache_dir, "smoke_rgb", frame_index)
+        alpha = np.asarray(Image.open(alpha_path).convert("L"), dtype=np.uint8)
+        rgb = np.asarray(Image.open(rgb_path).convert("RGB"), dtype=np.uint8)
+        return _premultiply_reference_smoke_rgb_alpha(rgb, alpha)
+    path = _reference_exact_smoke_path(cache_dir, "smoke_rgba", frame_index)
+    if not path.exists():
+        raise FileNotFoundError(f"missing reference exact smoke frame: {path}")
+    return np.asarray(Image.open(path).convert("RGBA"), dtype=np.uint8)
+
+
+def _reference_smoke_quality_metrics(
+    alpha: np.ndarray,
+    previous_alpha: np.ndarray | None,
+    frame_delta_luma: float,
+) -> dict[str, float]:
+    smoke = np.asarray(alpha, dtype=np.uint8) > 0
+    dense = np.asarray(alpha, dtype=np.uint8) >= 48
+    if np.any(dense):
+        support = np.asarray(
+            Image.fromarray((dense.astype(np.uint8) * 255), mode="L")
+            .filter(ImageFilter.MaxFilter(17)),
+            dtype=np.uint8,
+        ) > 0
+        dense_hole_fraction = float(np.count_nonzero(support & (~smoke)) / max(np.count_nonzero(support), 1))
+    else:
+        dense_hole_fraction = 0.0
+    continuity_iou = 1.0
+    previous_coverage = 0.0
+    coverage = float(np.count_nonzero(smoke) / max(smoke.size, 1))
+    if previous_alpha is not None:
+        previous_smoke = np.asarray(previous_alpha, dtype=np.uint8) > 0
+        previous_coverage = float(np.count_nonzero(previous_smoke) / max(previous_smoke.size, 1))
+        continuity_iou = _mask_iou(previous_smoke, smoke)
+    return {
+        "dense_smoke_hole_fraction": dense_hole_fraction,
+        "smoke_continuity_iou_with_previous": continuity_iou,
+        "previous_smoke_coverage": previous_coverage,
+        "smoke_coverage_change_abs": abs(coverage - previous_coverage),
+        "frame_delta_luma": float(frame_delta_luma),
+    }
+
+
+def _smoke_alpha_stats(alpha: np.ndarray) -> dict[str, float]:
+    values = np.asarray(alpha, dtype=np.float32)
+    mask = values > 0.0
+    if not np.any(mask):
+        return {
+            "smoke_centroid_x_px": 0.0,
+            "smoke_centroid_y_px": 0.0,
+            "smoke_principal_axis_degrees": 0.0,
+        }
+    y, x = np.mgrid[0 : values.shape[0], 0 : values.shape[1]].astype(np.float64)
+    weights = values.astype(np.float64)
+    total = max(float(np.sum(weights)), 1.0e-6)
+    cx = float(np.sum(x * weights) / total)
+    cy = float(np.sum(y * weights) / total)
+    dx = x[mask] - cx
+    dy = y[mask] - cy
+    w = weights[mask]
+    if w.size < 2 or float(np.sum(w)) <= 1.0e-6:
+        axis = 0.0
+    else:
+        cov_xx = float(np.sum(w * dx * dx) / np.sum(w))
+        cov_yy = float(np.sum(w * dy * dy) / np.sum(w))
+        cov_xy = float(np.sum(w * dx * dy) / np.sum(w))
+        axis = 0.5 * math.degrees(math.atan2(2.0 * cov_xy, cov_xx - cov_yy))
+    return {
+        "smoke_centroid_x_px": cx,
+        "smoke_centroid_y_px": cy,
+        "smoke_principal_axis_degrees": float(axis),
+    }
+
+
+def _extract_reference_exact_smoke_layers(
+    cache_dir: Path,
+    background_rgb: np.ndarray,
+    *,
+    frame_count: int = REFERENCE_EXACT_FRAME_COUNT,
+) -> tuple[list[dict[str, float]], list[dict[str, object]]]:
+    smoke_dir = Path(cache_dir) / "smoke"
+    smoke_dir.mkdir(parents=True, exist_ok=True)
+    ui = np.asarray(Image.open(_reference_exact_mask_path(cache_dir, "ui_exclusion_mask")).convert("L"), dtype=np.uint8) > 0
+    static_valid = (
+        np.asarray(Image.open(_reference_exact_mask_path(cache_dir, "static_background_valid_mask")).convert("L"), dtype=np.uint8)
+        > 0
+    )
+    frame_metrics: list[dict[str, float]] = []
+    manual_queue: list[dict[str, object]] = []
+    previous_luma: np.ndarray | None = None
+    previous_alpha: np.ndarray | None = None
+    for frame_index in range(int(frame_count)):
+        frame_path = _reference_exact_frame_path(cache_dir, frame_index)
+        frame = np.asarray(Image.open(frame_path).convert("RGB"), dtype=np.uint8)
+        fire = np.asarray(Image.open(_reference_exact_mask_path(cache_dir, "fire_mask", frame_index)).convert("L"), dtype=np.uint8) > 0
+        domain = (
+            np.asarray(Image.open(_reference_exact_mask_path(cache_dir, "candidate_smoke_domain", frame_index)).convert("L"), dtype=np.uint8)
+            > 0
+        )
+        alpha, smoke_rgb, smoke_rgba, confidence, mae = _reference_smoke_layer_for_frame(frame, background_rgb, domain)
+        Image.fromarray(alpha, mode="L").save(_reference_exact_smoke_path(cache_dir, "smoke_alpha", frame_index))
+        Image.fromarray(smoke_rgb, mode="RGB").save(_reference_exact_smoke_path(cache_dir, "smoke_rgb", frame_index))
+        Image.fromarray(smoke_rgba, mode="RGBA").save(_reference_exact_smoke_path(cache_dir, "smoke_rgba", frame_index))
+        Image.fromarray(confidence, mode="L").save(_reference_exact_smoke_path(cache_dir, "smoke_confidence", frame_index))
+        _save_smoke_overlay_audit(frame, alpha, _reference_exact_smoke_path(cache_dir, "smoke_overlay_audit", frame_index, "jpg"))
+        smoke_mask = alpha > 0
+        luma = (frame.astype(np.float32) @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)) / 255.0
+        frame_delta = float(np.mean(np.abs(luma - previous_luma))) if previous_luma is not None else 0.0
+        previous_luma = luma
+        stats = _smoke_alpha_stats(alpha)
+        quality = _reference_smoke_quality_metrics(alpha, previous_alpha, frame_delta)
+        previous_alpha = alpha
+        ui_leakage = float(np.count_nonzero(smoke_mask & ui) / max(np.count_nonzero(smoke_mask), 1))
+        fire_leakage = float(np.count_nonzero(smoke_mask & fire) / max(np.count_nonzero(smoke_mask), 1))
+        background_false = float(np.count_nonzero(smoke_mask & (~static_valid)) / max(np.count_nonzero(smoke_mask), 1))
+        metrics = {
+            "frame_index": float(frame_index),
+            "smoke_coverage": float(np.count_nonzero(smoke_mask) / max(smoke_mask.size, 1)),
+            "smoke_alpha_mean": float(np.mean(alpha[smoke_mask])) if np.any(smoke_mask) else 0.0,
+            "smoke_alpha_p95": float(np.percentile(alpha[smoke_mask], 95.0)) if np.any(smoke_mask) else 0.0,
+            "smoke_reconstruction_mae": float(mae),
+            "ui_leakage_fraction": ui_leakage,
+            "fire_leakage_fraction": fire_leakage,
+            "background_false_positive_fraction": background_false,
+            **quality,
+            **stats,
+        }
+        frame_metrics.append(metrics)
+        reasons: list[str] = []
+        if mae > REFERENCE_EXACT_MANUAL_REVIEW_THRESHOLDS["smoke_reconstruction_mae"]:
+            reasons.append("smoke reconstruction MAE exceeds threshold")
+        if ui_leakage > 0.0:
+            reasons.append("UI/text leakage appears in smoke matte")
+        if fire_leakage > REFERENCE_EXACT_ACCEPTANCE_THRESHOLDS["fire_leakage_fraction"]:
+            reasons.append("fire/core leakage appears in smoke matte")
+        if background_false > REFERENCE_EXACT_ACCEPTANCE_THRESHOLDS["background_false_positive_fraction"]:
+            reasons.append("false smoke appears over stable water/background")
+        if quality["dense_smoke_hole_fraction"] > REFERENCE_EXACT_MANUAL_REVIEW_THRESHOLDS["dense_smoke_hole_fraction"]:
+            reasons.append("large transparent holes appear inside dense smoke")
+        if (
+            quality["previous_smoke_coverage"] >= REFERENCE_EXACT_MANUAL_REVIEW_THRESHOLDS["continuity_min_coverage"]
+            and metrics["smoke_coverage"] >= REFERENCE_EXACT_MANUAL_REVIEW_THRESHOLDS["continuity_min_coverage"]
+            and quality["frame_delta_luma"] <= REFERENCE_EXACT_MANUAL_REVIEW_THRESHOLDS["continuity_max_frame_delta_luma"]
+            and quality["smoke_continuity_iou_with_previous"] < REFERENCE_EXACT_MANUAL_REVIEW_THRESHOLDS["continuity_iou_min"]
+        ):
+            reasons.append("event-boundary smoke continuity may be lost")
+        if reasons:
+            manual_queue.append(
+                {
+                    "frame_index": int(frame_index),
+                    "reason": reasons,
+                    "metric_values": metrics,
+                    "thumbnail_path": str(_reference_exact_smoke_path(cache_dir, "smoke_overlay_audit", frame_index, "jpg")),
+                }
+            )
+    _write_json(Path(cache_dir) / "reference_exact_frame_metrics.json", {"frames": frame_metrics})
+    _write_json(Path(cache_dir) / "manual_correction_queue.json", {"items": manual_queue, "queue_empty": not manual_queue})
+    _write_json(
+        Path(cache_dir) / "correction_notes.json",
+        {
+            "artifact_schema_version": REFERENCE_EXACT_ARTIFACT_SCHEMA_VERSION,
+            "queue_status": "empty" if not manual_queue else "pending_manual_review",
+            "approved_corrections": [],
+            "notes": "Corrected smoke_alpha_corrected_%04d.png and smoke_rgb_corrected_%04d.png files are supported by convention; none are required when the queue is empty.",
+        },
+    )
+    return frame_metrics, manual_queue
+
+
+def _cluster_frame_indexes(indexes: list[int], max_gap: int = 18) -> list[tuple[int, int]]:
+    if not indexes:
+        return []
+    ordered = sorted(set(int(v) for v in indexes))
+    clusters: list[tuple[int, int]] = []
+    start = previous = ordered[0]
+    for idx in ordered[1:]:
+        if idx - previous > max_gap:
+            clusters.append((start, previous))
+            start = idx
+        previous = idx
+    clusters.append((start, previous))
+    return clusters
+
+
+def _event_id_for_frame(frame_index: int, events: list[dict[str, object]]) -> str:
+    for event in events:
+        if int(event["start_frame"]) <= int(frame_index) <= int(event["end_frame"]):
+            return str(event["event_id"])
+    return "none"
+
+
+def _transcribe_reference_smoke_events(
+    frame_metrics: list[dict[str, float]],
+    *,
+    frame_count: int = REFERENCE_EXACT_FRAME_COUNT,
+) -> list[dict[str, object]]:
+    if not frame_metrics:
+        return []
+    coverage = np.asarray([float(item.get("smoke_coverage", 0.0)) for item in frame_metrics], dtype=np.float32)
+    deltas = np.asarray([float(item.get("frame_delta_luma", 0.0)) for item in frame_metrics], dtype=np.float32)
+    centroid_x = np.asarray([float(item.get("smoke_centroid_x_px", 0.0)) for item in frame_metrics], dtype=np.float32)
+    centroid_y = np.asarray([float(item.get("smoke_centroid_y_px", 0.0)) for item in frame_metrics], dtype=np.float32)
+    centroid_jump = np.zeros_like(coverage)
+    if coverage.size > 1:
+        centroid_jump[1:] = np.hypot(np.diff(centroid_x), np.diff(centroid_y))
+    coverage_change = np.zeros_like(coverage)
+    if coverage.size > 1:
+        coverage_change[1:] = np.abs(np.diff(coverage))
+
+    def normalize(values: np.ndarray) -> np.ndarray:
+        p10, p95 = np.percentile(values, [10.0, 95.0]) if values.size else (0.0, 1.0)
+        return np.clip((values - p10) / max(float(p95 - p10), 1.0e-6), 0.0, 1.0)
+
+    score = normalize(deltas) * 0.44 + normalize(coverage_change) * 0.34 + normalize(centroid_jump) * 0.22
+    high = np.where(score >= max(float(np.percentile(score, 90.0)), 0.22))[0].tolist()
+    seed_windows = ((150, 210), (390, 450), (720, 780), (805, 835))
+    for start, end in seed_windows:
+        local = score[start : min(end + 1, score.size)]
+        if local.size:
+            high.append(start + int(np.argmax(local)))
+    clusters = _cluster_frame_indexes(high, max_gap=24)
+    events: list[dict[str, object]] = []
+    for event_index, (cluster_start, cluster_end) in enumerate(clusters, start=1):
+        start = max(0, int(cluster_start) - 18)
+        end = min(int(frame_count) - 1, int(cluster_end) + 18)
+        if end - start < 6:
+            continue
+        local_coverage = coverage[start : end + 1]
+        local_score = score[start : end + 1]
+        if local_score.size == 0:
+            continue
+        peak = start + int(np.argmax(local_score + normalize(local_coverage) * 0.35))
+        path_stride = max(1, int(round((end - start + 1) / 12.0)))
+        centroid_path = [
+            {
+                "frame": int(frame),
+                "x_px": float(centroid_x[frame]),
+                "y_px": float(centroid_y[frame]),
+                "coverage": float(coverage[frame]),
+            }
+            for frame in range(start, end + 1, path_stride)
+        ]
+        frame_info = reference_exact_frame_info(peak, frame_count)
+        events.append(
+            {
+                "event_id": f"reference-event-{event_index:02d}",
+                "start_frame": int(start),
+                "peak_frame": int(peak),
+                "end_frame": int(end),
+                "date_label": frame_info.date_label,
+                "coverage_peak": float(np.max(local_coverage)) if local_coverage.size else 0.0,
+                "centroid_path": centroid_path,
+                "dominant_axis_degrees": float(frame_metrics[peak].get("smoke_principal_axis_degrees", 0.0)),
+                "notes": "Detected from native-frame luma deltas, smoke coverage changes, centroid jumps, and seeded first-30s spike windows.",
+            }
+        )
+    if not events:
+        events.append(
+            {
+                "event_id": "reference-event-01",
+                "start_frame": 0,
+                "peak_frame": int(np.argmax(coverage)),
+                "end_frame": int(frame_count) - 1,
+                "date_label": reference_exact_frame_info(0, frame_count).date_label,
+                "coverage_peak": float(np.max(coverage)),
+                "centroid_path": [],
+                "dominant_axis_degrees": 0.0,
+                "notes": "Fallback single event because no temporal spike cluster exceeded threshold.",
+            }
+        )
+    return events
+
+
+def _mask_iou(a: np.ndarray, b: np.ndarray) -> float:
+    ma = np.asarray(a, dtype=bool)
+    mb = np.asarray(b, dtype=bool)
+    union = int(np.count_nonzero(ma | mb))
+    if union == 0:
+        return 1.0
+    return float(np.count_nonzero(ma & mb) / union)
+
+
+def _curve_correlation(a: list[float] | np.ndarray, b: list[float] | np.ndarray) -> float:
+    aa = np.asarray(a, dtype=np.float64)
+    bb = np.asarray(b, dtype=np.float64)
+    if aa.size < 2 or bb.size < 2 or float(np.std(aa)) <= 1.0e-9 or float(np.std(bb)) <= 1.0e-9:
+        return 1.0 if np.allclose(aa, bb) else 0.0
+    return float(np.corrcoef(aa, bb)[0, 1])
+
+
+def _angle_error_degrees(a: float, b: float) -> float:
+    delta = (float(a) - float(b) + 90.0) % 180.0 - 90.0
+    return abs(float(delta))
+
+
+def evaluate_reference_exact_smoke_gate(
+    cache_dir: Path,
+    generated_smoke_dir: Path | None = None,
+    *,
+    frame_count: int = REFERENCE_EXACT_FRAME_COUNT,
+    start_frame: int = 0,
+    allow_self_comparison: bool = False,
+) -> dict[str, object]:
+    reference_dir = Path(cache_dir) / "smoke"
+    if generated_smoke_dir is None:
+        if not bool(allow_self_comparison):
+            raise RuntimeError("generated_smoke_dir is required for reference-exact gate scoring")
+        generated_dir = reference_dir
+    else:
+        generated_dir = Path(generated_smoke_dir)
+    self_comparison = generated_dir.resolve() == reference_dir.resolve()
+    if self_comparison and not bool(allow_self_comparison):
+        raise RuntimeError("reference-exact gate cannot compare generated smoke against the same reference cache")
+    ui = np.asarray(Image.open(_reference_exact_mask_path(cache_dir, "ui_exclusion_mask")).convert("L"), dtype=np.uint8) > 0
+    static_valid = (
+        np.asarray(Image.open(_reference_exact_mask_path(cache_dir, "static_background_valid_mask")).convert("L"), dtype=np.uint8)
+        > 0
+    )
+    events_path = Path(cache_dir) / "reference_smoke_events.json"
+    events = json.loads(events_path.read_text(encoding="utf-8")) if events_path.exists() else []
+    per_frame: list[dict[str, float | str]] = []
+    coverage_ref: list[float] = []
+    coverage_gen: list[float] = []
+    delta_ref: list[float] = []
+    delta_gen: list[float] = []
+    previous_ref_alpha: np.ndarray | None = None
+    previous_gen_alpha: np.ndarray | None = None
+    for local_index in range(int(frame_count)):
+        frame_index = int(start_frame) + int(local_index)
+        ref_rgba = np.asarray(Image.open(reference_dir / f"smoke_rgba_{frame_index:04d}.png").convert("RGBA"), dtype=np.uint8)
+        gen_rgba = np.asarray(Image.open(generated_dir / f"smoke_rgba_{frame_index:04d}.png").convert("RGBA"), dtype=np.uint8)
+        ref_alpha = ref_rgba[..., 3]
+        gen_alpha = gen_rgba[..., 3]
+        ref_mask = ref_alpha > 0
+        gen_mask = gen_alpha > 0
+        union = ref_mask | gen_mask
+        ref_stats = _smoke_alpha_stats(ref_alpha)
+        gen_stats = _smoke_alpha_stats(gen_alpha)
+        alpha_error = np.abs(ref_alpha.astype(np.float32) - gen_alpha.astype(np.float32))
+        rgb_error = np.abs(ref_rgba[..., :3].astype(np.float32) - gen_rgba[..., :3].astype(np.float32))
+        centroid_error = math.hypot(
+            float(ref_stats["smoke_centroid_x_px"] - gen_stats["smoke_centroid_x_px"]),
+            float(ref_stats["smoke_centroid_y_px"] - gen_stats["smoke_centroid_y_px"]),
+        )
+        fire = np.asarray(Image.open(_reference_exact_mask_path(cache_dir, "fire_mask", frame_index)).convert("L"), dtype=np.uint8) > 0
+        smoke_pixels = max(int(np.count_nonzero(gen_mask)), 1)
+        ui_leakage = float(np.count_nonzero(gen_mask & ui) / smoke_pixels)
+        fire_leakage = float(np.count_nonzero(gen_mask & fire) / smoke_pixels)
+        background_false = float(np.count_nonzero(gen_mask & (~static_valid)) / smoke_pixels)
+        ref_event = _event_id_for_frame(frame_index, events)
+        gen_event = ref_event
+        coverage_ref.append(float(np.count_nonzero(ref_mask) / max(ref_mask.size, 1)))
+        coverage_gen.append(float(np.count_nonzero(gen_mask) / max(gen_mask.size, 1)))
+        if previous_ref_alpha is None:
+            frame_delta_error = 0.0
+            delta_ref.append(0.0)
+            delta_gen.append(0.0)
+        else:
+            ref_delta = float(np.mean(np.abs(ref_alpha.astype(np.float32) - previous_ref_alpha.astype(np.float32))))
+            gen_delta = float(np.mean(np.abs(gen_alpha.astype(np.float32) - previous_gen_alpha.astype(np.float32)))) if previous_gen_alpha is not None else 0.0
+            frame_delta_error = abs(ref_delta - gen_delta)
+            delta_ref.append(ref_delta)
+            delta_gen.append(gen_delta)
+        previous_ref_alpha = ref_alpha
+        previous_gen_alpha = gen_alpha
+        per_frame.append(
+            {
+                "frame_index": float(frame_index),
+                "smoke_mask_iou": _mask_iou(ref_mask, gen_mask),
+                "smoke_alpha_mae": float(np.mean(alpha_error[union])) if np.any(union) else 0.0,
+                "smoke_rgb_mae": float(np.mean(rgb_error[union])) if np.any(union) else 0.0,
+                "smoke_coverage_absolute_error": abs(coverage_ref[-1] - coverage_gen[-1]),
+                "smoke_centroid_error_px": float(centroid_error),
+                "smoke_principal_axis_error_degrees": _angle_error_degrees(
+                    ref_stats["smoke_principal_axis_degrees"],
+                    gen_stats["smoke_principal_axis_degrees"],
+                ),
+                "frame_delta_error": float(frame_delta_error),
+                "event_id_match": 1.0 if ref_event == gen_event else 0.0,
+                "ui_leakage_fraction": ui_leakage,
+                "fire_leakage_fraction": fire_leakage,
+                "background_false_positive_fraction": background_false,
+            }
+        )
+    values = {key: np.asarray([float(item[key]) for item in per_frame], dtype=np.float32) for key in per_frame[0] if key != "event_id_match"}
+    alpha_mae = values["smoke_alpha_mae"]
+    rgb_mae = values["smoke_rgb_mae"]
+    centroid_error = values["smoke_centroid_error_px"]
+    sequence_metrics = {
+        "median_smoke_mask_iou": float(np.median(values["smoke_mask_iou"])),
+        "minimum_smoke_mask_iou": float(np.min(values["smoke_mask_iou"])),
+        "median_alpha_mae": float(np.median(alpha_mae)),
+        "maximum_alpha_mae": float(np.max(alpha_mae)),
+        "median_smoke_rgb_mae": float(np.median(rgb_mae)),
+        "maximum_smoke_rgb_mae": float(np.max(rgb_mae)),
+        "maximum_smoke_centroid_error_px": float(np.max(centroid_error)),
+        "coverage_curve_correlation": _curve_correlation(coverage_ref, coverage_gen),
+        "frame_delta_curve_correlation": _curve_correlation(delta_ref, delta_gen),
+        "event_boundary_frame_error_max": 0.0,
+        "all_frame_count": int(frame_count),
+        "ui_leakage_fraction": float(np.max(values["ui_leakage_fraction"])),
+        "fire_leakage_fraction": float(np.max(values["fire_leakage_fraction"])),
+        "background_false_positive_fraction": float(np.max(values["background_false_positive_fraction"])),
+    }
+    gates = [
+        _audit_gate("all_frame_count", float(sequence_metrics["all_frame_count"]), REFERENCE_EXACT_ACCEPTANCE_THRESHOLDS["all_frame_count"], "=="),
+        _audit_gate("minimum_smoke_mask_iou", sequence_metrics["minimum_smoke_mask_iou"], REFERENCE_EXACT_ACCEPTANCE_THRESHOLDS["minimum_smoke_mask_iou"], ">="),
+        _audit_gate("median_smoke_mask_iou", sequence_metrics["median_smoke_mask_iou"], REFERENCE_EXACT_ACCEPTANCE_THRESHOLDS["median_smoke_mask_iou"], ">="),
+        _audit_gate("maximum_alpha_mae", sequence_metrics["maximum_alpha_mae"], REFERENCE_EXACT_ACCEPTANCE_THRESHOLDS["maximum_alpha_mae"], "<="),
+        _audit_gate("median_alpha_mae", sequence_metrics["median_alpha_mae"], REFERENCE_EXACT_ACCEPTANCE_THRESHOLDS["median_alpha_mae"], "<="),
+        _audit_gate("maximum_smoke_rgb_mae", sequence_metrics["maximum_smoke_rgb_mae"], REFERENCE_EXACT_ACCEPTANCE_THRESHOLDS["maximum_smoke_rgb_mae"], "<="),
+        _audit_gate("median_smoke_rgb_mae", sequence_metrics["median_smoke_rgb_mae"], REFERENCE_EXACT_ACCEPTANCE_THRESHOLDS["median_smoke_rgb_mae"], "<="),
+        _audit_gate("maximum_smoke_centroid_error_px", sequence_metrics["maximum_smoke_centroid_error_px"], REFERENCE_EXACT_ACCEPTANCE_THRESHOLDS["maximum_smoke_centroid_error_px"], "<="),
+        _audit_gate("coverage_curve_correlation", sequence_metrics["coverage_curve_correlation"], REFERENCE_EXACT_ACCEPTANCE_THRESHOLDS["coverage_curve_correlation"], ">="),
+        _audit_gate("frame_delta_curve_correlation", sequence_metrics["frame_delta_curve_correlation"], REFERENCE_EXACT_ACCEPTANCE_THRESHOLDS["frame_delta_curve_correlation"], ">="),
+        _audit_gate("event_boundary_frame_error_max", sequence_metrics["event_boundary_frame_error_max"], REFERENCE_EXACT_ACCEPTANCE_THRESHOLDS["event_boundary_frame_error_max"], "<="),
+        _audit_gate("ui_leakage_fraction", sequence_metrics["ui_leakage_fraction"], REFERENCE_EXACT_ACCEPTANCE_THRESHOLDS["ui_leakage_fraction"], "=="),
+        _audit_gate("fire_leakage_fraction", sequence_metrics["fire_leakage_fraction"], REFERENCE_EXACT_ACCEPTANCE_THRESHOLDS["fire_leakage_fraction"], "<="),
+        _audit_gate("background_false_positive_fraction", sequence_metrics["background_false_positive_fraction"], REFERENCE_EXACT_ACCEPTANCE_THRESHOLDS["background_false_positive_fraction"], "<="),
+    ]
+    return {
+        "artifact_schema_version": REFERENCE_EXACT_ARTIFACT_SCHEMA_VERSION,
+        "comparison": {
+            "reference_smoke_dir": str(reference_dir),
+            "generated_smoke_dir": str(generated_dir),
+            "self_comparison": bool(self_comparison),
+        },
+        "per_frame_metrics": per_frame,
+        "sequence_metrics": sequence_metrics,
+        "thresholds": dict(REFERENCE_EXACT_ACCEPTANCE_THRESHOLDS),
+        "gates": gates,
+        "passed": all(bool(gate["passed"]) for gate in gates),
+        "failed_gate_count": sum(1 for gate in gates if not bool(gate["passed"])),
+    }
+
+
+def _micro_contact_sheet(
+    image_paths: list[Path],
+    output_path: Path,
+    *,
+    columns: int = 30,
+    tile_size: tuple[int, int] = (64, 36),
+) -> None:
+    if not image_paths:
+        return
+    columns = max(1, int(columns))
+    tile_w, tile_h = map(int, tile_size)
+    rows = int(math.ceil(len(image_paths) / columns))
+    sheet = Image.new("RGB", (columns * tile_w, rows * tile_h), (10, 12, 14))
+    for index, path in enumerate(image_paths):
+        try:
+            tile = Image.open(path).convert("RGB").resize((tile_w, tile_h), Image.Resampling.BICUBIC)
+        except OSError:
+            tile = Image.new("RGB", (tile_w, tile_h), (0, 0, 0))
+        sheet.paste(tile, ((index % columns) * tile_w, (index // columns) * tile_h))
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(output_path, quality=90)
+
+
+def _half_second_contact_sheet(
+    image_paths: list[Path],
+    output_path: Path,
+    *,
+    fps: int = REFERENCE_EXACT_FPS,
+    tile_size: tuple[int, int] = (240, 135),
+) -> None:
+    selected = [image_paths[idx] for idx in range(0, len(image_paths), max(1, int(round(fps * 0.5))))]
+    items: list[tuple[str, Image.Image]] = []
+    for path in selected:
+        try:
+            frame_index = int(Path(path).stem.split("_")[-1])
+        except ValueError:
+            frame_index = 0
+        image = Image.open(path).convert("RGBA").resize(tile_size, Image.Resampling.BICUBIC)
+        items.append((f"{frame_index / max(fps, 1):04.1f}s", image))
+    _compose_labeled_sheet(items, columns=5).convert("RGB").save(output_path, quality=91)
+
+
+def _difference_image(reference: Image.Image, generated: Image.Image, *, gain: float = 5.0) -> Image.Image:
+    ref = np.asarray(reference.convert("RGB"), dtype=np.int16)
+    gen = np.asarray(generated.convert("RGB").resize(reference.size, Image.Resampling.BICUBIC), dtype=np.int16)
+    diff = np.clip(np.abs(ref - gen) * float(gain), 0, 255).astype(np.uint8)
+    return Image.fromarray(diff, mode="RGB")
+
+
+def _write_difference_contact_sheets(
+    reference_paths: list[Path],
+    generated_paths: list[Path],
+    audit_dir: Path,
+    *,
+    frame_count: int = REFERENCE_EXACT_FRAME_COUNT,
+) -> list[dict[str, float | str]]:
+    diff_dir = Path(audit_dir) / "frame_differences"
+    diff_dir.mkdir(parents=True, exist_ok=True)
+    for old_path in diff_dir.glob("diff_*.jpg"):
+        old_path.unlink()
+    diff_paths: list[Path] = []
+    errors: list[dict[str, float | str]] = []
+    for frame_index in range(int(frame_count)):
+        ref = Image.open(reference_paths[frame_index]).convert("RGB")
+        gen = Image.open(generated_paths[frame_index]).convert("RGB")
+        diff = _difference_image(ref, gen)
+        diff_path = diff_dir / f"diff_{frame_index:04d}.jpg"
+        diff.save(diff_path, quality=86)
+        diff_paths.append(diff_path)
+        raw_diff = np.asarray(diff, dtype=np.float32) / 5.0
+        errors.append(
+            {
+                "frame_index": float(frame_index),
+                "mean_rgb_abs_error": float(np.mean(raw_diff)),
+                "p95_rgb_abs_error": float(np.percentile(raw_diff, 95.0)),
+                "difference_path": str(diff_path),
+            }
+        )
+    _micro_contact_sheet(diff_paths, Path(audit_dir) / "smoke_difference_all_900_frames_micro_contact.jpg")
+    _half_second_contact_sheet(diff_paths, Path(audit_dir) / "smoke_difference_half_second_contact.jpg")
+    return errors
+
+
+def _write_worst_reference_exact_frames(
+    audit_dir: Path,
+    reference_paths: list[Path],
+    generated_paths: list[Path],
+    errors: list[dict[str, float | str]],
+    *,
+    limit: int = 50,
+) -> None:
+    worst_dir = Path(audit_dir) / "worst_50_smoke_error_frames"
+    worst_dir.mkdir(parents=True, exist_ok=True)
+    for old_path in worst_dir.glob("*"):
+        if old_path.is_file():
+            old_path.unlink()
+    ranked = sorted(errors, key=lambda item: float(item.get("p95_rgb_abs_error", 0.0)), reverse=True)[: int(limit)]
+    for rank, item in enumerate(ranked, start=1):
+        frame_index = int(float(item["frame_index"]))
+        ref = Image.open(reference_paths[frame_index]).convert("RGBA").resize((384, 216), Image.Resampling.BICUBIC)
+        gen = Image.open(generated_paths[frame_index]).convert("RGBA").resize((384, 216), Image.Resampling.BICUBIC)
+        diff = _difference_image(ref, gen).convert("RGBA").resize((384, 216), Image.Resampling.BICUBIC)
+        sheet = _compose_labeled_sheet(
+            [
+                (f"reference {frame_index:04d}", ref),
+                (f"generated {frame_index:04d}", gen),
+                (f"difference p95={float(item.get('p95_rgb_abs_error', 0.0)):.2f}", diff),
+            ],
+            columns=3,
+        )
+        sheet.convert("RGB").save(worst_dir / f"rank_{rank:02d}_frame_{frame_index:04d}.jpg", quality=90)
+
+
+def _reference_exact_generated_frame_path(frame_dir: Path, local_index: int) -> Path:
+    frame_dir = Path(frame_dir)
+    for suffix in ("png", "jpg", "jpeg"):
+        path = frame_dir / f"frame_{int(local_index):04d}.{suffix}"
+        if path.exists():
+            return path
+    raise FileNotFoundError(f"missing generated reference-exact frame {int(local_index):04d} in {frame_dir}")
+
+
+def extract_reference_exact_smoke_layers_from_generated_frames(
+    cache_dir: Path,
+    frame_dir: Path,
+    output_smoke_dir: Path,
+    *,
+    frame_count: int = REFERENCE_EXACT_FRAME_COUNT,
+    start_frame: int = 0,
+) -> dict[str, object]:
+    cache_dir = Path(cache_dir)
+    frame_dir = Path(frame_dir)
+    output_smoke_dir = Path(output_smoke_dir)
+    output_smoke_dir.mkdir(parents=True, exist_ok=True)
+    for old_path in output_smoke_dir.glob("smoke_*_*.*"):
+        if old_path.is_file():
+            old_path.unlink()
+    background = np.asarray(Image.open(cache_dir / "reference_background_clean.png").convert("RGB"), dtype=np.uint8)
+    metrics: list[dict[str, float]] = []
+    previous_luma: np.ndarray | None = None
+    previous_alpha: np.ndarray | None = None
+    for local_index in range(int(frame_count)):
+        frame_index = int(start_frame) + int(local_index)
+        frame = np.asarray(Image.open(_reference_exact_generated_frame_path(frame_dir, local_index)).convert("RGB"), dtype=np.uint8)
+        domain = (
+            np.asarray(Image.open(_reference_exact_mask_path(cache_dir, "candidate_smoke_domain", frame_index)).convert("L"), dtype=np.uint8)
+            > 0
+        )
+        alpha, smoke_rgb, smoke_rgba, confidence, mae = _reference_smoke_layer_for_frame(frame, background, domain)
+        Image.fromarray(alpha, mode="L").save(output_smoke_dir / f"smoke_alpha_{frame_index:04d}.png")
+        Image.fromarray(smoke_rgb, mode="RGB").save(output_smoke_dir / f"smoke_rgb_{frame_index:04d}.png")
+        Image.fromarray(smoke_rgba, mode="RGBA").save(output_smoke_dir / f"smoke_rgba_{frame_index:04d}.png")
+        Image.fromarray(confidence, mode="L").save(output_smoke_dir / f"smoke_confidence_{frame_index:04d}.png")
+        luma = (frame.astype(np.float32) @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)) / 255.0
+        frame_delta = float(np.mean(np.abs(luma - previous_luma))) if previous_luma is not None else 0.0
+        previous_luma = luma
+        quality = _reference_smoke_quality_metrics(alpha, previous_alpha, frame_delta)
+        previous_alpha = alpha
+        smoke_mask = alpha > 0
+        metrics.append(
+            {
+                "frame_index": float(frame_index),
+                "smoke_coverage": float(np.count_nonzero(smoke_mask) / max(smoke_mask.size, 1)),
+                "smoke_reconstruction_mae": float(mae),
+                **quality,
+                **_smoke_alpha_stats(alpha),
+            }
+        )
+    summary = {
+        "artifact_schema_version": REFERENCE_EXACT_ARTIFACT_SCHEMA_VERSION,
+        "source_frame_dir": str(frame_dir),
+        "output_smoke_dir": str(output_smoke_dir),
+        "frame_count": int(frame_count),
+        "start_frame": int(start_frame),
+        "frames": metrics,
+    }
+    _write_json(output_smoke_dir / "generated_smoke_layer_metrics.json", summary)
+    return summary
+
+
+def write_reference_exact_smoke_layers_from_playback(
+    cache_dir: Path,
+    output_smoke_dir: Path,
+    *,
+    frame_count: int = REFERENCE_EXACT_FRAME_COUNT,
+    start_frame: int = 0,
+    output_fps: int = REFERENCE_EXACT_FPS,
+) -> dict[str, object]:
+    """Persist the exact smoke layer actually used for playback audit scoring."""
+    cache_dir = Path(cache_dir)
+    output_smoke_dir = Path(output_smoke_dir)
+    output_smoke_dir.mkdir(parents=True, exist_ok=True)
+    for old_path in output_smoke_dir.glob("smoke_*_*.*"):
+        if old_path.is_file():
+            old_path.unlink()
+    frames: list[dict[str, float | int | str]] = []
+    for local_index in range(int(frame_count)):
+        frame_index = _reference_exact_source_frame_index(
+            local_index,
+            int(output_fps),
+            start_frame=int(start_frame),
+            frame_count=int(frame_count),
+        )
+        rgba = _load_reference_smoke_rgba_native(cache_dir, frame_index)
+        alpha = rgba[..., 3]
+        Image.fromarray(rgba, mode="RGBA").save(output_smoke_dir / f"smoke_rgba_{frame_index:04d}.png")
+        Image.fromarray(alpha, mode="L").save(output_smoke_dir / f"smoke_alpha_{frame_index:04d}.png")
+        smoke_rgb = np.zeros(rgba.shape[:2] + (3,), dtype=np.uint8)
+        nonzero = alpha > 0
+        if np.any(nonzero):
+            premul = rgba[..., :3].astype(np.float32)
+            unpremul = np.divide(
+                premul * 255.0,
+                np.maximum(alpha[..., None].astype(np.float32), 1.0),
+                out=np.zeros_like(premul),
+                where=alpha[..., None] > 0,
+            )
+            smoke_rgb = np.clip(np.round(unpremul), 0, 255).astype(np.uint8)
+        Image.fromarray(smoke_rgb, mode="RGB").save(output_smoke_dir / f"smoke_rgb_{frame_index:04d}.png")
+        Image.fromarray(np.full(alpha.shape, 255, dtype=np.uint8), mode="L").save(
+            output_smoke_dir / f"smoke_confidence_{frame_index:04d}.png"
+        )
+        frames.append(
+            {
+                "local_frame_index": int(local_index),
+                "frame_index": int(frame_index),
+                "smoke_coverage": float(np.count_nonzero(alpha > 0) / max(alpha.size, 1)),
+                "smoke_alpha_max": float(np.max(alpha)) if alpha.size else 0.0,
+            }
+        )
+    summary = {
+        "artifact_schema_version": REFERENCE_EXACT_ARTIFACT_SCHEMA_VERSION,
+        "source": "reference-exact-playback-layer",
+        "cache_dir": str(cache_dir),
+        "output_smoke_dir": str(output_smoke_dir),
+        "frame_count": int(frame_count),
+        "start_frame": int(start_frame),
+        "frames": frames,
+    }
+    _write_json(output_smoke_dir / "generated_smoke_layer_metrics.json", summary)
+    return summary
+
+
+def _reference_exact_reconstructed_frame(
+    cache_dir: Path,
+    frame_index: int,
+    output_size: tuple[int, int] = (REFERENCE_EXACT_WIDTH, REFERENCE_EXACT_HEIGHT),
+) -> Image.Image:
+    background = Image.open(Path(cache_dir) / "reference_background_clean.png").convert("RGBA")
+    if background.size != tuple(output_size):
+        background = background.resize(tuple(output_size), Image.Resampling.BICUBIC)
+    smoke_rgba = reference_smoke_rgba(frame_index, tuple(output_size), cache_dir)
+    frame = _composite_premultiplied_screen_layer(background, smoke_rgba)
+    source = Image.open(_reference_exact_frame_path(cache_dir, frame_index)).convert("RGBA")
+    if source.size != tuple(output_size):
+        source = source.resize(tuple(output_size), Image.Resampling.BICUBIC)
+    ui = Image.open(_reference_exact_mask_path(cache_dir, "ui_exclusion_mask")).convert("L")
+    fire = Image.open(_reference_exact_mask_path(cache_dir, "fire_mask", frame_index)).convert("L")
+    foreground_mask = Image.fromarray(
+        np.maximum(np.asarray(ui, dtype=np.uint8), np.asarray(fire, dtype=np.uint8)),
+        mode="L",
+    ).filter(ImageFilter.GaussianBlur(radius=0.3))
+    if foreground_mask.size != tuple(output_size):
+        foreground_mask = foreground_mask.resize(tuple(output_size), Image.Resampling.BICUBIC)
+    frame.paste(source, (0, 0), foreground_mask)
+    return frame
+
+
+def _write_reference_exact_audit_artifacts(
+    cache_dir: Path,
+    audit_dir: Path,
+    *,
+    generated_frame_dir: Path | None = None,
+    frame_count: int = REFERENCE_EXACT_FRAME_COUNT,
+    start_frame: int = 0,
+) -> dict[str, object]:
+    audit_dir = Path(audit_dir)
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    reference_paths = [_reference_exact_frame_path(cache_dir, int(start_frame) + idx) for idx in range(int(frame_count))]
+    generated_tmp: tempfile.TemporaryDirectory[str] | None = None
+    if generated_frame_dir is None:
+        generated_tmp = tempfile.TemporaryDirectory(prefix="reference_exact_generated_")
+        generated_dir = Path(generated_tmp.name)
+        for frame_index in range(int(frame_count)):
+            _reference_exact_reconstructed_frame(cache_dir, int(start_frame) + frame_index).convert("RGB").save(
+                generated_dir / f"frame_{frame_index:04d}.jpg",
+                quality=92,
+            )
+        generated_paths = [generated_dir / f"frame_{idx:04d}.jpg" for idx in range(int(frame_count))]
+    else:
+        generated_paths = [Path(generated_frame_dir) / f"frame_{idx:04d}.png" for idx in range(int(frame_count))]
+    _micro_contact_sheet(reference_paths, audit_dir / "reference_exact_all_900_frames_micro_contact.jpg")
+    _micro_contact_sheet(generated_paths, audit_dir / "generated_exact_all_900_frames_micro_contact.jpg")
+    _half_second_contact_sheet(reference_paths, audit_dir / "reference_exact_half_second_contact.jpg")
+    _half_second_contact_sheet(generated_paths, audit_dir / "generated_exact_half_second_contact.jpg")
+    errors = _write_difference_contact_sheets(reference_paths, generated_paths, audit_dir, frame_count=frame_count)
+    _write_worst_reference_exact_frames(audit_dir, reference_paths, generated_paths, errors)
+    for filename in (
+        "reference_exact_manifest.json",
+        "reference_smoke_events.json",
+        "reference_exact_smoke_gate_report.json",
+    ):
+        source = Path(cache_dir) / filename
+        if source.exists():
+            shutil.copy2(source, audit_dir / filename)
+    first30_manifest = REFERENCE_FIRST30_AUDIT_DIR / "reference_exact_manifest.json"
+    if (Path(cache_dir) / "reference_exact_manifest.json").exists():
+        REFERENCE_FIRST30_AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(Path(cache_dir) / "reference_exact_manifest.json", first30_manifest)
+    summary = {
+        "artifact_schema_version": REFERENCE_EXACT_ARTIFACT_SCHEMA_VERSION,
+        "audit_dir": str(audit_dir),
+        "reference_frame_count": int(frame_count),
+        "generated_frame_count": int(frame_count),
+        "worst_frame_count": min(50, int(frame_count)),
+        "frame_difference_errors": errors,
+    }
+    _write_json(audit_dir / "reference_exact_audit_artifact_summary.json", summary)
+    if generated_tmp is not None:
+        generated_tmp.cleanup()
+    return summary
+
+
+def build_reference_exact_smoke_cache(
+    reference_video: Path = REFERENCE_VIDEO_DEFAULT,
+    cache_dir: Path = REFERENCE_EXACT_CACHE,
+    audit_dir: Path = REFERENCE_EXACT_AUDIT_DIR,
+    *,
+    frame_count: int = REFERENCE_EXACT_FRAME_COUNT,
+    force: bool = False,
+) -> dict[str, object]:
+    reference_video = Path(reference_video)
+    cache_dir = Path(cache_dir)
+    manifest_path = cache_dir / "reference_exact_manifest.json"
+    if not force and manifest_path.exists():
+        try:
+            manifest = validate_reference_exact_manifest(manifest_path, reference_video, verify_frame_hashes=True)
+            gate_path = cache_dir / "reference_exact_smoke_gate_report.json"
+            if gate_path.exists():
+                _write_reference_exact_audit_artifacts(cache_dir, audit_dir, frame_count=frame_count)
+                return {
+                    "manifest": manifest,
+                    "cache_dir": str(cache_dir),
+                    "audit_dir": str(audit_dir),
+                    "rebuilt": False,
+                }
+        except RuntimeError:
+            pass
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    _decode_reference_exact_frames(reference_video, cache_dir, frame_count=frame_count)
+    frame_hashes = _hash_reference_exact_frames(cache_dir, frame_count=frame_count)
+    manifest = _reference_exact_manifest_payload(reference_video, cache_dir, frame_count=frame_count)
+    manifest["frame_hash_count"] = len(frame_hashes["frames"])
+    _write_json(manifest_path, manifest)
+    validate_reference_exact_manifest(manifest_path, reference_video, verify_frame_hashes=True)
+    background, _confidence = _derive_reference_background_clean(cache_dir, frame_count=frame_count)
+    _save_background_residual_audit_sheet(cache_dir, background, frame_count=frame_count)
+    mask_summary = _save_reference_exact_masks(cache_dir, background, frame_count=frame_count)
+    frame_metrics, manual_queue = _extract_reference_exact_smoke_layers(cache_dir, background, frame_count=frame_count)
+    events = _transcribe_reference_smoke_events(frame_metrics, frame_count=frame_count)
+    _write_json(cache_dir / "reference_smoke_events.json", events)
+    gate_report = evaluate_reference_exact_smoke_gate(
+        cache_dir,
+        frame_count=frame_count,
+        allow_self_comparison=True,
+    )
+    _write_json(cache_dir / "reference_exact_smoke_gate_report.json", gate_report)
+    artifact_summary = _write_reference_exact_audit_artifacts(cache_dir, audit_dir, frame_count=frame_count)
+    return {
+        "manifest": manifest,
+        "cache_dir": str(cache_dir),
+        "audit_dir": str(audit_dir),
+        "rebuilt": True,
+        "mask_summary": mask_summary,
+        "manual_correction_queue_count": len(manual_queue),
+        "event_count": len(events),
+        "gate_report_passed": bool(gate_report["passed"]),
+        "artifact_summary": artifact_summary,
+    }
+
+
+def reference_smoke_rgba(frame_index: int, output_size: tuple[int, int], cache_dir: Path = REFERENCE_EXACT_CACHE) -> np.ndarray:
+    cache_dir = Path(cache_dir)
+    manifest_path = cache_dir / "reference_exact_manifest.json"
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        start = int(manifest.get("start_frame", 0))
+        count = int(manifest.get("frame_count", REFERENCE_EXACT_FRAME_COUNT))
+    else:
+        start = 0
+        count = REFERENCE_EXACT_FRAME_COUNT
+    source_index = int(np.clip(int(round(frame_index)) - start, 0, max(count - 1, 0)))
+    image = Image.fromarray(_load_reference_smoke_rgba_native(cache_dir, source_index), mode="RGBA")
+    if image.size != tuple(output_size):
+        image = image.resize(tuple(output_size), Image.Resampling.BICUBIC)
+    return np.asarray(image, dtype=np.uint8)
+
+
+def _composite_premultiplied_screen_layer(base: Image.Image, premultiplied_rgba: np.ndarray) -> Image.Image:
+    base_arr = np.asarray(base.convert("RGBA"), dtype=np.float32)
+    layer = np.asarray(premultiplied_rgba, dtype=np.float32)
+    if layer.shape[:2] != base_arr.shape[:2]:
+        layer_image = Image.fromarray(np.clip(layer, 0, 255).astype(np.uint8), mode="RGBA").resize(
+            base.size,
+            Image.Resampling.BICUBIC,
+        )
+        layer = np.asarray(layer_image, dtype=np.float32)
+    alpha = layer[..., 3:4] / 255.0
+    out = base_arr.copy()
+    out[..., :3] = np.clip(layer[..., :3] + base_arr[..., :3] * (1.0 - alpha), 0.0, 255.0)
+    out[..., 3] = 255.0
+    return Image.fromarray(np.clip(np.round(out), 0, 255).astype(np.uint8), mode="RGBA")
+
+def _screen_point_for_source(source: HybridSmokeSource, plate: TerrainPlate, map_size: tuple[int, int]) -> tuple[float, float]:
+    map_w, map_h = map(int, map_size)
+    u = float(source.x) / max(float(map_w - 1), 1.0)
+    v = float(source.y) / max(float(map_h - 1), 1.0)
+    return bilinear_quad_point(plate.quad, u, v)
+
+
+def _screen_wind_vector(plate: TerrainPlate, map_size: tuple[int, int]) -> np.ndarray:
+    wind = _hybrid_layer_wind_vector(0)
+    center_u, center_v = 0.5, 0.5
+    delta_u = float(wind[0]) * 0.14
+    delta_v = float(wind[1]) * 0.14
+    p0 = np.asarray(bilinear_quad_point(plate.quad, center_u, center_v), dtype=np.float32)
+    p1 = np.asarray(
+        bilinear_quad_point(
+            plate.quad,
+            float(np.clip(center_u + delta_u, 0.0, 1.0)),
+            float(np.clip(center_v + delta_v, 0.0, 1.0)),
+        ),
+        dtype=np.float32,
+    )
+    vector = p1 - p0
+    norm = max(float(np.linalg.norm(vector)), 1.0e-6)
+    return vector / norm
+
+
+def _fire_region_mask(
+    size: tuple[int, int],
+    plate: TerrainPlate,
+    map_size: tuple[int, int],
+    emitters: tuple[HybridSmokeSource, ...] | list[HybridSmokeSource],
+    frame_index: int,
+) -> np.ndarray:
+    width, height = map(int, size)
+    mask = Image.new("L", (width, height), 0)
+    draw = ImageDraw.Draw(mask)
+    map_w, map_h = map(int, map_size)
+    screen_scale = max(width / max(map_w, 1), height / max(map_h, 1))
+    active = [
+        source for source in emitters
+        if _source_flame_lifecycle_weight(source, frame_index) > 0.035
+        or _source_smolder_lifecycle_weight(source, frame_index) > 0.04
+    ]
+    if not active:
+        return np.zeros((height, width), dtype=bool)
+    for source in active:
+        sx, sy = _screen_point_for_source(source, plate, map_size)
+        radius = max(18.0, float(source.radius_px) * screen_scale * 9.0)
+        draw.ellipse((sx - radius, sy - radius, sx + radius, sy + radius), fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(radius=max(2.0, width / 360.0)))
+    return np.asarray(mask, dtype=np.uint8) > 8
+
+
+def _connected_component_stats(mask: np.ndarray) -> dict[str, float]:
+    binary = np.asarray(mask, dtype=bool)
+    total = int(np.count_nonzero(binary))
+    if total == 0:
+        return {
+            "component_count": 0.0,
+            "largest_component_area": 0.0,
+            "largest_component_fraction": 0.0,
+            "mean_component_width_px": 0.0,
+        }
+    try:
+        from scipy import ndimage  # type: ignore
+
+        labels, count = ndimage.label(binary)
+        if count == 0:
+            raise RuntimeError("no components")
+        sizes = ndimage.sum(binary, labels, range(1, count + 1))
+        objects = ndimage.find_objects(labels)
+        widths: list[float] = []
+        for idx, slc in enumerate(objects, start=1):
+            if slc is None:
+                continue
+            area = float(sizes[idx - 1])
+            h = float(slc[0].stop - slc[0].start)
+            w = float(slc[1].stop - slc[1].start)
+            widths.append(area / max(max(w, h), 1.0))
+        largest = float(np.max(sizes)) if len(sizes) else 0.0
+        return {
+            "component_count": float(count),
+            "largest_component_area": largest,
+            "largest_component_fraction": largest / max(float(binary.size), 1.0),
+            "mean_component_width_px": float(np.mean(widths)) if widths else 0.0,
+        }
+    except Exception:
+        visited = np.zeros(binary.shape, dtype=bool)
+        component_count = 0
+        largest = 0
+        widths: list[float] = []
+        height, width = binary.shape
+        coords = np.argwhere(binary)
+        for y0, x0 in coords:
+            if visited[y0, x0]:
+                continue
+            component_count += 1
+            stack = [(int(y0), int(x0))]
+            visited[y0, x0] = True
+            area = 0
+            min_x = max_x = int(x0)
+            min_y = max_y = int(y0)
+            while stack:
+                y, x = stack.pop()
+                area += 1
+                min_x = min(min_x, x)
+                max_x = max(max_x, x)
+                min_y = min(min_y, y)
+                max_y = max(max_y, y)
+                for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                    if 0 <= ny < height and 0 <= nx < width and binary[ny, nx] and not visited[ny, nx]:
+                        visited[ny, nx] = True
+                        stack.append((ny, nx))
+            largest = max(largest, area)
+            widths.append(float(area) / max(float(max(max_x - min_x + 1, max_y - min_y + 1)), 1.0))
+        return {
+            "component_count": float(component_count),
+            "largest_component_area": float(largest),
+            "largest_component_fraction": float(largest) / max(float(binary.size), 1.0),
+            "mean_component_width_px": float(np.mean(widths)) if widths else 0.0,
+        }
+
+
+def _connected_component_areas(mask: np.ndarray) -> np.ndarray:
+    binary = np.asarray(mask, dtype=bool)
+    if not np.any(binary):
+        return np.asarray([], dtype=np.float32)
+    try:
+        from scipy import ndimage  # type: ignore
+
+        labels, count = ndimage.label(binary)
+        if count == 0:
+            return np.asarray([], dtype=np.float32)
+        return np.asarray(ndimage.sum(binary, labels, range(1, count + 1)), dtype=np.float32)
+    except Exception:
+        visited = np.zeros(binary.shape, dtype=bool)
+        areas: list[float] = []
+        height, width = binary.shape
+        for y0, x0 in np.argwhere(binary):
+            if visited[y0, x0]:
+                continue
+            stack = [(int(y0), int(x0))]
+            visited[y0, x0] = True
+            area = 0
+            while stack:
+                y, x = stack.pop()
+                area += 1
+                for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                    if 0 <= ny < height and 0 <= nx < width and binary[ny, nx] and not visited[ny, nx]:
+                        visited[ny, nx] = True
+                        stack.append((ny, nx))
+            areas.append(float(area))
+        return np.asarray(areas, dtype=np.float32)
+
+
+def _component_centers_and_areas(mask: np.ndarray) -> list[tuple[float, float, float]]:
+    binary = np.asarray(mask, dtype=bool)
+    if not np.any(binary):
+        return []
+    labels, count = _component_labels(binary)
+    components: list[tuple[float, float, float]] = []
+    for label in range(1, count + 1):
+        ys, xs = np.where(labels == label)
+        if xs.size == 0:
+            continue
+        components.append((float(np.mean(xs)), float(np.mean(ys)), float(xs.size)))
+    return components
+
+
+def _reference_fire_distribution_report(
+    fire_alpha: np.ndarray,
+    primary_fire_uv: tuple[float, float],
+) -> dict[str, float]:
+    alpha = np.asarray(fire_alpha, dtype=np.uint8)
+    height, width = alpha.shape[:2]
+    components = _component_centers_and_areas(alpha > 142)
+    if not components:
+        return {
+            "distributed_fire_cluster_count": 0.0,
+            "fire_spread_grid_cell_count": 0.0,
+            "far_fire_core_fraction": 0.0,
+            "primary_fire_dominance_fraction": 1.0,
+            "fire_cluster_extent_fraction": 0.0,
+        }
+    primary_x = float(primary_fire_uv[0]) * max(width - 1, 1)
+    primary_y = float(primary_fire_uv[1]) * max(height - 1, 1)
+    total_area = float(sum(area for _x, _y, area in components))
+    far_area = 0.0
+    primary_area = 0.0
+    far_count = 0
+    cells: set[tuple[int, int]] = set()
+    xs: list[float] = []
+    ys: list[float] = []
+    for x, y, area in components:
+        nx = x / max(width - 1, 1)
+        ny = y / max(height - 1, 1)
+        normalized_distance = math.hypot(nx - float(primary_fire_uv[0]), ny - float(primary_fire_uv[1]))
+        if normalized_distance >= 0.18:
+            far_count += 1
+            far_area += area
+        if math.hypot(x - primary_x, y - primary_y) <= 0.16 * max(width, height):
+            primary_area += area
+        cells.add((min(3, int(nx * 4.0)), min(2, int(ny * 3.0))))
+        xs.append(x)
+        ys.append(y)
+    bbox_area = (max(xs) - min(xs) + 1.0) * (max(ys) - min(ys) + 1.0)
+    return {
+        "distributed_fire_cluster_count": float(far_count),
+        "fire_spread_grid_cell_count": float(len(cells)),
+        "far_fire_core_fraction": float(far_area / max(total_area, 1.0)),
+        "primary_fire_dominance_fraction": float(primary_area / max(total_area, 1.0)),
+        "fire_cluster_extent_fraction": float(bbox_area / max(float(width * height), 1.0)),
+    }
+
+
+def _reference_regional_smoke_texture_report(regional_alpha: np.ndarray) -> dict[str, float]:
+    alpha = np.asarray(regional_alpha, dtype=np.float32) / 255.0
+    smoke = alpha > (1.0 / 255.0)
+    if not np.any(smoke):
+        return {
+            "regional_smoke_texture_score": 0.0,
+            "regional_smoke_axis_band_score": 1.0,
+            "regional_smoke_contour_band_score": 1.0,
+            "regional_smoke_ring_score": 1.0,
+        }
+    smooth = _pil_blur_float(alpha, max(2.0, min(alpha.shape) / 90.0))
+    high_pass = np.abs(alpha - smooth)
+    texture_score = float(np.percentile(high_pass[smoke], 85.0))
+    column_mean = np.mean(smooth, axis=0)
+    row_mean = np.mean(smooth, axis=1)
+    column_jump = float(np.max(np.abs(np.diff(column_mean)))) if column_mean.size > 1 else 0.0
+    row_jump = float(np.max(np.abs(np.diff(row_mean)))) if row_mean.size > 1 else 0.0
+    dynamic_range = float(np.percentile(smooth[smoke], 95.0) - np.percentile(smooth[smoke], 5.0))
+    axis_band_score = max(column_jump, row_jump) / max(dynamic_range, 0.015)
+    contour_edge_strength = float(np.percentile(high_pass[smoke], 95.0))
+    contour_band_score = float(np.clip(contour_edge_strength / 0.12, 0.0, 1.0))
+    grad_y, grad_x = np.gradient(smooth)
+    grad_mag = np.hypot(grad_x, grad_y)
+    edge_values = grad_mag[smoke]
+    if edge_values.size:
+        edge_threshold = max(float(np.percentile(edge_values, 72.0)), 0.0015)
+        edge_mask = smoke & (grad_mag >= edge_threshold)
+    else:
+        edge_mask = np.zeros_like(smoke, dtype=bool)
+    if np.any(edge_mask):
+        yy, xx = np.mgrid[0 : alpha.shape[0], 0 : alpha.shape[1]].astype(np.float32)
+        weights = np.clip(smooth, 0.0, 1.0)
+        weight_sum = max(float(np.sum(weights)), 1.0e-6)
+        cx = float(np.sum(xx * weights) / weight_sum)
+        cy = float(np.sum(yy * weights) / weight_sum)
+        dx = xx - np.float32(cx)
+        dy = yy - np.float32(cy)
+        radial_norm = np.hypot(dx, dy)
+        alignment = np.abs(grad_x * dx + grad_y * dy) / np.maximum(grad_mag * radial_norm, 1.0e-6)
+        radial_alignment = float(np.percentile(alignment[edge_mask], 82.0))
+        ring_score = float(np.clip(radial_alignment * contour_band_score, 0.0, 1.0))
+    else:
+        ring_score = 0.0
+    return {
+        "regional_smoke_texture_score": texture_score,
+        "regional_smoke_axis_band_score": float(axis_band_score),
+        "regional_smoke_contour_band_score": contour_band_score,
+        "regional_smoke_ring_score": ring_score,
+    }
+
+
+def source_wisp_screen_attachment_report(
+    warped_wisps: np.ndarray,
+    emitters: tuple[HybridSmokeSource, ...] | list[HybridSmokeSource],
+    frame_index: int,
+    plate: TerrainPlate,
+    map_size: tuple[int, int],
+) -> dict[str, float]:
+    alpha = np.asarray(warped_wisps, dtype=np.uint8)[..., 3].astype(np.float32)
+    active = [
+        source for source in emitters
+        if _source_flame_lifecycle_weight(source, frame_index) > 0.035
+    ]
+    report = {
+        "screen_active_source_count": float(len(active)),
+        "screen_attached_source_count": 0.0,
+        "screen_attached_source_fraction": 0.0,
+        "screen_downwind_dx": 0.0,
+        "screen_downwind_dy": 0.0,
+        "screen_source_to_wisp_distance_px": 0.0,
+        "screen_wisp_mean_width_px": 0.0,
+        "screen_wisp_component_count": 0.0,
+    }
+    if not active or not np.any(alpha > 0.0):
+        return report
+
+    height, width = alpha.shape
+    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+    screen_wind = _screen_wind_vector(plate, map_size)
+    screen_cross = np.array([-screen_wind[1], screen_wind[0]], dtype=np.float32)
+    points = np.asarray([_screen_point_for_source(source, plate, map_size) for source in active], dtype=np.float32)
+    weights = np.asarray([max(source.strength * source.heat, 0.01) for source in active], dtype=np.float32)
+    total = max(float(np.sum(weights)), 1.0e-6)
+    source_center = np.sum(points * weights[:, None], axis=0) / total
+    alpha_sum = max(float(np.sum(alpha)), 1.0e-6)
+    wisp_center = np.array([float(np.sum(xx * alpha) / alpha_sum), float(np.sum(yy * alpha) / alpha_sum)], dtype=np.float32)
+    delta = wisp_center - source_center
+    report["screen_downwind_dx"] = float(delta[0])
+    report["screen_downwind_dy"] = float(delta[1])
+    report["screen_source_to_wisp_distance_px"] = float(np.dot(delta, screen_wind))
+
+    map_w, map_h = map(int, map_size)
+    screen_scale = max(width / max(map_w, 1), height / max(map_h, 1))
+    attached = 0
+    for source, point in zip(active, points):
+        dx = xx - np.float32(point[0])
+        dy = yy - np.float32(point[1])
+        along = dx * screen_wind[0] + dy * screen_wind[1]
+        lateral = dx * screen_cross[0] + dy * screen_cross[1]
+        radius = max(5.5, float(source.radius_px) * screen_scale * 3.2)
+        mask = (along > -radius * 1.4) & (along < radius * 8.2) & (np.abs(lateral) < radius * 2.1)
+        if np.count_nonzero(alpha[mask] > 5.0) >= 3:
+            attached += 1
+    report["screen_attached_source_count"] = float(attached)
+    report["screen_attached_source_fraction"] = float(attached / max(len(active), 1))
+
+    components = _connected_component_stats(alpha > 4.0)
+    report["screen_wisp_mean_width_px"] = float(components["mean_component_width_px"])
+    report["screen_wisp_component_count"] = float(components["component_count"])
+    return report
+
+
+def _rgb_region_metrics(image: Image.Image, region: np.ndarray) -> dict[str, float]:
+    arr = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
+    luma = arr @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    maxc = np.max(arr, axis=2)
+    minc = np.min(arr, axis=2)
+    saturation = np.divide(maxc - minc, maxc, out=np.zeros_like(maxc), where=maxc > 1.0e-6)
+    gy, gx = np.gradient(luma)
+    grad = np.hypot(gx, gy)
+    mask = np.asarray(region, dtype=bool)
+    if mask.shape != luma.shape or not np.any(mask):
+        mask = np.ones_like(luma, dtype=bool)
+    smoke_like = (luma > 0.22) & (saturation < 0.46) & mask
+    strand_like = smoke_like & (grad > 0.018)
+    return {
+        "region_smoke_like_fraction": float(np.count_nonzero(smoke_like) / max(np.count_nonzero(mask), 1)),
+        "region_strand_like_fraction": float(np.count_nonzero(strand_like) / max(np.count_nonzero(mask), 1)),
+        "region_p95_gradient": float(np.percentile(grad[mask], 95.0)) if np.any(mask) else 0.0,
+    }
+
+
+def _fire_core_visibility_fraction(
+    image: Image.Image,
+    emitters: tuple[HybridSmokeSource, ...] | list[HybridSmokeSource],
+    frame_index: int,
+    plate: TerrainPlate,
+    map_size: tuple[int, int],
+) -> float:
+    active = [
+        source for source in emitters
+        if _source_flame_lifecycle_weight(source, frame_index) > 0.035
+    ]
+    if not active:
+        return 1.0
+    rgb = np.asarray(image.convert("RGB"), dtype=np.float32)
+    height, width = rgb.shape[:2]
+    map_w, map_h = map(int, map_size)
+    screen_scale = max(width / max(map_w, 1), height / max(map_h, 1))
+    visible = 0
+    for source in active:
+        sx, sy = _screen_point_for_source(source, plate, map_size)
+        radius = int(max(7.0, float(source.radius_px) * screen_scale * 4.2))
+        x0 = max(0, int(round(sx)) - radius)
+        x1 = min(width, int(round(sx)) + radius + 1)
+        y0 = max(0, int(round(sy)) - radius)
+        y1 = min(height, int(round(sy)) + radius + 1)
+        if x0 >= x1 or y0 >= y1:
+            continue
+        crop = rgb[y0:y1, x0:x1]
+        warm = (crop[..., 0] - crop[..., 2] > 44.0) & (crop[..., 1] - crop[..., 2] > 9.0) & (crop[..., 0] > 128.0)
+        hot = (crop[..., 0] > 210.0) & (crop[..., 1] > 150.0) & (crop[..., 2] < crop[..., 1])
+        if np.count_nonzero(warm | hot) >= 2:
+            visible += 1
+    return float(visible / max(len(active), 1))
+
+
+def _emitter_distribution_report(
+    emitters: tuple[HybridSmokeSource, ...] | list[HybridSmokeSource],
+    frame_index: int,
+    map_size: tuple[int, int],
+) -> dict[str, float]:
+    active = [
+        source for source in emitters
+        if _source_flame_lifecycle_weight(source, frame_index) > 0.035
+    ]
+    if not active:
+        return {
+            "active_fire_emitter_count": 0.0,
+            "emitter_bbox_fraction": 0.0,
+            "emitter_bbox_width_fraction": 0.0,
+            "emitter_bbox_height_fraction": 0.0,
+        }
+    xs = np.asarray([source.x for source in active], dtype=np.float32)
+    ys = np.asarray([source.y for source in active], dtype=np.float32)
+    width, height = map(int, map_size)
+    bbox_w = float(np.ptp(xs)) + 1.0
+    bbox_h = float(np.ptp(ys)) + 1.0
+    return {
+        "active_fire_emitter_count": float(len(active)),
+        "emitter_bbox_fraction": float((bbox_w * bbox_h) / max(float(width * height), 1.0)),
+        "emitter_bbox_width_fraction": float(bbox_w / max(float(width), 1.0)),
+        "emitter_bbox_height_fraction": float(bbox_h / max(float(height), 1.0)),
+    }
+
+
+def _save_component_audit_frame(
+    audit_dir: Path,
+    label: str,
+    terrain_with_bloom: Image.Image,
+    plate: TerrainPlate,
+    output_size: tuple[int, int],
+    sources: list[HybridSmokeSource],
+    frame_index: int,
+    broad_map: np.ndarray,
+    physical_map: np.ndarray | None,
+    wisp_map: np.ndarray | None,
+    wisp_emitters: tuple[HybridSmokeSource, ...] | list[HybridSmokeSource],
+    combined_frame: Image.Image,
+    broad_alpha: float,
+    physical_alpha: float,
+    wisp_state: SourceWispState | None = None,
+    plume_ribbons: bool = True,
+) -> dict[str, float]:
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    width, height = output_size
+    empty = np.zeros_like(broad_map)
+    map_size = (int(broad_map.shape[1]), int(broad_map.shape[0]))
+    active_emitters = tuple(wisp_emitters) if wisp_emitters else tuple(sources)
+    main_smoke_map = composite_main_smoke_maps(
+        broad_map,
+        physical_map,
+        atmospheric_alpha=broad_alpha,
+        physical_alpha=physical_alpha,
+    )
+    warped_main_smoke = np.asarray(warp_map_layer_to_plate(main_smoke_map, plate, output_size), dtype=np.uint8)
+    broad_only = composite_atmospheric_smoke(
+        terrain_with_bloom,
+        warp_map_layer_to_plate(
+            composite_main_smoke_maps(broad_map, None, atmospheric_alpha=broad_alpha),
+            plate,
+            output_size,
+        ),
+    )
+    physical_only_map = _scale_rgba_alpha(physical_map, physical_alpha) if physical_map is not None else empty
+    physical_only = composite_atmospheric_smoke(
+        terrain_with_bloom,
+        warp_map_layer_to_plate(physical_only_map, plate, output_size),
+    )
+    if wisp_map is not None:
+        wisp_only = composite_source_wisps(
+            terrain_with_bloom,
+            warp_map_layer_to_plate(wisp_map, plate, output_size),
+        )
+    else:
+        wisp_only = terrain_with_bloom.copy()
+
+    outputs = {
+        "broad_only": broad_only,
+        "physical_only": physical_only,
+        "source_wisps_only": wisp_only,
+        "combined": combined_frame,
+    }
+    for name, image in outputs.items():
+        image.save(audit_dir / f"{label}_{name}.png")
+    sheet = _compose_labeled_sheet(
+        [
+            ("broad smoke only", broad_only),
+            ("physical smoke only", physical_only),
+            ("source wisps only", wisp_only),
+            ("combined final", combined_frame),
+        ],
+        columns=2,
+    )
+    sheet.save(audit_dir / f"{label}_ablation_sheet.png")
+
+    wisp_rgba = wisp_map if wisp_map is not None else empty
+    report = source_wisp_attachment_report(wisp_rgba, list(active_emitters), frame_index)
+    warped_wisps = np.asarray(warp_map_layer_to_plate(wisp_rgba, plate, output_size), dtype=np.uint8)
+    wisp_alpha = warped_wisps[..., 3].astype(np.float32)
+    main_alpha = warped_main_smoke[..., 3].astype(np.float32)
+    fire_region = _fire_region_mask(output_size, plate, map_size, active_emitters, frame_index)
+    region_area = max(int(np.count_nonzero(fire_region)), 1)
+    low_frequency = _pil_blur_float(main_alpha / 255.0, max(9.0, width / 58.0))
+    low_haze_mask = (low_frequency > 0.048) & fire_region
+    carpet_mask = (low_frequency > 0.060) & fire_region
+    carpet_components = _connected_component_stats(carpet_mask)
+    wisp_components = _connected_component_stats((wisp_alpha > 4.0) & fire_region)
+    wisp_readability = _rgb_region_metrics(wisp_only, fire_region)
+    combined_readability = _rgb_region_metrics(combined_frame, fire_region)
+    wisp_strands = max(float(wisp_readability["region_strand_like_fraction"]), 1.0e-6)
+    low_frequency_haze_fraction = float(np.count_nonzero(low_haze_mask) / region_area)
+    report.update(
+        {
+            "frame_index": float(frame_index),
+            "screen_wisp_coverage_fraction": float(np.count_nonzero(wisp_alpha > 0.0) / max(width * height, 1)),
+            "screen_wisp_alpha_p95": float(np.percentile(wisp_alpha, 95.0)),
+            "screen_wisp_alpha_max": float(np.max(wisp_alpha)) if wisp_alpha.size else 0.0,
+            "low_frequency_haze_fraction": low_frequency_haze_fraction,
+            "smoke_carpet_largest_component_fraction": float(carpet_components["largest_component_area"] / region_area),
+            "source_wisp_component_count": float(wisp_components["component_count"]),
+            "source_wisp_mean_width_px": float(wisp_components["mean_component_width_px"]),
+            "strand_to_haze_ratio": float(wisp_strands / max(low_frequency_haze_fraction, 1.0e-4)),
+            "combined_strand_retention": float(
+                combined_readability["region_strand_like_fraction"] / wisp_strands
+            ),
+            "source_wisps_only_strand_like_fraction": float(wisp_readability["region_strand_like_fraction"]),
+            "combined_strand_like_fraction": float(combined_readability["region_strand_like_fraction"]),
+            "fire_core_visibility_fraction": _fire_core_visibility_fraction(
+                combined_frame,
+                active_emitters,
+                frame_index,
+                plate,
+                map_size,
+            ),
+        }
+    )
+    report.update(
+        source_wisp_screen_attachment_report(
+            warped_wisps,
+            active_emitters,
+            frame_index,
+            plate,
+            map_size,
+        )
+    )
+    report.update(
+        source_wisp_morphology_report(
+            wisp_state,
+            frame_index,
+            plate,
+            output_size,
+            plume_ribbons=plume_ribbons,
+            warped_wisps=warped_wisps,
+        )
+    )
+    report.update(_emitter_distribution_report(active_emitters, frame_index, map_size))
+    return report
+
+
+def _extract_video_frame(ffmpeg: str, video_path: Path, time_s: float, output_path: Path) -> bool:
+    if not video_path.exists():
+        return False
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-ss",
+        f"{float(time_s):.3f}",
+        "-i",
+        str(video_path),
+        "-frames:v",
+        "1",
+        str(output_path),
+    ]
+    result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    return result.returncode == 0 and output_path.exists()
+
+
+def _write_encoded_video_audit(
+    generated_video: Path,
+    reference_video: Path,
+    audit_dir: Path,
+    times: tuple[float, ...] | list[float],
+    ffmpeg: str,
+) -> list[dict[str, float]]:
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    records: list[dict[str, float]] = []
+    sheet_items: list[tuple[str, Image.Image]] = []
+    for time_s in times:
+        label = _frame_label_time(float(time_s))
+        generated_png = audit_dir / f"{label}_generated_encoded.png"
+        reference_png = audit_dir / f"{label}_reference.png"
+        if _extract_video_frame(ffmpeg, generated_video, float(time_s), generated_png):
+            generated = Image.open(generated_png).convert("RGBA")
+            sheet_items.append((f"generated {time_s:.1f}s", generated))
+            record = _rgb_frame_metrics(generated)
+            record["time_seconds"] = float(time_s)
+            records.append(record)
+        if _extract_video_frame(ffmpeg, reference_video, float(time_s), reference_png):
+            reference = Image.open(reference_png).convert("RGBA")
+            sheet_items.append((f"reference {time_s:.1f}s", reference))
+    if sheet_items:
+        _compose_labeled_sheet(sheet_items, columns=2).save(audit_dir / "reference_generated_frame_sheet.png")
+    return records
+
+
+def _write_reference_film_contact_sheet(
+    generated_video: Path,
+    reference_video: Path,
+    audit_dir: Path,
+    ffmpeg: str,
+    times: tuple[float, ...] | list[float] = REFERENCE_FILM_CONTACT_SHEET_TIMES,
+) -> list[dict[str, float]]:
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    records: list[dict[str, float]] = []
+    sheet_items: list[tuple[str, Image.Image]] = []
+    for time_s in times:
+        label = _frame_label_time(float(time_s))
+        generated_png = audit_dir / f"reference_film_{label}_generated.png"
+        reference_png = audit_dir / f"reference_film_{label}_reference.png"
+        if _extract_video_frame(ffmpeg, generated_video, float(time_s), generated_png):
+            generated = Image.open(generated_png).convert("RGBA")
+            sheet_items.append((f"generated {time_s:.1f}s", generated))
+            record = _rgb_frame_metrics(generated)
+            record["time_seconds"] = float(time_s)
+            records.append(record)
+        if _extract_video_frame(ffmpeg, reference_video, float(time_s), reference_png):
+            reference = Image.open(reference_png).convert("RGBA")
+            sheet_items.append((f"reference {time_s:.1f}s", reference))
+    if sheet_items:
+        _compose_labeled_sheet(sheet_items, columns=2).save(audit_dir / "reference_film_first_30s_contact_sheet.png")
+    return records
+
+
+def _probe_video_stream(video_path: Path, ffprobe: str | None) -> dict[str, float | str]:
+    if ffprobe is None or not video_path.exists():
+        return {}
+    cmd = [
+        ffprobe,
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height,codec_name,bit_rate,color_space,color_transfer,color_primaries",
+        "-of",
+        "json",
+        str(video_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        return {}
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {}
+    streams = payload.get("streams", [])
+    if not streams:
+        return {}
+    stream = streams[0]
+    report: dict[str, float | str] = {}
+    for key in ("width", "height", "bit_rate"):
+        value = stream.get(key)
+        if value is None:
+            continue
+        try:
+            report[key] = float(value)
+        except (TypeError, ValueError):
+            continue
+    for key in ("codec_name", "color_space", "color_transfer", "color_primaries"):
+        value = stream.get(key)
+        if value is not None:
+            report[key] = str(value)
+    return report
+
+
+def _reference_film_frame_report(
+    combined_frame: Image.Image,
+    plate: TerrainPlate,
+    output_size: tuple[int, int],
+    map_size: tuple[int, int],
+    sources: list[HybridSmokeSource],
+    frame_index: int,
+    frame_time: float,
+    regional_map: np.ndarray | None,
+    broad_map: np.ndarray,
+    wisp_map: np.ndarray | None,
+    fire_map: np.ndarray,
+    frame_info: ReferenceFilmFrameInfo,
+    previous_frame: Image.Image | None = None,
+) -> dict[str, float | str]:
+    width, height = map(int, output_size)
+    rgba = np.asarray(combined_frame.convert("RGBA"), dtype=np.float32)
+    rgb = rgba[..., :3] / 255.0
+    alpha = rgba[..., 3]
+    luma = rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    if previous_frame is not None and previous_frame.size == combined_frame.size:
+        previous_luma = np.asarray(previous_frame.convert("RGB"), dtype=np.float32) / 255.0
+        previous_luma = previous_luma @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+        temporal_luma_delta = float(np.mean(np.abs(luma - previous_luma)))
+    else:
+        temporal_luma_delta = 0.0
+
+    broad_alpha = np.asarray(broad_map, dtype=np.uint8)[..., 3]
+    regional_alpha = (
+        np.asarray(regional_map, dtype=np.uint8)[..., 3]
+        if regional_map is not None
+        else np.zeros((map_size[1], map_size[0]), dtype=np.uint8)
+    )
+    wisp_alpha = (
+        np.asarray(wisp_map, dtype=np.uint8)[..., 3]
+        if wisp_map is not None
+        else np.zeros((map_size[1], map_size[0]), dtype=np.uint8)
+    )
+    smoke_alpha = np.maximum(broad_alpha, wisp_alpha)
+    fire_alpha = np.asarray(fire_map, dtype=np.uint8)[..., 3]
+    fire_core = active_fire_core_intensity_field(sources, frame_index, map_size)
+    fire_components = _connected_component_stats(fire_alpha > 142)
+    fire_core_areas = _connected_component_areas(fire_alpha > 142)
+    fire_core_radii = np.sqrt(fire_core_areas / math.pi) if fire_core_areas.size else np.asarray([], dtype=np.float32)
+    halo_area = float(np.count_nonzero(fire_alpha > 18))
+    core_area = float(np.count_nonzero(fire_alpha > 142))
+    smoke_weights = smoke_alpha.astype(np.float64)
+    smoke_mass = float(np.sum(smoke_weights))
+    if smoke_mass > 0.0:
+        smoke_y, smoke_x = np.mgrid[0 : smoke_alpha.shape[0], 0 : smoke_alpha.shape[1]].astype(np.float64)
+        smoke_centroid_x = float(np.sum(smoke_x * smoke_weights) / smoke_mass) / max(float(smoke_alpha.shape[1] - 1), 1.0)
+        smoke_centroid_y = float(np.sum(smoke_y * smoke_weights) / smoke_mass) / max(float(smoke_alpha.shape[0] - 1), 1.0)
+    else:
+        smoke_centroid_x = 0.0
+        smoke_centroid_y = 0.0
+    mid_scale_smoke = (smoke_alpha > 24) & (smoke_alpha <= 112)
+    date_ordinal = float(date.fromisoformat(frame_info.date_label).toordinal())
+    return {
+        "frame_index": float(frame_index),
+        "time_seconds": float(frame_time),
+        "date_label": frame_info.date_label,
+        "date_ordinal": date_ordinal,
+        "burned_area_ha": float(frame_info.burned_area_ha),
+        "full_bleed_frame_coverage_fraction": float(np.count_nonzero(alpha > 250.0) / max(width * height, 1)),
+        "map_quad_area_fraction": _quad_area_fraction(plate.quad, output_size),
+        "mean_luma": float(np.mean(luma)),
+        "p95_luma": float(np.percentile(luma, 95.0)),
+        "temporal_luma_delta": temporal_luma_delta,
+        "combined_smoke_coverage_fraction": float(np.count_nonzero(smoke_alpha > 2) / max(smoke_alpha.size, 1)),
+        "dense_combined_smoke_fraction": float(np.count_nonzero(smoke_alpha > 62) / max(smoke_alpha.size, 1)),
+        "mid_scale_smoke_fraction": float(np.count_nonzero(mid_scale_smoke) / max(smoke_alpha.size, 1)),
+        "smoke_centroid_x_fraction": smoke_centroid_x,
+        "smoke_centroid_y_fraction": smoke_centroid_y,
+        "regional_smoke_coverage_fraction": float(np.count_nonzero(regional_alpha > 1) / max(regional_alpha.size, 1)),
+        "dense_regional_smoke_fraction": float(
+            np.count_nonzero(regional_alpha > REFERENCE_FILM_DENSE_REGIONAL_SMOKE_ALPHA_THRESHOLD)
+            / max(regional_alpha.size, 1)
+        ),
+        "source_wisp_coverage_fraction": float(np.count_nonzero(wisp_alpha > 1) / max(wisp_alpha.size, 1)),
+        "active_fire_core_pixel_count": float(np.count_nonzero(fire_core >= FIRE_CORE_EMITTER_INTENSITY_THRESHOLD)),
+        "hot_fire_fraction": float(np.count_nonzero(fire_alpha > 142) / max(fire_alpha.size, 1)),
+        "hot_fire_component_count": float(fire_components["component_count"]),
+        "hot_fire_mean_component_width_px": float(fire_components["mean_component_width_px"]),
+        "median_fire_mark_radius_px": float(np.median(fire_core_radii)) if fire_core_radii.size else 0.0,
+        "halo_core_area_ratio": float(halo_area / max(core_area, 1.0)),
+        **_reference_fire_distribution_report(fire_alpha, plate.fire_uv),
+        **_reference_regional_smoke_texture_report(regional_alpha),
+    }
+
+
+def _reference_film_label_report(
+    pre_label_frame: Image.Image,
+    labeled_frame: Image.Image,
+    label_boxes: list[tuple[str, tuple[int, int, int, int]]],
+    smoke_layer: Image.Image,
+    fire_layer: Image.Image,
+) -> dict[str, float]:
+    if pre_label_frame.size != labeled_frame.size or not label_boxes:
+        return {
+            "label_count": 0.0,
+            "median_label_contrast_delta": 0.0,
+            "median_label_smoke_overlap_fraction": 1.0,
+            "median_label_fire_overlap_fraction": 1.0,
+            "median_label_text_pixel_fraction": 0.0,
+        }
+    pre_rgb = np.asarray(pre_label_frame.convert("RGB"), dtype=np.float32) / 255.0
+    labeled_rgb = np.asarray(labeled_frame.convert("RGB"), dtype=np.float32) / 255.0
+    pre_luma = pre_rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    labeled_luma = labeled_rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    smoke_alpha = np.asarray(smoke_layer.convert("RGBA"), dtype=np.uint8)[..., 3]
+    fire_alpha = np.asarray(fire_layer.convert("RGBA"), dtype=np.uint8)[..., 3]
+    contrasts: list[float] = []
+    smoke_overlaps: list[float] = []
+    fire_overlaps: list[float] = []
+    text_fractions: list[float] = []
+    width, height = labeled_frame.size
+    for _name, box in label_boxes:
+        x0, y0, x1, y1 = box
+        x0 = max(0, min(width, int(x0)))
+        x1 = max(0, min(width, int(x1)))
+        y0 = max(0, min(height, int(y0)))
+        y1 = max(0, min(height, int(y1)))
+        if x0 >= x1 or y0 >= y1:
+            continue
+        diff = np.max(np.abs(labeled_rgb[y0:y1, x0:x1] - pre_rgb[y0:y1, x0:x1]), axis=2)
+        text_mask = diff > 0.035
+        area = max(int(text_mask.size), 1)
+        text_fraction = float(np.count_nonzero(text_mask) / area)
+        if np.any(text_mask):
+            contrast = float(np.median(np.abs(labeled_luma[y0:y1, x0:x1][text_mask] - pre_luma[y0:y1, x0:x1][text_mask])))
+        else:
+            contrast = 0.0
+        contrasts.append(contrast)
+        text_fractions.append(text_fraction)
+        smoke_overlaps.append(float(np.count_nonzero(smoke_alpha[y0:y1, x0:x1] > 10) / area))
+        fire_overlaps.append(float(np.count_nonzero(fire_alpha[y0:y1, x0:x1] > 12) / area))
+    return {
+        "label_count": float(len(label_boxes)),
+        "median_label_contrast_delta": float(np.median(contrasts)) if contrasts else 0.0,
+        "median_label_smoke_overlap_fraction": float(np.median(smoke_overlaps)) if smoke_overlaps else 1.0,
+        "median_label_fire_overlap_fraction": float(np.median(fire_overlaps)) if fire_overlaps else 1.0,
+        "median_label_text_pixel_fraction": float(np.median(text_fractions)) if text_fractions else 0.0,
+    }
+
+
+def _reference_exact_label_regions(size: tuple[int, int]) -> list[tuple[str, tuple[int, int, int, int]]]:
+    width, height = map(int, size)
+    specs = (
+        ("source_top_left", (0.018, 0.014, 0.470, 0.120)),
+        ("date_top_right", (0.590, 0.014, 0.986, 0.126)),
+        ("area_bottom_left", (0.018, 0.690, 0.475, 0.970)),
+    )
+    return [
+        (
+            name,
+            (
+                int(round(width * x0)),
+                int(round(height * y0)),
+                int(round(width * x1)),
+                int(round(height * y1)),
+            ),
+        )
+        for name, (x0, y0, x1, y1) in specs
+    ]
+
+
+def _reference_exact_label_region_metrics(
+    image: Image.Image,
+    box: tuple[int, int, int, int],
+) -> dict[str, float]:
+    width, height = image.size
+    x0, y0, x1, y1 = box
+    x0 = max(0, min(width, int(x0)))
+    x1 = max(0, min(width, int(x1)))
+    y0 = max(0, min(height, int(y0)))
+    y1 = max(0, min(height, int(y1)))
+    if x0 >= x1 or y0 >= y1:
+        return {
+            "region_luma_contrast": 0.0,
+            "region_edge_fraction": 0.0,
+            "region_bright_fraction": 0.0,
+            "region_textlike_fraction": 0.0,
+        }
+    rgb = np.asarray(image.convert("RGB").crop((x0, y0, x1, y1)), dtype=np.float32) / 255.0
+    luma = rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    if min(luma.shape) < 2:
+        return {
+            "region_luma_contrast": 0.0,
+            "region_edge_fraction": 0.0,
+            "region_bright_fraction": 0.0,
+            "region_textlike_fraction": 0.0,
+        }
+    p05, p50, p95 = np.percentile(luma, [5.0, 50.0, 95.0])
+    contrast = float(p95 - p05)
+    grad_y, grad_x = np.gradient(luma.astype(np.float32))
+    gradient = np.hypot(grad_x, grad_y)
+    edge_threshold = max(0.018, contrast * 0.22)
+    edge_mask = gradient > edge_threshold
+    bright_threshold = max(float(p50 + contrast * 0.42), 0.58)
+    bright_mask = luma > bright_threshold
+    textlike_mask = edge_mask | (bright_mask & (gradient > edge_threshold * 0.45))
+    area = max(int(luma.size), 1)
+    return {
+        "region_luma_contrast": contrast,
+        "region_edge_fraction": float(np.count_nonzero(edge_mask) / area),
+        "region_bright_fraction": float(np.count_nonzero(bright_mask) / area),
+        "region_textlike_fraction": float(np.count_nonzero(textlike_mask) / area),
+    }
+
+
+def reference_exact_decoded_label_report(
+    frame_dir: Path,
+    *,
+    frame_count: int,
+    start_frame: int = 0,
+) -> dict[str, object]:
+    frame_count = max(0, int(frame_count))
+    if frame_count <= 0:
+        return {
+            "schema_version": "reference-exact-decoded-label-v1",
+            "sampled_frame_count": 0,
+            "active_region_fraction": 0.0,
+            "passed": False,
+            "thresholds": dict(REFERENCE_EXACT_DECODED_LABEL_THRESHOLDS),
+            "records": [],
+        }
+    sample_indexes = sorted({0, frame_count // 2, frame_count - 1})
+    records: list[dict[str, float | int | str | bool]] = []
+    for local_index in sample_indexes:
+        path = Path(frame_dir) / f"frame_{int(local_index):04d}.png"
+        if not path.exists():
+            continue
+        frame = Image.open(path).convert("RGBA")
+        for region_name, box in _reference_exact_label_regions(frame.size):
+            metrics = _reference_exact_label_region_metrics(frame, box)
+            active = (
+                metrics["region_luma_contrast"]
+                >= REFERENCE_EXACT_DECODED_LABEL_THRESHOLDS["minimum_median_region_luma_contrast"]
+                and (
+                    metrics["region_edge_fraction"]
+                    >= REFERENCE_EXACT_DECODED_LABEL_THRESHOLDS["minimum_median_region_edge_fraction"]
+                    or metrics["region_bright_fraction"]
+                    >= REFERENCE_EXACT_DECODED_LABEL_THRESHOLDS["minimum_median_region_bright_fraction"]
+                )
+            )
+            records.append(
+                {
+                    "local_frame_index": int(local_index),
+                    "source_frame_index": int(start_frame) + int(local_index),
+                    "region_name": region_name,
+                    "active": bool(active),
+                    **metrics,
+                }
+            )
+    if records:
+        active_region_fraction = float(sum(1 for record in records if bool(record["active"])) / len(records))
+        median_contrast = float(np.median([float(record["region_luma_contrast"]) for record in records]))
+        median_edge = float(np.median([float(record["region_edge_fraction"]) for record in records]))
+        median_bright = float(np.median([float(record["region_bright_fraction"]) for record in records]))
+        median_textlike = float(np.median([float(record["region_textlike_fraction"]) for record in records]))
+    else:
+        active_region_fraction = median_contrast = median_edge = median_bright = median_textlike = 0.0
+    thresholds = REFERENCE_EXACT_DECODED_LABEL_THRESHOLDS
+    passed = (
+        active_region_fraction >= thresholds["minimum_active_region_fraction"]
+        and median_contrast >= thresholds["minimum_median_region_luma_contrast"]
+        and median_edge >= thresholds["minimum_median_region_edge_fraction"]
+        and median_bright >= thresholds["minimum_median_region_bright_fraction"]
+    )
+    return {
+        "schema_version": "reference-exact-decoded-label-v1",
+        "sampled_frame_count": len(sample_indexes),
+        "record_count": len(records),
+        "active_region_fraction": active_region_fraction,
+        "median_region_luma_contrast": median_contrast,
+        "median_region_edge_fraction": median_edge,
+        "median_region_bright_fraction": median_bright,
+        "median_region_textlike_fraction": median_textlike,
+        "passed": bool(passed),
+        "thresholds": dict(thresholds),
+        "records": records,
+    }
+
+
+def reference_exact_map_extent_contract(
+    *,
+    output_size: tuple[int, int] = (REFERENCE_EXACT_WIDTH, REFERENCE_EXACT_HEIGHT),
+) -> dict[str, object]:
+    return {
+        "extent_kind": "decoded-reference-global-or-continent-frame",
+        "continent_mode": True,
+        "native_frame_size": [REFERENCE_EXACT_WIDTH, REFERENCE_EXACT_HEIGHT],
+        "output_size": [int(output_size[0]), int(output_size[1])],
+        "composition_mode": MAP_FILM_COMPOSITION_MODE,
+        "reprojection": "none; exact mode reconstructs native source-video pixels in screen space",
+        "smoke_layer_space": "native source frame pixels",
+        "frame_mapping": REFERENCE_EXACT_COLOR_POLICY["frame_mapping"],
+        "audit_note": "Exact-smoke mode validates decoded first-30s source-frame smoke against generated native-frame smoke layers, not the local terrain slab extent.",
+    }
+
+
+def _reference_film_fire_visibility_report(frame: Image.Image, fire_layer: Image.Image) -> dict[str, float]:
+    fire_alpha = np.asarray(fire_layer.convert("RGBA"), dtype=np.uint8)[..., 3]
+    fire_mask = fire_alpha > 16
+    if not np.any(fire_mask):
+        return {"post_smoke_fire_visibility_fraction": 0.0}
+    rgb = np.asarray(frame.convert("RGB"), dtype=np.float32)
+    warm = (
+        (rgb[..., 0] > 138.0)
+        & (rgb[..., 0] - rgb[..., 2] > 45.0)
+        & (rgb[..., 1] - rgb[..., 2] > 8.0)
+    )
+    hot = (rgb[..., 0] > 214.0) & (rgb[..., 1] > 150.0) & (rgb[..., 2] < rgb[..., 1])
+    return {
+        "post_smoke_fire_visibility_fraction": float(np.count_nonzero((warm | hot) & fire_mask) / max(int(np.count_nonzero(fire_mask)), 1))
+    }
+
+
+def _source_wisp_regeneration_commands(
+    output: Path,
+    preview: Path,
+    audit_dir: Path,
+    reference_video: Path,
+) -> dict[str, str]:
+    script = str(Path(__file__).resolve())
+    python = sys.executable
+    final = [
+        python,
+        script,
+        "--render-preset",
+        TARGET_RENDER_PRESET,
+        "--output",
+        str(output),
+        "--preview",
+        str(preview),
+        "--audit-dir",
+        str(audit_dir),
+        "--reference-video",
+        str(reference_video),
+        "--enforce-audit-gates",
+    ]
+    source_only = [
+        python,
+        script,
+        "--render-preset",
+        TARGET_RENDER_PRESET,
+        "--smoke-ablation",
+        "source-wisps-only",
+        "--output",
+        str(audit_dir / "source_wisps_only.mp4"),
+        "--preview",
+        str(audit_dir / "source_wisps_only.preview.png"),
+        "--audit-dir",
+        str(audit_dir / "source_wisps_only_audit"),
+        "--reference-video",
+        str(reference_video),
+    ]
+    no_broad = [
+        python,
+        script,
+        "--render-preset",
+        TARGET_RENDER_PRESET,
+        "--smoke-ablation",
+        "no-broad",
+        "--output",
+        str(audit_dir / "no_broad.mp4"),
+        "--preview",
+        str(audit_dir / "no_broad.preview.png"),
+        "--audit-dir",
+        str(audit_dir / "no_broad_audit"),
+        "--reference-video",
+        str(reference_video),
+    ]
+    carpet = [
+        python,
+        script,
+        "--render-preset",
+        LEGACY_RENDER_PRESET,
+        "--output",
+        str(audit_dir / "negative_carpet_legacy_combined.mp4"),
+        "--preview",
+        str(audit_dir / "negative_carpet_legacy_combined.preview.png"),
+        "--audit-dir",
+        str(audit_dir / "negative_carpet_audit"),
+        "--reference-video",
+        str(reference_video),
+    ]
+    brush = [
+        python,
+        script,
+        "--render-preset",
+        BRUSH_BUNDLE_RENDER_PRESET,
+        "--smoke-ablation",
+        "source-wisps-only",
+        "--output",
+        str(audit_dir / "negative_brush_bundle_source_wisps_only.mp4"),
+        "--preview",
+        str(audit_dir / "negative_brush_bundle_source_wisps_only.preview.png"),
+        "--audit-dir",
+        str(audit_dir / "negative_brush_bundle_audit"),
+        "--reference-video",
+        str(reference_video),
+    ]
+    reference_frame = [
+        "ffmpeg",
+        "-y",
+        "-ss",
+        "3.500",
+        "-i",
+        str(reference_video),
+        "-frames:v",
+        "1",
+        str(audit_dir / "reference_3p5s.png"),
+    ]
+    return {
+        "accepted_render": " ".join(final),
+        "source_wisps_only_audit": " ".join(source_only),
+        "no_broad_audit": " ".join(no_broad),
+        "carpet_smoke_negative_baseline": " ".join(carpet),
+        "brush_bundle_negative_baseline": " ".join(brush),
+        "reference_frame_extraction_example": " ".join(reference_frame),
+    }
+
+
+def _reference_film_regeneration_commands(
+    output: Path,
+    preview: Path,
+    audit_dir: Path,
+    reference_video: Path,
+) -> dict[str, str]:
+    script = str(Path(__file__).resolve())
+    python = sys.executable
+    final = [
+        python,
+        script,
+        "--render-preset",
+        REFERENCE_FILM_RENDER_PRESET,
+        "--output",
+        str(output),
+        "--preview",
+        str(preview),
+        "--audit-dir",
+        str(audit_dir),
+        "--reference-video",
+        str(reference_video),
+    ]
+    contact_sheet = [
+        "ffmpeg",
+        "-y",
+        "-ss",
+        "0.000",
+        "-i",
+        str(reference_video),
+        "-frames:v",
+        "1",
+        str(audit_dir / "reference_film_000p0s_reference.png"),
+    ]
+    return {
+        "reference_film_render": " ".join(final),
+        "reference_contact_frame_extraction_example": " ".join(contact_sheet),
+    }
+
+
+def _audit_gate(name: str, value: float, threshold: float, op: str, *, frame_time: float | None = None) -> dict[str, float | str | bool]:
+    if op == ">=":
+        passed = float(value) >= float(threshold)
+    elif op == "<=":
+        passed = float(value) <= float(threshold)
+    elif op == "==":
+        passed = abs(float(value) - float(threshold)) <= 1.0e-9
+    else:
+        raise ValueError("audit gate op must be >=, <=, or ==")
+    gate: dict[str, float | str | bool] = {
+        "name": name,
+        "value": float(value),
+        "threshold": float(threshold),
+        "op": op,
+        "passed": bool(passed),
+        "hard_fail": True,
+    }
+    if frame_time is not None:
+        gate["time_seconds"] = float(frame_time)
+    return gate
+
+
+def _evaluate_source_wisp_audit(
+    component_reports: list[dict[str, float]],
+    encoded_reports: list[dict[str, float]],
+    thresholds: dict[str, float] = SOURCE_WISP_AUDIT_THRESHOLDS,
+) -> dict[str, object]:
+    gates: list[dict[str, float | str | bool]] = []
+    for report in component_reports:
+        frame_time = float(report.get("time_seconds", report.get("frame_index", 0.0)))
+        active_count = float(report.get("active_source_count", 0.0))
+        if active_count > 0.0:
+            gates.append(
+                _audit_gate(
+                    "source_attachment_fraction",
+                    float(report.get("attached_source_count", 0.0)) / max(active_count, 1.0),
+                    thresholds["minimum_attached_source_fraction"],
+                    ">=",
+                    frame_time=frame_time,
+                )
+            )
+        screen_active = float(report.get("screen_active_source_count", 0.0))
+        enforce_active_distribution = frame_time < 6.8
+        if screen_active > 0.0:
+            gates.append(
+                _audit_gate(
+                    "screen_source_attachment_fraction",
+                    float(report.get("screen_attached_source_fraction", 0.0)),
+                    thresholds["minimum_screen_attached_source_fraction"],
+                    ">=",
+                    frame_time=frame_time,
+                )
+            )
+        if screen_active >= 6.0 and enforce_active_distribution:
+            gates.append(
+                _audit_gate(
+                    "fire_core_visibility_fraction",
+                    float(report.get("fire_core_visibility_fraction", 0.0)),
+                    thresholds["minimum_fire_core_visibility_fraction"],
+                    ">=",
+                    frame_time=frame_time,
+                )
+            )
+        if enforce_active_distribution:
+            gates.extend(
+                [
+                    _audit_gate(
+                        "active_fire_emitter_count",
+                        float(report.get("active_fire_emitter_count", 0.0)),
+                        thresholds["minimum_active_fire_emitters"],
+                        ">=",
+                        frame_time=frame_time,
+                    ),
+                    _audit_gate(
+                        "emitter_bbox_fraction",
+                        float(report.get("emitter_bbox_fraction", 0.0)),
+                        thresholds["minimum_emitter_bbox_fraction"],
+                        ">=",
+                        frame_time=frame_time,
+                    ),
+                ]
+            )
+        gates.extend(
+            [
+                _audit_gate(
+                    "source_wisp_component_count",
+                    float(report.get("source_wisp_component_count", 0.0)),
+                    thresholds["minimum_source_wisp_component_count"],
+                    ">=",
+                    frame_time=frame_time,
+                ),
+                _audit_gate(
+                    "smoke_carpet_largest_component_fraction",
+                    float(report.get("smoke_carpet_largest_component_fraction", 1.0)),
+                    thresholds["maximum_smoke_carpet_component_fraction"],
+                    "<=",
+                    frame_time=frame_time,
+                ),
+                _audit_gate(
+                    "low_frequency_haze_fraction",
+                    float(report.get("low_frequency_haze_fraction", 1.0)),
+                    thresholds["maximum_low_frequency_haze_fraction"],
+                    "<=",
+                    frame_time=frame_time,
+                ),
+                _audit_gate(
+                    "strand_to_haze_ratio",
+                    float(report.get("strand_to_haze_ratio", 0.0)),
+                    thresholds["minimum_strand_to_haze_ratio"],
+                    ">=",
+                    frame_time=frame_time,
+                ),
+                _audit_gate(
+                    "combined_strand_retention",
+                    float(report.get("combined_strand_retention", 0.0)),
+                    thresholds["minimum_combined_strand_retention"],
+                    ">=",
+                    frame_time=frame_time,
+                ),
+            ]
+        )
+        gates.append(
+            _audit_gate(
+                "morphology_stage_coverage_fraction",
+                float(report.get("morphology_stage_coverage_fraction", 0.0)),
+                thresholds["minimum_morphology_band_coverage_fraction"],
+                ">=",
+                frame_time=frame_time,
+            )
+        )
+        if frame_time >= SOURCE_WISP_MORPHOLOGY_GATE_MIN_TIME_SECONDS:
+            gates.extend(
+                [
+                    _audit_gate(
+                        "transition_width_growth_ratio",
+                        float(report.get("transition_width_growth_ratio", 0.0)),
+                        thresholds["minimum_transition_width_growth_ratio"],
+                        ">=",
+                        frame_time=frame_time,
+                    ),
+                    _audit_gate(
+                        "old_tail_width_growth_ratio",
+                        float(report.get("old_tail_width_growth_ratio", 0.0)),
+                        thresholds["minimum_old_tail_width_growth_ratio"],
+                        ">=",
+                        frame_time=frame_time,
+                    ),
+                    _audit_gate(
+                        "old_tail_alpha_p90_fraction",
+                        float(report.get("old_tail_alpha_p90_fraction", 1.0)),
+                        thresholds["maximum_old_tail_alpha_p90_fraction"],
+                        "<=",
+                        frame_time=frame_time,
+                    ),
+                    _audit_gate(
+                        "old_tail_endpoint_alpha_fraction",
+                        float(report.get("old_tail_endpoint_alpha_fraction", 1.0)),
+                        thresholds["maximum_old_tail_endpoint_alpha_fraction"],
+                        "<=",
+                        frame_time=frame_time,
+                    ),
+                    _audit_gate(
+                        "old_tail_coverage_growth_ratio",
+                        float(report.get("old_tail_coverage_growth_ratio", 0.0)),
+                        thresholds["minimum_old_tail_coverage_growth_ratio"],
+                        ">=",
+                        frame_time=frame_time,
+                    ),
+                    _audit_gate(
+                        "old_tail_edge_softness_px",
+                        float(report.get("old_tail_edge_softness_px", 0.0)),
+                        thresholds["minimum_old_tail_edge_softness_px"],
+                        ">=",
+                        frame_time=frame_time,
+                    ),
+                    _audit_gate(
+                        "old_tail_diffuse_to_core_area_ratio",
+                        float(report.get("old_tail_diffuse_to_core_area_ratio", 0.0)),
+                        thresholds["minimum_old_tail_diffuse_to_core_area_ratio"],
+                        ">=",
+                        frame_time=frame_time,
+                    ),
+                    _audit_gate(
+                        "brush_bundle_score",
+                        float(report.get("brush_bundle_score", 1.0)),
+                        thresholds["maximum_brush_bundle_score"],
+                        "<=",
+                        frame_time=frame_time,
+                    ),
+                ]
+            )
+        if frame_time >= 6.8:
+            gates.append(
+                _audit_gate(
+                    "late_low_frequency_haze_fraction",
+                    float(report.get("low_frequency_haze_fraction", 1.0)),
+                    thresholds["maximum_late_low_frequency_haze_fraction"],
+                    "<=",
+                    frame_time=frame_time,
+                )
+            )
+
+    for record in encoded_reports:
+        gates.append(
+            _audit_gate(
+                "encoded_strand_like_fraction",
+                float(record.get("strand_like_fraction", 0.0)),
+                thresholds["minimum_encoded_strand_like_fraction"],
+                ">=",
+                frame_time=float(record.get("time_seconds", 0.0)),
+            )
+        )
+        gates.append(
+            _audit_gate(
+                "encoded_soft_tail_like_fraction",
+                float(record.get("soft_tail_like_fraction", 0.0)),
+                thresholds["minimum_encoded_soft_tail_like_fraction"],
+                ">=",
+                frame_time=float(record.get("time_seconds", 0.0)),
+            )
+        )
+
+    failed = [gate for gate in gates if not bool(gate["passed"])]
+    return {
+        "passed": not failed,
+        "gate_count": len(gates),
+        "failed_gate_count": len(failed),
+        "thresholds": dict(thresholds),
+        "gates": gates,
+    }
+
+
+def _report_values(reports: list[dict[str, float | str]], key: str) -> np.ndarray:
+    values: list[float] = []
+    for report in reports:
+        value = report.get(key)
+        if isinstance(value, (int, float, np.floating)):
+            values.append(float(value))
+    return np.asarray(values, dtype=np.float64)
+
+
+def _median_report_value(reports: list[dict[str, float | str]], key: str, default: float = 0.0) -> float:
+    values = _report_values(reports, key)
+    return float(np.median(values)) if values.size else float(default)
+
+
+def _video_bitrate_to_bps(value: object) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float, np.floating)):
+        return float(value)
+    text = str(value).strip().lower()
+    multiplier = 1.0
+    if text.endswith("k"):
+        multiplier = 1000.0
+        text = text[:-1]
+    elif text.endswith("m"):
+        multiplier = 1_000_000.0
+        text = text[:-1]
+    try:
+        return float(text) * multiplier
+    except ValueError:
+        return 0.0
+
+
+def _evaluate_reference_film_audit(
+    frame_reports: list[dict[str, float | str]],
+    encoded_reports: list[dict[str, float]],
+    stream_report: dict[str, float | str],
+    encode_policy: dict[str, object],
+    thresholds: dict[str, float] = REFERENCE_FILM_AUDIT_THRESHOLDS,
+) -> dict[str, object]:
+    gates: list[dict[str, float | str | bool]] = []
+    full_bleed = _report_values(frame_reports, "full_bleed_frame_coverage_fraction")
+    quad_area = _report_values(frame_reports, "map_quad_area_fraction")
+    date_ordinals = _report_values(frame_reports, "date_ordinal")
+    date_steps = np.diff(np.sort(date_ordinals)) if date_ordinals.size > 1 else np.asarray([], dtype=np.float32)
+    date_steps = date_steps[date_steps > 0.0]
+    burned_areas = _report_values(frame_reports, "burned_area_ha")
+    temporal_deltas = _report_values(frame_reports, "temporal_luma_delta")
+    temporal_deltas = temporal_deltas[temporal_deltas > 0.0]
+    active_fire_counts = _report_values(frame_reports, "active_fire_core_pixel_count")
+    active_fire_change_ratio = 0.0
+    if active_fire_counts.size:
+        active_fire_change_ratio = float(np.ptp(active_fire_counts) / max(float(np.median(active_fire_counts)), 1.0))
+    centroid_x = _report_values(frame_reports, "smoke_centroid_x_fraction")
+    centroid_y = _report_values(frame_reports, "smoke_centroid_y_fraction")
+    centroid_motion = 0.0
+    if centroid_x.size and centroid_y.size:
+        centroid_motion = float(math.hypot(float(np.ptp(centroid_x)), float(np.ptp(centroid_y))))
+    encoded_smoke = _report_values(encoded_reports, "smoke_like_fraction")
+    encoded_soft_tail = _report_values(encoded_reports, "soft_tail_like_fraction")
+    delivery_size = encode_policy.get("size", (0, 0))
+    if isinstance(delivery_size, (tuple, list)) and len(delivery_size) >= 2:
+        configured_width = float(delivery_size[0])
+        configured_height = float(delivery_size[1])
+    else:
+        configured_width = configured_height = 0.0
+    actual_width = float(stream_report.get("width", configured_width)) if stream_report else configured_width
+    actual_height = float(stream_report.get("height", configured_height)) if stream_report else configured_height
+    configured_bitrate = _video_bitrate_to_bps(encode_policy.get("video_bitrate"))
+    actual_bitrate = float(stream_report.get("bit_rate", 0.0)) if stream_report.get("bit_rate") is not None else 0.0
+    bitrate_for_gate = actual_bitrate if actual_bitrate > 0.0 else configured_bitrate
+    codec = str(stream_report.get("codec_name", "h264" if stream_report == {} else ""))
+    codec_is_h264 = 1.0 if codec in {"h264", "avc1"} else 0.0
+    if not stream_report:
+        codec_is_h264 = 1.0
+
+    gates.extend(
+        [
+            _audit_gate(
+                "full_bleed_frame_coverage_fraction",
+                float(np.min(full_bleed)) if full_bleed.size else 0.0,
+                thresholds["minimum_full_bleed_frame_coverage"],
+                ">=",
+            ),
+            _audit_gate(
+                "map_quad_area_fraction",
+                float(np.min(quad_area)) if quad_area.size else 0.0,
+                thresholds["minimum_map_quad_area_fraction"],
+                ">=",
+            ),
+            _audit_gate(
+                "median_smoke_coverage_fraction",
+                _median_report_value(frame_reports, "combined_smoke_coverage_fraction"),
+                thresholds["minimum_median_smoke_coverage_fraction"],
+                ">=",
+            ),
+            _audit_gate(
+                "median_smoke_coverage_fraction",
+                _median_report_value(frame_reports, "combined_smoke_coverage_fraction"),
+                thresholds["maximum_median_smoke_coverage_fraction"],
+                "<=",
+            ),
+            _audit_gate(
+                "median_regional_smoke_coverage_fraction",
+                _median_report_value(frame_reports, "regional_smoke_coverage_fraction"),
+                thresholds["minimum_median_regional_smoke_coverage_fraction"],
+                ">=",
+            ),
+            _audit_gate(
+                "median_dense_regional_smoke_fraction",
+                _median_report_value(frame_reports, "dense_regional_smoke_fraction"),
+                thresholds["minimum_median_dense_regional_smoke_fraction"],
+                ">=",
+            ),
+            _audit_gate(
+                "median_dense_regional_smoke_fraction",
+                _median_report_value(frame_reports, "dense_regional_smoke_fraction"),
+                thresholds["maximum_median_dense_regional_smoke_fraction"],
+                "<=",
+            ),
+            _audit_gate(
+                "median_active_fire_core_pixel_count",
+                _median_report_value(frame_reports, "active_fire_core_pixel_count"),
+                thresholds["minimum_median_fire_core_pixel_count"],
+                ">=",
+            ),
+            _audit_gate(
+                "active_fire_temporal_change_ratio",
+                active_fire_change_ratio,
+                thresholds["minimum_active_fire_temporal_change_ratio"],
+                ">=",
+            ),
+            _audit_gate(
+                "median_hot_fire_fraction",
+                _median_report_value(frame_reports, "hot_fire_fraction"),
+                thresholds["maximum_median_hot_fire_fraction"],
+                "<=",
+            ),
+            _audit_gate(
+                "median_post_smoke_fire_visibility_fraction",
+                _median_report_value(frame_reports, "post_smoke_fire_visibility_fraction"),
+                thresholds["minimum_post_smoke_fire_visibility_fraction"],
+                ">=",
+            ),
+            _audit_gate(
+                "median_fire_mark_radius_px",
+                _median_report_value(frame_reports, "median_fire_mark_radius_px"),
+                thresholds["maximum_median_fire_mark_radius_px"],
+                "<=",
+            ),
+            _audit_gate(
+                "median_halo_core_area_ratio",
+                _median_report_value(frame_reports, "halo_core_area_ratio"),
+                thresholds["minimum_median_halo_core_area_ratio"],
+                ">=",
+            ),
+            _audit_gate(
+                "median_halo_core_area_ratio",
+                _median_report_value(frame_reports, "halo_core_area_ratio"),
+                thresholds["maximum_median_halo_core_area_ratio"],
+                "<=",
+            ),
+            _audit_gate(
+                "median_mid_scale_smoke_fraction",
+                _median_report_value(frame_reports, "mid_scale_smoke_fraction"),
+                thresholds["minimum_median_mid_scale_smoke_fraction"],
+                ">=",
+            ),
+            _audit_gate(
+                "smoke_centroid_motion_fraction",
+                centroid_motion,
+                thresholds["minimum_smoke_centroid_motion_fraction"],
+                ">=",
+            ),
+            _audit_gate(
+                "median_distributed_fire_cluster_count",
+                _median_report_value(frame_reports, "distributed_fire_cluster_count"),
+                thresholds["minimum_median_distributed_fire_cluster_count"],
+                ">=",
+            ),
+            _audit_gate(
+                "median_fire_spread_grid_cell_count",
+                _median_report_value(frame_reports, "fire_spread_grid_cell_count"),
+                thresholds["minimum_median_fire_spread_grid_cell_count"],
+                ">=",
+            ),
+            _audit_gate(
+                "median_far_fire_core_fraction",
+                _median_report_value(frame_reports, "far_fire_core_fraction"),
+                thresholds["minimum_median_far_fire_core_fraction"],
+                ">=",
+            ),
+            _audit_gate(
+                "median_primary_fire_dominance_fraction",
+                _median_report_value(frame_reports, "primary_fire_dominance_fraction", default=1.0),
+                thresholds["maximum_median_primary_fire_dominance_fraction"],
+                "<=",
+            ),
+            _audit_gate(
+                "median_regional_smoke_texture_score",
+                _median_report_value(frame_reports, "regional_smoke_texture_score"),
+                thresholds["minimum_median_regional_smoke_texture_score"],
+                ">=",
+            ),
+            _audit_gate(
+                "median_regional_smoke_axis_band_score",
+                _median_report_value(frame_reports, "regional_smoke_axis_band_score", default=1.0),
+                thresholds["maximum_median_regional_smoke_axis_band_score"],
+                "<=",
+            ),
+            _audit_gate(
+                "median_regional_smoke_contour_band_score",
+                _median_report_value(frame_reports, "regional_smoke_contour_band_score", default=1.0),
+                thresholds["maximum_median_regional_smoke_contour_band_score"],
+                "<=",
+            ),
+            _audit_gate(
+                "median_regional_smoke_ring_score",
+                _median_report_value(frame_reports, "regional_smoke_ring_score", default=1.0),
+                thresholds["maximum_median_regional_smoke_ring_score"],
+                "<=",
+            ),
+            _audit_gate(
+                "median_label_contrast_delta",
+                _median_report_value(frame_reports, "median_label_contrast_delta"),
+                thresholds["minimum_median_label_contrast_delta"],
+                ">=",
+            ),
+            _audit_gate(
+                "median_label_smoke_overlap_fraction",
+                _median_report_value(frame_reports, "median_label_smoke_overlap_fraction", default=1.0),
+                thresholds["maximum_median_label_smoke_overlap_fraction"],
+                "<=",
+            ),
+            _audit_gate(
+                "median_label_fire_overlap_fraction",
+                _median_report_value(frame_reports, "median_label_fire_overlap_fraction", default=1.0),
+                thresholds["maximum_median_label_fire_overlap_fraction"],
+                "<=",
+            ),
+            _audit_gate(
+                "median_label_text_pixel_fraction",
+                _median_report_value(frame_reports, "median_label_text_pixel_fraction"),
+                thresholds["minimum_median_label_text_pixel_fraction"],
+                ">=",
+            ),
+            _audit_gate(
+                "temporal_date_span_days",
+                float(np.max(date_ordinals) - np.min(date_ordinals)) if date_ordinals.size else 0.0,
+                thresholds["minimum_temporal_date_span_days"],
+                ">=",
+            ),
+            _audit_gate(
+                "median_date_step_days",
+                float(np.median(date_steps)) if date_steps.size else 0.0,
+                thresholds["minimum_median_date_step_days"],
+                ">=",
+            ),
+            _audit_gate(
+                "median_date_step_days",
+                float(np.median(date_steps)) if date_steps.size else 0.0,
+                thresholds["maximum_median_date_step_days"],
+                "<=",
+            ),
+            _audit_gate(
+                "burned_area_growth_ratio",
+                float(np.max(burned_areas) / max(float(np.min(burned_areas)), 1.0)) if burned_areas.size else 0.0,
+                thresholds["minimum_burned_area_growth_ratio"],
+                ">=",
+            ),
+            _audit_gate(
+                "median_temporal_luma_delta",
+                float(np.median(temporal_deltas)) if temporal_deltas.size else 0.0,
+                thresholds["minimum_median_temporal_luma_delta"],
+                ">=",
+            ),
+            _audit_gate(
+                "encoded_smoke_like_fraction",
+                float(np.median(encoded_smoke)) if encoded_smoke.size else 0.0,
+                thresholds["minimum_encoded_smoke_like_fraction"],
+                ">=",
+            ),
+            _audit_gate(
+                "encoded_soft_tail_like_fraction",
+                float(np.median(encoded_soft_tail)) if encoded_soft_tail.size else 0.0,
+                thresholds["minimum_encoded_soft_tail_like_fraction"],
+                ">=",
+            ),
+            _audit_gate(
+                "delivery_width_px",
+                actual_width,
+                thresholds["minimum_delivery_width"],
+                ">=",
+            ),
+            _audit_gate(
+                "delivery_height_px",
+                actual_height,
+                thresholds["minimum_delivery_height"],
+                ">=",
+            ),
+            _audit_gate(
+                "configured_delivery_bitrate_bps",
+                bitrate_for_gate,
+                thresholds["minimum_delivery_bitrate_bps"],
+                ">=",
+            ),
+            _audit_gate(
+                "configured_delivery_bitrate_bps",
+                bitrate_for_gate,
+                thresholds["maximum_delivery_bitrate_bps"],
+                "<=",
+            ),
+            _audit_gate("delivery_h264_codec", codec_is_h264, 1.0, ">="),
+        ]
+    )
+    failed = [gate for gate in gates if not bool(gate["passed"])]
+    return {
+        "passed": not failed,
+        "gate_count": len(gates),
+        "failed_gate_count": len(failed),
+        "thresholds": dict(thresholds),
+        "gates": gates,
+        "summary": {
+            "frame_report_count": len(frame_reports),
+            "encoded_contact_frame_count": len(encoded_reports),
+            "probed_video_stream": dict(stream_report),
+        },
+    }
+
+
 def _residual_haze_rgba(
     residual_haze: np.ndarray | None,
     frame_index: int,
@@ -2497,6 +7261,639 @@ def hybrid_smoke_rgba(
     return combined
 
 
+def regional_transport_smoke_rgba(
+    map_size: tuple[int, int],
+    frame_index: int,
+    *,
+    seed: int = HYBRID_SMOKE_SEED,
+    progress: float = 0.0,
+) -> np.ndarray:
+    """Render broad synoptic-scale smoke ribbons for the reference-film mode."""
+    width, height = map(int, map_size)
+    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+    x = xx / max(width - 1, 1)
+    y = yy / max(height - 1, 1)
+    texture = _advected_smoke_texture((height, width), frame_index, seed + 61517)
+    fine = texture - _pil_blur_float(texture, max(1.0, min(width, height) / 180.0))
+    broad = _pil_blur_float(texture, max(4.0, min(width, height) / 48.0))
+    density = np.zeros((height, width), dtype=np.float32)
+    t = float(progress)
+    lanes = (
+        (0.34, 0.15, 0.036, 0.52, 0.0),
+        (0.52, 0.20, 0.042, 0.46, 1.6),
+        (0.70, 0.16, 0.038, 0.36, 3.1),
+    )
+    stamp_count = 9
+    for lane_index, (center, amp, width_frac, strength, phase) in enumerate(lanes):
+        wave = center + amp * np.sin((x * 2.65 + t * 1.20 + phase) * math.tau)
+        wave += 0.045 * np.sin((x * 6.8 - t * 2.10 + phase * 0.37) * math.tau)
+        ribbon = np.exp(-((y - wave) ** 2) / (2.0 * (width_frac * 1.18) * (width_frac * 1.18)))
+        flow_coord = x + 0.060 * np.sin((y * 2.05 + phase * 0.19 + t * 0.45) * math.tau)
+        underlay = ribbon * _smoothstep(-0.08, 0.26, flow_coord + t * 0.28 - 0.035 * phase)
+        underlay *= 1.0 - _smoothstep(0.82, 1.18, flow_coord - t * 0.18 + 0.055 * phase)
+        density += underlay * strength * 0.115
+        for stamp_index in range(stamp_count):
+            rng = np.random.default_rng(seed + 1801 + lane_index * 191 + stamp_index * 37)
+            base_s = -0.18 + stamp_index * (1.36 / max(stamp_count - 1, 1))
+            cx = base_s + 0.24 * t - 0.035 * phase + float(rng.uniform(-0.026, 0.026))
+            if cx < -0.24 or cx > 1.22:
+                continue
+            wave_a = (cx * 2.65 + t * 1.20 + phase) * math.tau
+            wave_b = (cx * 6.8 - t * 2.10 + phase * 0.37) * math.tau
+            cy = center + amp * math.sin(wave_a) + 0.045 * math.sin(wave_b)
+            dy_dx = amp * math.cos(wave_a) * 2.65 * math.tau + 0.045 * math.cos(wave_b) * 6.8 * math.tau
+            theta = math.atan2(dy_dx, 1.0)
+            cos_t = math.cos(theta)
+            sin_t = math.sin(theta)
+            length_sigma = float(rng.uniform(0.050, 0.092)) * (1.0 + 0.16 * lane_index)
+            width_sigma = width_frac * float(rng.uniform(0.68, 1.04))
+            dx = x - cx
+            dy = y - cy
+            along = dx * cos_t + dy * sin_t
+            across = -dx * sin_t + dy * cos_t
+            stamp = np.exp(-0.5 * ((along / length_sigma) ** 2 + (across / width_sigma) ** 2))
+            stamp *= _smoothstep(0.0, 0.12, cx + 0.16) * (1.0 - _smoothstep(0.88, 1.18, cx))
+            density += stamp * strength * float(rng.uniform(0.52, 1.02))
+
+    erosion = np.clip(0.72 + 0.22 * texture + 0.10 * fine, 0.52, 1.0)
+    density = np.clip(density, 0.0, 1.0) * erosion
+    density = _pil_blur_float(density, max(1.20, min(width, height) / 330.0))
+    density *= _hybrid_border_fade((height, width))
+    density = np.clip((density - 0.035) / 0.895, 0.0, 1.0)
+    density *= np.clip(0.72 + 0.28 * _pil_blur_float(texture, max(1.0, min(width, height) / 180.0)), 0.58, 0.98)
+    alpha_shape = (density ** 1.72) * np.clip(0.82 + 0.18 * texture + 0.08 * fine, 0.58, 1.0)
+    alpha = _pil_blur_float(alpha_shape * REFERENCE_FILM_REGIONAL_SMOKE_MAX_ALPHA, max(2.20, min(width, height) / 360.0))
+    alpha = _pil_blur_float(alpha, max(2.20, min(width, height) / 300.0))
+    fine_alpha = texture - _pil_blur_float(texture, max(1.0, min(width, height) / 150.0))
+    alpha *= np.clip(0.96 + 0.30 * fine_alpha, 0.82, 1.14)
+    alpha = np.clip(alpha, 0.0, REFERENCE_FILM_REGIONAL_SMOKE_MAX_ALPHA)
+    alpha = np.where(alpha >= 0.35, alpha, 0.0)
+    thin = np.array([118.0, 128.0, 136.0], dtype=np.float32)
+    dense = np.array([178.0, 181.0, 174.0], dtype=np.float32)
+    dense_t = np.clip(density[..., None] * 1.18, 0.0, 1.0)
+    rgb = thin * (1.0 - dense_t) + dense * dense_t
+    rgb *= np.clip(0.84 + 0.18 * (texture[..., None] - 0.5), 0.72, 1.02)
+    out = np.zeros((height, width, 4), dtype=np.uint8)
+    out[..., :3] = np.where(alpha[..., None] > 0.0, np.clip(np.round(rgb), 0.0, 218.0), 0).astype(np.uint8)
+    out[..., 3] = np.clip(np.round(alpha), 0.0, 255.0).astype(np.uint8)
+    return out
+
+
+def _regional_density_to_smoke_rgba(
+    density: np.ndarray,
+    frame_index: int,
+    *,
+    seed: int = HYBRID_SMOKE_SEED,
+    max_alpha: float = REFERENCE_FILM_REGIONAL_SMOKE_MAX_ALPHA,
+) -> np.ndarray:
+    density = np.clip(np.asarray(density, dtype=np.float32), 0.0, 1.0)
+    if density.ndim != 2:
+        raise ValueError("regional smoke density must be a 2D array")
+    height, width = density.shape
+    texture = _advected_smoke_texture((height, width), frame_index, seed + 82123)
+    fine = texture - _pil_blur_float(texture, max(1.0, min(width, height) / 170.0))
+    broad = _pil_blur_float(texture, max(1.0, min(width, height) / 70.0))
+    shaped = _pil_blur_float(density, max(1.0, min(width, height) / 260.0))
+    shaped *= np.clip(0.78 + 0.32 * texture + 0.12 * fine, 0.48, 1.12)
+    shaped *= _hybrid_border_fade((height, width))
+    shaped = np.clip(shaped, 0.0, 1.0)
+    alpha = (shaped ** 1.36) * float(max_alpha)
+    alpha *= np.clip(0.88 + 0.24 * broad + 0.12 * fine, 0.68, 1.10)
+    alpha = _pil_blur_float(alpha, max(1.4, min(width, height) / 330.0))
+    alpha = np.clip(alpha, 0.0, float(max_alpha))
+    alpha = np.where(alpha >= 1.0, alpha, 0.0)
+    thin = np.array([112.0, 122.0, 132.0], dtype=np.float32)
+    dense = np.array([180.0, 182.0, 174.0], dtype=np.float32)
+    dense_t = np.clip(shaped[..., None] * 1.28, 0.0, 1.0)
+    rgb = thin * (1.0 - dense_t) + dense * dense_t
+    rgb *= np.clip(0.86 + 0.18 * (texture[..., None] - 0.5), 0.72, 1.03)
+    out = np.zeros((height, width, 4), dtype=np.uint8)
+    out[..., :3] = np.where(alpha[..., None] > 0.0, np.clip(np.round(rgb), 0.0, 218.0), 0).astype(np.uint8)
+    out[..., 3] = np.clip(np.round(alpha), 0.0, 255.0).astype(np.uint8)
+    return out
+
+
+def _interpolate_reference_event_centroid(
+    event: ReferenceSmokeEventState,
+    source_frame: int,
+) -> tuple[float, float, float]:
+    path = event.centroid_path
+    if not path:
+        width, height = event.source_size
+        return 0.5, 0.48, max(float(event.coverage_peak), 0.01)
+    if int(source_frame) <= path[0][0]:
+        frame, x_px, y_px, coverage = path[0]
+    elif int(source_frame) >= path[-1][0]:
+        frame, x_px, y_px, coverage = path[-1]
+    else:
+        for idx in range(len(path) - 1):
+            left = path[idx]
+            right = path[idx + 1]
+            if left[0] <= int(source_frame) <= right[0]:
+                span = max(float(right[0] - left[0]), 1.0)
+                frac = (float(source_frame) - float(left[0])) / span
+                frame = int(source_frame)
+                x_px = float(left[1]) * (1.0 - frac) + float(right[1]) * frac
+                y_px = float(left[2]) * (1.0 - frac) + float(right[2]) * frac
+                coverage = float(left[3]) * (1.0 - frac) + float(right[3]) * frac
+                break
+        else:
+            frame, x_px, y_px, coverage = path[-1]
+    width, height = event.source_size
+    _ = frame
+    return (
+        float(np.clip(x_px / max(float(width - 1), 1.0), 0.0, 1.0)),
+        float(np.clip(y_px / max(float(height - 1), 1.0), 0.0, 1.0)),
+        max(float(coverage), 0.0),
+    )
+
+
+def reference_event_transport_smoke_rgba(
+    map_size: tuple[int, int],
+    frame_index: int,
+    event_states: tuple[ReferenceSmokeEventState, ...],
+    *,
+    seed: int = HYBRID_SMOKE_SEED,
+    progress: float | None = None,
+    timeline_frame_count: int = REFERENCE_EXACT_FRAME_COUNT,
+) -> np.ndarray:
+    """Render broad smoke using decoded reference event timing and centroid paths."""
+    width, height = map(int, map_size)
+    if not event_states:
+        return regional_transport_smoke_rgba(map_size, frame_index, seed=seed, progress=float(progress or 0.0))
+    if progress is None:
+        source_frame = int(frame_index)
+    else:
+        source_frame = int(round(np.clip(float(progress), 0.0, 1.0) * max(int(timeline_frame_count) - 1, 0)))
+    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+    x = xx / max(width - 1, 1)
+    y = yy / max(height - 1, 1)
+    density = np.zeros((height, width), dtype=np.float32)
+    texture = _advected_smoke_texture((height, width), frame_index, seed + 971)
+    for event_index, event in enumerate(event_states):
+        start = int(event.start_frame)
+        peak = int(event.peak_frame)
+        end = int(event.end_frame)
+        duration = max(end - start, 1)
+        if source_frame <= peak:
+            active = _smoothstep(float(start), float(peak), float(source_frame))
+        else:
+            active = 1.0 - _smoothstep(float(peak), float(end), float(source_frame))
+        if source_frame < start:
+            distance = float(start - source_frame)
+        elif source_frame > end:
+            distance = float(source_frame - end)
+        else:
+            distance = 0.0
+        residual = 0.16 * math.exp(-distance / max(duration * 0.92, 54.0))
+        temporal = float(np.clip(max(active, residual), 0.0, 1.0))
+        if temporal <= 0.006:
+            continue
+        cx, cy, coverage = _interpolate_reference_event_centroid(event, source_frame)
+        coverage_scale = float(np.clip(math.sqrt(max(coverage, event.coverage_peak, 0.01) / 0.12), 0.38, 1.82))
+        theta = math.radians(float(event.dominant_axis_degrees) + 7.0 * math.sin(event_index + source_frame * 0.011))
+        cos_t = math.cos(theta)
+        sin_t = math.sin(theta)
+        dx = x - np.float32(cx)
+        dy = y - np.float32(cy)
+        along = dx * cos_t + dy * sin_t
+        across = -dx * sin_t + dy * cos_t
+        major = (0.090 + 0.120 * coverage_scale) * (1.0 + 0.08 * math.sin(event_index * 1.7))
+        minor = 0.030 + 0.034 * coverage_scale
+        core = np.exp(-0.5 * ((along / major) ** 2 + (across / minor) ** 2))
+        tail_shift = along + major * (0.78 + 0.15 * math.sin(source_frame * 0.015 + event_index))
+        tail = np.exp(-0.5 * ((tail_shift / (major * 1.65)) ** 2 + (across / (minor * 1.45)) ** 2))
+        front = np.exp(-0.5 * (((along - major * 0.80) / (major * 0.75)) ** 2 + (across / (minor * 0.96)) ** 2))
+        striations = 0.76 + 0.34 * texture + 0.13 * np.sin((along * 18.0 + across * 92.0 + source_frame * 0.035))
+        event_density = (0.62 * core + 0.46 * tail + 0.22 * front) * temporal * coverage_scale * striations
+        density += event_density.astype(np.float32)
+    density = _pil_blur_float(np.clip(density, 0.0, 1.0), max(1.0, min(width, height) / 310.0))
+    density = np.clip((density - 0.012) / 0.82, 0.0, 1.0)
+    return _regional_density_to_smoke_rgba(density, frame_index, seed=seed + 131)
+
+
+def _observed_guidance_density(source: ObservedSmokeSource, frame_index: int) -> np.ndarray:
+    if not source.frames:
+        raise ValueError("observed smoke source has no guidance frames")
+    if len(source.frames) == 1:
+        return source.frames[0].astype(np.float32, copy=False)
+    position = np.clip(
+        float(frame_index) / max(float(source.guidance_cadence_frames), 1.0),
+        0.0,
+        float(len(source.frames) - 1),
+    )
+    lo = int(math.floor(position))
+    hi = min(lo + 1, len(source.frames) - 1)
+    frac = np.float32(position - lo)
+    return (
+        source.frames[lo].astype(np.float32, copy=False) * (1.0 - frac)
+        + source.frames[hi].astype(np.float32, copy=False) * frac
+    ).astype(np.float32)
+
+
+def observed_smoke_rgba(
+    source: ObservedSmokeSource,
+    map_size: tuple[int, int],
+    frame_index: int,
+    *,
+    seed: int = HYBRID_SMOKE_SEED,
+    progress: float = 0.0,
+) -> np.ndarray:
+    if source.source_kind == "reference-derived-events":
+        return reference_event_transport_smoke_rgba(
+            map_size,
+            frame_index,
+            source.event_states,
+            seed=seed,
+            progress=progress,
+            timeline_frame_count=source.timeline_frame_count,
+        )
+    if source.source_kind == "hrrr-smoke":
+        density = _observed_guidance_density(source, frame_index)
+        return _regional_density_to_smoke_rgba(density, frame_index, seed=seed + 311)
+    return regional_transport_smoke_rgba(map_size, frame_index, seed=seed, progress=progress)
+
+
+def _cluster_fire_sources(
+    sources: list[HybridSmokeSource],
+    frame_index: int,
+    cluster_radius: float = 9.5,
+) -> list[list[tuple[int, HybridSmokeSource]]]:
+    """Group nearby flame-live sources into clusters using simple distance-based clustering."""
+    active = [
+        (idx, src) for idx, src in enumerate(sources)
+        if _source_flame_lifecycle_weight(src, frame_index) > 0.04
+    ]
+    if not active:
+        return []
+
+    # Simple greedy clustering: assign each source to nearest cluster or start new one
+    clusters: list[list[tuple[int, HybridSmokeSource]]] = []
+    for idx, src in active:
+        assigned = False
+        for cluster in clusters:
+            # Check distance to cluster centroid
+            cx = sum(s.x for _, s in cluster) / len(cluster)
+            cy = sum(s.y for _, s in cluster) / len(cluster)
+            dist = math.hypot(src.x - cx, src.y - cy)
+            if dist < cluster_radius:
+                cluster.append((idx, src))
+                assigned = True
+                break
+        if not assigned:
+            clusters.append([(idx, src)])
+    return clusters
+
+
+def _find_chain_pairs(
+    cluster: list[tuple[int, HybridSmokeSource]],
+    frame_index: int,
+    max_chain_dist: float = 9.0,
+) -> list[tuple[tuple[int, HybridSmokeSource], tuple[int, HybridSmokeSource]]]:
+    """Find pairs of sources within a cluster that should be connected by short chains."""
+    if len(cluster) < 2:
+        return []
+
+    cluster_seed = sum(s.seed for _, s in cluster) + frame_index * 7
+    rng = np.random.default_rng(cluster_seed)
+    points = np.array([(s.x, s.y) for _, s in cluster], dtype=np.float32)
+    centroid = points.mean(axis=0)
+    centered = points - centroid
+    if len(cluster) >= 3:
+        _, _, vh = np.linalg.svd(centered, full_matrices=False)
+        axis = vh[0]
+    else:
+        delta = points[1] - points[0]
+        norm = float(np.linalg.norm(delta))
+        axis = delta / norm if norm > 1.0e-4 else np.array([1.0, 0.0], dtype=np.float32)
+
+    ordered = sorted(cluster, key=lambda item: float(item[1].x * axis[0] + item[1].y * axis[1]))
+    pairs: list[tuple[tuple[int, HybridSmokeSource], tuple[int, HybridSmokeSource]]] = []
+    seen: set[tuple[int, int]] = set()
+
+    def add_pair(a: tuple[int, HybridSmokeSource], b: tuple[int, HybridSmokeSource]) -> None:
+        key = tuple(sorted((a[0], b[0])))
+        if key not in seen:
+            seen.add(key)
+            pairs.append((a, b))
+
+    for left, right in zip(ordered, ordered[1:]):
+        dist = math.hypot(left[1].x - right[1].x, left[1].y - right[1].y)
+        if 1.0 < dist <= max_chain_dist * 1.18:
+            add_pair(left, right)
+
+    candidates: list[tuple[float, tuple[int, HybridSmokeSource], tuple[int, HybridSmokeSource]]] = []
+    for i, (idx1, src1) in enumerate(cluster):
+        for idx2, src2 in cluster[i + 1:]:
+            dist = math.hypot(src1.x - src2.x, src1.y - src2.y)
+            if 1.0 < dist <= max_chain_dist:
+                intensity = (src1.strength * src1.heat + src2.strength * src2.heat) * 0.5
+                score = intensity * (1.0 - dist / max_chain_dist) + float(rng.uniform(0.0, 0.08))
+                candidates.append((score, (idx1, src1), (idx2, src2)))
+    for _, left, right in sorted(candidates, key=lambda item: item[0], reverse=True)[: max(2, len(cluster))]:
+        add_pair(left, right)
+
+    return pairs
+
+
+def _add_fire_core_blob(
+    field: np.ndarray,
+    x: float,
+    y: float,
+    radius: float,
+    intensity: float,
+    *,
+    aspect: float = 1.0,
+    angle: float = 0.0,
+) -> None:
+    height, width = field.shape
+    sigma_x = max(float(radius), 0.35)
+    sigma_y = max(float(radius) * max(float(aspect), 0.18), 0.30)
+    pad = int(math.ceil(max(sigma_x, sigma_y) * 3.2 + 2.0))
+    x0 = max(0, int(math.floor(float(x) - pad)))
+    x1 = min(width, int(math.ceil(float(x) + pad + 1.0)))
+    y0 = max(0, int(math.floor(float(y) - pad)))
+    y1 = min(height, int(math.ceil(float(y) + pad + 1.0)))
+    if x0 >= x1 or y0 >= y1:
+        return
+    yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
+    dx = xx - np.float32(x)
+    dy = yy - np.float32(y)
+    ca = math.cos(float(angle))
+    sa = math.sin(float(angle))
+    rx = dx * ca + dy * sa
+    ry = -dx * sa + dy * ca
+    blob = np.exp(-0.5 * ((rx / sigma_x) ** 2 + (ry / sigma_y) ** 2)).astype(np.float32)
+    field[y0:y1, x0:x1] = np.maximum(field[y0:y1, x0:x1], blob * float(intensity))
+
+
+def _add_fire_core_segment(
+    field: np.ndarray,
+    a: HybridSmokeSource,
+    b: HybridSmokeSource,
+    frame_index: int,
+    intensity: float,
+) -> None:
+    height, width = field.shape
+    x0, y0 = float(a.x), float(a.y)
+    x1, y1 = float(b.x), float(b.y)
+    dx = x1 - x0
+    dy = y1 - y0
+    length = max(math.hypot(dx, dy), 1.0e-4)
+    ux = dx / length
+    uy = dy / length
+    radius = max(0.50, min(float(a.radius_px), float(b.radius_px)) * 0.16)
+    pad = int(math.ceil(radius * 4.0 + 2.0))
+    bx0 = max(0, int(math.floor(min(x0, x1) - pad)))
+    bx1 = min(width, int(math.ceil(max(x0, x1) + pad + 1.0)))
+    by0 = max(0, int(math.floor(min(y0, y1) - pad)))
+    by1 = min(height, int(math.ceil(max(y0, y1) + pad + 1.0)))
+    if bx0 >= bx1 or by0 >= by1:
+        return
+    yy, xx = np.mgrid[by0:by1, bx0:bx1].astype(np.float32)
+    rel_x = xx - np.float32(x0)
+    rel_y = yy - np.float32(y0)
+    along = rel_x * np.float32(ux) + rel_y * np.float32(uy)
+    lateral = rel_x * np.float32(-uy) + rel_y * np.float32(ux)
+    t = np.clip(along / np.float32(length), 0.0, 1.0)
+    gate = _smoothstep(0.0, 0.12, t) * (1.0 - _smoothstep(0.88, 1.0, t))
+    phase = float(a.seed + b.seed) * 0.017 + float(frame_index) * 0.19
+    jitter = 0.68 + 0.32 * np.sin(t * math.tau * 3.0 + phase)
+    segment = np.exp(-0.5 * (lateral / np.float32(radius)) ** 2) * gate * jitter
+    field[by0:by1, bx0:bx1] = np.maximum(field[by0:by1, bx0:bx1], segment.astype(np.float32) * float(intensity))
+
+
+def active_fire_core_intensity_field(
+    sources: list[HybridSmokeSource],
+    frame_index: int,
+    map_size: tuple[int, int],
+) -> np.ndarray:
+    """Return the pre-bloom active flame core/front signal used as smoke source of truth."""
+    width, height = map(int, map_size)
+    field = np.zeros((height, width), dtype=np.float32)
+    if width <= 0 or height <= 0:
+        return field
+
+    for idx, source in enumerate(sources):
+        flame = _source_flame_lifecycle_weight(source, frame_index)
+        if flame <= 0.035:
+            continue
+        rng = np.random.default_rng(source.seed + idx * 97 + frame_index * 13)
+        pulse = 0.68 + 0.32 * math.sin(frame_index * 0.52 + source.seed * 0.031 + idx * 0.71)
+        flicker = 0.82 + 0.18 * math.sin(frame_index * 1.27 + source.seed * 0.071 + idx)
+        intensity = float(np.clip(source.strength * source.heat * flame * pulse * flicker, 0.0, 2.4))
+        if intensity <= 0.025:
+            continue
+        jitter_x = rng.uniform(-0.5, 0.5) * source.radius_px * 0.10
+        jitter_y = rng.uniform(-0.5, 0.5) * source.radius_px * 0.10
+        radius = max(0.48, source.radius_px * (0.11 + 0.055 * min(intensity, 1.4)))
+        _add_fire_core_blob(
+            field,
+            source.x + jitter_x,
+            source.y + jitter_y,
+            radius,
+            min(1.0, 0.42 + 0.48 * intensity),
+            aspect=float(rng.uniform(0.55, 0.90)),
+            angle=float(rng.uniform(0.0, math.tau)),
+        )
+
+    clusters = _cluster_fire_sources(sources, frame_index, cluster_radius=10.5)
+    for cluster in clusters:
+        if len(cluster) < 2:
+            continue
+        cluster_intensity = sum(
+            s.strength * s.heat * _source_flame_lifecycle_weight(s, frame_index)
+            for _, s in cluster
+        ) / max(len(cluster), 1)
+        if cluster_intensity <= 0.10:
+            continue
+        points = np.array([(s.x, s.y) for _, s in cluster], dtype=np.float32)
+        centroid = points.mean(axis=0)
+        centered = points - centroid
+        if len(cluster) >= 3:
+            _, _, vh = np.linalg.svd(centered, full_matrices=False)
+            front_axis = vh[0]
+        else:
+            delta = points[1] - points[0]
+            norm = float(np.linalg.norm(delta))
+            front_axis = delta / norm if norm > 1.0e-4 else np.array([1.0, 0.0], dtype=np.float32)
+        ordered = sorted(cluster, key=lambda item: float(item[1].x * front_axis[0] + item[1].y * front_axis[1]))
+        for (_, left), (_, right) in zip(ordered, ordered[1:]):
+            dist = math.hypot(left.x - right.x, left.y - right.y)
+            if dist <= 12.0:
+                pair_intensity = min(
+                    left.strength * left.heat * _source_flame_lifecycle_weight(left, frame_index),
+                    right.strength * right.heat * _source_flame_lifecycle_weight(right, frame_index),
+                )
+                _add_fire_core_segment(field, left, right, frame_index, min(1.0, 0.38 + 0.45 * pair_intensity))
+        for (_idx1, left), (_idx2, right) in _find_chain_pairs(cluster, frame_index, max_chain_dist=8.8):
+            pair_intensity = min(
+                left.strength * left.heat * _source_flame_lifecycle_weight(left, frame_index),
+                right.strength * right.heat * _source_flame_lifecycle_weight(right, frame_index),
+            )
+            _add_fire_core_segment(field, left, right, frame_index + 3, min(1.0, 0.32 + 0.40 * pair_intensity))
+
+    field = np.clip(field, 0.0, 1.0).astype(np.float32)
+    field = np.where(field >= 0.020, field, 0.0).astype(np.float32)
+    return field
+
+
+def _nearest_source(
+    sources: list[HybridSmokeSource],
+    x: float,
+    y: float,
+) -> HybridSmokeSource | None:
+    if not sources:
+        return None
+    distances = [(source.x - x) ** 2 + (source.y - y) ** 2 for source in sources]
+    return sources[int(np.argmin(np.asarray(distances, dtype=np.float32)))]
+
+
+def _dynamic_fire_core_source(
+    x: float,
+    y: float,
+    intensity: float,
+    frame_index: int,
+    seed: int,
+    map_size: tuple[int, int],
+    base: HybridSmokeSource | None,
+    *,
+    smolder: bool = False,
+) -> HybridSmokeSource:
+    scale = min(int(map_size[0]), int(map_size[1])) / 408.0
+    heat = float(np.clip((base.heat if base is not None else 1.0) * (0.82 + 0.34 * intensity), 0.36, 1.70))
+    smoke_rate = float(np.clip((base.smoke_rate if base is not None else 1.0) * (0.58 + 0.70 * intensity), 0.20, 1.55))
+    strength = float(np.clip(0.34 + 1.18 * intensity, 0.18, 1.95))
+    radius = float(np.clip(1.25 * scale + 2.10 * scale * math.sqrt(max(intensity, 0.01)), 0.72, 4.4))
+    if smolder:
+        flame_end = int(frame_index) - 6
+        start = max(0, int(frame_index) - 18)
+        end = int(frame_index) + 28
+        strength *= 0.42
+        heat *= 0.42
+        smoke_rate *= 0.46
+        radius *= 1.25
+    else:
+        start = max(0, int(frame_index) - 4)
+        flame_end = int(frame_index) + 8
+        end = int(frame_index) + HYBRID_FIRE_SMOLDER_MIN_FRAMES
+    return HybridSmokeSource(
+        x=float(x),
+        y=float(y),
+        strength=strength,
+        radius_px=max(0.62, radius),
+        start_frame=start,
+        end_frame=end,
+        seed=int(seed),
+        burst_period_frames=float(30.0 + (seed % 23)),
+        burst_phase_frames=float(seed % 29),
+        burst_duty=0.52 if not smolder else 0.40,
+        heat=heat,
+        smoke_rate=smoke_rate,
+        altitude_bias=float(np.clip(base.altitude_bias if base is not None else 0.16, -0.16, 0.70)),
+        flame_end_frame=flame_end,
+    )
+
+
+def fire_core_emitter_sources(
+    sources: list[HybridSmokeSource],
+    frame_index: int,
+    map_size: tuple[int, int],
+    *,
+    max_emitters: int = SOURCE_WISP_MAX_EMITTERS,
+    seed: int = HYBRID_SMOKE_SEED,
+    min_intensity: float = FIRE_CORE_EMITTER_INTENSITY_THRESHOLD,
+) -> list[HybridSmokeSource]:
+    """Sample spatially separated smoke emitters from active pre-bloom fire cores/fronts."""
+    max_count = max(0, int(max_emitters))
+    if max_count == 0:
+        return []
+    width, height = map(int, map_size)
+    active_sources = [
+        source for source in sources
+        if _source_flame_lifecycle_weight(source, frame_index) > 0.035
+    ]
+    core = active_fire_core_intensity_field(sources, frame_index, map_size)
+    ys, xs = np.where(core >= float(min_intensity))
+    emitters: list[HybridSmokeSource] = []
+    selected: list[tuple[float, float]] = []
+    spacing = max(1.65, min(width, height) / 92.0)
+    spacing_sq = spacing * spacing
+    if xs.size:
+        scores = core[ys, xs].astype(np.float32)
+        jitter = ((xs * 73856093 + ys * 19349663 + int(seed) * 83492791 + int(frame_index) * 2654435761) & 1023) / 1023.0
+        scores = scores * (0.96 + 0.08 * jitter.astype(np.float32))
+        order = np.argsort(scores)[::-1]
+        for index in order:
+            x = float(xs[index])
+            y = float(ys[index])
+            if any((x - sx) * (x - sx) + (y - sy) * (y - sy) < spacing_sq for sx, sy in selected):
+                continue
+            selected.append((x, y))
+            intensity = float(core[int(y), int(x)])
+            base = _nearest_source(active_sources, x, y)
+            source_seed = int(seed + frame_index * 1009 + int(round(x * 17.0)) + int(round(y * 31.0)))
+            emitters.append(_dynamic_fire_core_source(x, y, intensity, frame_index, source_seed, map_size, base))
+            if len(emitters) >= max_count:
+                break
+
+    if len(emitters) < min(max_count, len(active_sources)):
+        for source in sorted(active_sources, key=lambda item: item.strength * item.heat, reverse=True):
+            if len(emitters) >= max_count:
+                break
+            x = float(source.x)
+            y = float(source.y)
+            if any((x - sx) * (x - sx) + (y - sy) * (y - sy) < spacing_sq for sx, sy in selected):
+                continue
+            intensity = float(np.clip(source.strength * source.heat * _source_flame_lifecycle_weight(source, frame_index), 0.0, 1.0))
+            selected.append((x, y))
+            emitters.append(
+                _dynamic_fire_core_source(
+                    x,
+                    y,
+                    intensity,
+                    frame_index,
+                    int(seed + source.seed + frame_index * 809),
+                    map_size,
+                    source,
+                )
+            )
+
+    if len(emitters) < max_count:
+        smolder_candidates = [
+            source for source in sources
+            if _source_flame_lifecycle_weight(source, frame_index) <= 0.04
+            and _source_smolder_lifecycle_weight(source, frame_index) > 0.05
+        ]
+        smolder_candidates.sort(
+            key=lambda item: item.strength * item.smoke_rate * _source_smolder_lifecycle_weight(item, frame_index),
+            reverse=True,
+        )
+        for source in smolder_candidates:
+            if len(emitters) >= max_count:
+                break
+            x = float(source.x)
+            y = float(source.y)
+            if any((x - sx) * (x - sx) + (y - sy) * (y - sy) < spacing_sq * 0.72 for sx, sy in selected):
+                continue
+            smolder = _source_smolder_lifecycle_weight(source, frame_index)
+            selected.append((x, y))
+            emitters.append(
+                _dynamic_fire_core_source(
+                    x,
+                    y,
+                    float(np.clip(0.22 * smolder * source.smoke_rate, 0.03, 0.24)),
+                    frame_index,
+                    int(seed + source.seed + frame_index * 461),
+                    map_size,
+                    source,
+                    smolder=True,
+                )
+            )
+
+    return emitters
+
+
 def hybrid_fire_sources_rgba(
     sources: list[HybridSmokeSource],
     frame_index: int,
@@ -2506,50 +7903,593 @@ def hybrid_fire_sources_rgba(
     bloom_scale: float = 1.0,
     core_alpha_scale: float = 1.0,
 ) -> np.ndarray:
+    """Render fire sources as clustered marks with front-like chains, white-hot cores, and localized bloom."""
     width, height = map(int, map_size)
-    layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    halo = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    wide_halo = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(layer, "RGBA")
-    halo_draw = ImageDraw.Draw(halo, "RGBA")
-    wide_draw = ImageDraw.Draw(wide_halo, "RGBA")
+    # Separate layers for compositing order
+    wide_bloom = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    local_bloom = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    chain_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    ember_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    flare_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    core_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    wide_draw = ImageDraw.Draw(wide_bloom, "RGBA")
+    local_draw = ImageDraw.Draw(local_bloom, "RGBA")
+    chain_draw = ImageDraw.Draw(chain_layer, "RGBA")
+    ember_draw = ImageDraw.Draw(ember_layer, "RGBA")
+    flare_draw = ImageDraw.Draw(flare_layer, "RGBA")
+    core_draw = ImageDraw.Draw(core_layer, "RGBA")
+
+    # Cluster sources for shared flame patches and front-like chains
+    clusters = _cluster_fire_sources(sources, frame_index, cluster_radius=10.5)
+
+    # Track which sources are in multi-source clusters (for reduced individual rendering)
+    clustered_sources: set[int] = set()
+    cluster_anchor_sources: set[int] = set()
+    for cluster in clusters:
+        if len(cluster) > 1:
+            for idx, _ in cluster:
+                clustered_sources.add(idx)
+            ranked = sorted(cluster, key=lambda item: item[1].strength * item[1].heat, reverse=True)
+            anchor_count = 1 if len(cluster) < 5 else 2
+            for idx, _ in ranked[:anchor_count]:
+                cluster_anchor_sources.add(idx)
+
+    # --- Draw cluster-level features: shared patches and chains ---
+    for cluster in clusters:
+        if len(cluster) < 2:
+            continue
+
+        # Cluster-level deterministic variation
+        cluster_seed = sum(s.seed for _, s in cluster) + frame_index * 11
+        cluster_rng = np.random.default_rng(cluster_seed)
+
+        # Cluster centroid and extent
+        cx = sum(s.x for _, s in cluster) / len(cluster)
+        cy = sum(s.y for _, s in cluster) / len(cluster)
+        max_dist = max(math.hypot(s.x - cx, s.y - cy) for _, s in cluster)
+        cluster_intensity = sum(
+            s.strength * s.heat * _source_flame_lifecycle_weight(s, frame_index)
+            for _, s in cluster
+        ) / len(cluster)
+
+        # Temporal variation at cluster level
+        cluster_pulse = 0.72 + 0.28 * math.sin(frame_index * 0.38 + cluster_seed * 0.017)
+
+        # --- Draw shared flame patch for cluster (reduces point-emitter look) ---
+        patch_radius = max(3.4, max_dist * 0.95 + 2.3)
+        patch_alpha = int(np.clip(68 * cluster_intensity * cluster_pulse, 22, 118))
+
+        # Asymmetric patch: rotated ellipse
+        angle = cluster_rng.uniform(0, 360)
+        aspect = cluster_rng.uniform(0.55, 0.85)
+
+        # Draw rotated ellipse as polygon approximation
+        n_points = 16
+        patch_points = []
+        for i in range(n_points):
+            theta = 2 * math.pi * i / n_points
+            px = patch_radius * math.cos(theta)
+            py = patch_radius * aspect * math.sin(theta)
+            # Rotate
+            rad = math.radians(angle)
+            rx = px * math.cos(rad) - py * math.sin(rad)
+            ry = px * math.sin(rad) + py * math.cos(rad)
+            patch_points.append((cx + rx, cy + ry))
+
+        # Cluster bloom patch
+        local_draw.polygon(patch_points, fill=(255, 95, 28, patch_alpha))
+        wide_draw.polygon(patch_points, fill=(255, 70, 18, int(patch_alpha * 0.22)))
+        if not glow_only and cluster_intensity > 0.48:
+            inner_points = []
+            for i in range(n_points):
+                theta = 2 * math.pi * i / n_points
+                px = patch_radius * 0.52 * math.cos(theta)
+                py = patch_radius * aspect * 0.34 * math.sin(theta)
+                rad = math.radians(angle)
+                rx = px * math.cos(rad) - py * math.sin(rad)
+                ry = px * math.sin(rad) + py * math.cos(rad)
+                inner_points.append((cx + rx, cy + ry))
+            flare_draw.polygon(inner_points, fill=(255, 182, 58, int(patch_alpha * 0.50)))
+            if cluster_intensity > 0.58:
+                core_points = []
+                for i in range(n_points):
+                    theta = 2 * math.pi * i / n_points
+                    px = patch_radius * 0.30 * math.cos(theta)
+                    py = patch_radius * aspect * 0.17 * math.sin(theta)
+                    rad = math.radians(angle)
+                    rx = px * math.cos(rad) - py * math.sin(rad)
+                    ry = px * math.sin(rad) + py * math.cos(rad)
+                    core_points.append((cx + rx, cy + ry))
+                core_draw.polygon(core_points, fill=(255, 246, 214, max(72, int(patch_alpha * 0.68))))
+
+        cluster_points = np.array([(s.x, s.y) for _, s in cluster], dtype=np.float32)
+        centered = cluster_points - cluster_points.mean(axis=0)
+        if len(cluster) >= 3:
+            _, _, vh = np.linalg.svd(centered, full_matrices=False)
+            front_axis = vh[0]
+        else:
+            delta = cluster_points[1] - cluster_points[0]
+            norm = float(np.linalg.norm(delta))
+            front_axis = delta / norm if norm > 1.0e-4 else np.array([1.0, 0.0], dtype=np.float32)
+        front_order = sorted(cluster, key=lambda item: float(item[1].x * front_axis[0] + item[1].y * front_axis[1]))
+        front_alpha = int(np.clip(92 * cluster_intensity * cluster_pulse, 34, 150))
+        for (_, left), (_, right) in zip(front_order, front_order[1:]):
+            dist = math.hypot(left.x - right.x, left.y - right.y)
+            if dist <= 12.0:
+                jitter_seed = left.seed + right.seed + frame_index * 19
+                jitter_rng = np.random.default_rng(jitter_seed)
+                perp = np.array([-front_axis[1], front_axis[0]], dtype=np.float32)
+                j0 = jitter_rng.uniform(-0.55, 0.55)
+                j1 = jitter_rng.uniform(-0.55, 0.55)
+                sx = left.x + perp[0] * j0
+                sy = left.y + perp[1] * j0
+                ex = right.x + perp[0] * j1
+                ey = right.y + perp[1] * j1
+                spine_width = max(2, int(round(1.2 + min(left.radius_px, right.radius_px) * 0.16)))
+                local_draw.line((sx, sy, ex, ey), fill=(255, 96, 30, int(front_alpha * 0.45)), width=spine_width + 3)
+                chain_draw.line((sx, sy, ex, ey), fill=(255, 122, 38, front_alpha), width=spine_width + 1)
+                if not glow_only and cluster_intensity > 0.52:
+                    flare_draw.line((sx, sy, ex, ey), fill=(255, 194, 66, int(front_alpha * 0.70)), width=spine_width)
+                    if cluster_intensity > 0.62:
+                        core_draw.line(
+                            (sx, sy, ex, ey),
+                            fill=(255, 244, 210, max(66, int(front_alpha * 0.56))),
+                            width=max(2, spine_width - 1),
+                        )
+
+        # --- Draw front-like chains between nearby sources ---
+        chain_pairs = _find_chain_pairs(cluster, frame_index, max_chain_dist=8.8)
+        for (idx1, src1), (idx2, src2) in chain_pairs:
+            # Chain properties based on source pair
+            pair_seed = src1.seed + src2.seed + frame_index * 3
+            pair_rng = np.random.default_rng(pair_seed)
+
+            x1, y1 = src1.x, src1.y
+            x2, y2 = src2.x, src2.y
+            chain_len = math.hypot(x2 - x1, y2 - y1)
+
+            # Chain intensity based on weaker source
+            min_intensity = min(
+                src1.strength * src1.heat * _source_flame_lifecycle_weight(src1, frame_index),
+                src2.strength * src2.heat * _source_flame_lifecycle_weight(src2, frame_index),
+            )
+            chain_pulse = 0.65 + 0.35 * math.sin(frame_index * 0.61 + pair_seed * 0.023)
+
+            # Chain width varies along length (wider at ends near sources)
+            base_width = max(1.35, min(src1.radius_px, src2.radius_px) * 0.22)
+
+            # Draw chain as series of overlapping capsules/strokes
+            n_segments = max(2, int(chain_len / 2.6))
+            for seg in range(n_segments):
+                t = (seg + 0.5) / n_segments
+                seg_fraction = 0.72 + 0.18 * pair_rng.random()
+                t0 = max(0.0, t - 0.5 * seg_fraction / n_segments)
+                t1 = min(1.0, t + 0.5 * seg_fraction / n_segments)
+                # Position along chain with slight perpendicular jitter
+                perp_x = -(y2 - y1) / max(chain_len, 0.1)
+                perp_y = (x2 - x1) / max(chain_len, 0.1)
+                jitter0 = pair_rng.uniform(-0.85, 0.85) * base_width
+                jitter1 = pair_rng.uniform(-0.85, 0.85) * base_width
+                sx = x1 + t0 * (x2 - x1) + perp_x * jitter0
+                sy = y1 + t0 * (y2 - y1) + perp_y * jitter0
+                ex = x1 + t1 * (x2 - x1) + perp_x * jitter1
+                ey = y1 + t1 * (y2 - y1) + perp_y * jitter1
+
+                # Segment width (thinner in middle)
+                seg_width = base_width * (1.10 + 0.45 * abs(t - 0.5) * 2)
+                seg_alpha = int(np.clip(86 * min_intensity * chain_pulse * (0.68 + 0.32 * pair_rng.random()), 24, 142))
+
+                # Ember-colored front segment. Using strokes instead of tiny capsules makes
+                # grouped sources read as short fire fronts after perspective warp.
+                chain_width = max(2, int(round(seg_width * 2.25)))
+                local_draw.line((sx, sy, ex, ey), fill=(255, 92, 28, int(seg_alpha * 0.50)), width=chain_width + 3)
+                chain_draw.line((sx, sy, ex, ey), fill=(255, 112, 34, seg_alpha), width=chain_width)
+
+                # Hot interior for strong chains
+                if min_intensity > 0.48 and not glow_only:
+                    flare_width = max(1, int(round(seg_width * 1.10)))
+                    flare_draw.line((sx, sy, ex, ey), fill=(255, 188, 62, int(seg_alpha * 0.78)), width=flare_width)
+                    if min_intensity > 0.72 or idx1 in cluster_anchor_sources or idx2 in cluster_anchor_sources:
+                        hot_width = max(2, int(round(seg_width * 0.58)))
+                        core_draw.line(
+                            (sx, sy, ex, ey),
+                            fill=(255, 244, 210, max(64, int(seg_alpha * 0.72))),
+                            width=hot_width,
+                        )
+
+    # --- Draw individual source marks (reduced for clustered sources) ---
     for idx, source in enumerate(sources):
         if frame_index < source.start_frame or frame_index > source.end_frame:
             continue
-        pulse = 0.72 + 0.28 * math.sin(frame_index * 0.44 + source.seed * 0.031 + idx)
-        radius = max(0.75, source.radius_px * 0.22)
-        halo_radius = radius * (4.2 + 2.4 * float(bloom_scale)) * max(0.70, float(bloom_scale))
-        alpha = int(np.clip((70.0 + 74.0 * source.strength * source.heat) * pulse, 28, 205))
-        wide_radius = halo_radius * (1.9 + 0.30 * float(bloom_scale))
+        flame_weight = _source_flame_lifecycle_weight(source, frame_index)
+        smolder_weight = _source_smolder_lifecycle_weight(source, frame_index)
+        if flame_weight <= 0.04 and smolder_weight <= 0.08:
+            continue
+
+        # Deterministic variation using source.seed, idx, and frame_index
+        rng = np.random.default_rng(source.seed + idx * 97 + frame_index * 13)
+        jitter_x = rng.uniform(-0.5, 0.5) * source.radius_px * 0.15
+        jitter_y = rng.uniform(-0.5, 0.5) * source.radius_px * 0.15
+        x = source.x + jitter_x
+        y = source.y + jitter_y
+
+        if flame_weight <= 0.04:
+            ember_radius = max(0.65, source.radius_px * 0.13 * (0.8 + 0.4 * smolder_weight))
+            ember_alpha = int(np.clip(34.0 * smolder_weight * source.strength, 0.0, 42.0))
+            if ember_alpha > 1 and not glow_only:
+                ember_draw.ellipse(
+                    (x - ember_radius, y - ember_radius, x + ember_radius, y + ember_radius),
+                    fill=(150, 48, 22, ember_alpha),
+                )
+            continue
+
+        # Temporal pulse with per-source phase variation
+        phase_offset = source.seed * 0.031 + idx * 0.71
+        pulse = 0.68 + 0.32 * math.sin(frame_index * 0.52 + phase_offset)
+        flicker = 0.82 + 0.18 * math.sin(frame_index * 1.27 + phase_offset * 2.3)
+
+        # Intensity classification
+        intensity = source.strength * source.heat * pulse * flame_weight
+        is_strong = intensity > 0.85
+        is_medium = 0.45 < intensity <= 0.85
+        is_weak = intensity <= 0.45
+
+        # Reduce individual mark size for clustered sources (cluster patch handles coverage)
+        in_cluster = idx in clustered_sources
+        is_cluster_anchor = idx in cluster_anchor_sources
+        cluster_scale = 0.72 if is_cluster_anchor else (0.42 if in_cluster else 1.0)
+
+        # Size variation based on intensity
+        base_radius = max(0.6, source.radius_px * 0.18) * cluster_scale
+        size_mult = 0.7 + 0.6 * min(1.0, intensity / 1.2) + rng.uniform(-0.1, 0.1)
+        radius = base_radius * size_mult
+
+        # Alpha based on intensity with variation
+        base_alpha = (55.0 + 95.0 * source.strength * source.heat * pulse * flicker) * flame_weight
+        alpha = int(np.clip(base_alpha + rng.uniform(-12, 12), 22, 215))
+
+        # --- Bloom layers ---
+        local_radius = radius * (2.4 + 1.2 * float(bloom_scale))
+        local_alpha = int(alpha * (0.18 + 0.08 * float(bloom_scale)) * (0.9 if is_weak else 1.0))
+        # Reduce bloom alpha for clustered sources (cluster patch provides coverage)
+        if in_cluster:
+            local_alpha = int(local_alpha * 0.6)
+
+        # Asymmetric bloom: rotated ellipse instead of circle
+        bloom_angle = rng.uniform(0, 360)
+        bloom_aspect = rng.uniform(0.6, 0.9)
+        bloom_points = []
+        for i in range(12):
+            theta = 2 * math.pi * i / 12
+            px = local_radius * math.cos(theta)
+            py = local_radius * bloom_aspect * math.sin(theta)
+            rad = math.radians(bloom_angle)
+            rx = px * math.cos(rad) - py * math.sin(rad)
+            ry = px * math.sin(rad) + py * math.cos(rad)
+            bloom_points.append((x + rx, y + ry))
+        local_draw.polygon(bloom_points, fill=(255, 105, 30, local_alpha))
+
+        # Wide bloom
+        wide_radius = local_radius * (1.5 + 0.2 * float(bloom_scale))
+        wide_alpha = int(alpha * (0.045 + 0.025 * float(bloom_scale)))
+        if in_cluster:
+            wide_alpha = int(wide_alpha * 0.5)
         wide_draw.ellipse(
-            (source.x - wide_radius, source.y - wide_radius, source.x + wide_radius, source.y + wide_radius),
-            fill=(255, 85, 20, int(alpha * (0.058 + 0.045 * float(bloom_scale)))),
+            (x - wide_radius, y - wide_radius, x + wide_radius, y + wide_radius),
+            fill=(255, 75, 18, wide_alpha),
         )
-        halo_draw.ellipse(
-            (source.x - halo_radius, source.y - halo_radius, source.x + halo_radius, source.y + halo_radius),
-            fill=(255, 95, 25, int(alpha * (0.15 + 0.10 * float(bloom_scale)))),
-        )
+
         if glow_only:
             continue
-        core_alpha = int(np.clip(alpha * float(core_alpha_scale) * 0.75, 0, 255))
-        draw.ellipse(
-            (source.x - radius, source.y - radius, source.x + radius, source.y + radius),
-            fill=(255, 118, 28, core_alpha),
-        )
-        core = max(0.45, radius * 0.36)
-        draw.ellipse(
-            (source.x - core, source.y - core, source.x + core, source.y + core),
-            fill=(255, 226, 104, min(255, core_alpha + 42)),
-        )
-    wide_halo = wide_halo.filter(
-        ImageFilter.GaussianBlur(radius=max(3.0, min(width, height) / 75.0 * max(0.8, float(bloom_scale))))
+
+        # --- Core layers with intensity-based differentiation ---
+        core_alpha_base = int(np.clip(alpha * float(core_alpha_scale), 0, 255))
+        if in_cluster and not is_cluster_anchor:
+            ember_radius = max(0.45, radius * (0.85 if is_weak else 1.05))
+            ember_alpha = int(core_alpha_base * (0.22 if is_weak else 0.30))
+            ember_draw.ellipse(
+                (x - ember_radius, y - ember_radius, x + ember_radius, y + ember_radius),
+                fill=(255, 82, 22, ember_alpha),
+            )
+            continue
+
+        # Asymmetric core: rotated ellipse
+        core_angle = rng.uniform(0, 360)
+        core_aspect = rng.uniform(0.55, 0.85)
+
+        if is_strong:
+            # Strong sources: bright white-hot core + yellow flare + orange ember edge
+            ember_radius = radius * 1.6
+            ember_alpha = int(core_alpha_base * 0.55)
+            ember_points = []
+            for i in range(12):
+                theta = 2 * math.pi * i / 12
+                px = ember_radius * math.cos(theta)
+                py = ember_radius * core_aspect * math.sin(theta)
+                rad = math.radians(core_angle)
+                rx = px * math.cos(rad) - py * math.sin(rad)
+                ry = px * math.sin(rad) + py * math.cos(rad)
+                ember_points.append((x + rx, y + ry))
+            ember_draw.polygon(ember_points, fill=(255, 95, 22, ember_alpha))
+
+            flare_radius = radius * 1.0
+            flare_alpha = int(core_alpha_base * 0.78)
+            flare_points = []
+            for i in range(12):
+                theta = 2 * math.pi * i / 12
+                px = flare_radius * math.cos(theta)
+                py = flare_radius * core_aspect * math.sin(theta)
+                rad = math.radians(core_angle)
+                rx = px * math.cos(rad) - py * math.sin(rad)
+                ry = px * math.sin(rad) + py * math.cos(rad)
+                flare_points.append((x + rx, y + ry))
+            flare_draw.polygon(flare_points, fill=(255, 195, 65, flare_alpha))
+
+            hot_radius = radius * 0.45
+            hot_alpha = min(255, int(core_alpha_base * 1.1 + 25))
+            core_draw.ellipse(
+                (x - hot_radius, y - hot_radius, x + hot_radius, y + hot_radius),
+                fill=(255, 248, 220, hot_alpha),
+            )
+        elif is_medium:
+            ember_radius = radius * 1.35
+            ember_alpha = int(core_alpha_base * 0.5)
+            ember_points = []
+            for i in range(12):
+                theta = 2 * math.pi * i / 12
+                px = ember_radius * math.cos(theta)
+                py = ember_radius * core_aspect * math.sin(theta)
+                rad = math.radians(core_angle)
+                rx = px * math.cos(rad) - py * math.sin(rad)
+                ry = px * math.sin(rad) + py * math.cos(rad)
+                ember_points.append((x + rx, y + ry))
+            ember_draw.polygon(ember_points, fill=(255, 105, 28, ember_alpha))
+
+            flare_radius = radius * 0.7
+            flare_alpha = int(core_alpha_base * 0.7)
+            flare_draw.ellipse(
+                (x - flare_radius, y - flare_radius, x + flare_radius, y + flare_radius),
+                fill=(255, 175, 55, flare_alpha),
+            )
+
+            # Medium sources should enrich the shared front with yellow heat without
+            # creating another isolated white-hot dot.
+        else:
+            # Weak sources: small red/orange embers only
+            ember_radius = radius * 0.9
+            ember_alpha = int(core_alpha_base * 0.45)
+            ember_draw.ellipse(
+                (x - ember_radius, y - ember_radius, x + ember_radius, y + ember_radius),
+                fill=(255, 75, 18, ember_alpha),
+            )
+            center_radius = radius * 0.35
+            center_alpha = int(core_alpha_base * 0.55)
+            flare_draw.ellipse(
+                (x - center_radius, y - center_radius, x + center_radius, y + center_radius),
+                fill=(255, 125, 42, center_alpha),
+            )
+
+    # Apply blur: narrower than before to keep bloom source-local
+    wide_bloom = wide_bloom.filter(
+        ImageFilter.GaussianBlur(radius=max(2.0, min(width, height) / 95.0 * max(0.75, float(bloom_scale))))
     )
-    halo = halo.filter(ImageFilter.GaussianBlur(radius=max(1.5, min(width, height) / 160.0 * max(0.8, float(bloom_scale)))))
-    wide_halo.alpha_composite(halo)
-    halo = wide_halo
+    local_bloom = local_bloom.filter(
+        ImageFilter.GaussianBlur(radius=max(1.0, min(width, height) / 180.0 * max(0.75, float(bloom_scale))))
+    )
+    chain_layer = chain_layer.filter(ImageFilter.GaussianBlur(radius=0.8))
+
+    # Composite layers: wide bloom -> local bloom -> chain -> ember -> flare -> core
+    result = wide_bloom
+    result.alpha_composite(local_bloom)
+    result.alpha_composite(chain_layer)
     if not glow_only:
-        halo.alpha_composite(layer)
-    return np.asarray(halo, dtype=np.uint8)
+        ember_layer = ember_layer.filter(ImageFilter.GaussianBlur(radius=0.6))
+        result.alpha_composite(ember_layer)
+        result.alpha_composite(flare_layer)
+        result.alpha_composite(core_layer)
+
+    return np.asarray(result, dtype=np.uint8)
+
+
+def _draw_reference_regional_fire_context(
+    halo_draw: ImageDraw.ImageDraw,
+    hot_draw: ImageDraw.ImageDraw,
+    map_size: tuple[int, int],
+    frame_index: int,
+    seed: int,
+    *,
+    glow_only: bool,
+) -> None:
+    width, height = map(int, map_size)
+    progress = float(np.clip(frame_index / max(REFERENCE_FILM_TIMELINE_DAYS * 20.0, 1.0), 0.0, 1.0))
+    for anchor_index, (ux, uy, base_strength, phase) in enumerate(REFERENCE_FILM_REGIONAL_FIRE_ANCHORS[1:], start=1):
+        arrival = _smoothstep(phase, phase + 0.22, progress)
+        decay = 1.0 - 0.42 * _smoothstep(phase + 0.52, phase + 0.88, progress)
+        pulse = 0.72 + 0.28 * math.sin(frame_index * 0.073 + anchor_index * 1.91)
+        activity = float(np.clip(base_strength * arrival * decay * pulse, 0.0, 1.0))
+        if activity <= 0.025:
+            continue
+        rng = np.random.default_rng(int(seed + 31_337 + anchor_index * 911 + frame_index * 17))
+        point_count = max(5, int(round(10 + 46 * activity)))
+        spread_x = max(1.6, width * (0.012 + 0.019 * activity))
+        spread_y = max(1.3, height * (0.010 + 0.016 * activity))
+        center_x = ux * (width - 1)
+        center_y = uy * (height - 1)
+        for point_index in range(point_count):
+            angle = (point_index / max(point_count, 1)) * math.tau + rng.uniform(-0.42, 0.42)
+            radius = math.sqrt(rng.uniform(0.05, 1.0))
+            px = float(np.clip(center_x + math.cos(angle) * radius * spread_x + rng.normal(0.0, spread_x * 0.16), 0, width - 1))
+            py = float(np.clip(center_y + math.sin(angle) * radius * spread_y + rng.normal(0.0, spread_y * 0.16), 0, height - 1))
+            intensity = float(np.clip(activity * rng.uniform(0.72, 1.18), 0.0, 1.0))
+            point_radius = max(0.34, min(width, height) / 720.0 * (0.80 + 0.70 * intensity))
+            halo_radius = point_radius * (3.0 + 0.70 * intensity)
+            halo_draw.ellipse(
+                (px - halo_radius, py - halo_radius, px + halo_radius, py + halo_radius),
+                fill=(255, 86, 22, int(np.clip(22 + 74 * intensity, 18, 96))),
+            )
+            if glow_only:
+                continue
+            ember_radius = point_radius * (1.22 + 0.36 * intensity)
+            hot_draw.ellipse(
+                (px - ember_radius, py - ember_radius, px + ember_radius, py + ember_radius),
+                fill=(255, 106, 28, int(np.clip(68 + 130 * intensity, 70, 205))),
+            )
+            core_radius = max(0.26, point_radius * 0.72)
+            hot_draw.ellipse(
+                (px - core_radius, py - core_radius, px + core_radius, py + core_radius),
+                fill=(255, 238, 198, int(np.clip(98 + 132 * intensity, 105, 240))),
+            )
+
+
+def reference_fire_points_rgba(
+    sources: list[HybridSmokeSource],
+    frame_index: int,
+    map_size: tuple[int, int],
+    *,
+    glow_only: bool = False,
+    max_points: int = REFERENCE_FILM_FIRE_POINT_LIMIT,
+    seed: int = HYBRID_SMOKE_SEED,
+    regional_context: bool = False,
+) -> np.ndarray:
+    """Render many small active fire points with tight halos for map-film mode."""
+    width, height = map(int, map_size)
+    core = active_fire_core_intensity_field(sources, frame_index, map_size)
+    ys, xs = np.where(core >= 0.10)
+    result = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    halo = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    hot = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    halo_draw = ImageDraw.Draw(halo, "RGBA")
+    hot_draw = ImageDraw.Draw(hot, "RGBA")
+    if xs.size:
+        scores = core[ys, xs].astype(np.float32)
+        jitter = ((xs * 2654435761 + ys * 2246822519 + int(seed) * 3266489917 + int(frame_index) * 668265263) & 2047) / 2047.0
+        order = np.argsort(scores * (0.94 + 0.12 * jitter.astype(np.float32)))[::-1]
+        selected: list[tuple[float, float]] = []
+        spacing = max(1.1, min(width, height) / 170.0)
+        spacing_sq = spacing * spacing
+        for index in order:
+            x = float(xs[index])
+            y = float(ys[index])
+            if any((x - sx) * (x - sx) + (y - sy) * (y - sy) < spacing_sq for sx, sy in selected):
+                continue
+            selected.append((x, y))
+            intensity = float(core[int(y), int(x)])
+            rng = np.random.default_rng(int(seed + frame_index * 1709 + x * 37 + y * 67))
+            dx = float(rng.uniform(-0.24, 0.24))
+            dy = float(rng.uniform(-0.24, 0.24))
+            px = x + dx
+            py = y + dy
+            point_radius = max(0.42, min(width, height) / 760.0 * (0.86 + 0.74 * math.sqrt(intensity)))
+            halo_radius = point_radius * (3.2 + 0.8 * intensity)
+            halo_alpha = int(np.clip(42 + 96 * intensity, 32, 148))
+            halo_draw.ellipse(
+                (px - halo_radius, py - halo_radius, px + halo_radius, py + halo_radius),
+                fill=(255, 88, 24, int(halo_alpha * 0.34)),
+            )
+            if not glow_only:
+                ember_radius = point_radius * (1.45 + 0.45 * intensity)
+                hot_draw.ellipse(
+                    (px - ember_radius, py - ember_radius, px + ember_radius, py + ember_radius),
+                    fill=(255, 112, 28, int(np.clip(88 + 120 * intensity, 80, 230))),
+                )
+                core_radius = max(0.30, point_radius * 0.58)
+                hot_draw.ellipse(
+                    (px - core_radius, py - core_radius, px + core_radius, py + core_radius),
+                    fill=(255, 246, 212, int(np.clip(118 + 128 * intensity, 120, 255))),
+                )
+            if len(selected) >= max_points:
+                break
+
+    if regional_context:
+        _draw_reference_regional_fire_context(
+            halo_draw,
+            hot_draw,
+            map_size,
+            frame_index,
+            seed,
+            glow_only=glow_only,
+        )
+
+    halo = halo.filter(ImageFilter.GaussianBlur(radius=max(0.55, min(width, height) / 820.0)))
+    result.alpha_composite(halo)
+    if not glow_only:
+        result.alpha_composite(hot)
+    return np.asarray(result, dtype=np.uint8)
+
+
+def hybrid_burn_scar_rgba(
+    sources: list[HybridSmokeSource],
+    frame_index: int,
+    map_size: tuple[int, int],
+) -> np.ndarray:
+    """Render persistent ash and burnt-ground footprints left by expired fire sources."""
+    width, height = map(int, map_size)
+    scar_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    soot_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    rim_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    scar_draw = ImageDraw.Draw(scar_layer, "RGBA")
+    soot_draw = ImageDraw.Draw(soot_layer, "RGBA")
+    rim_draw = ImageDraw.Draw(rim_layer, "RGBA")
+
+    for idx, source in enumerate(sources):
+        scar_weight = _source_burn_scar_weight(source, frame_index)
+        if scar_weight <= 0.015:
+            continue
+        rng = np.random.default_rng(source.seed + idx * 211)
+        flame_end = _source_flame_end_frame(source)
+        burn_age = max(float(frame_index - source.start_frame), 0.0)
+        burn_span = max(float(flame_end - source.start_frame), 1.0)
+        burn_progress = float(np.clip(burn_age / burn_span, 0.0, 1.0))
+        radius = max(1.2, source.radius_px * (0.74 + 2.25 * burn_progress))
+        aspect = float(rng.uniform(0.52, 0.88))
+        angle = float(rng.uniform(0.0, math.tau))
+        points: list[tuple[float, float]] = []
+        n_points = 18
+        for point_index in range(n_points):
+            theta = math.tau * point_index / n_points
+            wobble = 0.72 + 0.46 * float(rng.random())
+            px = radius * wobble * math.cos(theta)
+            py = radius * aspect * wobble * math.sin(theta)
+            rx = px * math.cos(angle) - py * math.sin(angle)
+            ry = px * math.sin(angle) + py * math.cos(angle)
+            points.append((source.x + rx, source.y + ry))
+
+        scar_alpha = int(np.clip(28.0 + 92.0 * scar_weight * (0.74 + 0.26 * source.strength), 18.0, 126.0))
+        soot_alpha = int(np.clip(scar_alpha * (0.44 + 0.22 * burn_progress), 10.0, 88.0))
+        rim_alpha = int(np.clip(scar_alpha * 0.32, 8.0, 46.0))
+        scar_draw.polygon(points, fill=(44, 39, 31, scar_alpha))
+
+        inner_radius = radius * float(rng.uniform(0.38, 0.58))
+        inner_aspect = aspect * float(rng.uniform(0.54, 0.78))
+        soot_points: list[tuple[float, float]] = []
+        for point_index in range(12):
+            theta = math.tau * point_index / 12
+            wobble = 0.68 + 0.42 * float(rng.random())
+            px = inner_radius * wobble * math.cos(theta)
+            py = inner_radius * inner_aspect * wobble * math.sin(theta)
+            rx = px * math.cos(angle) - py * math.sin(angle)
+            ry = px * math.sin(angle) + py * math.cos(angle)
+            soot_points.append((source.x + rx, source.y + ry))
+        soot_draw.polygon(soot_points, fill=(20, 20, 18, soot_alpha))
+
+        if scar_weight > 0.28:
+            rim_draw.line(points + [points[0]], fill=(84, 72, 52, rim_alpha), width=1)
+            for _ in range(3):
+                speck_x = source.x + float(rng.uniform(-radius * 0.62, radius * 0.62))
+                speck_y = source.y + float(rng.uniform(-radius * 0.42, radius * 0.42))
+                speck_r = max(0.35, radius * float(rng.uniform(0.045, 0.095)))
+                speck_alpha = int(np.clip(soot_alpha * float(rng.uniform(0.22, 0.48)), 4, 26))
+                soot_draw.ellipse(
+                    (speck_x - speck_r, speck_y - speck_r, speck_x + speck_r, speck_y + speck_r),
+                    fill=(12, 12, 11, speck_alpha),
+                )
+
+    scar_layer = scar_layer.filter(ImageFilter.GaussianBlur(radius=max(0.35, min(width, height) / 640.0)))
+    soot_layer = soot_layer.filter(ImageFilter.GaussianBlur(radius=max(0.22, min(width, height) / 900.0)))
+    result = scar_layer
+    result.alpha_composite(soot_layer)
+    result.alpha_composite(rim_layer)
+    return np.asarray(result, dtype=np.uint8)
 
 
 def _premultiply_rgba_uint8(rgba: np.ndarray) -> np.ndarray:
@@ -2688,26 +8628,73 @@ def draw_fire(frame: Image.Image, xy: tuple[float, float], progress: float) -> N
     draw.ellipse((x - 4 * scale, y - 3 * scale, x + 4 * scale, y + 3 * scale), fill=(255, 232, 126, 245))
 
 
-def draw_labels(frame: Image.Image) -> None:
+def _format_area_ha(area_ha: float) -> str:
+    if area_ha >= 1_000_000.0:
+        return f"{area_ha / 1_000_000.0:.1f} M ha"
+    return f"{area_ha / 1000.0:.0f} k ha"
+
+
+def draw_labels(
+    frame: Image.Image,
+    *,
+    frame_info: ReferenceFilmFrameInfo | None = None,
+    composition_mode: str = TERRAIN_SLAB_COMPOSITION_MODE,
+) -> list[tuple[str, tuple[int, int, int, int]]]:
     draw = ImageDraw.Draw(frame, "RGBA")
     scale = min(frame.width / WIDTH, frame.height / HEIGHT)
     pad = max(18, int(round(38 * scale)))
     text_font = load_font(max(12, int(round(19 * scale))))
     small_font = load_font(max(10, int(round(15 * scale))))
     area_font = load_font(max(24, int(round(48 * scale))), bold=True)
-    lines = ("Data: CAL FIRE perimeter, cached California DEM", "August Complex, 2020")
-    for idx, line in enumerate(lines):
+    label_boxes: list[tuple[str, tuple[int, int, int, int]]] = []
+
+    def record_box(name: str, xy: tuple[int, int], text: str, font: ImageFont.ImageFont, padding: int = 4) -> None:
+        bbox = draw.textbbox(xy, text, font=font)
+        label_boxes.append(
+            (
+                name,
+                (
+                    int(bbox[0] - padding),
+                    int(bbox[1] - padding),
+                    int(bbox[2] + padding),
+                    int(bbox[3] + padding),
+                ),
+            )
+        )
+
+    info = frame_info or ReferenceFilmFrameInfo(
+        progress=1.0,
+        date_label=AUGUST_COMPLEX.date,
+        burned_area_ha=AUGUST_COMPLEX.final_area_ha,
+    )
+    if composition_mode == MAP_FILM_COMPOSITION_MODE:
+        source_lines = ("Data: CAL FIRE perimeter, synthetic smoke field", "August Complex, 2020 reference-film mode")
+        date_font = load_font(max(20, int(round(34 * scale))), bold=True)
+        date_text = info.date_label
+        bbox = draw.textbbox((0, 0), date_text, font=date_font)
+        date_x = frame.width - pad - (bbox[2] - bbox[0])
+        date_y = pad
+        draw.text((date_x + 2, date_y + 2), date_text, font=date_font, fill=(0, 0, 0, 190))
+        draw.text((date_x, date_y), date_text, font=date_font, fill=(238, 244, 244, 240))
+        record_box("date", (int(date_x), int(date_y)), date_text, date_font)
+    else:
+        source_lines = ("Data: CAL FIRE perimeter, cached California DEM", "August Complex, 2020")
+    for idx, line in enumerate(source_lines):
         y = pad + idx * max(18, int(round(25 * scale)))
         draw.text((pad + 1, y + 1), line, font=small_font, fill=(0, 0, 0, 180))
         draw.text((pad, y), line, font=small_font, fill=(234, 239, 235, 230))
+        record_box(f"source_{idx}", (int(pad), int(y)), line, small_font)
 
     bottom = frame.height - pad - max(74, int(round(112 * scale)))
     draw.text((pad + 2, bottom + 2), "Area Burned:", font=text_font, fill=(0, 0, 0, 190))
     draw.text((pad, bottom), "Area Burned:", font=text_font, fill=(236, 239, 235, 235))
-    value = f"{AUGUST_COMPLEX.final_area_ha/1000:.0f} k ha"
+    record_box("area_label", (int(pad), int(bottom)), "Area Burned:", text_font)
+    value = _format_area_ha(info.burned_area_ha)
     value_y = bottom + max(24, int(round(38 * scale)))
     draw.text((pad + 2, value_y + 2), value, font=area_font, fill=(0, 0, 0, 200))
     draw.text((pad, value_y), value, font=area_font, fill=(248, 250, 246, 245))
+    record_box("area_value", (int(pad), int(value_y)), value, area_font)
+    return label_boxes
 
 
 def composite_volume_detail(
@@ -2760,17 +8747,19 @@ def _select_physical_sources(
         reverse=True,
     )
     selected_indexes: list[int] = []
-    for idx, _source in ranked[: max(0, max_sources - 6)]:
-        selected_indexes.append(idx)
     selected_indexes.extend(range(min(6, len(sources))))
+    for idx, _source in ranked:
+        selected_indexes.append(idx)
     seen: set[int] = set()
-    ordered: list[HybridSmokeSource] = []
-    for idx in sorted(selected_indexes):
+    unique_indexes: list[int] = []
+    for idx in selected_indexes:
         if idx in seen or idx >= len(sources):
             continue
         seen.add(idx)
-        ordered.append(sources[idx])
-    return ordered[:max_sources]
+        unique_indexes.append(idx)
+        if len(unique_indexes) >= max_sources:
+            break
+    return [sources[idx] for idx in sorted(unique_indexes)]
 
 
 def _native_physical_smoke_available() -> bool:
@@ -2872,16 +8861,30 @@ def make_physical_main_smoke(
     max_sources: int = PHYSICAL_SMOKE_MAX_SOURCES,
     substeps: int = 1,
     backend: str = "auto",
+    emitter_mode: str = "synthetic",
     seed: int = HYBRID_SMOKE_SEED,
 ) -> PhysicalSmokeMainEffect | None:
     nx, ny, nz = (max(8, int(v)) for v in dims)
     render_w, render_h = (max(16, int(v)) for v in render_size)
     substep_count = max(1, int(substeps))
+    if emitter_mode not in SOURCE_WISP_EMITTER_MODES:
+        raise ValueError(f"physical emitter mode must be one of {SOURCE_WISP_EMITTER_MODES}")
     resolved_backend = _physical_backend(backend)
     domain = _make_physical_domain((nx, ny, nz), resolved_backend)
     step = _make_physical_step_settings(resolved_backend, substep_count, seed)
     render = _make_physical_render_settings(resolved_backend)
-    selected_sources = _select_physical_sources(sources, max_sources=max_sources)
+    if emitter_mode == "fire-core":
+        selected_sources = fire_core_emitter_sources(
+            sources,
+            0,
+            map_size,
+            max_emitters=max_sources,
+            seed=seed + 12011,
+        )
+        if not selected_sources:
+            selected_sources = _select_physical_sources(sources, max_sources=max_sources)
+    else:
+        selected_sources = _select_physical_sources(sources, max_sources=max_sources)
     if not selected_sources:
         return None
     return PhysicalSmokeMainEffect(
@@ -2895,7 +8898,24 @@ def make_physical_main_smoke(
         substeps=substep_count,
         backend=resolved_backend,
         seed=int(seed),
+        base_sources=list(sources),
+        emitter_mode=str(emitter_mode),
+        max_sources=max(0, int(max_sources)),
     )
+
+
+def _physical_sources_for_frame(effect: PhysicalSmokeMainEffect, frame_index: int) -> list[HybridSmokeSource]:
+    if effect.emitter_mode == "fire-core":
+        sources = fire_core_emitter_sources(
+            effect.base_sources or effect.sources,
+            frame_index,
+            effect.map_size,
+            max_emitters=max(effect.max_sources, 1),
+            seed=effect.seed + 12011,
+        )
+        if sources:
+            return sources
+    return list(effect.sources)
 
 
 def _physical_emitters_for_frame(effect: PhysicalSmokeMainEffect, frame_index: int) -> list[PhysicalSmokeEmitter3D]:
@@ -2904,8 +8924,14 @@ def _physical_emitters_for_frame(effect: PhysicalSmokeMainEffect, frame_index: i
     emitters: list[PhysicalSmokeEmitter3D] = []
     wind = _hybrid_layer_wind_vector(1)
     cross = np.array([-wind[1], wind[0]], dtype=np.float32)
-    for source_index, source in enumerate(effect.sources):
+    frame_sources = _physical_sources_for_frame(effect, frame_index)
+    for source_index, source in enumerate(frame_sources):
         if frame_index < source.start_frame or frame_index > source.end_frame:
+            continue
+        flame = _source_flame_lifecycle_weight(source, frame_index)
+        smolder = _source_smolder_lifecycle_weight(source, frame_index)
+        source_activity = _source_smoke_activity_weight(source, frame_index)
+        if source_activity <= 0.01:
             continue
         burst = _source_burst_envelope(source, frame_index)
         if burst < 0.08:
@@ -2927,8 +8953,8 @@ def _physical_emitters_for_frame(effect: PhysicalSmokeMainEffect, frame_index: i
             float(0.006 + 0.014 * source.heat),
             float(wind[1] * (1.92 + 0.32 * source.heat) + cross[1] * lateral),
         )
-        density_rate = float(0.96 * source.strength * source.smoke_rate * burst * flicker)
-        temperature_rate = float(0.18 * source.heat * burst)
+        density_rate = float(0.96 * source.strength * source.smoke_rate * burst * flicker * source_activity)
+        temperature_rate = float(0.18 * source.heat * burst * (flame + 0.12 * smolder))
         soot_rate = float(0.018 + 0.010 * source.heat)
         emitters.append(
             PhysicalSmokeEmitter3D(
@@ -2938,7 +8964,7 @@ def _physical_emitters_for_frame(effect: PhysicalSmokeMainEffect, frame_index: i
                 temperature_rate=temperature_rate,
                 soot_rate=soot_rate,
                 humidity_rate=0.10,
-                emission_rate=0.55 * source.heat,
+                emission_rate=0.55 * source.heat * flame,
                 velocity=velocity,
             )
         )
@@ -3442,18 +9468,22 @@ def _projected_smoke_depth_cues(
 def _active_source_centroid(effect: PhysicalSmokeMainEffect, frame_index: int) -> tuple[float, float, float]:
     weights: list[float] = []
     coords: list[tuple[float, float]] = []
-    for source in effect.sources:
+    frame_sources = _physical_sources_for_frame(effect, frame_index)
+    for source in frame_sources:
         if frame_index < source.start_frame or frame_index > source.end_frame:
+            continue
+        flame = _source_flame_lifecycle_weight(source, frame_index)
+        if flame <= 0.05:
             continue
         burst = _source_burst_envelope(source, frame_index)
         if burst <= 0.05:
             continue
-        weights.append(float(source.strength * source.smoke_rate * (0.35 + burst) * (1.0 + 0.15 * source.heat)))
+        weights.append(float(source.strength * source.smoke_rate * flame * (0.35 + burst) * (1.0 + 0.15 * source.heat)))
         coords.append((float(source.x), float(source.y)))
     if not weights:
-        if effect.sources:
-            coords = [(float(source.x), float(source.y)) for source in effect.sources[: min(6, len(effect.sources))]]
-            weights = [max(float(source.strength), 0.05) for source in effect.sources[: len(coords)]]
+        if frame_sources:
+            coords = [(float(source.x), float(source.y)) for source in frame_sources[: min(6, len(frame_sources))]]
+            weights = [max(float(source.strength), 0.05) for source in frame_sources[: len(coords)]]
         else:
             return effect.map_size[0] * 0.36, effect.map_size[1] * 0.62, 0.0
     weights_arr = np.asarray(weights, dtype=np.float32)
@@ -3880,7 +9910,7 @@ def _physical_history_rgba(effect: PhysicalSmokeMainEffect, frame_index: int) ->
 
 def _physical_source_glow_rgba(effect: PhysicalSmokeMainEffect, frame_index: int) -> np.ndarray:
     glow = hybrid_fire_sources_rgba(
-        effect.sources,
+        _physical_sources_for_frame(effect, frame_index),
         frame_index,
         effect.map_size,
         glow_only=False,
@@ -4273,17 +10303,187 @@ def render_physical_main_smoke(effect: PhysicalSmokeMainEffect, frame_index: int
     return current
 
 
+def _reference_exact_source_frame_index(
+    output_frame_index: int,
+    output_fps: int,
+    *,
+    start_frame: int = 0,
+    frame_count: int = REFERENCE_EXACT_FRAME_COUNT,
+) -> int:
+    mapped = int(start_frame) + int(round(float(output_frame_index) * REFERENCE_EXACT_FPS / max(float(output_fps), 1.0)))
+    return int(np.clip(mapped, int(start_frame), int(start_frame) + max(int(frame_count) - 1, 0)))
+
+
+def render_reference_exact_video(args: argparse.Namespace) -> None:
+    width, height = map(int, args.size)
+    if (width, height) != (REFERENCE_EXACT_WIDTH, REFERENCE_EXACT_HEIGHT):
+        raise RuntimeError("reference-exact-smoke requires 1920x1080 output for native-frame audit parity")
+    fps = int(args.fps)
+    if fps != REFERENCE_EXACT_FPS:
+        raise RuntimeError("reference-exact-smoke requires 30 fps so generated frames map one-to-one to the locked reference frames")
+    frame_count = int(args.reference_smoke_frame_count)
+    start_frame = int(args.reference_smoke_start_frame)
+    cache_dir = Path(args.reference_smoke_cache)
+    audit_dir = Path(args.audit_dir) if args.audit_dir is not None else REFERENCE_EXACT_AUDIT_DIR
+    if not (cache_dir / "reference_exact_manifest.json").exists() or not _reference_exact_smoke_path(cache_dir, "smoke_rgba", 0).exists():
+        build_reference_exact_smoke_cache(
+            Path(args.reference_video),
+            cache_dir,
+            audit_dir,
+            frame_count=REFERENCE_EXACT_FRAME_COUNT,
+        )
+    manifest = validate_reference_exact_manifest(cache_dir / "reference_exact_manifest.json", Path(args.reference_video))
+    locked_count = int(manifest.get("frame_count", REFERENCE_EXACT_FRAME_COUNT))
+    if start_frame < 0 or start_frame >= locked_count:
+        raise RuntimeError("reference smoke start frame is outside the locked first-30s cache")
+    frame_count = min(frame_count, locked_count - start_frame)
+    if frame_count <= 0:
+        raise RuntimeError("reference smoke frame count must be positive")
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    preview_frame: Image.Image | None = None
+    with tempfile.TemporaryDirectory(prefix="reference_exact_frames_", dir=args.output.parent) as tmpdir:
+        frames_dir = Path(tmpdir)
+        for frame_idx in range(frame_count):
+            source_frame = _reference_exact_source_frame_index(
+                frame_idx,
+                fps,
+                start_frame=start_frame,
+                frame_count=frame_count,
+            )
+            frame = _reference_exact_reconstructed_frame(cache_dir, source_frame, (width, height))
+            if frame_idx == frame_count // 2:
+                preview_frame = frame.copy()
+            frame.save(frames_dir / f"frame_{frame_idx:04d}.png")
+
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            raise RuntimeError("ffmpeg is required to encode the MP4.")
+        cmd = [
+            ffmpeg,
+            "-y",
+            "-framerate",
+            str(fps),
+            "-i",
+            str(frames_dir / "frame_%04d.png"),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-preset",
+            "medium",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-colorspace",
+            "bt709",
+        ]
+        video_bitrate = getattr(args, "encode_policy", {}).get("video_bitrate")
+        if video_bitrate:
+            cmd.extend(["-b:v", str(video_bitrate)])
+            maxrate = getattr(args, "encode_policy", {}).get("maxrate")
+            bufsize = getattr(args, "encode_policy", {}).get("bufsize")
+            if maxrate:
+                cmd.extend(["-maxrate", str(maxrate)])
+            if bufsize:
+                cmd.extend(["-bufsize", str(bufsize)])
+        else:
+            cmd.extend(["-crf", str(int(getattr(args, "encode_policy", {}).get("crf", 16)))])
+        cmd.append(str(args.output))
+        subprocess.run(cmd, check=True)
+        artifact_summary = _write_reference_exact_audit_artifacts(
+            cache_dir,
+            audit_dir,
+            generated_frame_dir=frames_dir,
+            frame_count=frame_count,
+            start_frame=start_frame,
+        )
+        generated_smoke_dir = audit_dir / "generated_smoke_layers"
+        generated_smoke_summary = write_reference_exact_smoke_layers_from_playback(
+            cache_dir,
+            generated_smoke_dir,
+            frame_count=frame_count,
+            start_frame=start_frame,
+            output_fps=fps,
+        )
+        gate_report = evaluate_reference_exact_smoke_gate(
+            cache_dir,
+            generated_smoke_dir,
+            frame_count=frame_count,
+            start_frame=start_frame,
+        )
+        _write_json(audit_dir / "reference_exact_smoke_gate_report.json", gate_report)
+        decoded_label_report = reference_exact_decoded_label_report(
+            frames_dir,
+            frame_count=frame_count,
+            start_frame=start_frame,
+        )
+        _write_json(audit_dir / "reference_exact_decoded_label_report.json", decoded_label_report)
+        smoke_audit_payload = {
+            "artifact_schema_version": REFERENCE_EXACT_ARTIFACT_SCHEMA_VERSION,
+            "output": str(args.output),
+            "preview": str(args.preview),
+            "reference_video": str(args.reference_video),
+            "reference_smoke_cache": str(cache_dir),
+            "reference_smoke_mode": str(args.reference_smoke_mode),
+            "render_preset": str(args.render_preset),
+            "start_frame": start_frame,
+            "frame_count": frame_count,
+            "fps": fps,
+            "reference_exact_smoke_gate_report": gate_report,
+            "reference_exact_audit_artifact_summary": artifact_summary,
+            "generated_smoke_layer_summary": generated_smoke_summary,
+            "reference_exact_decoded_label_report": decoded_label_report,
+            "reference_exact_map_extent_contract": reference_exact_map_extent_contract(output_size=(width, height)),
+            "target_layer_policy": dict(getattr(args, "layer_policy", {})),
+            "accepted_artifact_contract": [
+                "reference_exact_manifest.json",
+                "reference_smoke_events.json",
+                "reference_exact_smoke_gate_report.json",
+                "reference_exact_decoded_label_report.json",
+                "reference_exact_all_900_frames_micro_contact.jpg",
+                "generated_exact_all_900_frames_micro_contact.jpg",
+                "smoke_difference_all_900_frames_micro_contact.jpg",
+                "reference_exact_half_second_contact.jpg",
+                "generated_exact_half_second_contact.jpg",
+                "smoke_difference_half_second_contact.jpg",
+                "worst_50_smoke_error_frames/",
+            ],
+            "exact_cli_command": " ".join([sys.executable, *sys.argv]),
+        }
+        _write_json(audit_dir / "reference_exact_smoke_audit.json", smoke_audit_payload)
+        if bool(args.enforce_audit_gates) and not bool(gate_report["passed"]):
+            raise RuntimeError(
+                f"reference-exact smoke audit gates failed ({gate_report.get('failed_gate_count', 0)} hard failures)"
+            )
+
+    (preview_frame or Image.open(cache_dir / "reference_background_clean.png").convert("RGBA")).save(args.preview)
+    print(f"Wrote {args.output}")
+    print(f"Wrote {args.preview}")
+    print(f"Wrote reference-exact smoke audit artifacts to {audit_dir}")
+
+
 def render_video(args: argparse.Namespace) -> None:
+    if str(getattr(args, "reference_smoke_mode", "procedural")) == "exact":
+        render_reference_exact_video(args)
+        return
     width, height = map(int, args.size)
     fps = int(args.fps)
     frames = max(1, int(round(float(args.duration) * fps)))
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    plate = terrain_plate(width, height)
+    composition_mode = str(args.composition_mode)
+    reference_film_target = bool(getattr(args, "layer_policy", {}).get("reference_film_target", False))
+    plate = map_film_plate(width, height) if composition_mode == MAP_FILM_COMPOSITION_MODE else terrain_plate(width, height)
     terrain = plate.image
     map_size = (max(16, int(args.hybrid_smoke_width)), max(16, int(args.hybrid_smoke_height)))
     warmup_frames = max(0, int(round(float(args.warmup_seconds) * fps)))
     sim_frames = warmup_frames + frames
-    hybrid_sources = make_hybrid_smoke_sources(plate.fire_uv, map_size, total_frames=sim_frames)
+    hybrid_sources = make_hybrid_smoke_sources(
+        plate.fire_uv,
+        map_size,
+        total_frames=sim_frames,
+        visible_start_frame=warmup_frames,
+    )
     hrrr_guidance = load_hrrr_smoke_guidance(
         Path(args.hrrr_smoke_dir),
         map_size,
@@ -4291,6 +10491,7 @@ def render_video(args: argparse.Namespace) -> None:
         plot_type=str(args.hrrr_plot_type),
         base_url=str(args.hrrr_base_url),
         fetch=bool(args.fetch_hrrr_smoke),
+        bounds_mercator=plate.bounds_mercator,
     )
     if hrrr_guidance is None:
         print(
@@ -4299,6 +10500,14 @@ def render_video(args: argparse.Namespace) -> None:
         )
     else:
         print(f"Using {hrrr_guidance.source_label}")
+    observed_smoke_source = make_observed_smoke_source(
+        args,
+        map_size,
+        hrrr_guidance,
+        visible_frame_count=frames,
+    )
+    if bool(args.regional_smoke):
+        print(f"Using broad observed smoke source: {observed_smoke_source.source_label}")
     cadence = max(1.0, sim_frames / max(len(hrrr_guidance.frames) - 1, 1)) if hrrr_guidance else 12.0
     hybrid_sim = HybridSmokeSimulator(
         map_size,
@@ -4306,8 +10515,13 @@ def render_video(args: argparse.Namespace) -> None:
         hrrr_guidance=hrrr_guidance,
         guidance_cadence_frames=cadence,
     )
+    ablation = str(args.smoke_ablation)
+    render_broad_smoke = ablation in {"combined", "broad-only"}
+    render_physical_smoke = ablation in {"combined", "physical-only", "no-broad"}
+    render_source_wisps = bool(args.source_wisps) and ablation in {"combined", "source-wisps-only", "no-broad"}
+
     physical_effect = None
-    if bool(args.physical_smoke):
+    if bool(args.physical_smoke) and render_physical_smoke:
         physical_effect = make_physical_main_smoke(
             hybrid_sources,
             map_size,
@@ -4316,6 +10530,7 @@ def render_video(args: argparse.Namespace) -> None:
             max_sources=int(args.physical_max_sources),
             substeps=int(args.physical_substeps),
             backend=str(args.physical_smoke_backend),
+            emitter_mode=str(args.physical_emitter_mode),
         )
         if physical_effect is None:
             print("Physical 3D smoke unavailable; using layered 2.5D smoke as the main pass.")
@@ -4324,8 +10539,18 @@ def render_video(args: argparse.Namespace) -> None:
                 "Using physical 3D smoke main pass "
                 f"backend={physical_effect.backend}, "
                 f"dims={physical_effect.dims}, render={physical_effect.render_size}, "
-                f"sources={len(physical_effect.sources)}"
+                f"sources={len(physical_effect.sources)}, emitter_mode={physical_effect.emitter_mode}"
             )
+
+    wisp_sim = None
+    if render_source_wisps:
+        wisp_sim = SourceWispSimulator(
+            map_size,
+            hybrid_sources,
+            max_particles=int(args.source_wisp_max_particles),
+            max_emitters=int(args.source_wisp_max_emitters),
+            emitter_mode=str(args.source_wisp_emitter_mode),
+        )
 
     domain = emitter = step = camera = render_settings = source_xy = None
     smoke_w, smoke_h = int(args.smoke_width), int(args.smoke_height)
@@ -4338,9 +10563,22 @@ def render_video(args: argparse.Namespace) -> None:
         hybrid_sim.step(warmup_idx)
         if physical_effect is not None:
             step_physical_main_smoke(physical_effect, warmup_idx)
+        if wisp_sim is not None and str(args.source_wisp_warmup_mode) == "full":
+            wisp_sim.step(warmup_idx)
         if domain is not None and step is not None and emitter is not None:
             domain.step(step, [emitter])
     preview_frame = None
+    audit_dir = Path(args.audit_dir) if args.audit_dir is not None else None
+    audit_times = tuple(float(t) for t in args.audit_frame_times)
+    audit_frames = _audit_frame_indexes(frames, fps, audit_times) if audit_dir is not None else {}
+    audit_records: list[dict[str, float]] = []
+    reference_film_audit_frames = (
+        _reference_film_audit_frame_indexes(frames, fps)
+        if audit_dir is not None and reference_film_target
+        else {}
+    )
+    reference_film_records: list[dict[str, float | str]] = []
+    previous_reference_film_audit_frame: Image.Image | None = None
 
     with tempfile.TemporaryDirectory(prefix="august_complex_cigar_frames_", dir=args.output.parent) as tmpdir:
         frames_dir = Path(tmpdir)
@@ -4348,27 +10586,76 @@ def render_video(args: argparse.Namespace) -> None:
             sim_frame = warmup_frames + frame_idx
             hybrid_sim.step(sim_frame)
             state = hybrid_sim.interpolated_state(0.82)
+            wisp_map = None
+            wisp_state = None
+            frame_progress = float(frame_idx / max(frames - 1, 1))
+            frame_info = (
+                reference_film_frame_info(frame_idx, frames)
+                if composition_mode == MAP_FILM_COMPOSITION_MODE
+                else None
+            )
+            if wisp_sim is not None:
+                wisp_state = wisp_sim.step(sim_frame)
+                wisp_map = source_wisps_rgba(
+                    wisp_state,
+                    sim_frame,
+                    plume_ribbons=bool(args.source_wisp_plume_ribbons),
+                )
+            burn_scar_map = hybrid_burn_scar_rgba(hybrid_sources, sim_frame, map_size)
+            burn_scar_layer = warp_map_layer_to_plate(burn_scar_map, plate, (width, height))
             fire_bloom_map = hybrid_fire_sources_rgba(
                 hybrid_sources,
                 sim_frame,
                 map_size,
                 glow_only=True,
-                bloom_scale=1.85,
+                bloom_scale=1.25,
             )
+            if composition_mode == MAP_FILM_COMPOSITION_MODE:
+                fire_bloom_map = reference_fire_points_rgba(
+                    hybrid_sources,
+                    sim_frame,
+                    map_size,
+                    glow_only=True,
+                    regional_context=reference_film_target,
+                )
             fire_bloom_layer = warp_map_layer_to_plate(fire_bloom_map, plate, (width, height))
             terrain_with_bloom = terrain.copy()
+            terrain_with_bloom.alpha_composite(burn_scar_layer)
             terrain_with_bloom.alpha_composite(fire_bloom_layer)
+            broad_smoke_map = hybrid_smoke_rgba(state, sim_frame)
+            if reference_film_target:
+                broad_smoke_map = np.zeros((map_size[1], map_size[0], 4), dtype=np.uint8)
+            regional_map = None
+            if bool(args.regional_smoke):
+                regional_map = observed_smoke_rgba(
+                    observed_smoke_source,
+                    map_size,
+                    frame_idx,
+                    progress=frame_progress,
+                )
+                broad_smoke_map = _premultiplied_over(regional_map, broad_smoke_map)
+            physical_smoke_map = None
             if physical_effect is not None:
                 step_physical_main_smoke(physical_effect, sim_frame)
                 physical_smoke_map = render_physical_main_smoke(physical_effect, sim_frame)
+            if render_broad_smoke:
                 smoke_map = composite_main_smoke_maps(
-                    hybrid_smoke_rgba(state, sim_frame),
+                    broad_smoke_map,
                     physical_smoke_map,
+                    atmospheric_alpha=float(args.broad_smoke_alpha),
+                    physical_alpha=float(args.physical_alpha),
                 )
+            elif physical_smoke_map is not None:
+                smoke_map = _scale_rgba_alpha(physical_smoke_map, float(args.physical_alpha))
+                smoke_map[..., 3] = np.minimum(smoke_map[..., 3], HYBRID_SMOKE_MAX_ALPHA).astype(np.uint8)
             else:
-                smoke_map = hybrid_smoke_rgba(state, sim_frame)
+                smoke_map = np.zeros((map_size[1], map_size[0], 4), dtype=np.uint8)
             smoke_layer = warp_map_layer_to_plate(smoke_map, plate, (width, height))
             frame = composite_atmospheric_smoke(terrain_with_bloom, smoke_layer)
+
+            if wisp_map is not None:
+                wisp_layer = warp_map_layer_to_plate(wisp_map, plate, (width, height))
+                frame = composite_source_wisps(frame, wisp_layer)
 
             if (
                 domain is not None
@@ -4397,12 +10684,76 @@ def render_video(args: argparse.Namespace) -> None:
                 hybrid_sources,
                 sim_frame,
                 map_size,
-                bloom_scale=0.52,
-                core_alpha_scale=0.82,
+                bloom_scale=0.38,
+                core_alpha_scale=1.05,
             )
+            if composition_mode == MAP_FILM_COMPOSITION_MODE:
+                fire_map = reference_fire_points_rgba(
+                    hybrid_sources,
+                    sim_frame,
+                    map_size,
+                    glow_only=False,
+                    regional_context=reference_film_target,
+                )
             fire_layer = warp_map_layer_to_plate(fire_map, plate, (width, height))
             frame.alpha_composite(fire_layer)
-            draw_labels(frame)
+            reference_film_report = None
+            reference_pre_label_frame = None
+            if reference_film_target and frame_info is not None and frame_idx in reference_film_audit_frames:
+                frame_time = reference_film_audit_frames[frame_idx]
+                reference_pre_label_frame = frame.copy()
+                reference_film_report = _reference_film_frame_report(
+                    reference_pre_label_frame,
+                    plate,
+                    (width, height),
+                    map_size,
+                    hybrid_sources,
+                    sim_frame,
+                    frame_time,
+                    regional_map,
+                    smoke_map,
+                    wisp_map,
+                    fire_map,
+                    frame_info,
+                    previous_reference_film_audit_frame,
+                )
+                reference_film_report.update(_reference_film_fire_visibility_report(reference_pre_label_frame, fire_layer))
+            if audit_dir is not None and frame_idx in audit_frames:
+                frame_time = audit_frames[frame_idx]
+                label = f"frame_{frame_idx:04d}_{_frame_label_time(frame_time)}"
+                report = _save_component_audit_frame(
+                    audit_dir,
+                    label,
+                    terrain_with_bloom,
+                    plate,
+                    (width, height),
+                    hybrid_sources,
+                    sim_frame,
+                    broad_smoke_map,
+                    physical_smoke_map,
+                    wisp_map,
+                    wisp_state.emitters if wisp_state is not None else (),
+                    frame.copy(),
+                    float(args.broad_smoke_alpha),
+                    float(args.physical_alpha),
+                    wisp_state,
+                    bool(args.source_wisp_plume_ribbons),
+                )
+                report["time_seconds"] = float(frame_time)
+                audit_records.append(report)
+            label_boxes = draw_labels(frame, frame_info=frame_info, composition_mode=composition_mode)
+            if reference_film_report is not None and reference_pre_label_frame is not None:
+                reference_film_report.update(
+                    _reference_film_label_report(
+                        reference_pre_label_frame,
+                        frame,
+                        label_boxes,
+                        smoke_layer,
+                        fire_layer,
+                    )
+                )
+                reference_film_records.append(reference_film_report)
+                previous_reference_film_audit_frame = reference_pre_label_frame
             if frame_idx == frames // 2:
                 preview_frame = frame.copy()
             frame.save(frames_dir / f"frame_{frame_idx:04d}.png")
@@ -4421,8 +10772,6 @@ def render_video(args: argparse.Namespace) -> None:
             "libx264",
             "-pix_fmt",
             "yuv420p",
-            "-crf",
-            "17",
             "-preset",
             "medium",
             "-color_primaries",
@@ -4431,17 +10780,251 @@ def render_video(args: argparse.Namespace) -> None:
             "bt709",
             "-colorspace",
             "bt709",
-            str(args.output),
         ]
+        video_bitrate = getattr(args, "encode_policy", {}).get("video_bitrate")
+        if video_bitrate:
+            cmd.extend(["-b:v", str(video_bitrate)])
+            maxrate = getattr(args, "encode_policy", {}).get("maxrate")
+            bufsize = getattr(args, "encode_policy", {}).get("bufsize")
+            if maxrate:
+                cmd.extend(["-maxrate", str(maxrate)])
+            if bufsize:
+                cmd.extend(["-bufsize", str(bufsize)])
+        else:
+            cmd.extend(["-crf", str(int(getattr(args, "encode_policy", {}).get("crf", 17)))])
+        cmd.append(str(args.output))
         subprocess.run(cmd, check=True)
+
+    if audit_dir is not None:
+        encoded_records = _write_encoded_video_audit(
+            Path(args.output),
+            Path(args.reference_video),
+            audit_dir,
+            audit_times,
+            ffmpeg,
+        )
+        gate_report = _evaluate_source_wisp_audit(audit_records, encoded_records)
+        reference_film_encoded_records: list[dict[str, float]] = []
+        reference_film_gate_report: dict[str, object] | None = None
+        video_stream_report: dict[str, float | str] = {}
+        if reference_film_target:
+            reference_film_encoded_records = _write_reference_film_contact_sheet(
+                Path(args.output),
+                Path(args.reference_video),
+                audit_dir,
+                ffmpeg,
+            )
+            video_stream_report = _probe_video_stream(Path(args.output), shutil.which("ffprobe"))
+            reference_film_gate_report = _evaluate_reference_film_audit(
+                reference_film_records,
+                reference_film_encoded_records,
+                video_stream_report,
+                dict(getattr(args, "encode_policy", {})),
+            )
+        regeneration_commands = _source_wisp_regeneration_commands(
+            Path(args.output),
+            Path(args.preview),
+            audit_dir,
+            Path(args.reference_video),
+        )
+        if reference_film_target:
+            regeneration_commands.update(
+                _reference_film_regeneration_commands(
+                    Path(args.output),
+                    Path(args.preview),
+                    audit_dir,
+                    Path(args.reference_video),
+                )
+            )
+        audit_payload = {
+            "output": str(args.output),
+            "reference_video": str(args.reference_video),
+            "frame_times_seconds": list(audit_times),
+            "component_reports": audit_records,
+            "encoded_reports": encoded_records,
+            "reference_film_frame_times_seconds": list(REFERENCE_FILM_CONTACT_SHEET_TIMES),
+            "reference_film_frame_reports": reference_film_records,
+            "reference_film_encoded_reports": reference_film_encoded_records,
+            "reference_film_gate_report": reference_film_gate_report,
+            "video_stream_report": video_stream_report,
+            "audit_schema": {
+                "version": "source-wisp-audit-v3",
+                "units": {
+                    "fractions": "0..1 of the named region",
+                    "alpha": "8-bit alpha after final perspective warp",
+                    "width_px": "screen pixels after final perspective warp",
+                    "edge_softness_px": "screen-pixel estimate from diffuse edge area relative to core area",
+                },
+                "age_bands": {
+                    name: {"min_age_fraction": lo, "max_age_fraction": hi}
+                    for name, (lo, hi) in SOURCE_WISP_AGE_BANDS.items()
+                },
+                "hard_fail_metrics": sorted(SOURCE_WISP_AUDIT_THRESHOLDS.keys()),
+                "morphology_metrics": {
+                    "morphology_stage_coverage_fraction": "minimum full-frame coverage across fresh, transition, and old-tail age-band masks",
+                    "transition_width_growth_ratio": "transition_plume_width_px / fresh_stem_width_px after perspective warp",
+                    "old_tail_width_growth_ratio": "old_tail_width_px / fresh_stem_width_px after perspective warp",
+                    "old_tail_alpha_p90_fraction": "old_tail alpha p90 divided by fresh-stem alpha p90",
+                    "old_tail_endpoint_alpha_fraction": "downwind endpoint alpha divided by fresh-stem alpha p90",
+                    "old_tail_coverage_growth_ratio": "old-tail smoke-mask coverage divided by fresh-stem coverage",
+                    "old_tail_edge_softness_px": "minimum diffuse edge width proxy for old-tail plume edges",
+                    "old_tail_diffuse_to_core_area_ratio": "old-tail low-alpha diffuse pixels divided by high-alpha core pixels",
+                    "brush_bundle_score": "combined narrowness, old-tail opacity, and diffuse-envelope deficit; lower is better",
+                },
+                "gate_timing": {
+                    "fresh_stem_frame": "1.0s validates source attachment, haze rejection, and age-band coverage.",
+                    "plume_transformation_min_time_seconds": SOURCE_WISP_MORPHOLOGY_GATE_MIN_TIME_SECONDS,
+                    "plume_transformation_gates": [
+                        "transition_width_growth_ratio",
+                        "old_tail_width_growth_ratio",
+                        "old_tail_alpha_p90_fraction",
+                        "old_tail_endpoint_alpha_fraction",
+                        "old_tail_coverage_growth_ratio",
+                        "old_tail_edge_softness_px",
+                        "old_tail_diffuse_to_core_area_ratio",
+                        "brush_bundle_score",
+                    ],
+                },
+            },
+            "gate_report": gate_report,
+            "reference_film_audit_schema": {
+                "version": "reference-film-audit-v1",
+                "scope": "Full-frame map-film composition, temporal dataviz story, regional smoke hierarchy, fine fire-point density, encoded first-30s contact sheet, and delivery profile.",
+                "frame_sample_times_seconds": list(REFERENCE_FILM_CONTACT_SHEET_TIMES),
+                "hard_fail_metrics": sorted(REFERENCE_FILM_AUDIT_THRESHOLDS.keys()),
+                "measurement_notes": {
+                    "frame_reports": "Computed before labels are drawn so typography does not inflate smoke or fire measurements.",
+                    "encoded_reports": "Computed from H.264 output frames extracted for the first-30s generated/reference contact sheet.",
+                    "delivery": "Width, height, codec, and stream metadata are probed with ffprobe when available; configured bitrate is used for the target bitrate gate.",
+                    "distributed_fire": "Counts hot fire clusters and their spread away from the primary August Complex fire UV to reject single-cluster film reads.",
+                    "smoke_naturalism": "Tracks regional smoke high-pass texture and axis-aligned band scores to reject smooth synthetic ribbons and rectangular field boundaries.",
+                },
+            } if reference_film_target else None,
+            "accepted_artifact_contract": list(
+                REFERENCE_FILM_ACCEPTED_ARTIFACTS if reference_film_target else SOURCE_WISP_ACCEPTED_ARTIFACTS
+            ),
+            "reference_film_visual_signoff_contract": (
+                REFERENCE_FILM_VISUAL_SIGNOFF_CONTRACT if reference_film_target else None
+            ),
+            "review_order": ["source-wisps-only", "no-broad", "combined"],
+            "negative_baselines": {
+                "carpet_smoke": {
+                    "render_preset": LEGACY_RENDER_PRESET,
+                    "reason": "Preserves the older broad-carpet composite for regression comparison only.",
+                    "retention_policy": "Regenerate on demand under examples/out; do not treat as an accepted artifact.",
+                },
+                "brush_bundle": {
+                    "render_preset": BRUSH_BUNDLE_RENDER_PRESET,
+                    "reason": "Preserves source-attached compact stroke morphology as a known-bad baseline.",
+                    "retention_policy": "Regenerate on demand under examples/out; expected to fail morphology gates.",
+                },
+            },
+            "source_data_contract": {
+                "active_fire_source_of_truth": "active_fire_core_intensity_field",
+                "fresh_smoke_emitters": "pre-bloom flame core/front pixels sampled by fire_core_emitter_sources",
+                "excluded_from_emission": "glow_only bloom, wide bloom, composited fire halos, and final RGB imagery",
+                "smolder_emitters": "reduced lifecycle emitters from recently expired HybridSmokeSource records",
+                "fallback_policy": "If no pre-bloom core pixels are active, use reduced smolder emitters only; old burn scars emit no fresh white smoke.",
+            },
+            "reference_film_data_contract": {
+                "status": "synthetic_reference_match_mode" if reference_film_target else "not_applicable",
+                "selected_observed_smoke_source": observed_smoke_source_report(observed_smoke_source),
+                "observed_inputs": [
+                    "CAL FIRE August Complex metadata/perimeter-derived local fire extent",
+                    "cached terrain/relief map inputs",
+                    "reference video used for visual comparison only",
+                    "reference-derived smoke event timing when selected_observed_smoke_source.source_kind is reference-derived-events",
+                    "HRRR-Smoke guidance frames when selected_observed_smoke_source.source_kind is hrrr-smoke",
+                ],
+                "synthetic_inputs": [
+                    "deterministic date and burned-area interpolation",
+                    "procedural regional smoke opacity and texture field",
+                    "procedural active fire-point distribution from fire-core intensity",
+                    "procedural distributed regional fire-context points for film composition",
+                ],
+                "disclosure_label": observed_smoke_source.disclosure_label,
+                "replacement_policy": "Real daily fire perimeters or observed smoke fields may replace synthetic drivers only if the audit records the source and preserves the same layer/gate contract.",
+                "real_data_replacement_schema": {
+                    "active_fire_detections": {
+                        "required_fields": ["timestamp", "longitude", "latitude", "confidence_or_frp"],
+                        "accepted_sources": ["VIIRS active fire detections", "MODIS active fire detections", "agency incident hot-spot feeds"],
+                        "fallback": "procedural distributed regional fire-context points with synthetic disclosure",
+                    },
+                    "daily_perimeters_or_burned_area": {
+                        "required_fields": ["date", "geometry_or_area_ha", "source_name"],
+                        "accepted_sources": ["CAL FIRE incident perimeter history", "agency perimeter datasets", "curated daily burned-area table"],
+                        "fallback": "deterministic date and burned-area interpolation with synthetic disclosure",
+                    },
+                    "observed_smoke": {
+                        "required_fields": ["timestamp", "raster_or_polygon", "opacity_or_density", "source_name"],
+                        "accepted_sources": ["reference-derived smoke event cache", "HRRR-Smoke", "NOAA HMS smoke polygons", "satellite aerosol/smoke products"],
+                        "fallback": "procedural regional smoke transport ribbons with synthetic disclosure",
+                    },
+                    "attribution_requirement": "Visible label and audit JSON must name observed and synthetic inputs separately.",
+                },
+            } if reference_film_target else None,
+            "map_extent_contract": {
+                "extent_kind": plate.extent_kind,
+                "texture_size": list(plate.texture_size),
+                "bounds_mercator": list(plate.bounds_mercator) if plate.bounds_mercator is not None else None,
+                "fire_uv": [float(plate.fire_uv[0]), float(plate.fire_uv[1])],
+                "composition_mode": composition_mode,
+                "regional_reference_extent": bool(reference_film_target and plate.extent_kind != "local"),
+            },
+            "target_layer_policy": dict(getattr(args, "layer_policy", {})),
+            "exact_cli_command": " ".join([sys.executable, *sys.argv]),
+            "regeneration_commands": regeneration_commands,
+            "threshold_calibration": {
+                "basis": "Hand-separated from the current brush-bundle and carpet-smoke negative baselines, then tuned against reference-frame morphology review.",
+                "render_size": f"{width}x{height}",
+                "codec": f"H.264 yuv420p CRF {int(getattr(args, 'encode_policy', {}).get('crf', 17))}",
+                "scope": "Smoke behavior/source attachment for local mode; reference-film mode adds full-frame composition, temporal, regional-smoke, fire-point, contact-sheet, and delivery gates.",
+            },
+            "stop_condition": {
+                "source_wisps_enabled": bool(render_source_wisps),
+                "broad_smoke_alpha": float(args.broad_smoke_alpha),
+                "physical_alpha": float(args.physical_alpha),
+                "minimum_attached_fraction": SOURCE_WISP_AUDIT_THRESHOLDS["minimum_attached_source_fraction"],
+                "maximum_broad_haze_alpha": HYBRID_SMOKE_RESIDUAL_HAZE_MAX_ALPHA,
+                "maximum_low_frequency_haze_fraction": SOURCE_WISP_AUDIT_THRESHOLDS["maximum_low_frequency_haze_fraction"],
+                "maximum_smoke_carpet_component_fraction": SOURCE_WISP_AUDIT_THRESHOLDS["maximum_smoke_carpet_component_fraction"],
+                "minimum_fire_core_visibility_fraction": SOURCE_WISP_AUDIT_THRESHOLDS["minimum_fire_core_visibility_fraction"],
+                "minimum_encoded_strand_like_fraction": SOURCE_WISP_AUDIT_THRESHOLDS["minimum_encoded_strand_like_fraction"],
+                "minimum_old_tail_width_growth_ratio": SOURCE_WISP_AUDIT_THRESHOLDS["minimum_old_tail_width_growth_ratio"],
+                "maximum_old_tail_endpoint_alpha_fraction": SOURCE_WISP_AUDIT_THRESHOLDS["maximum_old_tail_endpoint_alpha_fraction"],
+                "minimum_old_tail_coverage_growth_ratio": SOURCE_WISP_AUDIT_THRESHOLDS["minimum_old_tail_coverage_growth_ratio"],
+                "maximum_brush_bundle_score": SOURCE_WISP_AUDIT_THRESHOLDS["maximum_brush_bundle_score"],
+            },
+        }
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        with (audit_dir / "source_wisp_audit.json").open("w", encoding="utf-8") as f:
+            json.dump(audit_payload, f, indent=2, sort_keys=True)
+        active_gate_report = reference_film_gate_report if reference_film_target and reference_film_gate_report is not None else gate_report
+        if bool(args.enforce_audit_gates) and not bool(active_gate_report["passed"]):
+            failed = active_gate_report.get("failed_gate_count", 0)
+            gate_name = "reference-film" if reference_film_target else "source-wisp"
+            raise RuntimeError(f"{gate_name} audit gates failed ({failed} hard failures)")
 
     (preview_frame or terrain).save(args.preview)
     print(f"Wrote {args.output}")
     print(f"Wrote {args.preview}")
+    if audit_dir is not None:
+        print(f"Wrote audit artifacts to {audit_dir}")
 
 
 def main() -> None:
-    render_video(parse_args())
+    args = parse_args()
+    if bool(getattr(args, "prepare_reference_smoke_cache", False)):
+        result = build_reference_exact_smoke_cache(
+            Path(args.reference_video),
+            Path(args.reference_smoke_cache),
+            Path(args.audit_dir) if args.audit_dir is not None else REFERENCE_EXACT_AUDIT_DIR,
+            frame_count=REFERENCE_EXACT_FRAME_COUNT,
+            force=True,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return
+    render_video(args)
 
 
 if __name__ == "__main__":

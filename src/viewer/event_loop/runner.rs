@@ -102,11 +102,10 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                             WindowEvent::CloseRequested => {
                                 elwt.exit();
                             }
-                            WindowEvent::KeyboardInput { event: key_event, .. }
-                                if key_event.state == ElementState::Pressed =>
-                            {
-                                if let PhysicalKey::Code(KeyCode::Escape) = key_event.physical_key
-                                {
+                            WindowEvent::KeyboardInput {
+                                event: key_event, ..
+                            } if key_event.state == ElementState::Pressed => {
+                                if let PhysicalKey::Code(KeyCode::Escape) = key_event.physical_key {
                                     elwt.exit();
                                 }
                             }
@@ -293,11 +292,10 @@ pub fn run_viewer_with_ipc(
                             WindowEvent::CloseRequested => {
                                 elwt.exit();
                             }
-                            WindowEvent::KeyboardInput { event: key_event, .. }
-                                if key_event.state == ElementState::Pressed =>
-                            {
-                                if let PhysicalKey::Code(KeyCode::Escape) = key_event.physical_key
-                                {
+                            WindowEvent::KeyboardInput {
+                                event: key_event, ..
+                            } if key_event.state == ElementState::Pressed => {
+                                if let PhysicalKey::Code(KeyCode::Escape) = key_event.physical_key {
                                     elwt.exit();
                                 }
                             }

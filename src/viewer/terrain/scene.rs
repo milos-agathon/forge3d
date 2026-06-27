@@ -125,7 +125,15 @@ impl ViewerTerrainData {
     }
 
     pub fn camera_view_matrix(&self) -> Mat4 {
-        Mat4::look_at_rh(self.camera_eye(), self.camera_target(), Vec3::Y)
+        let eye = self.camera_eye();
+        let target = self.camera_target();
+        let view_dir = (target - eye).normalize_or_zero();
+        let up = if view_dir.dot(Vec3::Y).abs() > 0.999 {
+            -Vec3::Z
+        } else {
+            Vec3::Y
+        };
+        Mat4::look_at_rh(eye, target, up)
     }
 
     /// Set camera state from animation keyframe values.

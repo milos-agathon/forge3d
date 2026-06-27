@@ -143,7 +143,7 @@ from .path_tracing import PathTracer, make_camera
 # Interactive Viewer API
 # -----------------------------------------------------------------------------
 from .viewer import LabelBatchResult, ViewerHandle, open_viewer, open_viewer_async
-from . import viewer_ipc, colors, interactive, datasets, widgets
+from . import viewer_ipc, colors, interactive, datasets, widgets, smoke
 from .datasets import (
     available as available_datasets,
     bundled as bundled_datasets,

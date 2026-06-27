@@ -82,6 +82,10 @@ class TestNativeModuleSymbols:
         "SdfPrimitive",
         "SdfScene",
         "SdfSceneBuilder",
+        "SmokeDomain",
+        "SmokeEmitter",
+        "SmokeStepSettings",
+        "SmokeRenderSettings",
     ]
 
     @pytest.mark.parametrize("cls_name", EXPECTED_CLASSES)

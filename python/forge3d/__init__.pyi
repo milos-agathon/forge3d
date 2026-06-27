@@ -107,6 +107,7 @@ from .style import (
     validate_style_support,
     vector_overlay_configs_from_style,
 )
+from . import smoke
 
 PathLikeStr = os.PathLike[str] | str
 

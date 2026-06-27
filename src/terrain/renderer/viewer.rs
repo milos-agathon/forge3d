@@ -196,7 +196,13 @@ impl TerrainScene {
         let eye_z = terrain_center.z + radius * theta_rad.sin() * phi_rad.sin();
         let eye = glam::Vec3::new(eye_x, eye_y, eye_z);
 
-        let view = glam::Mat4::look_at_rh(eye, terrain_center, glam::Vec3::Y);
+        let view_dir = (terrain_center - eye).normalize_or_zero();
+        let up = if view_dir.dot(glam::Vec3::Y).abs() > 0.999 {
+            -glam::Vec3::Z
+        } else {
+            glam::Vec3::Y
+        };
+        let view = glam::Mat4::look_at_rh(eye, terrain_center, up);
         let aspect = width as f32 / height as f32;
         let proj = glam::Mat4::perspective_rh(
             terrain.cam_fov_deg.to_radians(),
