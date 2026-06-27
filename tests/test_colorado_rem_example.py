@@ -4,6 +4,15 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
+
+pytest.importorskip("rasterio.features")
+pytest.importorskip("rasterio.io")
+pytest.importorskip("rasterio.transform")
+pytest.importorskip("rasterio.warp")
+pytest.importorskip("rasterio.windows")
+pytest.importorskip("shapely.geometry")
+
 from shapely.geometry import GeometryCollection, LineString, MultiLineString, Point
 
 ROOT = Path(__file__).resolve().parents[1]
