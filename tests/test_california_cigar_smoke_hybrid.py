@@ -16,6 +16,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_PATH = REPO_ROOT / "examples" / "california_cigar_smoke_demo.py"
 
 
+def skip_missing_california_cache(exc: RuntimeError) -> None:
+    if "Cached California terrain assets are missing" in str(exc):
+        pytest.skip(str(exc))
+    raise exc
+
+
 def load_module():
     python_dir = REPO_ROOT / "python"
     if str(python_dir) not in sys.path:
@@ -931,7 +937,10 @@ def test_reference_smoke_layer_excludes_fire_and_static_background() -> None:
 def test_map_film_plate_uses_regional_reference_extent() -> None:
     module = load_module()
 
-    local_texture, _local_dem, _local_fire = module.crop_fire_extent()
+    try:
+        local_texture, _local_dem, _local_fire = module.crop_fire_extent()
+    except RuntimeError as exc:
+        skip_missing_california_cache(exc)
     plate = module.map_film_plate(320, 180)
 
     assert plate.extent_kind == "regional-california"
@@ -2068,7 +2077,7 @@ def test_hybrid_fire_sources_rgba_glow_only_suppresses_cores() -> None:
 
 def test_hybrid_fire_has_connected_components_larger_than_single_dot() -> None:
     """Fire layer should contain warm connected components larger than a single source dot."""
-    from scipy import ndimage
+    ndimage = pytest.importorskip("scipy.ndimage")
 
     module = load_module()
     map_size = (120, 90)
@@ -2095,7 +2104,7 @@ def test_hybrid_fire_has_connected_components_larger_than_single_dot() -> None:
 
 def test_hybrid_fire_fronts_dominate_warm_area_with_hot_strokes() -> None:
     """Cluster/front rendering should dominate warm area and include connected hot strokes."""
-    from scipy import ndimage
+    ndimage = pytest.importorskip("scipy.ndimage")
 
     module = load_module()
     map_size = (160, 125)
