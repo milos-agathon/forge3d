@@ -325,6 +325,20 @@ diag_out/
 out/
 reports/
 examples/output/
+examples/*
+examples/.cache/
+examples/out/
+examples/output/
+examples/**/*.py
+tests/test_*example*.py
+tests/test_*examples*.py
+tests/test_france_population_spikes_height_shade.py
+tests/test_iberia_builtup_cover_3d.py
+tests/test_italy_forest_cover_example.py
+tests/test_poland_population_contour_3d.py
+tests/test_romania_builtup_cover_3d.py
+.superpowers/
+scripts/*
 
 # forge3d outputs (A13) 
 out/
@@ -342,13 +356,3 @@ docs/_build/
 
 # Large data files
 landuse/landuse/glad_cropland_2019.tif
-!examples/diagnostics_support_matrices_demo.py
-!examples/label_api_truth_basic.py
-!examples/mapscene_terrain_raster.py
-!examples/mapscene_vector_labels.py
-!examples/mapscene_buildings_labels.py
-!examples/mapscene_bundled_datasets_showcase.py
-!examples/mapscene_p1_assets_bundle_showcase.py
-!examples/germany_terrain_landcover_viewer.py
-!examples/khumbu_icefall_sentinel_timelapse.py
-!examples/turkiye_river_basins_3d.py
