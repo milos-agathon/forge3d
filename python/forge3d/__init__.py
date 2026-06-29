@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.26.0"
+__version__ = "1.27.0"
 version = __version__
 
 import numpy as np
@@ -132,6 +132,7 @@ from .offline import OfflineProgress, OfflineResult, render_offline
 from .denoise_oidn import oidn_available, oidn_denoise
 from . import presets
 from . import animation
+from . import gis
 from . import camera_rigs
 
 # -----------------------------------------------------------------------------
@@ -535,6 +536,7 @@ __all__ = [
     "dump_frame_sequence",
     # Modules
     "geometry",
+    "gis",
     "io",
     "terrain_scatter",
     "animation",

@@ -49,5 +49,6 @@ pub(crate) fn register_py_classes(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::smoke::py::PySmokeEmitter>()?;
     m.add_class::<crate::smoke::py::PySmokeStepSettings>()?;
     m.add_class::<crate::smoke::py::PySmokeRenderSettings>()?;
+    m.add_class::<crate::gis::RasterInfo>()?;
     Ok(())
 }

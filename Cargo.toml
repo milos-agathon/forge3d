@@ -1,9 +1,9 @@
 [package]
 name = "forge3d"
-version = "1.26.0"
+version = "1.27.0"
 edition = "2021"
 autoexamples = false
-description = "GPU-accelerated offline 3D map rendering with material/VT diagnostics, advanced labels, large-scene summaries, and reproducible bundles"
+description = "GPU-accelerated offline 3D map rendering with local GIS raster metadata and GeoTIFF write support"
 license = "Apache-2.0 OR MIT"
 readme = "README.md"
 repository = "https://github.com/milos-agathon/forge3d"
@@ -97,6 +97,9 @@ async-trait = { version = "0.1", optional = true }
 flate2 = { version = "1.0", optional = true }
 # P3-reproject: CRS transformation via PROJ (optional, feature-gated)
 proj = { version = "0.27", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync"] }

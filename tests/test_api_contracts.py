@@ -86,6 +86,7 @@ class TestNativeModuleSymbols:
         "SmokeEmitter",
         "SmokeStepSettings",
         "SmokeRenderSettings",
+        "RasterInfo",
     ]
 
     @pytest.mark.parametrize("cls_name", EXPECTED_CLASSES)
@@ -119,6 +120,9 @@ class TestNativeModuleSymbols:
         # P0.4: TBN mesh generation
         "mesh_generate_cube_tbn",
         "mesh_generate_plane_tbn",
+        # G-002a1: Rust-backed GIS raster metadata/write foundation
+        "read_raster_info",
+        "write_raster",
     ]
 
     @pytest.mark.parametrize("fn_name", EXPECTED_FUNCTIONS)

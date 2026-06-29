@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import Tuple, Optional, Sequence, Any, Dict, Literal, Mapping, Callable
 import os
 import numpy as np
+from . import gis
 from .bundle import (
     BUNDLE_VERSION,
     BundleManifest,

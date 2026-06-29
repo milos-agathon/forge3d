@@ -6,6 +6,16 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.27.0] - 2026-06-29
+### Added
+- G-001: Added the public `forge3d.gis` module surface with `RasterInfo`, `read_raster_info(path)`, and `write_raster(...)`.
+- G-002a: Added Rust TIFF-backed local raster metadata reading, PyO3 bindings, Python wrappers, type stubs, and API contract coverage.
+- G-002b: Added GeoTIFF writing support covering CRS authority metadata, affine transforms, nodata, creation options, overwrite validation, warning codes, and round-trip raster tests.
+
+### Changed
+- Updated package metadata to describe forge3d's Rust-backed local GIS raster read/write support.
+- Bumped the package version to `1.27.0`.
+
 ## [1.26.0] - 2026-05-18
 ### Added
 - Implemented Spec 006 P2 material, virtual-texture, and large-scene polish: deterministic VT family validation, textured-building material diagnostics, advanced static label planning, and large-scene resource summaries.

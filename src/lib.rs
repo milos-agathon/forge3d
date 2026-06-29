@@ -127,6 +127,7 @@ pub mod external_image;
 pub mod formats;
 pub mod geo; // P3-reproject: Geographic utilities (CRS reprojection)
 pub mod geometry;
+pub mod gis; // Rust-backed GIS raster metadata and GeoTIFF write utilities
 pub mod import; // Importers: OSM buildings, etc.
 pub mod io; // IO: OBJ/PLY/glTF readers/writers
 pub mod lighting; // P0: Production-ready lighting stack (lights, BRDFs, shadows, IBL)

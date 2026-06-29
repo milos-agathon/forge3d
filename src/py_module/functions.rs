@@ -4,6 +4,7 @@ use crate::py_functions::*;
 mod camera;
 mod diagnostics;
 mod geometry;
+mod gis;
 mod interactive;
 mod io_import;
 mod license;
@@ -18,5 +19,6 @@ pub(crate) fn register_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     license::register_license_py_functions(m)?;
     camera::register_camera_py_functions(m)?;
     rendering::register_rendering_py_functions(m)?;
+    gis::register_gis_py_functions(m)?;
     Ok(())
 }
