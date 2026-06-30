@@ -341,7 +341,7 @@ fn bytes_to_array<const N: usize, T>(
     bytes: &[u8],
     convert: impl Fn([u8; N]) -> T,
 ) -> GisResult<Vec<T>> {
-    if bytes.len() % N != 0 {
+    if !bytes.chunks_exact(N).remainder().is_empty() {
         return Err(GisError::InvalidRaster(
             "TIFF strip byte count is not aligned to sample size".to_string(),
         ));
