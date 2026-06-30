@@ -87,6 +87,8 @@ class TestNativeModuleSymbols:
         "SmokeStepSettings",
         "SmokeRenderSettings",
         "RasterInfo",
+        "AffineTransform",
+        "CrsTransform",
     ]
 
     @pytest.mark.parametrize("cls_name", EXPECTED_CLASSES)
@@ -122,7 +124,39 @@ class TestNativeModuleSymbols:
         "mesh_generate_plane_tbn",
         # G-002a1: Rust-backed GIS raster metadata/write foundation
         "read_raster_info",
+        "read_raster",
         "write_raster",
+        # G-002b: Rust-backed GIS CRS/affine/warp operations
+        "parse_crs",
+        "inspect_crs",
+        "raster_crs",
+        "assign_crs",
+        "create_crs_transformer",
+        "transform_bounds",
+        "web_mercator_bounds",
+        "raster_transform",
+        "transform_from_origin",
+        "transform_from_bounds",
+        "array_bounds",
+        "raster_bounds",
+        "raster_resolution",
+        "validate_transform",
+        "pixel_convention",
+        "rowcol",
+        "xy",
+        "index",
+        "apply_nodata",
+        "read_raster_mask",
+        "resample_raster",
+        "assert_grid_compatible",
+        "align_raster_grid",
+        "align_raster_to",
+        "reproject_raster",
+        "calculate_default_transform",
+        "window_from_bounds",
+        "read_raster_window",
+        "window_transform",
+        "bounds",
     ]
 
     @pytest.mark.parametrize("fn_name", EXPECTED_FUNCTIONS)

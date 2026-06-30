@@ -50,5 +50,7 @@ pub(crate) fn register_py_classes(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::smoke::py::PySmokeStepSettings>()?;
     m.add_class::<crate::smoke::py::PySmokeRenderSettings>()?;
     m.add_class::<crate::gis::RasterInfo>()?;
+    m.add_class::<crate::gis::AffineTransform>()?;
+    m.add_class::<crate::gis::CrsTransform>()?;
     Ok(())
 }

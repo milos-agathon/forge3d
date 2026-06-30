@@ -1,9 +1,9 @@
 [package]
 name = "forge3d"
-version = "1.27.0"
+version = "1.28.0"
 edition = "2021"
 autoexamples = false
-description = "GPU-accelerated offline 3D map rendering with local GIS raster metadata and GeoTIFF write support"
+description = "GPU-accelerated offline 3D map rendering with local GIS raster read/write, CRS, affine, windowing, and reprojection support"
 license = "Apache-2.0 OR MIT"
 readme = "README.md"
 repository = "https://github.com/milos-agathon/forge3d"

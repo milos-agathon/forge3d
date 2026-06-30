@@ -6,11 +6,21 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.28.0] - 2026-06-30
+### Added
+- G-002a1: Added public Rust-backed `forge3d.gis.read_raster(path, bands=None, window=None, masked=False)` with 1-based band selection, in-bounds pixel windows, serialized `RasterInfo` metadata, per-band nodata summaries, and true-valid masks when requested.
+- G-002b: Added Rust-first local TIFF GIS CRS/affine/bounds/windowing/resampling/alignment/reprojection APIs with stable diagnostics and a support matrix documenting built-in EPSG:4326/EPSG:3857 limits.
+
+### Changed
+- Sealed the G-002a1 local raster read/write foundation before G-002c planning: `read_raster_info`, `read_raster`, `write_raster`, `read_raster_window`, and `read_raster_mask` now share Rust-backed TIFF read internals.
+- Updated package metadata to describe forge3d's local GIS raster read/write, CRS, affine, windowing, and reprojection support.
+- Bumped the package version to `1.28.0`.
+
 ## [1.27.0] - 2026-06-29
 ### Added
 - G-001: Added the public `forge3d.gis` module surface with `RasterInfo`, `read_raster_info(path)`, and `write_raster(...)`.
 - G-002a: Added Rust TIFF-backed local raster metadata reading, PyO3 bindings, Python wrappers, type stubs, and API contract coverage.
-- G-002b: Added GeoTIFF writing support covering CRS authority metadata, affine transforms, nodata, creation options, overwrite validation, warning codes, and round-trip raster tests.
+- G-002a1: Added GeoTIFF writing support covering CRS authority metadata, affine transforms, nodata, creation options, overwrite validation, warning codes, and round-trip raster tests.
 
 ### Changed
 - Updated package metadata to describe forge3d's Rust-backed local GIS raster read/write support.

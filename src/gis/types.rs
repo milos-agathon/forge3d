@@ -12,6 +12,7 @@ pub const WARNING_NOT_GEOREFERENCED: &str = "not_georeferenced";
 pub const WARNING_ROTATED_OR_SHEARED: &str = "rotated_or_sheared_transform";
 pub const WARNING_PER_BAND_NODATA_MISMATCH: &str = "per_band_nodata_mismatch";
 pub const WARNING_METADATA_UNAVAILABLE: &str = "metadata_unavailable";
+pub const WARNING_ASSIGNMENT_NOT_REPROJECTION: &str = "assignment_not_reprojection";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RasterWarning {
@@ -85,6 +86,10 @@ impl RasterDType {
     }
 }
 
+#[cfg_attr(
+    feature = "extension-module",
+    pyo3::pyclass(module = "forge3d._forge3d", name = "AffineTransform")
+)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AffineTransform {
     pub a: f64,
@@ -167,11 +172,39 @@ impl AffineTransform {
         self.b != 0.0 || self.d != 0.0
     }
 
-    fn apply(self, col: f64, row: f64) -> (f64, f64) {
+    pub(crate) fn apply(self, col: f64, row: f64) -> (f64, f64) {
         (
             self.a.mul_add(col, self.b.mul_add(row, self.c)),
             self.d.mul_add(col, self.e.mul_add(row, self.f)),
         )
+    }
+}
+
+#[cfg(feature = "extension-module")]
+#[pyo3::pymethods]
+impl AffineTransform {
+    #[new]
+    fn py_new(a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) -> pyo3::PyResult<Self> {
+        Self::new([a, b, c, d, e, f]).map_err(Into::into)
+    }
+
+    #[getter]
+    fn coefficients(&self) -> (f64, f64, f64, f64, f64, f64) {
+        self.tuple()
+    }
+
+    #[getter(resolution)]
+    fn resolution_py(&self) -> (f64, f64) {
+        self.resolution()
+    }
+
+    #[getter]
+    fn rotated_or_sheared(&self) -> bool {
+        self.is_rotated_or_sheared()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("AffineTransform{:?}", self.tuple())
     }
 }
 

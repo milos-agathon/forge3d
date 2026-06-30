@@ -13,8 +13,17 @@ pub enum GisError {
     InvalidShape(String),
     UnsupportedDType(String),
     InvalidTransform(String),
+    MissingTransform(String),
     InvalidNodata(String),
     InvalidArgument(String),
+    InvalidBounds(String),
+    MissingCrs(String),
+    CrsAlreadyExists(String),
+    CrsMismatch(String),
+    ResamplingRequired(String),
+    UnsupportedResamplingMethod(String),
+    TransformFailed(String),
+    BackendUnavailable(String),
     ShapeMismatch(String),
     UnsupportedCreationOption(String),
     WriteFailed(String),
@@ -33,8 +42,17 @@ impl GisError {
             GisError::InvalidShape(_) => "InvalidShape",
             GisError::UnsupportedDType(_) => "UnsupportedDType",
             GisError::InvalidTransform(_) => "InvalidTransform",
+            GisError::MissingTransform(_) => "MissingTransform",
             GisError::InvalidNodata(_) => "InvalidNodata",
             GisError::InvalidArgument(_) => "InvalidArgument",
+            GisError::InvalidBounds(_) => "InvalidBounds",
+            GisError::MissingCrs(_) => "MissingCrs",
+            GisError::CrsAlreadyExists(_) => "CrsAlreadyExists",
+            GisError::CrsMismatch(_) => "CrsMismatch",
+            GisError::ResamplingRequired(_) => "resampling_required",
+            GisError::UnsupportedResamplingMethod(_) => "unsupported_resampling_method",
+            GisError::TransformFailed(_) => "TransformFailed",
+            GisError::BackendUnavailable(_) => "BackendUnavailable",
             GisError::ShapeMismatch(_) => "ShapeMismatch",
             GisError::UnsupportedCreationOption(_) => "UnsupportedCreationOption",
             GisError::WriteFailed(_) => "WriteFailed",
@@ -52,8 +70,17 @@ impl GisError {
             | GisError::InvalidShape(message)
             | GisError::UnsupportedDType(message)
             | GisError::InvalidTransform(message)
+            | GisError::MissingTransform(message)
             | GisError::InvalidNodata(message)
             | GisError::InvalidArgument(message)
+            | GisError::InvalidBounds(message)
+            | GisError::MissingCrs(message)
+            | GisError::CrsAlreadyExists(message)
+            | GisError::CrsMismatch(message)
+            | GisError::ResamplingRequired(message)
+            | GisError::UnsupportedResamplingMethod(message)
+            | GisError::TransformFailed(message)
+            | GisError::BackendUnavailable(message)
             | GisError::ShapeMismatch(message)
             | GisError::UnsupportedCreationOption(message)
             | GisError::WriteFailed(message)
@@ -101,13 +128,22 @@ impl From<GisError> for pyo3::PyErr {
             GisError::UnsupportedDType(_) => PyTypeError::new_err(message),
             GisError::InvalidRaster(_)
             | GisError::WriteFailed(_)
-            | GisError::PostWriteValidationFailed(_) => PyRuntimeError::new_err(message),
+            | GisError::PostWriteValidationFailed(_)
+            | GisError::BackendUnavailable(_)
+            | GisError::TransformFailed(_) => PyRuntimeError::new_err(message),
             GisError::UnsupportedDriver(_)
             | GisError::InvalidCrs(_)
             | GisError::InvalidShape(_)
             | GisError::InvalidTransform(_)
+            | GisError::MissingTransform(_)
             | GisError::InvalidNodata(_)
             | GisError::InvalidArgument(_)
+            | GisError::InvalidBounds(_)
+            | GisError::MissingCrs(_)
+            | GisError::CrsAlreadyExists(_)
+            | GisError::CrsMismatch(_)
+            | GisError::ResamplingRequired(_)
+            | GisError::UnsupportedResamplingMethod(_)
             | GisError::ShapeMismatch(_)
             | GisError::UnsupportedCreationOption(_) => PyValueError::new_err(message),
         }

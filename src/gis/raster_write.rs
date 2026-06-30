@@ -168,7 +168,7 @@ impl CrsSpec {
         })
     }
 
-    fn from_raster_info(info: &RasterInfo) -> Option<Self> {
+    pub(crate) fn from_raster_info(info: &RasterInfo) -> Option<Self> {
         let authority = info.crs_authority.as_ref().and_then(|authority| {
             Some((
                 authority.get("name")?.to_ascii_uppercase(),
@@ -193,7 +193,7 @@ impl CrsSpec {
         }
     }
 
-    fn equivalent_to(&self, other: &Self) -> bool {
+    pub(crate) fn equivalent_to(&self, other: &Self) -> bool {
         self == other
             || (self.has_epsg_4326_authority() && other.has_wgs84_wkt())
             || (other.has_epsg_4326_authority() && self.has_wgs84_wkt())
@@ -859,9 +859,9 @@ fn validate_authority_code(authority: &str, code: &str) -> GisResult<(String, St
         ));
     }
     match code.as_str() {
-        "4326" | "3857" => Ok((authority, code)),
+        "4326" | "3857" | "32631" => Ok((authority, code)),
         _ => Err(GisError::InvalidCrs(format!(
-            "unsupported EPSG code {code}; G-002a1 supports EPSG:4326 and EPSG:3857"
+            "unsupported EPSG code {code}; this TIFF-only backend supports EPSG:4326, EPSG:3857, and EPSG:32631"
         ))),
     }
 }

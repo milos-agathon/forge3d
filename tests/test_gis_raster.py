@@ -112,9 +112,136 @@ def test_public_gis_wrapper_surface():
     native = get_native_module()
 
     assert gis.RasterInfo is native.RasterInfo
-    assert set(gis.__all__) == {"RasterInfo", "read_raster_info", "write_raster"}
+    assert set(gis.__all__) == {
+        "RasterInfo",
+        "AffineTransform",
+        "CrsTransform",
+        "RasterReadResult",
+        "read_raster_info",
+        "read_raster",
+        "write_raster",
+        "parse_crs",
+        "inspect_crs",
+        "raster_crs",
+        "assign_crs",
+        "create_crs_transformer",
+        "transform_bounds",
+        "web_mercator_bounds",
+        "raster_transform",
+        "transform_from_origin",
+        "transform_from_bounds",
+        "array_bounds",
+        "raster_bounds",
+        "raster_resolution",
+        "validate_transform",
+        "pixel_convention",
+        "rowcol",
+        "xy",
+        "index",
+        "apply_nodata",
+        "read_raster_mask",
+        "resample_raster",
+        "assert_grid_compatible",
+        "align_raster_grid",
+        "align_raster_to",
+        "reproject_raster",
+        "calculate_default_transform",
+        "window_from_bounds",
+        "read_raster_window",
+        "window_transform",
+        "bounds",
+    }
     assert callable(gis.read_raster_info)
+    assert callable(gis.read_raster)
     assert callable(gis.write_raster)
+    assert callable(gis.parse_crs)
+    assert callable(gis.inspect_crs)
+    assert callable(gis.raster_crs)
+    assert callable(gis.assign_crs)
+    assert callable(gis.create_crs_transformer)
+    assert callable(gis.transform_bounds)
+    assert callable(gis.web_mercator_bounds)
+    assert callable(gis.raster_transform)
+    assert callable(gis.transform_from_origin)
+    assert callable(gis.transform_from_bounds)
+    assert callable(gis.array_bounds)
+    assert callable(gis.raster_bounds)
+    assert callable(gis.raster_resolution)
+    assert callable(gis.validate_transform)
+    assert callable(gis.pixel_convention)
+    assert callable(gis.rowcol)
+    assert callable(gis.xy)
+    assert callable(gis.index)
+    assert callable(gis.apply_nodata)
+    assert callable(gis.read_raster_mask)
+    assert callable(gis.resample_raster)
+    assert callable(gis.assert_grid_compatible)
+    assert callable(gis.align_raster_grid)
+    assert callable(gis.align_raster_to)
+    assert callable(gis.reproject_raster)
+    assert callable(gis.calculate_default_transform)
+    assert callable(gis.window_from_bounds)
+    assert callable(gis.read_raster_window)
+    assert callable(gis.window_transform)
+    assert callable(gis.bounds)
+    assert hasattr(gis.CrsTransform, "from_crs")
+
+
+def test_public_gis_all_matches_stub_exports():
+    stub_exports = set()
+    for line in Path(gis.__file__).with_suffix(".pyi").read_text(encoding="utf-8").splitlines():
+        if line.startswith(("class ", "def ")):
+            stub_exports.add(line.split()[1].split("(")[0].rstrip(":"))
+
+    assert set(gis.__all__) == stub_exports
+
+
+def test_apply_nodata_scalar_per_band_mask_nan_and_empty_valid():
+    data = np.array(
+        [
+            [[1.0, -9999.0], [np.nan, 4.0]],
+            [[10.0, 11.0], [12.0, 13.0]],
+        ],
+        dtype=np.float32,
+    )
+    explicit_mask = np.array(
+        [
+            [[True, True], [True, False]],
+            [[True, False], [True, True]],
+        ],
+        dtype=bool,
+    )
+
+    result = gis.apply_nodata(data, [-9999.0, None], mask=explicit_mask)
+
+    assert result["mask_polarity"] == "true_valid"
+    assert result["nodata_per_band"] == [-9999.0, None]
+    assert result["valid_count"] == 4
+    assert result["mask"].shape == data.shape
+    assert result["mask"][0, 0, 1] == np.False_
+    assert result["mask"][0, 1, 0] == np.False_
+    assert result["mask"][0, 1, 1] == np.False_
+    assert result["mask"][1, 0, 1] == np.False_
+
+    empty = gis.apply_nodata(np.array([[0, 0]], dtype=np.uint8), 0)
+    assert empty["valid_count"] == 0
+    assert "empty_raster" in {warning["code"] for warning in empty["warnings"]}
+
+
+def test_read_raster_mask_reports_polarity_flags_and_nodata(tmp_path: Path):
+    path = tmp_path / "mask.tif"
+    gis.write_raster(path, np.array([[0, 2], [3, 0]], dtype=np.uint8), nodata=0)
+
+    result = gis.read_raster_mask(path)
+
+    assert result["mask_polarity"] == "true_valid"
+    assert result["mask_flags"] == ["nodata"]
+    assert result["nodata_per_band"] == [0.0]
+    assert result["mask"].shape == (1, 2, 2)
+    np.testing.assert_array_equal(
+        result["mask"][0],
+        np.array([[False, True], [True, False]], dtype=bool),
+    )
 
 
 def test_write_raster_pixels_are_readable_by_rasterio(tmp_path: Path):

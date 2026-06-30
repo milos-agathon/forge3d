@@ -69,6 +69,10 @@ out/
 diag_out/
 cover/
 tmp/
+.worktrees/
+codex-review/
+codex-gis-g002*-review.zip
+g-002*-review-*.zip
 
 # Translations
 *.mo
