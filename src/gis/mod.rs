@@ -17,10 +17,13 @@ pub use raster_write::{
 pub use types::{AffineTransform, RasterBounds, RasterDType, RasterInfo, RasterWarning};
 #[cfg(feature = "extension-module")]
 pub use vector::{
-    feature_count_py, geometry_type_py, read_vector_py, vector_bounds_py, vector_crs_py,
-    vector_schema_py,
+    feature_count_py, geometry_type_py, read_vector_py, reproject_vector_py, vector_bounds_py,
+    vector_crs_py, vector_schema_py,
 };
-pub use vector::{read_vector, read_vector_info, VectorInfo, VectorReadOptions, VectorReadResult};
+pub use vector::{
+    read_vector, read_vector_info, reproject_vector, VectorInfo, VectorReadOptions,
+    VectorReadResult, VectorReprojectInput, VectorReprojectResult,
+};
 pub use warp::{align_raster_to, assign_crs, reproject_raster, resample_array, resample_raster};
 
 #[cfg(feature = "extension-module")]
@@ -754,7 +757,7 @@ fn looks_like_dataset_path(value: &str) -> bool {
 }
 
 #[cfg(feature = "extension-module")]
-fn extract_crs(crs: Option<&Bound<'_, PyAny>>) -> PyResult<Option<CrsSpec>> {
+pub(crate) fn extract_crs(crs: Option<&Bound<'_, PyAny>>) -> PyResult<Option<CrsSpec>> {
     let Some(crs) = crs else {
         return Ok(None);
     };
@@ -797,7 +800,7 @@ fn extract_crs(crs: Option<&Bound<'_, PyAny>>) -> PyResult<Option<CrsSpec>> {
 }
 
 #[cfg(feature = "extension-module")]
-fn extract_required_crs(crs: Option<&Bound<'_, PyAny>>) -> PyResult<CrsSpec> {
+pub(crate) fn extract_required_crs(crs: Option<&Bound<'_, PyAny>>) -> PyResult<CrsSpec> {
     extract_crs(crs)?.ok_or_else(|| {
         GisError::MissingCrs("missing_crs: CRS argument is required".to_string()).into()
     })

@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use serde_json::{Map, Value};
+use serde_json::{Map, Number, Value};
 
 use crate::gis::affine::validate_bounds_tuple;
 use crate::gis::crs;
@@ -11,6 +11,7 @@ use crate::gis::raster_write::CrsSpec;
 use crate::gis::types::{RasterBounds, RasterWarning, WARNING_MISSING_CRS};
 
 pub const WARNING_EMPTY_FEATURE_SET: &str = "empty_feature_set";
+pub const WARNING_EMPTY_GEOMETRY: &str = "empty_geometry";
 pub const WARNING_INVALID_GEOMETRY: &str = "invalid_geometry";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -54,6 +55,27 @@ pub struct VectorReadOptions {
 pub struct VectorReadResult {
     pub features: Vec<Value>,
     pub info: VectorInfo,
+    pub warnings: Vec<RasterWarning>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum VectorReprojectInput {
+    Path(PathBuf),
+    Features {
+        features: Vec<Value>,
+        info: Option<VectorInfo>,
+        geojson_crs: Option<CrsSpec>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct VectorReprojectResult {
+    pub features: Vec<Value>,
+    pub info: VectorInfo,
+    pub src_crs: CrsSpec,
+    pub dst_crs: CrsSpec,
+    pub bounds: Option<(f64, f64, f64, f64)>,
+    pub feature_count: u64,
     pub warnings: Vec<RasterWarning>,
 }
 
@@ -152,6 +174,430 @@ pub fn read_vector_info(path: impl AsRef<Path>, layer: Option<String>) -> GisRes
         },
     )?
     .info)
+}
+
+pub fn reproject_vector(
+    input: VectorReprojectInput,
+    dst_crs: CrsSpec,
+    src_crs: Option<CrsSpec>,
+) -> GisResult<VectorReprojectResult> {
+    let (features, info, geojson_crs) = match input {
+        VectorReprojectInput::Path(path) => {
+            let result = read_vector(
+                &path,
+                VectorReadOptions {
+                    layer: None,
+                    columns: None,
+                    bbox: None,
+                    limit: None,
+                },
+            )?;
+            let geojson_crs = crs_spec_from_vector_info(&result.info)?;
+            (result.features, Some(result.info), geojson_crs)
+        }
+        VectorReprojectInput::Features {
+            features,
+            info,
+            geojson_crs,
+        } => {
+            let features = features
+                .iter()
+                .map(normalize_reproject_feature)
+                .collect::<GisResult<Vec<_>>>()?;
+            (features, info, geojson_crs)
+        }
+    };
+    let metadata_crs = vector_metadata_crs(info.as_ref(), geojson_crs)?;
+    let src_crs = resolve_vector_source_crs(src_crs, metadata_crs)?;
+
+    let mut warnings = Vec::new();
+    if features.is_empty() {
+        warnings.push(RasterWarning::new(
+            WARNING_EMPTY_FEATURE_SET,
+            "vector source has zero features",
+            Some("features"),
+        ));
+    }
+
+    let mut out_features = Vec::with_capacity(features.len());
+    for feature in &features {
+        out_features.push(reproject_feature(
+            feature,
+            &src_crs,
+            &dst_crs,
+            &mut warnings,
+        )?);
+    }
+
+    let bounds = bounds_for_features(&out_features).map(RasterBounds::tuple);
+    let feature_count = out_features.len() as u64;
+    let out_info =
+        build_reprojected_vector_info(info.as_ref(), &out_features, &dst_crs, warnings.clone());
+
+    Ok(VectorReprojectResult {
+        features: out_features,
+        info: out_info,
+        src_crs,
+        dst_crs,
+        bounds,
+        feature_count,
+        warnings,
+    })
+}
+
+#[cfg(feature = "extension-module")]
+fn normalize_reproject_features(root: &Value) -> GisResult<Vec<Value>> {
+    match root.get("type").and_then(Value::as_str) {
+        Some("FeatureCollection") => normalize_feature_array(root),
+        None if root.get("features").is_some() => normalize_feature_array(root),
+        _ => normalize_features(root),
+    }
+}
+
+#[cfg(feature = "extension-module")]
+fn normalize_feature_array(root: &Value) -> GisResult<Vec<Value>> {
+    let features = root
+        .get("features")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            GisError::InvalidGeometry(
+                "invalid_geometry: FeatureCollection requires a features array".to_string(),
+            )
+        })?;
+    features.iter().map(normalize_reproject_feature).collect()
+}
+
+fn normalize_reproject_feature(value: &Value) -> GisResult<Value> {
+    normalize_feature(value).map_err(invalid_argument_to_invalid_geometry)
+}
+
+fn invalid_argument_to_invalid_geometry(err: GisError) -> GisError {
+    match err {
+        GisError::InvalidArgument(message) if message.contains(WARNING_INVALID_GEOMETRY) => {
+            GisError::InvalidGeometry(message)
+        }
+        other => other,
+    }
+}
+
+fn vector_metadata_crs(
+    info: Option<&VectorInfo>,
+    geojson_crs: Option<CrsSpec>,
+) -> GisResult<Option<CrsSpec>> {
+    let info_crs = info.map(crs_spec_from_vector_info).transpose()?.flatten();
+    match (info_crs, geojson_crs) {
+        (Some(info_crs), Some(geojson_crs)) => {
+            if crs::crs_equal(&info_crs, &geojson_crs) {
+                Ok(Some(info_crs))
+            } else {
+                Err(GisError::CrsMismatch(format!(
+                    "CrsMismatch: input info CRS {} conflicts with GeoJSON CRS {}",
+                    crs::canonical_label(&info_crs)?,
+                    crs::canonical_label(&geojson_crs)?
+                )))
+            }
+        }
+        (Some(info_crs), None) => Ok(Some(info_crs)),
+        (None, Some(geojson_crs)) => Ok(Some(geojson_crs)),
+        (None, None) => Ok(None),
+    }
+}
+
+fn resolve_vector_source_crs(
+    explicit: Option<CrsSpec>,
+    metadata: Option<CrsSpec>,
+) -> GisResult<CrsSpec> {
+    match (explicit, metadata) {
+        (Some(explicit), Some(metadata)) => {
+            if crs::crs_equal(&explicit, &metadata) {
+                Ok(explicit)
+            } else {
+                Err(GisError::CrsMismatch(format!(
+                    "CrsMismatch: explicit src_crs {} conflicts with input CRS metadata {}",
+                    crs::canonical_label(&explicit)?,
+                    crs::canonical_label(&metadata)?
+                )))
+            }
+        }
+        (Some(explicit), None) => Ok(explicit),
+        (None, Some(metadata)) => Ok(metadata),
+        (None, None) => Err(GisError::MissingCrs(
+            "missing_crs: vector source has no CRS metadata; provide src_crs".to_string(),
+        )),
+    }
+}
+
+fn crs_spec_from_vector_info(info: &VectorInfo) -> GisResult<Option<CrsSpec>> {
+    if let Some(authority) = info.crs_authority.as_ref() {
+        let name = authority.get("name").cloned().ok_or_else(|| {
+            GisError::InvalidCrs("invalid_crs: vector CRS authority is missing name".to_string())
+        })?;
+        let code = authority.get("code").cloned().ok_or_else(|| {
+            GisError::InvalidCrs("invalid_crs: vector CRS authority is missing code".to_string())
+        })?;
+        return CrsSpec::from_parts(Some(name), Some(code), None).map(Some);
+    }
+    info.crs_wkt
+        .clone()
+        .map(|wkt| CrsSpec::from_parts(None, None, Some(wkt)))
+        .transpose()
+}
+
+fn reproject_feature(
+    feature: &Value,
+    src: &CrsSpec,
+    dst: &CrsSpec,
+    warnings: &mut Vec<RasterWarning>,
+) -> GisResult<Value> {
+    let object = feature.as_object().ok_or_else(|| {
+        GisError::InvalidGeometry("invalid_geometry: feature must be an object".to_string())
+    })?;
+    if object.get("type").and_then(Value::as_str) != Some("Feature") {
+        return Err(GisError::InvalidGeometry(
+            "invalid_geometry: features must be Feature objects".to_string(),
+        ));
+    }
+
+    let mut out = object.clone();
+    let geometry = object.get("geometry").unwrap_or(&Value::Null);
+    out.insert(
+        "geometry".to_string(),
+        reproject_geometry(geometry, src, dst, warnings)?,
+    );
+    let transformed = Value::Object(out.clone());
+    update_bbox_member(&mut out, feature_bounds(&transformed))?;
+    Ok(Value::Object(out))
+}
+
+fn reproject_geometry(
+    geometry: &Value,
+    src: &CrsSpec,
+    dst: &CrsSpec,
+    warnings: &mut Vec<RasterWarning>,
+) -> GisResult<Value> {
+    if geometry.is_null() {
+        warning_once(
+            warnings,
+            WARNING_EMPTY_GEOMETRY,
+            "vector feature has null or empty geometry",
+            Some("geometry"),
+        );
+        return Ok(Value::Null);
+    }
+    let object = geometry.as_object().ok_or_else(|| {
+        GisError::InvalidGeometry("invalid_geometry: geometry must be an object".to_string())
+    })?;
+    let kind = object.get("type").and_then(Value::as_str).ok_or_else(|| {
+        GisError::InvalidGeometry("invalid_geometry: geometry requires a type string".to_string())
+    })?;
+
+    if kind == "GeometryCollection" {
+        let geometries = object
+            .get("geometries")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                GisError::InvalidGeometry(
+                    "invalid_geometry: GeometryCollection requires a geometries array".to_string(),
+                )
+            })?;
+        if geometries.is_empty() {
+            warning_once(
+                warnings,
+                WARNING_EMPTY_GEOMETRY,
+                "vector feature has null or empty geometry",
+                Some("geometry"),
+            );
+        }
+        let mut out = object.clone();
+        let transformed = geometries
+            .iter()
+            .map(|geometry| reproject_geometry(geometry, src, dst, warnings))
+            .collect::<GisResult<Vec<_>>>()?;
+        out.insert("geometries".to_string(), Value::Array(transformed));
+        let transformed_geometry = Value::Object(out.clone());
+        update_bbox_member(&mut out, geometry_bounds(&transformed_geometry))?;
+        return Ok(Value::Object(out));
+    }
+
+    if !matches!(
+        kind,
+        "Point" | "LineString" | "Polygon" | "MultiPoint" | "MultiLineString" | "MultiPolygon"
+    ) {
+        return Err(GisError::InvalidGeometry(format!(
+            "invalid_geometry: unsupported geometry type {kind:?}"
+        )));
+    }
+
+    let coordinates = object.get("coordinates").ok_or_else(|| {
+        GisError::InvalidGeometry("invalid_geometry: geometry requires coordinates".to_string())
+    })?;
+    let mut out = object.clone();
+    if coordinates_are_empty(coordinates) {
+        warning_once(
+            warnings,
+            WARNING_EMPTY_GEOMETRY,
+            "vector feature has null or empty geometry",
+            Some("geometry"),
+        );
+        out.insert("coordinates".to_string(), coordinates.clone());
+    } else {
+        out.insert(
+            "coordinates".to_string(),
+            reproject_coordinates_for_geometry_type(kind, coordinates, src, dst)?,
+        );
+    }
+    let transformed_geometry = Value::Object(out.clone());
+    update_bbox_member(&mut out, geometry_bounds(&transformed_geometry))?;
+    Ok(Value::Object(out))
+}
+
+fn reproject_coordinates_for_geometry_type(
+    kind: &str,
+    coordinates: &Value,
+    src: &CrsSpec,
+    dst: &CrsSpec,
+) -> GisResult<Value> {
+    match kind {
+        "Point" => reproject_position(coordinates, src, dst),
+        "LineString" | "MultiPoint" => reproject_position_nested(coordinates, 1, src, dst),
+        "Polygon" | "MultiLineString" => reproject_position_nested(coordinates, 2, src, dst),
+        "MultiPolygon" => reproject_position_nested(coordinates, 3, src, dst),
+        _ => Err(GisError::InvalidGeometry(format!(
+            "invalid_geometry: unsupported geometry type {kind:?}"
+        ))),
+    }
+}
+
+fn reproject_position_nested(
+    value: &Value,
+    depth: usize,
+    src: &CrsSpec,
+    dst: &CrsSpec,
+) -> GisResult<Value> {
+    if depth == 0 {
+        return reproject_position(value, src, dst);
+    }
+    let items = value.as_array().ok_or_else(|| {
+        GisError::InvalidGeometry(
+            "invalid_geometry: coordinate nesting does not match geometry type".to_string(),
+        )
+    })?;
+    if items.is_empty() {
+        return Err(GisError::InvalidGeometry(
+            "invalid_geometry: nested coordinate arrays must not be empty".to_string(),
+        ));
+    }
+    items
+        .iter()
+        .map(|item| reproject_position_nested(item, depth - 1, src, dst))
+        .collect::<GisResult<Vec<_>>>()
+        .map(Value::Array)
+}
+
+fn reproject_position(position: &Value, src: &CrsSpec, dst: &CrsSpec) -> GisResult<Value> {
+    let items = position.as_array().ok_or_else(|| {
+        GisError::InvalidGeometry("invalid_geometry: position must be an array".to_string())
+    })?;
+    if items.len() < 2 {
+        return Err(GisError::InvalidGeometry(
+            "invalid_geometry: position requires at least x and y".to_string(),
+        ));
+    }
+    let x = finite_coordinate(&items[0], "x")?;
+    let y = finite_coordinate(&items[1], "y")?;
+    let (x, y) = crs::transform_point(x, y, src, dst)?;
+    let mut out = items.clone();
+    out[0] = finite_json_number(x)?;
+    out[1] = finite_json_number(y)?;
+    Ok(Value::Array(out))
+}
+
+fn finite_coordinate(value: &Value, axis: &str) -> GisResult<f64> {
+    let number = value.as_f64().ok_or_else(|| {
+        GisError::InvalidGeometry(format!(
+            "invalid_geometry: coordinate {axis} must be numeric"
+        ))
+    })?;
+    if !number.is_finite() {
+        return Err(GisError::InvalidGeometry(format!(
+            "invalid_geometry: coordinate {axis} must be finite"
+        )));
+    }
+    Ok(number)
+}
+
+fn finite_json_number(value: f64) -> GisResult<Value> {
+    Number::from_f64(value).map(Value::Number).ok_or_else(|| {
+        GisError::InvalidGeometry(
+            "invalid_geometry: transformed coordinate is not finite".to_string(),
+        )
+    })
+}
+
+fn update_bbox_member(
+    object: &mut Map<String, Value>,
+    bounds: Option<RasterBounds>,
+) -> GisResult<()> {
+    if !object.contains_key("bbox") {
+        return Ok(());
+    }
+    match bounds {
+        Some(bounds) => {
+            object.insert("bbox".to_string(), bbox_value(bounds)?);
+        }
+        None => {
+            object.remove("bbox");
+        }
+    }
+    Ok(())
+}
+
+fn bbox_value(bounds: RasterBounds) -> GisResult<Value> {
+    Ok(Value::Array(vec![
+        finite_json_number(bounds.left)?,
+        finite_json_number(bounds.bottom)?,
+        finite_json_number(bounds.right)?,
+        finite_json_number(bounds.top)?,
+    ]))
+}
+
+fn build_reprojected_vector_info(
+    base: Option<&VectorInfo>,
+    features: &[Value],
+    dst: &CrsSpec,
+    warnings: Vec<RasterWarning>,
+) -> VectorInfo {
+    let bounds = bounds_for_features(features).map(RasterBounds::tuple);
+    let crs_wkt = dst.wkt.clone();
+    let crs_authority = crs::authority_map(dst);
+    VectorInfo {
+        path: base.map(|info| info.path.clone()).unwrap_or_default(),
+        driver: base
+            .map(|info| info.driver.clone())
+            .unwrap_or_else(|| "GeoJSON".to_string()),
+        layer_name: base.and_then(|info| info.layer_name.clone()),
+        layer_count: base.map(|info| info.layer_count).unwrap_or(1),
+        geometry_type: geometry_type_for_features(features),
+        feature_count: features.len() as u64,
+        schema: infer_schema(features),
+        crs_wkt,
+        crs_authority,
+        bounds,
+        is_georeferenced: bounds.is_some(),
+        warnings,
+    }
+}
+
+fn warning_once(
+    warnings: &mut Vec<RasterWarning>,
+    code: &'static str,
+    message: &str,
+    field: Option<&'static str>,
+) {
+    if warnings.iter().any(|warning| warning.code == code) {
+        return;
+    }
+    warnings.push(RasterWarning::new(code, message, field));
 }
 
 fn validate_vector_path(path: &Path) -> GisResult<()> {
@@ -503,6 +949,112 @@ fn bounds_intersects(left: RasterBounds, right: RasterBounds) -> bool {
         && left.top >= right.bottom
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn epsg(code: &str) -> CrsSpec {
+        CrsSpec::from_string(format!("EPSG:{code}")).expect("valid test CRS")
+    }
+
+    fn coordinate(value: &Value, index: usize) -> f64 {
+        value
+            .as_array()
+            .and_then(|items| items.get(index))
+            .and_then(Value::as_f64)
+            .expect("numeric coordinate")
+    }
+
+    #[test]
+    fn reproject_position_preserves_extra_ordinates() {
+        let src = epsg("4326");
+        let dst = epsg("3857");
+
+        let out = reproject_position(&json!([1.0, 1.0, 42.0, "kept"]), &src, &dst)
+            .expect("position reprojects");
+
+        assert!((coordinate(&out, 0) - 111_319.490_793_273_57).abs() < 1e-6);
+        assert!((coordinate(&out, 1) - 111_325.142_866_385_1).abs() < 1e-6);
+        assert_eq!(out[2], json!(42.0));
+        assert_eq!(out[3], json!("kept"));
+    }
+
+    #[test]
+    fn resolve_vector_source_crs_errors_when_missing() {
+        let err = resolve_vector_source_crs(None, None).expect_err("missing CRS must fail");
+
+        assert!(matches!(err, GisError::MissingCrs(_)));
+        assert!(err.to_string().contains("missing_crs"));
+    }
+
+    #[test]
+    fn resolve_vector_source_crs_rejects_conflict() {
+        let err = resolve_vector_source_crs(Some(epsg("3857")), Some(epsg("4326")))
+            .expect_err("conflicting source CRS must fail");
+
+        assert!(matches!(err, GisError::CrsMismatch(_)));
+    }
+
+    #[test]
+    fn reproject_geometry_collection_recurses() {
+        let src = epsg("4326");
+        let dst = epsg("3857");
+        let geometry = json!({
+            "type": "GeometryCollection",
+            "geometries": [
+                {"type": "Point", "coordinates": [1.0, 1.0]},
+                {"type": "LineString", "coordinates": [[0.0, 0.0], [1.0, 1.0]]}
+            ]
+        });
+        let mut warnings = Vec::new();
+
+        let out = reproject_geometry(&geometry, &src, &dst, &mut warnings)
+            .expect("collection reprojects");
+
+        assert!(
+            (out["geometries"][0]["coordinates"][0].as_f64().unwrap() - 111_319.490_793_273_57)
+                .abs()
+                < 1e-6
+        );
+        assert!(
+            (out["geometries"][1]["coordinates"][1][1].as_f64().unwrap() - 111_325.142_866_385_1)
+                .abs()
+                < 1e-6
+        );
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn same_crs_reprojection_is_copy_with_destination_metadata() {
+        let crs = epsg("4326");
+        let feature = json!({
+            "type": "Feature",
+            "id": "point-a",
+            "properties": {"name": "alpha"},
+            "geometry": {"type": "Point", "coordinates": [1.0, 2.0]}
+        });
+
+        let result = reproject_vector(
+            VectorReprojectInput::Features {
+                features: vec![feature],
+                info: None,
+                geojson_crs: Some(crs.clone()),
+            },
+            crs,
+            None,
+        )
+        .expect("same-CRS reprojection succeeds");
+
+        assert_eq!(
+            result.features[0]["geometry"]["coordinates"],
+            json!([1.0, 2.0])
+        );
+        assert_eq!(result.info.crs_authority, crs::authority_map(&epsg("4326")));
+        assert_eq!(result.feature_count, 1);
+    }
+}
+
 #[cfg(feature = "extension-module")]
 mod py {
     use super::*;
@@ -690,6 +1242,20 @@ mod py {
             })
     }
 
+    #[pyfunction(name = "reproject_vector", signature = (input, dst_crs, src_crs = None))]
+    pub fn reproject_vector_py(
+        py: Python<'_>,
+        input: &Bound<'_, PyAny>,
+        dst_crs: &Bound<'_, PyAny>,
+        src_crs: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyObject> {
+        let dst_crs = crate::gis::extract_required_crs(Some(dst_crs))?;
+        let src_crs = crate::gis::extract_crs(src_crs)?;
+        let input = reproject_input_from_py(input)?;
+        let result = reproject_vector(input, dst_crs, src_crs)?;
+        vector_reproject_result_to_py(py, &result)
+    }
+
     fn vector_read_result_to_py(py: Python<'_>, result: &VectorReadResult) -> PyResult<PyObject> {
         let dict = PyDict::new_bound(py);
         dict.set_item("type", "FeatureCollection")?;
@@ -700,6 +1266,39 @@ mod py {
         dict.set_item("info", vector_info_to_py_dict(py, &result.info)?)?;
         dict.set_item("vector_info", Py::new(py, result.info.clone())?)?;
         dict.set_item("warnings", warnings_to_py(py, &result.warnings)?)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn vector_reproject_result_to_py(
+        py: Python<'_>,
+        result: &VectorReprojectResult,
+    ) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        dict.set_item("type", "FeatureCollection")?;
+        dict.set_item(
+            "features",
+            json_to_py(py, &Value::Array(result.features.clone()))?,
+        )?;
+        dict.set_item("info", vector_info_to_py_dict(py, &result.info)?)?;
+        dict.set_item("vector_info", Py::new(py, result.info.clone())?)?;
+        dict.set_item("src_crs", crs_spec_to_py(py, &result.src_crs, "crs")?)?;
+        dict.set_item("dst_crs", crs_spec_to_py(py, &result.dst_crs, "crs")?)?;
+        dict.set_item("bounds", result.bounds)?;
+        dict.set_item("feature_count", result.feature_count)?;
+        dict.set_item("warnings", warnings_to_py(py, &result.warnings)?)?;
+        Ok(dict.into_py(py))
+    }
+
+    fn crs_spec_to_py(py: Python<'_>, spec: &CrsSpec, source_kind: &str) -> PyResult<PyObject> {
+        let inspection = crs::inspect_crs_spec(spec, source_kind);
+        let dict = PyDict::new_bound(py);
+        dict.set_item("source_kind", inspection.source_kind)?;
+        dict.set_item("missing", inspection.missing)?;
+        dict.set_item("wkt", inspection.wkt)?;
+        dict.set_item("authority", inspection.authority)?;
+        dict.set_item("axis_order", inspection.axis_order)?;
+        dict.set_item("axis_order_policy", inspection.axis_order_policy)?;
+        dict.set_item("warnings", warnings_to_py(py, &inspection.warnings)?)?;
         Ok(dict.into_py(py))
     }
 
@@ -718,6 +1317,85 @@ mod py {
         dict.set_item("is_georeferenced", info.is_georeferenced)?;
         dict.set_item("warnings", warnings_to_py(py, &info.warnings)?)?;
         Ok(dict.into_py(py))
+    }
+
+    fn reproject_input_from_py(source: &Bound<'_, PyAny>) -> PyResult<VectorReprojectInput> {
+        if source.extract::<PyRef<'_, VectorInfo>>().is_ok() {
+            return Err(GisError::InvalidArgument(
+                "feature payload is required; VectorInfo alone cannot be reprojected".to_string(),
+            )
+            .into());
+        }
+        if let Ok(path) = source.extract::<String>() {
+            return Ok(VectorReprojectInput::Path(PathBuf::from(path)));
+        }
+        let dict = source.downcast::<PyDict>().map_err(|_| {
+            GisError::InvalidArgument(
+                "input must be a vector path, read_vector result, or GeoJSON-like dict".to_string(),
+            )
+        })?;
+        if is_info_dict(dict)? && !dict.contains("features")? {
+            return Err(GisError::InvalidArgument(
+                "feature payload is required; VectorInfo metadata alone cannot be reprojected"
+                    .to_string(),
+            )
+            .into());
+        }
+        let info = reproject_info_from_dict(dict)?;
+        let root = reproject_source_json(source)?;
+        let geojson_crs = geojson_crs(&root)?;
+        let features = normalize_reproject_features(&root)?;
+        Ok(VectorReprojectInput::Features {
+            features,
+            info,
+            geojson_crs,
+        })
+    }
+
+    fn reproject_info_from_dict(dict: &Bound<'_, PyDict>) -> PyResult<Option<VectorInfo>> {
+        if let Some(vector_info) = dict.get_item("vector_info")? {
+            if vector_info.is_none() {
+                return Ok(None);
+            }
+            return vector_info_from_info_value(&vector_info).map(Some);
+        }
+        if let Some(info) = dict.get_item("info")? {
+            if info.is_none() {
+                return Ok(None);
+            }
+            return vector_info_from_info_value(&info).map(Some);
+        }
+        Ok(None)
+    }
+
+    fn reproject_source_json(source: &Bound<'_, PyAny>) -> PyResult<Value> {
+        if let Ok(dict) = source.downcast::<PyDict>() {
+            let type_name = dict
+                .get_item("type")?
+                .map(|value| value.extract::<String>())
+                .transpose()
+                .ok()
+                .flatten();
+            if type_name.as_deref() == Some("FeatureCollection")
+                || (type_name.is_none() && dict.contains("features")?)
+            {
+                let mut out = Map::new();
+                if let Some(type_value) = dict.get_item("type")? {
+                    out.insert("type".to_string(), py_to_json_strict(&type_value)?);
+                }
+                if let Some(features) = dict.get_item("features")? {
+                    out.insert("features".to_string(), py_to_json_strict(&features)?);
+                }
+                if let Some(crs) = dict.get_item("crs")? {
+                    out.insert("crs".to_string(), py_to_json_strict(&crs)?);
+                }
+                if let Some(bbox) = dict.get_item("bbox")? {
+                    out.insert("bbox".to_string(), py_to_json_strict(&bbox)?);
+                }
+                return Ok(Value::Object(out));
+            }
+        }
+        py_to_json_strict(source)
     }
 
     fn vector_crs_to_py(py: Python<'_>, info: &VectorInfo) -> PyResult<PyObject> {
@@ -1060,6 +1738,62 @@ mod py {
         .into())
     }
 
+    fn py_to_json_strict(value: &Bound<'_, PyAny>) -> PyResult<Value> {
+        if value.is_none() {
+            return Ok(Value::Null);
+        }
+        if let Ok(value) = value.extract::<bool>() {
+            return Ok(Value::Bool(value));
+        }
+        if let Ok(value) = value.extract::<i64>() {
+            return Ok(Value::Number(value.into()));
+        }
+        if let Ok(value) = value.extract::<u64>() {
+            return Ok(Value::Number(value.into()));
+        }
+        if let Ok(value) = value.extract::<f64>() {
+            return Number::from_f64(value).map(Value::Number).ok_or_else(|| {
+                GisError::InvalidGeometry(
+                    "invalid_geometry: JSON numbers must be finite".to_string(),
+                )
+                .into()
+            });
+        }
+        if let Ok(value) = value.extract::<String>() {
+            return Ok(Value::String(value));
+        }
+        if let Ok(dict) = value.downcast::<PyDict>() {
+            let mut out = Map::new();
+            for (key, item) in dict.iter() {
+                let key = key.extract::<String>().map_err(|_| {
+                    GisError::InvalidGeometry(
+                        "invalid_geometry: JSON object keys must be strings".to_string(),
+                    )
+                })?;
+                out.insert(key, py_to_json_strict(&item)?);
+            }
+            return Ok(Value::Object(out));
+        }
+        if let Ok(list) = value.downcast::<PyList>() {
+            return list
+                .iter()
+                .map(|item| py_to_json_strict(&item))
+                .collect::<PyResult<Vec<_>>>()
+                .map(Value::Array);
+        }
+        if let Ok(tuple) = value.downcast::<PyTuple>() {
+            return tuple
+                .iter()
+                .map(|item| py_to_json_strict(&item))
+                .collect::<PyResult<Vec<_>>>()
+                .map(Value::Array);
+        }
+        Err(GisError::InvalidGeometry(
+            "invalid_geometry: GeoJSON values must be JSON-compatible".to_string(),
+        )
+        .into())
+    }
+
     fn json_to_py(py: Python<'_>, value: &Value) -> PyResult<PyObject> {
         match value {
             Value::Null => Ok(py.None()),
@@ -1096,6 +1830,6 @@ mod py {
 
 #[cfg(feature = "extension-module")]
 pub use py::{
-    feature_count_py, geometry_type_py, read_vector_py, vector_bounds_py, vector_crs_py,
-    vector_schema_py,
+    feature_count_py, geometry_type_py, read_vector_py, reproject_vector_py, vector_bounds_py,
+    vector_crs_py, vector_schema_py,
 };

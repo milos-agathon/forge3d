@@ -83,6 +83,15 @@ def read_vector(
     )
 
 
+def reproject_vector(
+    input: os.PathLike[str] | str | dict[str, Any],
+    dst_crs: str | int | dict[str, Any],
+    src_crs: str | int | dict[str, Any] | None = None,
+):
+    """Reproject a vector FeatureCollection through the native built-in CRS path."""
+    return _require_native().reproject_vector(_path_or_self(input), dst_crs, src_crs)
+
+
 def geometry_type(source: os.PathLike[str] | str | Any, *, layer: str | None = None) -> str:
     """Return a stable geometry type string for a vector source or GeoJSON-like object."""
     return _require_native().geometry_type(_path_or_self(source), layer=layer)
@@ -412,6 +421,7 @@ __all__ = [
     "read_raster_info",
     "read_raster",
     "read_vector",
+    "reproject_vector",
     "geometry_type",
     "vector_schema",
     "feature_count",

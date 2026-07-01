@@ -128,6 +128,7 @@ class TestNativeModuleSymbols:
         "read_raster",
         "write_raster",
         "read_vector",
+        "reproject_vector",
         "geometry_type",
         "vector_schema",
         "feature_count",
