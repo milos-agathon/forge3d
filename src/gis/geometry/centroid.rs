@@ -69,7 +69,7 @@ fn accumulate_centroid(geometry: &Geometry, stats: &mut CentroidStats) -> GisRes
             }
             Ok(())
         }
-        Geometry::GeometryCollection(geometries) => {
+        Geometry::Collection(geometries) => {
             for item in geometries {
                 accumulate_centroid(item, stats)?;
             }

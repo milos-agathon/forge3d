@@ -37,7 +37,7 @@ pub(super) fn representative_for_geometry(geometry: &Geometry) -> GisResult<Coor
         Geometry::Polygon(_) | Geometry::MultiPolygon(_) => {
             Err(polygon_topology_error("polygon representative_point"))
         }
-        Geometry::GeometryCollection(geometries) => representative_for_collection(geometries),
+        Geometry::Collection(geometries) => representative_for_collection(geometries),
     }
 }
 
@@ -61,7 +61,7 @@ fn representative_for_collection(geometries: &[Geometry]) -> GisResult<Coord> {
         ) {
             return representative_for_geometry(geometry);
         }
-        if let Geometry::GeometryCollection(_) = geometry {
+        if let Geometry::Collection(_) = geometry {
             return representative_for_geometry(geometry);
         }
     }

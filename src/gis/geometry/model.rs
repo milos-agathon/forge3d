@@ -27,7 +27,7 @@ pub(super) enum Geometry {
     MultiPoint(Vec<Coord>),
     MultiLineString(Vec<Vec<Coord>>),
     MultiPolygon(Vec<Vec<Vec<Coord>>>),
-    GeometryCollection(Vec<Geometry>),
+    Collection(Vec<Geometry>),
 }
 
 impl Geometry {
@@ -40,7 +40,7 @@ impl Geometry {
             Geometry::MultiPoint(_) => "MultiPoint",
             Geometry::MultiLineString(_) => "MultiLineString",
             Geometry::MultiPolygon(_) => "MultiPolygon",
-            Geometry::GeometryCollection(_) => "GeometryCollection",
+            Geometry::Collection(_) => "GeometryCollection",
         }
     }
 
@@ -53,16 +53,14 @@ impl Geometry {
             Geometry::MultiPoint(points) => points.is_empty(),
             Geometry::MultiLineString(lines) => lines.is_empty(),
             Geometry::MultiPolygon(polygons) => polygons.is_empty(),
-            Geometry::GeometryCollection(geometries) => geometries.is_empty(),
+            Geometry::Collection(geometries) => geometries.is_empty(),
         }
     }
 
     pub(super) fn is_polygonal(&self) -> bool {
         match self {
             Geometry::Polygon(_) | Geometry::MultiPolygon(_) => true,
-            Geometry::GeometryCollection(geometries) => {
-                geometries.iter().any(Geometry::is_polygonal)
-            }
+            Geometry::Collection(geometries) => geometries.iter().any(Geometry::is_polygonal),
             _ => false,
         }
     }

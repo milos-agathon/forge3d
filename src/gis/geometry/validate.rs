@@ -113,7 +113,7 @@ fn validate_parsed_geometry(geometry: &Geometry) -> ValidationState {
             }
             valid_state()
         }
-        Geometry::GeometryCollection(geometries) => {
+        Geometry::Collection(geometries) => {
             if geometries.is_empty() {
                 return invalid_state(EMPTY_GEOMETRY, "GeometryCollection is empty");
             }

@@ -60,7 +60,7 @@ fn accumulate_measure(geometry: &Geometry, stats: &mut MeasureStats) -> GisResul
             }
             Ok(())
         }
-        Geometry::GeometryCollection(geometries) => {
+        Geometry::Collection(geometries) => {
             if geometries.is_empty() {
                 return Err(empty_geometry_error());
             }

@@ -224,10 +224,10 @@ fn parse_geometry_collection(object: &Map<String, Value>) -> GisResult<Geometry>
         .iter()
         .map(parse_geometry)
         .collect::<GisResult<Vec<_>>>()
-        .map(Geometry::GeometryCollection)
+        .map(Geometry::Collection)
 }
 
-fn required_coordinates<'a>(object: &'a Map<String, Value>) -> GisResult<&'a Value> {
+fn required_coordinates(object: &Map<String, Value>) -> GisResult<&Value> {
     object.get("coordinates").ok_or_else(|| {
         GisError::InvalidGeometry(format!("{INVALID_GEOMETRY}: geometry requires coordinates"))
     })
@@ -286,7 +286,7 @@ fn extract_crs_metadata(source: &Value) -> Option<Value> {
 
 fn geometry_member_count(geometry: &Geometry) -> usize {
     match geometry {
-        Geometry::GeometryCollection(geometries) => geometries.len(),
+        Geometry::Collection(geometries) => geometries.len(),
         _ => 1,
     }
 }
