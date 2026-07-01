@@ -22,11 +22,11 @@ use line_ops::{
 use measure::{measure_geometries, validate_metric_names};
 use model::{
     finite_value, operation_value, point_value, Coord, Geometry, NormalizedInput, EMPTY_INPUT,
-    EPSILON, GEOMETRY_TYPE_CHANGED, INVALID_ARGUMENT, UNSUPPORTED_GEOMETRY_TYPE,
+    EMPTY_OUTPUT, EPSILON, GEOMETRY_TYPE_CHANGED, INVALID_ARGUMENT, UNSUPPORTED_GEOMETRY_TYPE,
     UNSUPPORTED_OPTION,
 };
 use parse::normalize_input;
-use topology::{require_topology_backend, union_polygonal};
+use topology::{buffer_topology, require_topology_backend, union_polygonal};
 use validate::{validate_geometry_value, validate_input_or_error};
 
 pub fn validate_geometry(source: &Value) -> GisResult<Value> {
@@ -233,7 +233,6 @@ pub fn union_geometries(source: &Value) -> GisResult<Value> {
 }
 
 pub fn buffer_geometry(source: &Value, distance: f64, quad_segs: i64) -> GisResult<Value> {
-    let _ = source;
     if !distance.is_finite() {
         return Err(GisError::InvalidArgument(format!(
             "{INVALID_ARGUMENT}: buffer distance must be finite"
@@ -244,8 +243,20 @@ pub fn buffer_geometry(source: &Value, distance: f64, quad_segs: i64) -> GisResu
             "{INVALID_ARGUMENT}: quad_segs must be at least 1"
         )));
     }
+    let input = normalize_input(source, false)?;
+    validate_input_or_error(&input)?;
     require_topology_backend("buffer_geometry")?;
-    unreachable!("topology backend is not wired in C4.0")
+    let geometry = input
+        .geometries
+        .first()
+        .ok_or_else(model::empty_geometry_error)?;
+
+    if distance == 0.0 && matches!(geometry, Geometry::Polygon(_) | Geometry::MultiPolygon(_)) {
+        return buffer_geometry_output(&input, geometry.clone(), false);
+    }
+
+    let output = buffer_topology(geometry, distance, quad_segs as usize)?;
+    buffer_geometry_output(&input, output, true)
 }
 
 pub fn simplify_geometry(
@@ -261,6 +272,62 @@ pub fn simplify_geometry(
     }
     require_topology_backend("simplify_geometry")?;
     unreachable!("topology backend is not wired in C4.0")
+}
+
+fn buffer_geometry_output(
+    input: &NormalizedInput,
+    geometry: Geometry,
+    changed: bool,
+) -> GisResult<Value> {
+    if geometry.is_empty() {
+        let warnings = vec![RasterWarning::new(
+            EMPTY_OUTPUT,
+            "buffer_geometry produced an empty geometry",
+            Some("geometry"),
+        )];
+        return Ok(json!({
+            "geometry": Value::Null,
+            "operation": operation_value(
+                "buffer_geometry",
+                &input.input_geometry_type,
+                None,
+                input.input_count,
+                0,
+                true,
+                input.crs.clone(),
+                warnings,
+            ),
+        }));
+    }
+
+    let output_geometry_type = geometry.geometry_type();
+    let type_changed = output_geometry_type != input.input_geometry_type;
+    let warnings = if type_changed {
+        vec![RasterWarning::new(
+            GEOMETRY_TYPE_CHANGED,
+            format!(
+                "buffer_geometry output type changed from {} to {output_geometry_type}",
+                input.input_geometry_type
+            ),
+            Some("geometry"),
+        )]
+    } else {
+        Vec::new()
+    };
+
+    Ok(json!({
+        "geometry": geometry_value(&geometry)?,
+        "operation": operation_value(
+            "buffer_geometry",
+            &input.input_geometry_type,
+            Some(output_geometry_type),
+            input.input_count,
+            1,
+            changed || type_changed,
+            input.crs.clone(),
+            warnings,
+        ),
+    }))
 }
 
 fn normalize_union_input(source: &Value) -> GisResult<NormalizedInput> {
@@ -329,7 +396,7 @@ fn geometry_value(geometry: &Geometry) -> GisResult<Value> {
         }
         Geometry::Empty => Ok(Value::Null),
         other => Err(GisError::InvalidGeometry(format!(
-            "{UNSUPPORTED_GEOMETRY_TYPE}: cannot serialize {} as union output",
+            "{UNSUPPORTED_GEOMETRY_TYPE}: cannot serialize {} as polygonal output",
             other.geometry_type()
         ))),
     }

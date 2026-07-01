@@ -5,6 +5,7 @@ use crate::gis::types::RasterWarning;
 
 pub(super) const EMPTY_GEOMETRY: &str = "empty_geometry";
 pub(super) const EMPTY_INPUT: &str = "empty_input";
+pub(super) const EMPTY_OUTPUT: &str = "empty_output";
 pub(super) const INVALID_GEOMETRY: &str = "invalid_geometry";
 pub(super) const UNSUPPORTED_GEOMETRY_TYPE: &str = "unsupported_geometry_type";
 pub(super) const UNSUPPORTED_OPTION: &str = "unsupported_option";

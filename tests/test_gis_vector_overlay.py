@@ -40,6 +40,10 @@ def _unit_square():
     }
 
 
+def _point():
+    return {"type": "Point", "coordinates": [0.0, 0.0]}
+
+
 def _feature_collection():
     return {
         "type": "FeatureCollection",
@@ -113,6 +117,29 @@ def _geometry_area(geometry) -> float:
             for poly in geometry["coordinates"]
         )
     raise AssertionError(f"unexpected geometry type {kind!r}")
+
+
+def _geometry_bounds(geometry):
+    points = []
+
+    def collect(value):
+        if isinstance(value, (list, tuple)):
+            if (
+                len(value) >= 2
+                and isinstance(value[0], (int, float))
+                and isinstance(value[1], (int, float))
+            ):
+                points.append((float(value[0]), float(value[1])))
+            else:
+                for item in value:
+                    collect(item)
+
+    collect(geometry.get("coordinates"))
+    if not points:
+        raise AssertionError("geometry has no coordinates")
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    return min(xs), min(ys), max(xs), max(ys)
 
 
 def _warning_codes(result):
@@ -297,13 +324,112 @@ def test_union_geometries_optional_shapely_reference_area():
     assert _geometry_area(result["geometry"]) == pytest.approx(expected.area)
 
 
-def test_non_union_c4_apis_stay_gated_with_topology_backend(tmp_path: Path):
+def test_buffer_geometry_point_with_topology_backend_returns_polygonal():
+    _require_topology_backend()
+
+    result = gis.buffer_geometry(_point(), 1.0, quad_segs=4)
+
+    assert result["geometry"]["type"] in {"Polygon", "MultiPolygon"}
+    assert _geometry_area(result["geometry"]) > 2.0
+    assert result["operation"]["name"] == "buffer_geometry"
+    assert result["operation"]["input_geometry_type"] == "Point"
+    assert result["operation"]["output_geometry_type"] in {"Polygon", "MultiPolygon"}
+    assert result["operation"]["input_count"] == 1
+    assert result["operation"]["output_count"] == 1
+    assert result["operation"]["changed"] is True
+    assert "geometry_type_changed" in _warning_codes(result)
+
+
+def test_buffer_geometry_polygon_positive_increases_area_and_bounds():
+    _require_topology_backend()
+
+    result = gis.buffer_geometry(_unit_square(), 0.25, quad_segs=8)
+    bounds = _geometry_bounds(result["geometry"])
+
+    assert _geometry_area(result["geometry"]) > _geometry_area(_unit_square())
+    assert bounds[0] < 0.0
+    assert bounds[1] < 0.0
+    assert bounds[2] > 1.0
+    assert bounds[3] > 1.0
+
+
+def test_buffer_geometry_zero_distance_valid_polygon_is_deterministic():
+    _require_topology_backend()
+
+    result = gis.buffer_geometry(_unit_square(), 0.0)
+
+    assert result["geometry"]["type"] == "Polygon"
+    assert _geometry_area(result["geometry"]) == pytest.approx(1.0)
+    assert result["operation"]["changed"] is False
+    assert result["operation"]["warnings"] == []
+
+
+def test_buffer_geometry_negative_point_returns_empty_output():
+    _require_topology_backend()
+
+    result = gis.buffer_geometry(_point(), -1.0)
+
+    assert result["geometry"] is None
+    assert result["operation"]["output_geometry_type"] is None
+    assert result["operation"]["output_count"] == 0
+    assert result["operation"]["changed"] is True
+    assert "empty_output" in _warning_codes(result)
+
+
+def test_buffer_geometry_feature_input_uses_geometry_only():
+    _require_topology_backend()
+
+    result = gis.buffer_geometry(_feature(_point()), 1.0)
+
+    assert result["geometry"]["type"] in {"Polygon", "MultiPolygon"}
+    assert result["operation"]["input_geometry_type"] == "Point"
+    assert result["operation"]["input_count"] == 1
+
+
+def test_buffer_geometry_rejects_invalid_bowtie_polygon():
+    _require_topology_backend()
+    bowtie = {
+        "type": "Polygon",
+        "coordinates": [
+            [[0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 0.0], [0.0, 0.0]]
+        ],
+    }
+
+    with pytest.raises(ValueError, match="invalid_geometry"):
+        gis.buffer_geometry(bowtie, 1.0)
+
+
+def test_buffer_geometry_rejects_malformed_unsupported_and_feature_collection():
+    _require_topology_backend()
+
+    with pytest.raises(ValueError, match="invalid_geometry"):
+        gis.buffer_geometry({"type": "Polygon", "coordinates": [[["bad", 0.0]]]}, 1.0)
+    with pytest.raises(ValueError, match="unsupported_geometry_type"):
+        gis.buffer_geometry({"type": "Triangle", "coordinates": []}, 1.0)
+    with pytest.raises(ValueError, match="unsupported_geometry_type"):
+        gis.buffer_geometry({"type": "FeatureCollection", "features": [_feature(_point())]}, 1.0)
+
+
+def test_buffer_geometry_optional_shapely_reference_area():
+    _require_topology_backend()
+    shapely_geometry = pytest.importorskip("shapely.geometry")
+
+    result = gis.buffer_geometry(_unit_square(), 0.25, quad_segs=8)
+    source = shapely_geometry.shape(_unit_square())
+    try:
+        expected = source.buffer(0.25, quad_segs=8)
+    except TypeError:
+        expected = source.buffer(0.25, resolution=8)
+
+    assert _geometry_area(result["geometry"]) == pytest.approx(expected.area, rel=0.15)
+
+
+def test_non_buffer_c4_apis_stay_gated_with_topology_backend(tmp_path: Path):
     _require_topology_backend()
     path = tmp_path / "boundary.geojson"
     path.write_text('{"type":"FeatureCollection","features":[]}', encoding="utf-8")
 
     _assert_backend_unavailable(lambda: gis.dissolve_vector(_feature_collection()))
-    _assert_backend_unavailable(lambda: gis.buffer_geometry(_unit_square(), 1.0))
     _assert_backend_unavailable(lambda: gis.clip_vector(_feature_collection(), _unit_square()))
     _assert_backend_unavailable(
         lambda: gis.intersect_vectors(_feature_collection(), _feature_collection())

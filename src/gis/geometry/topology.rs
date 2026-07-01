@@ -1,7 +1,7 @@
 use crate::gis::error::{GisError, GisResult};
 
 #[cfg(feature = "geos-topology")]
-use super::model::{Coord, UNSUPPORTED_GEOMETRY_TYPE};
+use super::model::{Coord, EMPTY_GEOMETRY, UNSUPPORTED_GEOMETRY_TYPE};
 use super::model::{Geometry, BACKEND_UNAVAILABLE};
 
 pub(crate) fn topology_backend_available() -> bool {
@@ -9,7 +9,7 @@ pub(crate) fn topology_backend_available() -> bool {
 }
 
 pub(crate) fn require_topology_backend(operation: &str) -> GisResult<()> {
-    if operation == "union_geometries" && topology_backend_available() {
+    if matches!(operation, "union_geometries" | "buffer_geometry") && topology_backend_available() {
         return Ok(());
     }
     Err(GisError::BackendUnavailable(format!(
@@ -51,6 +51,32 @@ pub(super) fn union_polygonal(_geometries: &[Geometry]) -> GisResult<Geometry> {
 }
 
 #[cfg(feature = "geos-topology")]
+pub(super) fn buffer_topology(
+    geometry: &Geometry,
+    distance: f64,
+    quad_segs: usize,
+) -> GisResult<Geometry> {
+    use geo::algorithm::buffer::{Buffer, BufferStyle, LineCap, LineJoin};
+
+    let angle = std::f64::consts::FRAC_PI_2 / quad_segs as f64;
+    let style = BufferStyle::new(distance)
+        .line_cap(LineCap::Round(angle))
+        .line_join(LineJoin::Round(angle));
+    let output = geometry_to_geo(geometry)?.buffer_with_style(style);
+    multi_polygon_to_geometry(output)
+}
+
+#[cfg(not(feature = "geos-topology"))]
+pub(super) fn buffer_topology(
+    _geometry: &Geometry,
+    _distance: f64,
+    _quad_segs: usize,
+) -> GisResult<Geometry> {
+    require_topology_backend("buffer_geometry")?;
+    unreachable!("topology backend is feature-gated")
+}
+
+#[cfg(feature = "geos-topology")]
 fn polygon_from_rings(rings: &[Vec<Coord>]) -> GisResult<geo::Polygon<f64>> {
     let exterior = rings
         .first()
@@ -71,6 +97,55 @@ fn line_string_from_ring(ring: &[Coord]) -> geo::LineString<f64> {
             .map(|coord| (coord.x, coord.y))
             .collect::<Vec<_>>(),
     )
+}
+
+#[cfg(feature = "geos-topology")]
+fn geometry_to_geo(geometry: &Geometry) -> GisResult<geo::Geometry<f64>> {
+    match geometry {
+        Geometry::Empty => Err(GisError::InvalidGeometry(format!(
+            "{EMPTY_GEOMETRY}: geometry is empty"
+        ))),
+        Geometry::Point(coord) => Ok(geo::Geometry::Point(geo::Point::new(coord.x, coord.y))),
+        Geometry::LineString(points) => {
+            Ok(geo::Geometry::LineString(line_string_from_ring(points)))
+        }
+        Geometry::Polygon(rings) => Ok(geo::Geometry::Polygon(polygon_from_rings(rings)?)),
+        Geometry::MultiPoint(points) => Ok(geo::Geometry::MultiPoint(geo::MultiPoint(
+            points
+                .iter()
+                .map(|coord| geo::Point::new(coord.x, coord.y))
+                .collect(),
+        ))),
+        Geometry::MultiLineString(lines) => {
+            Ok(geo::Geometry::MultiLineString(geo::MultiLineString(
+                lines
+                    .iter()
+                    .map(|line| line_string_from_ring(line))
+                    .collect(),
+            )))
+        }
+        Geometry::MultiPolygon(polygons) => Ok(geo::Geometry::MultiPolygon(
+            multi_polygon_from_model(polygons)?,
+        )),
+        Geometry::Collection(geometries) => {
+            let items = geometries
+                .iter()
+                .map(geometry_to_geo)
+                .collect::<GisResult<Vec<_>>>()?;
+            Ok(geo::Geometry::GeometryCollection(
+                geo::GeometryCollection::new_from(items),
+            ))
+        }
+    }
+}
+
+#[cfg(feature = "geos-topology")]
+fn multi_polygon_from_model(polygons: &[Vec<Vec<Coord>>]) -> GisResult<geo::MultiPolygon<f64>> {
+    polygons
+        .iter()
+        .map(|rings| polygon_from_rings(rings))
+        .collect::<GisResult<Vec<_>>>()
+        .map(geo::MultiPolygon)
 }
 
 #[cfg(feature = "geos-topology")]
