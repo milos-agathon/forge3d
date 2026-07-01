@@ -45,6 +45,19 @@ def _point():
     return {"type": "Point", "coordinates": [0.0, 0.0]}
 
 
+def _zigzag_line():
+    return {
+        "type": "LineString",
+        "coordinates": [
+            [0.0, 0.0],
+            [1.0, 0.01],
+            [2.0, 0.0],
+            [3.0, 0.01],
+            [4.0, 0.0],
+        ],
+    }
+
+
 def _geojson_crs(code: int = 4326):
     return {"type": "name", "properties": {"name": f"EPSG:{code}"}}
 
@@ -156,6 +169,18 @@ def _geometry_bounds(geometry):
     xs = [point[0] for point in points]
     ys = [point[1] for point in points]
     return min(xs), min(ys), max(xs), max(ys)
+
+
+def _coordinate_count(geometry):
+    if geometry["type"] == "LineString":
+        return len(geometry["coordinates"])
+    if geometry["type"] == "MultiLineString":
+        return sum(len(line) for line in geometry["coordinates"])
+    if geometry["type"] == "Polygon":
+        return sum(len(ring) for ring in geometry["coordinates"])
+    if geometry["type"] == "MultiPolygon":
+        return sum(len(ring) for polygon in geometry["coordinates"] for ring in polygon)
+    raise AssertionError(f"unexpected geometry type {geometry['type']!r}")
 
 
 def _warning_codes(result):
@@ -788,12 +813,115 @@ def test_intersect_vectors_non_polygonal_geometry_raises_unsupported_type():
         gis.intersect_vectors(_feature_collection(), _feature_collection_from([_feature(_point())]))
 
 
+def test_simplify_geometry_linestring_reduces_points_and_preserves_endpoints():
+    _require_topology_backend()
+    source = _zigzag_line()
+
+    result = gis.simplify_geometry(source, 0.05, preserve_topology=False)
+
+    assert result["geometry"]["type"] == "LineString"
+    assert len(result["geometry"]["coordinates"]) < len(source["coordinates"])
+    assert result["geometry"]["coordinates"][0] == source["coordinates"][0]
+    assert result["geometry"]["coordinates"][-1] == source["coordinates"][-1]
+    assert result["operation"]["name"] == "simplify_geometry"
+    assert result["operation"]["input_geometry_type"] == "LineString"
+    assert result["operation"]["output_geometry_type"] == "LineString"
+    assert result["operation"]["input_count"] == 1
+    assert result["operation"]["output_count"] == 1
+    assert result["operation"]["changed"] is True
+
+
+def test_simplify_geometry_polygon_preserve_topology_stays_valid():
+    _require_topology_backend()
+    polygon = {
+        "type": "Polygon",
+        "coordinates": [
+            [
+                [0.0, 0.0],
+                [1.0, 0.02],
+                [2.0, 0.0],
+                [2.0, 1.0],
+                [1.0, 1.02],
+                [0.0, 1.0],
+                [0.0, 0.0],
+            ]
+        ],
+    }
+
+    result = gis.simplify_geometry(polygon, 0.05, preserve_topology=True)
+
+    assert result["geometry"]["type"] == "Polygon"
+    assert gis.validate_geometry(result["geometry"])["valid"] is True
+    assert result["operation"]["output_count"] == 1
+
+
+@pytest.mark.parametrize(
+    "geometry",
+    [
+        _zigzag_line(),
+        {"type": "MultiLineString", "coordinates": [_zigzag_line()["coordinates"]]},
+        _unit_square(),
+        {"type": "MultiPolygon", "coordinates": [_unit_square()["coordinates"]]},
+    ],
+)
+def test_simplify_geometry_preserve_false_supported_types(geometry):
+    _require_topology_backend()
+
+    result = gis.simplify_geometry(geometry, 0.01, preserve_topology=False)
+
+    assert result["geometry"] is not None
+    assert result["geometry"]["type"] == geometry["type"]
+    assert result["operation"]["output_count"] == 1
+
+
+def test_simplify_geometry_zero_tolerance_is_deterministic():
+    _require_topology_backend()
+    source = _zigzag_line()
+
+    result = gis.simplify_geometry(source, 0.0, preserve_topology=True)
+
+    assert result["geometry"] == source
+    assert result["operation"]["changed"] is False
+    assert result["operation"]["warnings"] == []
+
+
+def test_simplify_geometry_feature_input_uses_geometry_only():
+    _require_topology_backend()
+
+    result = gis.simplify_geometry(_feature(_zigzag_line(), {"ignored": True}), 0.05)
+
+    assert result["geometry"]["type"] == "LineString"
+    assert "properties" not in result["geometry"]
+    assert _coordinate_count(result["geometry"]) < _coordinate_count(_zigzag_line())
+
+
+def test_simplify_geometry_rejects_invalid_bowtie():
+    _require_topology_backend()
+    bowtie = {
+        "type": "Polygon",
+        "coordinates": [
+            [[0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 0.0], [0.0, 0.0]]
+        ],
+    }
+
+    with pytest.raises(ValueError, match="invalid_geometry"):
+        gis.simplify_geometry(bowtie, 0.1)
+
+
+def test_simplify_geometry_rejects_unsupported_inputs():
+    _require_topology_backend()
+
+    with pytest.raises(ValueError, match="unsupported_geometry_type"):
+        gis.simplify_geometry(_point(), 0.1)
+    with pytest.raises(ValueError, match="unsupported_geometry_type"):
+        gis.simplify_geometry(_feature_collection(), 0.1)
+
+
 def test_remaining_c4_apis_stay_gated_with_topology_backend(tmp_path: Path):
     _require_topology_backend()
     path = tmp_path / "boundary.geojson"
     path.write_text('{"type":"FeatureCollection","features":[]}', encoding="utf-8")
 
     _assert_backend_unavailable(lambda: gis.dissolve_vector(_feature_collection()))
-    _assert_backend_unavailable(lambda: gis.simplify_geometry(_unit_square(), 0.1))
     _assert_backend_unavailable(lambda: gis.load_boundary(path))
 

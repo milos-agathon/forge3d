@@ -27,7 +27,8 @@ use model::{
 };
 use parse::normalize_input;
 use topology::{
-    buffer_topology, intersection_polygonal, require_topology_backend, union_polygonal,
+    buffer_topology, intersection_polygonal, require_topology_backend, simplify_topology,
+    union_polygonal,
 };
 use validate::{validate_geometry_value, validate_input_or_error};
 
@@ -270,14 +271,20 @@ pub fn simplify_geometry(
     tolerance: f64,
     preserve_topology: bool,
 ) -> GisResult<Value> {
-    let _ = (source, preserve_topology);
     if !tolerance.is_finite() || tolerance < 0.0 {
         return Err(GisError::InvalidArgument(format!(
             "{INVALID_ARGUMENT}: simplify tolerance must be finite and non-negative"
         )));
     }
+    let input = normalize_input(source, false)?;
+    validate_input_or_error(&input)?;
     require_topology_backend("simplify_geometry")?;
-    unreachable!("topology backend is not wired in C4.0")
+    let geometry = input
+        .geometries
+        .first()
+        .ok_or_else(model::empty_geometry_error)?;
+    let output = simplify_topology(geometry, tolerance, preserve_topology)?;
+    simplify_geometry_output(&input, output, &input.crs)
 }
 
 pub(crate) fn prepare_polygonal_clip_mask(source: &Value) -> GisResult<PolygonalClipMask> {
@@ -407,6 +414,62 @@ fn buffer_geometry_output(
     }))
 }
 
+fn simplify_geometry_output(
+    input: &NormalizedInput,
+    geometry: Geometry,
+    crs: &Option<Value>,
+) -> GisResult<Value> {
+    if geometry.is_empty() {
+        let warnings = vec![RasterWarning::new(
+            EMPTY_OUTPUT,
+            "simplify_geometry produced an empty geometry",
+            Some("geometry"),
+        )];
+        return Ok(json!({
+            "geometry": Value::Null,
+            "operation": operation_value(
+                "simplify_geometry",
+                &input.input_geometry_type,
+                None,
+                input.input_count,
+                0,
+                true,
+                crs.clone(),
+                warnings,
+            ),
+        }));
+    }
+
+    let output_geometry_type = geometry.geometry_type();
+    let type_changed = output_geometry_type != input.input_geometry_type;
+    let warnings = if type_changed {
+        vec![RasterWarning::new(
+            GEOMETRY_TYPE_CHANGED,
+            format!(
+                "simplify_geometry output type changed from {} to {output_geometry_type}",
+                input.input_geometry_type
+            ),
+            Some("geometry"),
+        )]
+    } else {
+        Vec::new()
+    };
+
+    Ok(json!({
+        "geometry": geometry_value(&geometry)?,
+        "operation": operation_value(
+            "simplify_geometry",
+            &input.input_geometry_type,
+            Some(output_geometry_type),
+            input.input_count,
+            1,
+            geometry != input.geometries[0] || type_changed,
+            crs.clone(),
+            warnings,
+        ),
+    }))
+}
+
 fn require_polygonal_geometry(geometry: &Geometry, operation: &str) -> GisResult<()> {
     match geometry {
         Geometry::Polygon(_) | Geometry::MultiPolygon(_) => Ok(()),
@@ -467,10 +530,24 @@ fn common_geometry_type(geometries: &[Geometry]) -> String {
 
 fn geometry_value(geometry: &Geometry) -> GisResult<Value> {
     match geometry {
+        Geometry::LineString(points) => Ok(json!({
+            "type": "LineString",
+            "coordinates": line_value(points)?,
+        })),
         Geometry::Polygon(rings) => Ok(json!({
             "type": "Polygon",
             "coordinates": rings_value(rings)?,
         })),
+        Geometry::MultiLineString(lines) => {
+            let mut out = Vec::with_capacity(lines.len());
+            for line in lines {
+                out.push(line_value(line)?);
+            }
+            Ok(json!({
+                "type": "MultiLineString",
+                "coordinates": out,
+            }))
+        }
         Geometry::MultiPolygon(polygons) => {
             let mut out = Vec::with_capacity(polygons.len());
             for rings in polygons {
@@ -489,15 +566,15 @@ fn geometry_value(geometry: &Geometry) -> GisResult<Value> {
     }
 }
 
-fn rings_value(rings: &[Vec<Coord>]) -> GisResult<Vec<Vec<Value>>> {
-    rings
+fn line_value(points: &[Coord]) -> GisResult<Vec<Value>> {
+    points
         .iter()
-        .map(|ring| {
-            ring.iter()
-                .map(|coord| Ok(json!([finite_value(coord.x)?, finite_value(coord.y)?])))
-                .collect()
-        })
+        .map(|coord| Ok(json!([finite_value(coord.x)?, finite_value(coord.y)?])))
         .collect()
+}
+
+fn rings_value(rings: &[Vec<Coord>]) -> GisResult<Vec<Vec<Value>>> {
+    rings.iter().map(|ring| line_value(ring)).collect()
 }
 
 #[cfg(feature = "extension-module")]

@@ -11,7 +11,11 @@ pub(crate) fn topology_backend_available() -> bool {
 pub(crate) fn require_topology_backend(operation: &str) -> GisResult<()> {
     if matches!(
         operation,
-        "union_geometries" | "buffer_geometry" | "clip_vector" | "intersect_vectors"
+        "union_geometries"
+            | "buffer_geometry"
+            | "clip_vector"
+            | "intersect_vectors"
+            | "simplify_geometry"
     ) && topology_backend_available()
     {
         return Ok(());
@@ -100,6 +104,80 @@ pub(super) fn intersection_polygonal(
     operation: &str,
 ) -> GisResult<Geometry> {
     require_topology_backend(operation)?;
+    unreachable!("topology backend is feature-gated")
+}
+
+#[cfg(feature = "geos-topology")]
+pub(super) fn simplify_topology(
+    geometry: &Geometry,
+    tolerance: f64,
+    preserve_topology: bool,
+) -> GisResult<Geometry> {
+    use geo::{SimplifyVw, SimplifyVwPreserve};
+
+    if tolerance == 0.0 {
+        return Ok(geometry.clone());
+    }
+    match geometry {
+        Geometry::LineString(points) => {
+            let line = line_string_from_ring(points);
+            let simplified = if preserve_topology {
+                line.simplify_vw_preserve(tolerance)
+            } else {
+                line.simplify_vw(tolerance)
+            };
+            Ok(Geometry::LineString(line_string_to_ring(&simplified)))
+        }
+        Geometry::MultiLineString(lines) => {
+            let multilines = geo::MultiLineString(
+                lines
+                    .iter()
+                    .map(|line| line_string_from_ring(line))
+                    .collect(),
+            );
+            let simplified = if preserve_topology {
+                multilines.simplify_vw_preserve(tolerance)
+            } else {
+                multilines.simplify_vw(tolerance)
+            };
+            Ok(Geometry::MultiLineString(
+                simplified.iter().map(line_string_to_ring).collect(),
+            ))
+        }
+        Geometry::Polygon(rings) => {
+            let polygon = polygon_from_rings(rings)?;
+            let simplified = if preserve_topology {
+                polygon.simplify_vw_preserve(tolerance)
+            } else {
+                polygon.simplify_vw(tolerance)
+            };
+            Ok(Geometry::Polygon(polygon_to_rings(&simplified)))
+        }
+        Geometry::MultiPolygon(polygons) => {
+            let multipolygon = multi_polygon_from_model(polygons)?;
+            let simplified = if preserve_topology {
+                multipolygon.simplify_vw_preserve(tolerance)
+            } else {
+                multipolygon.simplify_vw(tolerance)
+            };
+            Ok(Geometry::MultiPolygon(
+                simplified.iter().map(polygon_to_rings).collect(),
+            ))
+        }
+        other => Err(GisError::InvalidGeometry(format!(
+            "{UNSUPPORTED_GEOMETRY_TYPE}: simplify_geometry supports LineString, MultiLineString, Polygon, and MultiPolygon, got {}",
+            other.geometry_type()
+        ))),
+    }
+}
+
+#[cfg(not(feature = "geos-topology"))]
+pub(super) fn simplify_topology(
+    _geometry: &Geometry,
+    _tolerance: f64,
+    _preserve_topology: bool,
+) -> GisResult<Geometry> {
+    require_topology_backend("simplify_geometry")?;
     unreachable!("topology backend is feature-gated")
 }
 
