@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import math
 import os
 from pathlib import Path
@@ -44,6 +45,10 @@ def _point():
     return {"type": "Point", "coordinates": [0.0, 0.0]}
 
 
+def _geojson_crs(code: int = 4326):
+    return {"type": "name", "properties": {"name": f"EPSG:{code}"}}
+
+
 def _feature_collection():
     return {
         "type": "FeatureCollection",
@@ -54,8 +59,15 @@ def _feature_collection():
                 "geometry": _unit_square(),
             }
         ],
-        "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
+        "crs": _geojson_crs(),
     }
+
+
+def _feature_collection_from(features, *, crs=True):
+    out = {"type": "FeatureCollection", "features": features}
+    if crs:
+        out["crs"] = _geojson_crs()
+    return out
 
 
 def _assert_backend_unavailable(call):
@@ -75,8 +87,12 @@ def _shifted_square(x0: float, y0: float, size: float = 1.0):
     }
 
 
-def _feature(geometry):
-    return {"type": "Feature", "properties": {"ignored": True}, "geometry": geometry}
+def _feature(geometry, properties=None):
+    return {
+        "type": "Feature",
+        "properties": {"ignored": True} if properties is None else properties,
+        "geometry": geometry,
+    }
 
 
 def _has_topology_backend() -> bool:
@@ -171,7 +187,9 @@ def test_c4_apis_raise_backend_unavailable_without_topology_backend(tmp_path: Pa
     _assert_backend_unavailable(lambda: gis.union_geometries([_unit_square()]))
     _assert_backend_unavailable(lambda: gis.dissolve_vector(_feature_collection()))
     _assert_backend_unavailable(lambda: gis.buffer_geometry(_unit_square(), 1.0))
-    _assert_backend_unavailable(lambda: gis.clip_vector(_feature_collection(), _unit_square()))
+    _assert_backend_unavailable(
+        lambda: gis.clip_vector(_feature_collection(), _unit_square(), clip_crs="EPSG:4326")
+    )
     _assert_backend_unavailable(
         lambda: gis.intersect_vectors(_feature_collection(), _feature_collection())
     )
@@ -424,13 +442,180 @@ def test_buffer_geometry_optional_shapely_reference_area():
     assert _geometry_area(result["geometry"]) == pytest.approx(expected.area, rel=0.15)
 
 
-def test_non_buffer_c4_apis_stay_gated_with_topology_backend(tmp_path: Path):
+def test_clip_vector_polygon_source_clipped_by_polygon_recomputes_metadata():
+    _require_topology_backend()
+    source = _feature_collection_from([
+        _feature(_unit_square(), {"name": "parcel", "value": 7})
+    ])
+
+    result = gis.clip_vector(source, _shifted_square(0.5, 0.0), clip_crs="EPSG:4326")
+
+    assert result["type"] == "FeatureCollection"
+    assert len(result["features"]) == 1
+    assert result["features"][0]["properties"] == {"name": "parcel", "value": 7}
+    assert result["features"][0]["geometry"]["type"] == "Polygon"
+    assert _geometry_area(result["features"][0]["geometry"]) == pytest.approx(0.5)
+    assert result["info"]["feature_count"] == 1
+    assert result["info"]["geometry_type"] == "Polygon"
+    assert [field["name"] for field in result["info"]["schema"]] == ["name", "value"]
+    assert result["info"]["bounds"] == pytest.approx((0.5, 0.0, 1.0, 1.0))
+    assert result["info"]["crs_authority"] == {"name": "EPSG", "code": "4326"}
+    assert result["warnings"] == []
+    assert result["operation"]["name"] == "clip_vector"
+    assert result["operation"]["input_count"] == 1
+    assert result["operation"]["output_count"] == 1
+
+
+def test_clip_vector_no_intersections_returns_empty_output():
+    _require_topology_backend()
+
+    result = gis.clip_vector(
+        _feature_collection(),
+        _shifted_square(3.0, 3.0),
+        clip_crs="EPSG:4326",
+    )
+
+    assert result["features"] == []
+    assert result["info"]["feature_count"] == 0
+    assert result["info"]["geometry_type"] == "Empty"
+    assert result["info"]["bounds"] is None
+    assert "empty_output" in _warning_codes(result)
+
+
+def test_clip_vector_empty_source_returns_empty_feature_set():
+    _require_topology_backend()
+    source = _feature_collection_from([])
+
+    result = gis.clip_vector(source, _unit_square(), clip_crs="EPSG:4326")
+
+    assert result["features"] == []
+    assert result["info"]["feature_count"] == 0
+    assert "empty_feature_set" in _warning_codes(result)
+
+
+def test_clip_vector_path_input_works(tmp_path: Path):
+    _require_topology_backend()
+    path = tmp_path / "clip-source.geojson"
+    path.write_text(
+        json.dumps(_feature_collection_from([_feature(_unit_square(), {"id": 1})])),
+        encoding="utf-8",
+    )
+
+    result = gis.clip_vector(path, _shifted_square(0.5, 0.0), clip_crs="EPSG:4326")
+
+    assert len(result["features"]) == 1
+    assert result["features"][0]["properties"] == {"id": 1}
+    assert _geometry_area(result["features"][0]["geometry"]) == pytest.approx(0.5)
+
+
+def test_clip_vector_read_vector_result_input_works(tmp_path: Path):
+    _require_topology_backend()
+    path = tmp_path / "clip-read-result.geojson"
+    path.write_text(
+        json.dumps(_feature_collection_from([_feature(_unit_square(), {"id": 2})])),
+        encoding="utf-8",
+    )
+    source = gis.read_vector(path)
+
+    result = gis.clip_vector(source, _shifted_square(0.5, 0.0), clip_crs="EPSG:4326")
+
+    assert len(result["features"]) == 1
+    assert result["features"][0]["properties"] == {"id": 2}
+
+
+def test_clip_vector_clip_feature_input_uses_geometry_only():
+    _require_topology_backend()
+
+    result = gis.clip_vector(
+        _feature_collection(),
+        _feature(_shifted_square(0.5, 0.0), {"ignored": True}),
+        clip_crs="EPSG:4326",
+    )
+
+    assert len(result["features"]) == 1
+    assert _geometry_area(result["features"][0]["geometry"]) == pytest.approx(0.5)
+
+
+def test_clip_vector_clip_feature_collection_input_is_union_mask():
+    _require_topology_backend()
+    mask = _feature_collection_from(
+        [
+            _feature(_shifted_square(-0.5, 0.0)),
+            _feature(_shifted_square(0.5, 0.0)),
+        ]
+    )
+
+    result = gis.clip_vector(_feature_collection(), mask)
+
+    assert len(result["features"]) == 1
+    assert _geometry_area(result["features"][0]["geometry"]) == pytest.approx(1.0)
+
+
+def test_clip_vector_source_crs_missing_raises_missing_crs():
+    _require_topology_backend()
+    source = _feature_collection_from([_feature(_unit_square())], crs=False)
+
+    with pytest.raises(ValueError, match="missing_crs"):
+        gis.clip_vector(source, _unit_square(), clip_crs="EPSG:4326")
+
+
+def test_clip_vector_clip_crs_missing_raises_missing_crs():
+    _require_topology_backend()
+
+    with pytest.raises(ValueError, match="missing_crs"):
+        gis.clip_vector(_feature_collection(), _unit_square())
+
+
+def test_clip_vector_mismatched_crs_raises_crs_mismatch():
+    _require_topology_backend()
+
+    with pytest.raises(ValueError, match="crs_mismatch"):
+        gis.clip_vector(_feature_collection(), _unit_square(), clip_crs="EPSG:3857")
+
+
+def test_clip_vector_invalid_source_geometry_raises_invalid_geometry():
+    _require_topology_backend()
+    bowtie = {
+        "type": "Polygon",
+        "coordinates": [
+            [[0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 0.0], [0.0, 0.0]]
+        ],
+    }
+    source = _feature_collection_from([_feature(bowtie)])
+
+    with pytest.raises(ValueError, match="invalid_geometry"):
+        gis.clip_vector(source, _unit_square(), clip_crs="EPSG:4326")
+
+
+def test_clip_vector_invalid_clip_geometry_raises_invalid_geometry():
+    _require_topology_backend()
+    bowtie = {
+        "type": "Polygon",
+        "coordinates": [
+            [[0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 0.0], [0.0, 0.0]]
+        ],
+    }
+
+    with pytest.raises(ValueError, match="invalid_geometry"):
+        gis.clip_vector(_feature_collection(), bowtie, clip_crs="EPSG:4326")
+
+
+def test_clip_vector_non_polygonal_geometry_raises_unsupported_type():
+    _require_topology_backend()
+    source = _feature_collection_from([_feature(_point())])
+
+    with pytest.raises(ValueError, match="unsupported_geometry_type"):
+        gis.clip_vector(source, _unit_square(), clip_crs="EPSG:4326")
+    with pytest.raises(ValueError, match="unsupported_geometry_type"):
+        gis.clip_vector(_feature_collection(), _point(), clip_crs="EPSG:4326")
+
+
+def test_non_clip_c4_apis_stay_gated_with_topology_backend(tmp_path: Path):
     _require_topology_backend()
     path = tmp_path / "boundary.geojson"
     path.write_text('{"type":"FeatureCollection","features":[]}', encoding="utf-8")
 
     _assert_backend_unavailable(lambda: gis.dissolve_vector(_feature_collection()))
-    _assert_backend_unavailable(lambda: gis.clip_vector(_feature_collection(), _unit_square()))
     _assert_backend_unavailable(
         lambda: gis.intersect_vectors(_feature_collection(), _feature_collection())
     )

@@ -26,8 +26,14 @@ use model::{
     UNSUPPORTED_OPTION,
 };
 use parse::normalize_input;
-use topology::{buffer_topology, require_topology_backend, union_polygonal};
+use topology::{
+    buffer_topology, intersection_polygonal, require_topology_backend, union_polygonal,
+};
 use validate::{validate_geometry_value, validate_input_or_error};
+
+pub(crate) struct PolygonalClipMask {
+    geometry: Geometry,
+}
 
 pub fn validate_geometry(source: &Value) -> GisResult<Value> {
     Ok(validate_geometry_value(source))
@@ -274,6 +280,39 @@ pub fn simplify_geometry(
     unreachable!("topology backend is not wired in C4.0")
 }
 
+pub(crate) fn prepare_polygonal_clip_mask(source: &Value) -> GisResult<PolygonalClipMask> {
+    let input = normalize_input(source, true)?;
+    validate_input_or_error(&input)?;
+    for geometry in &input.geometries {
+        require_polygonal_geometry(geometry, "clip_vector")?;
+    }
+    let geometry = if input.geometries.len() == 1 {
+        input.geometries[0].clone()
+    } else {
+        union_polygonal(&input.geometries)?
+    };
+    Ok(PolygonalClipMask { geometry })
+}
+
+pub(crate) fn clip_polygonal_geometry_value(
+    source: &Value,
+    mask: &PolygonalClipMask,
+) -> GisResult<Option<Value>> {
+    let input = normalize_input(source, false)?;
+    validate_input_or_error(&input)?;
+    let geometry = input
+        .geometries
+        .first()
+        .ok_or_else(model::empty_geometry_error)?;
+    require_polygonal_geometry(geometry, "clip_vector")?;
+    let output = intersection_polygonal(geometry, &mask.geometry)?;
+    if output.is_empty() {
+        Ok(None)
+    } else {
+        geometry_value(&output).map(Some)
+    }
+}
+
 fn buffer_geometry_output(
     input: &NormalizedInput,
     geometry: Geometry,
@@ -328,6 +367,16 @@ fn buffer_geometry_output(
             warnings,
         ),
     }))
+}
+
+fn require_polygonal_geometry(geometry: &Geometry, operation: &str) -> GisResult<()> {
+    match geometry {
+        Geometry::Polygon(_) | Geometry::MultiPolygon(_) => Ok(()),
+        other => Err(GisError::InvalidGeometry(format!(
+            "{UNSUPPORTED_GEOMETRY_TYPE}: {operation} supports Polygon and MultiPolygon, got {}",
+            other.geometry_type()
+        ))),
+    }
 }
 
 fn normalize_union_input(source: &Value) -> GisResult<NormalizedInput> {

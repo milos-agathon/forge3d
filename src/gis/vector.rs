@@ -2,16 +2,18 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde_json::{Map, Number, Value};
+use serde_json::{json, Map, Number, Value};
 
 use crate::gis::affine::validate_bounds_tuple;
 use crate::gis::crs;
 use crate::gis::error::{GisError, GisResult};
+use crate::gis::geometry::{clip_polygonal_geometry_value, prepare_polygonal_clip_mask};
 use crate::gis::raster_write::CrsSpec;
 use crate::gis::types::{RasterBounds, RasterWarning, WARNING_MISSING_CRS};
 
 pub const WARNING_EMPTY_FEATURE_SET: &str = "empty_feature_set";
 pub const WARNING_EMPTY_GEOMETRY: &str = "empty_geometry";
+pub const WARNING_EMPTY_OUTPUT: &str = "empty_output";
 pub const WARNING_INVALID_GEOMETRY: &str = "invalid_geometry";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -256,9 +258,46 @@ pub fn clip_vector(
     clip_geometry: &Value,
     clip_crs: Option<Value>,
 ) -> GisResult<Value> {
-    let _ = (source, clip_geometry, clip_crs);
-    crate::gis::geometry::topology::require_topology_backend("clip_vector")?;
-    unreachable!("topology backend is not wired in C4.0")
+    let source = resolve_clip_source(source)?;
+    let clip_crs = resolve_clip_crs(clip_geometry, clip_crs)?;
+    if !crs::crs_equal(&source.crs, &clip_crs) {
+        return Err(GisError::CrsMismatch(format!(
+            "crs_mismatch: source CRS {} does not match clip CRS {}",
+            crs::canonical_label(&source.crs)?,
+            crs::canonical_label(&clip_crs)?
+        )));
+    }
+
+    if source.features.is_empty() {
+        let warnings = vec![RasterWarning::new(
+            WARNING_EMPTY_FEATURE_SET,
+            "clip_vector source has zero features",
+            Some("features"),
+        )];
+        return clip_result_value(&source, Vec::new(), warnings, false);
+    }
+
+    let mask = prepare_polygonal_clip_mask(clip_geometry)?;
+    let mut out_features = Vec::new();
+    for feature in &source.features {
+        let geometry = feature.get("geometry").ok_or_else(|| {
+            GisError::InvalidGeometry("invalid_geometry: Feature requires geometry".to_string())
+        })?;
+        if let Some(clipped_geometry) = clip_polygonal_geometry_value(geometry, &mask)? {
+            out_features.push(clipped_feature(feature, clipped_geometry)?);
+        }
+    }
+
+    let warnings = if out_features.is_empty() {
+        vec![RasterWarning::new(
+            WARNING_EMPTY_OUTPUT,
+            "clip_vector produced no output features",
+            Some("features"),
+        )]
+    } else {
+        Vec::new()
+    };
+    clip_result_value(&source, out_features, warnings, true)
 }
 
 pub fn intersect_vectors(left: &Value, right: &Value, suffixes: (&str, &str)) -> GisResult<Value> {
@@ -280,6 +319,308 @@ pub fn load_boundary(
     }
     crate::gis::geometry::topology::require_topology_backend("load_boundary")?;
     unreachable!("topology backend is not wired in C4.0")
+}
+
+struct ClipSourceData {
+    features: Vec<Value>,
+    path: String,
+    driver: String,
+    layer_name: Option<String>,
+    layer_count: u32,
+    crs: CrsSpec,
+}
+
+fn resolve_clip_source(source: &Value) -> GisResult<ClipSourceData> {
+    if let Some(path) = source.as_str() {
+        let result = read_vector(
+            path,
+            VectorReadOptions {
+                layer: None,
+                columns: None,
+                bbox: None,
+                limit: None,
+            },
+        )?;
+        let crs = crs_spec_from_vector_info(&result.info)?.ok_or_else(|| {
+            GisError::MissingCrs("missing_crs: vector source has no CRS metadata".to_string())
+        })?;
+        return Ok(ClipSourceData {
+            features: result.features,
+            path: result.info.path,
+            driver: result.info.driver,
+            layer_name: result.info.layer_name,
+            layer_count: result.info.layer_count,
+            crs,
+        });
+    }
+
+    let object = source.as_object().ok_or_else(|| {
+        GisError::InvalidGeometry(
+            "invalid_geometry: clip_vector source must be a path or FeatureCollection".to_string(),
+        )
+    })?;
+    if object.get("type").and_then(Value::as_str) != Some("FeatureCollection")
+        && !object.contains_key("features")
+    {
+        return Err(GisError::InvalidGeometry(
+            "invalid_geometry: clip_vector source must be a FeatureCollection".to_string(),
+        ));
+    }
+
+    let features = normalize_features(source).map_err(invalid_argument_to_invalid_geometry)?;
+    let info = object.get("info");
+    let info_crs = info.map(crs_spec_from_info_json).transpose()?.flatten();
+    let metadata_crs = compatible_metadata_crs(info_crs, geojson_crs(source)?, "source")?;
+    let crs = metadata_crs.ok_or_else(|| {
+        GisError::MissingCrs("missing_crs: vector source has no CRS metadata".to_string())
+    })?;
+
+    Ok(ClipSourceData {
+        features,
+        path: info
+            .and_then(|value| json_string(value, "path"))
+            .unwrap_or_default(),
+        driver: info
+            .and_then(|value| json_string(value, "driver"))
+            .unwrap_or_else(|| "GeoJSON".to_string()),
+        layer_name: info.and_then(|value| json_string(value, "layer_name")),
+        layer_count: info
+            .and_then(|value| json_u32(value, "layer_count"))
+            .unwrap_or(1),
+        crs,
+    })
+}
+
+fn resolve_clip_crs(clip_geometry: &Value, explicit: Option<Value>) -> GisResult<CrsSpec> {
+    let info_crs = clip_geometry
+        .get("info")
+        .map(crs_spec_from_info_json)
+        .transpose()?
+        .flatten();
+    let metadata_crs = compatible_metadata_crs(info_crs, geojson_crs(clip_geometry)?, "clip")?;
+    let explicit_crs = explicit
+        .as_ref()
+        .map(crs_spec_from_json_value)
+        .transpose()?
+        .flatten();
+    compatible_metadata_crs(explicit_crs, metadata_crs, "clip")?.ok_or_else(|| {
+        GisError::MissingCrs(
+            "missing_crs: clip geometry has no CRS metadata; provide clip_crs".to_string(),
+        )
+    })
+}
+
+fn compatible_metadata_crs(
+    left: Option<CrsSpec>,
+    right: Option<CrsSpec>,
+    label: &str,
+) -> GisResult<Option<CrsSpec>> {
+    match (left, right) {
+        (Some(left), Some(right)) => {
+            if crs::crs_equal(&left, &right) {
+                Ok(Some(left))
+            } else {
+                Err(GisError::CrsMismatch(format!(
+                    "crs_mismatch: {label} CRS {} conflicts with {}",
+                    crs::canonical_label(&left)?,
+                    crs::canonical_label(&right)?
+                )))
+            }
+        }
+        (Some(crs), None) | (None, Some(crs)) => Ok(Some(crs)),
+        (None, None) => Ok(None),
+    }
+}
+
+fn crs_spec_from_json_value(value: &Value) -> GisResult<Option<CrsSpec>> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    if let Some(code) = value.as_u64() {
+        return crs::parse_crs_string(format!("EPSG:{code}")).map(Some);
+    }
+    if let Some(code) = value.as_i64() {
+        if code < 0 {
+            return Err(GisError::InvalidCrs(
+                "invalid_crs: EPSG code must be non-negative".to_string(),
+            ));
+        }
+        return crs::parse_crs_string(format!("EPSG:{code}")).map(Some);
+    }
+    if let Some(text) = value.as_str() {
+        return crs::parse_crs_string(text.to_string()).map(Some);
+    }
+    let object = value.as_object().ok_or_else(|| {
+        GisError::InvalidCrs(
+            "invalid_crs: CRS must be a string, integer, dict, or None".to_string(),
+        )
+    })?;
+    let name = object
+        .get("name")
+        .and_then(json_value_string)
+        .ok_or_else(|| GisError::InvalidCrs("invalid_crs: CRS dict requires name".to_string()))?;
+    let code = object
+        .get("code")
+        .and_then(json_value_string)
+        .ok_or_else(|| GisError::InvalidCrs("invalid_crs: CRS dict requires code".to_string()))?;
+    CrsSpec::from_parts(Some(name), Some(code), None).map(Some)
+}
+
+fn crs_spec_from_info_json(info: &Value) -> GisResult<Option<CrsSpec>> {
+    if let Some(authority) = info.get("crs_authority").and_then(Value::as_object) {
+        if let (Some(name), Some(code)) = (
+            authority.get("name").and_then(json_value_string),
+            authority.get("code").and_then(json_value_string),
+        ) {
+            return CrsSpec::from_parts(Some(name), Some(code), None).map(Some);
+        }
+    }
+    if let Some(wkt) = info.get("crs_wkt").and_then(Value::as_str) {
+        if !wkt.trim().is_empty() {
+            return CrsSpec::from_parts(None, None, Some(wkt.to_string())).map(Some);
+        }
+    }
+    Ok(None)
+}
+
+fn clipped_feature(feature: &Value, geometry: Value) -> GisResult<Value> {
+    let mut object = feature
+        .as_object()
+        .ok_or_else(|| {
+            GisError::InvalidGeometry("invalid_geometry: feature must be an object".to_string())
+        })?
+        .clone();
+    object.insert("geometry".to_string(), geometry);
+    let updated = Value::Object(object.clone());
+    update_bbox_member(&mut object, feature_bounds(&updated))?;
+    Ok(Value::Object(object))
+}
+
+fn clip_result_value(
+    source: &ClipSourceData,
+    features: Vec<Value>,
+    warnings: Vec<RasterWarning>,
+    changed: bool,
+) -> GisResult<Value> {
+    let info = clip_vector_info(source, &features, warnings.clone());
+    Ok(json!({
+        "type": "FeatureCollection",
+        "features": features,
+        "info": vector_info_json(&info),
+        "operation": clip_operation_json(source, &info, &warnings, changed),
+        "warnings": warnings_json(&warnings),
+    }))
+}
+
+fn clip_vector_info(
+    source: &ClipSourceData,
+    features: &[Value],
+    warnings: Vec<RasterWarning>,
+) -> VectorInfo {
+    let bounds = bounds_for_features(features).map(RasterBounds::tuple);
+    VectorInfo {
+        path: source.path.clone(),
+        driver: source.driver.clone(),
+        layer_name: source.layer_name.clone(),
+        layer_count: source.layer_count,
+        geometry_type: geometry_type_for_features(features),
+        feature_count: features.len() as u64,
+        schema: infer_schema(features),
+        crs_wkt: source.crs.wkt.clone(),
+        crs_authority: crs::authority_map(&source.crs),
+        bounds,
+        is_georeferenced: bounds.is_some(),
+        warnings,
+    }
+}
+
+fn clip_operation_json(
+    source: &ClipSourceData,
+    info: &VectorInfo,
+    warnings: &[RasterWarning],
+    changed: bool,
+) -> Value {
+    json!({
+        "name": "clip_vector",
+        "input_geometry_type": geometry_type_for_features(&source.features),
+        "output_geometry_type": info.geometry_type,
+        "input_count": source.features.len(),
+        "output_count": info.feature_count,
+        "changed": changed,
+        "crs": crs_json(&source.crs),
+        "warnings": warnings_json(warnings),
+    })
+}
+
+fn vector_info_json(info: &VectorInfo) -> Value {
+    json!({
+        "path": info.path.clone(),
+        "driver": info.driver.clone(),
+        "layer_name": info.layer_name.clone(),
+        "layer_count": info.layer_count,
+        "geometry_type": info.geometry_type.clone(),
+        "feature_count": info.feature_count,
+        "schema": info.schema.iter().map(schema_field_json).collect::<Vec<_>>(),
+        "crs_wkt": info.crs_wkt.clone(),
+        "crs_authority": info.crs_authority.clone(),
+        "bounds": info.bounds,
+        "is_georeferenced": info.is_georeferenced,
+        "warnings": warnings_json(&info.warnings),
+    })
+}
+
+fn schema_field_json(field: &SchemaField) -> Value {
+    json!({
+        "name": field.name.clone(),
+        "type": field.field_type.clone(),
+        "nullable": field.nullable,
+        "width": field.width,
+        "precision": field.precision,
+    })
+}
+
+fn crs_json(crs: &CrsSpec) -> Value {
+    json!({
+        "source_kind": "vector",
+        "wkt": crs.wkt.clone(),
+        "authority": crs::authority_map(crs),
+    })
+}
+
+fn warnings_json(warnings: &[RasterWarning]) -> Value {
+    Value::Array(
+        warnings
+            .iter()
+            .map(|warning| {
+                json!({
+                    "code": warning.code.clone(),
+                    "message": warning.message.clone(),
+                    "field": warning.field.clone(),
+                })
+            })
+            .collect(),
+    )
+}
+
+fn json_string(value: &Value, key: &str) -> Option<String> {
+    value.get(key).and_then(json_value_string)
+}
+
+fn json_u32(value: &Value, key: &str) -> Option<u32> {
+    value
+        .get(key)
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+}
+
+fn json_value_string(value: &Value) -> Option<String> {
+    if value.is_null() {
+        None
+    } else if let Some(text) = value.as_str() {
+        Some(text.to_string())
+    } else {
+        Some(value.to_string())
+    }
 }
 
 #[cfg(feature = "extension-module")]

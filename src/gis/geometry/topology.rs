@@ -9,7 +9,11 @@ pub(crate) fn topology_backend_available() -> bool {
 }
 
 pub(crate) fn require_topology_backend(operation: &str) -> GisResult<()> {
-    if matches!(operation, "union_geometries" | "buffer_geometry") && topology_backend_available() {
+    if matches!(
+        operation,
+        "union_geometries" | "buffer_geometry" | "clip_vector"
+    ) && topology_backend_available()
+    {
         return Ok(());
     }
     Err(GisError::BackendUnavailable(format!(
@@ -73,6 +77,21 @@ pub(super) fn buffer_topology(
     _quad_segs: usize,
 ) -> GisResult<Geometry> {
     require_topology_backend("buffer_geometry")?;
+    unreachable!("topology backend is feature-gated")
+}
+
+#[cfg(feature = "geos-topology")]
+pub(super) fn intersection_polygonal(left: &Geometry, right: &Geometry) -> GisResult<Geometry> {
+    use geo::BooleanOps;
+
+    let left = polygonal_to_multi_polygon(left, "clip_vector")?;
+    let right = polygonal_to_multi_polygon(right, "clip_vector")?;
+    multi_polygon_to_geometry(left.intersection(&right))
+}
+
+#[cfg(not(feature = "geos-topology"))]
+pub(super) fn intersection_polygonal(_left: &Geometry, _right: &Geometry) -> GisResult<Geometry> {
+    require_topology_backend("clip_vector")?;
     unreachable!("topology backend is feature-gated")
 }
 
@@ -146,6 +165,21 @@ fn multi_polygon_from_model(polygons: &[Vec<Vec<Coord>>]) -> GisResult<geo::Mult
         .map(|rings| polygon_from_rings(rings))
         .collect::<GisResult<Vec<_>>>()
         .map(geo::MultiPolygon)
+}
+
+#[cfg(feature = "geos-topology")]
+fn polygonal_to_multi_polygon(
+    geometry: &Geometry,
+    operation: &str,
+) -> GisResult<geo::MultiPolygon<f64>> {
+    match geometry {
+        Geometry::Polygon(rings) => Ok(geo::MultiPolygon(vec![polygon_from_rings(rings)?])),
+        Geometry::MultiPolygon(polygons) => multi_polygon_from_model(polygons),
+        other => Err(GisError::InvalidGeometry(format!(
+            "{UNSUPPORTED_GEOMETRY_TYPE}: {operation} supports Polygon and MultiPolygon, got {}",
+            other.geometry_type()
+        ))),
+    }
 }
 
 #[cfg(feature = "geos-topology")]
