@@ -610,15 +610,190 @@ def test_clip_vector_non_polygonal_geometry_raises_unsupported_type():
         gis.clip_vector(_feature_collection(), _point(), clip_crs="EPSG:4326")
 
 
-def test_non_clip_c4_apis_stay_gated_with_topology_backend(tmp_path: Path):
+def test_intersect_vectors_one_polygon_overlap_recomputes_metadata():
+    _require_topology_backend()
+    left = _feature_collection_from([
+        _feature(_unit_square(), {"left_id": 1, "name": "left"})
+    ])
+    right = _feature_collection_from([
+        _feature(_shifted_square(0.5, 0.0), {"right_id": 2})
+    ])
+
+    result = gis.intersect_vectors(left, right)
+
+    assert result["type"] == "FeatureCollection"
+    assert len(result["features"]) == 1
+    assert result["features"][0]["properties"] == {
+        "left_id": 1,
+        "name": "left",
+        "right_id": 2,
+    }
+    assert result["features"][0]["geometry"]["type"] == "Polygon"
+    assert _geometry_area(result["features"][0]["geometry"]) == pytest.approx(0.5)
+    assert result["info"]["feature_count"] == 1
+    assert result["info"]["geometry_type"] == "Polygon"
+    assert {field["name"] for field in result["info"]["schema"]} == {
+        "left_id",
+        "name",
+        "right_id",
+    }
+    assert result["info"]["bounds"] == pytest.approx((0.5, 0.0, 1.0, 1.0))
+    assert result["info"]["crs_authority"] == {"name": "EPSG", "code": "4326"}
+    assert result["warnings"] == []
+    assert result["operation"]["name"] == "intersect_vectors"
+    assert result["operation"]["input_count"] == 2
+    assert result["operation"]["output_count"] == 1
+
+
+def test_intersect_vectors_no_overlap_returns_empty_output():
+    _require_topology_backend()
+
+    result = gis.intersect_vectors(
+        _feature_collection(),
+        _feature_collection_from([_feature(_shifted_square(3.0, 3.0))]),
+    )
+
+    assert result["features"] == []
+    assert result["info"]["feature_count"] == 0
+    assert result["info"]["geometry_type"] == "Empty"
+    assert result["info"]["bounds"] is None
+    assert "empty_output" in _warning_codes(result)
+
+
+@pytest.mark.parametrize("empty_side", ["left", "right"])
+def test_intersect_vectors_empty_input_returns_empty_feature_set(empty_side):
+    _require_topology_backend()
+    empty = _feature_collection_from([])
+    nonempty = _feature_collection()
+    left, right = (empty, nonempty) if empty_side == "left" else (nonempty, empty)
+
+    result = gis.intersect_vectors(left, right)
+
+    assert result["features"] == []
+    assert result["info"]["feature_count"] == 0
+    assert "empty_feature_set" in _warning_codes(result)
+
+
+def test_intersect_vectors_path_input_works(tmp_path: Path):
+    _require_topology_backend()
+    left_path = tmp_path / "intersect-left.geojson"
+    right_path = tmp_path / "intersect-right.geojson"
+    left_path.write_text(
+        json.dumps(_feature_collection_from([_feature(_unit_square(), {"id": 1})])),
+        encoding="utf-8",
+    )
+    right_path.write_text(
+        json.dumps(_feature_collection_from([_feature(_shifted_square(0.5, 0.0), {"kind": "r"})])),
+        encoding="utf-8",
+    )
+
+    result = gis.intersect_vectors(left_path, right_path)
+
+    assert len(result["features"]) == 1
+    assert result["features"][0]["properties"] == {"id": 1, "kind": "r"}
+    assert _geometry_area(result["features"][0]["geometry"]) == pytest.approx(0.5)
+
+
+def test_intersect_vectors_read_vector_result_input_works(tmp_path: Path):
+    _require_topology_backend()
+    left_path = tmp_path / "intersect-read-left.geojson"
+    left_path.write_text(
+        json.dumps(_feature_collection_from([_feature(_unit_square(), {"id": 3})])),
+        encoding="utf-8",
+    )
+    left = gis.read_vector(left_path)
+    right = _feature_collection_from([
+        _feature(_shifted_square(0.5, 0.0), {"kind": "right"})
+    ])
+
+    result = gis.intersect_vectors(left, right)
+
+    assert len(result["features"]) == 1
+    assert result["features"][0]["properties"] == {"id": 3, "kind": "right"}
+
+
+def test_intersect_vectors_property_collision_applies_suffixes():
+    _require_topology_backend()
+    left = _feature_collection_from([
+        _feature(_unit_square(), {"id": 1, "name": "left", "left_only": True})
+    ])
+    right = _feature_collection_from([
+        _feature(_shifted_square(0.5, 0.0), {"id": 2, "name": "right", "right_only": True})
+    ])
+
+    result = gis.intersect_vectors(left, right, suffixes=("_l", "_r"))
+
+    assert result["features"][0]["properties"] == {
+        "id_l": 1,
+        "id_r": 2,
+        "left_only": True,
+        "name_l": "left",
+        "name_r": "right",
+        "right_only": True,
+    }
+
+
+def test_intersect_vectors_generated_property_collision_raises():
+    _require_topology_backend()
+    left = _feature_collection_from([
+        _feature(_unit_square(), {"id": 1, "id_left": "existing"})
+    ])
+    right = _feature_collection_from([
+        _feature(_shifted_square(0.5, 0.0), {"id": 2})
+    ])
+
+    with pytest.raises(ValueError, match="property_collision"):
+        gis.intersect_vectors(left, right)
+
+
+def test_intersect_vectors_missing_crs_raises_missing_crs():
+    _require_topology_backend()
+
+    with pytest.raises(ValueError, match="missing_crs"):
+        gis.intersect_vectors(_feature_collection_from([_feature(_unit_square())], crs=False), _feature_collection())
+    with pytest.raises(ValueError, match="missing_crs"):
+        gis.intersect_vectors(_feature_collection(), _feature_collection_from([_feature(_unit_square())], crs=False))
+
+
+def test_intersect_vectors_crs_mismatch_raises_crs_mismatch():
+    _require_topology_backend()
+    right = _feature_collection_from([_feature(_unit_square())])
+    right["crs"] = _geojson_crs(3857)
+
+    with pytest.raises(ValueError, match="crs_mismatch"):
+        gis.intersect_vectors(_feature_collection(), right)
+
+
+def test_intersect_vectors_invalid_geometry_raises_invalid_geometry():
+    _require_topology_backend()
+    bowtie = {
+        "type": "Polygon",
+        "coordinates": [
+            [[0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 0.0], [0.0, 0.0]]
+        ],
+    }
+
+    with pytest.raises(ValueError, match="invalid_geometry"):
+        gis.intersect_vectors(_feature_collection_from([_feature(bowtie)]), _feature_collection())
+    with pytest.raises(ValueError, match="invalid_geometry"):
+        gis.intersect_vectors(_feature_collection(), _feature_collection_from([_feature(bowtie)]))
+
+
+def test_intersect_vectors_non_polygonal_geometry_raises_unsupported_type():
+    _require_topology_backend()
+
+    with pytest.raises(ValueError, match="unsupported_geometry_type"):
+        gis.intersect_vectors(_feature_collection_from([_feature(_point())]), _feature_collection())
+    with pytest.raises(ValueError, match="unsupported_geometry_type"):
+        gis.intersect_vectors(_feature_collection(), _feature_collection_from([_feature(_point())]))
+
+
+def test_remaining_c4_apis_stay_gated_with_topology_backend(tmp_path: Path):
     _require_topology_backend()
     path = tmp_path / "boundary.geojson"
     path.write_text('{"type":"FeatureCollection","features":[]}', encoding="utf-8")
 
     _assert_backend_unavailable(lambda: gis.dissolve_vector(_feature_collection()))
-    _assert_backend_unavailable(
-        lambda: gis.intersect_vectors(_feature_collection(), _feature_collection())
-    )
     _assert_backend_unavailable(lambda: gis.simplify_geometry(_unit_square(), 0.1))
     _assert_backend_unavailable(lambda: gis.load_boundary(path))
 

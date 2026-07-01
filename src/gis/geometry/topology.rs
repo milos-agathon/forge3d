@@ -11,7 +11,7 @@ pub(crate) fn topology_backend_available() -> bool {
 pub(crate) fn require_topology_backend(operation: &str) -> GisResult<()> {
     if matches!(
         operation,
-        "union_geometries" | "buffer_geometry" | "clip_vector"
+        "union_geometries" | "buffer_geometry" | "clip_vector" | "intersect_vectors"
     ) && topology_backend_available()
     {
         return Ok(());
@@ -81,17 +81,25 @@ pub(super) fn buffer_topology(
 }
 
 #[cfg(feature = "geos-topology")]
-pub(super) fn intersection_polygonal(left: &Geometry, right: &Geometry) -> GisResult<Geometry> {
+pub(super) fn intersection_polygonal(
+    left: &Geometry,
+    right: &Geometry,
+    operation: &str,
+) -> GisResult<Geometry> {
     use geo::BooleanOps;
 
-    let left = polygonal_to_multi_polygon(left, "clip_vector")?;
-    let right = polygonal_to_multi_polygon(right, "clip_vector")?;
+    let left = polygonal_to_multi_polygon(left, operation)?;
+    let right = polygonal_to_multi_polygon(right, operation)?;
     multi_polygon_to_geometry(left.intersection(&right))
 }
 
 #[cfg(not(feature = "geos-topology"))]
-pub(super) fn intersection_polygonal(_left: &Geometry, _right: &Geometry) -> GisResult<Geometry> {
-    require_topology_backend("clip_vector")?;
+pub(super) fn intersection_polygonal(
+    _left: &Geometry,
+    _right: &Geometry,
+    operation: &str,
+) -> GisResult<Geometry> {
+    require_topology_backend(operation)?;
     unreachable!("topology backend is feature-gated")
 }
 

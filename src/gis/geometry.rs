@@ -298,14 +298,52 @@ pub(crate) fn clip_polygonal_geometry_value(
     source: &Value,
     mask: &PolygonalClipMask,
 ) -> GisResult<Option<Value>> {
+    intersect_polygonal_geometry_values_for_operation(
+        source,
+        &geometry_value(&mask.geometry)?,
+        "clip_vector",
+    )
+}
+
+pub(crate) fn validate_polygonal_geometry_value(source: &Value, operation: &str) -> GisResult<()> {
     let input = normalize_input(source, false)?;
     validate_input_or_error(&input)?;
     let geometry = input
         .geometries
         .first()
         .ok_or_else(model::empty_geometry_error)?;
-    require_polygonal_geometry(geometry, "clip_vector")?;
-    let output = intersection_polygonal(geometry, &mask.geometry)?;
+    require_polygonal_geometry(geometry, operation)
+}
+
+pub(crate) fn intersect_polygonal_geometry_values(
+    left: &Value,
+    right: &Value,
+) -> GisResult<Option<Value>> {
+    intersect_polygonal_geometry_values_for_operation(left, right, "intersect_vectors")
+}
+
+fn intersect_polygonal_geometry_values_for_operation(
+    left: &Value,
+    right: &Value,
+    operation: &str,
+) -> GisResult<Option<Value>> {
+    let left_input = normalize_input(left, false)?;
+    validate_input_or_error(&left_input)?;
+    let left_geometry = left_input
+        .geometries
+        .first()
+        .ok_or_else(model::empty_geometry_error)?;
+    require_polygonal_geometry(left_geometry, operation)?;
+
+    let right_input = normalize_input(right, false)?;
+    validate_input_or_error(&right_input)?;
+    let right_geometry = right_input
+        .geometries
+        .first()
+        .ok_or_else(model::empty_geometry_error)?;
+    require_polygonal_geometry(right_geometry, operation)?;
+
+    let output = intersection_polygonal(left_geometry, right_geometry, operation)?;
     if output.is_empty() {
         Ok(None)
     } else {

@@ -7,7 +7,10 @@ use serde_json::{json, Map, Number, Value};
 use crate::gis::affine::validate_bounds_tuple;
 use crate::gis::crs;
 use crate::gis::error::{GisError, GisResult};
-use crate::gis::geometry::{clip_polygonal_geometry_value, prepare_polygonal_clip_mask};
+use crate::gis::geometry::{
+    clip_polygonal_geometry_value, intersect_polygonal_geometry_values,
+    prepare_polygonal_clip_mask, validate_polygonal_geometry_value,
+};
 use crate::gis::raster_write::CrsSpec;
 use crate::gis::types::{RasterBounds, RasterWarning, WARNING_MISSING_CRS};
 
@@ -301,9 +304,58 @@ pub fn clip_vector(
 }
 
 pub fn intersect_vectors(left: &Value, right: &Value, suffixes: (&str, &str)) -> GisResult<Value> {
-    let _ = (left, right, suffixes);
+    let left = resolve_clip_source(left)?;
+    let right = resolve_clip_source(right)?;
+    if !crs::crs_equal(&left.crs, &right.crs) {
+        return Err(GisError::CrsMismatch(format!(
+            "crs_mismatch: left CRS {} does not match right CRS {}",
+            crs::canonical_label(&left.crs)?,
+            crs::canonical_label(&right.crs)?
+        )));
+    }
+
+    if left.features.is_empty() || right.features.is_empty() {
+        let warnings = vec![RasterWarning::new(
+            WARNING_EMPTY_FEATURE_SET,
+            "intersect_vectors input has zero features",
+            Some("features"),
+        )];
+        return intersect_result_value(&left, &right, Vec::new(), warnings, false);
+    }
+
+    for feature in left.features.iter().chain(right.features.iter()) {
+        validate_polygonal_geometry_value(feature_geometry(feature)?, "intersect_vectors")?;
+    }
     crate::gis::geometry::topology::require_topology_backend("intersect_vectors")?;
-    unreachable!("topology backend is not wired in C4.0")
+
+    let mut out_features = Vec::new();
+    for left_feature in &left.features {
+        let left_geometry = feature_geometry(left_feature)?;
+        for right_feature in &right.features {
+            let right_geometry = feature_geometry(right_feature)?;
+            if let Some(geometry) =
+                intersect_polygonal_geometry_values(left_geometry, right_geometry)?
+            {
+                out_features.push(intersection_feature(
+                    left_feature,
+                    right_feature,
+                    geometry,
+                    suffixes,
+                )?);
+            }
+        }
+    }
+
+    let warnings = if out_features.is_empty() {
+        vec![RasterWarning::new(
+            WARNING_EMPTY_OUTPUT,
+            "intersect_vectors produced no output features",
+            Some("features"),
+        )]
+    } else {
+        Vec::new()
+    };
+    intersect_result_value(&left, &right, out_features, warnings, true)
 }
 
 pub fn load_boundary(
@@ -483,6 +535,12 @@ fn crs_spec_from_info_json(info: &Value) -> GisResult<Option<CrsSpec>> {
     Ok(None)
 }
 
+fn feature_geometry(feature: &Value) -> GisResult<&Value> {
+    feature.get("geometry").ok_or_else(|| {
+        GisError::InvalidGeometry("invalid_geometry: Feature requires geometry".to_string())
+    })
+}
+
 fn clipped_feature(feature: &Value, geometry: Value) -> GisResult<Value> {
     let mut object = feature
         .as_object()
@@ -494,6 +552,75 @@ fn clipped_feature(feature: &Value, geometry: Value) -> GisResult<Value> {
     let updated = Value::Object(object.clone());
     update_bbox_member(&mut object, feature_bounds(&updated))?;
     Ok(Value::Object(object))
+}
+
+fn intersection_feature(
+    left: &Value,
+    right: &Value,
+    geometry: Value,
+    suffixes: (&str, &str),
+) -> GisResult<Value> {
+    let mut object = Map::new();
+    object.insert("type".to_string(), Value::String("Feature".to_string()));
+    object.insert("geometry".to_string(), geometry);
+    object.insert(
+        "properties".to_string(),
+        Value::Object(merged_properties(left, right, suffixes)?),
+    );
+    Ok(Value::Object(object))
+}
+
+fn merged_properties(
+    left: &Value,
+    right: &Value,
+    suffixes: (&str, &str),
+) -> GisResult<Map<String, Value>> {
+    let left_props = feature_properties(left)?;
+    let right_props = feature_properties(right)?;
+    let left_keys = left_props.keys().cloned().collect::<BTreeSet<_>>();
+    let right_keys = right_props.keys().cloned().collect::<BTreeSet<_>>();
+    let mut out = Map::new();
+
+    for key in left_keys.difference(&right_keys) {
+        insert_property(&mut out, key.clone(), left_props[key].clone())?;
+    }
+    for key in right_keys.difference(&left_keys) {
+        insert_property(&mut out, key.clone(), right_props[key].clone())?;
+    }
+    for key in left_keys.intersection(&right_keys) {
+        insert_property(
+            &mut out,
+            format!("{key}{}", suffixes.0),
+            left_props[key].clone(),
+        )?;
+        insert_property(
+            &mut out,
+            format!("{key}{}", suffixes.1),
+            right_props[key].clone(),
+        )?;
+    }
+    Ok(out)
+}
+
+fn feature_properties(feature: &Value) -> GisResult<&Map<String, Value>> {
+    feature
+        .get("properties")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            GisError::InvalidGeometry(
+                "invalid_geometry: Feature properties must be an object".to_string(),
+            )
+        })
+}
+
+fn insert_property(out: &mut Map<String, Value>, key: String, value: Value) -> GisResult<()> {
+    if out.contains_key(&key) {
+        return Err(GisError::InvalidArgument(format!(
+            "property_collision: generated property key {key:?} already exists"
+        )));
+    }
+    out.insert(key, value);
+    Ok(())
 }
 
 fn clip_result_value(
@@ -508,6 +635,23 @@ fn clip_result_value(
         "features": features,
         "info": vector_info_json(&info),
         "operation": clip_operation_json(source, &info, &warnings, changed),
+        "warnings": warnings_json(&warnings),
+    }))
+}
+
+fn intersect_result_value(
+    left: &ClipSourceData,
+    right: &ClipSourceData,
+    features: Vec<Value>,
+    warnings: Vec<RasterWarning>,
+    changed: bool,
+) -> GisResult<Value> {
+    let info = clip_vector_info(left, &features, warnings.clone());
+    Ok(json!({
+        "type": "FeatureCollection",
+        "features": features,
+        "info": vector_info_json(&info),
+        "operation": intersect_operation_json(left, right, &info, &warnings, changed),
         "warnings": warnings_json(&warnings),
     }))
 }
@@ -548,6 +692,29 @@ fn clip_operation_json(
         "output_count": info.feature_count,
         "changed": changed,
         "crs": crs_json(&source.crs),
+        "warnings": warnings_json(warnings),
+    })
+}
+
+fn intersect_operation_json(
+    left: &ClipSourceData,
+    right: &ClipSourceData,
+    info: &VectorInfo,
+    warnings: &[RasterWarning],
+    changed: bool,
+) -> Value {
+    json!({
+        "name": "intersect_vectors",
+        "input_geometry_type": format!(
+            "{}+{}",
+            geometry_type_for_features(&left.features),
+            geometry_type_for_features(&right.features)
+        ),
+        "output_geometry_type": info.geometry_type,
+        "input_count": left.features.len() + right.features.len(),
+        "output_count": info.feature_count,
+        "changed": changed,
+        "crs": crs_json(&left.crs),
         "warnings": warnings_json(warnings),
     })
 }
