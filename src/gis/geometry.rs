@@ -21,11 +21,12 @@ use line_ops::{
 };
 use measure::{measure_geometries, validate_metric_names};
 use model::{
-    finite_value, operation_value, point_value, EMPTY_INPUT, EPSILON, INVALID_ARGUMENT,
-    UNSUPPORTED_GEOMETRY_TYPE, UNSUPPORTED_OPTION,
+    finite_value, operation_value, point_value, Coord, Geometry, NormalizedInput, EMPTY_INPUT,
+    EPSILON, GEOMETRY_TYPE_CHANGED, INVALID_ARGUMENT, UNSUPPORTED_GEOMETRY_TYPE,
+    UNSUPPORTED_OPTION,
 };
 use parse::normalize_input;
-use topology::require_topology_backend;
+use topology::{require_topology_backend, union_polygonal};
 use validate::{validate_geometry_value, validate_input_or_error};
 
 pub fn validate_geometry(source: &Value) -> GisResult<Value> {
@@ -179,8 +180,8 @@ pub fn interpolate_line(source: &Value, distance: f64, normalized: bool) -> GisR
 }
 
 pub fn union_geometries(source: &Value) -> GisResult<Value> {
-    let (input_geometry_type, input_count) = union_input_metadata(source)?;
-    if input_count == 0 {
+    let input = normalize_union_input(source)?;
+    if input.input_count == 0 {
         let warnings = vec![RasterWarning::new(
             EMPTY_INPUT,
             "union_geometries received no geometries",
@@ -190,18 +191,45 @@ pub fn union_geometries(source: &Value) -> GisResult<Value> {
             "geometry": Value::Null,
             "operation": operation_value(
                 "union_geometries",
-                &input_geometry_type,
+                &input.input_geometry_type,
                 None,
                 0,
                 0,
                 false,
-                None,
+                input.crs,
                 warnings,
             ),
         }));
     }
-    require_topology_backend("union_geometries")?;
-    unreachable!("topology backend is not wired in C4.0")
+    validate_input_or_error(&input)?;
+    let geometry = union_polygonal(&input.geometries)?;
+    let output_geometry_type = geometry.geometry_type();
+    let type_changed = output_geometry_type != input.input_geometry_type;
+    let warnings = if type_changed {
+        vec![RasterWarning::new(
+            GEOMETRY_TYPE_CHANGED,
+            format!(
+                "union_geometries output type changed from {} to {output_geometry_type}",
+                input.input_geometry_type
+            ),
+            Some("geometry"),
+        )]
+    } else {
+        Vec::new()
+    };
+    Ok(json!({
+        "geometry": geometry_value(&geometry)?,
+        "operation": operation_value(
+            "union_geometries",
+            &input.input_geometry_type,
+            Some(output_geometry_type),
+            input.input_count,
+            1,
+            input.input_count != 1 || type_changed,
+            input.crs,
+            warnings,
+        ),
+    }))
 }
 
 pub fn buffer_geometry(source: &Value, distance: f64, quad_segs: i64) -> GisResult<Value> {
@@ -235,12 +263,19 @@ pub fn simplify_geometry(
     unreachable!("topology backend is not wired in C4.0")
 }
 
-fn union_input_metadata(source: &Value) -> GisResult<(String, usize)> {
+fn normalize_union_input(source: &Value) -> GisResult<NormalizedInput> {
     if let Some(items) = source.as_array() {
-        return Ok((
-            if items.is_empty() { "Empty" } else { "Mixed" }.to_string(),
-            items.len(),
-        ));
+        let mut geometries = Vec::with_capacity(items.len());
+        for item in items {
+            let input = normalize_input(item, false)?;
+            geometries.extend(input.geometries);
+        }
+        return Ok(NormalizedInput {
+            input_geometry_type: common_geometry_type(&geometries),
+            input_count: items.len(),
+            geometries,
+            crs: None,
+        });
     }
     if source.get("type").and_then(Value::as_str) == Some("FeatureCollection") {
         let features = source
@@ -251,19 +286,64 @@ fn union_input_metadata(source: &Value) -> GisResult<(String, usize)> {
                     "{INVALID_ARGUMENT}: FeatureCollection requires a features array"
                 ))
             })?;
-        return Ok((
-            if features.is_empty() {
-                "Empty"
-            } else {
-                "Mixed"
-            }
-            .to_string(),
-            features.len(),
-        ));
+        let mut input = normalize_input(source, true)?;
+        input.input_geometry_type = common_geometry_type(&input.geometries);
+        input.input_count = features.len();
+        return Ok(input);
     }
     Err(GisError::InvalidArgument(format!(
         "{INVALID_ARGUMENT}: union_geometries requires a sequence of geometries"
     )))
+}
+
+fn common_geometry_type(geometries: &[Geometry]) -> String {
+    let Some(first) = geometries.first() else {
+        return "Empty".to_string();
+    };
+    let first_type = first.geometry_type();
+    if geometries
+        .iter()
+        .all(|geometry| geometry.geometry_type() == first_type)
+    {
+        first_type.to_string()
+    } else {
+        "Mixed".to_string()
+    }
+}
+
+fn geometry_value(geometry: &Geometry) -> GisResult<Value> {
+    match geometry {
+        Geometry::Polygon(rings) => Ok(json!({
+            "type": "Polygon",
+            "coordinates": rings_value(rings)?,
+        })),
+        Geometry::MultiPolygon(polygons) => {
+            let mut out = Vec::with_capacity(polygons.len());
+            for rings in polygons {
+                out.push(rings_value(rings)?);
+            }
+            Ok(json!({
+                "type": "MultiPolygon",
+                "coordinates": out,
+            }))
+        }
+        Geometry::Empty => Ok(Value::Null),
+        other => Err(GisError::InvalidGeometry(format!(
+            "{UNSUPPORTED_GEOMETRY_TYPE}: cannot serialize {} as union output",
+            other.geometry_type()
+        ))),
+    }
+}
+
+fn rings_value(rings: &[Vec<Coord>]) -> GisResult<Vec<Vec<Value>>> {
+    rings
+        .iter()
+        .map(|ring| {
+            ring.iter()
+                .map(|coord| Ok(json!([finite_value(coord.x)?, finite_value(coord.y)?])))
+                .collect()
+        })
+        .collect()
 }
 
 #[cfg(feature = "extension-module")]

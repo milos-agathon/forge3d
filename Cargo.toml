@@ -53,8 +53,8 @@ copc_laz = ["dep:laz"]
 cog_streaming = ["dep:reqwest", "dep:async-trait", "dep:tokio", "dep:flate2"]
 # P3-reproject: On-the-fly CRS reprojection via PROJ
 proj = ["dep:proj"]
-# G-002c C4: reserved robust topology backend gate.
-geos-topology = []
+# G-002c C4: robust topology backend gate for polygonal overlay operations.
+geos-topology = ["dep:geo"]
 # A2-END:cargo-features
 
 [dependencies]
@@ -99,6 +99,8 @@ async-trait = { version = "0.1", optional = true }
 flate2 = { version = "1.0", optional = true }
 # P3-reproject: CRS transformation via PROJ (optional, feature-gated)
 proj = { version = "0.27", optional = true }
+# G-002c C4.1: pure-Rust polygon boolean operations, feature-gated.
+geo = { version = "0.33.1", default-features = false, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

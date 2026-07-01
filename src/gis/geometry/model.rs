@@ -10,6 +10,7 @@ pub(super) const UNSUPPORTED_GEOMETRY_TYPE: &str = "unsupported_geometry_type";
 pub(super) const UNSUPPORTED_OPTION: &str = "unsupported_option";
 pub(super) const INVALID_ARGUMENT: &str = "invalid_argument";
 pub(super) const BACKEND_UNAVAILABLE: &str = "backend_unavailable";
+pub(super) const GEOMETRY_TYPE_CHANGED: &str = "geometry_type_changed";
 
 pub(super) const EPSILON: f64 = 1.0e-12;
 
