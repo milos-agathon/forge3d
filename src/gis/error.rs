@@ -16,6 +16,7 @@ pub enum GisError {
     MissingTransform(String),
     InvalidNodata(String),
     InvalidArgument(String),
+    InvalidGeometry(String),
     InvalidBounds(String),
     MissingCrs(String),
     CrsAlreadyExists(String),
@@ -45,6 +46,7 @@ impl GisError {
             GisError::MissingTransform(_) => "MissingTransform",
             GisError::InvalidNodata(_) => "InvalidNodata",
             GisError::InvalidArgument(_) => "InvalidArgument",
+            GisError::InvalidGeometry(_) => "InvalidGeometry",
             GisError::InvalidBounds(_) => "InvalidBounds",
             GisError::MissingCrs(_) => "MissingCrs",
             GisError::CrsAlreadyExists(_) => "CrsAlreadyExists",
@@ -73,6 +75,7 @@ impl GisError {
             | GisError::MissingTransform(message)
             | GisError::InvalidNodata(message)
             | GisError::InvalidArgument(message)
+            | GisError::InvalidGeometry(message)
             | GisError::InvalidBounds(message)
             | GisError::MissingCrs(message)
             | GisError::CrsAlreadyExists(message)
@@ -138,6 +141,7 @@ impl From<GisError> for pyo3::PyErr {
             | GisError::MissingTransform(_)
             | GisError::InvalidNodata(_)
             | GisError::InvalidArgument(_)
+            | GisError::InvalidGeometry(_)
             | GisError::InvalidBounds(_)
             | GisError::MissingCrs(_)
             | GisError::CrsAlreadyExists(_)

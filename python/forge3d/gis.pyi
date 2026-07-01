@@ -140,6 +140,13 @@ def read_vector(
 ) -> dict[str, Any]: ...
 
 
+def reproject_vector(
+    input: os.PathLike[str] | str | dict[str, Any],
+    dst_crs: str | int | dict[str, Any],
+    src_crs: str | int | dict[str, Any] | None = ...,
+) -> dict[str, Any]: ...
+
+
 def geometry_type(
     source: os.PathLike[str] | str | VectorInfo | dict[str, Any],
     *,

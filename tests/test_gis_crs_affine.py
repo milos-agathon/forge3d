@@ -84,6 +84,7 @@ def test_gis_stub_exposes_runtime_api():
         "assert_grid_compatible",
         "align_raster_grid",
         "align_raster_to",
+        "reproject_vector",
         "reproject_raster",
         "calculate_default_transform",
         "read_raster_window",

@@ -122,6 +122,7 @@ def test_public_gis_wrapper_surface():
         "read_raster_info",
         "read_raster",
         "read_vector",
+        "reproject_vector",
         "geometry_type",
         "vector_schema",
         "feature_count",
@@ -162,6 +163,7 @@ def test_public_gis_wrapper_surface():
     assert callable(gis.read_raster_info)
     assert callable(gis.read_raster)
     assert callable(gis.read_vector)
+    assert callable(gis.reproject_vector)
     assert callable(gis.geometry_type)
     assert callable(gis.vector_schema)
     assert callable(gis.feature_count)
