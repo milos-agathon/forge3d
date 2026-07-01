@@ -4,6 +4,7 @@ pub mod error;
 pub mod raster_info;
 pub mod raster_write;
 pub mod types;
+pub mod vector;
 pub mod warp;
 
 pub use affine::{window_from_bounds, PixelWindow, RasterWindow};
@@ -14,6 +15,12 @@ pub use raster_write::{
     write_raster, CreationOptions, CrsSpec, RasterArray, RasterData, WriteRasterOptions,
 };
 pub use types::{AffineTransform, RasterBounds, RasterDType, RasterInfo, RasterWarning};
+#[cfg(feature = "extension-module")]
+pub use vector::{
+    feature_count_py, geometry_type_py, read_vector_py, vector_bounds_py, vector_crs_py,
+    vector_schema_py,
+};
+pub use vector::{read_vector, read_vector_info, VectorInfo, VectorReadOptions, VectorReadResult};
 pub use warp::{align_raster_to, assign_crs, reproject_raster, resample_array, resample_raster};
 
 #[cfg(feature = "extension-module")]

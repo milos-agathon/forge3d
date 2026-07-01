@@ -5,6 +5,12 @@ pub(crate) fn register_gis_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()>
     m.add_function(wrap_pyfunction!(crate::gis::read_raster_info_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::read_raster_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::write_raster_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::read_vector_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::geometry_type_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::vector_schema_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::feature_count_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::vector_crs_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::vector_bounds_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::parse_crs_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::inspect_crs_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::raster_crs_py, m)?)?;

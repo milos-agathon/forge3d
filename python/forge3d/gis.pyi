@@ -44,6 +44,34 @@ class RasterInfo:
     def as_dict(self) -> dict[str, Any]: ...
 
 
+class VectorInfo:
+    @property
+    def path(self) -> str: ...
+    @property
+    def driver(self) -> str: ...
+    @property
+    def layer_name(self) -> str | None: ...
+    @property
+    def layer_count(self) -> int: ...
+    @property
+    def geometry_type(self) -> str: ...
+    @property
+    def feature_count(self) -> int: ...
+    @property
+    def schema(self) -> list[dict[str, Any]]: ...
+    @property
+    def crs_wkt(self) -> str | None: ...
+    @property
+    def crs_authority(self) -> dict[str, str] | None: ...
+    @property
+    def bounds(self) -> tuple[float, float, float, float] | None: ...
+    @property
+    def is_georeferenced(self) -> bool: ...
+    @property
+    def warnings(self) -> list[dict[str, str | None]]: ...
+    def as_dict(self) -> dict[str, Any]: ...
+
+
 class AffineTransform:
     def __init__(self, a: float, b: float, c: float, d: float, e: float, f: float) -> None: ...
     @property
@@ -100,6 +128,51 @@ def read_raster(
     window: tuple[int, int, int, int] | dict[str, int] | None = ...,
     masked: bool = ...,
 ) -> RasterReadResult: ...
+
+
+def read_vector(
+    path: os.PathLike[str] | str,
+    *,
+    layer: str | None = ...,
+    columns: list[str] | tuple[str, ...] | None = ...,
+    bbox: tuple[float, float, float, float] | None = ...,
+    limit: int | None = ...,
+) -> dict[str, Any]: ...
+
+
+def geometry_type(
+    source: os.PathLike[str] | str | VectorInfo | dict[str, Any],
+    *,
+    layer: str | None = ...,
+) -> str: ...
+
+
+def vector_schema(
+    source: os.PathLike[str] | str | VectorInfo | dict[str, Any],
+    *,
+    layer: str | None = ...,
+) -> list[dict[str, Any]]: ...
+
+
+def feature_count(
+    source: os.PathLike[str] | str | VectorInfo | dict[str, Any],
+    *,
+    layer: str | None = ...,
+) -> int: ...
+
+
+def vector_crs(
+    source: os.PathLike[str] | str | VectorInfo | dict[str, Any],
+    *,
+    layer: str | None = ...,
+) -> dict[str, Any]: ...
+
+
+def vector_bounds(
+    source: os.PathLike[str] | str | VectorInfo | dict[str, Any],
+    *,
+    layer: str | None = ...,
+) -> tuple[float, float, float, float]: ...
 
 
 def write_raster(

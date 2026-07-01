@@ -15,6 +15,11 @@ if _native is not None and hasattr(_native, "RasterInfo"):
 else:  # pragma: no cover - exercised only without the compiled extension
     RasterInfo = None
 
+if _native is not None and hasattr(_native, "VectorInfo"):
+    VectorInfo = _native.VectorInfo
+else:  # pragma: no cover - exercised only without the compiled extension
+    VectorInfo = None
+
 if _native is not None and hasattr(_native, "AffineTransform"):
     AffineTransform = _native.AffineTransform
 else:  # pragma: no cover - exercised only without the compiled extension
@@ -58,6 +63,53 @@ def read_raster(
         window=window,
         masked=masked,
     )
+
+
+def read_vector(
+    path: os.PathLike[str] | str,
+    *,
+    layer: str | None = None,
+    columns: list[str] | tuple[str, ...] | None = None,
+    bbox: tuple[float, float, float, float] | None = None,
+    limit: int | None = None,
+):
+    """Read a local GeoJSON vector source and return a FeatureCollection-like dict."""
+    return _require_native().read_vector(
+        os.fspath(path),
+        layer=layer,
+        columns=columns,
+        bbox=bbox,
+        limit=limit,
+    )
+
+
+def geometry_type(source: os.PathLike[str] | str | Any, *, layer: str | None = None) -> str:
+    """Return a stable geometry type string for a vector source or GeoJSON-like object."""
+    return _require_native().geometry_type(_path_or_self(source), layer=layer)
+
+
+def vector_schema(source: os.PathLike[str] | str | Any, *, layer: str | None = None):
+    """Return vector field schema metadata."""
+    return _require_native().vector_schema(_path_or_self(source), layer=layer)
+
+
+def feature_count(source: os.PathLike[str] | str | Any, *, layer: str | None = None) -> int:
+    """Return the feature count for a vector source or FeatureCollection-like dict."""
+    return _require_native().feature_count(_path_or_self(source), layer=layer)
+
+
+def vector_crs(source: os.PathLike[str] | str | Any, *, layer: str | None = None):
+    """Return CRS metadata for a vector source without guessing missing CRS."""
+    return _require_native().vector_crs(_path_or_self(source), layer=layer)
+
+
+def vector_bounds(
+    source: os.PathLike[str] | str | Any,
+    *,
+    layer: str | None = None,
+) -> tuple[float, float, float, float]:
+    """Return vector bounds as (left, bottom, right, top)."""
+    return _require_native().vector_bounds(_path_or_self(source), layer=layer)
 
 
 def _path_or_self(value: Any):
@@ -353,11 +405,18 @@ def web_mercator_bounds(
 
 __all__ = [
     "RasterInfo",
+    "VectorInfo",
     "AffineTransform",
     "CrsTransform",
     "RasterReadResult",
     "read_raster_info",
     "read_raster",
+    "read_vector",
+    "geometry_type",
+    "vector_schema",
+    "feature_count",
+    "vector_crs",
+    "vector_bounds",
     "write_raster",
     "parse_crs",
     "inspect_crs",

@@ -112,13 +112,21 @@ def test_public_gis_wrapper_surface():
     native = get_native_module()
 
     assert gis.RasterInfo is native.RasterInfo
+    assert gis.VectorInfo is native.VectorInfo
     assert set(gis.__all__) == {
         "RasterInfo",
+        "VectorInfo",
         "AffineTransform",
         "CrsTransform",
         "RasterReadResult",
         "read_raster_info",
         "read_raster",
+        "read_vector",
+        "geometry_type",
+        "vector_schema",
+        "feature_count",
+        "vector_crs",
+        "vector_bounds",
         "write_raster",
         "parse_crs",
         "inspect_crs",
@@ -153,6 +161,12 @@ def test_public_gis_wrapper_surface():
     }
     assert callable(gis.read_raster_info)
     assert callable(gis.read_raster)
+    assert callable(gis.read_vector)
+    assert callable(gis.geometry_type)
+    assert callable(gis.vector_schema)
+    assert callable(gis.feature_count)
+    assert callable(gis.vector_crs)
+    assert callable(gis.vector_bounds)
     assert callable(gis.write_raster)
     assert callable(gis.parse_crs)
     assert callable(gis.inspect_crs)
