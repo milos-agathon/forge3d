@@ -87,6 +87,7 @@ class TestNativeModuleSymbols:
         "SmokeStepSettings",
         "SmokeRenderSettings",
         "RasterInfo",
+        "VectorInfo",
         "AffineTransform",
         "CrsTransform",
     ]
@@ -126,6 +127,12 @@ class TestNativeModuleSymbols:
         "read_raster_info",
         "read_raster",
         "write_raster",
+        "read_vector",
+        "geometry_type",
+        "vector_schema",
+        "feature_count",
+        "vector_crs",
+        "vector_bounds",
         # G-002b: Rust-backed GIS CRS/affine/warp operations
         "parse_crs",
         "inspect_crs",
