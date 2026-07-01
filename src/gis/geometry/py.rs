@@ -62,6 +62,40 @@ pub fn interpolate_line_py(
     json_to_py(py, &result)
 }
 
+#[pyfunction(name = "union_geometries")]
+pub fn union_geometries_py(py: Python<'_>, geometries: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let source = py_to_json_strict(geometries)?;
+    let result = super::union_geometries(&source)?;
+    json_to_py(py, &result)
+}
+
+#[pyfunction(name = "buffer_geometry", signature = (geometry, distance, *, quad_segs = 8))]
+pub fn buffer_geometry_py(
+    py: Python<'_>,
+    geometry: &Bound<'_, PyAny>,
+    distance: f64,
+    quad_segs: i64,
+) -> PyResult<PyObject> {
+    let source = py_to_json_strict(geometry)?;
+    let result = super::buffer_geometry(&source, distance, quad_segs)?;
+    json_to_py(py, &result)
+}
+
+#[pyfunction(
+    name = "simplify_geometry",
+    signature = (geometry, tolerance, *, preserve_topology = true)
+)]
+pub fn simplify_geometry_py(
+    py: Python<'_>,
+    geometry: &Bound<'_, PyAny>,
+    tolerance: f64,
+    preserve_topology: bool,
+) -> PyResult<PyObject> {
+    let source = py_to_json_strict(geometry)?;
+    let result = super::simplify_geometry(&source, tolerance, preserve_topology)?;
+    json_to_py(py, &result)
+}
+
 fn metrics_from_py(metrics: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<String>> {
     let Some(metrics) = metrics else {
         return Ok(vec!["area".to_string(), "length".to_string()]);

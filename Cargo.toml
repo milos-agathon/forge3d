@@ -53,6 +53,8 @@ copc_laz = ["dep:laz"]
 cog_streaming = ["dep:reqwest", "dep:async-trait", "dep:tokio", "dep:flate2"]
 # P3-reproject: On-the-fly CRS reprojection via PROJ
 proj = ["dep:proj"]
+# G-002c C4: reserved robust topology backend gate.
+geos-topology = []
 # A2-END:cargo-features
 
 [dependencies]

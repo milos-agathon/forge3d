@@ -213,6 +213,56 @@ def interpolate_line(
 ) -> dict[str, Any]: ...
 
 
+def union_geometries(geometries: list[dict[str, Any]] | tuple[dict[str, Any], ...]) -> dict[str, Any]: ...
+
+
+def dissolve_vector(
+    source: os.PathLike[str] | str | dict[str, Any],
+    *,
+    by: str | list[str] | tuple[str, ...] | None = ...,
+) -> dict[str, Any]: ...
+
+
+def buffer_geometry(
+    geometry: dict[str, Any],
+    distance: float,
+    *,
+    quad_segs: int = ...,
+) -> dict[str, Any]: ...
+
+
+def clip_vector(
+    source: os.PathLike[str] | str | dict[str, Any],
+    clip_geometry: dict[str, Any],
+    *,
+    clip_crs: str | int | dict[str, Any] | None = ...,
+) -> dict[str, Any]: ...
+
+
+def intersect_vectors(
+    left: os.PathLike[str] | str | dict[str, Any],
+    right: os.PathLike[str] | str | dict[str, Any],
+    *,
+    suffixes: tuple[str, str] = ...,
+) -> dict[str, Any]: ...
+
+
+def simplify_geometry(
+    geometry: dict[str, Any],
+    tolerance: float,
+    *,
+    preserve_topology: bool = ...,
+) -> dict[str, Any]: ...
+
+
+def load_boundary(
+    path: os.PathLike[str] | str,
+    *,
+    layer: str | None = ...,
+    where: str | None = ...,
+) -> dict[str, Any]: ...
+
+
 def write_raster(
     path: os.PathLike[str] | str,
     array: np.ndarray,

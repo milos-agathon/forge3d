@@ -1,6 +1,7 @@
 use serde_json::{json, Map, Value};
 
 use crate::gis::error::{GisError, GisResult};
+use crate::gis::types::RasterWarning;
 
 mod centroid;
 mod line_ops;
@@ -10,6 +11,7 @@ mod model;
 mod parse;
 #[cfg(feature = "extension-module")]
 mod py;
+pub(crate) mod topology;
 mod validate;
 
 use centroid::centroid_for_geometries;
@@ -19,10 +21,11 @@ use line_ops::{
 };
 use measure::{measure_geometries, validate_metric_names};
 use model::{
-    finite_value, operation_value, point_value, BACKEND_UNAVAILABLE, EPSILON,
+    finite_value, operation_value, point_value, EMPTY_INPUT, EPSILON, INVALID_ARGUMENT,
     UNSUPPORTED_GEOMETRY_TYPE, UNSUPPORTED_OPTION,
 };
 use parse::normalize_input;
+use topology::require_topology_backend;
 use validate::{validate_geometry_value, validate_input_or_error};
 
 pub fn validate_geometry(source: &Value) -> GisResult<Value> {
@@ -41,9 +44,8 @@ pub fn repair_geometry(source: &Value, method: &str) -> GisResult<Value> {
             "{UNSUPPORTED_GEOMETRY_TYPE}: repair_geometry does not accept FeatureCollection"
         )));
     }
-    Err(GisError::BackendUnavailable(format!(
-        "{BACKEND_UNAVAILABLE}: geos-topology feature required for make_valid"
-    )))
+    require_topology_backend("make_valid")?;
+    unreachable!("topology backend is not wired in C4.0")
 }
 
 pub fn geometry_measure(source: &Value, metrics: &[String]) -> GisResult<Value> {
@@ -176,10 +178,99 @@ pub fn interpolate_line(source: &Value, distance: f64, normalized: bool) -> GisR
     }))
 }
 
+pub fn union_geometries(source: &Value) -> GisResult<Value> {
+    let (input_geometry_type, input_count) = union_input_metadata(source)?;
+    if input_count == 0 {
+        let warnings = vec![RasterWarning::new(
+            EMPTY_INPUT,
+            "union_geometries received no geometries",
+            Some("geometries"),
+        )];
+        return Ok(json!({
+            "geometry": Value::Null,
+            "operation": operation_value(
+                "union_geometries",
+                &input_geometry_type,
+                None,
+                0,
+                0,
+                false,
+                None,
+                warnings,
+            ),
+        }));
+    }
+    require_topology_backend("union_geometries")?;
+    unreachable!("topology backend is not wired in C4.0")
+}
+
+pub fn buffer_geometry(source: &Value, distance: f64, quad_segs: i64) -> GisResult<Value> {
+    let _ = source;
+    if !distance.is_finite() {
+        return Err(GisError::InvalidArgument(format!(
+            "{INVALID_ARGUMENT}: buffer distance must be finite"
+        )));
+    }
+    if quad_segs < 1 {
+        return Err(GisError::InvalidArgument(format!(
+            "{INVALID_ARGUMENT}: quad_segs must be at least 1"
+        )));
+    }
+    require_topology_backend("buffer_geometry")?;
+    unreachable!("topology backend is not wired in C4.0")
+}
+
+pub fn simplify_geometry(
+    source: &Value,
+    tolerance: f64,
+    preserve_topology: bool,
+) -> GisResult<Value> {
+    let _ = (source, preserve_topology);
+    if !tolerance.is_finite() || tolerance < 0.0 {
+        return Err(GisError::InvalidArgument(format!(
+            "{INVALID_ARGUMENT}: simplify tolerance must be finite and non-negative"
+        )));
+    }
+    require_topology_backend("simplify_geometry")?;
+    unreachable!("topology backend is not wired in C4.0")
+}
+
+fn union_input_metadata(source: &Value) -> GisResult<(String, usize)> {
+    if let Some(items) = source.as_array() {
+        return Ok((
+            if items.is_empty() { "Empty" } else { "Mixed" }.to_string(),
+            items.len(),
+        ));
+    }
+    if source.get("type").and_then(Value::as_str) == Some("FeatureCollection") {
+        let features = source
+            .get("features")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                GisError::InvalidArgument(format!(
+                    "{INVALID_ARGUMENT}: FeatureCollection requires a features array"
+                ))
+            })?;
+        return Ok((
+            if features.is_empty() {
+                "Empty"
+            } else {
+                "Mixed"
+            }
+            .to_string(),
+            features.len(),
+        ));
+    }
+    Err(GisError::InvalidArgument(format!(
+        "{INVALID_ARGUMENT}: union_geometries requires a sequence of geometries"
+    )))
+}
+
 #[cfg(feature = "extension-module")]
 pub use py::{
-    geometry_centroid_py, geometry_measure_py, interpolate_line_py, repair_geometry_py,
-    representative_point_py, validate_geometry_py,
+    buffer_geometry_py, geometry_centroid_py, geometry_measure_py, interpolate_line_py,
+    repair_geometry_py, representative_point_py, simplify_geometry_py, union_geometries_py,
+    validate_geometry_py,
 };
 
 #[cfg(test)]

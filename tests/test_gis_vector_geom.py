@@ -366,27 +366,16 @@ def test_no_python_gis_backend_imports_in_forge3d_gis():
         assert banned not in source
 
 
-def test_no_later_phase_api_names_in_c3_public_surfaces():
+def test_no_c5_c6_api_names_in_gis_public_surfaces():
     repo = Path(__file__).resolve().parents[1]
     files = [
         repo / "python/forge3d/gis.py",
         repo / "python/forge3d/gis.pyi",
         repo / "src/py_module/functions/gis.rs",
-        repo / "tests/test_api_contracts.py",
-        repo / "tests/test_gis_raster.py",
-        repo / "tests/test_gis_crs_affine.py",
-        repo / "tests/test_gis_vector_geom.py",
     ]
     banned = [
         "_".join(parts)
         for parts in (
-            ("union", "geometries"),
-            ("dissolve", "vector"),
-            ("buffer", "geometry"),
-            ("clip", "vector"),
-            ("intersect", "vectors"),
-            ("simplify", "geometry"),
-            ("load", "boundary"),
             ("rasterize", "vectors"),
             ("geometry", "mask"),
             ("mask", "raster"),

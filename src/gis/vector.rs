@@ -245,6 +245,43 @@ pub fn reproject_vector(
     })
 }
 
+pub fn dissolve_vector(source: &Value, by: Option<Vec<String>>) -> GisResult<Value> {
+    let _ = (source, by);
+    crate::gis::geometry::topology::require_topology_backend("dissolve_vector")?;
+    unreachable!("topology backend is not wired in C4.0")
+}
+
+pub fn clip_vector(
+    source: &Value,
+    clip_geometry: &Value,
+    clip_crs: Option<Value>,
+) -> GisResult<Value> {
+    let _ = (source, clip_geometry, clip_crs);
+    crate::gis::geometry::topology::require_topology_backend("clip_vector")?;
+    unreachable!("topology backend is not wired in C4.0")
+}
+
+pub fn intersect_vectors(left: &Value, right: &Value, suffixes: (&str, &str)) -> GisResult<Value> {
+    let _ = (left, right, suffixes);
+    crate::gis::geometry::topology::require_topology_backend("intersect_vectors")?;
+    unreachable!("topology backend is not wired in C4.0")
+}
+
+pub fn load_boundary(
+    path: impl AsRef<Path>,
+    layer: Option<String>,
+    where_clause: Option<String>,
+) -> GisResult<Value> {
+    let _ = (path.as_ref(), layer);
+    if where_clause.is_some() {
+        return Err(GisError::InvalidArgument(
+            "unsupported_option: load_boundary where filtering is not implemented".to_string(),
+        ));
+    }
+    crate::gis::geometry::topology::require_topology_backend("load_boundary")?;
+    unreachable!("topology backend is not wired in C4.0")
+}
+
 #[cfg(feature = "extension-module")]
 fn normalize_reproject_features(root: &Value) -> GisResult<Vec<Value>> {
     match root.get("type").and_then(Value::as_str) {
@@ -1060,7 +1097,7 @@ mod py {
     use super::*;
     use crate::gis::py_json::{json_to_py, py_to_json, py_to_json_strict, warnings_to_py};
     use pyo3::prelude::*;
-    use pyo3::types::{PyAny, PyDict, PyDictMethods, PyList};
+    use pyo3::types::{PyAny, PyDict, PyDictMethods, PyList, PyTuple};
     use pyo3::IntoPy;
 
     #[pyo3::pymethods]
@@ -1257,6 +1294,57 @@ mod py {
         vector_reproject_result_to_py(py, &result)
     }
 
+    #[pyfunction(name = "dissolve_vector", signature = (source, *, by = None))]
+    pub fn dissolve_vector_py(
+        py: Python<'_>,
+        source: &Bound<'_, PyAny>,
+        by: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyObject> {
+        let source = py_to_json_strict(source)?;
+        let by = by_from_py(by)?;
+        let result = dissolve_vector(&source, by)?;
+        json_to_py(py, &result)
+    }
+
+    #[pyfunction(name = "clip_vector", signature = (source, clip_geometry, *, clip_crs = None))]
+    pub fn clip_vector_py(
+        py: Python<'_>,
+        source: &Bound<'_, PyAny>,
+        clip_geometry: &Bound<'_, PyAny>,
+        clip_crs: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyObject> {
+        let source = py_to_json_strict(source)?;
+        let clip_geometry = py_to_json_strict(clip_geometry)?;
+        let clip_crs = clip_crs.map(py_to_json_strict).transpose()?;
+        let result = clip_vector(&source, &clip_geometry, clip_crs)?;
+        json_to_py(py, &result)
+    }
+
+    #[pyfunction(name = "intersect_vectors", signature = (left, right, *, suffixes = None))]
+    pub fn intersect_vectors_py(
+        py: Python<'_>,
+        left: &Bound<'_, PyAny>,
+        right: &Bound<'_, PyAny>,
+        suffixes: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<PyObject> {
+        let left = py_to_json_strict(left)?;
+        let right = py_to_json_strict(right)?;
+        let suffixes = suffixes_from_py(suffixes)?;
+        let result = intersect_vectors(&left, &right, (&suffixes.0, &suffixes.1))?;
+        json_to_py(py, &result)
+    }
+
+    #[pyfunction(name = "load_boundary", signature = (path, *, layer = None, r#where = None))]
+    pub fn load_boundary_py(
+        py: Python<'_>,
+        path: String,
+        layer: Option<String>,
+        r#where: Option<String>,
+    ) -> PyResult<PyObject> {
+        let result = load_boundary(path, layer, r#where)?;
+        json_to_py(py, &result)
+    }
+
     fn vector_read_result_to_py(py: Python<'_>, result: &VectorReadResult) -> PyResult<PyObject> {
         let dict = PyDict::new_bound(py);
         dict.set_item("type", "FeatureCollection")?;
@@ -1288,6 +1376,76 @@ mod py {
         dict.set_item("feature_count", result.feature_count)?;
         dict.set_item("warnings", warnings_to_py(py, &result.warnings)?)?;
         Ok(dict.into_py(py))
+    }
+
+    fn by_from_py(value: Option<&Bound<'_, PyAny>>) -> PyResult<Option<Vec<String>>> {
+        let Some(value) = value else {
+            return Ok(None);
+        };
+        if value.is_none() {
+            return Ok(None);
+        }
+        if let Ok(field) = value.extract::<String>() {
+            return Ok(Some(vec![field]));
+        }
+        let items = if let Ok(list) = value.downcast::<PyList>() {
+            strings_from_iter(list.iter(), "by")?
+        } else if let Ok(tuple) = value.downcast::<PyTuple>() {
+            strings_from_iter(tuple.iter(), "by")?
+        } else {
+            return Err(GisError::InvalidArgument(
+                "invalid_argument: by must be None, a string, or a sequence of strings".to_string(),
+            )
+            .into());
+        };
+        if items.is_empty() {
+            return Err(GisError::InvalidArgument(
+                "invalid_argument: by sequence must not be empty".to_string(),
+            )
+            .into());
+        }
+        Ok(Some(items))
+    }
+
+    fn suffixes_from_py(value: Option<&Bound<'_, PyAny>>) -> PyResult<(String, String)> {
+        let Some(value) = value else {
+            return Ok(("_left".to_string(), "_right".to_string()));
+        };
+        if value.is_none() {
+            return Ok(("_left".to_string(), "_right".to_string()));
+        }
+        let items = if let Ok(list) = value.downcast::<PyList>() {
+            strings_from_iter(list.iter(), "suffixes")
+        } else if let Ok(tuple) = value.downcast::<PyTuple>() {
+            strings_from_iter(tuple.iter(), "suffixes")
+        } else {
+            Err(GisError::InvalidArgument(
+                "invalid_argument: suffixes must be a pair of strings".to_string(),
+            )
+            .into())
+        }?;
+        if items.len() != 2 {
+            return Err(GisError::InvalidArgument(
+                "invalid_argument: suffixes must contain exactly two strings".to_string(),
+            )
+            .into());
+        }
+        Ok((items[0].clone(), items[1].clone()))
+    }
+
+    fn strings_from_iter<'py>(
+        items: impl Iterator<Item = Bound<'py, PyAny>>,
+        field: &str,
+    ) -> PyResult<Vec<String>> {
+        let mut out = Vec::new();
+        for item in items {
+            out.push(item.extract::<String>().map_err(|_| {
+                GisError::InvalidArgument(format!(
+                    "invalid_argument: {field} must contain only strings"
+                ))
+            })?);
+        }
+        Ok(out)
     }
 
     fn crs_spec_to_py(py: Python<'_>, spec: &CrsSpec, source_kind: &str) -> PyResult<PyObject> {
@@ -1674,6 +1832,7 @@ mod py {
 
 #[cfg(feature = "extension-module")]
 pub use py::{
-    feature_count_py, geometry_type_py, read_vector_py, reproject_vector_py, vector_bounds_py,
-    vector_crs_py, vector_schema_py,
+    clip_vector_py, dissolve_vector_py, feature_count_py, geometry_type_py, intersect_vectors_py,
+    load_boundary_py, read_vector_py, reproject_vector_py, vector_bounds_py, vector_crs_py,
+    vector_schema_py,
 };

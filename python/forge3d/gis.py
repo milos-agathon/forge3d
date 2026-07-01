@@ -164,6 +164,77 @@ def interpolate_line(
     )
 
 
+def union_geometries(geometries):
+    """Union GeoJSON-like geometries through the native topology backend."""
+    return _require_native().union_geometries(geometries)
+
+
+def dissolve_vector(source: os.PathLike[str] | str | dict[str, Any], *, by=None):
+    """Dissolve a vector source through the native topology backend."""
+    return _require_native().dissolve_vector(_path_or_self(source), by=by)
+
+
+def buffer_geometry(geometry: dict[str, Any], distance: float, *, quad_segs: int = 8):
+    """Buffer a GeoJSON-like geometry through the native topology backend."""
+    return _require_native().buffer_geometry(geometry, distance, quad_segs=quad_segs)
+
+
+def clip_vector(
+    source: os.PathLike[str] | str | dict[str, Any],
+    clip_geometry: dict[str, Any],
+    *,
+    clip_crs: str | int | dict[str, Any] | None = None,
+):
+    """Clip a vector source through the native topology backend."""
+    return _require_native().clip_vector(
+        _path_or_self(source),
+        clip_geometry,
+        clip_crs=clip_crs,
+    )
+
+
+def intersect_vectors(
+    left: os.PathLike[str] | str | dict[str, Any],
+    right: os.PathLike[str] | str | dict[str, Any],
+    *,
+    suffixes: tuple[str, str] = ("_left", "_right"),
+):
+    """Intersect vector sources through the native topology backend."""
+    return _require_native().intersect_vectors(
+        _path_or_self(left),
+        _path_or_self(right),
+        suffixes=suffixes,
+    )
+
+
+def simplify_geometry(
+    geometry: dict[str, Any],
+    tolerance: float,
+    *,
+    preserve_topology: bool = True,
+):
+    """Simplify a GeoJSON-like geometry through the native topology backend."""
+    return _require_native().simplify_geometry(
+        geometry,
+        tolerance,
+        preserve_topology=preserve_topology,
+    )
+
+
+def load_boundary(
+    path: os.PathLike[str] | str,
+    *,
+    layer: str | None = None,
+    where: str | None = None,
+):
+    """Load a vector boundary through the native topology backend."""
+    return _require_native().load_boundary(
+        os.fspath(path),
+        layer=layer,
+        where=where,
+    )
+
+
 def _path_or_self(value: Any):
     return os.fspath(value) if isinstance(value, (str, os.PathLike)) else value
 
@@ -476,6 +547,13 @@ __all__ = [
     "geometry_centroid",
     "representative_point",
     "interpolate_line",
+    "union_geometries",
+    "dissolve_vector",
+    "buffer_geometry",
+    "clip_vector",
+    "intersect_vectors",
+    "simplify_geometry",
+    "load_boundary",
     "write_raster",
     "parse_crs",
     "inspect_crs",

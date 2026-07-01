@@ -18,6 +18,13 @@ pub(crate) fn register_gis_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()>
     m.add_function(wrap_pyfunction!(crate::gis::geometry_centroid_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::representative_point_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::interpolate_line_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::union_geometries_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::dissolve_vector_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::buffer_geometry_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::clip_vector_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::intersect_vectors_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::simplify_geometry_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::load_boundary_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::parse_crs_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::inspect_crs_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::raster_crs_py, m)?)?;

@@ -134,6 +134,13 @@ def test_public_gis_wrapper_surface():
         "geometry_centroid",
         "representative_point",
         "interpolate_line",
+        "union_geometries",
+        "dissolve_vector",
+        "buffer_geometry",
+        "clip_vector",
+        "intersect_vectors",
+        "simplify_geometry",
+        "load_boundary",
         "write_raster",
         "parse_crs",
         "inspect_crs",
@@ -181,6 +188,13 @@ def test_public_gis_wrapper_surface():
     assert callable(gis.geometry_centroid)
     assert callable(gis.representative_point)
     assert callable(gis.interpolate_line)
+    assert callable(gis.union_geometries)
+    assert callable(gis.dissolve_vector)
+    assert callable(gis.buffer_geometry)
+    assert callable(gis.clip_vector)
+    assert callable(gis.intersect_vectors)
+    assert callable(gis.simplify_geometry)
+    assert callable(gis.load_boundary)
     assert callable(gis.write_raster)
     assert callable(gis.parse_crs)
     assert callable(gis.inspect_crs)

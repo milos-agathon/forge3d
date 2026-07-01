@@ -140,6 +140,13 @@ class TestNativeModuleSymbols:
         "geometry_centroid",
         "representative_point",
         "interpolate_line",
+        "union_geometries",
+        "dissolve_vector",
+        "buffer_geometry",
+        "clip_vector",
+        "intersect_vectors",
+        "simplify_geometry",
+        "load_boundary",
         # G-002b: Rust-backed GIS CRS/affine/warp operations
         "parse_crs",
         "inspect_crs",
@@ -173,6 +180,14 @@ class TestNativeModuleSymbols:
         "bounds",
     ]
 
+    LATER_GIS_FUNCTIONS = [
+        "rasterize_vectors",
+        "geometry_mask",
+        "mask_raster",
+        "normalize_raster",
+        "classify_raster",
+    ]
+
     @pytest.mark.parametrize("fn_name", EXPECTED_FUNCTIONS)
     def test_registered_function_exists(self, fn_name: str):
         """Each registered pyfunction must be callable on the native module."""
@@ -184,6 +199,11 @@ class TestNativeModuleSymbols:
         assert callable(obj), (
             f"_forge3d.{fn_name} should be callable, got {type(obj)}"
         )
+
+    @pytest.mark.parametrize("fn_name", LATER_GIS_FUNCTIONS)
+    def test_later_gis_function_not_registered(self, fn_name: str):
+        """C5/C6 GIS functions must not be exported by the C4.0 slice."""
+        assert not hasattr(_native, fn_name)
 
 
 # ===========================================================================

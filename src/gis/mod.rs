@@ -14,27 +14,30 @@ pub use affine::{window_from_bounds, PixelWindow, RasterWindow};
 pub use crs::{web_mercator_bounds, CrsInspection, CrsTransform};
 pub use error::{GisError, GisResult};
 pub use geometry::{
-    geometry_centroid, geometry_measure, interpolate_line, repair_geometry, representative_point,
-    validate_geometry,
+    buffer_geometry, geometry_centroid, geometry_measure, interpolate_line, repair_geometry,
+    representative_point, simplify_geometry, union_geometries, validate_geometry,
 };
 #[cfg(feature = "extension-module")]
 pub use geometry::{
-    geometry_centroid_py, geometry_measure_py, interpolate_line_py, repair_geometry_py,
-    representative_point_py, validate_geometry_py,
+    buffer_geometry_py, geometry_centroid_py, geometry_measure_py, interpolate_line_py,
+    repair_geometry_py, representative_point_py, simplify_geometry_py, union_geometries_py,
+    validate_geometry_py,
 };
 pub use raster_info::{read_raster, read_raster_info};
 pub use raster_write::{
     write_raster, CreationOptions, CrsSpec, RasterArray, RasterData, WriteRasterOptions,
 };
 pub use types::{AffineTransform, RasterBounds, RasterDType, RasterInfo, RasterWarning};
+pub use vector::{
+    clip_vector, dissolve_vector, intersect_vectors, load_boundary, read_vector, read_vector_info,
+    reproject_vector, VectorInfo, VectorReadOptions, VectorReadResult, VectorReprojectInput,
+    VectorReprojectResult,
+};
 #[cfg(feature = "extension-module")]
 pub use vector::{
-    feature_count_py, geometry_type_py, read_vector_py, reproject_vector_py, vector_bounds_py,
-    vector_crs_py, vector_schema_py,
-};
-pub use vector::{
-    read_vector, read_vector_info, reproject_vector, VectorInfo, VectorReadOptions,
-    VectorReadResult, VectorReprojectInput, VectorReprojectResult,
+    clip_vector_py, dissolve_vector_py, feature_count_py, geometry_type_py, intersect_vectors_py,
+    load_boundary_py, read_vector_py, reproject_vector_py, vector_bounds_py, vector_crs_py,
+    vector_schema_py,
 };
 pub use warp::{align_raster_to, assign_crs, reproject_raster, resample_array, resample_raster};
 
