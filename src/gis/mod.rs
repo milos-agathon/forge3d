@@ -1,6 +1,9 @@
 pub mod affine;
 pub mod crs;
 pub mod error;
+pub mod geometry;
+#[cfg(feature = "extension-module")]
+pub(crate) mod py_json;
 pub mod raster_info;
 pub mod raster_write;
 pub mod types;
@@ -10,6 +13,15 @@ pub mod warp;
 pub use affine::{window_from_bounds, PixelWindow, RasterWindow};
 pub use crs::{web_mercator_bounds, CrsInspection, CrsTransform};
 pub use error::{GisError, GisResult};
+pub use geometry::{
+    geometry_centroid, geometry_measure, interpolate_line, repair_geometry, representative_point,
+    validate_geometry,
+};
+#[cfg(feature = "extension-module")]
+pub use geometry::{
+    geometry_centroid_py, geometry_measure_py, interpolate_line_py, repair_geometry_py,
+    representative_point_py, validate_geometry_py,
+};
 pub use raster_info::{read_raster, read_raster_info};
 pub use raster_write::{
     write_raster, CreationOptions, CrsSpec, RasterArray, RasterData, WriteRasterOptions,

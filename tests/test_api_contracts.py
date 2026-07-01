@@ -134,6 +134,12 @@ class TestNativeModuleSymbols:
         "feature_count",
         "vector_crs",
         "vector_bounds",
+        "validate_geometry",
+        "repair_geometry",
+        "geometry_measure",
+        "geometry_centroid",
+        "representative_point",
+        "interpolate_line",
         # G-002b: Rust-backed GIS CRS/affine/warp operations
         "parse_crs",
         "inspect_crs",

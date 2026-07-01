@@ -128,6 +128,12 @@ def test_public_gis_wrapper_surface():
         "feature_count",
         "vector_crs",
         "vector_bounds",
+        "validate_geometry",
+        "repair_geometry",
+        "geometry_measure",
+        "geometry_centroid",
+        "representative_point",
+        "interpolate_line",
         "write_raster",
         "parse_crs",
         "inspect_crs",
@@ -169,6 +175,12 @@ def test_public_gis_wrapper_surface():
     assert callable(gis.feature_count)
     assert callable(gis.vector_crs)
     assert callable(gis.vector_bounds)
+    assert callable(gis.validate_geometry)
+    assert callable(gis.repair_geometry)
+    assert callable(gis.geometry_measure)
+    assert callable(gis.geometry_centroid)
+    assert callable(gis.representative_point)
+    assert callable(gis.interpolate_line)
     assert callable(gis.write_raster)
     assert callable(gis.parse_crs)
     assert callable(gis.inspect_crs)
