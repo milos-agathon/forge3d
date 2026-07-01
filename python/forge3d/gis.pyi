@@ -182,6 +182,37 @@ def vector_bounds(
 ) -> tuple[float, float, float, float]: ...
 
 
+def validate_geometry(geometry: dict[str, Any]) -> dict[str, Any]: ...
+
+
+def repair_geometry(
+    geometry: dict[str, Any],
+    *,
+    method: str = ...,
+) -> dict[str, Any]: ...
+
+
+def geometry_measure(
+    geometry: dict[str, Any],
+    *,
+    metrics: tuple[str, ...] | list[str] = ...,
+) -> dict[str, Any]: ...
+
+
+def geometry_centroid(geometry: dict[str, Any]) -> dict[str, Any]: ...
+
+
+def representative_point(geometry: dict[str, Any]) -> dict[str, Any]: ...
+
+
+def interpolate_line(
+    geometry: dict[str, Any],
+    distance: float,
+    *,
+    normalized: bool = ...,
+) -> dict[str, Any]: ...
+
+
 def write_raster(
     path: os.PathLike[str] | str,
     array: np.ndarray,

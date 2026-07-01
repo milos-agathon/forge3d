@@ -121,6 +121,49 @@ def vector_bounds(
     return _require_native().vector_bounds(_path_or_self(source), layer=layer)
 
 
+def validate_geometry(geometry: dict[str, Any]):
+    """Validate a GeoJSON-like geometry object."""
+    return _require_native().validate_geometry(geometry)
+
+
+def repair_geometry(geometry: dict[str, Any], *, method: str = "make_valid"):
+    """Repair a GeoJSON-like geometry object through the native topology backend."""
+    return _require_native().repair_geometry(geometry, method=method)
+
+
+def geometry_measure(
+    geometry: dict[str, Any],
+    *,
+    metrics: tuple[str, ...] | list[str] = ("area", "length"),
+):
+    """Measure planar area and length for a GeoJSON-like geometry object."""
+    return _require_native().geometry_measure(geometry, metrics=metrics)
+
+
+def geometry_centroid(geometry: dict[str, Any]):
+    """Return the planar centroid for a GeoJSON-like geometry object."""
+    return _require_native().geometry_centroid(geometry)
+
+
+def representative_point(geometry: dict[str, Any]):
+    """Return a representative point for a GeoJSON-like geometry object."""
+    return _require_native().representative_point(geometry)
+
+
+def interpolate_line(
+    geometry: dict[str, Any],
+    distance: float,
+    *,
+    normalized: bool = False,
+):
+    """Interpolate a point along a LineString or MultiLineString."""
+    return _require_native().interpolate_line(
+        geometry,
+        distance,
+        normalized=normalized,
+    )
+
+
 def _path_or_self(value: Any):
     return os.fspath(value) if isinstance(value, (str, os.PathLike)) else value
 
@@ -427,6 +470,12 @@ __all__ = [
     "feature_count",
     "vector_crs",
     "vector_bounds",
+    "validate_geometry",
+    "repair_geometry",
+    "geometry_measure",
+    "geometry_centroid",
+    "representative_point",
+    "interpolate_line",
     "write_raster",
     "parse_crs",
     "inspect_crs",
