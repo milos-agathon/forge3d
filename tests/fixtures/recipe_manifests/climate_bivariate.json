@@ -1,0 +1,136 @@
+{
+  "alignment": {
+    "crs": "example_defined",
+    "extent": "example_defined",
+    "notes": "DEM and climate rasters are aligned by the script",
+    "resolution": "example_defined"
+  },
+  "annotations_defaults": {
+    "legend": "example_defined"
+  },
+  "camera_defaults": {
+    "policy": "example_defined"
+  },
+  "diagnostics": [
+    "recipe_manifest_golden_not_selected",
+    "recipe_manifest_mapscene_partial",
+    "recipe_manifest_example_only"
+  ],
+  "golden_fixture_intent": {
+    "note": "missing tiny canonical bivariate climate asset",
+    "status": "missing"
+  },
+  "layers": [
+    {
+      "layer_id": "terrain",
+      "layer_type": "terrain_dem",
+      "required": true,
+      "role": "base"
+    },
+    {
+      "layer_id": "temperature",
+      "layer_type": "raster_continuous",
+      "required": true,
+      "role": "bivariate_input"
+    },
+    {
+      "layer_id": "precipitation",
+      "layer_type": "raster_continuous",
+      "required": true,
+      "role": "bivariate_input"
+    },
+    {
+      "layer_id": "climate_bivariate",
+      "layer_type": "raster_bivariate",
+      "required": true,
+      "role": "terrain_drape",
+      "style_ref": "bivariate_matrix"
+    },
+    {
+      "layer_id": "legend",
+      "layer_type": "map_furniture",
+      "required": false,
+      "role": "legend"
+    }
+  ],
+  "lighting_defaults": {
+    "policy": "example_defined"
+  },
+  "non_goals": [
+    "no bivariate raster style object",
+    "no map plate helper",
+    "no visual golden"
+  ],
+  "open_questions": [],
+  "optional_inputs": [
+    {
+      "kind": "palette_matrix",
+      "name": "bivariate_matrix",
+      "role": "styling"
+    }
+  ],
+  "preprocessing": {
+    "bivariate_classification": "example_defined"
+  },
+  "produced_outputs": [
+    {
+      "deterministic": true,
+      "format": "png",
+      "kind": "poster",
+      "path": "example_defined"
+    }
+  ],
+  "recipe_family": "climate_bivariate",
+  "recipe_id": "climate_bivariate_recipe_manifest",
+  "render_export_defaults": {
+    "path_policy": "example_defined"
+  },
+  "required_inputs": [
+    {
+      "kind": "heightfield",
+      "name": "dem",
+      "role": "terrain"
+    },
+    {
+      "kind": "raster",
+      "name": "temperature",
+      "role": "bivariate_x"
+    },
+    {
+      "kind": "raster",
+      "name": "precipitation",
+      "role": "bivariate_y"
+    }
+  ],
+  "schema_version": "1",
+  "source_evidence": [
+    {
+      "line_end": 499,
+      "line_start": 486,
+      "note": "climate bivariate recipe evidence",
+      "path": "docs/carto-engine/golden-map-recipe-capability-audit.md"
+    },
+    {
+      "line_end": 261,
+      "line_start": 261,
+      "note": "P1-1 climate fixture row",
+      "path": "docs/carto-engine/g-001-p1-1-recipe-manifest-implementation-plan.md"
+    }
+  ],
+  "source_examples": [
+    "docs/carto-engine/golden-map-recipe-capability-audit.md"
+  ],
+  "status": "exists_only_as_example_or_script_logic",
+  "styling_defaults": {
+    "bivariate_matrix": "example_defined",
+    "legend": "example_defined"
+  },
+  "support_status": {
+    "mapscene_compatibility": "partially_proven",
+    "raster_primitives": "proven_in_forge3d",
+    "style_defaults": "exists_only_as_example_or_script_logic"
+  },
+  "tests": [
+    "tests/test_recipe_manifest.py::test_first_batch_fixture_manifests_construct_and_validate"
+  ]
+}
