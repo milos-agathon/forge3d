@@ -92,7 +92,8 @@
     }
   ],
   "source_examples": [
-    "examples/landcover_esri/bosnia_terrain_landcover_viewer.py"
+    "examples/swiss_terrain_landcover_viewer.py",
+    "tests/test_bosnia_terrain_landcover_viewer.py"
   ],
   "status": "exists_only_as_example_or_script_logic",
   "styling_defaults": {

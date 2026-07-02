@@ -78,7 +78,6 @@
     }
   ],
   "source_examples": [
-    "examples/terrain_viewer/terrain_demo.py",
     "python/forge3d/terrain_demo.py"
   ],
   "status": "proven_in_forge3d",

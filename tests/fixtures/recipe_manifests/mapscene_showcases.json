@@ -87,11 +87,9 @@
     }
   ],
   "source_examples": [
-    "examples/mapscene_terrain_raster.py",
-    "examples/mapscene_vector_labels.py",
-    "examples/mapscene_bundled_datasets_showcase.py",
-    "examples/mapscene_p1_assets_bundle_showcase.py",
-    "examples/mapscene_buildings_labels.py"
+    "tests/test_mapscene_examples.py",
+    "tests/test_mapscene_recipe_contract.py",
+    "tests/test_mapscene_save_bundle.py"
   ],
   "status": "partially_proven",
   "styling_defaults": {

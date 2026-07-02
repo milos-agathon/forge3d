@@ -70,7 +70,7 @@ def test_dataclass_construction_for_terrain_demo_manifest():
         recipe_family="terrain_demo",
         recipe_id="terrain_demo_recipe_manifest",
         status="proven_in_forge3d",
-        source_examples=["examples/terrain_viewer/terrain_demo.py"],
+        source_examples=["python/forge3d/terrain_demo.py"],
         source_evidence=[
             rm.SourceEvidence(
                 path="docs/carto-engine/golden-map-recipe-capability-audit.md",

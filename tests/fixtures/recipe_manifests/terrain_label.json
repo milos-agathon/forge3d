@@ -91,8 +91,8 @@
     }
   ],
   "source_examples": [
-    "examples/labels_styles_picking/fuji_labels_demo.py",
-    "examples/mapscene_vector_labels.py"
+    "examples/fuji_labels_demo.py",
+    "tests/test_mapscene_label_plan_integration.py"
   ],
   "status": "proven_in_forge3d",
   "styling_defaults": {

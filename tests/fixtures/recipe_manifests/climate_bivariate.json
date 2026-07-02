@@ -118,7 +118,7 @@
     }
   ],
   "source_examples": [
-    "examples/climate_bivariate/europe_bivariate_climate_map.py"
+    "docs/carto-engine/golden-map-recipe-capability-audit.md"
   ],
   "status": "exists_only_as_example_or_script_logic",
   "styling_defaults": {

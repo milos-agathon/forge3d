@@ -100,9 +100,7 @@
     }
   ],
   "source_examples": [
-    "examples/hydrology_river_basins/poland_river_basins_forge3d.py",
-    "examples/hydrology_river_basins/pnoa_river_showcase.py",
-    "examples/hydrology_river_basins/turkiye_river_basins_3d.py"
+    "tests/test_turkiye_river_basins_3d.py"
   ],
   "status": "exists_only_as_example_or_script_logic",
   "styling_defaults": {
