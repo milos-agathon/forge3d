@@ -432,14 +432,65 @@ pub fn load_boundary(
     layer: Option<String>,
     where_clause: Option<String>,
 ) -> GisResult<Value> {
-    let _ = (path.as_ref(), layer);
     if where_clause.is_some() {
         return Err(GisError::InvalidArgument(
             "unsupported_option: load_boundary where filtering is not implemented".to_string(),
         ));
     }
-    crate::gis::geometry::topology::require_topology_backend("load_boundary")?;
-    unreachable!("topology backend is not wired in C4.0")
+    let source = read_vector(
+        path,
+        VectorReadOptions {
+            layer,
+            columns: None,
+            bbox: None,
+            limit: None,
+        },
+    )?;
+    let mut warnings = source.warnings.clone();
+
+    if source.features.is_empty() {
+        warning_once(
+            &mut warnings,
+            WARNING_EMPTY_FEATURE_SET,
+            "load_boundary source has zero features",
+            Some("features"),
+        );
+        return load_boundary_result_value(&source, None, warnings, false);
+    }
+
+    for feature in &source.features {
+        validate_polygonal_geometry_value(feature_geometry(feature)?, "load_boundary")?;
+    }
+
+    let changed = source.features.len() > 1;
+    let geometry = if source.features.len() == 1 {
+        Some(feature_geometry(&source.features[0])?.clone())
+    } else {
+        crate::gis::geometry::topology::require_topology_backend("load_boundary")?;
+        let geometries = source
+            .features
+            .iter()
+            .map(|feature| feature_geometry(feature).cloned())
+            .collect::<GisResult<Vec<_>>>()?;
+        union_polygonal_geometry_values(&geometries, "load_boundary")?
+    };
+
+    if let Some(geometry) = geometry.as_ref() {
+        let output_type = geometry_type_from_value(geometry);
+        if output_type != source.info.geometry_type {
+            warning_once(
+                &mut warnings,
+                WARNING_GEOMETRY_TYPE_CHANGED,
+                &format!(
+                    "load_boundary output type changed from {} to {output_type}",
+                    source.info.geometry_type
+                ),
+                Some("geometry"),
+            );
+        }
+    }
+
+    load_boundary_result_value(&source, geometry, warnings, changed)
 }
 
 struct ClipSourceData {
@@ -859,6 +910,24 @@ fn dissolve_result_value(
     }))
 }
 
+fn load_boundary_result_value(
+    source: &VectorReadResult,
+    geometry: Option<Value>,
+    warnings: Vec<RasterWarning>,
+    changed: bool,
+) -> GisResult<Value> {
+    Ok(json!({
+        "geometry": geometry.clone().unwrap_or(Value::Null),
+        "features": {
+            "type": "FeatureCollection",
+            "features": source.features.clone(),
+        },
+        "info": vector_info_json(&source.info),
+        "operation": load_boundary_operation_json(&source.info, geometry.as_ref(), &warnings, changed),
+        "warnings": warnings_json(&warnings),
+    }))
+}
+
 fn clip_result_value(
     source: &ClipSourceData,
     features: Vec<Value>,
@@ -959,6 +1028,27 @@ fn dissolve_operation_json(
     })
 }
 
+fn load_boundary_operation_json(
+    info: &VectorInfo,
+    geometry: Option<&Value>,
+    warnings: &[RasterWarning],
+    changed: bool,
+) -> Value {
+    let output_geometry_type = geometry
+        .map(geometry_type_from_value)
+        .unwrap_or_else(|| "Empty".to_string());
+    json!({
+        "name": "load_boundary",
+        "input_geometry_type": info.geometry_type,
+        "output_geometry_type": output_geometry_type,
+        "input_count": info.feature_count,
+        "output_count": usize::from(geometry.is_some()),
+        "changed": changed,
+        "crs": crs_json_from_info(info),
+        "warnings": warnings_json(warnings),
+    })
+}
+
 fn clip_operation_json(
     source: &ClipSourceData,
     info: &VectorInfo,
@@ -998,6 +1088,18 @@ fn intersect_operation_json(
         "crs": crs_json(&left.crs),
         "warnings": warnings_json(warnings),
     })
+}
+
+fn crs_json_from_info(info: &VectorInfo) -> Value {
+    if info.crs_wkt.is_none() && info.crs_authority.is_none() {
+        Value::Null
+    } else {
+        json!({
+            "source_kind": "vector",
+            "wkt": info.crs_wkt.clone(),
+            "authority": info.crs_authority.clone(),
+        })
+    }
 }
 
 fn vector_info_json(info: &VectorInfo) -> Value {

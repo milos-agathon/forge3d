@@ -83,6 +83,14 @@ def _feature_collection_from(features, *, crs=True):
     return out
 
 
+def _write_feature_collection(path: Path, features, *, crs=True, name=None):
+    collection = _feature_collection_from(features, crs=crs)
+    if name is not None:
+        collection["name"] = name
+    path.write_text(json.dumps(collection), encoding="utf-8")
+    return path
+
+
 def _assert_backend_unavailable(call):
     with pytest.raises(RuntimeError) as exc:
         call()
@@ -204,9 +212,9 @@ def test_c4_apis_raise_backend_unavailable_without_topology_backend(tmp_path: Pa
         pytest.skip("backend_unavailable contract is default/no-topology only")
 
     path = tmp_path / "boundary.geojson"
-    path.write_text(
-        '{"type":"FeatureCollection","features":[],"crs":{"type":"name","properties":{"name":"EPSG:4326"}}}',
-        encoding="utf-8",
+    _write_feature_collection(
+        path,
+        [_feature(_unit_square()), _feature(_shifted_square(2.0, 0.0))],
     )
 
     _assert_backend_unavailable(lambda: gis.union_geometries([_unit_square()]))
@@ -1089,10 +1097,115 @@ def test_dissolve_vector_missing_crs_preserves_warning_metadata():
     assert "missing_crs" in _warning_codes(result)
 
 
-def test_remaining_c4_apis_stay_gated_with_topology_backend(tmp_path: Path):
+def test_load_boundary_single_polygon_returns_boundary_payload(tmp_path: Path):
+    path = _write_feature_collection(
+        tmp_path / "boundary-single.geojson",
+        [_feature(_unit_square(), {"name": "unit"})],
+        name="boundary-single",
+    )
+
+    result = gis.load_boundary(path, layer="boundary-single")
+
+    assert result["geometry"] == _unit_square()
+    assert result["features"]["type"] == "FeatureCollection"
+    assert result["features"]["features"][0]["properties"] == {"name": "unit"}
+    assert result["info"]["feature_count"] == 1
+    assert result["info"]["geometry_type"] == "Polygon"
+    assert result["info"]["bounds"] == pytest.approx((0.0, 0.0, 1.0, 1.0))
+    assert result["info"]["crs_authority"] == {"name": "EPSG", "code": "4326"}
+    assert result["warnings"] == []
+    assert result["operation"]["name"] == "load_boundary"
+    assert result["operation"]["input_count"] == 1
+    assert result["operation"]["output_count"] == 1
+    assert result["operation"]["changed"] is False
+
+
+def test_load_boundary_multi_feature_unions_with_topology_backend(tmp_path: Path):
     _require_topology_backend()
-    path = tmp_path / "boundary.geojson"
-    path.write_text('{"type":"FeatureCollection","features":[]}', encoding="utf-8")
+    path = _write_feature_collection(
+        tmp_path / "boundary-multi.geojson",
+        [
+            _feature(_unit_square(), {"id": 1}),
+            _feature(_shifted_square(0.5, 0.0), {"id": 2}),
+        ],
+    )
+
+    result = gis.load_boundary(path)
+
+    assert result["geometry"]["type"] == "Polygon"
+    assert _geometry_area(result["geometry"]) == pytest.approx(1.5)
+    assert len(result["features"]["features"]) == 2
+    assert result["info"]["feature_count"] == 2
+    assert result["operation"]["input_count"] == 2
+    assert result["operation"]["output_count"] == 1
+    assert result["operation"]["changed"] is True
+
+
+def test_load_boundary_empty_source_returns_empty_feature_set(tmp_path: Path):
+    path = _write_feature_collection(tmp_path / "boundary-empty.geojson", [])
+
+    result = gis.load_boundary(path)
+
+    assert result["geometry"] is None
+    assert result["features"] == {"type": "FeatureCollection", "features": []}
+    assert result["info"]["feature_count"] == 0
+    assert result["operation"]["output_count"] == 0
+    assert "empty_feature_set" in _warning_codes(result)
+
+
+def test_load_boundary_missing_layer_uses_read_vector_semantics(tmp_path: Path):
+    path = _write_feature_collection(
+        tmp_path / "boundary-layer.geojson",
+        [_feature(_unit_square())],
+        name="actual-layer",
+    )
+
+    with pytest.raises(ValueError, match="missing_layer"):
+        gis.load_boundary(path, layer="absent-layer")
+
+
+def test_load_boundary_invalid_geometry_raises_invalid_geometry(tmp_path: Path):
+    bowtie = {
+        "type": "Polygon",
+        "coordinates": [
+            [[0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 0.0], [0.0, 0.0]]
+        ],
+    }
+    path = _write_feature_collection(tmp_path / "boundary-invalid.geojson", [_feature(bowtie)])
+
+    with pytest.raises(ValueError, match="invalid_geometry"):
+        gis.load_boundary(path)
+
+
+def test_load_boundary_non_polygonal_geometry_raises_unsupported_type(tmp_path: Path):
+    path = _write_feature_collection(tmp_path / "boundary-point.geojson", [_feature(_point())])
+
+    with pytest.raises(ValueError, match="unsupported_geometry_type"):
+        gis.load_boundary(path)
+
+
+def test_load_boundary_missing_crs_warning_is_preserved(tmp_path: Path):
+    path = _write_feature_collection(
+        tmp_path / "boundary-no-crs.geojson",
+        [_feature(_unit_square())],
+        crs=False,
+    )
+
+    result = gis.load_boundary(path)
+
+    assert result["geometry"] == _unit_square()
+    assert result["info"]["crs_authority"] is None
+    assert result["info"]["crs_wkt"] is None
+    assert "missing_crs" in _warning_codes(result)
+
+
+def test_load_boundary_multi_feature_requires_topology_backend_without_feature(tmp_path: Path):
+    if _has_topology_backend():
+        pytest.skip("backend_unavailable contract is default/no-topology only")
+    path = _write_feature_collection(
+        tmp_path / "boundary-default-multi.geojson",
+        [_feature(_unit_square()), _feature(_shifted_square(2.0, 0.0))],
+    )
 
     _assert_backend_unavailable(lambda: gis.load_boundary(path))
 
