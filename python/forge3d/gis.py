@@ -628,6 +628,176 @@ def web_mercator_bounds(
     return _require_native().web_mercator_bounds(bounds, src_crs)
 
 
+def fetch_remote_geodata(
+    url: str,
+    cache: os.PathLike[str] | str | dict[str, Any] | None = None,
+    timeout: float | None = None,
+    checksum: str | None = None,
+) -> dict[str, Any]:
+    cache_value = _cache_or_none(cache)
+    return _require_native().fetch_remote_geodata(
+        url,
+        cache=cache_value,
+        timeout=timeout,
+        checksum=checksum,
+    )
+
+
+def cache_geodata(
+    key_or_url: str,
+    cache_dir: os.PathLike[str] | str,
+    refresh: bool = False,
+) -> dict[str, Any]:
+    return _require_native().cache_geodata(key_or_url, os.fspath(cache_dir), refresh)
+
+
+def fetch_vector(
+    url: str,
+    cache: os.PathLike[str] | str | dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return _require_native().fetch_vector(url, cache=_cache_or_none(cache))
+
+
+def read_cog(
+    path_or_url: os.PathLike[str] | str,
+    window: tuple[int, int, int, int] | None = None,
+    overview: int | None = None,
+) -> dict[str, Any]:
+    return _require_native().read_cog(os.fspath(path_or_url), window=window, overview=overview)
+
+
+def slippy_tile_index(
+    bounds: tuple[float, float, float, float],
+    zoom: int,
+    crs: str = "EPSG:4326",
+) -> dict[str, Any]:
+    return _require_native().slippy_tile_index(bounds, zoom, crs)
+
+
+def query_osm_features(
+    aoi: tuple[float, float, float, float],
+    tags: dict[str, Any],
+    cache: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return _require_native().query_osm_features(aoi, tags, cache=cache)
+
+
+def parse_osm_features(osm_json: dict[str, Any] | str, tags: dict[str, Any] | None = None) -> dict[str, Any]:
+    return _require_native().parse_osm_features(osm_json, tags=tags)
+
+
+def load_context_vectors(
+    path_or_features: os.PathLike[str] | str | dict[str, Any],
+    layers: str | list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    return _require_native().load_context_vectors(_path_or_self(path_or_features), layers=layers)
+
+
+def prepare_osm_scene(
+    aoi: tuple[float, float, float, float],
+    tags: dict[str, Any] | None = None,
+    cache: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return _require_native().prepare_osm_scene(aoi, tags=tags, cache=cache)
+
+
+def prepare_dem(
+    source: os.PathLike[str] | str | Any,
+    target_info: os.PathLike[str] | str | Any | None = None,
+    nodata: float | None = None,
+) -> dict[str, Any]:
+    return _require_native().prepare_dem(
+        _path_or_self(source),
+        target_info=_path_or_self(target_info) if target_info is not None else None,
+        nodata=nodata,
+    )
+
+
+def prepare_terrain_derivatives(
+    dem: os.PathLike[str] | str | Any,
+    derivatives: list[str] | tuple[str, ...] = ("slope", "hillshade"),
+) -> dict[str, Any]:
+    return _require_native().prepare_terrain_derivatives(_path_or_self(dem), derivatives=derivatives)
+
+
+def read_gridded_dataset(path: os.PathLike[str] | str, variable: str | None = None) -> dict[str, Any]:
+    return _require_native().read_gridded_dataset(os.fspath(path), variable=variable)
+
+
+def subset_grid(
+    source: os.PathLike[str] | str | Any,
+    bounds_or_coords: tuple[float, float, float, float],
+    variable: str | None = None,
+) -> dict[str, Any]:
+    return _require_native().subset_grid(_path_or_self(source), bounds_or_coords, variable=variable)
+
+
+def decode_terrarium_dem(rgb_array_or_path: os.PathLike[str] | str | Any) -> dict[str, Any]:
+    return _require_native().decode_terrarium_dem(_path_or_self(rgb_array_or_path))
+
+
+def build_terrarium_dem(
+    bounds: tuple[float, float, float, float],
+    zoom: int,
+    cache: os.PathLike[str] | str | dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return _require_native().build_terrarium_dem(bounds, zoom, cache=_cache_or_none(cache))
+
+
+def prepare_landcover_raster(
+    source: os.PathLike[str] | str | Any,
+    target_info: os.PathLike[str] | str | Any,
+    classes: dict[int, str] | None = None,
+) -> dict[str, Any]:
+    return _require_native().prepare_landcover_raster(
+        _path_or_self(source),
+        _path_or_self(target_info),
+        classes=classes,
+    )
+
+
+def prepare_population_raster(
+    source: os.PathLike[str] | str | Any,
+    target_info: os.PathLike[str] | str | Any | None = None,
+    normalization: str | None = None,
+) -> dict[str, Any]:
+    return _require_native().prepare_population_raster(
+        _path_or_self(source),
+        target_info=_path_or_self(target_info) if target_info is not None else None,
+        normalization=normalization,
+    )
+
+
+def load_building_footprints(
+    path_or_features: os.PathLike[str] | str | dict[str, Any],
+    dst_crs: str | int | dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return _require_native().load_building_footprints(_path_or_self(path_or_features), dst_crs=dst_crs)
+
+
+def extract_building_heights(
+    features: dict[str, Any],
+    defaults: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    return _require_native().extract_building_heights(features, defaults=defaults)
+
+
+def estimate_local_utm(
+    bounds_or_geometry: tuple[float, float, float, float] | dict[str, Any],
+) -> dict[str, Any]:
+    return _require_native().estimate_local_utm(bounds_or_geometry)
+
+
+def _cache_or_none(value: os.PathLike[str] | str | dict[str, Any] | None):
+    if value is None:
+        return None
+    if isinstance(value, (str, os.PathLike)):
+        return os.fspath(value)
+    if "cache_dir" in value:
+        return {**value, "cache_dir": os.fspath(value["cache_dir"])}
+    return value
+
+
 __all__ = [
     "RasterInfo",
     "VectorInfo",
@@ -692,4 +862,24 @@ __all__ = [
     "read_raster_window",
     "window_transform",
     "bounds",
+    "fetch_remote_geodata",
+    "cache_geodata",
+    "fetch_vector",
+    "read_cog",
+    "slippy_tile_index",
+    "query_osm_features",
+    "parse_osm_features",
+    "load_context_vectors",
+    "prepare_osm_scene",
+    "prepare_dem",
+    "prepare_terrain_derivatives",
+    "read_gridded_dataset",
+    "subset_grid",
+    "decode_terrarium_dem",
+    "build_terrarium_dem",
+    "prepare_landcover_raster",
+    "prepare_population_raster",
+    "load_building_footprints",
+    "extract_building_heights",
+    "estimate_local_utm",
 ]

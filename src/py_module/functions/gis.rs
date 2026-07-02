@@ -63,5 +63,40 @@ pub(crate) fn register_gis_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()>
         m
     )?)?;
     m.add_function(wrap_pyfunction!(crate::gis::web_mercator_bounds_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::fetch_remote_geodata_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::cache_geodata_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::fetch_vector_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::read_cog_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::slippy_tile_index_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::query_osm_features_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::parse_osm_features_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::load_context_vectors_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::prepare_osm_scene_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::prepare_dem_py, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::gis::prepare_terrain_derivatives_py,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::read_gridded_dataset_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::subset_grid_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::decode_terrarium_dem_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::build_terrarium_dem_py, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::gis::prepare_landcover_raster_py,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::gis::prepare_population_raster_py,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::gis::load_building_footprints_py,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::gis::extract_building_heights_py,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::estimate_local_utm_py, m)?)?;
     Ok(())
 }
