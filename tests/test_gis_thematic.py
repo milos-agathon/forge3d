@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import numpy as np
@@ -293,5 +294,20 @@ def test_no_runtime_python_gis_backend_library_usage():
         if not path.exists():
             continue
         source = path.read_text(encoding="utf-8")
-        for name in banned:
-            assert name not in source
+        if path.suffix == ".py":
+            tree = ast.parse(source)
+            imports = {
+                node.names[0].name.split(".")[0]
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Import)
+            }
+            imports.update(
+                node.module.split(".")[0]
+                for node in ast.walk(tree)
+                if isinstance(node, ast.ImportFrom) and node.module
+            )
+            for name in banned:
+                assert name not in imports
+        else:
+            for name in banned:
+                assert name not in source

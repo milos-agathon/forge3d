@@ -51,6 +51,8 @@ images = ["dep:exr"]
 copc_laz = ["dep:laz"]
 # P3: Cloud Optimized GeoTIFF streaming
 cog_streaming = ["dep:reqwest", "dep:async-trait", "dep:tokio", "dep:flate2"]
+# G-002 Later: explicit remote geodata fetch/cache backend
+gis-remote = ["dep:reqwest", "dep:tokio"]
 # P3-reproject: On-the-fly CRS reprojection via PROJ
 proj = ["dep:proj"]
 # G-002c C4: robust topology backend gate for polygonal overlay operations.

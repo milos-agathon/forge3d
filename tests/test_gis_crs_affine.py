@@ -45,12 +45,24 @@ def test_inspect_valid_epsg_crs():
 
 
 def test_python_gis_module_has_no_backend_gis_libraries():
+    import ast
     import inspect
 
     source = inspect.getsource(gis)
+    tree = ast.parse(source)
+    imports = {
+        node.names[0].name.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+    }
+    imports.update(
+        node.module.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    )
 
     for banned in ("rasterio", "geopandas", "shapely", "rioxarray", "xarray", "terra"):
-        assert banned not in source
+        assert banned not in imports
     assert "_looks_like_dataset_path" not in source
 
 

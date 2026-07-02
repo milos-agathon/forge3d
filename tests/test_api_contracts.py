@@ -183,6 +183,27 @@ class TestNativeModuleSymbols:
         "read_raster_window",
         "window_transform",
         "bounds",
+        # G-002 Later: domain and remote helpers
+        "fetch_remote_geodata",
+        "cache_geodata",
+        "fetch_vector",
+        "read_cog",
+        "slippy_tile_index",
+        "query_osm_features",
+        "parse_osm_features",
+        "load_context_vectors",
+        "prepare_osm_scene",
+        "prepare_dem",
+        "prepare_terrain_derivatives",
+        "read_gridded_dataset",
+        "subset_grid",
+        "decode_terrarium_dem",
+        "build_terrarium_dem",
+        "prepare_landcover_raster",
+        "prepare_population_raster",
+        "load_building_footprints",
+        "extract_building_heights",
+        "estimate_local_utm",
     ]
 
     LATER_GIS_FUNCTIONS = []

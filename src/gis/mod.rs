@@ -1,19 +1,31 @@
 pub mod affine;
 pub mod crs;
+pub mod domain;
 pub mod error;
 pub mod geometry;
+pub mod osm;
 #[cfg(feature = "extension-module")]
 pub(crate) mod py_json;
 pub mod raster_info;
 pub mod raster_write;
 pub mod rasterize;
+pub mod remote;
+pub mod terrarium;
 pub mod thematic;
+pub mod tiles;
 pub mod types;
 pub mod vector;
 pub mod warp;
 
 pub use affine::{window_from_bounds, PixelWindow, RasterWindow};
 pub use crs::{web_mercator_bounds, CrsInspection, CrsTransform};
+#[cfg(feature = "extension-module")]
+pub use domain::{
+    estimate_local_utm_py, extract_building_heights_py, load_building_footprints_py,
+    load_context_vectors_py, prepare_dem_py, prepare_landcover_raster_py, prepare_osm_scene_py,
+    prepare_population_raster_py, prepare_terrain_derivatives_py, read_cog_py,
+    read_gridded_dataset_py, subset_grid_py,
+};
 pub use error::{GisError, GisResult};
 pub use geometry::{
     buffer_geometry, geometry_centroid, geometry_measure, interpolate_line, repair_geometry,
@@ -25,6 +37,8 @@ pub use geometry::{
     repair_geometry_py, representative_point_py, simplify_geometry_py, union_geometries_py,
     validate_geometry_py,
 };
+#[cfg(feature = "extension-module")]
+pub use osm::{parse_osm_features_py, query_osm_features_py};
 pub use raster_info::{read_raster, read_raster_info};
 pub use raster_write::{
     write_raster, CreationOptions, CrsSpec, RasterArray, RasterData, WriteRasterOptions,
@@ -37,7 +51,13 @@ pub use rasterize::{
 #[cfg(feature = "extension-module")]
 pub use rasterize::{geometry_mask_py, mask_raster_py, rasterize_vectors_py};
 #[cfg(feature = "extension-module")]
+pub use remote::{cache_geodata_py, fetch_remote_geodata_py, fetch_vector_py};
+#[cfg(feature = "extension-module")]
+pub use terrarium::{build_terrarium_dem_py, decode_terrarium_dem_py};
+#[cfg(feature = "extension-module")]
 pub use thematic::{classify_raster_py, normalize_raster_py};
+#[cfg(feature = "extension-module")]
+pub use tiles::slippy_tile_index_py;
 pub use types::{AffineTransform, RasterBounds, RasterDType, RasterInfo, RasterWarning};
 pub use vector::{
     clip_vector, dissolve_vector, intersect_vectors, load_boundary, read_vector, read_vector_info,

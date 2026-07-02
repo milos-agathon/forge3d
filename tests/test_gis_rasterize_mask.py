@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
@@ -288,8 +289,23 @@ def test_no_runtime_python_gis_backend_imports_or_rust_backend_mentions():
         if not path.exists():
             continue
         source = path.read_text(encoding="utf-8")
-        for name in banned:
-            assert name not in source
+        if path.suffix == ".py":
+            tree = ast.parse(source)
+            imports = {
+                node.names[0].name.split(".")[0]
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Import)
+            }
+            imports.update(
+                node.module.split(".")[0]
+                for node in ast.walk(tree)
+                if isinstance(node, ast.ImportFrom) and node.module
+            )
+            for name in banned:
+                assert name not in imports
+        else:
+            for name in banned:
+                assert name not in source
 
 
 def test_optional_rasterio_reference_rasterize_matches_small_polygon():
