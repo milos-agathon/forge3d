@@ -322,6 +322,29 @@ pub(crate) fn validate_polygonal_geometry_value(source: &Value, operation: &str)
     require_polygonal_geometry(geometry, operation)
 }
 
+pub(crate) fn union_polygonal_geometry_values(
+    sources: &[Value],
+    operation: &str,
+) -> GisResult<Option<Value>> {
+    let mut geometries = Vec::with_capacity(sources.len());
+    for source in sources {
+        let input = normalize_input(source, false)?;
+        validate_input_or_error(&input)?;
+        let geometry = input
+            .geometries
+            .first()
+            .ok_or_else(model::empty_geometry_error)?;
+        require_polygonal_geometry(geometry, operation)?;
+        geometries.push(geometry.clone());
+    }
+    let output = union_polygonal(&geometries)?;
+    if output.is_empty() {
+        Ok(None)
+    } else {
+        geometry_value(&output).map(Some)
+    }
+}
+
 pub(crate) fn intersect_polygonal_geometry_values(
     left: &Value,
     right: &Value,

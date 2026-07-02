@@ -9,7 +9,8 @@ use crate::gis::crs;
 use crate::gis::error::{GisError, GisResult};
 use crate::gis::geometry::{
     clip_polygonal_geometry_value, intersect_polygonal_geometry_values,
-    prepare_polygonal_clip_mask, validate_polygonal_geometry_value,
+    prepare_polygonal_clip_mask, union_polygonal_geometry_values,
+    validate_polygonal_geometry_value,
 };
 use crate::gis::raster_write::CrsSpec;
 use crate::gis::types::{RasterBounds, RasterWarning, WARNING_MISSING_CRS};
@@ -17,6 +18,7 @@ use crate::gis::types::{RasterBounds, RasterWarning, WARNING_MISSING_CRS};
 pub const WARNING_EMPTY_FEATURE_SET: &str = "empty_feature_set";
 pub const WARNING_EMPTY_GEOMETRY: &str = "empty_geometry";
 pub const WARNING_EMPTY_OUTPUT: &str = "empty_output";
+pub const WARNING_GEOMETRY_TYPE_CHANGED: &str = "geometry_type_changed";
 pub const WARNING_INVALID_GEOMETRY: &str = "invalid_geometry";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -251,9 +253,76 @@ pub fn reproject_vector(
 }
 
 pub fn dissolve_vector(source: &Value, by: Option<Vec<String>>) -> GisResult<Value> {
-    let _ = (source, by);
+    if by.as_ref().is_some_and(Vec::is_empty) {
+        return Err(GisError::InvalidArgument(
+            "invalid_argument: dissolve_vector by sequence must not be empty".to_string(),
+        ));
+    }
+    let source = resolve_dissolve_source(source)?;
+    let by = by.unwrap_or_default();
+
+    if source.features.is_empty() {
+        let mut warnings = source.warnings.clone();
+        warning_once(
+            &mut warnings,
+            WARNING_EMPTY_FEATURE_SET,
+            "dissolve_vector source has zero features",
+            Some("features"),
+        );
+        return dissolve_result_value(&source, Vec::new(), warnings, false);
+    }
+
+    for feature in &source.features {
+        validate_polygonal_geometry_value(feature_geometry(feature)?, "dissolve_vector")?;
+    }
+
+    let mut groups = BTreeMap::<String, DissolveGroup>::new();
+    for feature in &source.features {
+        let (key, properties) = dissolve_group_key(feature, &by)?;
+        let feature_type = feature_geometry_type(feature);
+        let group = groups.entry(key).or_insert_with(|| DissolveGroup {
+            properties,
+            geometries: Vec::new(),
+            input_geometry_type: feature_type.clone(),
+        });
+        if group.input_geometry_type != feature_type {
+            group.input_geometry_type = "Mixed".to_string();
+        }
+        group.geometries.push(feature_geometry(feature)?.clone());
+    }
     crate::gis::geometry::topology::require_topology_backend("dissolve_vector")?;
-    unreachable!("topology backend is not wired in C4.0")
+
+    let mut warnings = source.warnings.clone();
+    let mut features = Vec::with_capacity(groups.len());
+    for group in groups.into_values() {
+        let Some(geometry) = union_polygonal_geometry_values(&group.geometries, "dissolve_vector")?
+        else {
+            continue;
+        };
+        let output_type = geometry_type_from_value(&geometry);
+        if output_type != group.input_geometry_type {
+            warning_once(
+                &mut warnings,
+                WARNING_GEOMETRY_TYPE_CHANGED,
+                &format!(
+                    "dissolve_vector output type changed from {} to {output_type}",
+                    group.input_geometry_type
+                ),
+                Some("geometry"),
+            );
+        }
+        features.push(dissolved_feature(geometry, group.properties)?);
+    }
+
+    if features.is_empty() {
+        warning_once(
+            &mut warnings,
+            WARNING_EMPTY_OUTPUT,
+            "dissolve_vector produced no output features",
+            Some("features"),
+        );
+    }
+    dissolve_result_value(&source, features, warnings, true)
 }
 
 pub fn clip_vector(
@@ -382,6 +451,22 @@ struct ClipSourceData {
     crs: CrsSpec,
 }
 
+struct DissolveSourceData {
+    features: Vec<Value>,
+    path: String,
+    driver: String,
+    layer_name: Option<String>,
+    layer_count: u32,
+    crs: Option<CrsSpec>,
+    warnings: Vec<RasterWarning>,
+}
+
+struct DissolveGroup {
+    properties: Map<String, Value>,
+    geometries: Vec<Value>,
+    input_geometry_type: String,
+}
+
 fn resolve_clip_source(source: &Value) -> GisResult<ClipSourceData> {
     if let Some(path) = source.as_str() {
         let result = read_vector(
@@ -440,6 +525,83 @@ fn resolve_clip_source(source: &Value) -> GisResult<ClipSourceData> {
             .and_then(|value| json_u32(value, "layer_count"))
             .unwrap_or(1),
         crs,
+    })
+}
+
+fn resolve_dissolve_source(source: &Value) -> GisResult<DissolveSourceData> {
+    if let Some(path) = source.as_str() {
+        let result = read_vector(
+            path,
+            VectorReadOptions {
+                layer: None,
+                columns: None,
+                bbox: None,
+                limit: None,
+            },
+        )?;
+        let crs = crs_spec_from_vector_info(&result.info)?;
+        let mut warnings = result.warnings.clone();
+        if crs.is_none() {
+            warning_once(
+                &mut warnings,
+                WARNING_MISSING_CRS,
+                "vector source has no CRS metadata",
+                Some("crs_wkt"),
+            );
+        }
+        return Ok(DissolveSourceData {
+            features: result.features,
+            path: result.info.path,
+            driver: result.info.driver,
+            layer_name: result.info.layer_name,
+            layer_count: result.info.layer_count,
+            crs,
+            warnings,
+        });
+    }
+
+    let object = source.as_object().ok_or_else(|| {
+        GisError::InvalidGeometry(
+            "invalid_geometry: dissolve_vector source must be a path or FeatureCollection"
+                .to_string(),
+        )
+    })?;
+    if object.get("type").and_then(Value::as_str) != Some("FeatureCollection")
+        && !object.contains_key("features")
+    {
+        return Err(GisError::InvalidGeometry(
+            "invalid_geometry: dissolve_vector source must be a FeatureCollection".to_string(),
+        ));
+    }
+
+    let features = normalize_features(source).map_err(invalid_argument_to_invalid_geometry)?;
+    let info = object.get("info");
+    let info_crs = info.map(crs_spec_from_info_json).transpose()?.flatten();
+    let crs = compatible_metadata_crs(info_crs, geojson_crs(source)?, "source")?;
+    let mut warnings = dissolve_metadata_warnings(object, info);
+    if crs.is_none() {
+        warning_once(
+            &mut warnings,
+            WARNING_MISSING_CRS,
+            "vector source has no CRS metadata",
+            Some("crs_wkt"),
+        );
+    }
+
+    Ok(DissolveSourceData {
+        features,
+        path: info
+            .and_then(|value| json_string(value, "path"))
+            .unwrap_or_default(),
+        driver: info
+            .and_then(|value| json_string(value, "driver"))
+            .unwrap_or_else(|| "GeoJSON".to_string()),
+        layer_name: info.and_then(|value| json_string(value, "layer_name")),
+        layer_count: info
+            .and_then(|value| json_u32(value, "layer_count"))
+            .unwrap_or(1),
+        crs,
+        warnings,
     })
 }
 
@@ -541,6 +703,64 @@ fn feature_geometry(feature: &Value) -> GisResult<&Value> {
     })
 }
 
+fn dissolve_metadata_warnings(
+    object: &Map<String, Value>,
+    info: Option<&Value>,
+) -> Vec<RasterWarning> {
+    let mut warnings = Vec::new();
+    let metadata_warnings = object
+        .get("warnings")
+        .or_else(|| info.and_then(|value| value.get("warnings")));
+    if metadata_warnings.is_some_and(|value| json_warnings_contain(value, WARNING_MISSING_CRS)) {
+        warning_once(
+            &mut warnings,
+            WARNING_MISSING_CRS,
+            "vector source has no CRS metadata",
+            Some("crs_wkt"),
+        );
+    }
+    warnings
+}
+
+fn json_warnings_contain(value: &Value, code: &str) -> bool {
+    value.as_array().is_some_and(|items| {
+        items
+            .iter()
+            .any(|item| item.get("code").and_then(Value::as_str) == Some(code))
+    })
+}
+
+fn dissolve_group_key(
+    feature: &Value,
+    fields: &[String],
+) -> GisResult<(String, Map<String, Value>)> {
+    if fields.is_empty() {
+        return Ok(("[]".to_string(), Map::new()));
+    }
+
+    let properties = feature_properties(feature)?;
+    let mut key_parts = Vec::with_capacity(fields.len());
+    let mut out = Map::new();
+    for field in fields {
+        let value = properties.get(field).ok_or_else(|| {
+            GisError::InvalidArgument(format!(
+                "missing_field: dissolve field {field:?} is missing"
+            ))
+        })?;
+        key_parts.push(json!([field, value.clone()]));
+        out.insert(field.clone(), value.clone());
+    }
+    Ok((Value::Array(key_parts).to_string(), out))
+}
+
+fn dissolved_feature(geometry: Value, properties: Map<String, Value>) -> GisResult<Value> {
+    Ok(json!({
+        "type": "Feature",
+        "properties": properties,
+        "geometry": geometry,
+    }))
+}
+
 fn clipped_feature(feature: &Value, geometry: Value) -> GisResult<Value> {
     let mut object = feature
         .as_object()
@@ -623,6 +843,22 @@ fn insert_property(out: &mut Map<String, Value>, key: String, value: Value) -> G
     Ok(())
 }
 
+fn dissolve_result_value(
+    source: &DissolveSourceData,
+    features: Vec<Value>,
+    warnings: Vec<RasterWarning>,
+    changed: bool,
+) -> GisResult<Value> {
+    let info = dissolve_vector_info(source, &features, warnings.clone());
+    Ok(json!({
+        "type": "FeatureCollection",
+        "features": features,
+        "info": vector_info_json(&info),
+        "operation": dissolve_operation_json(source, &info, &warnings, changed),
+        "warnings": warnings_json(&warnings),
+    }))
+}
+
 fn clip_result_value(
     source: &ClipSourceData,
     features: Vec<Value>,
@@ -656,6 +892,33 @@ fn intersect_result_value(
     }))
 }
 
+fn dissolve_vector_info(
+    source: &DissolveSourceData,
+    features: &[Value],
+    warnings: Vec<RasterWarning>,
+) -> VectorInfo {
+    let bounds = bounds_for_features(features).map(RasterBounds::tuple);
+    let (crs_wkt, crs_authority) = source
+        .crs
+        .as_ref()
+        .map(|crs| (crs.wkt.clone(), crs::authority_map(crs)))
+        .unwrap_or((None, None));
+    VectorInfo {
+        path: source.path.clone(),
+        driver: source.driver.clone(),
+        layer_name: source.layer_name.clone(),
+        layer_count: source.layer_count,
+        geometry_type: geometry_type_for_features(features),
+        feature_count: features.len() as u64,
+        schema: infer_schema(features),
+        crs_wkt,
+        crs_authority,
+        bounds,
+        is_georeferenced: bounds.is_some() && source.crs.is_some(),
+        warnings,
+    }
+}
+
 fn clip_vector_info(
     source: &ClipSourceData,
     features: &[Value],
@@ -676,6 +939,24 @@ fn clip_vector_info(
         is_georeferenced: bounds.is_some(),
         warnings,
     }
+}
+
+fn dissolve_operation_json(
+    source: &DissolveSourceData,
+    info: &VectorInfo,
+    warnings: &[RasterWarning],
+    changed: bool,
+) -> Value {
+    json!({
+        "name": "dissolve_vector",
+        "input_geometry_type": geometry_type_for_features(&source.features),
+        "output_geometry_type": info.geometry_type,
+        "input_count": source.features.len(),
+        "output_count": info.feature_count,
+        "changed": changed,
+        "crs": source.crs.as_ref().map(crs_json).unwrap_or(Value::Null),
+        "warnings": warnings_json(warnings),
+    })
 }
 
 fn clip_operation_json(

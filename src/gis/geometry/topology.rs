@@ -15,6 +15,7 @@ pub(crate) fn require_topology_backend(operation: &str) -> GisResult<()> {
             | "buffer_geometry"
             | "clip_vector"
             | "intersect_vectors"
+            | "dissolve_vector"
             | "simplify_geometry"
     ) && topology_backend_available()
     {

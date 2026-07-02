@@ -917,11 +917,182 @@ def test_simplify_geometry_rejects_unsupported_inputs():
         gis.simplify_geometry(_feature_collection(), 0.1)
 
 
+def test_dissolve_vector_all_returns_one_feature_with_empty_properties():
+    _require_topology_backend()
+    source = _feature_collection_from(
+        [
+            _feature(_unit_square(), {"group": "a", "value": 1}),
+            _feature(_shifted_square(2.0, 0.0), {"group": "b", "value": 2}),
+        ]
+    )
+
+    result = gis.dissolve_vector(source)
+
+    assert result["type"] == "FeatureCollection"
+    assert len(result["features"]) == 1
+    assert result["features"][0]["properties"] == {}
+    assert result["features"][0]["geometry"]["type"] in {"MultiPolygon", "GeometryCollection"}
+    assert _geometry_area(result["features"][0]["geometry"]) == pytest.approx(2.0)
+    assert result["info"]["feature_count"] == 1
+    assert result["info"]["geometry_type"] == result["features"][0]["geometry"]["type"]
+    assert result["info"]["bounds"] == pytest.approx((0.0, 0.0, 3.0, 1.0))
+    assert result["info"]["crs_authority"] == {"name": "EPSG", "code": "4326"}
+    assert result["operation"]["name"] == "dissolve_vector"
+    assert result["operation"]["input_count"] == 2
+    assert result["operation"]["output_count"] == 1
+    assert "geometry_type_changed" in _warning_codes(result)
+
+
+def test_dissolve_vector_by_one_field_returns_group_features():
+    _require_topology_backend()
+    source = _feature_collection_from(
+        [
+            _feature(_unit_square(), {"zone": "a", "drop": 1}),
+            _feature(_shifted_square(0.5, 0.0), {"zone": "a", "drop": 2}),
+            _feature(_shifted_square(3.0, 0.0), {"zone": "b", "drop": 3}),
+        ]
+    )
+
+    result = gis.dissolve_vector(source, by="zone")
+
+    assert len(result["features"]) == 2
+    features = {feature["properties"]["zone"]: feature for feature in result["features"]}
+    assert set(features) == {"a", "b"}
+    assert features["a"]["properties"] == {"zone": "a"}
+    assert _geometry_area(features["a"]["geometry"]) == pytest.approx(1.5)
+    assert features["b"]["properties"] == {"zone": "b"}
+    assert _geometry_area(features["b"]["geometry"]) == pytest.approx(1.0)
+    assert [field["name"] for field in result["info"]["schema"]] == ["zone"]
+
+
+def test_dissolve_vector_by_multiple_fields_groups_exact_values():
+    _require_topology_backend()
+    source = _feature_collection_from(
+        [
+            _feature(_unit_square(), {"zone": "a", "kind": 1, "drop": "x"}),
+            _feature(_shifted_square(0.5, 0.0), {"zone": "a", "kind": 1, "drop": "y"}),
+            _feature(_shifted_square(3.0, 0.0), {"zone": "a", "kind": 2, "drop": "z"}),
+        ]
+    )
+
+    result = gis.dissolve_vector(source, by=("zone", "kind"))
+
+    properties = [feature["properties"] for feature in result["features"]]
+    assert properties == [{"kind": 1, "zone": "a"}, {"kind": 2, "zone": "a"}]
+    assert all(set(props) == {"zone", "kind"} for props in properties)
+    assert result["info"]["feature_count"] == 2
+
+
+def test_dissolve_vector_missing_field_raises_missing_field():
+    _require_topology_backend()
+    source = _feature_collection_from([_feature(_unit_square(), {"zone": "a"})])
+
+    with pytest.raises(ValueError, match="missing_field"):
+        gis.dissolve_vector(source, by="missing")
+
+
+@pytest.mark.parametrize("by", [(), [], ("zone", 7), 7])
+def test_dissolve_vector_invalid_by_values_raise_invalid_argument(by):
+    with pytest.raises(ValueError, match="invalid_argument"):
+        gis.dissolve_vector(_feature_collection(), by=by)
+
+
+def test_dissolve_vector_empty_source_returns_empty_feature_set():
+    _require_topology_backend()
+
+    result = gis.dissolve_vector(_feature_collection_from([]))
+
+    assert result["features"] == []
+    assert result["info"]["feature_count"] == 0
+    assert result["info"]["geometry_type"] == "Empty"
+    assert result["info"]["bounds"] is None
+    assert "empty_feature_set" in _warning_codes(result)
+
+
+def test_dissolve_vector_invalid_geometry_raises_invalid_geometry():
+    _require_topology_backend()
+    bowtie = {
+        "type": "Polygon",
+        "coordinates": [
+            [[0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 0.0], [0.0, 0.0]]
+        ],
+    }
+
+    with pytest.raises(ValueError, match="invalid_geometry"):
+        gis.dissolve_vector(_feature_collection_from([_feature(bowtie)]))
+
+
+def test_dissolve_vector_non_polygonal_geometry_raises_unsupported_type():
+    _require_topology_backend()
+
+    with pytest.raises(ValueError, match="unsupported_geometry_type"):
+        gis.dissolve_vector(_feature_collection_from([_feature(_point())]))
+
+
+def test_dissolve_vector_path_input_works(tmp_path: Path):
+    _require_topology_backend()
+    path = tmp_path / "dissolve-source.geojson"
+    path.write_text(
+        json.dumps(
+            _feature_collection_from(
+                [
+                    _feature(_unit_square(), {"zone": "a"}),
+                    _feature(_shifted_square(0.5, 0.0), {"zone": "a"}),
+                ]
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    result = gis.dissolve_vector(path, by="zone")
+
+    assert len(result["features"]) == 1
+    assert result["features"][0]["properties"] == {"zone": "a"}
+    assert _geometry_area(result["features"][0]["geometry"]) == pytest.approx(1.5)
+
+
+def test_dissolve_vector_read_vector_result_input_works(tmp_path: Path):
+    _require_topology_backend()
+    path = tmp_path / "dissolve-read-result.geojson"
+    path.write_text(
+        json.dumps(_feature_collection_from([_feature(_unit_square(), {"zone": "read"})])),
+        encoding="utf-8",
+    )
+
+    result = gis.dissolve_vector(gis.read_vector(path), by="zone")
+
+    assert len(result["features"]) == 1
+    assert result["features"][0]["properties"] == {"zone": "read"}
+
+
+def test_dissolve_vector_raw_feature_collection_input_works():
+    _require_topology_backend()
+
+    result = gis.dissolve_vector(
+        _feature_collection_from([_feature(_unit_square(), {"zone": "raw"})]),
+        by="zone",
+    )
+
+    assert len(result["features"]) == 1
+    assert result["features"][0]["properties"] == {"zone": "raw"}
+
+
+def test_dissolve_vector_missing_crs_preserves_warning_metadata():
+    _require_topology_backend()
+    source = _feature_collection_from([_feature(_unit_square(), {"zone": "a"})], crs=False)
+
+    result = gis.dissolve_vector(source, by="zone")
+
+    assert result["info"]["crs_authority"] is None
+    assert result["info"]["crs_wkt"] is None
+    assert result["info"]["is_georeferenced"] is False
+    assert "missing_crs" in _warning_codes(result)
+
+
 def test_remaining_c4_apis_stay_gated_with_topology_backend(tmp_path: Path):
     _require_topology_backend()
     path = tmp_path / "boundary.geojson"
     path.write_text('{"type":"FeatureCollection","features":[]}', encoding="utf-8")
 
-    _assert_backend_unavailable(lambda: gis.dissolve_vector(_feature_collection()))
     _assert_backend_unavailable(lambda: gis.load_boundary(path))
 
