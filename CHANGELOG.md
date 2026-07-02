@@ -6,6 +6,16 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.29.0] - 2026-07-02
+### Added
+- G-002c: Added Rust-first GIS vector metadata/read, CRS reprojection, geometry measurement/topology, rasterization, geometry masks, raster masks, and thematic raster APIs.
+- Added `forge3d.gis.normalize_raster(...)` and `forge3d.gis.classify_raster(...)` for nodata-aware normalization and explicit-bin classification with class tables.
+- Added the G-002c C6 thematic raster implementation plan and regression coverage for the thematic raster surface.
+
+### Changed
+- Updated package metadata to describe forge3d's Rust-first GIS vector, rasterization, mask, thematic, CRS, affine, windowing, and reprojection support.
+- Bumped the package and PyPI version to `1.29.0`.
+
 ## [1.28.0] - 2026-06-30
 ### Added
 - G-002a1: Added public Rust-backed `forge3d.gis.read_raster(path, bands=None, window=None, masked=False)` with 1-based band selection, in-bounds pixel windows, serialized `RasterInfo` metadata, per-band nodata summaries, and true-valid masks when requested.

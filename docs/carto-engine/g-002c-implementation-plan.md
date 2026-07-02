@@ -4,6 +4,8 @@
 
 **Goal:** Implement the G-002c Rust-first GIS vector, rasterization, mask, and thematic raster APIs on top of the G-002a1/G-002b raster foundation.
 
+**Completion Status:** G-002c C1-C6 is merged to `main` and captured for the `1.29.0` package/PyPI release on 2026-07-02. C6 adds `normalize_raster` and `classify_raster`; no colormap rendering, domain recipes, gallery goldens, or MapScene recipe-family work were added.
+
 **Architecture:** Backend GIS behavior belongs in Rust under `src/gis/`; Python wrappers in `python/forge3d/gis.py` stay thin `os.fspath`/argument marshaling shims over PyO3. Heavy GIS capabilities are feature-gated and must fail with stable `BackendUnavailable` errors when unavailable rather than silently falling back to Python libraries.
 
 **Tech Stack:** Rust, PyO3, NumPy at the Python boundary, existing `tiff`/`ndarray` raster code, existing CRS/affine helpers, optional GDAL/OGR for vector IO/reprojection/rasterization, optional GEOS-equivalent topology for robust geometry operations, and optional reference checks using Python GIS libraries in tests only.
