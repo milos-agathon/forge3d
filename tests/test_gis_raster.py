@@ -144,6 +144,8 @@ def test_public_gis_wrapper_surface():
         "rasterize_vectors",
         "geometry_mask",
         "mask_raster",
+        "normalize_raster",
+        "classify_raster",
         "write_raster",
         "parse_crs",
         "inspect_crs",
@@ -201,6 +203,8 @@ def test_public_gis_wrapper_surface():
     assert callable(gis.rasterize_vectors)
     assert callable(gis.geometry_mask)
     assert callable(gis.mask_raster)
+    assert callable(gis.normalize_raster)
+    assert callable(gis.classify_raster)
     assert callable(gis.write_raster)
     assert callable(gis.parse_crs)
     assert callable(gis.inspect_crs)

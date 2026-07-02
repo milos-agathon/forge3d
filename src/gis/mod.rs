@@ -7,6 +7,7 @@ pub(crate) mod py_json;
 pub mod raster_info;
 pub mod raster_write;
 pub mod rasterize;
+pub mod thematic;
 pub mod types;
 pub mod vector;
 pub mod warp;
@@ -35,6 +36,8 @@ pub use rasterize::{
 };
 #[cfg(feature = "extension-module")]
 pub use rasterize::{geometry_mask_py, mask_raster_py, rasterize_vectors_py};
+#[cfg(feature = "extension-module")]
+pub use thematic::{classify_raster_py, normalize_raster_py};
 pub use types::{AffineTransform, RasterBounds, RasterDType, RasterInfo, RasterWarning};
 pub use vector::{
     clip_vector, dissolve_vector, intersect_vectors, load_boundary, read_vector, read_vector_info,
