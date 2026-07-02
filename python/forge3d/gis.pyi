@@ -296,6 +296,28 @@ def mask_raster(
 ) -> dict[str, Any]: ...
 
 
+def normalize_raster(
+    source: os.PathLike[str] | str | np.ndarray | dict[str, Any],
+    *,
+    method: str = ...,
+    valid_mask: np.ndarray | None = ...,
+    nodata: float | list[float | None] | tuple[float | None, ...] | None = ...,
+    clip: tuple[float, float] | None = ...,
+) -> dict[str, Any]: ...
+
+
+def classify_raster(
+    source: os.PathLike[str] | str | np.ndarray | dict[str, Any],
+    *,
+    bins: Any = ...,
+    labels: list[str] | tuple[str, ...] | None = ...,
+    right: bool = ...,
+    valid_mask: np.ndarray | None = ...,
+    nodata: float | list[float | None] | tuple[float | None, ...] | None = ...,
+    dtype: str = ...,
+) -> dict[str, Any]: ...
+
+
 def write_raster(
     path: os.PathLike[str] | str,
     array: np.ndarray,

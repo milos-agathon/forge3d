@@ -297,6 +297,46 @@ def mask_raster(
     )
 
 
+def normalize_raster(
+    source: os.PathLike[str] | str | Any,
+    *,
+    method: str = "minmax",
+    valid_mask: Any | None = None,
+    nodata: float | list[float | None] | tuple[float | None, ...] | None = None,
+    clip: tuple[float, float] | None = None,
+):
+    """Normalize raster values through the native thematic backend."""
+    return _require_native().normalize_raster(
+        _path_or_self(source),
+        method=method,
+        valid_mask=valid_mask,
+        nodata=nodata,
+        clip=clip,
+    )
+
+
+def classify_raster(
+    source: os.PathLike[str] | str | Any,
+    *,
+    bins: Any = None,
+    labels: list[str] | tuple[str, ...] | None = None,
+    right: bool = False,
+    valid_mask: Any | None = None,
+    nodata: float | list[float | None] | tuple[float | None, ...] | None = None,
+    dtype: str = "uint16",
+):
+    """Classify raster values through the native thematic backend."""
+    return _require_native().classify_raster(
+        _path_or_self(source),
+        bins=bins,
+        labels=labels,
+        right=right,
+        valid_mask=valid_mask,
+        nodata=nodata,
+        dtype=dtype,
+    )
+
+
 def _path_or_self(value: Any):
     return os.fspath(value) if isinstance(value, (str, os.PathLike)) else value
 
@@ -619,6 +659,8 @@ __all__ = [
     "rasterize_vectors",
     "geometry_mask",
     "mask_raster",
+    "normalize_raster",
+    "classify_raster",
     "write_raster",
     "parse_crs",
     "inspect_crs",

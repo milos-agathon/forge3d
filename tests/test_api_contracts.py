@@ -150,6 +150,8 @@ class TestNativeModuleSymbols:
         "rasterize_vectors",
         "geometry_mask",
         "mask_raster",
+        "normalize_raster",
+        "classify_raster",
         # G-002b: Rust-backed GIS CRS/affine/warp operations
         "parse_crs",
         "inspect_crs",
@@ -183,10 +185,7 @@ class TestNativeModuleSymbols:
         "bounds",
     ]
 
-    LATER_GIS_FUNCTIONS = [
-        "normalize_raster",
-        "classify_raster",
-    ]
+    LATER_GIS_FUNCTIONS = []
 
     @pytest.mark.parametrize("fn_name", EXPECTED_FUNCTIONS)
     def test_registered_function_exists(self, fn_name: str):
