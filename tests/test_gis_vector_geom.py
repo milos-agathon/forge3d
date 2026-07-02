@@ -366,23 +366,14 @@ def test_no_python_gis_backend_imports_in_forge3d_gis():
         assert banned not in source
 
 
-def test_no_c5_c6_api_names_in_gis_public_surfaces():
+def test_no_c6_api_names_in_gis_public_surfaces():
     repo = Path(__file__).resolve().parents[1]
     files = [
         repo / "python/forge3d/gis.py",
         repo / "python/forge3d/gis.pyi",
         repo / "src/py_module/functions/gis.rs",
     ]
-    banned = [
-        "_".join(parts)
-        for parts in (
-            ("rasterize", "vectors"),
-            ("geometry", "mask"),
-            ("mask", "raster"),
-            ("normalize", "raster"),
-            ("classify", "raster"),
-        )
-    ]
+    banned = ["normalize_raster", "classify_raster"]
 
     for path in files:
         source = path.read_text(encoding="utf-8")

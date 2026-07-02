@@ -675,7 +675,7 @@ fn resolve_clip_crs(clip_geometry: &Value, explicit: Option<Value>) -> GisResult
     })
 }
 
-fn compatible_metadata_crs(
+pub(crate) fn compatible_metadata_crs(
     left: Option<CrsSpec>,
     right: Option<CrsSpec>,
     label: &str,
@@ -731,7 +731,7 @@ fn crs_spec_from_json_value(value: &Value) -> GisResult<Option<CrsSpec>> {
     CrsSpec::from_parts(Some(name), Some(code), None).map(Some)
 }
 
-fn crs_spec_from_info_json(info: &Value) -> GisResult<Option<CrsSpec>> {
+pub(crate) fn crs_spec_from_info_json(info: &Value) -> GisResult<Option<CrsSpec>> {
     if let Some(authority) = info.get("crs_authority").and_then(Value::as_object) {
         if let (Some(name), Some(code)) = (
             authority.get("name").and_then(json_value_string),
@@ -748,7 +748,7 @@ fn crs_spec_from_info_json(info: &Value) -> GisResult<Option<CrsSpec>> {
     Ok(None)
 }
 
-fn feature_geometry(feature: &Value) -> GisResult<&Value> {
+pub(crate) fn feature_geometry(feature: &Value) -> GisResult<&Value> {
     feature.get("geometry").ok_or_else(|| {
         GisError::InvalidGeometry("invalid_geometry: Feature requires geometry".to_string())
     })
@@ -1255,7 +1255,7 @@ fn resolve_vector_source_crs(
     }
 }
 
-fn crs_spec_from_vector_info(info: &VectorInfo) -> GisResult<Option<CrsSpec>> {
+pub(crate) fn crs_spec_from_vector_info(info: &VectorInfo) -> GisResult<Option<CrsSpec>> {
     if let Some(authority) = info.crs_authority.as_ref() {
         let name = authority.get("name").cloned().ok_or_else(|| {
             GisError::InvalidCrs("invalid_crs: vector CRS authority is missing name".to_string())
@@ -1553,7 +1553,7 @@ fn geojson_layer_name(path: &Path, root: &Value) -> Option<String> {
         .or_else(|| path.file_stem()?.to_str().map(str::to_string))
 }
 
-fn geojson_crs(root: &Value) -> GisResult<Option<CrsSpec>> {
+pub(crate) fn geojson_crs(root: &Value) -> GisResult<Option<CrsSpec>> {
     let Some(crs_value) = root.get("crs") else {
         return Ok(None);
     };
@@ -1595,7 +1595,7 @@ fn parse_vector_crs_spec(value: &str) -> GisResult<Option<CrsSpec>> {
         .map_err(|err| GisError::InvalidCrs(format!("invalid_crs: {}", err.message())))
 }
 
-fn normalize_features(root: &Value) -> GisResult<Vec<Value>> {
+pub(crate) fn normalize_features(root: &Value) -> GisResult<Vec<Value>> {
     match root.get("type").and_then(Value::as_str) {
         Some("FeatureCollection") => {
             let features = root

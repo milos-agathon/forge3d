@@ -25,6 +25,9 @@ pub(crate) fn register_gis_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()>
     m.add_function(wrap_pyfunction!(crate::gis::intersect_vectors_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::simplify_geometry_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::load_boundary_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::rasterize_vectors_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::geometry_mask_py, m)?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::mask_raster_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::parse_crs_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::inspect_crs_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::raster_crs_py, m)?)?;

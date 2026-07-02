@@ -263,6 +263,39 @@ def load_boundary(
 ) -> dict[str, Any]: ...
 
 
+def rasterize_vectors(
+    vectors: os.PathLike[str] | str | dict[str, Any],
+    target_info: RasterInfo | dict[str, Any],
+    *,
+    value: float = ...,
+    attribute: str | None = ...,
+    dtype: str = ...,
+    fill: float = ...,
+    all_touched: bool = ...,
+) -> dict[str, Any]: ...
+
+
+def geometry_mask(
+    geometries: os.PathLike[str] | str | dict[str, Any],
+    target_info: RasterInfo | dict[str, Any],
+    *,
+    invert: bool = ...,
+    all_touched: bool = ...,
+    mask_polarity: str = ...,
+) -> dict[str, Any]: ...
+
+
+def mask_raster(
+    source: os.PathLike[str] | str | np.ndarray | dict[str, Any],
+    mask: np.ndarray,
+    *,
+    mask_polarity: str,
+    crop: bool = ...,
+    fill: float | None = ...,
+    nodata: float | list[float | None] | tuple[float | None, ...] | None = ...,
+) -> dict[str, Any]: ...
+
+
 def write_raster(
     path: os.PathLike[str] | str,
     array: np.ndarray,
