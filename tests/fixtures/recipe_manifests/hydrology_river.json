@@ -1,0 +1,120 @@
+{
+  "alignment": {
+    "crs": "example_defined",
+    "extent": "example_defined",
+    "notes": "DEM, river lines, and optional basin polygons are aligned by the example scripts"
+  },
+  "annotations_defaults": {
+    "map_text": "example_defined"
+  },
+  "camera_defaults": {
+    "policy": "example_defined"
+  },
+  "diagnostics": [
+    "recipe_manifest_golden_not_selected",
+    "recipe_manifest_mapscene_partial",
+    "recipe_manifest_example_only"
+  ],
+  "golden_fixture_intent": {
+    "note": "missing tiny canonical river-line drape asset",
+    "status": "missing"
+  },
+  "layers": [
+    {
+      "layer_id": "terrain",
+      "layer_type": "terrain_dem",
+      "required": true,
+      "role": "base"
+    },
+    {
+      "layer_id": "rivers",
+      "layer_type": "vector_line",
+      "required": true,
+      "role": "draped_line",
+      "style_ref": "river_line_style"
+    },
+    {
+      "layer_id": "basins",
+      "layer_type": "vector_polygon",
+      "required": false,
+      "role": "context"
+    }
+  ],
+  "lighting_defaults": {
+    "policy": "example_defined"
+  },
+  "non_goals": [
+    "no reusable line stroke helper",
+    "no alignment diagnostics",
+    "no visual golden"
+  ],
+  "open_questions": [],
+  "optional_inputs": [
+    {
+      "kind": "vector_polygon",
+      "name": "basins",
+      "role": "context"
+    }
+  ],
+  "preprocessing": {
+    "river_width_rules": "example_defined"
+  },
+  "produced_outputs": [
+    {
+      "deterministic": true,
+      "format": "png",
+      "kind": "poster",
+      "path": "example_defined"
+    }
+  ],
+  "recipe_family": "hydrology_river",
+  "recipe_id": "hydrology_river_recipe_manifest",
+  "render_export_defaults": {
+    "path_policy": "example_defined"
+  },
+  "required_inputs": [
+    {
+      "kind": "heightfield",
+      "name": "dem",
+      "role": "terrain"
+    },
+    {
+      "kind": "vector_line",
+      "name": "rivers",
+      "role": "overlay"
+    }
+  ],
+  "schema_version": "1",
+  "source_evidence": [
+    {
+      "line_end": 874,
+      "line_start": 861,
+      "note": "hydrology river recipe evidence",
+      "path": "docs/carto-engine/golden-map-recipe-capability-audit.md"
+    },
+    {
+      "line_end": 263,
+      "line_start": 263,
+      "note": "P1-1 hydrology fixture row",
+      "path": "docs/carto-engine/g-001-p1-1-recipe-manifest-implementation-plan.md"
+    }
+  ],
+  "source_examples": [
+    "examples/hydrology_river_basins/poland_river_basins_forge3d.py",
+    "examples/hydrology_river_basins/pnoa_river_showcase.py",
+    "examples/hydrology_river_basins/turkiye_river_basins_3d.py"
+  ],
+  "status": "exists_only_as_example_or_script_logic",
+  "styling_defaults": {
+    "river_color": "example_defined",
+    "river_width": "example_defined"
+  },
+  "support_status": {
+    "mapscene_compatibility": "partially_proven",
+    "vector_overlay": "proven_in_forge3d",
+    "vector_style_defaults": "exists_only_as_example_or_script_logic"
+  },
+  "tests": [
+    "tests/test_recipe_manifest.py::test_first_batch_fixture_manifests_construct_and_validate"
+  ]
+}

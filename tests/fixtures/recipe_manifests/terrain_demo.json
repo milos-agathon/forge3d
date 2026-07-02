@@ -1,0 +1,96 @@
+{
+  "alignment": {
+    "notes": "single DEM input; no cross-layer alignment"
+  },
+  "annotations_defaults": {},
+  "camera_defaults": {
+    "policy": "example_defined"
+  },
+  "diagnostics": [
+    "recipe_manifest_golden_not_selected"
+  ],
+  "golden_fixture_intent": {
+    "note": "terrain visual golden coverage exists; recipe-level golden selection is deferred",
+    "source_test": "tests/test_terrain_visual_goldens.py",
+    "status": "deferred"
+  },
+  "layers": [
+    {
+      "layer_id": "terrain",
+      "layer_type": "terrain_dem",
+      "required": true,
+      "role": "base",
+      "style_ref": "terrain_colormap"
+    }
+  ],
+  "lighting_defaults": {
+    "policy": "example_defined"
+  },
+  "non_goals": [
+    "no terrain camera preset implementation",
+    "no recipe-level visual golden selection",
+    "no MapScene replacement"
+  ],
+  "open_questions": [],
+  "optional_inputs": [
+    {
+      "kind": "palette",
+      "name": "colormap",
+      "role": "styling"
+    }
+  ],
+  "preprocessing": {
+    "terrain_parameters": "example_defined"
+  },
+  "produced_outputs": [
+    {
+      "deterministic": true,
+      "format": "png",
+      "kind": "render",
+      "path": "example_defined"
+    }
+  ],
+  "recipe_family": "terrain_demo",
+  "recipe_id": "terrain_demo_recipe_manifest",
+  "render_export_defaults": {
+    "path_policy": "example_defined"
+  },
+  "required_inputs": [
+    {
+      "kind": "heightfield",
+      "name": "dem",
+      "role": "terrain"
+    }
+  ],
+  "schema_version": "1",
+  "source_evidence": [
+    {
+      "line_end": 170,
+      "line_start": 121,
+      "note": "terrain demo recipe evidence",
+      "path": "docs/carto-engine/golden-map-recipe-capability-audit.md"
+    },
+    {
+      "line_end": 264,
+      "line_start": 259,
+      "note": "P1-1 first-batch fixture row",
+      "path": "docs/carto-engine/g-001-p1-1-recipe-manifest-implementation-plan.md"
+    }
+  ],
+  "source_examples": [
+    "examples/terrain_viewer/terrain_demo.py",
+    "python/forge3d/terrain_demo.py"
+  ],
+  "status": "proven_in_forge3d",
+  "styling_defaults": {
+    "colormap": "example_defined"
+  },
+  "support_status": {
+    "recipe_manifest": "proven_in_forge3d",
+    "terrain_renderer": "proven_in_forge3d"
+  },
+  "tests": [
+    "tests/test_recipe_manifest.py::test_first_batch_fixture_manifests_construct_and_validate",
+    "tests/test_terrain_visual_goldens.py"
+  ]
+}
