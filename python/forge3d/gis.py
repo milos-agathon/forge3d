@@ -31,6 +31,7 @@ else:  # pragma: no cover - exercised only without the compiled extension
     CrsTransform = None
 
 RasterReadResult = dict
+_MISSING = object()
 
 
 def _require_native():
@@ -232,6 +233,67 @@ def load_boundary(
         os.fspath(path),
         layer=layer,
         where=where,
+    )
+
+
+def rasterize_vectors(
+    vectors: os.PathLike[str] | str | dict[str, Any],
+    target_info: Any,
+    *,
+    value: float = 1,
+    attribute: str | None = None,
+    dtype: str = "uint8",
+    fill: float = 0,
+    all_touched: bool = False,
+):
+    """Rasterize polygonal vector features onto an explicit target grid."""
+    return _require_native().rasterize_vectors(
+        _path_or_self(vectors),
+        target_info,
+        value=value,
+        attribute=attribute,
+        dtype=dtype,
+        fill=fill,
+        all_touched=all_touched,
+    )
+
+
+def geometry_mask(
+    geometries: dict[str, Any],
+    target_info: Any,
+    *,
+    invert: bool = False,
+    all_touched: bool = False,
+    mask_polarity: str = "true_inside",
+):
+    """Create a boolean geometry mask on an explicit target grid."""
+    return _require_native().geometry_mask(
+        _path_or_self(geometries),
+        target_info,
+        invert=invert,
+        all_touched=all_touched,
+        mask_polarity=mask_polarity,
+    )
+
+
+def mask_raster(
+    source: os.PathLike[str] | str | Any,
+    mask: Any,
+    *,
+    mask_polarity=_MISSING,
+    crop: bool = False,
+    fill: float | None = None,
+    nodata: float | list[float | None] | tuple[float | None, ...] | None = None,
+):
+    """Apply an explicit true-retain boolean mask to raster data."""
+    polarity = None if mask_polarity is _MISSING else mask_polarity
+    return _require_native().mask_raster(
+        _path_or_self(source),
+        mask,
+        mask_polarity=polarity,
+        crop=crop,
+        fill=fill,
+        nodata=nodata,
     )
 
 
@@ -554,6 +616,9 @@ __all__ = [
     "intersect_vectors",
     "simplify_geometry",
     "load_boundary",
+    "rasterize_vectors",
+    "geometry_mask",
+    "mask_raster",
     "write_raster",
     "parse_crs",
     "inspect_crs",

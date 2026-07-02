@@ -6,6 +6,7 @@ pub mod geometry;
 pub(crate) mod py_json;
 pub mod raster_info;
 pub mod raster_write;
+pub mod rasterize;
 pub mod types;
 pub mod vector;
 pub mod warp;
@@ -27,6 +28,13 @@ pub use raster_info::{read_raster, read_raster_info};
 pub use raster_write::{
     write_raster, CreationOptions, CrsSpec, RasterArray, RasterData, WriteRasterOptions,
 };
+pub use rasterize::{
+    geometry_mask, mask_raster, rasterize_vectors, GeometryMaskOptions, GeometryMaskResult,
+    MaskPolarity, MaskRasterOptions, MaskRasterResult, RasterMaskPolarity, RasterizeOptions,
+    RasterizeResult,
+};
+#[cfg(feature = "extension-module")]
+pub use rasterize::{geometry_mask_py, mask_raster_py, rasterize_vectors_py};
 pub use types::{AffineTransform, RasterBounds, RasterDType, RasterInfo, RasterWarning};
 pub use vector::{
     clip_vector, dissolve_vector, intersect_vectors, load_boundary, read_vector, read_vector_info,

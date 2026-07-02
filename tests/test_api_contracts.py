@@ -147,6 +147,9 @@ class TestNativeModuleSymbols:
         "intersect_vectors",
         "simplify_geometry",
         "load_boundary",
+        "rasterize_vectors",
+        "geometry_mask",
+        "mask_raster",
         # G-002b: Rust-backed GIS CRS/affine/warp operations
         "parse_crs",
         "inspect_crs",
@@ -181,9 +184,6 @@ class TestNativeModuleSymbols:
     ]
 
     LATER_GIS_FUNCTIONS = [
-        "rasterize_vectors",
-        "geometry_mask",
-        "mask_raster",
         "normalize_raster",
         "classify_raster",
     ]
