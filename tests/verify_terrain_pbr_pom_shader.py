@@ -18,7 +18,7 @@ def test_shader_milestone_4_complete():
 
     assert shader_path.exists(), f"Shader file not found: {shader_path}"
 
-    shader_source = shader_path.read_text()
+    shader_source = shader_path.read_text(encoding="utf-8")
 
     print("\n========== MILESTONE 4 Verification ==========\n")
 

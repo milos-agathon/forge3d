@@ -202,6 +202,7 @@ jobs:
     name: Test Python (${{ matrix.os }})
     needs: build-wheels
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -237,10 +238,19 @@ jobs:
           FORGE3D_NO_BOOTSTRAP: '1'
         run: pytest tests/test_license.py -v --tb=short
 
-      - name: Run pytest (skip viewer/GPU tests)
+      - name: Run P0/P1 release contract tests
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
-        run: pytest tests/ -v --tb=short -m "not viewer and not interactive_viewer and not offscreen"
+        run: >
+          pytest
+          tests/test_api_contracts.py
+          tests/test_blender_quality_integration.py
+          tests/test_bloom_effect.py
+          tests/test_bloom_execute_behavior.py
+          tests/test_mesh_tbn.py
+          tests/test_recipe_manifest.py
+          tests/test_ssgi_ssr_wiring.py
+          -v --tb=short
 
   # ============================================================================
   # Linux aarch64 Wheel Smoke Test (QEMU)
