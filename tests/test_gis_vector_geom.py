@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import inspect
 from pathlib import Path
 
@@ -361,8 +362,19 @@ def test_feature_collection_rejected_for_repair_representative_and_interpolate()
 
 def test_no_python_gis_backend_imports_in_forge3d_gis():
     source = inspect.getsource(gis)
+    tree = ast.parse(source)
+    imports = {
+        node.names[0].name.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+    }
+    imports.update(
+        node.module.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    )
 
     for banned in ("rasterio", "geopandas", "shapely", "rioxarray", "xarray", "terra"):
-        assert banned not in source
+        assert banned not in imports
 
 

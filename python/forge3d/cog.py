@@ -44,6 +44,15 @@ def is_cog_available() -> bool:
     return _COG_AVAILABLE
 
 
+def _rasterio_available() -> bool:
+    try:
+        import rasterio
+
+        return not getattr(rasterio, "__forge3d_stub__", False)
+    except Exception:
+        return False
+
+
 @dataclass
 class CogStats:
     """COG streaming statistics.
@@ -407,12 +416,20 @@ def open_cog(
         >>> tile = ds.read_tile(0, 0)
     """
     if prefer_native and _COG_AVAILABLE:
-        return CogDataset(
+        ds = CogDataset(
             url,
             cache_size_mb=cache_size_mb,
             cache_dir=cache_dir,
             cache_budget_mb=cache_budget_mb,
         )
+        if _rasterio_available() and ds.ifd_info(0).compression == 5:
+            return CogDatasetFallback(
+                url,
+                cache_size_mb=cache_size_mb,
+                cache_dir=cache_dir,
+                cache_budget_mb=cache_budget_mb,
+            )
+        return ds
     
     try:
         return CogDatasetFallback(

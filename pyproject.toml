@@ -106,7 +106,7 @@ module-name = "forge3d._forge3d"
 # Optimize for size and performance in release builds
 cargo-extra-args = "--profile release-lto"
 # Generate abi3 wheels for Python 3.10+ compatibility
-features = ["extension-module", "weighted-oit", "enable-tbn", "enable-gpu-instancing", "copc_laz", "cog_streaming"]
+features = ["extension-module", "weighted-oit", "enable-tbn", "enable-gpu-instancing", "copc_laz", "cog_streaming", "gis-remote"]
 exclude = [
     "_build/**",
     "assets/**",

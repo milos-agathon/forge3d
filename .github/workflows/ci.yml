@@ -181,6 +181,9 @@ jobs:
 
       - name: Build wheel
         uses: PyO3/maturin-action@v1
+        env:
+          # ring's aarch64 assembly expects this macro under the manylinux cross compiler.
+          CFLAGS_aarch64_unknown_linux_gnu: ${{ matrix.platform.target == 'aarch64-unknown-linux-gnu' && '-D__ARM_ARCH=8' || '' }}
         with:
           target: ${{ matrix.platform.target }}
           args: ${{ matrix.platform.maturin_args }}

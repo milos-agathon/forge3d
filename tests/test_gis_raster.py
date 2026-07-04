@@ -177,6 +177,26 @@ def test_public_gis_wrapper_surface():
         "read_raster_window",
         "window_transform",
         "bounds",
+        "fetch_remote_geodata",
+        "cache_geodata",
+        "fetch_vector",
+        "read_cog",
+        "slippy_tile_index",
+        "query_osm_features",
+        "parse_osm_features",
+        "load_context_vectors",
+        "prepare_osm_scene",
+        "prepare_dem",
+        "prepare_terrain_derivatives",
+        "read_gridded_dataset",
+        "subset_grid",
+        "decode_terrarium_dem",
+        "build_terrarium_dem",
+        "prepare_landcover_raster",
+        "prepare_population_raster",
+        "load_building_footprints",
+        "extract_building_heights",
+        "estimate_local_utm",
     }
     assert callable(gis.read_raster_info)
     assert callable(gis.read_raster)
@@ -219,6 +239,26 @@ def test_public_gis_wrapper_surface():
     assert callable(gis.array_bounds)
     assert callable(gis.raster_bounds)
     assert callable(gis.raster_resolution)
+    assert callable(gis.fetch_remote_geodata)
+    assert callable(gis.cache_geodata)
+    assert callable(gis.fetch_vector)
+    assert callable(gis.read_cog)
+    assert callable(gis.slippy_tile_index)
+    assert callable(gis.query_osm_features)
+    assert callable(gis.parse_osm_features)
+    assert callable(gis.load_context_vectors)
+    assert callable(gis.prepare_osm_scene)
+    assert callable(gis.prepare_dem)
+    assert callable(gis.prepare_terrain_derivatives)
+    assert callable(gis.read_gridded_dataset)
+    assert callable(gis.subset_grid)
+    assert callable(gis.decode_terrarium_dem)
+    assert callable(gis.build_terrarium_dem)
+    assert callable(gis.prepare_landcover_raster)
+    assert callable(gis.prepare_population_raster)
+    assert callable(gis.load_building_footprints)
+    assert callable(gis.extract_building_heights)
+    assert callable(gis.estimate_local_utm)
     assert callable(gis.validate_transform)
     assert callable(gis.pixel_convention)
     assert callable(gis.rowcol)

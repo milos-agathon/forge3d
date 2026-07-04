@@ -522,3 +522,131 @@ def window_transform(
 
 
 def bounds(source: os.PathLike[str] | str | RasterInfo) -> tuple[float, float, float, float]: ...
+
+
+def fetch_remote_geodata(
+    url: str,
+    cache: os.PathLike[str] | str | dict[str, Any] | None = ...,
+    timeout: float | None = ...,
+    checksum: str | None = ...,
+) -> dict[str, Any]: ...
+
+
+def cache_geodata(
+    key_or_url: str,
+    cache_dir: os.PathLike[str] | str,
+    refresh: bool = ...,
+) -> dict[str, Any]: ...
+
+
+def fetch_vector(
+    url: str,
+    cache: os.PathLike[str] | str | dict[str, Any] | None = ...,
+) -> dict[str, Any]: ...
+
+
+def read_cog(
+    path_or_url: os.PathLike[str] | str,
+    window: tuple[int, int, int, int] | None = ...,
+    overview: int | None = ...,
+) -> dict[str, Any]: ...
+
+
+def slippy_tile_index(
+    bounds: tuple[float, float, float, float],
+    zoom: int,
+    crs: str = ...,
+) -> dict[str, Any]: ...
+
+
+def query_osm_features(
+    aoi: tuple[float, float, float, float],
+    tags: dict[str, Any],
+    cache: dict[str, Any] | None = ...,
+) -> dict[str, Any]: ...
+
+
+def parse_osm_features(
+    osm_json: dict[str, Any] | str,
+    tags: dict[str, Any] | None = ...,
+) -> dict[str, Any]: ...
+
+
+def load_context_vectors(
+    path_or_features: os.PathLike[str] | str | dict[str, Any],
+    layers: str | list[str] | tuple[str, ...] | None = ...,
+) -> dict[str, Any]: ...
+
+
+def prepare_osm_scene(
+    aoi: tuple[float, float, float, float],
+    tags: dict[str, Any] | None = ...,
+    cache: dict[str, Any] | None = ...,
+) -> dict[str, Any]: ...
+
+
+def prepare_dem(
+    source: os.PathLike[str] | str | np.ndarray | dict[str, Any],
+    target_info: os.PathLike[str] | str | RasterInfo | dict[str, Any] | None = ...,
+    nodata: float | None = ...,
+) -> dict[str, Any]: ...
+
+
+def prepare_terrain_derivatives(
+    dem: os.PathLike[str] | str | np.ndarray | dict[str, Any],
+    derivatives: list[str] | tuple[str, ...] = ...,
+) -> dict[str, Any]: ...
+
+
+def read_gridded_dataset(
+    path: os.PathLike[str] | str,
+    variable: str | None = ...,
+) -> dict[str, Any]: ...
+
+
+def subset_grid(
+    source: os.PathLike[str] | str | dict[str, Any],
+    bounds_or_coords: tuple[float, float, float, float],
+    variable: str | None = ...,
+) -> dict[str, Any]: ...
+
+
+def decode_terrarium_dem(rgb_array_or_path: os.PathLike[str] | str | np.ndarray) -> dict[str, Any]: ...
+
+
+def build_terrarium_dem(
+    bounds: tuple[float, float, float, float],
+    zoom: int,
+    cache: os.PathLike[str] | str | dict[str, Any] | None = ...,
+) -> dict[str, Any]: ...
+
+
+def prepare_landcover_raster(
+    source: os.PathLike[str] | str | np.ndarray | dict[str, Any],
+    target_info: os.PathLike[str] | str | RasterInfo | dict[str, Any],
+    classes: dict[int, str] | None = ...,
+) -> dict[str, Any]: ...
+
+
+def prepare_population_raster(
+    source: os.PathLike[str] | str | np.ndarray | dict[str, Any],
+    target_info: os.PathLike[str] | str | RasterInfo | dict[str, Any] | None = ...,
+    normalization: str | None = ...,
+) -> dict[str, Any]: ...
+
+
+def load_building_footprints(
+    path_or_features: os.PathLike[str] | str | dict[str, Any],
+    dst_crs: str | int | dict[str, Any] | None = ...,
+) -> dict[str, Any]: ...
+
+
+def extract_building_heights(
+    features: dict[str, Any],
+    defaults: dict[str, float] | None = ...,
+) -> dict[str, Any]: ...
+
+
+def estimate_local_utm(
+    bounds_or_geometry: tuple[float, float, float, float] | dict[str, Any],
+) -> dict[str, Any]: ...

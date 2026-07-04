@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import inspect
 import json
 import math
@@ -275,8 +276,20 @@ def test_load_boundary_where_unsupported_precedes_backend_gate(tmp_path: Path):
 
 def test_no_python_gis_backend_libraries_in_overlay_wrapper():
     source = inspect.getsource(gis)
+    tree = ast.parse(source)
+    imports = {
+        node.names[0].name.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+    }
+    imports.update(
+        node.module.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+    )
+
     for banned in ("rasterio", "geopandas", "shapely", "rioxarray", "xarray", "terra"):
-        assert banned not in source
+        assert banned not in imports
 
 
 def test_union_geometries_overlapping_squares_with_topology_backend():

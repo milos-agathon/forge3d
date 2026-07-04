@@ -12,6 +12,7 @@ use super::cog_reader::CogHeightReader;
 #[pyclass(module = "forge3d._forge3d", name = "CogDataset")]
 pub struct PyCogDataset {
     reader: Arc<CogHeightReader>,
+    _runtime: tokio::runtime::Runtime,
     url: String,
 }
 
@@ -39,11 +40,13 @@ impl PyCogDataset {
                 PyRuntimeError::new_err(format!("Failed to create tokio runtime: {}", e))
             })?;
 
+        let handle = runtime.handle().clone();
         let reader = runtime
             .block_on(async {
-                CogHeightReader::new_with_cache_options(
+                CogHeightReader::new_with_runtime_and_cache_options(
                     url,
                     cache_size_mb,
+                    handle,
                     cache_dir.map(PathBuf::from),
                     cache_budget_mb.unwrap_or(cache_size_mb),
                 )
@@ -53,6 +56,7 @@ impl PyCogDataset {
 
         Ok(Self {
             reader: Arc::new(reader),
+            _runtime: runtime,
             url: url.to_string(),
         })
     }
