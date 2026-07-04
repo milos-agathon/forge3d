@@ -309,18 +309,23 @@ jobs:
       - name: Probe terrain golden backend
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1'
         id: terrain-goldens-probe
+        continue-on-error: true
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
         run: python scripts/terrain_ci_probe.py --mode terrain
 
       - name: Run visual golden tests
-        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1'
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outcome == 'success'
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
           FORGE3D_RUN_TERRAIN_GOLDENS: '1'
           FORGE3D_TERRAIN_GOLDEN_ARTIFACT_DIR: tests/artifacts/terrain_goldens
           FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR: tests/artifacts/recipe_goldens
         run: pytest tests/test_terrain_visual_goldens.py tests/test_terrain_tv10_goldens.py tests/test_recipe_goldens.py -v --tb=short
+
+      - name: Skip unsupported terrain golden lane
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outcome != 'success'
+        run: echo "Skipping visual golden tests on unsupported hosted-runner adapter."
 
       - name: Run software-allowed recipe goldens
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS == '1'
