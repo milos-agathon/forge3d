@@ -1,4 +1,5 @@
 use super::*;
+use crate::terrain::hosek_sky::hosek_rgb_sky;
 
 pub(super) struct AtmosphereInitResources {
     pub(super) sky_bind_group_layout0: wgpu::BindGroupLayout,
@@ -14,6 +15,10 @@ struct TerrainSkyUniforms {
     sun_direction_turbidity: [f32; 4],
     ground_albedo_sun_size_sun_intensity_exposure: [f32; 4],
     model_pad: [u32; 4],
+    hosek_coeffs_a_d: [[f32; 4]; 3],
+    hosek_coeffs_e_h: [[f32; 4]; 3],
+    hosek_coeff_i: [f32; 4],
+    hosek_radiance: [f32; 4],
 }
 
 #[repr(C, align(16))]
@@ -151,6 +156,13 @@ impl TerrainScene {
             return Ok(None);
         }
 
+        let sky_sun_y = decoded.light.direction[2].clamp(0.0, 1.0);
+        let solar_elevation = sky_sun_y.asin().clamp(0.0, std::f32::consts::FRAC_PI_2);
+        let hosek = hosek_rgb_sky(
+            decoded.sky.turbidity.clamp(1.0, 10.0),
+            decoded.sky.ground_albedo.clamp(0.0, 1.0),
+            solar_elevation,
+        );
         let sky_uniforms = TerrainSkyUniforms {
             // sky.wgsl is authored in a Y-up frame while terrain lighting is Z-up.
             // Swizzle the decoded terrain light so the sky disk still tracks the
@@ -167,7 +179,11 @@ impl TerrainScene {
                 decoded.sky.sun_intensity.max(0.0),
                 decoded.sky.sky_exposure.max(0.0),
             ],
-            model_pad: [1, 0, 0, 0],
+            model_pad: [decoded.sky.model, 0, 0, 0],
+            hosek_coeffs_a_d: hosek.uniform_a_d(),
+            hosek_coeffs_e_h: hosek.uniform_e_h(),
+            hosek_coeff_i: hosek.uniform_i(),
+            hosek_radiance: hosek.uniform_radiance(),
         };
         let sky_params = self
             .device

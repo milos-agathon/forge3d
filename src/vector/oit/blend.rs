@@ -41,16 +41,20 @@ pub fn get_accum_blend_state() -> wgpu::BlendState {
 /// Get blend state for reveal accumulation buffer.
 ///
 /// Uses multiplicative blending for alpha reveal tracking.
+///
+/// The reveal attachment is R16Float, so the source value lives in the color
+/// component rather than an alpha channel. Use OneMinusSrc, not
+/// OneMinusSrcAlpha, to multiply the destination by (1 - alpha).
 pub fn get_reveal_blend_state() -> wgpu::BlendState {
     wgpu::BlendState {
         color: wgpu::BlendComponent {
             src_factor: wgpu::BlendFactor::Zero,
-            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            dst_factor: wgpu::BlendFactor::OneMinusSrc,
             operation: wgpu::BlendOperation::Add,
         },
         alpha: wgpu::BlendComponent {
             src_factor: wgpu::BlendFactor::Zero,
-            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            dst_factor: wgpu::BlendFactor::OneMinusSrc,
             operation: wgpu::BlendOperation::Add,
         },
     }
@@ -83,12 +87,12 @@ pub fn reveal_target_state() -> wgpu::ColorTargetState {
         blend: Some(wgpu::BlendState {
             color: wgpu::BlendComponent {
                 src_factor: wgpu::BlendFactor::Zero,
-                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                dst_factor: wgpu::BlendFactor::OneMinusSrc,
                 operation: wgpu::BlendOperation::Add,
             },
             alpha: wgpu::BlendComponent {
                 src_factor: wgpu::BlendFactor::Zero,
-                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                dst_factor: wgpu::BlendFactor::OneMinusSrc,
                 operation: wgpu::BlendOperation::Add,
             },
         }),

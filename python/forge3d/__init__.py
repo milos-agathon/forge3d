@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.29.0"
+__version__ = "1.30.0"
 version = __version__
 
 import numpy as np
@@ -83,6 +83,14 @@ if _NATIVE_MODULE is not None:
         "SunPosition",  # P0.3/M2: Sun ephemeris
         "sun_position",  # P0.3/M2: Sun ephemeris function
         "sun_position_utc",  # P0.3/M2: Sun ephemeris function (components)
+        "set_point_shape_mode",
+        "set_point_lod_threshold",
+        "is_weighted_oit_available",
+        "vector_oit_and_pick_demo",
+        "vector_render_oit_py",
+        "vector_render_pick_map_py",
+        "vector_render_oit_and_pick_py",
+        "vector_render_polygons_fill_py",
         "ClipmapConfig",  # P2.1/M5: Clipmap terrain
         "ClipmapMesh",  # P2.1/M5: Clipmap terrain
         "clipmap_generate_py",  # P2.1/M5: Clipmap generation function
@@ -138,7 +146,7 @@ from . import camera_rigs
 # -----------------------------------------------------------------------------
 # Core rendering API
 # -----------------------------------------------------------------------------
-from .path_tracing import PathTracer, make_camera
+from .path_tracing import ExperimentalSyntheticOutput, PathTracer, make_camera
 
 # -----------------------------------------------------------------------------
 # Interactive Viewer API
@@ -275,6 +283,7 @@ from .map_plate import MapPlate, MapPlateConfig, BBox, PlateRegion
 from .legend import Legend, LegendConfig
 from .scale_bar import ScaleBar, ScaleBarConfig
 from .north_arrow import NorthArrow, NorthArrowConfig
+from .graticule import GraticuleSpec, generate_graticule
 
 # -----------------------------------------------------------------------------
 # P5-export: Vector Export (SVG/PDF)
@@ -450,6 +459,23 @@ from .map_scene import (
     TypographySettings,
     VectorOverlay,
 )
+from .recipe_manifest import recipe_manifest
+from .alignment import (
+    alignment_report,
+    alignment_residual,
+    reproject_dem_to_target,
+    resample_raster_to_grid,
+    transform_features as align_transform_features,
+    transform_geometry as align_transform_geometry,
+)
+from .text_atlas import (
+    BakedAtlas,
+    bake_atlas,
+    default_latin_atlas_paths,
+    load_atlas_metrics,
+    save_atlas,
+    validate_atlas_metrics,
+)
 
 # -----------------------------------------------------------------------------
 # Public API
@@ -461,6 +487,7 @@ __all__ = [
     # Core rendering
     "Renderer",
     "PathTracer",
+    "ExperimentalSyntheticOutput",
     "make_camera",
     # Native types (when available)
     "Scene",
@@ -520,6 +547,14 @@ __all__ = [
     "get_device",
     "enumerate_adapters",
     "device_probe",
+    "set_point_shape_mode",
+    "set_point_lod_threshold",
+    "is_weighted_oit_available",
+    "vector_oit_and_pick_demo",
+    "vector_render_oit_py",
+    "vector_render_pick_map_py",
+    "vector_render_oit_and_pick_py",
+    "vector_render_polygons_fill_py",
     "memory_metrics",
     "budget_remaining",
     "utilization_ratio",
@@ -561,6 +596,8 @@ __all__ = [
     "ScaleBarConfig",
     "NorthArrow",
     "NorthArrowConfig",
+    "GraticuleSpec",
+    "generate_graticule",
     # Viewer utilities
     "viewer_ipc",
     "colors",
@@ -663,6 +700,19 @@ __all__ = [
     "LightingPreset",
     "OutputSpec",
     "ReproducibilityProfile",
+    "recipe_manifest",
+    "alignment_report",
+    "alignment_residual",
+    "reproject_dem_to_target",
+    "resample_raster_to_grid",
+    "align_transform_features",
+    "align_transform_geometry",
+    "BakedAtlas",
+    "bake_atlas",
+    "default_latin_atlas_paths",
+    "load_atlas_metrics",
+    "save_atlas",
+    "validate_atlas_metrics",
     # P3-reproject: CRS utilities
     "proj_available",
     "transform_coords",

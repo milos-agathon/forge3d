@@ -70,6 +70,10 @@ def _has_upward_convergence_trend(history: list[dict[str, float]]) -> bool:
     ) >= -1e-3
 
 
+def _params_python_object(params: Any) -> Any:
+    return getattr(params, "python_object", params)
+
+
 def render_offline(
     renderer: Any,
     material_set: Any,
@@ -157,8 +161,10 @@ def render_offline(
 
         hdr_frame, aov_frame = renderer.resolve_offline_hdr()
 
-        if getattr(params, "denoise", None) is not None and params.denoise.enabled:
-            method = str(params.denoise.method).lower()
+        params_python = _params_python_object(params)
+        denoise = getattr(params_python, "denoise", None)
+        if denoise is not None and denoise.enabled:
+            method = str(denoise.method).lower()
             if method != "none":
                 beauty_hdr = np.asarray(hdr_frame.to_numpy_f32(), dtype=np.float32)[..., :3]
                 albedo_np = _require_matching_aov_shape(
@@ -193,10 +199,10 @@ def render_offline(
                         beauty_hdr,
                         albedo=albedo_np,
                         normal=normal_np,
-                        iterations=int(params.denoise.iterations),
-                        sigma_color=float(params.denoise.sigma_color),
-                        sigma_normal=float(params.denoise.sigma_normal),
-                        sigma_depth=float(params.denoise.sigma_depth),
+                        iterations=int(denoise.iterations),
+                        sigma_color=float(denoise.sigma_color),
+                        sigma_normal=float(denoise.sigma_normal),
+                        sigma_depth=float(denoise.sigma_depth),
                     )
                     denoiser_used = "atrous"
 

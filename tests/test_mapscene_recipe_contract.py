@@ -116,6 +116,11 @@ def test_mapscene_recipe_components_are_public_and_serializable():
         "height": 600,
         "format": "png",
         "path": "map.png",
+        "samples": 1,
+        "denoiser": "none",
+        "aovs": [],
+        "hdr": False,
+        "bit_depth": 8,
         "metadata": {},
     }
 

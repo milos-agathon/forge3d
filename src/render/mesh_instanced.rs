@@ -4,6 +4,7 @@
 use bytemuck::{Pod, Zeroable};
 use glam::Mat4;
 use std::cell::Cell;
+use wgpu::util::DeviceExt;
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindingType, Buffer, BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, Device,
@@ -14,6 +15,7 @@ use wgpu::{
 };
 
 const DRAW_BATCH_UNIFORM_SLOT_COUNT: usize = 512;
+const FALLBACK_CSM_UNIFORM_BYTES: usize = 864;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -76,9 +78,11 @@ pub struct TerrainBlendContext<'a> {
 
 pub struct MeshInstancedRenderer {
     pipeline: RenderPipeline,
+    shadow_pipeline: Option<RenderPipeline>,
     uniforms: ScatterBatchUniforms,
     uniforms_buf: Buffer,
     bind_group: BindGroup,
+    shadow_bind_group: BindGroup,
     terrain_context: TerrainContextUniforms,
     terrain_context_buf: Buffer,
     terrain_bind_group_layout: BindGroupLayout,
@@ -88,6 +92,9 @@ pub struct MeshInstancedRenderer {
     per_draw_uniforms: Vec<Buffer>,
     per_draw_bind_groups: Vec<BindGroup>,
     per_draw_cursor: Cell<usize>,
+    shadow_per_draw_uniforms: Vec<Buffer>,
+    shadow_per_draw_bind_groups: Vec<BindGroup>,
+    shadow_per_draw_cursor: Cell<usize>,
     vbuf: Option<Buffer>,
     ibuf: Option<Buffer>,
     instbuf: Option<Buffer>,
@@ -127,6 +134,26 @@ impl MeshInstancedRenderer {
         sample_count: u32,
         depth_compare: wgpu::CompareFunction,
         depth_write_enabled: bool,
+    ) -> Self {
+        Self::new_with_depth_state_and_shadow_layout(
+            device,
+            color_format,
+            depth_format,
+            sample_count,
+            depth_compare,
+            depth_write_enabled,
+            None,
+        )
+    }
+
+    pub fn new_with_depth_state_and_shadow_layout(
+        device: &Device,
+        color_format: TextureFormat,
+        depth_format: Option<TextureFormat>,
+        sample_count: u32,
+        depth_compare: wgpu::CompareFunction,
+        depth_write_enabled: bool,
+        shadow_bind_group_layout: Option<&BindGroupLayout>,
     ) -> Self {
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("mesh_instanced_shader"),
@@ -174,9 +201,30 @@ impl MeshInstancedRenderer {
                 ],
             });
 
+        let owned_shadow_bind_group_layout;
+        let shadow_bind_group_layout = match shadow_bind_group_layout {
+            Some(layout) => layout,
+            None => {
+                owned_shadow_bind_group_layout =
+                    Self::create_fallback_shadow_bind_group_layout(device);
+                &owned_shadow_bind_group_layout
+            }
+        };
+        let shadow_bind_group =
+            Self::create_fallback_shadow_bind_group(device, shadow_bind_group_layout);
+
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("mesh_instanced_pl"),
-            bind_group_layouts: &[&bind_group_layout, &terrain_bind_group_layout],
+            bind_group_layouts: &[
+                &bind_group_layout,
+                &terrain_bind_group_layout,
+                shadow_bind_group_layout,
+            ],
+            push_constant_ranges: &[],
+        });
+        let shadow_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("mesh_instanced_shadow_pl"),
+            bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -231,7 +279,7 @@ impl MeshInstancedRenderer {
             vertex: VertexState {
                 module: &shader,
                 entry_point: "vs_main",
-                buffers: &[vertex_layout, instance_layout],
+                buffers: &[vertex_layout.clone(), instance_layout.clone()],
             },
             primitive: PrimitiveState {
                 topology: PrimitiveTopology::TriangleList,
@@ -258,6 +306,31 @@ impl MeshInstancedRenderer {
                 })],
             }),
             multiview: None,
+        });
+        let shadow_pipeline = depth_format.map(|df| {
+            device.create_render_pipeline(&RenderPipelineDescriptor {
+                label: Some("mesh_instanced_shadow_pipeline"),
+                layout: Some(&shadow_pipeline_layout),
+                vertex: VertexState {
+                    module: &shader,
+                    entry_point: "vs_shadow",
+                    buffers: &[vertex_layout, instance_layout],
+                },
+                primitive: PrimitiveState {
+                    topology: PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: df,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                fragment: None,
+                multiview: None,
+            })
         });
 
         let uniforms = ScatterBatchUniforms::default();
@@ -334,12 +407,34 @@ impl MeshInstancedRenderer {
             per_draw_uniforms.push(uniforms_buf);
             per_draw_bind_groups.push(bind_group);
         }
+        let mut shadow_per_draw_uniforms = Vec::with_capacity(DRAW_BATCH_UNIFORM_SLOT_COUNT);
+        let mut shadow_per_draw_bind_groups = Vec::with_capacity(DRAW_BATCH_UNIFORM_SLOT_COUNT);
+        for _ in 0..DRAW_BATCH_UNIFORM_SLOT_COUNT {
+            let uniforms_buf = device.create_buffer(&BufferDescriptor {
+                label: Some("mesh_instanced_shadow_draw_uniforms"),
+                size: std::mem::size_of::<ScatterBatchUniforms>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let bind_group = device.create_bind_group(&BindGroupDescriptor {
+                label: Some("mesh_instanced_shadow_draw_bg"),
+                layout: &bind_group_layout,
+                entries: &[BindGroupEntry {
+                    binding: 0,
+                    resource: uniforms_buf.as_entire_binding(),
+                }],
+            });
+            shadow_per_draw_uniforms.push(uniforms_buf);
+            shadow_per_draw_bind_groups.push(bind_group);
+        }
 
         Self {
             pipeline,
+            shadow_pipeline,
             uniforms,
             uniforms_buf,
             bind_group,
+            shadow_bind_group,
             terrain_context,
             terrain_context_buf,
             terrain_bind_group_layout,
@@ -349,12 +444,149 @@ impl MeshInstancedRenderer {
             per_draw_uniforms,
             per_draw_bind_groups,
             per_draw_cursor: Cell::new(0),
+            shadow_per_draw_uniforms,
+            shadow_per_draw_bind_groups,
+            shadow_per_draw_cursor: Cell::new(0),
             vbuf: None,
             ibuf: None,
             instbuf: None,
             index_count: 0,
             instance_capacity: 0,
         }
+    }
+
+    fn create_fallback_shadow_bind_group_layout(device: &Device) -> BindGroupLayout {
+        device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("mesh_instanced.shadow_fallback_bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        sample_type: wgpu::TextureSampleType::Depth,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        })
+    }
+
+    fn create_fallback_shadow_bind_group(device: &Device, layout: &BindGroupLayout) -> BindGroup {
+        let csm_zeroes = [0u8; FALLBACK_CSM_UNIFORM_BYTES];
+        let csm_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("mesh_instanced.shadow_fallback_csm"),
+            contents: &csm_zeroes,
+            usage: BufferUsages::STORAGE,
+        });
+        let shadow_maps = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mesh_instanced.shadow_fallback_maps"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let shadow_view = shadow_maps.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("mesh_instanced.shadow_fallback_maps_view"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            array_layer_count: Some(1),
+            ..Default::default()
+        });
+        let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("mesh_instanced.shadow_fallback_sampler"),
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..Default::default()
+        });
+        let moment_maps = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mesh_instanced.shadow_fallback_moments"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let moment_view = moment_maps.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("mesh_instanced.shadow_fallback_moments_view"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            array_layer_count: Some(1),
+            ..Default::default()
+        });
+        let moment_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("mesh_instanced.shadow_fallback_moment_sampler"),
+            ..Default::default()
+        });
+        device.create_bind_group(&BindGroupDescriptor {
+            label: Some("mesh_instanced.shadow_fallback_bg"),
+            layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: csm_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&shadow_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&shadow_sampler),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&moment_view),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Sampler(&moment_sampler),
+                },
+            ],
+        })
     }
 
     pub fn set_view_proj(&mut self, view: Mat4, proj: Mat4) {
@@ -415,6 +647,10 @@ impl MeshInstancedRenderer {
 
     pub fn reset_draw_batch_uniforms(&self) {
         self.per_draw_cursor.set(0);
+    }
+
+    pub fn reset_shadow_draw_batch_uniforms(&self) {
+        self.shadow_per_draw_cursor.set(0);
     }
 
     pub fn set_mesh(
@@ -530,6 +766,7 @@ impl MeshInstancedRenderer {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_bind_group(1, &self.terrain_bind_group, &[]);
+        pass.set_bind_group(2, &self.shadow_bind_group, &[]);
         pass.set_vertex_buffer(0, vbuf.slice(..));
         pass.set_vertex_buffer(1, inst.slice(..));
         pass.set_index_buffer(ibuf.slice(..), IndexFormat::Uint32);
@@ -563,6 +800,7 @@ impl MeshInstancedRenderer {
         wind_bend_fade: [f32; 4],
         terrain_blend: [f32; 4],
         terrain_contact: [f32; 4],
+        shadow_bind_group: Option<&'rp BindGroup>,
         vbuf: &'rp Buffer,
         ibuf: &'rp Buffer,
         instbuf: &'rp Buffer,
@@ -604,10 +842,66 @@ impl MeshInstancedRenderer {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.per_draw_bind_groups[slot], &[]);
         pass.set_bind_group(1, &self.terrain_bind_group, &[]);
+        pass.set_bind_group(2, shadow_bind_group.unwrap_or(&self.shadow_bind_group), &[]);
         pass.set_vertex_buffer(0, vbuf.slice(..));
         pass.set_vertex_buffer(1, instbuf.slice(..));
         pass.set_index_buffer(ibuf.slice(..), IndexFormat::Uint32);
         pass.draw_indexed(0..index_count, 0, 0..instance_count);
+    }
+
+    pub fn draw_shadow_batch_params<'rp>(
+        &'rp self,
+        pass: &mut RenderPass<'rp>,
+        queue: &Queue,
+        view: Mat4,
+        proj: Mat4,
+        vbuf: &'rp Buffer,
+        ibuf: &'rp Buffer,
+        instbuf: &'rp Buffer,
+        index_count: u32,
+        instance_count: u32,
+    ) {
+        if index_count == 0 || instance_count == 0 {
+            return;
+        }
+        let Some(pipeline) = &self.shadow_pipeline else {
+            return;
+        };
+        let Some(slot) = self.next_shadow_draw_batch_uniform_slot() else {
+            static WARN_ONCE: std::sync::Once = std::sync::Once::new();
+            WARN_ONCE.call_once(|| {
+                eprintln!(
+                    "[mesh_instanced] shadow per-draw uniform slot pool exhausted ({} slots); \
+                     excess shadow draws will be skipped this frame",
+                    DRAW_BATCH_UNIFORM_SLOT_COUNT
+                );
+            });
+            return;
+        };
+        let mut u = self.uniforms;
+        u.view = view.to_cols_array_2d();
+        u.proj = proj.to_cols_array_2d();
+        queue.write_buffer(
+            &self.shadow_per_draw_uniforms[slot],
+            0,
+            bytemuck::bytes_of(&u),
+        );
+
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &self.shadow_per_draw_bind_groups[slot], &[]);
+        pass.set_vertex_buffer(0, vbuf.slice(..));
+        pass.set_vertex_buffer(1, instbuf.slice(..));
+        pass.set_index_buffer(ibuf.slice(..), IndexFormat::Uint32);
+        pass.draw_indexed(0..index_count, 0, 0..instance_count);
+    }
+
+    fn next_shadow_draw_batch_uniform_slot(&self) -> Option<usize> {
+        let slot = self.shadow_per_draw_cursor.get();
+        if slot >= self.shadow_per_draw_uniforms.len() {
+            return None;
+        }
+        self.shadow_per_draw_cursor.set(slot + 1);
+        Some(slot)
     }
 }
 
@@ -833,6 +1127,7 @@ mod tests {
                     [0.0; 4],
                     [0.0, 0.75, 2.5, 0.0],
                     [0.0, 3.0, 0.35, 0.65],
+                    None,
                     per_draw_renderer.vbuf.as_ref().unwrap(),
                     per_draw_renderer.ibuf.as_ref().unwrap(),
                     per_draw_renderer.instbuf.as_ref().unwrap(),

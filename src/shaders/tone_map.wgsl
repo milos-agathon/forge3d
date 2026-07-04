@@ -3,54 +3,14 @@
 // Exists to share curve math between GPU pass and CPU reference.
 // RELEVANT FILES:src/pipeline/pbr.rs,python/forge3d/pbr.py,tests/test_b2_tonemap.py,examples/pbr_spheres.py
 
-const HABLE_WHITE_POINT : f32 = 11.2;
-
-fn curve_reinhard(value: f32) -> f32 {
-    return value / (1.0 + value);
-}
-
-fn curve_aces(value: f32) -> f32 {
-    let a = 2.51;
-    let b = 0.03;
-    let c = 2.43;
-    let d = 0.59;
-    let e = 0.14;
-    let numerator = value * (a * value + b);
-    let denominator = value * (c * value + d) + e;
-    if (abs(denominator) < 1e-6) {
-        return 0.0;
-    }
-    return clamp(numerator / denominator, 0.0, 1.0);
-}
-
-fn curve_hable(value: f32) -> f32 {
-    let a = 0.15;
-    let b = 0.50;
-    let c = 0.10;
-    let d = 0.20;
-    let e = 0.02;
-    let f = 0.30;
-    let numerator = value * (value * a + c * b) + d * e;
-    let denominator = value * (value * a + b) + d * f;
-    if (abs(denominator) < 1e-6) {
-        return 0.0;
-    }
-    let tone = numerator / denominator - e / f;
-    let white_num = HABLE_WHITE_POINT * (HABLE_WHITE_POINT * a + c * b) + d * e;
-    let white_den = HABLE_WHITE_POINT * (HABLE_WHITE_POINT * a + b) + d * f;
-    let white = select(white_num / white_den - e / f, 1.0, abs(white_den) < 1e-6);
-    if (abs(white) < 1e-6) {
-        return 0.0;
-    }
-    return clamp(tone / white, 0.0, 1.0);
-}
-
 fn tone_map_unit(value: f32, mode: u32) -> f32 {
+    let sample = vec3<f32>(max(value, 0.0));
     switch(mode) {
-        case 0u: { return curve_aces(value); }
-        case 1u: { return curve_reinhard(value); }
-        case 2u: { return curve_hable(value); }
-        default: { return curve_reinhard(value); }
+        case TONEMAP_OPERATOR_ACES: { return tonemap_aces(sample).x; }
+        case TONEMAP_OPERATOR_REINHARD: { return tonemap_reinhard(sample).x; }
+        case TONEMAP_OPERATOR_UNCHARTED2: { return tonemap_uncharted2(sample, 11.2).x; }
+        case TONEMAP_OPERATOR_FILMIC_TERRAIN: { return tonemap_filmic_terrain(sample).x; }
+        default: { return tonemap_reinhard(sample).x; }
     }
 }
 

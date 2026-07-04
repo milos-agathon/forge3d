@@ -63,21 +63,26 @@ Typed MapScene API
 
 ``forge3d.map_scene`` exposes the typed offline map-production contract. Use
 ``MapScene`` with ``SceneRecipe`` or keyword recipe components to validate
-scene intent, compile deterministic label plans, write native/offscreen PNG
-output for fixture-backed MVP recipes, keep deterministic source-derived
-compatibility output for symbolic fixture recipes, and save deterministic review
-bundles.
+scene intent, compile deterministic label plans, write GPU-terrain PNG output
+or EXR output for renderable terrain recipes, keep deterministic placeholder
+output behind explicit ``allow_placeholder=True`` debug opt-in, and save
+deterministic review bundles. ``OutputSpec`` exposes ``samples``,
+``denoiser``, ``aovs``, and ``hdr`` fields for offline-quality MapScene output,
+and ``LightingPreset(name="rainier_showcase")`` resolves the self-contained
+camera/sun/IBL/reproducibility preset from ``forge3d.presets``.
 Unsupported, ``Pro-gated``,
 ``placeholder/fallback``, ``experimental``, missing-source, and blocking
 diagnostic paths are reported before successful render completion.
 
 ``MapScene.render`` performs validation before rendering, writes deterministic
-PNG output for supported terrain/raster/vector/label scene recipes, records the
-last backend on ``MapScene.last_render_backend``, and still blocks unsupported
-layer paths through typed diagnostics instead of representing them as successful
-renders. ``MapScene.save_bundle`` writes review metadata and diagnostics;
-blocked scenes are recorded as non-renderable instead of being represented as
-successful renders.
+PNG or EXR output for supported terrain/raster/vector/label scene recipes,
+records the last backend on ``MapScene.last_render_backend`` and sample/AOV
+details on ``MapScene.last_render_metadata``, and still blocks unsupported layer
+paths through typed diagnostics instead of representing them as successful
+renders. ``forge3d.recipe_manifest(scene)`` returns a deterministic JSON-safe
+manifest for CI/review tooling. ``MapScene.save_bundle`` writes review metadata
+and diagnostics; blocked scenes are recorded as non-renderable instead of being
+represented as successful renders.
 
 Feature ``005-map-assets-bundles-p1`` extends this product path without
 changing the legacy building module export. Use ``forge3d.map_scene.LabelLayer``

@@ -70,7 +70,28 @@ def render_offscreen_rgba(
     return _fallback_render_rgba(w, h, scene=scene, camera=camera, seed=int(seed), frames=int(frames), denoiser=str(denoiser))
 
 
-def save_png_deterministic(path: str | bytes | "os.PathLike[str]", rgba: np.ndarray) -> None:
+def _png_array_for_bit_depth(rgba: np.ndarray, bit_depth: int) -> np.ndarray:
+    if bit_depth not in {8, 16}:
+        raise ValueError("bit_depth must be 8 or 16")
+    data = rgba
+    if bit_depth == 8:
+        if data.dtype == np.uint8:
+            return data
+        if data.dtype in (np.float32, np.float64):
+            return (np.clip(data, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+        if data.dtype == np.uint16:
+            return ((data.astype(np.uint32) * 255 + 32767) // 65535).astype(np.uint8)
+        return data.astype(np.uint8)
+    if data.dtype == np.uint16:
+        return data
+    if data.dtype == np.uint8:
+        return (data.astype(np.uint16) * 257).astype(np.uint16)
+    if data.dtype in (np.float32, np.float64):
+        return (np.clip(data, 0.0, 1.0) * 65535.0 + 0.5).astype(np.uint16)
+    return data.astype(np.uint16)
+
+
+def save_png_deterministic(path: str | bytes | "os.PathLike[str]", rgba: np.ndarray, *, bit_depth: int = 8) -> None:
     """Save RGBA as PNG with deterministic bytes for hashing.
 
     Ensures stable PNG output by using fixed parameters and avoiding metadata.
@@ -78,27 +99,13 @@ def save_png_deterministic(path: str | bytes | "os.PathLike[str]", rgba: np.ndar
     if not isinstance(rgba, np.ndarray) or rgba.ndim != 3 or rgba.shape[2] not in (3, 4):
         raise ValueError("rgba must be numpy array with shape (H,W,3|4)")
 
-    data = rgba
-    if data.dtype == np.uint8:
-        arr = data
-    elif data.dtype in (np.float32, np.float64):
-        arr = (np.clip(data, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
-    else:
-        arr = data.astype(np.uint8)
-
+    arr = _png_array_for_bit_depth(rgba, int(bit_depth))
     _save_png(path, arr, compress_level=6)
 
 
-def rgba_to_png_bytes(rgba: np.ndarray) -> bytes:
+def rgba_to_png_bytes(rgba: np.ndarray, *, bit_depth: int = 8) -> bytes:
     """Convert RGBA array to PNG bytes deterministically."""
-    data = rgba
-    if data.dtype == np.uint8:
-        arr = data
-    elif data.dtype in (np.float32, np.float64):
-        arr = (np.clip(data, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
-    else:
-        arr = data.astype(np.uint8)
-
+    arr = _png_array_for_bit_depth(rgba, int(bit_depth))
     return _encode_png(arr, compress_level=6)
 
 

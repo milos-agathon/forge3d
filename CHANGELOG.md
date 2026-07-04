@@ -6,6 +6,14 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.30.0] - 2026-07-04
+### Added
+- Completed the Blender-outmatch P0/P1 map rendering quality block: MapScene GPU terrain rendering, labels/vectors, offline output, presets, alignment diagnostics, SDF text atlas support, material maps, buildings, cartographic furniture, Hosek-Wilkie sky, 16-bit/color pipeline work, and recipe-level golden gates.
+- Added the P0/P1 implementation audit to `docs/3d-map-rendering-quality-blender-outmatch-plan.md`, marking all BOP-P0 and BOP-P1 tasks full with residual polish tracked separately.
+
+### Changed
+- Bumped the package and PyPI version to `1.30.0`.
+
 ## [1.29.0] - 2026-07-02
 ### Added
 - G-002c: Added Rust-first GIS vector metadata/read, CRS reprojection, geometry measurement/topology, rasterization, geometry masks, raster masks, and thematic raster APIs.

@@ -50,3 +50,46 @@ fn test_invalid_cityjson() {
     assert!(parse_cityjson(b"not json").is_err());
     assert!(parse_cityjson(br#"{"type": "NotCityJSON"}"#).is_err());
 }
+
+#[test]
+fn test_cityjson_surface_with_hole_preserves_void() {
+    let data = br#"{
+        "type": "CityJSON",
+        "version": "1.1",
+        "vertices": [
+            [0, 0, 0], [10, 0, 0], [10, 10, 0], [0, 10, 0],
+            [4, 4, 0], [6, 4, 0], [6, 6, 0], [4, 6, 0]
+        ],
+        "CityObjects": {
+            "courtyard": {
+                "type": "Building",
+                "geometry": [{
+                    "type": "MultiSurface",
+                    "lod": "2",
+                    "boundaries": [
+                        [[0, 1, 2, 3], [4, 5, 6, 7]]
+                    ]
+                }]
+            }
+        }
+    }"#;
+
+    let (buildings, _) = parse_cityjson(data).unwrap();
+    let building = &buildings[0];
+
+    assert!(building.vertex_count() >= 8);
+    assert!(building.triangle_count() >= 4);
+    for tri in building.indices.chunks(3) {
+        let centroid = tri.iter().fold([0.0f32; 2], |mut acc, index| {
+            let base = *index as usize * 3;
+            acc[0] += building.positions[base] / 3.0;
+            acc[1] += building.positions[base + 1] / 3.0;
+            acc
+        });
+        assert!(
+            centroid[0] <= 4.0 || centroid[0] >= 6.0 || centroid[1] <= 4.0 || centroid[1] >= 6.0,
+            "triangle centroid {:?} fell inside the CityJSON interior ring",
+            centroid
+        );
+    }
+}

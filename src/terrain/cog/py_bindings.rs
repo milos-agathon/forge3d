@@ -3,6 +3,7 @@
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::cog_reader::CogHeightReader;
@@ -21,9 +22,16 @@ impl PyCogDataset {
     /// Args:
     ///     url: HTTP(S) URL or file:// path to COG file
     ///     cache_size_mb: Tile cache memory budget in MB (default: 256)
+    ///     cache_dir: Optional on-disk range cache directory
+    ///     cache_budget_mb: Byte/disk range cache budget in MB (default: cache_size_mb)
     #[new]
-    #[pyo3(signature = (url, cache_size_mb=256))]
-    pub fn new(url: &str, cache_size_mb: u32) -> PyResult<Self> {
+    #[pyo3(signature = (url, cache_size_mb=256, cache_dir=None, cache_budget_mb=None))]
+    pub fn new(
+        url: &str,
+        cache_size_mb: u32,
+        cache_dir: Option<String>,
+        cache_budget_mb: Option<u32>,
+    ) -> PyResult<Self> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -32,7 +40,15 @@ impl PyCogDataset {
             })?;
 
         let reader = runtime
-            .block_on(async { CogHeightReader::new(url, cache_size_mb).await })
+            .block_on(async {
+                CogHeightReader::new_with_cache_options(
+                    url,
+                    cache_size_mb,
+                    cache_dir.map(PathBuf::from),
+                    cache_budget_mb.unwrap_or(cache_size_mb),
+                )
+                .await
+            })
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to open COG: {:?}", e)))?;
 
         Ok(Self {
@@ -118,6 +134,22 @@ impl PyCogDataset {
         map.insert(
             "memory_budget_bytes".to_string(),
             stats.memory_budget_bytes as f64,
+        );
+        map.insert(
+            "byte_cache_used_bytes".to_string(),
+            stats.byte_cache_used_bytes as f64,
+        );
+        map.insert(
+            "byte_cache_budget_bytes".to_string(),
+            stats.byte_cache_budget_bytes as f64,
+        );
+        map.insert(
+            "disk_cache_used_bytes".to_string(),
+            stats.disk_cache_used_bytes as f64,
+        );
+        map.insert(
+            "disk_cache_budget_bytes".to_string(),
+            stats.disk_cache_budget_bytes as f64,
         );
 
         let total = stats.hits + stats.misses;

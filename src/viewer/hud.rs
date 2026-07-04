@@ -14,14 +14,13 @@ pub fn push_rect(
     y1: f32,
     color: [f32; 4],
 ) {
-    inst.push(TextInstance {
-        rect_min: [x0, y0],
-        rect_max: [x1, y1],
-        uv_min: [0.0, 0.0],
-        uv_max: [1.0, 1.0],
+    inst.push(TextInstance::new(
+        [x0, y0],
+        [x1, y1],
+        [0.0, 0.0],
+        [1.0, 1.0],
         color,
-        rotation: 0.0,
-    });
+    ));
 }
 
 /// Push a single 3x5 block character (A-Z subset)

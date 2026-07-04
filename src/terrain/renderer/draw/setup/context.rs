@@ -14,6 +14,16 @@ pub(in crate::terrain::renderer) struct UploadedHeightInputs {
     pub(in crate::terrain::renderer) water_mask_view_uploaded: Option<wgpu::TextureView>,
 }
 
+pub(in crate::terrain::renderer) struct MaterialMapResources {
+    _normal_texture: wgpu::Texture,
+    normal_view: wgpu::TextureView,
+    _roughness_texture: wgpu::Texture,
+    roughness_view: wgpu::TextureView,
+    _mask_texture: wgpu::Texture,
+    mask_view: wgpu::TextureView,
+    sampler: wgpu::Sampler,
+}
+
 pub(in crate::terrain::renderer) struct PreparedMaterials {
     pub(in crate::terrain::renderer) gpu_materials:
         Arc<crate::render::material_set::GpuMaterialSet>,
@@ -21,6 +31,7 @@ pub(in crate::terrain::renderer) struct PreparedMaterials {
     pub(in crate::terrain::renderer) overlay_buffer: wgpu::Buffer,
     pub(in crate::terrain::renderer) overlay_binding: OverlayBinding,
     pub(in crate::terrain::renderer) fallback_colormap_view: Option<wgpu::TextureView>,
+    pub(in crate::terrain::renderer) material_maps: MaterialMapResources,
 }
 
 impl PreparedMaterials {
@@ -46,6 +57,22 @@ impl PreparedMaterials {
         } else {
             &self.gpu_materials.sampler
         }
+    }
+
+    pub(in crate::terrain::renderer) fn material_normal_view(&self) -> &wgpu::TextureView {
+        &self.material_maps.normal_view
+    }
+
+    pub(in crate::terrain::renderer) fn material_roughness_view(&self) -> &wgpu::TextureView {
+        &self.material_maps.roughness_view
+    }
+
+    pub(in crate::terrain::renderer) fn material_mask_view(&self) -> &wgpu::TextureView {
+        &self.material_maps.mask_view
+    }
+
+    pub(in crate::terrain::renderer) fn material_map_sampler(&self) -> &wgpu::Sampler {
+        &self.material_maps.sampler
     }
 }
 
@@ -160,6 +187,7 @@ impl TerrainScene {
             .map_err(|err| {
                 PyRuntimeError::new_err(format!("Failed to prepare material textures: {err:#}"))
             })?;
+        let material_maps = self.prepare_material_map_resources(&decoded.materials)?;
 
         let shading_uniforms =
             self.build_shading_uniforms(material_set, gpu_materials.as_ref(), params, decoded)?;
@@ -207,7 +235,113 @@ impl TerrainScene {
             overlay_buffer,
             overlay_binding,
             fallback_colormap_view,
+            material_maps,
         })
+    }
+
+    fn prepare_material_map_resources(
+        &self,
+        materials: &crate::terrain::render_params::MaterialLayerSettingsNative,
+    ) -> Result<MaterialMapResources> {
+        let (normal_texture, normal_view) = self.upload_material_map_texture(
+            materials.normal_path.as_deref(),
+            [128, 128, 255, 255],
+            "terrain.material_maps.normal",
+        )?;
+        let (roughness_texture, roughness_view) = self.upload_material_map_texture(
+            materials.roughness_path.as_deref(),
+            [255, 255, 255, 255],
+            "terrain.material_maps.roughness",
+        )?;
+        let (mask_texture, mask_view) = self.upload_material_map_texture(
+            materials.mask_path.as_deref(),
+            [255, 255, 255, 255],
+            "terrain.material_maps.mask",
+        )?;
+        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("terrain.material_maps.sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        Ok(MaterialMapResources {
+            _normal_texture: normal_texture,
+            normal_view,
+            _roughness_texture: roughness_texture,
+            roughness_view,
+            _mask_texture: mask_texture,
+            mask_view,
+            sampler,
+        })
+    }
+
+    fn upload_material_map_texture(
+        &self,
+        path: Option<&str>,
+        fallback_rgba: [u8; 4],
+        label: &'static str,
+    ) -> Result<(wgpu::Texture, wgpu::TextureView)> {
+        let (width, height, pixels) = if let Some(path) = path {
+            let image = image::open(path)
+                .map_err(|err| anyhow!("Failed to load terrain material map '{}': {err}", path))?;
+            let rgba = image.to_rgba8();
+            let (width, height) = rgba.dimensions();
+            if width == 0 || height == 0 {
+                return Err(anyhow!(
+                    "Terrain material map '{}' has zero dimensions",
+                    path
+                ));
+            }
+            (width, height, rgba.into_raw())
+        } else {
+            (1, 1, fallback_rgba.to_vec())
+        };
+
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let (padded, padded_bpr) = pad_rgba8_rows(width, height, &pixels);
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &padded,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(padded_bpr),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some(label),
+            format: Some(wgpu::TextureFormat::Rgba8Unorm),
+            dimension: Some(wgpu::TextureViewDimension::D2),
+            ..Default::default()
+        });
+        Ok((texture, view))
     }
 
     pub(in crate::terrain::renderer) fn prepare_ibl_bind_group(
@@ -261,4 +395,20 @@ impl TerrainScene {
             ],
         }))
     }
+}
+
+fn pad_rgba8_rows(width: u32, height: u32, pixels: &[u8]) -> (Vec<u8>, u32) {
+    let row_bytes = width as usize * 4;
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
+    let padded_row_bytes = ((row_bytes + align - 1) / align) * align;
+    if padded_row_bytes == row_bytes {
+        return (pixels.to_vec(), row_bytes as u32);
+    }
+    let mut padded = vec![0u8; padded_row_bytes * height as usize];
+    for row in 0..height as usize {
+        let src = row * row_bytes;
+        let dst = row * padded_row_bytes;
+        padded[dst..dst + row_bytes].copy_from_slice(&pixels[src..src + row_bytes]);
+    }
+    (padded, padded_row_bytes as u32)
 }

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 import math
 import os
@@ -59,6 +59,54 @@ def _require_attributes(attr_names: Iterable[str]) -> None:
 
 def _normalize_preset_name(name: str) -> str:
     return "".join(c for c in str(name).strip().lower() if c not in {"-", "_", " ", "."})
+
+
+def _arg_was_explicit(args: Any, name: str) -> bool:
+    explicit = getattr(args, "_explicit_cli_args", None)
+    return bool(explicit is not None and str(name) in explicit)
+
+
+def _values_equal(left: Any, right: Any) -> bool:
+    try:
+        return abs(float(left) - float(right)) <= 1.0e-9
+    except (TypeError, ValueError):
+        return left == right
+
+
+def _set_arg_default(args: Any, name: str, value: Any, default: Any = None) -> None:
+    if value is None or _arg_was_explicit(args, name):
+        return
+    current = getattr(args, name, default)
+    if current is None or _values_equal(current, default):
+        setattr(args, name, value)
+
+
+def _preset_payload(name: str) -> Mapping[str, Any]:
+    try:
+        from . import presets as _presets
+
+        return dict(_presets.get(str(name)))
+    except Exception:
+        return {}
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _builtin_ibl_path(name: Any) -> Path | None:
+    key = _normalize_preset_name(str(name or ""))
+    if key not in {"clearsky", "clear"}:
+        return None
+    root = Path(__file__).resolve().parents[2]
+    for relative in (
+        Path("assets") / "hdri" / "venice_sunrise_4k.hdr",
+        Path("assets") / "hdri" / "brown_photostudio_02_4k.hdr",
+    ):
+        candidate = root / relative
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def check_camera_sun_alignment(
@@ -279,12 +327,10 @@ def _parse_volumetric_spec(spec: str) -> dict[str, Any]:
 def _make_terrain_shadow_settings(shadow_config) -> TerrainShadowSettings:
     """Create ShadowSettings for terrain rendering with early validation.
     
-    Validates that the requested technique is actually implemented in the
-    terrain_pbr_pom.wgsl shader. VSM/EVSM/MSM are recognized by config but
-    NOT implemented (moment_maps binding exists but is never sampled).
+    Validates that the requested technique is supported by the terrain shader.
     
     Raises:
-        ValueError: If technique is VSM/EVSM/MSM (not implemented for terrain)
+        ValueError: If the technique is not supported for terrain.
     """
     settings = TerrainShadowSettings(
         enabled=shadow_config.enabled if shadow_config else True,
@@ -600,23 +646,50 @@ def _apply_luminance_unsharp(frame, strength: float):
 
 
 def _apply_preset_cli_defaults(args: Any) -> None:
-    """Apply preset-specific camera defaults for perspective relief presets."""
+    """Apply preset payload defaults to CLI args without overriding explicit flags."""
     preset_name = getattr(args, "preset", None)
     if not preset_name:
         return
 
-    key = _normalize_preset_name(preset_name)
-    if key != "rainierrelief":
+    preset = _preset_payload(str(preset_name))
+    if not preset:
         return
 
-    if getattr(args, "camera_mode", DEFAULT_CAMERA_MODE) == DEFAULT_CAMERA_MODE:
-        args.camera_mode = "mesh"
-    if float(getattr(args, "cam_theta", DEFAULT_CAM_THETA)) == DEFAULT_CAM_THETA:
-        args.cam_theta = 65.0
-    if float(getattr(args, "cam_phi", DEFAULT_CAM_PHI)) == DEFAULT_CAM_PHI:
-        args.cam_phi = 45.0
-    if float(getattr(args, "cam_fov", DEFAULT_CAM_FOV)) == DEFAULT_CAM_FOV:
-        args.cam_fov = 55.0
+    cli_params = _mapping(preset.get("cli_params"))
+    camera = _mapping(preset.get("camera"))
+    sun = _mapping(preset.get("sun"))
+    ibl = _mapping(preset.get("ibl"))
+
+    _set_arg_default(args, "camera_mode", cli_params.get("camera_mode") or camera.get("camera_mode"), DEFAULT_CAMERA_MODE)
+    _set_arg_default(args, "cam_radius", cli_params.get("cam_radius") or camera.get("radius"), DEFAULT_CAM_RADIUS)
+    _set_arg_default(args, "cam_theta", cli_params.get("cam_theta") or camera.get("theta_deg") or camera.get("elevation_deg"), DEFAULT_CAM_THETA)
+    _set_arg_default(args, "cam_phi", cli_params.get("cam_phi") or camera.get("azimuth_deg"), DEFAULT_CAM_PHI)
+    _set_arg_default(args, "cam_fov", cli_params.get("cam_fov") or camera.get("fov_deg"), DEFAULT_CAM_FOV)
+
+    _set_arg_default(args, "sun_azimuth", sun.get("azimuth_deg"), None)
+    _set_arg_default(args, "sun_elevation", sun.get("elevation_deg"), None)
+    _set_arg_default(args, "sun_intensity", sun.get("intensity"), None)
+    _set_arg_default(args, "sun_color", sun.get("color"), None)
+
+    _set_arg_default(args, "ibl_intensity", ibl.get("intensity"), 1.0)
+    _set_arg_default(args, "hdr", ibl.get("path") or ibl.get("hdr_path") or _builtin_ibl_path(ibl.get("builtin")), DEFAULT_HDR)
+    _set_arg_default(args, "z_scale", preset.get("exaggeration"), 2.0)
+
+
+def _apply_preset_dem_defaults(args: Any, terrain_span: float) -> None:
+    """Apply preset defaults that depend on DEM dimensions."""
+    preset_name = getattr(args, "preset", None)
+    if not preset_name or _arg_was_explicit(args, "cam_radius"):
+        return
+
+    preset = _preset_payload(str(preset_name))
+    camera = _mapping(preset.get("camera"))
+    radius_scale = camera.get("radius_scale")
+    if radius_scale is None:
+        return
+    current = getattr(args, "cam_radius", DEFAULT_CAM_RADIUS)
+    if current is None or _values_equal(current, DEFAULT_CAM_RADIUS):
+        setattr(args, "cam_radius", max(1.0, float(terrain_span)) * float(radius_scale))
 
 
 def render_sunrise_to_noon_sequence(
@@ -792,6 +865,7 @@ def run(args: Any) -> int:
 
     dem = _load_dem(args.dem)
     dem_dx_m, dem_dy_m, terrain_span, spacing_note = _dem_spacing_info(dem)
+    _apply_preset_dem_defaults(args, terrain_span)
     heightmap_array = dem.data
 
     if getattr(args, "colormap_domain", None) is not None:

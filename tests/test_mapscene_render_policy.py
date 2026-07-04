@@ -23,7 +23,7 @@ def test_render_performs_validation_and_continues_on_warnings_by_default(tmp_pat
     scene = _base_scene(diagnostics_policy={"gpu_memory_budget_bytes": 1})
     output_path = tmp_path / "warning.png"
 
-    report = scene.render(str(output_path))
+    report = scene.render(str(output_path), allow_placeholder=True)
 
     assert output_path.exists()
     assert report.status == "warning"

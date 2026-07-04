@@ -26,7 +26,7 @@
 //!   - @binding(4): BRDF LUT texture
 //!   - @binding(5): BRDF LUT sampler
 //! Render Target Formats:
-//! - Color: RGBA8UnormSrgb (matches CPU expectations)
+//! - Color: RGBA8UnormSrgb (the target applies final sRGB encoding)
 //! Address Space: `uniform`, `fragment`, `vertex`
 //!
 //! Implements metallic-roughness workflow with BRDF dispatch to lighting.wgsl module.
@@ -293,14 +293,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // indirect_lighting contains the diffuse+spec IBL contribution.
     var color = direct_lighting + indirect_lighting + emissive;
     
-    // Tone mapping and gamma correction
+    // Tone mapping. The Rgba8UnormSrgb target applies final sRGB encoding.
     color = color * lighting.exposure;
-    
-    // Simple Reinhard tone mapping
-    color = color / (color + vec3<f32>(1.0));
-    
-    // Gamma correction
-    color = pow(color, vec3<f32>(1.0 / lighting.gamma));
+    color = tonemap_reinhard(color);
     
     return vec4<f32>(color, base_color.a);
 }
@@ -383,10 +378,9 @@ fn fs_pbr_simple(input: VertexOutput) -> @location(0) vec4<f32> {
     // Simple ambient
     color = color + vec3<f32>(0.03) * base_color.rgb + emissive;
     
-    // Tone mapping
+    // Tone mapping. The Rgba8UnormSrgb target applies final sRGB encoding.
     color = color * lighting.exposure;
-    color = color / (color + vec3<f32>(1.0));
-    color = pow(color, vec3<f32>(1.0 / lighting.gamma));
+    color = tonemap_reinhard(color);
     
     return vec4<f32>(color, base_color.a);
 }

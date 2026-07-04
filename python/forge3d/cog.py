@@ -14,6 +14,7 @@ Example:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from os import PathLike
 from typing import Dict, Tuple, TYPE_CHECKING
 
 import numpy as np
@@ -53,7 +54,11 @@ class CogStats:
         cache_evictions: Number of tiles evicted from cache
         memory_used_bytes: Current cache memory usage in bytes
         memory_budget_bytes: Cache memory budget in bytes
-        hit_rate_percent: Cache hit rate as percentage
+    hit_rate_percent: Cache hit rate as percentage
+        byte_cache_used_bytes: Current range byte-cache memory usage
+        byte_cache_budget_bytes: Range byte-cache memory budget
+        disk_cache_used_bytes: Current on-disk range-cache usage
+        disk_cache_budget_bytes: On-disk range-cache budget
     """
     cache_hits: int
     cache_misses: int
@@ -61,6 +66,10 @@ class CogStats:
     memory_used_bytes: int
     memory_budget_bytes: int
     hit_rate_percent: float
+    byte_cache_used_bytes: int = 0
+    byte_cache_budget_bytes: int = 0
+    disk_cache_used_bytes: int = 0
+    disk_cache_budget_bytes: int = 0
     
     @classmethod
     def from_dict(cls, d: Dict[str, float]) -> "CogStats":
@@ -72,6 +81,10 @@ class CogStats:
             memory_used_bytes=int(d.get("memory_used_bytes", 0)),
             memory_budget_bytes=int(d.get("memory_budget_bytes", 0)),
             hit_rate_percent=d.get("hit_rate_percent", 0.0),
+            byte_cache_used_bytes=int(d.get("byte_cache_used_bytes", 0)),
+            byte_cache_budget_bytes=int(d.get("byte_cache_budget_bytes", 0)),
+            disk_cache_used_bytes=int(d.get("disk_cache_used_bytes", 0)),
+            disk_cache_budget_bytes=int(d.get("disk_cache_budget_bytes", 0)),
         )
 
 
@@ -137,16 +150,27 @@ class CogDataset:
         RuntimeError: If COG streaming feature is not available
     """
     
-    def __init__(self, url: str, *, cache_size_mb: int = 256):
+    def __init__(
+        self,
+        url: str,
+        *,
+        cache_size_mb: int = 256,
+        cache_dir: str | PathLike[str] | None = None,
+        cache_budget_mb: int | None = None,
+    ):
         if not _COG_AVAILABLE:
             raise RuntimeError(
                 "COG streaming is not available. "
                 "Rebuild forge3d with: maturin develop --release --features cog_streaming"
             )
         
-        self._native = _CogDatasetNative(url, cache_size_mb)
+        cache_dir_str = None if cache_dir is None else str(cache_dir)
+        range_cache_budget_mb = cache_size_mb if cache_budget_mb is None else cache_budget_mb
+        self._native = _CogDatasetNative(url, cache_size_mb, cache_dir_str, range_cache_budget_mb)
         self._url = url
         self._cache_size_mb = cache_size_mb
+        self._cache_dir = cache_dir_str
+        self._cache_budget_mb = range_cache_budget_mb
     
     @property
     def url(self) -> str:
@@ -209,7 +233,10 @@ class CogDataset:
         return IfdInfo.from_dict(raw)
     
     def __repr__(self) -> str:
-        return f"CogDataset(url={self._url!r}, cache_size_mb={self._cache_size_mb})"
+        return (
+            f"CogDataset(url={self._url!r}, cache_size_mb={self._cache_size_mb}, "
+            f"cache_dir={self._cache_dir!r}, cache_budget_mb={self._cache_budget_mb})"
+        )
 
 
 class CogDatasetFallback:
@@ -222,7 +249,14 @@ class CogDatasetFallback:
     Note: This fallback requires rasterio to be installed.
     """
     
-    def __init__(self, url: str, *, cache_size_mb: int = 256):
+    def __init__(
+        self,
+        url: str,
+        *,
+        cache_size_mb: int = 256,
+        cache_dir: str | PathLike[str] | None = None,
+        cache_budget_mb: int | None = None,
+    ):
         try:
             import rasterio
         except Exception as exc:
@@ -239,6 +273,8 @@ class CogDatasetFallback:
         
         self._url = url
         self._cache_size_mb = cache_size_mb
+        self._cache_dir = None if cache_dir is None else str(cache_dir)
+        self._cache_budget_mb = cache_size_mb if cache_budget_mb is None else cache_budget_mb
         self._src = rasterio.open(url)
         self._cache: Dict[Tuple[int, int, int], np.ndarray] = {}
         self._cache_order: list = []
@@ -313,6 +349,8 @@ class CogDatasetFallback:
             memory_used_bytes=memory_used,
             memory_budget_bytes=self._cache_size_mb * 1024 * 1024,
             hit_rate_percent=hit_rate,
+            byte_cache_budget_bytes=self._cache_budget_mb * 1024 * 1024,
+            disk_cache_budget_bytes=0,
         )
     
     def ifd_info(self, level: int = 0) -> IfdInfo:
@@ -343,7 +381,14 @@ class CogDatasetFallback:
         return f"CogDatasetFallback(url={self._url!r})"
 
 
-def open_cog(url: str, *, cache_size_mb: int = 256, prefer_native: bool = True) -> CogDataset:
+def open_cog(
+    url: str,
+    *,
+    cache_size_mb: int = 256,
+    prefer_native: bool = True,
+    cache_dir: str | PathLike[str] | None = None,
+    cache_budget_mb: int | None = None,
+) -> CogDataset:
     """Open a COG dataset, using native streaming if available.
     
     This is the recommended way to open COG files as it automatically
@@ -362,13 +407,28 @@ def open_cog(url: str, *, cache_size_mb: int = 256, prefer_native: bool = True) 
         >>> tile = ds.read_tile(0, 0)
     """
     if prefer_native and _COG_AVAILABLE:
-        return CogDataset(url, cache_size_mb=cache_size_mb)
+        return CogDataset(
+            url,
+            cache_size_mb=cache_size_mb,
+            cache_dir=cache_dir,
+            cache_budget_mb=cache_budget_mb,
+        )
     
     try:
-        return CogDatasetFallback(url, cache_size_mb=cache_size_mb)
+        return CogDatasetFallback(
+            url,
+            cache_size_mb=cache_size_mb,
+            cache_dir=cache_dir,
+            cache_budget_mb=cache_budget_mb,
+        )
     except RuntimeError:
         if _COG_AVAILABLE:
-            return CogDataset(url, cache_size_mb=cache_size_mb)
+            return CogDataset(
+                url,
+                cache_size_mb=cache_size_mb,
+                cache_dir=cache_dir,
+                cache_budget_mb=cache_budget_mb,
+            )
         raise
 
 

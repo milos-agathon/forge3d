@@ -1,10 +1,22 @@
 use super::*;
 
+fn optional_path(materials: &Bound<'_, PyAny>, name: &str) -> Option<String> {
+    materials
+        .getattr(name)
+        .ok()
+        .and_then(|value| value.extract::<Option<String>>().ok())
+        .flatten()
+        .filter(|value| !value.is_empty())
+}
+
 pub(super) fn parse_material_layer_settings(
     params: &Bound<'_, PyAny>,
 ) -> MaterialLayerSettingsNative {
     if let Ok(materials) = params.getattr("materials") {
         let variation = materials.getattr("variation").ok();
+        let normal_path = optional_path(&materials, "normal_path");
+        let roughness_path = optional_path(&materials, "roughness_path");
+        let mask_path = optional_path(&materials, "mask_path");
 
         let snow_enabled: bool = materials
             .getattr("snow_enabled")
@@ -170,6 +182,9 @@ pub(super) fn parse_material_layer_settings(
         };
 
         MaterialLayerSettingsNative {
+            normal_path,
+            roughness_path,
+            mask_path,
             snow_enabled,
             snow_altitude_min,
             snow_altitude_blend,

@@ -3,9 +3,10 @@
 This page gets you onto the main public workflow as fast as possible:
 
 1. install the package
-2. open a terrain scene
-3. add an overlay or notebook widget
-4. jump to the example or guide that matches your real task
+2. render a deterministic MapScene
+3. open a terrain scene
+4. add an overlay or notebook widget
+5. jump to the example or guide that matches your real task
 
 ## Install
 
@@ -25,6 +26,38 @@ pip install "forge3d[all]"
 launcher used by `open_viewer_async()`. In source checkouts, the Python wrapper
 can still pick newer local binaries from `target/debug` or `target/release`
 when they exist.
+
+## First MapScene Render
+
+Use `MapScene` when you want the reproducible offline map-production path:
+
+```python
+import forge3d as f3d
+
+scene = f3d.MapScene(
+    terrain=f3d.TerrainSource(path=f3d.mini_dem_path(), crs="EPSG:3857"),
+    lighting=f3d.LightingPreset(name="rainier_showcase"),
+    output=f3d.OutputSpec(
+        width=1600,
+        height=1000,
+        path="mapscene.png",
+        samples=4,
+        denoiser="atrous",
+        aovs=("albedo", "normal", "depth"),
+    ),
+)
+
+report = scene.validate()
+if not report.render_blocked(scene.render_policy):
+    scene.render()
+
+manifest = f3d.recipe_manifest(scene)
+```
+
+`MapScene.render()` uses the GPU-terrain backend for real `.npy` or GeoTIFF
+terrain when the native backend is available. Deterministic placeholder output
+requires `allow_placeholder=True`, so unsupported recipes do not silently turn
+into review images.
 
 ## First viewer session
 

@@ -8,6 +8,11 @@ from typing import Tuple, Optional, Sequence, Any, Dict, Literal, Mapping, Calla
 import os
 import numpy as np
 from . import gis
+from .graticule import GraticuleSpec, generate_graticule
+from .legend import Legend, LegendConfig
+from .map_plate import BBox, MapPlate, MapPlateConfig, PlateRegion
+from .north_arrow import NorthArrow, NorthArrowConfig
+from .scale_bar import ScaleBar, ScaleBarConfig
 from .bundle import (
     BUNDLE_VERSION,
     BundleManifest,
@@ -85,23 +90,40 @@ from .label_plan import (
     RejectedLabel,
 )
 from .map_scene import (
-    FontAtlas,
-    FontFallbackRange,
-    LabelLayer,
-    LightingPreset,
-    MapFurnitureLayer,
-    MapScene,
+    FontAtlas as FontAtlas,
+    FontFallbackRange as FontFallbackRange,
+    LabelLayer as LabelLayer,
+    LightingPreset as LightingPreset,
+    MapFurnitureLayer as MapFurnitureLayer,
+    MapScene as MapScene,
     BuildingLayer as MapSceneBuildingLayer,
-    OrbitCamera,
-    OutputSpec,
-    PointCloudLayer,
-    RasterOverlay,
-    ReproducibilityProfile,
-    SceneRecipe,
-    TerrainSource,
-    Tiles3DLayer,
-    TypographySettings,
-    VectorOverlay,
+    OrbitCamera as OrbitCamera,
+    OutputSpec as OutputSpec,
+    PointCloudLayer as PointCloudLayer,
+    RasterOverlay as RasterOverlay,
+    ReproducibilityProfile as ReproducibilityProfile,
+    SceneRecipe as SceneRecipe,
+    TerrainSource as TerrainSource,
+    Tiles3DLayer as Tiles3DLayer,
+    TypographySettings as TypographySettings,
+    VectorOverlay as VectorOverlay,
+)
+from .recipe_manifest import recipe_manifest as recipe_manifest
+from .alignment import (
+    alignment_report,
+    alignment_residual,
+    reproject_dem_to_target,
+    resample_raster_to_grid,
+    transform_features as align_transform_features,
+    transform_geometry as align_transform_geometry,
+)
+from .text_atlas import (
+    BakedAtlas,
+    bake_atlas,
+    default_latin_atlas_paths,
+    load_atlas_metrics,
+    save_atlas,
+    validate_atlas_metrics,
 )
 from .style import (
     label_layer_contracts_from_style,
@@ -109,6 +131,7 @@ from .style import (
     vector_overlay_configs_from_style,
 )
 from . import smoke
+from .path_tracing import ExperimentalSyntheticOutput
 
 PathLikeStr = os.PathLike[str] | str
 
@@ -121,6 +144,10 @@ class RendererConfig:
     shadows: Dict[str, Any]
     gi: Dict[str, Any]
     atmosphere: Dict[str, Any]
+    camera: Dict[str, Any]
+    sun: Dict[str, Any]
+    ibl: Dict[str, Any]
+    exaggeration: Optional[float]
     brdf_override: Optional[str]
     def __init__(
         self,
@@ -130,6 +157,10 @@ class RendererConfig:
         shadows: Dict[str, Any] | None = ...,
         gi: Dict[str, Any] | None = ...,
         atmosphere: Dict[str, Any] | None = ...,
+        camera: Dict[str, Any] | None = ...,
+        sun: Dict[str, Any] | None = ...,
+        ibl: Dict[str, Any] | None = ...,
+        exaggeration: Optional[float] = ...,
         brdf_override: Optional[str] = ...,
     ) -> None: ...
     def to_dict(self) -> Dict[str, Any]: ...
@@ -417,6 +448,7 @@ class Scene:
     def set_native_text_alpha(self, alpha: float) -> None: ...
     def add_native_text_rect(self, x: float, y: float, w: float, h: float, r: float, g: float, b: float, a: float) -> None: ...
     def add_native_text_rect_uv(self, x: float, y: float, w: float, h: float, u0: float, v0: float, u1: float, v1: float, r: float, g: float, b: float, a: float) -> None: ...
+    def add_native_text_rect_uv_halo(self, x: float, y: float, w: float, h: float, u0: float, v0: float, u1: float, v1: float, r: float, g: float, b: float, a: float, halo_r: float, halo_g: float, halo_b: float, halo_a: float, halo_width: float) -> None: ...
     def clear_native_text(self) -> None: ...
     def set_native_text_atlas(self, atlas: np.ndarray, channels: int | None = ..., smoothing: float | None = ...) -> None: ...
 
@@ -521,6 +553,7 @@ class TerrainRenderParams:
     colormap_strength: float
     overlays: Sequence[OverlayLayer]
     terrain_data_revision: Optional[int]
+    material_map_paths: Dict[str, str]
     def __init__(self, params: Any) -> None: ...
     @property
     def light(self) -> Any: ...
@@ -696,9 +729,7 @@ class TerrainRenderer:
     def get_scatter_memory_report(self) -> Dict[str, Any]: ...
     def get_probe_memory_report(self) -> Dict[str, Any]: ...
     def get_reflection_probe_memory_report(self) -> Dict[str, Any]: ...
-    # Terrain material virtual texturing.
-    # The current native terrain runtime pages the albedo family; normal/mask
-    # families remain forward-compatible Python contract entries.
+    # Terrain material virtual texturing for albedo/normal/mask families.
     def register_material_vt_source(
         self,
         material_index: int,
@@ -1009,7 +1040,7 @@ class SkySettings:
     sun_direction: Tuple[float, float, float]
     turbidity: float
     ground_albedo: float
-    model: str  # "off", "preetham", or "hosek-wilkie"
+    model: str  # "off", "preetham", "hosek-wilkie", or "approximate"
     sun_intensity: float
     exposure: float
     def __init__(
@@ -1166,7 +1197,7 @@ from .datasets import (
     fetch_dem,
     list_datasets,
     mini_dem,
-    mini_dem_path,
+    mini_dem_path as mini_dem_path,
     remote as remote_datasets,
     sample_boundaries,
     sample_boundaries_path,

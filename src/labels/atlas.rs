@@ -1,6 +1,7 @@
 //! MSDF font atlas loading and text layout.
 
 use crate::core::text_overlay::TextInstance;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use wgpu::{Device, Queue, Texture, TextureView};
@@ -38,6 +39,27 @@ pub struct MsdfAtlas {
     pub line_height: f32,
     /// Baseline offset from top of line.
     pub baseline: f32,
+}
+
+#[derive(Debug, Deserialize)]
+struct AtlasMetricsJson {
+    font_size: Option<f32>,
+    line_height: Option<f32>,
+    baseline: Option<f32>,
+    glyphs: HashMap<String, GlyphMetricsJson>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GlyphMetricsJson {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    #[serde(default)]
+    ox: f32,
+    #[serde(default)]
+    oy: f32,
+    adv: Option<f32>,
 }
 
 impl MsdfAtlas {
@@ -143,158 +165,42 @@ impl MsdfAtlas {
         atlas_width: u32,
         atlas_height: u32,
     ) -> Result<(HashMap<u32, GlyphMetrics>, f32, f32, f32), String> {
-        // Simple JSON parsing without external dependencies
-        let mut glyphs = HashMap::new();
-        let mut font_size = 32.0f32;
-        let mut line_height = 40.0f32;
-        let mut baseline = 32.0f32;
-
-        // Try to parse as JSON
-        // This is a minimal parser - in production, use serde_json
-        let json = json.trim();
-
-        // Extract font_size
-        if let Some(pos) = json.find("\"font_size\"") {
-            if let Some(colon) = json[pos..].find(':') {
-                let start = pos + colon + 1;
-                let end = json[start..]
-                    .find(|c: char| c == ',' || c == '}')
-                    .map(|p| start + p)
-                    .unwrap_or(json.len());
-                if let Ok(v) = json[start..end].trim().parse::<f32>() {
-                    font_size = v;
-                }
-            }
+        let parsed: AtlasMetricsJson =
+            serde_json::from_str(json).map_err(|e| format!("Invalid atlas metrics JSON: {e}"))?;
+        if parsed.glyphs.is_empty() {
+            return Err("Atlas metrics must contain at least one glyph".to_string());
         }
 
-        // Extract line_height
-        if let Some(pos) = json.find("\"line_height\"") {
-            if let Some(colon) = json[pos..].find(':') {
-                let start = pos + colon + 1;
-                let end = json[start..]
-                    .find(|c: char| c == ',' || c == '}')
-                    .map(|p| start + p)
-                    .unwrap_or(json.len());
-                if let Ok(v) = json[start..end].trim().parse::<f32>() {
-                    line_height = v;
-                }
+        let font_size = parsed.font_size.unwrap_or(32.0);
+        let line_height = parsed.line_height.unwrap_or(font_size * 1.25);
+        let baseline = parsed.baseline.unwrap_or(font_size);
+        let mut glyphs = HashMap::with_capacity(parsed.glyphs.len());
+
+        for (codepoint_str, glyph) in parsed.glyphs {
+            let codepoint = codepoint_str.parse::<u32>().map_err(|_| {
+                format!("Atlas glyph key is not a Unicode codepoint: {codepoint_str}")
+            })?;
+            if glyph.w <= 0.0 || glyph.h <= 0.0 {
+                return Err(format!(
+                    "Atlas glyph {codepoint} has non-positive dimensions"
+                ));
             }
-        }
-
-        // Extract baseline
-        if let Some(pos) = json.find("\"baseline\"") {
-            if let Some(colon) = json[pos..].find(':') {
-                let start = pos + colon + 1;
-                let end = json[start..]
-                    .find(|c: char| c == ',' || c == '}')
-                    .map(|p| start + p)
-                    .unwrap_or(json.len());
-                if let Ok(v) = json[start..end].trim().parse::<f32>() {
-                    baseline = v;
-                }
-            }
-        }
-
-        // Extract glyphs section
-        if let Some(glyphs_start) = json.find("\"glyphs\"") {
-            if let Some(obj_start) = json[glyphs_start..].find('{') {
-                let glyphs_str = &json[glyphs_start + obj_start..];
-                // Find matching closing brace
-                let mut depth = 0;
-                let mut end_pos = 0;
-                for (i, c) in glyphs_str.char_indices() {
-                    match c {
-                        '{' => depth += 1,
-                        '}' => {
-                            depth -= 1;
-                            if depth == 0 {
-                                end_pos = i + 1;
-                                break;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                let glyphs_obj = &glyphs_str[1..end_pos - 1]; // Remove outer braces
-
-                // Parse each glyph entry: "65": { ... }
-                let mut pos = 0;
-                while pos < glyphs_obj.len() {
-                    // Find next key (codepoint)
-                    if let Some(key_start) = glyphs_obj[pos..].find('"') {
-                        let key_start = pos + key_start + 1;
-                        if let Some(key_end) = glyphs_obj[key_start..].find('"') {
-                            let key_end = key_start + key_end;
-                            let codepoint_str = &glyphs_obj[key_start..key_end];
-
-                            // Parse codepoint
-                            if let Ok(codepoint) = codepoint_str.parse::<u32>() {
-                                // Find the glyph object
-                                if let Some(obj_start) = glyphs_obj[key_end..].find('{') {
-                                    let obj_start = key_end + obj_start;
-                                    if let Some(obj_end) = glyphs_obj[obj_start..].find('}') {
-                                        let obj_end = obj_start + obj_end + 1;
-                                        let glyph_str = &glyphs_obj[obj_start..obj_end];
-
-                                        // Parse glyph properties
-                                        let x = parse_json_num(glyph_str, "x").unwrap_or(0.0);
-                                        let y = parse_json_num(glyph_str, "y").unwrap_or(0.0);
-                                        let w = parse_json_num(glyph_str, "w").unwrap_or(0.0);
-                                        let h = parse_json_num(glyph_str, "h").unwrap_or(0.0);
-                                        let ox = parse_json_num(glyph_str, "ox").unwrap_or(0.0);
-                                        let oy = parse_json_num(glyph_str, "oy").unwrap_or(0.0);
-                                        let adv = parse_json_num(glyph_str, "adv").unwrap_or(w);
-
-                                        // Convert to UV coordinates
-                                        let u0 = x / atlas_width as f32;
-                                        let v0 = y / atlas_height as f32;
-                                        let u1 = (x + w) / atlas_width as f32;
-                                        let v1 = (y + h) / atlas_height as f32;
-
-                                        glyphs.insert(
-                                            codepoint,
-                                            GlyphMetrics {
-                                                codepoint,
-                                                uv: [u0, v0, u1, v1],
-                                                width: w,
-                                                height: h,
-                                                offset_x: ox,
-                                                offset_y: oy,
-                                                advance: adv,
-                                            },
-                                        );
-
-                                        pos = obj_end;
-                                        continue;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    pos += 1;
-                }
-            }
-        }
-
-        // If no glyphs were parsed, create a basic ASCII set with fallback metrics
-        if glyphs.is_empty() {
-            // Fallback ASCII metrics keep layout functional when glyph parsing fails.
-            let glyph_w = font_size * 0.6;
-            let glyph_h = font_size;
-            for c in 32u32..127 {
-                glyphs.insert(
-                    c,
-                    GlyphMetrics {
-                        codepoint: c,
-                        uv: [0.0, 0.0, 0.1, 0.1], // Small region
-                        width: glyph_w,
-                        height: glyph_h,
-                        offset_x: 0.0,
-                        offset_y: 0.0,
-                        advance: glyph_w,
-                    },
-                );
-            }
+            let u0 = glyph.x / atlas_width as f32;
+            let v0 = glyph.y / atlas_height as f32;
+            let u1 = (glyph.x + glyph.w) / atlas_width as f32;
+            let v1 = (glyph.y + glyph.h) / atlas_height as f32;
+            glyphs.insert(
+                codepoint,
+                GlyphMetrics {
+                    codepoint,
+                    uv: [u0, v0, u1, v1],
+                    width: glyph.w,
+                    height: glyph.h,
+                    offset_x: glyph.ox,
+                    offset_y: glyph.oy,
+                    advance: glyph.adv.unwrap_or(glyph.w),
+                },
+            );
         }
 
         Ok((glyphs, font_size, line_height, baseline))
@@ -326,7 +232,7 @@ impl MsdfAtlas {
     }
 
     /// Layout text into TextInstance quads.
-    /// Generates instances for each glyph, optionally with halo.
+    /// Generates one SDF/MSDF instance per glyph; the shader expands halos.
     pub fn layout_text(
         &self,
         text: &str,
@@ -344,47 +250,6 @@ impl MsdfAtlas {
         let start_x = center_pos[0] - total_width * 0.5;
         let start_y = center_pos[1] - total_height * 0.5;
 
-        // If halo is enabled, render halo glyphs first (behind main text)
-        if halo_width > 0.0 {
-            let halo_offset = halo_width;
-            let offsets = [
-                (-halo_offset, -halo_offset),
-                (halo_offset, -halo_offset),
-                (-halo_offset, halo_offset),
-                (halo_offset, halo_offset),
-                (-halo_offset, 0.0),
-                (halo_offset, 0.0),
-                (0.0, -halo_offset),
-                (0.0, halo_offset),
-            ];
-
-            for (dx, dy) in offsets {
-                let mut halo_cursor_x = start_x;
-                for c in text.chars() {
-                    if let Some(glyph) = self.get_glyph(c) {
-                        let x0 = halo_cursor_x + glyph.offset_x * scale + dx;
-                        let y0 = start_y + glyph.offset_y * scale + dy;
-                        let x1 = x0 + glyph.width * scale;
-                        let y1 = y0 + glyph.height * scale;
-
-                        instances.push(TextInstance {
-                            rect_min: [x0, y0],
-                            rect_max: [x1, y1],
-                            uv_min: [glyph.uv[0], glyph.uv[1]],
-                            uv_max: [glyph.uv[2], glyph.uv[3]],
-                            color: halo_color,
-                            rotation: 0.0,
-                        });
-
-                        halo_cursor_x += glyph.advance * scale;
-                    } else if c == ' ' {
-                        halo_cursor_x += size * 0.3;
-                    }
-                }
-            }
-        }
-
-        // Render main text
         let mut cursor_x = start_x;
         for c in text.chars() {
             if let Some(glyph) = self.get_glyph(c) {
@@ -393,14 +258,16 @@ impl MsdfAtlas {
                 let x1 = x0 + glyph.width * scale;
                 let y1 = y0 + glyph.height * scale;
 
-                instances.push(TextInstance {
-                    rect_min: [x0, y0],
-                    rect_max: [x1, y1],
-                    uv_min: [glyph.uv[0], glyph.uv[1]],
-                    uv_max: [glyph.uv[2], glyph.uv[3]],
-                    color,
-                    rotation: 0.0,
-                });
+                instances.push(
+                    TextInstance::new(
+                        [x0, y0],
+                        [x1, y1],
+                        [glyph.uv[0], glyph.uv[1]],
+                        [glyph.uv[2], glyph.uv[3]],
+                        color,
+                    )
+                    .with_halo(halo_color, halo_width),
+                );
 
                 cursor_x += glyph.advance * scale;
             } else if c == ' ' {
@@ -410,22 +277,6 @@ impl MsdfAtlas {
 
         instances
     }
-}
-
-/// Helper to parse a numeric value from a JSON-like string.
-fn parse_json_num(s: &str, key: &str) -> Option<f32> {
-    let search = format!("\"{}\"", key);
-    if let Some(pos) = s.find(&search) {
-        if let Some(colon) = s[pos..].find(':') {
-            let start = pos + colon + 1;
-            let end = s[start..]
-                .find(|c: char| c == ',' || c == '}')
-                .map(|p| start + p)
-                .unwrap_or(s.len());
-            return s[start..end].trim().parse::<f32>().ok();
-        }
-    }
-    None
 }
 
 impl Clone for MsdfAtlas {
@@ -440,5 +291,45 @@ impl Clone for MsdfAtlas {
             line_height: self.line_height,
             baseline: self.baseline,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MsdfAtlas;
+
+    #[test]
+    fn parses_metrics_with_serde_json() {
+        let json = r#"{
+            "font_size": 24,
+            "line_height": 32,
+            "baseline": 20,
+            "glyphs": {
+                "65": {"x": 4, "y": 8, "w": 16, "h": 18, "ox": -2, "oy": 1, "adv": 17}
+            }
+        }"#;
+
+        let (glyphs, font_size, line_height, baseline) =
+            MsdfAtlas::parse_metrics(json, 64, 64).expect("metrics should parse");
+        let glyph = glyphs.get(&65).expect("A glyph should be present");
+
+        assert_eq!(font_size, 24.0);
+        assert_eq!(line_height, 32.0);
+        assert_eq!(baseline, 20.0);
+        assert_eq!(glyph.width, 16.0);
+        assert_eq!(glyph.height, 18.0);
+        assert_eq!(glyph.advance, 17.0);
+        assert_eq!(glyph.uv, [4.0 / 64.0, 8.0 / 64.0, 20.0 / 64.0, 26.0 / 64.0]);
+    }
+
+    #[test]
+    fn rejects_empty_or_malformed_metrics() {
+        assert!(MsdfAtlas::parse_metrics(r#"{"glyphs": {}}"#, 64, 64).is_err());
+        assert!(MsdfAtlas::parse_metrics(
+            r#"{"font_size": 12, "line_height": 16, "baseline": 12, "glyphs": {"A": {"x": 0, "y": 0, "w": 1, "h": 1}}}"#,
+            64,
+            64
+        )
+        .is_err());
     }
 }

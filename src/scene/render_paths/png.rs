@@ -145,6 +145,7 @@ impl Scene {
                                 [0.0; 4],
                                 [0.0, 0.75, 2.5, 0.0],
                                 [0.0, 3.0, 0.35, 0.65],
+                                None,
                                 &batch.vbuf,
                                 &batch.ibuf,
                                 &batch.instbuf,

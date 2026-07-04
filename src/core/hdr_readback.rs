@@ -1,6 +1,6 @@
 // src/core/hdr_readback.rs
 // GPU texture readback utilities for HDR rendering
-// RELEVANT FILES: shaders/tonemap.wgsl
+// RELEVANT FILES: shaders/postprocess_tonemap.wgsl
 
 use wgpu::{
     BufferDescriptor, BufferUsages, Device, Extent3d, ImageCopyTexture, ImageDataLayout, Origin3d,

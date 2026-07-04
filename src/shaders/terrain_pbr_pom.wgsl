@@ -469,6 +469,8 @@ struct MaterialLayerUniforms {
     snow_variation: vec4<f32>,
     rock_variation: vec4<f32>,
     wetness_variation: vec4<f32>,
+    // Per-texel material map flags: normal, roughness, mask, _pad
+    map_flags: vec4<f32>,
 }
 
 @group(6) @binding(0)
@@ -476,6 +478,9 @@ var<uniform> material_layer_uniforms: MaterialLayerUniforms;
 
 
 const TERRAIN_VT_MATERIAL_CAPACITY: u32 = 4u;
+const TERRAIN_VT_FAMILY_ALBEDO: u32 = 0u;
+const TERRAIN_VT_FAMILY_NORMAL: u32 = 1u;
+const TERRAIN_VT_FAMILY_MASK: u32 = 2u;
 
 struct TerrainVTUniforms {
     config0: vec4<u32>,
@@ -484,7 +489,9 @@ struct TerrainVTUniforms {
 }
 
 struct TerrainVTFallbackColors {
-    colors: array<vec4<f32>, 4>,
+    albedo: array<vec4<f32>, 4>,
+    normal: array<vec4<f32>, 4>,
+    mask: array<vec4<f32>, 4>,
 }
 
 struct TerrainVTFeedbackEntry {
@@ -511,6 +518,18 @@ var terrain_vt_page_table: texture_2d_array<f32>;
 
 @group(6) @binding(11)
 var<storage, read_write> terrain_vt_feedback: array<TerrainVTFeedbackEntry>;
+
+@group(6) @binding(12)
+var material_normal_tex: texture_2d<f32>;
+
+@group(6) @binding(13)
+var material_roughness_tex: texture_2d<f32>;
+
+@group(6) @binding(14)
+var material_mask_tex: texture_2d<f32>;
+
+@group(6) @binding(15)
+var material_map_samp: sampler;
 struct TerrainMaterialNoise {
     snow_macro: f32,
     snow_detail: f32,
@@ -1725,14 +1744,31 @@ fn terrain_vt_enabled() -> bool {
     return terrain_vt_uniforms.config0.x > 0u;
 }
 
+fn terrain_vt_family_enabled(family_slot: u32) -> bool {
+    var bit = 1u;
+    if (family_slot == TERRAIN_VT_FAMILY_NORMAL) {
+        bit = 2u;
+    } else if (family_slot == TERRAIN_VT_FAMILY_MASK) {
+        bit = 4u;
+    }
+    return (terrain_vt_uniforms.config0.x & bit) != 0u;
+}
+
 fn terrain_vt_material_index(layer: f32) -> u32 {
     let material_count = max(terrain_vt_uniforms.config2.y, 1u);
     let clamped_layer = clamp(u32(max(layer, 0.0)), 0u, material_count - 1u);
     return min(clamped_layer, TERRAIN_VT_MATERIAL_CAPACITY - 1u);
 }
 
-fn terrain_vt_fallback_color(material_index: u32) -> vec4<f32> {
-    return terrain_vt_fallbacks.colors[min(material_index, TERRAIN_VT_MATERIAL_CAPACITY - 1u)];
+fn terrain_vt_fallback_color(family_slot: u32, material_index: u32) -> vec4<f32> {
+    let clamped_material = min(material_index, TERRAIN_VT_MATERIAL_CAPACITY - 1u);
+    if (family_slot == TERRAIN_VT_FAMILY_NORMAL) {
+        return terrain_vt_fallbacks.normal[clamped_material];
+    }
+    if (family_slot == TERRAIN_VT_FAMILY_MASK) {
+        return terrain_vt_fallbacks.mask[clamped_material];
+    }
+    return terrain_vt_fallbacks.albedo[clamped_material];
 }
 
 fn terrain_vt_desired_mip(ddx_uv: vec2<f32>, ddy_uv: vec2<f32>) -> u32 {
@@ -1758,18 +1794,21 @@ fn terrain_vt_page_dims(mip_level: u32) -> vec2<u32> {
     );
 }
 
-fn terrain_vt_page_table_layer(material_index: u32, mip_level: u32) -> i32 {
+fn terrain_vt_page_table_layer(family_slot: u32, material_index: u32, mip_level: u32) -> i32 {
     let max_mip_levels = max(terrain_vt_uniforms.config2.x, 1u);
-    return i32(material_index * max_mip_levels + mip_level);
+    let material_count = max(terrain_vt_uniforms.config2.y, 1u);
+    return i32(((family_slot * material_count) + material_index) * max_mip_levels + mip_level);
 }
 
-fn terrain_vt_feedback_index(material_index: u32, mip_level: u32, tile_x: u32, tile_y: u32) -> u32 {
+fn terrain_vt_feedback_index(family_slot: u32, material_index: u32, mip_level: u32, tile_x: u32, tile_y: u32) -> u32 {
     let base_pages_x = max(terrain_vt_uniforms.config1.z, 1u);
     let base_pages_y = max(terrain_vt_uniforms.config1.w, 1u);
-    return (((material_index * max(terrain_vt_uniforms.config2.x, 1u)) + mip_level) * base_pages_y + tile_y) * base_pages_x + tile_x;
+    let material_count = max(terrain_vt_uniforms.config2.y, 1u);
+    let logical_material = family_slot * material_count + material_index;
+    return (((logical_material * max(terrain_vt_uniforms.config2.x, 1u)) + mip_level) * base_pages_y + tile_y) * base_pages_x + tile_x;
 }
 
-fn terrain_vt_write_feedback(material_index: u32, mip_level: u32, tile_x: u32, tile_y: u32) {
+fn terrain_vt_write_feedback(family_slot: u32, material_index: u32, mip_level: u32, tile_x: u32, tile_y: u32) {
     if (terrain_vt_uniforms.config2.w == 0u) {
         return;
     }
@@ -1778,24 +1817,26 @@ fn terrain_vt_write_feedback(material_index: u32, mip_level: u32, tile_x: u32, t
     if (tile_x >= base_pages_x || tile_y >= base_pages_y) {
         return;
     }
-    let index = terrain_vt_feedback_index(material_index, mip_level, tile_x, tile_y);
+    let index = terrain_vt_feedback_index(family_slot, material_index, mip_level, tile_x, tile_y);
+    let material_count = max(terrain_vt_uniforms.config2.y, 1u);
+    let logical_material = family_slot * material_count + material_index;
     terrain_vt_feedback[index] = TerrainVTFeedbackEntry(
         tile_x,
         tile_y,
         mip_level,
-        material_index + 1u,
+        logical_material + 1u,
     );
 }
 
-fn sample_material_layer_uv(
+fn terrain_vt_sample_family_uv(
+    family_slot: u32,
     uv: vec2<f32>,
     ddx_uv: vec2<f32>,
     ddy_uv: vec2<f32>,
     layer: f32,
 ) -> vec3<f32> {
-    if (!terrain_vt_enabled()) {
-        let layer_index = i32(layer);
-        return textureSampleGrad(material_albedo_tex, material_samp, uv, layer_index, ddx_uv, ddy_uv).rgb;
+    if (!terrain_vt_enabled() || !terrain_vt_family_enabled(family_slot)) {
+        return terrain_vt_fallback_color(family_slot, terrain_vt_material_index(layer)).rgb;
     }
 
     let material_index = terrain_vt_material_index(layer);
@@ -1813,7 +1854,7 @@ fn sample_material_layer_uv(
     let desired_page_dims = terrain_vt_page_dims(desired_mip);
     let desired_page_size = vec2<f32>(tile_size * exp2(f32(desired_mip)), tile_size * exp2(f32(desired_mip)));
     let desired_page = min(vec2<u32>(virtual_texel / desired_page_size), desired_page_dims - vec2<u32>(1u, 1u));
-    terrain_vt_write_feedback(material_index, desired_mip, desired_page.x, desired_page.y);
+    terrain_vt_write_feedback(family_slot, material_index, desired_mip, desired_page.x, desired_page.y);
 
     var mip_level = desired_mip;
     loop {
@@ -1823,7 +1864,7 @@ fn sample_material_layer_uv(
         let entry = textureLoad(
             terrain_vt_page_table,
             vec2<i32>(i32(page.x), i32(page.y)),
-            terrain_vt_page_table_layer(material_index, mip_level),
+            terrain_vt_page_table_layer(family_slot, material_index, mip_level),
             0,
         );
         if (entry.z > 0.5) {
@@ -1840,7 +1881,21 @@ fn sample_material_layer_uv(
         mip_level = mip_level + 1u;
     }
 
-    return terrain_vt_fallback_color(material_index).rgb;
+    return terrain_vt_fallback_color(family_slot, material_index).rgb;
+}
+
+fn sample_material_layer_uv(
+    uv: vec2<f32>,
+    ddx_uv: vec2<f32>,
+    ddy_uv: vec2<f32>,
+    layer: f32,
+) -> vec3<f32> {
+    if (!terrain_vt_enabled() || !terrain_vt_family_enabled(TERRAIN_VT_FAMILY_ALBEDO)) {
+        let layer_index = i32(layer);
+        return textureSampleGrad(material_albedo_tex, material_samp, uv, layer_index, ddx_uv, ddy_uv).rgb;
+    }
+
+    return terrain_vt_sample_family_uv(TERRAIN_VT_FAMILY_ALBEDO, uv, ddx_uv, ddy_uv, layer);
 }
 
 /// Triplanar sampling with textureSampleGrad for correct mip selection.
@@ -1879,11 +1934,71 @@ fn sample_triplanar(
 
     return color_x * weights.x + color_y * weights.y + color_z * weights.z;
 }
+
+fn sample_triplanar_vt_family(
+    family_slot: u32,
+    world_pos : vec3<f32>,
+    normal : vec3<f32>,
+    scale : f32,
+    blend_sharpness : f32,
+    layer : f32,
+) -> vec3<f32> {
+    let weights = compute_triplanar_weights(normal, blend_sharpness);
+    let uv_x = world_pos.yz * scale;
+    let uv_y = world_pos.xz * scale;
+    let uv_z = world_pos.xy * scale;
+    let dpdx_world = dpdx(world_pos) * scale;
+    let dpdy_world = dpdy(world_pos) * scale;
+    let ddx_x = dpdx_world.yz;
+    let ddy_x = dpdy_world.yz;
+    let ddx_y = dpdx_world.xz;
+    let ddy_y = dpdy_world.xz;
+    let ddx_z = dpdx_world.xy;
+    let ddy_z = dpdy_world.xy;
+
+    let color_x = terrain_vt_sample_family_uv(family_slot, uv_x, ddx_x, ddy_x, layer);
+    let color_y = terrain_vt_sample_family_uv(family_slot, uv_y, ddx_y, ddy_y, layer);
+    let color_z = terrain_vt_sample_family_uv(family_slot, uv_z, ddx_z, ddy_z, layer);
+    return color_x * weights.x + color_y * weights.y + color_z * weights.z;
+}
+
 fn build_tbn(normal : vec3<f32>) -> mat3x3<f32> {
-    let up = select(vec3<f32>(0.0, 0.0, 1.0), vec3<f32>(0.0, 1.0, 0.0), abs(normal.y) > 0.99);
+    let up = select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.0, 0.0, 1.0), abs(normal.y) > 0.99);
     let tangent = normalize(cross(up, normal));
     let bitangent = cross(normal, tangent);
     return mat3x3<f32>(tangent, bitangent, normal);
+}
+
+fn apply_encoded_tangent_normal(base_normal: vec3<f32>, encoded_rgb: vec3<f32>, strength: f32, mask_value: f32) -> vec3<f32> {
+    if (mask_value <= 0.001 || strength <= 0.001) {
+        return base_normal;
+    }
+    let tangent_normal = normalize(encoded_rgb * 2.0 - vec3<f32>(1.0, 1.0, 1.0));
+    let mapped = normalize(build_tbn(base_normal) * tangent_normal);
+    return normalize(mix(base_normal, mapped, clamp(strength * mask_value, 0.0, 1.0)));
+}
+
+fn material_map_mask(uv: vec2<f32>) -> f32 {
+    if (material_layer_uniforms.map_flags.z <= 0.5) {
+        return 1.0;
+    }
+    return textureSample(material_mask_tex, material_map_samp, clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0))).r;
+}
+
+fn apply_material_normal_map(base_normal: vec3<f32>, uv: vec2<f32>, strength: f32, mask_value: f32) -> vec3<f32> {
+    if (material_layer_uniforms.map_flags.x <= 0.5 || mask_value <= 0.001) {
+        return base_normal;
+    }
+    let encoded = textureSample(material_normal_tex, material_map_samp, clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0))).rgb;
+    return apply_encoded_tangent_normal(base_normal, encoded, strength, mask_value);
+}
+
+fn apply_material_roughness_map(base_roughness: f32, uv: vec2<f32>, mask_value: f32) -> f32 {
+    if (material_layer_uniforms.map_flags.y <= 0.5 || mask_value <= 0.001) {
+        return base_roughness;
+    }
+    let mapped = textureSample(material_roughness_tex, material_map_samp, clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0))).r;
+    return mix(base_roughness, mapped, clamp(mask_value, 0.0, 1.0));
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -2385,55 +2500,6 @@ fn terrain_to_shading_params(
     return params;
 }
 
-fn gamma_correct(color : vec3<f32>, gamma : f32) -> vec3<f32> {
-    return pow(color, vec3<f32>(1.0 / gamma));
-}
-
-// Linear to sRGB conversion (piecewise exact curve)
-fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
-    let a = vec3<f32>(0.055);
-    let lo = c * 12.92;
-    let hi = (1.0 + a) * pow(c, vec3<f32>(1.0 / 2.4)) - a;
-    return select(hi, lo, c <= vec3<f32>(0.0031308));
-}
-
-fn tonemap_reinhard(color : vec3<f32>) -> vec3<f32> {
-    return color / (vec3<f32>(1.0, 1.0, 1.0) + color);
-}
-
-fn tonemap_aces(color : vec3<f32>) -> vec3<f32> {
-    let clipped = clamp(color, vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(65504.0, 65504.0, 65504.0));
-    let a = clipped * (clipped + vec3<f32>(0.0245786, 0.0245786, 0.0245786)) - vec3<f32>(0.000090537, 0.000090537, 0.000090537);
-    let b = clipped * (vec3<f32>(0.983729, 0.983729, 0.983729) * clipped + vec3<f32>(0.4329510, 0.4329510, 0.4329510)) + vec3<f32>(0.238081, 0.238081, 0.238081);
-    return clamp(a / b, vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(1.0, 1.0, 1.0));
-}
-
-// Filmic tonemap with stronger highlight compression and lifted shadows
-// Based on Hable/Uncharted2 curve with terrain-tuned parameters
-fn tonemap_filmic_terrain(color: vec3<f32>) -> vec3<f32> {
-    // Filmic curve parameters tuned for terrain:
-    // - Strong shoulder for highlight compression (D1 fix)
-    // - Lifted toe for readable shadow detail (D1 fix)
-    // - Neutral midtone response
-    let A = 0.22;  // Shoulder strength
-    let B = 0.30;  // Linear strength  
-    let C = 0.10;  // Linear angle
-    let D = 0.20;  // Toe strength
-    let E = 0.01;  // Toe numerator
-    let F = 0.30;  // Toe denominator
-    let W = 11.2;  // Linear white point
-    
-    // Apply curve: ((x*(A*x+C*B)+D*E)/(x*(A*x+B)+D*F)) - E/F
-    let x = max(color, vec3<f32>(0.0));
-    let curve = ((x * (A * x + vec3<f32>(C * B)) + vec3<f32>(D * E)) / 
-                 (x * (A * x + vec3<f32>(B)) + vec3<f32>(D * F))) - vec3<f32>(E / F);
-    
-    // White scale for proper normalization
-    let white_curve = ((W * (A * W + C * B) + D * E) / (W * (A * W + B) + D * F)) - E / F;
-    
-    return clamp(curve / white_curve, vec3<f32>(0.0), vec3<f32>(1.0));
-}
-
 // Check for NaN/Inf (debug helper for catching bad data)
 fn is_finite_f32(x: f32) -> bool {
     // NaN != NaN, and Inf comparisons fail
@@ -2850,6 +2916,10 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     var albedo = vec3<f32>(0.0, 0.0, 0.0);
     var roughness = 0.0;
     var metallic = 0.0;
+    let vt_normal_enabled = terrain_vt_enabled() && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_NORMAL);
+    let vt_mask_enabled = terrain_vt_enabled() && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_MASK);
+    var vt_normal_encoded = vec3<f32>(0.0, 0.0, 0.0);
+    var vt_mask_value = 0.0;
     for (var idx = 0; idx < 4; idx = idx + 1) {
         if (idx < layer_count) {
             let weight = weights[idx];
@@ -2867,6 +2937,28 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             albedo = albedo + sample_rgb * weight;
             roughness = roughness + u_shading.layer_roughness[idx] * weight;
             metallic = metallic + u_shading.layer_metallic[idx] * weight;
+            if (vt_normal_enabled) {
+                let encoded_linear = sample_triplanar_vt_family(
+                    TERRAIN_VT_FAMILY_NORMAL,
+                    input.world_position,
+                    base_normal,
+                    tri_scale,
+                    tri_blend,
+                    layer,
+                );
+                vt_normal_encoded = vt_normal_encoded + linear_to_srgb(encoded_linear) * weight;
+            }
+            if (vt_mask_enabled) {
+                let mask_sample = sample_triplanar_vt_family(
+                    TERRAIN_VT_FAMILY_MASK,
+                    input.world_position,
+                    base_normal,
+                    tri_scale,
+                    tri_blend,
+                    layer,
+                ).r;
+                vt_mask_value = vt_mask_value + mask_sample * weight;
+            }
         }
     }
 
@@ -2950,6 +3042,28 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         
         // Build perturbed normal (Y is up)
         shading_normal = normalize(vec3<f32>(wave_dx, 1.0, wave_dy));
+    }
+
+    if (!is_water) {
+        var map_mask = material_map_mask(parallax_uv);
+        if (vt_mask_enabled) {
+            map_mask = map_mask * clamp(vt_mask_value, 0.0, 1.0);
+        }
+        if (vt_normal_enabled) {
+            shading_normal = apply_encoded_tangent_normal(
+                shading_normal,
+                clamp(vt_normal_encoded, vec3<f32>(0.0), vec3<f32>(1.0)),
+                normal_strength,
+                map_mask
+            );
+        }
+        shading_normal = apply_material_normal_map(
+            shading_normal,
+            parallax_uv,
+            normal_strength,
+            map_mask
+        );
+        roughness = apply_material_roughness_map(roughness, parallax_uv, map_mask);
     }
     
     // ──────────────────────────────────────────────────────────────────────────

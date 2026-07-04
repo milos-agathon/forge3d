@@ -214,7 +214,7 @@ impl OverlayRenderer {
         // Dummy 1x1 storage buffer for page table when not provided
         let pt_dummy = device.create_buffer(&BufferDescriptor {
             label: Some("overlay_page_table_dummy"),
-            size: 16,
+            size: std::mem::size_of::<[u32; 8]>() as u64,
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -418,7 +418,7 @@ impl OverlayRenderer {
         // Fallback dummy storage buffer if page table is not provided
         let pt_dummy = device.create_buffer(&BufferDescriptor {
             label: Some("overlay_page_table_dummy_recreate"),
-            size: 16,
+            size: std::mem::size_of::<[u32; 8]>() as u64,
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });

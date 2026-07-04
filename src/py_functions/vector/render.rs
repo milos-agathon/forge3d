@@ -103,7 +103,7 @@ pub(super) fn upload_vector_scene(
             .pack_polylines(poly_defs)
             .map_err(vector_runtime_err)?;
         line_renderer
-            .upload_lines(&device, &instances)
+            .upload_lines(&device, &queue, &instances)
             .map_err(vector_runtime_err)?;
     }
 
@@ -141,6 +141,7 @@ pub(super) fn render_oit_scene<'a>(
             .map_err(vector_runtime_err)?;
     }
     if scene.point_count > 0 {
+        let pixel_scale = width.max(height) as f32 * 0.5;
         scene
             .point_renderer
             .render_oit(
@@ -148,7 +149,7 @@ pub(super) fn render_oit_scene<'a>(
                 &scene.queue,
                 &IDENTITY_VIEW_PROJ,
                 viewport,
-                1.0,
+                pixel_scale,
                 scene.point_count,
             )
             .map_err(vector_runtime_err)?;

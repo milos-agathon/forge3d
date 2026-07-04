@@ -90,16 +90,10 @@ def test_terrain_vt_and_3dtiles_intent_are_diagnosed_before_render():
     report = scene.validate()
 
     assert report.status == "error"
-    assert _codes(report) == [
-        "python_public_3dtiles_incomplete",
-        "vt_unsupported_family",
-        "vt_unsupported_family",
-    ]
-    assert sorted(
-        diagnostic.details["family"]
-        for diagnostic in report.diagnostics
-        if diagnostic.code == "vt_unsupported_family"
-    ) == ["mask", "normal"]
+    assert _codes(report) == ["python_public_3dtiles_incomplete"]
+    assert report.supported_features["vt.albedo"] == "supported"
+    assert report.supported_features["vt.normal"] == "supported"
+    assert report.supported_features["vt.mask"] == "supported"
     assert report.diagnostics[0].layer_id == "tiles-buildings"
 
 

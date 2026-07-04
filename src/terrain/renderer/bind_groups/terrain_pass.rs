@@ -151,6 +151,10 @@ impl TerrainScene {
         heightmap_view: &wgpu::TextureView,
         material_view: &wgpu::TextureView,
         material_sampler: &wgpu::Sampler,
+        material_normal_view: &wgpu::TextureView,
+        material_roughness_view: &wgpu::TextureView,
+        material_mask_view: &wgpu::TextureView,
+        material_map_sampler: &wgpu::Sampler,
         shading_buffer: &wgpu::Buffer,
         colormap_view: &wgpu::TextureView,
         colormap_sampler: &wgpu::Sampler,
@@ -327,6 +331,24 @@ impl TerrainScene {
                 0.0,
                 0.0,
             ],
+            map_flags: [
+                if materials.normal_path.is_some() {
+                    1.0
+                } else {
+                    0.0
+                },
+                if materials.roughness_path.is_some() {
+                    1.0
+                } else {
+                    0.0
+                },
+                if materials.mask_path.is_some() {
+                    1.0
+                } else {
+                    0.0
+                },
+                0.0,
+            ],
         };
         self.queue.write_buffer(
             &self.material_layer_uniform_buffer,
@@ -394,6 +416,22 @@ impl TerrainScene {
                         wgpu::BindGroupEntry {
                             binding: 11,
                             resource: feedback_buffer.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 12,
+                            resource: wgpu::BindingResource::TextureView(material_normal_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 13,
+                            resource: wgpu::BindingResource::TextureView(material_roughness_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 14,
+                            resource: wgpu::BindingResource::TextureView(material_mask_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 15,
+                            resource: wgpu::BindingResource::Sampler(material_map_sampler),
                         },
                     ],
                 })

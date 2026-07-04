@@ -76,6 +76,7 @@ class TestNativeModuleSymbols:
         "CameraState",
         "ClipmapConfig",
         "ClipmapMesh",
+        "CogDataset",
         "SunPosition",
         # P0.3: Previously-orphaned classes now registered
         "Frame",
@@ -1023,6 +1024,11 @@ class TestSsgiSsrSettingsWiring:
                         "set_ssr_settings", "get_ssr_settings"):
             assert hasattr(_native.Scene, method), f"Scene.{method} not found"
             assert callable(getattr(_native.Scene, method))
+
+    def test_scene_has_native_text_halo_method(self):
+        """Scene must expose native SDF text quads with halo fields."""
+        assert hasattr(_native.Scene, "add_native_text_rect_uv_halo")
+        assert callable(getattr(_native.Scene, "add_native_text_rect_uv_halo"))
 
 
 # ===========================================================================

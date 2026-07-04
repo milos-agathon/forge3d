@@ -13,9 +13,9 @@ impl ToneMappingMode {
     /// Map enum variant to shader index for tone mapping selection
     pub fn as_index(self) -> u32 {
         match self {
-            ToneMappingMode::Aces => 0,
-            ToneMappingMode::Reinhard => 1,
-            ToneMappingMode::Hable => 2,
+            ToneMappingMode::Aces => 2,
+            ToneMappingMode::Reinhard => 0,
+            ToneMappingMode::Hable => 3,
         }
     }
 }
@@ -126,5 +126,57 @@ pub fn tone_map_color(color: [f32; 3], config: ToneMappingConfig) -> [f32; 3] {
 
 /// Provide WGSL source for the tone mapping pass used by shaders
 pub fn tone_map_shader_source() -> &'static str {
-    include_str!("../../shaders/tone_map.wgsl")
+    concat!(
+        include_str!("../../shaders/includes/tonemap_common.wgsl"),
+        "\n",
+        include_str!("../../shaders/tone_map.wgsl")
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn linear_to_srgb_scalar(value: f32) -> f32 {
+        let clamped = value.clamp(0.0, 1.0);
+        if clamped <= 0.003_130_8 {
+            clamped * 12.92
+        } else {
+            1.055 * clamped.powf(1.0 / 2.4) - 0.055
+        }
+    }
+
+    #[test]
+    fn tone_map_reinhard_midpoint_matches_shared_operator_contract() {
+        let mapped = tone_map_color(
+            [1.0, 1.0, 1.0],
+            ToneMappingConfig::new(ToneMappingMode::Reinhard, 1.0),
+        );
+
+        for channel in mapped {
+            assert!((channel - 0.5).abs() <= 1.0e-6);
+        }
+    }
+
+    #[test]
+    fn single_srgb_encode_for_linear_half_gray_is_188() {
+        let encoded = linear_to_srgb_scalar(0.5);
+        let byte = (encoded * 255.0).round() as u8;
+        let double_encoded = linear_to_srgb_scalar(encoded);
+        let double_byte = (double_encoded * 255.0).round() as u8;
+
+        assert!((encoded - 0.735_356_9).abs() <= 1.0e-6);
+        assert_eq!(byte, 188);
+        assert_eq!(double_byte, 223);
+        assert_ne!(byte, double_byte);
+    }
+
+    #[test]
+    fn shader_source_contains_shared_tonemap_once_before_entry_shader() {
+        let source = tone_map_shader_source();
+
+        assert!(source.contains("fn tonemap_apply_operator"));
+        assert!(source.contains("fn tone_map_color"));
+        assert_eq!(source.matches("fn tonemap_apply_operator").count(), 1);
+    }
 }

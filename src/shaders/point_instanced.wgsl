@@ -194,7 +194,7 @@ fn fs_oit(in: VertexOutput) -> OITOutput {
 
     var out: OITOutput;
     out.accum = vec4<f32>(in.color.rgb * alpha, alpha);
-    out.reveal = 1.0 - alpha;
+    out.reveal = alpha;
     return out;
 }
 

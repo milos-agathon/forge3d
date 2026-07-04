@@ -52,7 +52,7 @@ class ShadowSettings:
     """Shadow mapping configuration."""
 
     enabled: bool
-    technique: str  # "HARD", "PCF", "PCSS", "CSM" (terrain-supported); VSM/EVSM/MSM not implemented
+    technique: str  # "HARD", "PCF", "PCSS", "CSM" (terrain-supported moment techniques included)
     resolution: int
     cascades: int
     max_distance: float
@@ -149,16 +149,14 @@ class ShadowSettings:
 
     def validate_for_terrain(self) -> None:
         """Validate that this shadow technique is implemented in the terrain pipeline.
-        
+
         Raises ValueError with a clear message if the technique is not supported.
-        VSM/EVSM/MSM are recognized by the config layer but NOT implemented in
-        terrain_pbr_pom.wgsl (moment_maps binding exists but is never sampled).
+        Terrain supports HARD/PCF/PCSS plus moment-map variants VSM/EVSM/MSM.
         """
         if self.technique not in self.TERRAIN_SUPPORTED_TECHNIQUES:
             terrain_list = ", ".join(sorted(self.TERRAIN_SUPPORTED_TECHNIQUES - {"NONE"}))
             raise ValueError(
-                f"Shadow technique {self.technique!r} is not implemented for terrain rendering. "
-                f"The terrain shader does not support variance/moment-based shadows (VSM/EVSM/MSM). "
+                f"Shadow technique {self.technique!r} is not supported for terrain rendering. "
                 f"Terrain-supported techniques: {terrain_list}. "
                 f"Use 'NONE' to disable shadows."
             )
@@ -485,7 +483,15 @@ class MaterialLayerSettings:
     TV4 extends this with bounded procedural variation controls. Those controls live
     under ``variation`` and default to zero amplitudes so the existing material
     layering output remains unchanged until explicitly enabled.
+
+    ``normal_path``, ``roughness_path``, and ``mask_path`` describe optional
+    per-texel material maps for the terrain shader/VT path. They are inert when
+    unset and serialize with the rest of the render parameters.
     """
+
+    normal_path: Optional[str] = None
+    roughness_path: Optional[str] = None
+    mask_path: Optional[str] = None
 
     # Snow layer settings
     snow_enabled: bool = False
@@ -567,6 +573,13 @@ class MaterialLayerSettings:
                 raise ValueError("wetness_subsurface_tint components must be in [0, 1]")
         if not isinstance(self.variation, MaterialNoiseSettings):
             raise ValueError("variation must be a MaterialNoiseSettings instance")
+        for name, value in [
+            ("normal_path", self.normal_path),
+            ("roughness_path", self.roughness_path),
+            ("mask_path", self.mask_path),
+        ]:
+            if value is not None and not str(value):
+                raise ValueError(f"{name} must be a non-empty path when provided")
 
 
 @dataclass
@@ -1194,18 +1207,20 @@ class VolumetricsSettings:
 
 @dataclass
 class SkySettings:
-    """M6: Physically-based sky and aerial perspective configuration.
+    """M6: Analytic procedural sky and aerial perspective configuration.
     
     Renders procedural sky with:
-    - Rayleigh and Mie scattering
     - Sun disc rendering
-    - Aerial perspective for distant terrain using the same sky path
+    - Hosek-Wilkie RGB coefficient-table sky model
+    - Optional Preetham or legacy approximate gradients for migration
+    - Aerial perspective for distant terrain using the same sky tint path
     
     Applied as a rendered sky background in mesh-mode terrain views and sampled
     by the terrain atmosphere path for aerial perspective and fog inscatter tint.
     """
     
     enabled: bool = False  # Disabled by default
+    model: str = "hosek-wilkie"  # "hosek-wilkie", "preetham", or "approximate"
     
     # Sky model parameters
     turbidity: float = 2.0        # Atmospheric haziness [1.0-10.0]
@@ -1223,6 +1238,9 @@ class SkySettings:
     sky_exposure: float = 1.0     # Sky brightness adjustment
     
     def __post_init__(self) -> None:
+        valid_models = ("hosek-wilkie", "preetham", "approximate")
+        if self.model not in valid_models:
+            raise ValueError(f"model must be one of {valid_models}")
         if self.turbidity < 1.0 or self.turbidity > 10.0:
             raise ValueError("turbidity must be in [1.0, 10.0]")
         if self.ground_albedo < 0.0 or self.ground_albedo > 1.0:
@@ -1246,9 +1264,10 @@ class SkySettings:
 class VTLayerFamily:
     """Describes one paged terrain material family.
 
-    The Python contract reserves ``albedo``, ``normal``, and ``mask`` families.
-    The current native terrain VT runtime pages only ``albedo``; ``normal`` and
-    ``mask`` remain forward-compatible placeholders for a later native extension.
+    The native runtime supports ``albedo``, ``normal``, and ``mask`` terrain
+    material families in the same residency pass. Albedo feeds material color;
+    normal feeds terrain normal perturbation; mask gates per-texel material-map
+    effects.
     """
     """Describes one paged terrain material family."""
     family: str                        # "albedo" | "normal" | "mask"
@@ -1261,10 +1280,6 @@ class VTLayerFamily:
         VALID_FAMILIES = {"albedo", "normal", "mask"}
         if self.family not in VALID_FAMILIES:
             raise ValueError(f"family must be one of {VALID_FAMILIES}")
-        # normal/mask are accepted in the Python contract for forward compatibility.
-        # The Python contract stays stable across families. The current native
-        # terrain VT path only pages albedo and skips other families during
-        # native decode/runtime setup.
         if self.tile_size < 16:
             raise ValueError("tile_size must be >= 16")
         if self.tile_border < 0:
@@ -1310,10 +1325,9 @@ class VTLayerFamily:
 class TerrainVTSettings:
     """Terrain material virtual texturing configuration.
 
-    v1 ships feedback-driven albedo-family paging plus runtime residency stats.
-    ``normal`` and ``mask`` layer families are accepted in ``layers`` so callers
-    can keep a stable contract, but the native terrain runtime currently ignores
-    them when building the resident tile set.
+    Supports feedback-driven paging for terrain material families. Albedo,
+    normal, and mask families share one page-table layout and must use matching
+    virtual size and tile geometry when enabled together.
     """
     """Terrain material virtual texturing configuration."""
     enabled: bool = False
@@ -1354,39 +1368,28 @@ def validate_terrain_vt_support(
     layer_id: str | None = None,
 ):
     """Validate terrain VT family support against the current native runtime."""
-    from .diagnostics import LayerSummary, ValidationReport, vt_unsupported_family_diagnostic
+    from .diagnostics import LayerSummary, ValidationReport
 
     effective_layer_id = layer_id or "terrain.vt"
-    diagnostics = [
-        vt_unsupported_family_diagnostic(
-            layer.family,
-            layer_id=effective_layer_id,
-            object_id=f"vt.{layer.family}",
-        )
-        for layer in settings.layers
-        if layer.family != "albedo"
-    ]
+    diagnostics = []
+    families = sorted(layer.family for layer in settings.layers)
     return ValidationReport(
         diagnostics=diagnostics,
         layer_summaries=[
             LayerSummary(
                 layer_id=effective_layer_id,
                 layer_type="terrain.virtual_texture",
-                support_level="supported" if not diagnostics else "unsupported",
+                support_level="supported",
                 diagnostic_codes=[diag.code for diag in diagnostics],
                 details={
                     "enabled": settings.enabled,
-                    "families": sorted(layer.family for layer in settings.layers),
-                    "native_supported_family": "albedo",
+                    "families": families,
+                    "native_supported_families": families,
                 },
             )
         ],
-        supported_features={"vt.albedo": "supported"},
-        unsupported_features={
-            f"vt.{layer.family}": "unsupported"
-            for layer in settings.layers
-            if layer.family != "albedo"
-        },
+        supported_features={f"vt.{family}": "supported" for family in families},
+        unsupported_features={},
     )
 
 

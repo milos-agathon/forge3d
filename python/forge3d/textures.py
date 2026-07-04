@@ -3,6 +3,12 @@
 # Exists to satisfy tests for channel mapping and material texturing without GPU.
 # RELEVANT FILES:python/forge3d/materials.py,python/forge3d/path_tracing.py,tests/test_gltf_mr_channels.py
 
+"""Lightweight texture descriptors for PBR material tests.
+
+This module does not upload textures to GPU pipelines. File paths are retained
+as descriptors; numpy arrays are normalized to RGBA8 host memory.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

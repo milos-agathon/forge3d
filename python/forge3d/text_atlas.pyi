@@ -1,0 +1,19 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Mapping, Sequence
+
+import numpy as np
+
+DEFAULT_LATIN_CHARSET: str
+
+class BakedAtlas:
+    image: np.ndarray
+    metrics: dict[str, Any]
+    def __init__(self, image: np.ndarray, metrics: dict[str, Any]) -> None: ...
+
+def bake_atlas(font_path: str | Path | None = ..., charset: Sequence[str] | str = ..., *, font_size: int = ..., px_range: int = ..., padding: int = ...) -> BakedAtlas: ...
+def validate_atlas_metrics(metrics: Mapping[str, Any]) -> dict[str, Any]: ...
+def save_atlas(atlas: BakedAtlas, png_path: str | Path, json_path: str | Path) -> tuple[Path, Path]: ...
+def load_atlas_metrics(path: str | Path) -> dict[str, Any]: ...
+def default_latin_atlas_paths() -> tuple[Path, Path]: ...

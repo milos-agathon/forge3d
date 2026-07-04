@@ -32,6 +32,10 @@ impl Default for MaterialNoiseSettingsNative {
 #[cfg(feature = "extension-module")]
 #[derive(Clone)]
 pub struct MaterialLayerSettingsNative {
+    // Optional terrain-wide material maps sampled in heightmap UV space.
+    pub normal_path: Option<String>,
+    pub roughness_path: Option<String>,
+    pub mask_path: Option<String>,
     // Snow layer
     pub snow_enabled: bool,
     pub snow_altitude_min: f32,
@@ -65,6 +69,9 @@ pub struct MaterialLayerSettingsNative {
 impl Default for MaterialLayerSettingsNative {
     fn default() -> Self {
         Self {
+            normal_path: None,
+            roughness_path: None,
+            mask_path: None,
             snow_enabled: false,
             snow_altitude_min: 2000.0,
             snow_altitude_blend: 500.0,

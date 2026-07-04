@@ -1,13 +1,17 @@
 import importlib.util
 from pathlib import Path
 
+import forge3d.map_scene as map_scene
+
 
 EXAMPLES = {
     "terrain_raster": Path("examples/mapscene_terrain_raster.py"),
     "vector_labels": Path("examples/mapscene_vector_labels.py"),
+    "offline_quality": Path("examples/mapscene_offline_quality.py"),
     "buildings_labels": Path("examples/mapscene_buildings_labels.py"),
     "bundled_datasets_showcase": Path("examples/mapscene_bundled_datasets_showcase.py"),
     "p1_assets_bundle_showcase": Path("examples/mapscene_p1_assets_bundle_showcase.py"),
+    "fuji_labels": Path("examples/fuji_labels_demo.py"),
 }
 
 
@@ -20,7 +24,7 @@ def _load_example(path: Path):
 
 
 def _supported_render_backend(payload):
-    assert payload["render_backend"] in {"native/offscreen", "source-derived"}
+    assert payload["render_backend"] in {"gpu_terrain", "placeholder"}
 
 
 def test_canonical_mapscene_examples_exist_and_do_not_use_raw_ipc():
@@ -32,18 +36,23 @@ def test_canonical_mapscene_examples_exist_and_do_not_use_raw_ipc():
         assert "send_ipc" not in text
 
 
-def test_terrain_raster_example_validates_renders_and_bundles(tmp_path):
+def test_terrain_raster_example_validates_renders_and_bundles(tmp_path, monkeypatch):
     module = _load_example(EXAMPLES["terrain_raster"])
 
     payload = module.run_example(tmp_path)
 
     assert payload["validation_status"] == "ok"
     assert payload["render_status"] == "ok"
-    _supported_render_backend(payload)
+    assert payload["render_backend"] == "gpu_terrain"
     assert payload["bundle_status"] == "ok"
     assert Path(payload["png_path"]).exists()
     assert Path(payload["bundle_path"]).exists()
     assert "placeholder_fallback" not in payload["diagnostic_codes"]
+
+    monkeypatch.setattr(map_scene, "_render_native_offscreen_result", lambda _recipe, _plans, **_kwargs: None)
+    placeholder_scene = module.build_scene(tmp_path / "placeholder")
+    placeholder_scene.render(allow_placeholder=True)
+    assert Path(payload["png_path"]).read_bytes() != Path(placeholder_scene.last_render_path).read_bytes()
 
 
 def test_vector_labels_example_compiles_label_plan_and_bundles(tmp_path):
@@ -61,16 +70,59 @@ def test_vector_labels_example_compiles_label_plan_and_bundles(tmp_path):
     assert Path(payload["bundle_path"]).exists()
 
 
-def test_buildings_labels_example_uses_honest_diagnostics_when_blocked(tmp_path):
+def test_fuji_labels_demo_uses_public_mapscene_gpu_label_path(tmp_path):
+    module = _load_example(EXAMPLES["fuji_labels"])
+
+    payload = module.run_example(tmp_path)
+
+    assert payload["validation_status"] == "ok"
+    assert payload["render_status"] == "ok"
+    assert payload["render_backend"] == "gpu_terrain"
+    assert payload["accepted_label_ids"]
+    assert Path(payload["png_path"]).exists()
+
+
+def test_offline_quality_example_uses_native_accumulation_and_aovs(tmp_path):
+    module = _load_example(EXAMPLES["offline_quality"])
+
+    payload = module.run_example(tmp_path)
+
+    assert payload["validation_status"] == "ok"
+    assert payload["render_status"] == "ok"
+    assert payload["render_backend"] == "gpu_terrain"
+    assert payload["bundle_status"] == "ok"
+    assert payload["samples_used"] == 4
+    assert payload["denoiser_used"] == "atrous"
+    assert payload["aa_seed"] == 20260703
+    assert set(payload["aov_paths"]) == {"albedo", "normal", "depth"}
+    assert Path(payload["png_path"]).exists()
+    assert Path(payload["hdr_path"]).exists()
+    for path in payload["aov_paths"].values():
+        assert Path(path).exists()
+    assert Path(payload["bundle_path"]).exists()
+
+
+def test_buildings_labels_example_renders_native_gpu_buildings(tmp_path):
     module = _load_example(EXAMPLES["buildings_labels"])
 
     payload = module.run_example(tmp_path)
 
-    assert payload["validation_status"] == "error"
-    assert payload["render_status"] == "blocked_by_diagnostics"
-    assert payload["bundle_status"] == "error"
-    assert "pro_gated_path" in payload["diagnostic_codes"]
-    assert not Path(payload["png_path"]).exists()
+    assert payload["validation_status"] == "ok"
+    assert payload["render_status"] == "ok"
+    assert payload["render_backend"] == "gpu_terrain"
+    assert payload["bundle_status"] == "ok"
+    assert "pro_gated_path" not in payload["diagnostic_codes"]
+    assert payload["building_backend"] == "terrain_scatter_instanced_mesh"
+    assert payload["building_batch_count"] == 4
+    assert payload["building_shadow_model"] == "terrain_csm_mesh_cast_receive"
+    assert set(payload["building_batch_ids"]) == {
+        "building-flat",
+        "building-gabled",
+        "building-hipped",
+        "building-pyramidal",
+    }
+    assert set(payload["building_roof_types"].values()) == {"flat", "gabled", "hipped", "pyramidal"}
+    assert Path(payload["png_path"]).exists()
     assert Path(payload["bundle_path"]).exists()
 
 

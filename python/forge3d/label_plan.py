@@ -195,6 +195,16 @@ def _terrain_sample(
     if coords is not None and _requires_terrain(record):
         if terrain is None:
             return {"source": "terrain_sampler", "unavailable": True, "visible": False}
+        sample_label = getattr(terrain, "sample_label", None)
+        if callable(sample_label):
+            try:
+                result = sample_label(coords, record=record, label_id=label_id)
+            except TypeError:
+                result = sample_label(coords)
+            if isinstance(result, Mapping):
+                return dict(result)
+            if result is not None:
+                return {"elevation": _number(result), "source": type(terrain).__name__, "visible": True}
         return _call_terrain_sampler(terrain, coords)
     return {}
 
@@ -526,6 +536,23 @@ def _label_sort_key(record: Mapping[str, Any], fallback_key: str) -> tuple[str, 
     return (label_id, geometry_type, text)
 
 
+def _normalize_typography(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    typography = dict(value or {})
+    if "halo_width_px" not in typography:
+        for key in ("halo_width", "text_halo_width"):
+            if key in typography:
+                typography["halo_width_px"] = typography[key]
+                break
+    if "halo_width_px" in typography:
+        typography.setdefault("halo_width", typography["halo_width_px"])
+        typography.setdefault("text_halo_width", typography["halo_width_px"])
+    if "halo_color" not in typography and "text_halo_color" in typography:
+        typography["halo_color"] = typography["text_halo_color"]
+    if "halo_color" in typography:
+        typography.setdefault("text_halo_color", typography["halo_color"])
+    return typography
+
+
 @dataclass
 class LabelCandidate:
     candidate_id: str
@@ -604,7 +631,7 @@ class AcceptedLabel:
         self.world_bounds = (
             tuple(float(value) for value in self.world_bounds) if self.world_bounds is not None else None
         )
-        self.typography = _json_safe(dict(self.typography or {}))
+        self.typography = _json_safe(_normalize_typography(self.typography))
         self.glyphs = tuple(str(glyph) for glyph in self.glyphs)
         self.ordering_key = self.ordering_key or self.label_id
 
@@ -1064,7 +1091,7 @@ class LabelPlan:
                     priority_class=str(record.get("priority_class", "default")),
                     screen_bounds=screen_bounds,
                     world_bounds=world_bounds,
-                    typography=dict(typography or record.get("typography") or {}),
+                    typography=_normalize_typography(typography or record.get("typography") or {}),
                     glyphs=list(text),
                     ordering_key=ordering_key,
                 )

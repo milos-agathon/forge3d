@@ -372,12 +372,14 @@ def test_validate_reports_supported_building_source_asset_failures_before_render
                 source="missing/buildings.geojson",
                 support_level="supported",
                 geometry_count=2,
+                material_status="scalar_pbr_underdeveloped",
             ),
             f3d.MapSceneBuildingLayer(
                 layer_id="bad-format-buildings",
                 source="fixtures/buildings.txt",
                 support_level="supported",
                 geometry_count=2,
+                material_status="scalar_pbr_underdeveloped",
                 metadata={"asset_status": "fixture"},
             ),
         ],
@@ -396,7 +398,7 @@ def test_validate_reports_supported_building_source_asset_failures_before_render
     assert summaries["bad-format-buildings"] == "unsupported"
 
 
-def test_validate_reports_supported_building_render_adapter_placeholder_before_render():
+def test_validate_reports_supported_scalar_building_render_adapter_before_render():
     scene = f3d.MapScene(
         terrain=_terrain(),
         camera=_camera(),
@@ -408,19 +410,20 @@ def test_validate_reports_supported_building_render_adapter_placeholder_before_r
                 source="fixtures/buildings.geojson",
                 support_level="supported",
                 geometry_count=4,
+                material_status="scalar_pbr_underdeveloped",
                 metadata={"asset_status": "fixture"},
             )
         ],
     )
 
     report = scene.validate()
-    diagnostic = _diagnostic(report, "placeholder_fallback")
 
-    assert report.status == "error"
-    assert diagnostic.layer_id == "buildings"
-    assert diagnostic.details["feature"] == "building layer MapScene render adapter"
+    assert report.status == "ok"
+    assert not any(diagnostic.code == "placeholder_fallback" for diagnostic in report.diagnostics)
+    assert report.supported_features["buildings.scalar_materials"] == "supported"
+    assert report.supported_features["buildings.mapscene_render"] == "supported"
     summary = next(summary for summary in report.layer_summaries if summary.layer_id == "buildings")
-    assert summary.support_level == "placeholder/fallback"
+    assert summary.support_level == "supported"
 
 
 def test_validate_reports_vector_path_only_loader_placeholder_before_render():

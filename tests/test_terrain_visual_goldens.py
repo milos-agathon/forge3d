@@ -240,6 +240,26 @@ def terrain_golden_env():
             ),
         ),
         (
+            "terrain_low_sun_sky",
+            dict(
+                sky=SkySettings(
+                    enabled=True,
+                    model="hosek-wilkie",
+                    turbidity=7.0,
+                    ground_albedo=0.42,
+                    sun_intensity=2.2,
+                    sun_size=1.8,
+                    aerial_density=3.2,
+                    sky_exposure=1.15,
+                ),
+                light_elevation_deg=5.0,
+                light_azimuth_deg=118.0,
+                cam_radius=5.1,
+                cam_phi_deg=138.0,
+                cam_theta_deg=68.0,
+            ),
+        ),
+        (
             "terrain_pom",
             dict(
                 size_px=(256, 160),

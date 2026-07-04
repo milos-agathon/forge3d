@@ -3,6 +3,12 @@
 # Exists to provide a simple API surface for tests without GPU coupling.
 # RELEVANT FILES:python/forge3d/textures.py,python/forge3d/path_tracing.py,tests/test_pbr_textures_gpu.py
 
+"""Lightweight PBR material containers.
+
+This module does not upload materials to GPU pipelines; it stores Python-side
+descriptors used by tests and higher-level import helpers.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace

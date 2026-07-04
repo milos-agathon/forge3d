@@ -47,11 +47,12 @@ def test_mapscene_public_api_is_documented_with_truthful_support_levels():
     assert "forge3d.map_scene" in api
     assert "MapScene.render" in offline
     assert "MapScene.save_bundle" in offline
-    assert "| `MapScene.render` PNG path | `supported` |" in offline
-    assert "native/offscreen" in api
-    assert "source-derived" in api
+    assert "| `MapScene.render` PNG/EXR path | `supported` |" in offline
+    assert "GPU-terrain" in api
+    assert "allow_placeholder=True" in api
     assert "last_render_backend" in api
-    assert "native/offscreen PNG output" in offline
+    assert "GPU-terrain PNG/EXR output" in offline
+    assert "recipe_manifest" in api
     assert "Full MapScene rendering | `missing`" not in offline
     assert "Deterministic LabelPlan | `missing`" not in offline
     assert "`unsupported`" in offline

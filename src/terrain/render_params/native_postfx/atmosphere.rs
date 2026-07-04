@@ -49,6 +49,7 @@ impl Default for VolumetricsSettingsNative {
 #[derive(Clone)]
 pub struct SkySettingsNative {
     pub enabled: bool,
+    pub model: u32,
     pub turbidity: f32,
     pub ground_albedo: f32,
     pub sun_intensity: f32,
@@ -63,6 +64,7 @@ impl Default for SkySettingsNative {
     fn default() -> Self {
         Self {
             enabled: false,
+            model: 1,
             turbidity: 2.0,
             ground_albedo: 0.3,
             sun_intensity: 1.0,

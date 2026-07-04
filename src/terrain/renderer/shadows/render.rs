@@ -5,6 +5,8 @@ impl TerrainScene {
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         heightmap_view: &wgpu::TextureView,
+        heightmap_width: u32,
+        heightmap_height: u32,
         terrain_spacing: f32,
         height_exag: f32,
         height_min: f32,
@@ -15,7 +17,7 @@ impl TerrainScene {
         near_plane: f32,
         far_plane: f32,
         height_curve: [f32; 4],
-    ) -> wgpu::BindGroup {
+    ) -> Result<wgpu::BindGroup> {
         let light_dir = sun_direction.normalize();
         let light_up = if light_dir.z.abs() > 0.99 {
             glam::Vec3::Y
@@ -126,6 +128,49 @@ impl TerrainScene {
         const SHADOW_GRID_RES: u32 = 1024;
         let vertices_per_cascade = (SHADOW_GRID_RES - 1) * (SHADOW_GRID_RES - 1) * 6;
 
+        #[cfg(feature = "enable-gpu-instancing")]
+        let scatter_shadow = if self.scatter_batches.is_empty() {
+            None
+        } else {
+            let terrain_width = heightmap_width.max(heightmap_height).max(1) as f32;
+            let scale_xy = terrain_spacing.max(1e-3) / terrain_width;
+            let centered_z_offset = -0.5 * (height_max - height_min).max(0.0) * height_exag;
+            let render_from_contract = glam::Mat4::from_cols_array(&[
+                scale_xy,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                scale_xy,
+                0.0,
+                0.0,
+                -terrain_spacing * 0.5,
+                -terrain_spacing * 0.5,
+                centered_z_offset,
+                1.0,
+            ]);
+            let eye_contract = render_from_contract
+                .inverse()
+                .transform_point3(light_camera_pos);
+            let identity_packed =
+                crate::terrain::scatter::pack_hlod_identity_instance(render_from_contract);
+            let hlod_inst_bytes = (std::mem::size_of::<f32>() * 16) as u64;
+            let hlod_instbuf = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("terrain.shadow.scatter.hlod.instance_buffer"),
+                size: hlod_inst_bytes,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.queue
+                .write_buffer(&hlod_instbuf, 0, bytemuck::cast_slice(&identity_packed));
+            self.scatter_renderer.reset_shadow_draw_batch_uniforms();
+            Some((render_from_contract, eye_contract, scale_xy, hlod_instbuf))
+        };
+
         for cascade_idx in 0..cascade_count {
             let cascade = &self.csm_renderer.uniforms.cascades[cascade_idx as usize];
             let stored_light_view_proj = cascade.light_view_proj;
@@ -185,8 +230,62 @@ impl TerrainScene {
             pass.set_pipeline(&self.shadow_depth_pipeline);
             pass.set_bind_group(0, &shadow_depth_bind_group, &[]);
             pass.draw(0..vertices_per_cascade, 0..1);
+
+            #[cfg(feature = "enable-gpu-instancing")]
+            if let Some((render_from_contract, eye_contract, instance_scale, hlod_instbuf)) =
+                scatter_shadow.as_ref()
+            {
+                let device = self.device.as_ref();
+                let queue = self.queue.as_ref();
+                let renderer = &self.scatter_renderer;
+                for batch in &mut self.scatter_batches {
+                    let (_batch_stats, draws) = batch.prepare_draws(
+                        device,
+                        queue,
+                        *eye_contract,
+                        *render_from_contract,
+                        *instance_scale,
+                    )?;
+                    for draw in draws {
+                        let Some(instbuf) = batch.level_instbuf(draw.level_index) else {
+                            continue;
+                        };
+                        renderer.draw_shadow_batch_params(
+                            &mut pass,
+                            queue,
+                            light_view,
+                            light_proj,
+                            batch.level_vbuf(draw.level_index),
+                            batch.level_ibuf(draw.level_index),
+                            instbuf,
+                            batch.level_index_count(draw.level_index),
+                            draw.instance_count,
+                        );
+                    }
+
+                    let active_clusters = batch.hlod_active_clusters(*eye_contract);
+                    for cluster_idx in active_clusters {
+                        if let (Some(vbuf), Some(ibuf)) = (
+                            batch.hlod_cluster_vbuf(cluster_idx),
+                            batch.hlod_cluster_ibuf(cluster_idx),
+                        ) {
+                            renderer.draw_shadow_batch_params(
+                                &mut pass,
+                                queue,
+                                light_view,
+                                light_proj,
+                                vbuf,
+                                ibuf,
+                                hlod_instbuf,
+                                batch.hlod_cluster_index_count(cluster_idx),
+                                1,
+                            );
+                        }
+                    }
+                }
+            }
         }
 
-        self.create_shadow_bind_group()
+        Ok(self.create_shadow_bind_group())
     }
 }

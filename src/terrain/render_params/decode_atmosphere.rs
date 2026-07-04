@@ -78,6 +78,16 @@ pub(super) fn parse_sky_settings(params: &Bound<'_, PyAny>) -> SkySettingsNative
                     .getattr("enabled")
                     .and_then(|v| v.extract())
                     .unwrap_or(false),
+                model: sky
+                    .getattr("model")
+                    .and_then(|v| v.extract::<String>())
+                    .map(|model| match model.as_str() {
+                        "preetham" => 0,
+                        "hosek-wilkie" | "hosek_wilkie" | "hosekwilkie" => 1,
+                        "approximate" | "legacy" => 2,
+                        _ => 1,
+                    })
+                    .unwrap_or(1),
                 turbidity: sky
                     .getattr("turbidity")
                     .and_then(|v| v.extract())

@@ -1,8 +1,8 @@
 #[cfg(feature = "extension-module")]
 #[derive(Clone)]
 pub struct VTLayerFamilyNative {
-    // Python accepts "albedo", "normal", and "mask". The current terrain VT
-    // runtime pages only the albedo family and ignores the others for now.
+    // Python accepts "albedo", "normal", and "mask". The terrain VT runtime
+    // pages all enabled families in one atlas/page-table layout.
     pub family: String,
     pub virtual_size: (u32, u32),
     pub tile_size: u32,

@@ -20,6 +20,7 @@ Example
 """
 from __future__ import annotations
 
+import copy
 from typing import Any, Callable, Dict, List
 
 
@@ -156,7 +157,8 @@ def rainier_showcase() -> Dict[str, Any]:
     - Increasing sun intensity to 4.0 to compensate for reduced fill
     - Using 4 CSM cascades at high resolution for detailed shadows
     
-    Best paired with camera phi around 30-60° (sun at 135° creates ~75-105° offset).
+    Includes camera, sun, IBL, and terrain exaggeration values so MapScene can
+    consume the preset without hidden command-line parameters.
     """
     return {
         "lighting": {
@@ -183,14 +185,37 @@ def rainier_showcase() -> Dict[str, Any]:
             "cascades": 4,
         },
         "gi": {
-            "modes": ["ibl"],  # Enable IBL but at reduced intensity
+            "modes": ["ssao"],
+            "ambient_occlusion_strength": 0.35,
         },
         "atmosphere": {
             "enabled": True,
-            "sky": "hdri",
+            "sky": "hosek-wilkie",
         },
-        # Note: IBL intensity should be set via CLI --ibl-intensity 0.3
-        # Sun/camera angles should be set via CLI for flexibility
+        "camera": {
+            "target": [0.0, 0.0, 0.0],
+            "radius_scale": 2.4,
+            "azimuth_deg": 135.0,
+            "elevation_deg": 45.0,
+            "fov_deg": 55.0,
+        },
+        "sun": {
+            "azimuth_deg": 135.0,
+            "elevation_deg": 25.0,
+            "intensity": 4.0,
+            "color": [1.0, 0.95, 0.90],
+            "direction": [0.64, 0.42, -0.64],
+        },
+        "ibl": {
+            "builtin": "clear_sky",
+            "intensity": 0.3,
+        },
+        "exaggeration": 1.35,
+        "reproducibility": {
+            "seed": 1350,
+            "renderer_backend": "gpu_terrain",
+            "pixel_tolerance": 0.005,
+        },
     }
 
 
@@ -200,8 +225,9 @@ def rainier_relief() -> Dict[str, Any]:
     Constraints:
     1. Sun elevation is low (18 deg < 30) for long shadows.
     2. Camera defaults to a perspective mesh view (theta 65 deg, phi 45 deg, fov 55).
-    3. No implicit sun-camera offsets; angles are honored as provided.
-    4. Relief comes from low-angle sun plus high-resolution PCSS shadows.
+    3. Relief comes from low-angle sun plus high-resolution PCSS shadows.
+    4. Camera, sun, IBL, and terrain exaggeration values are included in the
+       returned mapping for MapScene and terrain-demo parity.
     """
     import math
 
@@ -236,13 +262,37 @@ def rainier_relief() -> Dict[str, Any]:
             "light_size": 2.0,
         },
         "gi": {
-            "modes": ["ibl"],
+            "modes": ["ssao"],
+            "ambient_occlusion_strength": 0.45,
         },
         "atmosphere": {
             "enabled": True,
-            "sky": "hdri",
+            "sky": "hosek-wilkie",
         },
-        # Recommended camera defaults applied by terrain_demo when preset is selected.
+        "camera": {
+            "target": [0.0, 0.0, 0.0],
+            "radius_scale": 2.1,
+            "azimuth_deg": 45.0,
+            "elevation_deg": 65.0,
+            "fov_deg": 55.0,
+        },
+        "sun": {
+            "azimuth_deg": 225.0,
+            "elevation_deg": 18.0,
+            "intensity": 5.0,
+            "color": [1.0, 0.92, 0.85],
+            "direction": [sun_x, sun_y, sun_z],
+        },
+        "ibl": {
+            "builtin": "clear_sky",
+            "intensity": 0.25,
+        },
+        "exaggeration": 1.5,
+        "reproducibility": {
+            "seed": 1818,
+            "renderer_backend": "gpu_terrain",
+            "pixel_tolerance": 0.005,
+        },
         "cli_params": {
             "camera_mode": "mesh",
             "cam_theta": 65.0,
@@ -300,7 +350,7 @@ def get(name: str) -> Dict[str, Any]:
     # Return a shallow copy to avoid accidental mutation of registry entries
     out = _PRESETS[key]()
     assert isinstance(out, dict)
-    return dict(out)
+    return copy.deepcopy(out)
 
 
 __all__ = [

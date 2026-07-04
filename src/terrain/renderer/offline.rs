@@ -368,11 +368,16 @@ impl TerrainScene {
                     },
                 ],
             });
+        let tonemap_shader_source = format!(
+            "{}\n{}",
+            include_str!("../../shaders/includes/tonemap_common.wgsl"),
+            include_str!("../../shaders/tonemap_terrain_offline.wgsl")
+        );
         let tonemap_pipeline = create_pipeline(
             device,
             "terrain.offline.tonemap.pipeline",
             &tonemap_bind_group_layout,
-            include_str!("../../shaders/tonemap_terrain_offline.wgsl"),
+            &tonemap_shader_source,
             "main",
         );
 
@@ -654,6 +659,8 @@ impl TerrainScene {
                 &state.params,
                 &state.decoded,
                 &state.height_inputs.heightmap_view,
+                state.height_inputs.width,
+                state.height_inputs.height,
             )?;
             let shadow_bind_group = shadow_setup
                 .shadow_bind_group
@@ -684,6 +691,10 @@ impl TerrainScene {
                 &state.height_inputs.heightmap_view,
                 state.materials.material_view(),
                 state.materials.material_sampler(),
+                state.materials.material_normal_view(),
+                state.materials.material_roughness_view(),
+                state.materials.material_mask_view(),
+                state.materials.material_map_sampler(),
                 &state.materials.shading_buffer,
                 state.materials.colormap_view(),
                 state.materials.colormap_sampler(),

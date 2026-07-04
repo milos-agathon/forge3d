@@ -202,6 +202,7 @@ class TestSkySettings:
         """SkySettings should be disabled by default."""
         settings = SkySettings()
         assert settings.enabled is False
+        assert settings.model == "hosek-wilkie"
         assert settings.turbidity == 2.0
         assert settings.ground_albedo == 0.3
         assert settings.sun_intensity == 1.0
@@ -220,6 +221,15 @@ class TestSkySettings:
         assert settings.enabled is True
         assert settings.turbidity == 4.0
         assert settings.sun_intensity == 2.0
+
+    def test_sky_model_validation(self):
+        """SkySettings validates explicit sky model selection."""
+        SkySettings(model="hosek-wilkie")
+        SkySettings(model="preetham")
+        SkySettings(model="approximate")
+
+        with pytest.raises(ValueError, match="model must be one of"):
+            SkySettings(model="rayleigh")
 
     def test_sky_turbidity_validation(self):
         """SkySettings validates turbidity field."""

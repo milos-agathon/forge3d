@@ -79,6 +79,9 @@ pub mod render_params;
 pub use render_params::{AddressModeNative, FilterModeNative, TerrainRenderParams};
 
 // TerrainRenderer - GPU pipeline for PBR+POM terrain rendering
+mod hosek_rgb_data;
+pub(crate) mod hosek_sky;
+
 #[cfg(feature = "extension-module")]
 pub mod renderer;
 #[cfg(feature = "extension-module")]

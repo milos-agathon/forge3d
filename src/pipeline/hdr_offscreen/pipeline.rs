@@ -7,10 +7,10 @@ use wgpu::{
     Extent3d, FilterMode, FragmentState, ImageCopyTexture, ImageDataLayout, LoadOp,
     MultisampleState, Operations, Origin3d, PipelineLayoutDescriptor, PrimitiveState, Queue,
     RenderPass, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline,
-    RenderPipelineDescriptor, SamplerBindingType, SamplerDescriptor, ShaderModuleDescriptor,
-    ShaderSource, ShaderStages, StoreOp, Texture, TextureAspect, TextureDescriptor,
-    TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureView,
-    TextureViewDescriptor, TextureViewDimension, VertexState,
+    RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor,
+    ShaderModuleDescriptor, ShaderSource, ShaderStages, StoreOp, Texture, TextureAspect,
+    TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
+    TextureView, TextureViewDescriptor, TextureViewDimension, VertexState,
 };
 
 /// HDR off-screen rendering pipeline
@@ -28,6 +28,9 @@ pub struct HdrOffscreenPipeline {
     pub tonemap_uniforms: Buffer,
     pub tonemap_bind_group: BindGroup,
     pub tonemap_pipeline: RenderPipeline,
+    pub default_lut_texture: Texture,
+    pub default_lut_view: TextureView,
+    pub lut_sampler: Sampler,
 }
 
 impl HdrOffscreenPipeline {
@@ -146,11 +149,14 @@ impl HdrOffscreenPipeline {
         });
 
         // Create tonemap pipeline
+        let tonemap_shader_source = format!(
+            "{}\n{}",
+            include_str!("../../shaders/includes/tonemap_common.wgsl"),
+            include_str!("../../shaders/postprocess_tonemap.wgsl")
+        );
         let tonemap_shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("tonemap_shader"),
-            source: ShaderSource::Wgsl(
-                include_str!("../../shaders/postprocess_tonemap.wgsl").into(),
-            ),
+            source: ShaderSource::Wgsl(tonemap_shader_source.into()),
         });
 
         // Create bind group layout
@@ -181,6 +187,22 @@ impl HdrOffscreenPipeline {
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: TextureViewDimension::D3,
+                        sample_type: TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
                 },
             ],
@@ -226,6 +248,32 @@ impl HdrOffscreenPipeline {
             ..Default::default()
         });
 
+        let default_lut_texture = device.create_texture(&TextureDescriptor {
+            label: Some("hdr_offscreen_default_lut"),
+            size: Extent3d {
+                width: 2,
+                height: 2,
+                depth_or_array_layers: 2,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D3,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let default_lut_view = default_lut_texture.create_view(&TextureViewDescriptor::default());
+        let lut_sampler = device.create_sampler(&SamplerDescriptor {
+            label: Some("hdr_offscreen_lut_sampler"),
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            mipmap_filter: FilterMode::Linear,
+            ..Default::default()
+        });
+
         // Create bind group for tone mapping
         let tonemap_bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("tonemap_bind_group"),
@@ -242,6 +290,14 @@ impl HdrOffscreenPipeline {
                 BindGroupEntry {
                     binding: 2,
                     resource: tonemap_uniforms.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::TextureView(&default_lut_view),
+                },
+                BindGroupEntry {
+                    binding: 4,
+                    resource: BindingResource::Sampler(&lut_sampler),
                 },
             ],
         });
@@ -260,6 +316,9 @@ impl HdrOffscreenPipeline {
             tonemap_uniforms,
             tonemap_bind_group,
             tonemap_pipeline,
+            default_lut_texture,
+            default_lut_view,
+            lut_sampler,
         })
     }
 

@@ -1,5 +1,5 @@
 // src/core/text_overlay.rs
-// Native text overlay pass using rectangle quads until MSDF glyphs are wired.
+// Native text overlay pass for SDF/MSDF glyph quads.
 // Renders screen-space quads (pixel coords) with alpha blending on top of the scene color target.
 
 use wgpu::{
@@ -43,7 +43,36 @@ pub struct TextInstance {
     pub uv_min: [f32; 2],   // u0, v0 in atlas
     pub uv_max: [f32; 2],   // u1, v1 in atlas
     pub color: [f32; 4],    // rgba in linear 0..1
-    pub rotation: f32,      // radians around rect center in screen space
+    pub halo_color: [f32; 4],
+    pub halo_width: f32, // outward halo width in screen pixels
+    pub rotation: f32,   // radians around rect center in screen space
+}
+
+impl TextInstance {
+    pub fn new(
+        rect_min: [f32; 2],
+        rect_max: [f32; 2],
+        uv_min: [f32; 2],
+        uv_max: [f32; 2],
+        color: [f32; 4],
+    ) -> Self {
+        Self {
+            rect_min,
+            rect_max,
+            uv_min,
+            uv_max,
+            color,
+            halo_color: [0.0, 0.0, 0.0, 0.0],
+            halo_width: 0.0,
+            rotation: 0.0,
+        }
+    }
+
+    pub fn with_halo(mut self, halo_color: [f32; 4], halo_width: f32) -> Self {
+        self.halo_color = halo_color;
+        self.halo_width = halo_width.max(0.0);
+        self
+    }
 }
 
 pub struct TextOverlayRenderer {
@@ -118,7 +147,7 @@ impl TextOverlayRenderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8UnormSrgb,
+            format: TextureFormat::Rgba8Unorm,
             usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
             view_formats: &[],
         });
@@ -176,7 +205,9 @@ impl TextOverlayRenderer {
                 3 => Float32x2, // uv_min
                 4 => Float32x2, // uv_max
                 5 => Float32x4, // color
-                6 => Float32    // rotation
+                6 => Float32x4, // halo_color
+                7 => Float32,   // halo_width
+                8 => Float32    // rotation
             ],
         };
 

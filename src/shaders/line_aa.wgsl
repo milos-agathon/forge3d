@@ -54,9 +54,15 @@ fn vs_main(
 ) -> VertexOutput {
     var out: VertexOutput;
     
-    // Calculate line direction and normal
-    let line_vec = vertex.end_pos - vertex.start_pos;
-    let line_length = length(line_vec);
+    let start_clip = uniforms.transform * vec4<f32>(vertex.start_pos, 0.0, 1.0);
+    let end_clip = uniforms.transform * vec4<f32>(vertex.end_pos, 0.0, 1.0);
+    let start_ndc = start_clip.xy / max(start_clip.w, 1.0e-6);
+    let end_ndc = end_clip.xy / max(end_clip.w, 1.0e-6);
+
+    // Calculate line direction and normal in screen pixels so stroke width is
+    // stable regardless of viewport size or aspect ratio.
+    let line_vec_px = (end_ndc - start_ndc) * uniforms.viewport_size * 0.5;
+    let line_length = length(line_vec_px);
     
     // Handle degenerate lines
     if (line_length < 0.001) {
@@ -64,12 +70,13 @@ fn vs_main(
         return out;
     }
     
-    let line_dir = line_vec / line_length;
-    let line_normal = vec2<f32>(-line_dir.y, line_dir.x);
+    let line_dir_px = line_vec_px / line_length;
+    let line_normal_px = vec2<f32>(-line_dir_px.y, line_dir_px.x);
+    let pixel_to_ndc = vec2<f32>(2.0 / max(uniforms.viewport_size.x, 1.0), 2.0 / max(uniforms.viewport_size.y, 1.0));
     
     // Expand line segment to quad (triangle strip)
     // vertex_id: 0=start-top, 1=start-bottom, 2=end-top, 3=end-bottom
-    let half_width = vertex.width * 0.5;
+    let half_width = max(vertex.width, uniforms.stroke_width) * 0.5;
     let is_end = (vertex_id & 2u) != 0u;
     let is_top = (vertex_id & 1u) == 0u;
     
@@ -77,18 +84,19 @@ fn vs_main(
     let aa_margin = 1.0; // 1 pixel margin for AA
     let expanded_width = half_width + aa_margin;
     
-    let base_pos = select(vertex.start_pos, vertex.end_pos, is_end);
+    let base_ndc = select(start_ndc, end_ndc, is_end);
+    let base_clip = select(start_clip, end_clip, is_end);
     let normal_offset = select(-expanded_width, expanded_width, is_top);
-    let world_pos = base_pos + line_normal * normal_offset;
+    let ndc_offset = line_normal_px * normal_offset * pixel_to_ndc;
+    let expanded_ndc = base_ndc + ndc_offset;
     
-    // Transform to clip space
-    out.clip_position = uniforms.transform * vec4<f32>(world_pos, 0.0, 1.0);
-    out.world_pos = world_pos;
+    out.clip_position = vec4<f32>(expanded_ndc * base_clip.w, base_clip.z, base_clip.w);
+    out.world_pos = base_ndc;
     
     // Calculate line-local coordinates for fragment shader
     let t = select(0.0, 1.0, is_end);
     out.line_pos = vec2<f32>(t * line_length, normal_offset);
-    out.distance = abs(normal_offset);
+    out.distance = normal_offset;
     out.width = half_width;
     out.color = vertex.color;
     out.instance_id = instance_index;
@@ -208,6 +216,6 @@ fn fs_oit(in: VertexOutput) -> OITOutput {
     let color = in.color;
     var out: OITOutput;
     out.accum = vec4<f32>(color.rgb * alpha, alpha);
-    out.reveal = 1.0 - alpha;
+    out.reveal = alpha;
     return out;
 }

@@ -17,10 +17,10 @@ env:
 
 jobs:
   # ============================================================================
-  # Terrain Visual Change Detection
+  # Visual Golden Change Detection
   # ============================================================================
   terrain-golden-paths:
-    name: Terrain Golden Paths
+    name: Visual Golden Paths
     runs-on: ubuntu-latest
     outputs:
       terrain_goldens: ${{ steps.filter.outputs.terrain_goldens }}
@@ -30,13 +30,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Detect terrain visual changes
+      - name: Detect visual golden changes
         id: filter
         uses: dorny/paths-filter@v3
         with:
           filters: |
             terrain_goldens:
               - '.github/workflows/ci.yml'
+              - 'src/**'
+              - 'python/**'
               - 'src/shaders/**/*.wgsl'
               - 'src/terrain/**'
               - 'src/viewer/terrain/**'
@@ -44,7 +46,10 @@ jobs:
               - 'examples/terrain*.py'
               - 'tests/test_terrain_visual_goldens.py'
               - 'tests/test_terrain_tv10_goldens.py'
+              - 'tests/test_recipe_goldens.py'
               - 'tests/golden/terrain/**'
+              - 'tests/golden/recipes/**'
+              - 'docs/gallery/**'
 
   # ============================================================================
   # Rust Tests (cargo test)
@@ -217,7 +222,7 @@ jobs:
       - name: Install wheel and test dependencies
         run: |
           python scripts/install_compatible_wheel.py dist
-          pip install pytest numpy pillow
+          pip install pytest numpy pillow mypy
 
       - name: Run install smoke tests
         env:
@@ -266,16 +271,18 @@ jobs:
             bash -lc "python -m pip install -U pip pytest && python /workspace/scripts/install_compatible_wheel.py /workspace/dist && FORGE3D_NO_BOOTSTRAP=1 pytest tests/test_install_smoke.py -v --tb=short"
 
   # ============================================================================
-  # Terrain Golden Image Tests
+  # Visual Golden Image Tests
   # ============================================================================
   test-golden-images:
-    name: Terrain Goldens
+    name: Visual Goldens
     needs: [build-wheels, terrain-golden-paths]
     runs-on: windows-latest
     if: github.event_name == 'workflow_dispatch' || needs.terrain-golden-paths.outputs.terrain_goldens == 'true'
     env:
       # The terrain shader path is not GL-safe on hosted runners; pin a stable backend.
       WGPU_BACKEND: dx12
+      # Explicit opt-in for non-GPU environments that may only run recipe-level CPU goldens.
+      FORGE3D_ALLOW_SOFTWARE_GOLDENS: ${{ vars.FORGE3D_ALLOW_SOFTWARE_GOLDENS }}
 
     steps:
       - uses: actions/checkout@v4
@@ -294,33 +301,37 @@ jobs:
       - name: Install wheel and test dependencies
         run: |
           python scripts/install_compatible_wheel.py dist
-          pip install pytest numpy
+          pip install pytest numpy pyproj
 
       - name: Probe terrain golden backend
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1'
         id: terrain-goldens-probe
-        continue-on-error: true
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
         run: python scripts/terrain_ci_probe.py --mode terrain
 
-      - name: Run terrain golden tests
-        if: steps.terrain-goldens-probe.outcome == 'success'
+      - name: Run visual golden tests
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1'
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
           FORGE3D_RUN_TERRAIN_GOLDENS: '1'
           FORGE3D_TERRAIN_GOLDEN_ARTIFACT_DIR: tests/artifacts/terrain_goldens
-        run: pytest tests/test_terrain_visual_goldens.py tests/test_terrain_tv10_goldens.py -v --tb=short
+          FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR: tests/artifacts/recipe_goldens
+        run: pytest tests/test_terrain_visual_goldens.py tests/test_terrain_tv10_goldens.py tests/test_recipe_goldens.py -v --tb=short
 
-      - name: Skip unsupported terrain golden lane
-        if: steps.terrain-goldens-probe.outcome != 'success'
-        run: echo "Skipping terrain golden tests on unsupported hosted-runner adapter."
+      - name: Run software-allowed recipe goldens
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS == '1'
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+          FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR: tests/artifacts/recipe_goldens
+        run: pytest tests/test_recipe_goldens.py -v --tb=short
 
       - name: Upload golden image artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: terrain-golden-diffs
-          path: tests/artifacts/terrain_goldens/
+          name: visual-golden-diffs
+          path: tests/artifacts/
 
   # ============================================================================
   # Documentation Build

@@ -208,6 +208,21 @@ impl TerrainRenderParams {
         self.python_object.clone_ref(py)
     }
 
+    #[getter]
+    pub fn material_map_paths(&self) -> std::collections::BTreeMap<String, String> {
+        let mut paths = std::collections::BTreeMap::new();
+        if let Some(path) = self.decoded.materials.normal_path.as_ref() {
+            paths.insert("normal".to_string(), path.clone());
+        }
+        if let Some(path) = self.decoded.materials.roughness_path.as_ref() {
+            paths.insert("roughness".to_string(), path.clone());
+        }
+        if let Some(path) = self.decoded.materials.mask_path.as_ref() {
+            paths.insert("mask".to_string(), path.clone());
+        }
+        paths
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "TerrainRenderParams(size_px=({},{}) , overlays={}, msaa_samples={})",

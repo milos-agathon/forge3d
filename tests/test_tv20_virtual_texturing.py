@@ -62,9 +62,9 @@ def test_vt_layer_family_accepts_forward_compatible_families() -> None:
     VTLayerFamily(family="mask")
 
 
-def test_native_terrain_vt_runtime_is_currently_albedo_only() -> None:
+def test_native_terrain_vt_runtime_accepts_material_map_families() -> None:
     source = VT_RUNTIME.read_text(encoding="utf-8")
-    assert 'const TERRAIN_VT_SUPPORTED_FAMILY: &str = "albedo";' in source
+    assert 'const TERRAIN_VT_SUPPORTED_FAMILIES: &[&str] = &["albedo", "normal", "mask"];' in source
 
 
 def test_vt_settings_reject_duplicate_families() -> None:
@@ -148,7 +148,21 @@ def _build_vt_source(size: int, material_index: int) -> np.ndarray:
     return np.ascontiguousarray((rgba * 255.0).round().astype(np.uint8))
 
 
-def _register_vt_sources(renderer: f3d.TerrainRenderer, virtual_size: int) -> None:
+def _build_vt_normal_source(size: int, material_index: int) -> np.ndarray:
+    rgba = np.zeros((size, size, 4), dtype=np.uint8)
+    rgba[..., 0] = 220 + material_index * 6
+    rgba[..., 1] = 128
+    rgba[..., 2] = 180
+    rgba[..., 3] = 255
+    return np.ascontiguousarray(rgba)
+
+
+def _register_vt_sources(
+    renderer: f3d.TerrainRenderer,
+    virtual_size: int,
+    *,
+    include_normal: bool = False,
+) -> None:
     renderer.clear_material_vt_sources()
     for material_index in range(VT_MATERIAL_COUNT):
         source = _build_vt_source(virtual_size, material_index)
@@ -160,6 +174,15 @@ def _register_vt_sources(renderer: f3d.TerrainRenderer, virtual_size: int) -> No
             (virtual_size, virtual_size),
             [float(fallback_rgb[0]), float(fallback_rgb[1]), float(fallback_rgb[2]), 1.0],
         )
+        if include_normal:
+            normal_source = _build_vt_normal_source(virtual_size, material_index)
+            renderer.register_material_vt_source(
+                material_index,
+                "normal",
+                normal_source,
+                (virtual_size, virtual_size),
+                [0.5, 0.5, 1.0, 1.0],
+            )
 
 
 def _build_render_params(
@@ -169,6 +192,7 @@ def _build_render_params(
     size_px: tuple[int, int] = (224, 160),
     terrain_span: float = 8.0,
     cam_radius: float = 4.0,
+    normal_aov: bool = False,
 ) -> f3d.TerrainRenderParams:
     config = make_terrain_params_config(
         size_px=size_px,
@@ -191,7 +215,7 @@ def _build_render_params(
         fov_y_deg=50.0,
         camera_mode="mesh",
         pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),
-        aov=AovSettings(enabled=True, albedo=True, normal=False, depth=False),
+        aov=AovSettings(enabled=True, albedo=True, normal=normal_aov, depth=False),
     )
     config.cam_target = [float(cam_target[0]), float(cam_target[1]), float(cam_target[2])]
     config.vt = vt_settings
@@ -220,6 +244,27 @@ def _render_albedo(
         heightmap=heightmap,
     )
     return np.asarray(aov_frame.albedo(), dtype=np.float32)
+
+
+def _render_normal(
+    renderer: f3d.TerrainRenderer,
+    material_set,
+    ibl,
+    heightmap: np.ndarray,
+    *,
+    vt_settings: TerrainVTSettings | None,
+) -> np.ndarray:
+    params = _build_render_params(
+        vt_settings=vt_settings,
+        normal_aov=True,
+    )
+    _, aov_frame = renderer.render_with_aov(
+        material_set=material_set,
+        env_maps=ibl,
+        params=params,
+        heightmap=heightmap,
+    )
+    return np.asarray(aov_frame.normal(), dtype=np.float32)
 
 
 def _render_beauty(
@@ -345,6 +390,86 @@ class TestTerrainMaterialVirtualTexturing:
         assert stats["tiles_streamed"] > 0.0
         assert stats["avg_upload_ms"] > 0.0
         assert stats["source_count"] == pytest.approx(float(VT_MATERIAL_COUNT))
+
+    def test_vt_normal_family_changes_normal_aov_and_reports_dual_residency(self, tv20_render_env) -> None:
+        renderer, material_set, ibl, heightmap = tv20_render_env
+        renderer.clear_material_vt_sources()
+
+        baseline = _render_normal(
+            renderer,
+            material_set,
+            ibl,
+            heightmap,
+            vt_settings=None,
+        )
+
+        _register_vt_sources(renderer, virtual_size=2048, include_normal=True)
+        vt_settings = TerrainVTSettings(
+            enabled=True,
+            atlas_size=1024,
+            residency_budget_mb=48.0,
+            max_mip_levels=6,
+            layers=[
+                VTLayerFamily(family="albedo", virtual_size_px=(2048, 2048)),
+                VTLayerFamily(
+                    family="normal",
+                    virtual_size_px=(2048, 2048),
+                    fallback=(0.5, 0.5, 1.0, 1.0),
+                ),
+            ],
+        )
+        vt_normal = _render_normal(
+            renderer,
+            material_set,
+            ibl,
+            heightmap,
+            vt_settings=vt_settings,
+        )
+        stats = renderer.get_material_vt_stats()
+
+        assert _mean_abs_diff(baseline, vt_normal) > 0.02
+        assert stats["source_count"] == pytest.approx(float(VT_MATERIAL_COUNT * 2))
+        assert stats["resident_pages"] > 0.0
+        assert stats["total_pages"] > stats["resident_pages"]
+        assert stats["resident_pages"] <= stats["cache_budget_pages"]
+
+    def test_vt_dual_family_respects_512_mib_residency_budget(self, tv20_render_env) -> None:
+        renderer, material_set, ibl, heightmap = tv20_render_env
+        renderer.clear_material_vt_sources()
+        _register_vt_sources(renderer, virtual_size=4096, include_normal=True)
+
+        vt_settings = TerrainVTSettings(
+            enabled=True,
+            atlas_size=1024,
+            residency_budget_mb=512.0,
+            max_mip_levels=6,
+            layers=[
+                VTLayerFamily(family="albedo", virtual_size_px=(4096, 4096)),
+                VTLayerFamily(
+                    family="normal",
+                    virtual_size_px=(4096, 4096),
+                    fallback=(0.5, 0.5, 1.0, 1.0),
+                ),
+            ],
+        )
+
+        _render_beauty(
+            renderer,
+            material_set,
+            ibl,
+            heightmap,
+            vt_settings=vt_settings,
+            cam_target=(1.5, -1.25, 0.0),
+            cam_radius=1.4,
+        )
+        stats = renderer.get_material_vt_stats()
+
+        assert stats["source_count"] == pytest.approx(float(VT_MATERIAL_COUNT * 2))
+        assert stats["cache_budget_mb"] == pytest.approx(512.0)
+        assert stats["resident_pages"] > 0.0
+        assert stats["resident_pages"] <= stats["cache_budget_pages"]
+        assert stats["resident_megabytes"] <= 512.0
+        assert stats["total_pages"] > stats["cache_budget_pages"]
 
     def test_vt_budget_is_enforced_under_camera_motion(self, tv20_render_env) -> None:
         renderer, material_set, ibl, heightmap = tv20_render_env

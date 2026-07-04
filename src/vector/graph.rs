@@ -128,7 +128,7 @@ impl GraphRenderer {
         // Upload edges via line renderer
         if !packed_graph.edge_instances.is_empty() {
             self.edge_renderer
-                .upload_lines(device, &packed_graph.edge_instances)?;
+                .upload_lines(device, queue, &packed_graph.edge_instances)?;
         }
 
         Ok(())

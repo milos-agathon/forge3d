@@ -12,11 +12,20 @@ use crate::core::tile_cache::{TileCache, TileData, TileId};
 use crate::core::virtual_texture::PageTableEntry;
 
 #[cfg(feature = "extension-module")]
-// Terrain VT v1 pages only the albedo family. The Python contract already
-// reserves normal/mask entries so the public API does not need to change later.
-const TERRAIN_VT_SUPPORTED_FAMILY: &str = "albedo";
+const TERRAIN_VT_SUPPORTED_FAMILIES: &[&str] = &["albedo", "normal", "mask"];
+#[cfg(feature = "extension-module")]
+const TERRAIN_VT_FAMILY_COUNT: u32 = 3;
+#[cfg(feature = "extension-module")]
+const TERRAIN_VT_FAMILY_ALBEDO: u32 = 0;
+#[cfg(feature = "extension-module")]
+const TERRAIN_VT_FAMILY_NORMAL: u32 = 1;
+#[cfg(feature = "extension-module")]
+const TERRAIN_VT_FAMILY_MASK: u32 = 2;
 #[cfg(feature = "extension-module")]
 const TERRAIN_VT_BYTES_PER_PIXEL: usize = 4;
+#[cfg(feature = "extension-module")]
+const TERRAIN_VT_FALLBACK_COUNT: usize =
+    super::core::MATERIAL_LAYER_CAPACITY * TERRAIN_VT_FAMILY_COUNT as usize;
 
 #[cfg(feature = "extension-module")]
 #[derive(Clone)]
@@ -45,6 +54,7 @@ struct TerrainVTUniformsGpu {
 #[cfg(feature = "extension-module")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct TileKey {
+    family_slot: u32,
     material_index: u32,
     x: u32,
     y: u32,
@@ -100,7 +110,7 @@ struct TerrainMaterialVTRuntime {
     page_table_texture: wgpu::Texture,
     page_table_view: wgpu::TextureView,
     page_tables: Vec<Vec<PageTableEntry>>,
-    sources: HashMap<u32, PreparedVTSource>,
+    sources: HashMap<(u32, u32), PreparedVTSource>,
     tile_cache: TileCache,
     feedback_buffer: Option<FeedbackBuffer>,
     pending_feedback: Vec<TileKey>,
@@ -108,6 +118,8 @@ struct TerrainMaterialVTRuntime {
     budget_pages: u32,
     source_generation: u64,
     use_feedback: bool,
+    family_mask: u32,
+    layer_fallbacks: [[f32; 4]; TERRAIN_VT_FAMILY_COUNT as usize],
     stats: TerrainMaterialVTStats,
 }
 
@@ -141,14 +153,14 @@ impl TerrainMaterialVT {
         if virtual_size_px.0 == 0 || virtual_size_px.1 == 0 {
             return Err("virtual_size_px must be > 0 in both dimensions".to_string());
         }
-        if family != TERRAIN_VT_SUPPORTED_FAMILY {
+        let family_supported = TERRAIN_VT_SUPPORTED_FAMILIES.contains(&family.as_str());
+        if !family_supported {
             log::warn!(
-                "terrain material VT currently pages only '{supported}' sources; storing '{family}' for forward compatibility but the native runtime will ignore it",
-                supported = TERRAIN_VT_SUPPORTED_FAMILY,
+                "terrain material VT received unsupported family '{family}'; storing it for diagnostics but the native runtime will ignore it",
                 family = family,
             );
         }
-        if family == TERRAIN_VT_SUPPORTED_FAMILY {
+        if family_supported {
             let expected_len = virtual_size_px.0 as usize
                 * virtual_size_px.1 as usize
                 * TERRAIN_VT_BYTES_PER_PIXEL;
@@ -243,16 +255,77 @@ impl TerrainMaterialVT {
             })
     }
 
-    fn selected_layer(
-        vt: &crate::terrain::render_params::TerrainVTSettingsNative,
-    ) -> Option<&crate::terrain::render_params::VTLayerFamilyNative> {
-        if !vt.enabled {
-            return None;
+    fn family_slot(family: &str) -> Option<u32> {
+        match family {
+            "albedo" => Some(TERRAIN_VT_FAMILY_ALBEDO),
+            "normal" => Some(TERRAIN_VT_FAMILY_NORMAL),
+            "mask" => Some(TERRAIN_VT_FAMILY_MASK),
+            _ => None,
         }
-        // The shipped terrain VT path currently samples only the albedo family.
+    }
+
+    fn active_layers(
+        vt: &crate::terrain::render_params::TerrainVTSettingsNative,
+    ) -> Vec<&crate::terrain::render_params::VTLayerFamilyNative> {
+        if !vt.enabled {
+            return Vec::new();
+        }
         vt.layers
             .iter()
-            .find(|layer| layer.family == TERRAIN_VT_SUPPORTED_FAMILY)
+            .filter(|layer| TERRAIN_VT_SUPPORTED_FAMILIES.contains(&layer.family.as_str()))
+            .collect()
+    }
+
+    fn compatible_layout<'a>(
+        layers: &'a [&crate::terrain::render_params::VTLayerFamilyNative],
+    ) -> Result<&'a crate::terrain::render_params::VTLayerFamilyNative, String> {
+        let Some(first) = layers.first().copied() else {
+            return Err("terrain VT requires at least one supported family".to_string());
+        };
+        for layer in layers.iter().copied().skip(1) {
+            if layer.virtual_size != first.virtual_size
+                || layer.tile_size != first.tile_size
+                || layer.tile_border != first.tile_border
+            {
+                return Err(format!(
+                    "terrain VT families must share virtual_size_px/tile_size/tile_border; '{}' has {:?}/{}.{}, '{}' has {:?}/{}.{}",
+                    first.family,
+                    first.virtual_size,
+                    first.tile_size,
+                    first.tile_border,
+                    layer.family,
+                    layer.virtual_size,
+                    layer.tile_size,
+                    layer.tile_border,
+                ));
+            }
+        }
+        Ok(first)
+    }
+
+    fn family_mask(layers: &[&crate::terrain::render_params::VTLayerFamilyNative]) -> u32 {
+        layers.iter().fold(0u32, |mask, layer| {
+            mask | Self::family_slot(&layer.family).map_or(0u32, |slot| 1u32 << slot)
+        })
+    }
+
+    fn default_family_fallbacks() -> [[f32; 4]; TERRAIN_VT_FAMILY_COUNT as usize] {
+        let mut fallbacks = [[0.5, 0.5, 0.5, 1.0]; TERRAIN_VT_FAMILY_COUNT as usize];
+        fallbacks[TERRAIN_VT_FAMILY_NORMAL as usize] = [0.5, 0.5, 1.0, 1.0];
+        fallbacks[TERRAIN_VT_FAMILY_MASK as usize] = [1.0, 1.0, 1.0, 1.0];
+        fallbacks
+    }
+
+    fn layer_fallbacks(
+        layers: &[&crate::terrain::render_params::VTLayerFamilyNative],
+    ) -> [[f32; 4]; TERRAIN_VT_FAMILY_COUNT as usize] {
+        let mut fallbacks = Self::default_family_fallbacks();
+        for layer in layers {
+            if let Some(slot) = Self::family_slot(&layer.family) {
+                fallbacks[slot as usize] = layer.fallback;
+            }
+        }
+        fallbacks
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -269,23 +342,21 @@ impl TerrainMaterialVT {
         vt_uniform_buffer: &wgpu::Buffer,
         vt_fallback_uniform_buffer: &wgpu::Buffer,
     ) -> Result<bool, String> {
-        let layer = match Self::selected_layer(&decoded.vt) {
-            Some(layer) => layer,
-            None => {
-                self.runtime = None;
-                self.last_stats = TerrainMaterialVTStats::default();
-                Self::write_disabled_uniforms(queue, vt_uniform_buffer, vt_fallback_uniform_buffer);
-                return Ok(false);
-            }
-        };
+        let layers = Self::active_layers(&decoded.vt);
+        if layers.is_empty() {
+            self.runtime = None;
+            self.last_stats = TerrainMaterialVTStats::default();
+            Self::write_disabled_uniforms(queue, vt_uniform_buffer, vt_fallback_uniform_buffer);
+            return Ok(false);
+        }
 
         let effective_material_count =
             material_count.clamp(1, super::core::MATERIAL_LAYER_CAPACITY as u32);
-        self.ensure_runtime(device, layer, effective_material_count, &decoded.vt)?;
+        self.ensure_runtime(device, &layers, effective_material_count, &decoded.vt)?;
         let runtime = self.runtime.as_mut().unwrap();
         runtime.reset_frame_stats(decoded.vt.residency_budget_mb);
 
-        let fallback_colors = runtime.fallback_colors(layer);
+        let fallback_colors = runtime.fallback_colors();
         Self::write_uniforms(queue, vt_uniform_buffer, runtime, true);
         queue.write_buffer(
             vt_fallback_uniform_buffer,
@@ -340,8 +411,13 @@ impl TerrainMaterialVT {
         if let Some(feedback_buffer) = runtime.feedback_buffer.as_ref() {
             let entries = feedback_buffer.read_feedback_entries(device, queue)?;
             for entry in entries {
-                let material_index = entry.frame_number.saturating_sub(1);
-                if !runtime.sources.contains_key(&material_index) {
+                let encoded = entry.frame_number.saturating_sub(1);
+                let material_count = runtime.material_count.max(1);
+                let family_slot = encoded / material_count;
+                let material_index = encoded % material_count;
+                if family_slot >= TERRAIN_VT_FAMILY_COUNT
+                    || !runtime.sources.contains_key(&(family_slot, material_index))
+                {
                     continue;
                 }
                 if entry.mip_level >= runtime.max_mip_levels {
@@ -352,6 +428,7 @@ impl TerrainMaterialVT {
                     continue;
                 }
                 runtime.pending_feedback.push(TileKey {
+                    family_slot,
                     material_index,
                     x: entry.tile_x,
                     y: entry.tile_y,
@@ -374,7 +451,7 @@ impl TerrainMaterialVT {
             config1: [0, 0, 0, 0],
             config2: [0, 0, 0, 0],
         };
-        let fallback_colors = [[0.5, 0.5, 0.5, 1.0]; super::core::MATERIAL_LAYER_CAPACITY];
+        let fallback_colors = TerrainMaterialVTRuntime::default_fallback_colors();
         queue.write_buffer(vt_uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
         queue.write_buffer(
             vt_fallback_uniform_buffer,
@@ -391,7 +468,7 @@ impl TerrainMaterialVT {
     ) {
         let uniforms = TerrainVTUniformsGpu {
             config0: [
-                if enabled { 1 } else { 0 },
+                if enabled { runtime.family_mask } else { 0 },
                 runtime.tile_size,
                 runtime.tile_border,
                 runtime.atlas_size,
@@ -415,10 +492,13 @@ impl TerrainMaterialVT {
     fn ensure_runtime(
         &mut self,
         device: &wgpu::Device,
-        layer: &crate::terrain::render_params::VTLayerFamilyNative,
+        layers: &[&crate::terrain::render_params::VTLayerFamilyNative],
         material_count: u32,
         vt: &crate::terrain::render_params::TerrainVTSettingsNative,
     ) -> Result<(), String> {
+        let layer = Self::compatible_layout(layers)?;
+        let family_mask = Self::family_mask(layers);
+        let layer_fallbacks = Self::layer_fallbacks(layers);
         let full_levels = TerrainMaterialVTRuntime::full_pyramid_levels(
             layer.virtual_size.0,
             layer.virtual_size.1,
@@ -435,6 +515,8 @@ impl TerrainMaterialVT {
                 && runtime.max_mip_levels == max_mip_levels
                 && runtime.source_generation == self.source_generation
                 && runtime.use_feedback == vt.use_feedback
+                && runtime.family_mask == family_mask
+                && runtime.layer_fallbacks == layer_fallbacks
         });
         if runtime_matches {
             return Ok(());
@@ -444,7 +526,10 @@ impl TerrainMaterialVT {
             device,
             &self.sources,
             self.source_generation,
+            layers,
             layer,
+            family_mask,
+            layer_fallbacks,
             material_count,
             vt.atlas_size,
             vt.residency_budget_mb,
@@ -464,7 +549,10 @@ impl TerrainMaterialVTRuntime {
         device: &wgpu::Device,
         sources: &HashMap<(u32, String), VTSource>,
         source_generation: u64,
+        layers: &[&crate::terrain::render_params::VTLayerFamilyNative],
         layer: &crate::terrain::render_params::VTLayerFamilyNative,
+        family_mask: u32,
+        layer_fallbacks: [[f32; 4]; TERRAIN_VT_FAMILY_COUNT as usize],
         material_count: u32,
         atlas_size: u32,
         residency_budget_mb: f32,
@@ -504,7 +592,7 @@ impl TerrainMaterialVTRuntime {
             size: wgpu::Extent3d {
                 width: pages_x0,
                 height: pages_y0,
-                depth_or_array_layers: material_count * max_mip_levels,
+                depth_or_array_layers: TERRAIN_VT_FAMILY_COUNT * material_count * max_mip_levels,
             },
             mip_level_count: 1,
             sample_count: 1,
@@ -520,25 +608,33 @@ impl TerrainMaterialVTRuntime {
             base_mip_level: 0,
             mip_level_count: Some(1),
             base_array_layer: 0,
-            array_layer_count: Some(material_count * max_mip_levels),
+            array_layer_count: Some(TERRAIN_VT_FAMILY_COUNT * material_count * max_mip_levels),
             ..Default::default()
         });
 
         let mut prepared_sources = HashMap::new();
         for ((material_index, family), source) in sources {
-            if family != TERRAIN_VT_SUPPORTED_FAMILY || *material_index >= material_count {
+            let Some(family_slot) = TerrainMaterialVT::family_slot(family) else {
                 continue;
-            }
-            if source.virtual_size != layer.virtual_size {
+            };
+            if family_mask & (1u32 << family_slot) == 0 || *material_index >= material_count {
+                continue;
+            };
+            let Some(layer_for_family) =
+                layers.iter().find(|candidate| candidate.family == *family)
+            else {
+                continue;
+            };
+            if source.virtual_size != layer_for_family.virtual_size {
                 return Err(format!(
                     "VT source {:?} virtual size {:?} does not match layer contract {:?}",
                     (material_index, family),
                     source.virtual_size,
-                    layer.virtual_size
+                    layer_for_family.virtual_size
                 ));
             }
             prepared_sources.insert(
-                *material_index,
+                (family_slot, *material_index),
                 PreparedVTSource {
                     fallback_color: source.fallback_color,
                     mips: build_rgba_mip_chain(&source.data, source.virtual_size, max_mip_levels),
@@ -560,6 +656,7 @@ impl TerrainMaterialVTRuntime {
         tile_cache.configure_atlas(atlas_size, atlas_size, slot_size);
 
         let feedback_capacity = material_count
+            .saturating_mul(TERRAIN_VT_FAMILY_COUNT)
             .saturating_mul(max_mip_levels)
             .saturating_mul(pages_x0)
             .saturating_mul(pages_y0)
@@ -570,14 +667,18 @@ impl TerrainMaterialVTRuntime {
             None
         };
 
-        let mut page_tables = Vec::with_capacity((material_count * max_mip_levels) as usize);
-        for _material_index in 0..material_count {
-            for mip_level in 0..max_mip_levels {
-                let (pages_x, pages_y) = pages_for_mip_counts(pages_x0, pages_y0, mip_level);
-                page_tables.push(vec![
-                    PageTableEntry::default();
-                    (pages_x * pages_y) as usize
-                ]);
+        let mut page_tables = Vec::with_capacity(
+            (TERRAIN_VT_FAMILY_COUNT * material_count * max_mip_levels) as usize,
+        );
+        for _family_slot in 0..TERRAIN_VT_FAMILY_COUNT {
+            for _material_index in 0..material_count {
+                for mip_level in 0..max_mip_levels {
+                    let (pages_x, pages_y) = pages_for_mip_counts(pages_x0, pages_y0, mip_level);
+                    page_tables.push(vec![
+                        PageTableEntry::default();
+                        (pages_x * pages_y) as usize
+                    ]);
+                }
             }
         }
 
@@ -604,6 +705,8 @@ impl TerrainMaterialVTRuntime {
             budget_pages,
             source_generation,
             use_feedback,
+            family_mask,
+            layer_fallbacks,
             stats: TerrainMaterialVTStats::default(),
         };
         runtime.stats.total_pages = total_pages;
@@ -613,14 +716,31 @@ impl TerrainMaterialVTRuntime {
         Ok(runtime)
     }
 
-    fn fallback_colors(
-        &self,
-        layer: &crate::terrain::render_params::VTLayerFamilyNative,
-    ) -> [[f32; 4]; super::core::MATERIAL_LAYER_CAPACITY] {
-        let mut colors = [layer.fallback; super::core::MATERIAL_LAYER_CAPACITY];
-        for (material_index, source) in &self.sources {
-            if (*material_index as usize) < colors.len() {
-                colors[*material_index as usize] = source.fallback_color;
+    fn default_fallback_colors() -> [[f32; 4]; TERRAIN_VT_FALLBACK_COUNT] {
+        let mut colors = [[0.5, 0.5, 0.5, 1.0]; TERRAIN_VT_FALLBACK_COUNT];
+        for material_index in 0..super::core::MATERIAL_LAYER_CAPACITY {
+            colors[TERRAIN_VT_FAMILY_NORMAL as usize * super::core::MATERIAL_LAYER_CAPACITY
+                + material_index] = [0.5, 0.5, 1.0, 1.0];
+            colors[TERRAIN_VT_FAMILY_MASK as usize * super::core::MATERIAL_LAYER_CAPACITY
+                + material_index] = [1.0, 1.0, 1.0, 1.0];
+        }
+        colors
+    }
+
+    fn fallback_colors(&self) -> [[f32; 4]; TERRAIN_VT_FALLBACK_COUNT] {
+        let mut colors = Self::default_fallback_colors();
+        for family_slot in 0..TERRAIN_VT_FAMILY_COUNT {
+            for material_index in 0..super::core::MATERIAL_LAYER_CAPACITY {
+                colors[family_slot as usize * super::core::MATERIAL_LAYER_CAPACITY
+                    + material_index] = self.layer_fallbacks[family_slot as usize];
+            }
+        }
+        for ((family_slot, material_index), source) in &self.sources {
+            if *family_slot < TERRAIN_VT_FAMILY_COUNT
+                && (*material_index as usize) < super::core::MATERIAL_LAYER_CAPACITY
+            {
+                colors[*family_slot as usize * super::core::MATERIAL_LAYER_CAPACITY
+                    + *material_index as usize] = source.fallback_color;
             }
         }
         colors
@@ -654,12 +774,13 @@ impl TerrainMaterialVTRuntime {
         let end_y = ((uv_max[1] * pages_y as f32).ceil() as i32 - 1).clamp(0, pages_y as i32 - 1);
 
         let mut requests = HashSet::new();
-        for material_index in self.sources.keys().copied() {
+        for (family_slot, material_index) in self.sources.keys().copied() {
             for y in start_y..=end_y {
                 for x in start_x..=end_x {
                     self.insert_tile_with_ancestors(
                         &mut requests,
                         TileKey {
+                            family_slot,
                             material_index,
                             x: x as u32,
                             y: y as u32,
@@ -672,7 +793,10 @@ impl TerrainMaterialVTRuntime {
 
         if use_feedback {
             for feedback in &self.pending_feedback {
-                if self.sources.contains_key(&feedback.material_index) {
+                if self
+                    .sources
+                    .contains_key(&(feedback.family_slot, feedback.material_index))
+                {
                     self.insert_tile_with_ancestors(&mut requests, *feedback);
                 }
             }
@@ -696,7 +820,11 @@ impl TerrainMaterialVTRuntime {
             return Ok(());
         }
 
-        let Some(source) = self.sources.get(&key.material_index).cloned() else {
+        let Some(source) = self
+            .sources
+            .get(&(key.family_slot, key.material_index))
+            .cloned()
+        else {
             return Ok(());
         };
 
@@ -734,45 +862,47 @@ impl TerrainMaterialVTRuntime {
     }
 
     fn upload_page_tables(&self, queue: &wgpu::Queue) {
-        for material_index in 0..self.material_count {
-            for mip_level in 0..self.max_mip_levels {
-                let layer_index = self.layer_mip_index(material_index, mip_level);
-                let entries = &self.page_tables[layer_index];
-                let (pages_x, pages_y) = self.pages_at_mip(mip_level);
-                let packed_entries = entries
-                    .iter()
-                    .map(|entry| {
-                        [
-                            entry.atlas_u,
-                            entry.atlas_v,
-                            if entry.is_resident > 0 { 1.0 } else { 0.0 },
-                            entry.mip_bias,
-                        ]
-                    })
-                    .collect::<Vec<_>>();
-                queue.write_texture(
-                    wgpu::ImageCopyTexture {
-                        texture: &self.page_table_texture,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d {
-                            x: 0,
-                            y: 0,
-                            z: layer_index as u32,
+        for family_slot in 0..TERRAIN_VT_FAMILY_COUNT {
+            for material_index in 0..self.material_count {
+                for mip_level in 0..self.max_mip_levels {
+                    let layer_index = self.layer_mip_index(family_slot, material_index, mip_level);
+                    let entries = &self.page_tables[layer_index];
+                    let (pages_x, pages_y) = self.pages_at_mip(mip_level);
+                    let packed_entries = entries
+                        .iter()
+                        .map(|entry| {
+                            [
+                                entry.atlas_u,
+                                entry.atlas_v,
+                                if entry.is_resident > 0 { 1.0 } else { 0.0 },
+                                entry.mip_bias,
+                            ]
+                        })
+                        .collect::<Vec<_>>();
+                    queue.write_texture(
+                        wgpu::ImageCopyTexture {
+                            texture: &self.page_table_texture,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d {
+                                x: 0,
+                                y: 0,
+                                z: layer_index as u32,
+                            },
+                            aspect: wgpu::TextureAspect::All,
                         },
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    bytemuck::cast_slice(&packed_entries),
-                    wgpu::ImageDataLayout {
-                        offset: 0,
-                        bytes_per_row: Some(pages_x * 16),
-                        rows_per_image: Some(pages_y),
-                    },
-                    wgpu::Extent3d {
-                        width: pages_x,
-                        height: pages_y,
-                        depth_or_array_layers: 1,
-                    },
-                );
+                        bytemuck::cast_slice(&packed_entries),
+                        wgpu::ImageDataLayout {
+                            offset: 0,
+                            bytes_per_row: Some(pages_x * 16),
+                            rows_per_image: Some(pages_y),
+                        },
+                        wgpu::Extent3d {
+                            width: pages_x,
+                            height: pages_y,
+                            depth_or_array_layers: 1,
+                        },
+                    );
+                }
             }
         }
     }
@@ -838,7 +968,7 @@ impl TerrainMaterialVTRuntime {
     }
 
     fn set_page_entry(&mut self, key: TileKey, atlas_slot: crate::core::tile_cache::AtlasSlot) {
-        let layer_index = self.layer_mip_index(key.material_index, key.mip_level);
+        let layer_index = self.layer_mip_index(key.family_slot, key.material_index, key.mip_level);
         let (pages_x, _pages_y) = self.pages_at_mip(key.mip_level);
         let page_index = (key.y * pages_x + key.x) as usize;
         if let Some(entry) = self.page_tables[layer_index].get_mut(page_index) {
@@ -850,10 +980,13 @@ impl TerrainMaterialVTRuntime {
     }
 
     fn clear_page_entry(&mut self, key: TileKey) {
-        if key.material_index >= self.material_count || key.mip_level >= self.max_mip_levels {
+        if key.family_slot >= TERRAIN_VT_FAMILY_COUNT
+            || key.material_index >= self.material_count
+            || key.mip_level >= self.max_mip_levels
+        {
             return;
         }
-        let layer_index = self.layer_mip_index(key.material_index, key.mip_level);
+        let layer_index = self.layer_mip_index(key.family_slot, key.material_index, key.mip_level);
         let (pages_x, pages_y) = self.pages_at_mip(key.mip_level);
         if key.x >= pages_x || key.y >= pages_y {
             return;
@@ -873,6 +1006,7 @@ impl TerrainMaterialVTRuntime {
                 break;
             }
             key = TileKey {
+                family_slot: key.family_slot,
                 material_index: key.material_index,
                 x: key.x / 2,
                 y: key.y / 2,
@@ -932,21 +1066,25 @@ impl TerrainMaterialVTRuntime {
         pages_for_mip_counts(self.pages_x0, self.pages_y0, mip_level)
     }
 
-    fn layer_mip_index(&self, material_index: u32, mip_level: u32) -> usize {
-        (material_index * self.max_mip_levels + mip_level) as usize
+    fn layer_mip_index(&self, family_slot: u32, material_index: u32, mip_level: u32) -> usize {
+        ((family_slot * self.material_count + material_index) * self.max_mip_levels + mip_level)
+            as usize
     }
 
     fn encode_cache_tile(&self, key: TileKey) -> TileId {
+        let logical_material = key.family_slot * self.material_count.max(1) + key.material_index;
         TileId {
-            x: key.material_index * self.pages_x0.max(1) + key.x,
+            x: logical_material * self.pages_x0.max(1) + key.x,
             y: key.y,
             mip_level: key.mip_level,
         }
     }
 
     fn decode_cache_tile(&self, tile: TileId) -> TileKey {
+        let logical_material = tile.x / self.pages_x0.max(1);
         TileKey {
-            material_index: tile.x / self.pages_x0.max(1),
+            family_slot: logical_material / self.material_count.max(1),
+            material_index: logical_material % self.material_count.max(1),
             x: tile.x % self.pages_x0.max(1),
             y: tile.y,
             mip_level: tile.mip_level,

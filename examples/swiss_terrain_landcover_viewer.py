@@ -10,6 +10,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+from forge3d.alignment import reproject_dem_to_target, resample_raster_to_grid
 from forge3d.viewer import open_viewer_async
 
 
@@ -195,45 +196,18 @@ def compose_snapshot(raw_path: Path, output_path: Path) -> None:
     canvas.save(output_path)
 
 
-def ensure_dem_in_target_crs(dem_path: Path) -> Path:
+def build_aligned_dem(dem_path: Path) -> Path:
     import rasterio
     from rasterio.crs import CRS
-    from rasterio.enums import Resampling
-    from rasterio.warp import calculate_default_transform, reproject
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     output_path = CACHE_DIR / f"{dem_path.stem}_{CACHE_KEY}.tif"
     with rasterio.open(dem_path) as src:
         if src.crs == CRS.from_user_input(TARGET_CRS):
             return dem_path
-        if output_path.exists() and output_path.stat().st_mtime >= dem_path.stat().st_mtime:
-            return output_path
-        transform, width, height = calculate_default_transform(src.crs, TARGET_CRS, src.width, src.height, *src.bounds)
-        profile = src.profile.copy()
-        profile.update(
-            driver="GTiff",
-            crs=TARGET_CRS,
-            transform=transform,
-            width=width,
-            height=height,
-            count=1,
-            dtype="float32",
-            nodata=src.nodata if src.nodata is not None else -9999.0,
-            compress="lzw",
-        )
-        with rasterio.open(output_path, "w", **profile) as dst:
-            reproject(
-                source=rasterio.band(src, 1),
-                destination=rasterio.band(dst, 1),
-                src_transform=src.transform,
-                src_crs=src.crs,
-                dst_transform=transform,
-                dst_crs=TARGET_CRS,
-                resampling=Resampling.bilinear,
-                src_nodata=src.nodata,
-                dst_nodata=profile["nodata"],
-                init_dest_nodata=True,
-            )
+    if output_path.exists() and output_path.stat().st_mtime >= dem_path.stat().st_mtime:
+        return output_path
+    reproject_dem_to_target(dem_path, TARGET_CRS, output_path=output_path, resampling="bilinear")
     return output_path
 
 
@@ -338,8 +312,6 @@ def build_landcover_classes(landcover_path: Path) -> Path:
 
 def build_overlay(landcover_path: Path, terrain_path: Path) -> Path:
     import rasterio
-    from rasterio.enums import Resampling
-    from rasterio.warp import reproject
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     classes_path = build_landcover_classes(landcover_path)
@@ -347,26 +319,22 @@ def build_overlay(landcover_path: Path, terrain_path: Path) -> Path:
     newest_input = max(terrain_path.stat().st_mtime, classes_path.stat().st_mtime)
     if overlay_path.exists() and overlay_path.stat().st_mtime >= newest_input:
         return overlay_path
-    with rasterio.open(terrain_path) as terrain, rasterio.open(classes_path) as landcover_classes:
-        classes = np.full((terrain.height, terrain.width), -1, dtype=np.int16)
-        reproject(
-            source=rasterio.band(landcover_classes, 1),
-            destination=classes,
-            src_transform=landcover_classes.transform,
-            src_crs=landcover_classes.crs,
-            dst_transform=terrain.transform,
-            dst_crs=terrain.crs,
-            resampling=Resampling.mode,
-            src_nodata=-1,
-            dst_nodata=-1,
-            init_dest_nodata=True,
-        )
+    with rasterio.open(terrain_path) as terrain:
+        target_grid = {
+            "crs": terrain.crs,
+            "transform": terrain.transform,
+            "width": terrain.width,
+            "height": terrain.height,
+            "nodata": -1,
+        }
+    result = resample_raster_to_grid(classes_path, target_grid, resampling="mode", dst_nodata=-1)
+    classes = np.asarray(result["array"], dtype=np.int16)
     Image.fromarray(classes_to_rgba(despeckle_landcover_classes(classes)), "RGBA").save(overlay_path)
     return overlay_path
 
 
 def render(snapshot_path: Path, dem_path: Path, landcover_path: Path, width: int, height: int) -> None:
-    terrain_path = ensure_dem_in_target_crs(dem_path)
+    terrain_path = build_aligned_dem(dem_path)
     overlay_path = build_overlay(landcover_path, terrain_path)
     snapshot_path = snapshot_path.resolve()
     snapshot_path.parent.mkdir(parents=True, exist_ok=True)

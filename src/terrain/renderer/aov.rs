@@ -513,6 +513,8 @@ impl TerrainScene {
             params,
             decoded,
             &height_inputs.heightmap_view,
+            height_inputs.width,
+            height_inputs.height,
         )?;
         let shadow_bind_group = shadow_setup
             .shadow_bind_group
@@ -542,6 +544,10 @@ impl TerrainScene {
             &height_inputs.heightmap_view,
             materials.material_view(),
             materials.material_sampler(),
+            materials.material_normal_view(),
+            materials.material_roughness_view(),
+            materials.material_mask_view(),
+            materials.material_map_sampler(),
             &materials.shading_buffer,
             materials.colormap_view(),
             materials.colormap_sampler(),
@@ -618,6 +624,7 @@ impl TerrainScene {
                 &mut encoder,
                 &render_targets,
                 &height_inputs.heightmap_view,
+                shadow_setup.shadow_bind_group.as_ref(),
                 &scatter_state,
             )?;
         }

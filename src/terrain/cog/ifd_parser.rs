@@ -8,6 +8,10 @@ const TAG_IMAGE_WIDTH: u16 = 256;
 const TAG_IMAGE_LENGTH: u16 = 257;
 const TAG_BITS_PER_SAMPLE: u16 = 258;
 const TAG_COMPRESSION: u16 = 259;
+const TAG_STRIP_OFFSETS: u16 = 273;
+const TAG_PREDICTOR: u16 = 317;
+const TAG_ROWS_PER_STRIP: u16 = 278;
+const TAG_STRIP_BYTE_COUNTS: u16 = 279;
 const TAG_SAMPLE_FORMAT: u16 = 339;
 const TAG_TILE_WIDTH: u16 = 322;
 const TAG_TILE_LENGTH: u16 = 323;
@@ -19,6 +23,10 @@ pub const COMPRESSION_NONE: u16 = 1;
 pub const COMPRESSION_LZW: u16 = 5;
 pub const COMPRESSION_DEFLATE: u16 = 8;
 pub const COMPRESSION_DEFLATE_ALT: u16 = 32946;
+
+/// TIFF predictor constants.
+pub const TIFF_PREDICTOR_NONE: u16 = 1;
+pub const TIFF_PREDICTOR_HORIZONTAL: u16 = 2;
 
 /// Sample format constants.
 pub const SAMPLE_FORMAT_UINT: u16 = 1;
@@ -35,6 +43,7 @@ pub struct IfdEntry {
     pub bits_per_sample: u16,
     pub sample_format: u16,
     pub compression: u16,
+    pub predictor: u16,
     pub tile_offsets: Vec<u64>,
     pub tile_byte_counts: Vec<u64>,
     pub overview_level: u32,
@@ -207,8 +216,12 @@ async fn parse_ifd(
     let mut bits_per_sample = 8u16;
     let mut sample_format = SAMPLE_FORMAT_UINT;
     let mut compression = COMPRESSION_NONE;
-    let mut tile_offsets_info: Option<(u64, u64)> = None;
-    let mut tile_byte_counts_info: Option<(u64, u64)> = None;
+    let mut predictor = TIFF_PREDICTOR_NONE;
+    let mut tile_offsets_info: Option<(u64, u64, u16)> = None;
+    let mut tile_byte_counts_info: Option<(u64, u64, u16)> = None;
+    let mut strip_offsets_info: Option<(u64, u64, u16)> = None;
+    let mut strip_byte_counts_info: Option<(u64, u64, u16)> = None;
+    let mut rows_per_strip = 0u32;
 
     for i in 0..entry_count {
         let entry_offset = (i * entry_size) as usize;
@@ -233,6 +246,24 @@ async fn parse_ifd(
             TAG_IMAGE_LENGTH => height = value as u32,
             TAG_BITS_PER_SAMPLE => bits_per_sample = value as u16,
             TAG_COMPRESSION => compression = value as u16,
+            TAG_STRIP_OFFSETS => {
+                let data_offset = if count > 1 || type_size(field_type) * count as usize > 4 {
+                    value
+                } else {
+                    offset + count_size + (i * entry_size) + value_offset as u64
+                };
+                strip_offsets_info = Some((data_offset, count, field_type));
+            }
+            TAG_PREDICTOR => predictor = value as u16,
+            TAG_ROWS_PER_STRIP => rows_per_strip = value as u32,
+            TAG_STRIP_BYTE_COUNTS => {
+                let data_offset = if count > 1 || type_size(field_type) * count as usize > 4 {
+                    value
+                } else {
+                    offset + count_size + (i * entry_size) + value_offset as u64
+                };
+                strip_byte_counts_info = Some((data_offset, count, field_type));
+            }
             TAG_SAMPLE_FORMAT => sample_format = value as u16,
             TAG_TILE_WIDTH => tile_width = value as u32,
             TAG_TILE_LENGTH => tile_height = value as u32,
@@ -242,7 +273,7 @@ async fn parse_ifd(
                 } else {
                     offset + count_size + (i * entry_size) + value_offset as u64
                 };
-                tile_offsets_info = Some((data_offset, count));
+                tile_offsets_info = Some((data_offset, count, field_type));
             }
             TAG_TILE_BYTE_COUNTS => {
                 let data_offset = if count > 1 || type_size(field_type) * count as usize > 4 {
@@ -250,26 +281,41 @@ async fn parse_ifd(
                 } else {
                     offset + count_size + (i * entry_size) + value_offset as u64
                 };
-                tile_byte_counts_info = Some((data_offset, count));
+                tile_byte_counts_info = Some((data_offset, count, field_type));
             }
             _ => {}
         }
     }
 
+    let mut tile_offsets = if let Some((off, count, field_type)) = tile_offsets_info {
+        read_offset_array(reader, off, count as usize, field_type, big_endian).await?
+    } else {
+        Vec::new()
+    };
+
+    let mut tile_byte_counts = if let Some((off, count, field_type)) = tile_byte_counts_info {
+        read_offset_array(reader, off, count as usize, field_type, big_endian).await?
+    } else {
+        Vec::new()
+    };
+
+    if tile_offsets.is_empty() {
+        if let Some((off, count, field_type)) = strip_offsets_info {
+            tile_offsets =
+                read_offset_array(reader, off, count as usize, field_type, big_endian).await?;
+            tile_width = width;
+            tile_height = rows_per_strip.max(1).min(height);
+        }
+    }
+    if tile_byte_counts.is_empty() {
+        if let Some((off, count, field_type)) = strip_byte_counts_info {
+            tile_byte_counts =
+                read_offset_array(reader, off, count as usize, field_type, big_endian).await?;
+        }
+    }
+
     let tiles_across = (width + tile_width - 1) / tile_width;
     let tiles_down = (height + tile_height - 1) / tile_height;
-
-    let tile_offsets = if let Some((off, count)) = tile_offsets_info {
-        read_offset_array(reader, off, count as usize, big_endian).await?
-    } else {
-        Vec::new()
-    };
-
-    let tile_byte_counts = if let Some((off, count)) = tile_byte_counts_info {
-        read_offset_array(reader, off, count as usize, big_endian).await?
-    } else {
-        Vec::new()
-    };
 
     let next_ifd_offset = if bigtiff {
         read_u64(&ifd_data, entries_size as usize, big_endian)
@@ -286,6 +332,7 @@ async fn parse_ifd(
             bits_per_sample,
             sample_format,
             compression,
+            predictor,
             tile_offsets,
             tile_byte_counts,
             overview_level,
@@ -300,18 +347,22 @@ async fn read_offset_array(
     reader: &RangeReader,
     offset: u64,
     count: usize,
+    field_type: u16,
     big_endian: bool,
 ) -> Result<Vec<u64>, CogError> {
-    let bytes = reader.read_range(offset, (count * 8) as u64).await?;
+    let item_size = type_size(field_type);
+    let bytes = reader
+        .read_range(offset, (count * item_size) as u64)
+        .await?;
     let mut offsets = Vec::with_capacity(count);
 
     for i in 0..count {
-        let val = if bytes.len() >= (i + 1) * 8 {
-            read_u64(&bytes, i * 8, big_endian)
-        } else if bytes.len() >= (i + 1) * 4 {
-            read_u32(&bytes, i * 4, big_endian) as u64
-        } else {
-            0
+        let base = i * item_size;
+        let val = match field_type {
+            3 if bytes.len() >= base + 2 => read_u16(&bytes, base, big_endian) as u64,
+            4 if bytes.len() >= base + 4 => read_u32(&bytes, base, big_endian) as u64,
+            16 if bytes.len() >= base + 8 => read_u64(&bytes, base, big_endian),
+            _ => 0,
         };
         offsets.push(val);
     }

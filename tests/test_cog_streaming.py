@@ -347,6 +347,30 @@ class TestCogDataclasses:
         assert info.compression == 8
         assert info.tile_count == 12
 
+    def test_cog_dataset_forwards_cache_dir_and_budget(self, monkeypatch, tmp_path):
+        """Test native constructor receives disk-cache options."""
+        from forge3d import cog
+
+        captured = {}
+
+        class FakeNativeCogDataset:
+            def __init__(self, *args):
+                captured["args"] = args
+
+        monkeypatch.setattr(cog, "_COG_AVAILABLE", True)
+        monkeypatch.setattr(cog, "_CogDatasetNative", FakeNativeCogDataset)
+
+        ds = cog.CogDataset(
+            "file:///tmp/test.tif",
+            cache_size_mb=8,
+            cache_dir=tmp_path,
+            cache_budget_mb=4,
+        )
+
+        assert captured["args"] == ("file:///tmp/test.tif", 8, str(tmp_path), 4)
+        assert ds._cache_dir == str(tmp_path)
+        assert ds._cache_budget_mb == 4
+
 
 class TestCogAvailability:
     """Test COG availability checking."""

@@ -46,7 +46,8 @@ def test_p2_quickstart_vt_textured_building_and_large_scene_diagnostics(tmp_path
     report = scene.validate()
     codes = {diagnostic.code for diagnostic in report.diagnostics}
 
-    assert {"vt_unsupported_family", "unsupported_feature", "estimated_gpu_memory"}.issubset(codes)
+    assert {"unsupported_feature", "estimated_gpu_memory"}.issubset(codes)
+    assert "vt_unsupported_family" not in codes
     assert next(s for s in report.layer_summaries if s.layer_id == "large_scene.resources")
 
 

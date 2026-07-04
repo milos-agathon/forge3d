@@ -28,7 +28,17 @@ def _renderable_fixture_scene():
         terrain=f3d.TerrainSource(
             path="fixtures/dem.tif",
             crs="EPSG:32610",
-            metadata={"width": 8, "height": 8, "asset_status": "fixture", "source_id": "terrain-source"},
+            metadata={
+                "width": 8,
+                "height": 8,
+                "asset_status": "fixture",
+                "source_id": "terrain-source",
+                "source_crs": "EPSG:4326",
+                "source_geotransform": [0.0, 0.01, 0.0, 1.0, 0.0, -0.01],
+                "geotransform": [500000.0, 30.0, 0.0, 4100000.0, 0.0, -30.0],
+                "nodata": -9999.0,
+                "alignment_transform_applied": True,
+            },
             elevation_sampling_available=True,
         ),
         camera=f3d.OrbitCamera(target=(0.0, 0.0, 0.0), distance=900.0),
@@ -79,7 +89,7 @@ def test_bundle_persists_required_p1_review_fields_and_label_payloads(tmp_path):
     assert review["supported_export_settings"] == {
         "bundle_schema": "forge3d.mapscene.review.v1",
         "label_plan_persistence": True,
-        "output_formats": ["png"],
+        "output_formats": ["exr", "png"],
     }
     assert review["compiled_label_plan_ids"] == ["labels.cities"]
     assert review["source_layer_ids"] == ["labels.cities", "ortho", "roads", "terrain"]
@@ -87,6 +97,14 @@ def test_bundle_persists_required_p1_review_fields_and_label_payloads(tmp_path):
     assert label_plan["accepted"][0]["label_id"] == "city-1"
     assert label_source["source_reference"]["source_id"] == "labels-source"
     assert terrain_source["source_reference"]["source_id"] == "terrain-source"
+    assert recipe["terrain"]["metadata"]["source_crs"] == "EPSG:4326"
+    assert recipe["terrain"]["metadata"]["source_geotransform"] == [0.0, 0.01, 0.0, 1.0, 0.0, -0.01]
+    assert recipe["terrain"]["metadata"]["geotransform"] == [500000.0, 30.0, 0.0, 4100000.0, 0.0, -30.0]
+    assert recipe["terrain"]["metadata"]["nodata"] == -9999.0
+    assert terrain_source["metadata"]["source_crs"] == "EPSG:4326"
+    assert terrain_source["metadata"]["source_geotransform"] == [0.0, 0.01, 0.0, 1.0, 0.0, -0.01]
+    assert terrain_source["metadata"]["geotransform"] == [500000.0, 30.0, 0.0, 4100000.0, 0.0, -30.0]
+    assert terrain_source["metadata"]["nodata"] == -9999.0
 
 
 def test_bundle_load_reconstructs_renderable_scene_when_assets_are_available(tmp_path):
@@ -97,11 +115,12 @@ def test_bundle_load_reconstructs_renderable_scene_when_assets_are_available(tmp
     _renderable_fixture_scene().save_bundle(bundle)
 
     loaded = f3d.MapScene.load_bundle(bundle)
-    report = loaded.render(str(output))
+    report = loaded.render(str(output), allow_placeholder=True)
 
     assert output.exists()
     assert output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     assert report.status == "ok"
+    assert loaded.last_render_backend == "placeholder"
     assert loaded.compiled_label_plans["labels.cities"].accepted
 
 

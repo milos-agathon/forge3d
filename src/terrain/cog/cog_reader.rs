@@ -5,11 +5,13 @@ use super::error::CogError;
 use super::ifd_parser::{
     parse_cog_header, CogHeader, COMPRESSION_DEFLATE, COMPRESSION_DEFLATE_ALT, COMPRESSION_LZW,
     COMPRESSION_NONE, SAMPLE_FORMAT_FLOAT, SAMPLE_FORMAT_INT, SAMPLE_FORMAT_UINT,
+    TIFF_PREDICTOR_HORIZONTAL, TIFF_PREDICTOR_NONE,
 };
 use super::range_reader::RangeReader;
 use crate::terrain::page_table::HeightReader;
 use crate::terrain::tiling::TileBounds;
 use glam::Vec2;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// COG-based height reader implementing the HeightReader trait.
@@ -23,11 +25,33 @@ pub struct CogHeightReader {
 impl CogHeightReader {
     /// Create a new COG height reader from a URL.
     pub async fn new(url: &str, cache_size_mb: u32) -> Result<Self, CogError> {
+        Self::new_with_cache_options(url, cache_size_mb, None, cache_size_mb).await
+    }
+
+    /// Create a new COG height reader with explicit range-cache options.
+    pub async fn new_with_cache_options(
+        url: &str,
+        cache_size_mb: u32,
+        cache_dir: Option<PathBuf>,
+        range_cache_budget_mb: u32,
+    ) -> Result<Self, CogError> {
+        let range_cache_budget_bytes = range_cache_budget_mb as u64 * 1024 * 1024;
         let reader = if url.starts_with("file://") {
             let path = url.strip_prefix("file://").unwrap_or(url);
-            RangeReader::new_local(path)?
+            RangeReader::new_local_with_cache_options(
+                path,
+                range_cache_budget_bytes,
+                cache_dir,
+                range_cache_budget_bytes,
+            )?
         } else {
-            RangeReader::new(url).await?
+            RangeReader::new_with_cache_options(
+                url,
+                range_cache_budget_bytes,
+                cache_dir,
+                range_cache_budget_bytes,
+            )
+            .await?
         };
 
         let reader = Arc::new(reader);
@@ -50,11 +74,35 @@ impl CogHeightReader {
         cache_size_mb: u32,
         runtime: tokio::runtime::Handle,
     ) -> Result<Self, CogError> {
+        Self::new_with_runtime_and_cache_options(url, cache_size_mb, runtime, None, cache_size_mb)
+            .await
+    }
+
+    /// Create with an existing tokio runtime handle and cache options.
+    pub async fn new_with_runtime_and_cache_options(
+        url: &str,
+        cache_size_mb: u32,
+        runtime: tokio::runtime::Handle,
+        cache_dir: Option<PathBuf>,
+        range_cache_budget_mb: u32,
+    ) -> Result<Self, CogError> {
+        let range_cache_budget_bytes = range_cache_budget_mb as u64 * 1024 * 1024;
         let reader = if url.starts_with("file://") {
             let path = url.strip_prefix("file://").unwrap_or(url);
-            RangeReader::new_local(path)?
+            RangeReader::new_local_with_cache_options(
+                path,
+                range_cache_budget_bytes,
+                cache_dir,
+                range_cache_budget_bytes,
+            )?
         } else {
-            RangeReader::new(url).await?
+            RangeReader::new_with_cache_options(
+                url,
+                range_cache_budget_bytes,
+                cache_dir,
+                range_cache_budget_bytes,
+            )
+            .await?
         };
 
         let reader = Arc::new(reader);
@@ -90,7 +138,12 @@ impl CogHeightReader {
 
     /// Get cache statistics.
     pub fn cache_stats(&self) -> super::cache::CogCacheStats {
-        self.cache.stats()
+        let mut stats = self.cache.stats();
+        stats.byte_cache_used_bytes = self.reader.stats().cached_bytes();
+        stats.byte_cache_budget_bytes = self.reader.byte_cache_budget_bytes();
+        stats.disk_cache_used_bytes = self.reader.stats().disk_cached_bytes();
+        stats.disk_cache_budget_bytes = self.reader.disk_cache_budget_bytes();
+        stats
     }
 
     /// Read a specific tile at given LOD.
@@ -125,6 +178,7 @@ impl CogHeightReader {
         let compression = ifd.compression;
         let bits_per_sample = ifd.bits_per_sample;
         let sample_format = ifd.sample_format;
+        let predictor = ifd.predictor;
         let tile_width = ifd.tile_width;
         let tile_height = ifd.tile_height;
 
@@ -137,6 +191,7 @@ impl CogHeightReader {
                 sample_format,
                 tile_width,
                 tile_height,
+                predictor,
             )
         })?;
 
@@ -188,6 +243,7 @@ impl CogHeightReader {
             ifd.sample_format,
             ifd.tile_width,
             ifd.tile_height,
+            ifd.predictor,
         )?;
 
         let tile_size = (ifd.tile_width * ifd.tile_height) as usize;
@@ -359,9 +415,13 @@ fn decode_heights(
     sample_format: u16,
     tile_width: u32,
     tile_height: u32,
+    predictor: u16,
 ) -> Result<Vec<f32>, CogError> {
     let pixel_count = (tile_width * tile_height) as usize;
     let mut heights = Vec::with_capacity(pixel_count);
+    let bytes_per_sample = (bits_per_sample as usize + 7) / 8;
+    let data = apply_predictor(data, predictor, bytes_per_sample, tile_width, tile_height)?;
+    let data = data.as_slice();
 
     match (bits_per_sample, sample_format) {
         (32, SAMPLE_FORMAT_FLOAT) => {
@@ -452,4 +512,92 @@ fn resample_tile(src: &[f32], dst_width: u32, dst_height: u32) -> Vec<f32> {
         }
     }
     dst
+}
+
+fn apply_predictor(
+    data: &[u8],
+    predictor: u16,
+    bytes_per_sample: usize,
+    tile_width: u32,
+    tile_height: u32,
+) -> Result<Vec<u8>, CogError> {
+    if predictor == TIFF_PREDICTOR_NONE {
+        return Ok(data.to_vec());
+    }
+    if predictor != TIFF_PREDICTOR_HORIZONTAL {
+        return Err(CogError::InvalidIfd(format!(
+            "Unsupported TIFF predictor: {}",
+            predictor
+        )));
+    }
+    if !matches!(bytes_per_sample, 1 | 2 | 4 | 8) {
+        return Err(CogError::InvalidIfd(format!(
+            "Unsupported predictor sample width: {}",
+            bytes_per_sample
+        )));
+    }
+
+    let row_bytes = tile_width as usize * bytes_per_sample;
+    let needed = row_bytes * tile_height as usize;
+    if data.len() < needed {
+        return Err(CogError::InvalidIfd(format!(
+            "Data too short for predictor: {} < {}",
+            data.len(),
+            needed
+        )));
+    }
+
+    let mut out = data.to_vec();
+    for row in 0..tile_height as usize {
+        let row_start = row * row_bytes;
+        for col in 1..tile_width as usize {
+            let prev = row_start + (col - 1) * bytes_per_sample;
+            let cur = row_start + col * bytes_per_sample;
+            match bytes_per_sample {
+                1 => out[cur] = out[cur].wrapping_add(out[prev]),
+                2 => {
+                    let a = u16::from_le_bytes(out[prev..prev + 2].try_into().unwrap());
+                    let b = u16::from_le_bytes(out[cur..cur + 2].try_into().unwrap());
+                    out[cur..cur + 2].copy_from_slice(&b.wrapping_add(a).to_le_bytes());
+                }
+                4 => {
+                    let a = u32::from_le_bytes(out[prev..prev + 4].try_into().unwrap());
+                    let b = u32::from_le_bytes(out[cur..cur + 4].try_into().unwrap());
+                    out[cur..cur + 4].copy_from_slice(&b.wrapping_add(a).to_le_bytes());
+                }
+                8 => {
+                    let a = u64::from_le_bytes(out[prev..prev + 8].try_into().unwrap());
+                    let b = u64::from_le_bytes(out[cur..cur + 8].try_into().unwrap());
+                    out[cur..cur + 8].copy_from_slice(&b.wrapping_add(a).to_le_bytes());
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_heights_applies_horizontal_predictor_to_u16_rows() {
+        let encoded: Vec<u8> = [10u16, 2, 3, 20, 4, 5]
+            .into_iter()
+            .flat_map(u16::to_le_bytes)
+            .collect();
+
+        let decoded = decode_heights(
+            &encoded,
+            16,
+            SAMPLE_FORMAT_UINT,
+            3,
+            2,
+            TIFF_PREDICTOR_HORIZONTAL,
+        )
+        .unwrap();
+
+        assert_eq!(decoded, vec![10.0, 12.0, 15.0, 20.0, 24.0, 29.0]);
+    }
 }

@@ -15,6 +15,10 @@ pub struct CogCacheStats {
     pub evictions: u64,
     pub memory_used_bytes: u64,
     pub memory_budget_bytes: u64,
+    pub byte_cache_used_bytes: u64,
+    pub byte_cache_budget_bytes: u64,
+    pub disk_cache_used_bytes: u64,
+    pub disk_cache_budget_bytes: u64,
 }
 
 /// LRU entry for cache.
@@ -146,6 +150,10 @@ impl CogTileCache {
             evictions: self.evictions.load(Ordering::Relaxed),
             memory_used_bytes: self.current_memory.load(Ordering::Relaxed),
             memory_budget_bytes: self.memory_budget_bytes,
+            byte_cache_used_bytes: 0,
+            byte_cache_budget_bytes: 0,
+            disk_cache_used_bytes: 0,
+            disk_cache_budget_bytes: 0,
         }
     }
 

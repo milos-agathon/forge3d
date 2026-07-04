@@ -1,6 +1,13 @@
 # python/forge3d/path_tracing.py
+"""Experimental path-tracing helpers.
+
+The Python renderer in this module produces deterministic synthetic images and
+AOVs for tests and demos. It is not a physically traced GPU render path; callers
+must pass ``synthetic_ok=True`` to receive synthetic pixels.
+"""
+
 # Deterministic CPU fallback path tracer with basic features for tests and demos.
-# Exists to provide a predictable render_rgba API and host-side utilities while GPU compute matures.
+# Exists to provide explicit synthetic render_rgba API and host-side utilities while GPU compute matures.
 # RELEVANT FILES:python/forge3d/path_tracing.pyi,tests/test_a17_firefly_clamp.py,README.md
 
 from __future__ import annotations
@@ -18,6 +25,19 @@ try:
     _NATIVE = _get_native_module()
 except Exception:
     _NATIVE = None
+
+
+class ExperimentalSyntheticOutput(RuntimeError):
+    """Raised when an experimental synthetic render is requested without opt-in."""
+
+
+def _require_synthetic_ok(synthetic_ok: bool, api_name: str) -> None:
+    if not bool(synthetic_ok):
+        raise ExperimentalSyntheticOutput(
+            f"{api_name} produces deterministic synthetic output, not a real path-traced render; "
+            "pass synthetic_ok=True to opt in."
+        )
+
 
 # --- A19: Scene cache for HQ path tracing (Python fallback) ---
 # Minimal in-memory cache to reuse scene-dependent precomputations across renders.
@@ -95,9 +115,9 @@ def make_sphere(
     ax: float | int = 0.2,
     ay: float | int = 0.2,
 ) -> Dict[str, Any]:
-    """Create a PBR sphere descriptor.
+    """Create a PBR sphere descriptor for the experimental synthetic tracer.
 
-    Parameters map to the GPU material used by the compute tracer:
+    Parameters mirror the intended material model:
       - albedo: base color (RGB)
       - metallic: 0..1
       - roughness: 0..1 (GGX alpha derived from roughness^2)
@@ -194,13 +214,16 @@ class PathTracer:
         return None
 
     def render_rgba(self, *args, spp: int = 1, **kwargs) -> np.ndarray:
-        """Produce an RGBA image.
+        """Produce a deterministic synthetic RGBA image.
 
         Overloads:
-          - render using internal size: render_rgba(spp=1)
-          - path-tracing style: render_rgba(width,height,scene,camera,seed=...,frames=...,use_gpu=...,denoiser=...,svgf_iters=...)
+          - render using internal size: render_rgba(spp=1, synthetic_ok=True)
+          - path-tracing style: render_rgba(width,height,scene,camera,seed=...,frames=...,use_gpu=...,denoiser=...,svgf_iters=...,synthetic_ok=True)
 
         """
+        synthetic_ok = bool(kwargs.pop("synthetic_ok", False))
+        _require_synthetic_ok(synthetic_ok, "PathTracer.render_rgba")
+
         # New-style call with explicit (w,h, ...)
         if len(args) >= 2 and isinstance(args[0], (int, np.integer)) and isinstance(args[1], (int, np.integer)):
             width = int(args[0]); height = int(args[1])
@@ -256,7 +279,15 @@ class PathTracer:
 
             if denoiser == "svgf":
                 # Build guidance AOVs deterministically
-                aovs = render_aovs(width, height, scene=None, camera=None, aovs=("albedo","normal","depth"), seed=seed)
+                aovs = render_aovs(
+                    width,
+                    height,
+                    scene=None,
+                    camera=None,
+                    aovs=("albedo", "normal", "depth"),
+                    seed=seed,
+                    synthetic_ok=True,
+                )
                 rgb = atrous_denoise(
                     rgb.astype(np.float32),
                     albedo=aovs.get("albedo"),
@@ -444,13 +475,15 @@ def render_aovs(
     frames: int = 1,
     use_gpu: bool = True,
     mesh: Any | None = None,
+    synthetic_ok: bool = False,
 ) -> Dict[str, np.ndarray]:
-    """Render a deterministic set of AOVs for testing and API conformance.
+    """Render a deterministic synthetic set of AOVs for tests and demos.
 
     This CPU implementation returns arrays with the correct shapes and dtypes.
     Values are procedurally generated and deterministic with the given seed.
 
     """
+    _require_synthetic_ok(synthetic_ok, "render_aovs")
     width = int(width)
     height = int(height)
     if width <= 0 or height <= 0:

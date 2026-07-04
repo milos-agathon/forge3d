@@ -17,6 +17,8 @@ struct VsOut {
   @builtin(position) pos : vec4<f32>,
   @location(0) color    : vec4<f32>,
   @location(1) uv       : vec2<f32>,
+  @location(2) halo_color : vec4<f32>,
+  @location(3) halo_width : f32,
 };
 
 @vertex
@@ -26,7 +28,9 @@ fn vs_main(@location(0) quad_pos: vec2<f32>,
            @location(3) uv_min: vec2<f32>,
            @location(4) uv_max: vec2<f32>,
            @location(5) color: vec4<f32>,
-           @location(6) rotation: f32) -> VsOut {
+           @location(6) halo_color: vec4<f32>,
+           @location(7) halo_width: f32,
+           @location(8) rotation: f32) -> VsOut {
   var out: VsOut;
   // Scale unit quad to rect in pixel space
   let unrotated_px = mix(rect_min, rect_max, quad_pos);
@@ -44,6 +48,8 @@ fn vs_main(@location(0) quad_pos: vec2<f32>,
   out.pos = vec4<f32>(ndc, 0.0, 1.0);
   out.color = color;
   out.uv = mix(uv_min, uv_max, quad_pos);
+  out.halo_color = halo_color;
+  out.halo_width = halo_width;
   return out;
 }
 
@@ -64,10 +70,23 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // SDF: use single channel (assume red)
     sdf = sample.r - 0.5;
   }
-  // Compute width from derivatives in UV space -> scale with smoothing
-  let w = fwidth(sdf) * U.smoothing;
-  let a_edge = clamp(sdf / max(1e-6, w) + 0.5, 0.0, 1.0);
-  let a = clamp(a_edge * in.color.a * U.alpha, 0.0, 1.0);
-  let col = in.color.rgb;
-  return vec4<f32>(col, a);
+  let edge_width = max(fwidth(sdf) * max(U.smoothing, 0.1), 1e-6);
+  let fill_alpha = smoothstep(-edge_width, edge_width, sdf);
+
+  let halo_px = max(in.halo_width, 0.0);
+  let halo_distance = halo_px * edge_width;
+  let halo_alpha = select(
+    0.0,
+    smoothstep(-(halo_distance + edge_width), -edge_width, sdf),
+    halo_px > 0.0 && in.halo_color.a > 0.0);
+  let halo_under_fill = halo_alpha * (1.0 - fill_alpha);
+
+  let fill_a = clamp(fill_alpha * in.color.a, 0.0, 1.0);
+  let halo_a = clamp(halo_under_fill * in.halo_color.a, 0.0, 1.0);
+  let local_a = clamp(fill_a + halo_a * (1.0 - fill_a), 0.0, 1.0);
+  if (local_a <= 1e-5) { discard; }
+
+  let fill_weight = fill_a / max(fill_a + halo_a, 1e-6);
+  let rgb = mix(in.halo_color.rgb, in.color.rgb, fill_weight);
+  return vec4<f32>(rgb, clamp(local_a * U.alpha, 0.0, 1.0));
 }

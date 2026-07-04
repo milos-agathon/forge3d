@@ -18,6 +18,7 @@ class ScaleBarConfig:
     """Configuration for scale bar rendering."""
     units: Literal["m", "km", "mi", "ft"] = "km"
     style: Literal["simple", "alternating"] = "alternating"
+    geodesic: bool = True
     width_px: int = 180
     height_px: int = 25
     divisions: int = 4
@@ -61,15 +62,39 @@ class ScaleBar:
         self.config = config or ScaleBarConfig()
 
     @staticmethod
-    def compute_meters_per_pixel(bbox: BBox, image_width: int) -> float:
+    def compute_meters_per_pixel(bbox: BBox, image_width: int, *, geodesic: bool = True) -> float:
         """Compute meters per pixel from geographic bounds.
-        
-        Uses WGS84 approximation: 1 degree ≈ 111320m * cos(lat) for longitude.
+
+        Uses WGS84 geodesic distance along the bounding-box center latitude by
+        default, falling back to a cosine approximation when a geodesic backend
+        is unavailable.
         """
+        if image_width <= 0:
+            raise ValueError("image_width must be positive")
+        if geodesic:
+            endpoints = ((float(bbox.west), float(bbox.center_lat)), (float(bbox.east), float(bbox.center_lat)))
+            if str(getattr(bbox, "crs", "EPSG:4326")).upper() not in {"EPSG:4326", "WGS84", "WGS 84"}:
+                try:
+                    import numpy as np
+
+                    from .crs import transform_coords
+
+                    transformed = transform_coords(np.asarray(endpoints, dtype=np.float64), str(bbox.crs), "EPSG:4326")
+                    endpoints = ((float(transformed[0, 0]), float(transformed[0, 1])), (float(transformed[1, 0]), float(transformed[1, 1])))
+                except Exception:
+                    return abs(float(bbox.width)) / float(image_width)
+            try:
+                from pyproj import Geod
+
+                geod = Geod(ellps="WGS84")
+                _az12, _az21, distance = geod.inv(endpoints[0][0], endpoints[0][1], endpoints[1][0], endpoints[1][1])
+                return abs(float(distance)) / float(image_width)
+            except Exception:
+                pass
         lat_rad = math.radians(bbox.center_lat)
         meters_per_deg_lon = 111320.0 * math.cos(lat_rad)
         total_meters = bbox.width * meters_per_deg_lon
-        return total_meters / image_width
+        return abs(total_meters) / image_width
 
     def _choose_nice_distance(self, max_distance: float) -> float:
         """Choose a nice round distance that fits within max_distance."""

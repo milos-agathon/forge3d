@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 import forge3d as f3d
 
 
@@ -42,49 +40,45 @@ def test_albedo_only_vt_scene_validates_and_renders(tmp_path):
     summary = _vt_summary(report)
     assert summary.support_level == "supported"
     assert summary.details["families"] == ["albedo"]
-    assert summary.details["native_supported_family"] == "albedo"
+    assert summary.details["native_supported_families"] == ["albedo"]
 
     output_path = tmp_path / "albedo-vt.png"
-    render_report = scene.render(str(output_path))
+    render_report = scene.render(str(output_path), allow_placeholder=True)
 
     assert output_path.exists()
     assert render_report.status == "ok"
 
 
-def test_non_albedo_vt_families_are_deterministic_unsupported_diagnostics():
+def test_non_albedo_vt_families_are_deterministic_supported_families():
     first = _scene_with_vt(["albedo", "normal", "mask"]).validate()
     second = _scene_with_vt(["mask", "albedo", "normal"]).validate()
 
-    assert first.status == "error"
-    assert second.status == "error"
+    assert first.status == "ok"
+    assert second.status == "ok"
     assert first.to_dict() == second.to_dict()
 
     diagnostics = [diagnostic for diagnostic in first.diagnostics if diagnostic.code == "vt_unsupported_family"]
-    assert [diagnostic.details["family"] for diagnostic in diagnostics] == ["mask", "normal"]
-    assert [diagnostic.object_id for diagnostic in diagnostics] == ["vt.mask", "vt.normal"]
-    assert {diagnostic.layer_id for diagnostic in diagnostics} == {"terrain.vt"}
-    assert {diagnostic.support_level for diagnostic in diagnostics} == {"unsupported"}
+    assert diagnostics == []
 
     summary = _vt_summary(first)
-    assert summary.support_level == "unsupported"
-    assert summary.diagnostic_codes == ("vt_unsupported_family", "vt_unsupported_family")
+    assert summary.support_level == "supported"
+    assert summary.diagnostic_codes == ()
     assert summary.details["families"] == ["albedo", "mask", "normal"]
+    assert summary.details["native_supported_families"] == ["albedo", "mask", "normal"]
     assert first.supported_features["vt.albedo"] == "supported"
-    assert first.unsupported_features["vt.mask"] == "unsupported"
-    assert first.unsupported_features["vt.normal"] == "unsupported"
+    assert first.supported_features["vt.mask"] == "supported"
+    assert first.supported_features["vt.normal"] == "supported"
+    assert first.unsupported_features == {}
 
 
-def test_non_albedo_vt_request_blocks_render_without_silent_skip(tmp_path):
+def test_non_albedo_vt_request_no_longer_blocks_render(tmp_path):
     scene = _scene_with_vt(["albedo", "normal"])
     output_path = tmp_path / "silently-skipped-normal.png"
 
-    with pytest.raises(RuntimeError, match="blocking diagnostics"):
-        scene.render(str(output_path))
+    report = scene.render(str(output_path), allow_placeholder=True)
 
-    assert not output_path.exists()
+    assert output_path.exists()
+    assert report.status == "ok"
     assert scene.last_validation_report is not None
-    assert scene.last_validation_report.status == "error"
-    diagnostic = scene.last_validation_report.diagnostics[0]
-    assert diagnostic.code == "vt_unsupported_family"
-    assert diagnostic.object_id == "vt.normal"
-    assert diagnostic.details == {"family": "normal", "supported_family": "albedo"}
+    assert scene.last_validation_report.status == "ok"
+    assert "vt.normal" not in scene.last_validation_report.unsupported_features

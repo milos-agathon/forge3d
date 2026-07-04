@@ -23,6 +23,50 @@ struct TerrainContextUniforms {
 @group(1) @binding(0) var<uniform> T : TerrainContextUniforms;
 @group(1) @binding(1) var height_tex : texture_2d<f32>;
 
+struct ShadowCascade {
+  light_projection: mat4x4<f32>,
+  light_view_proj: mat4x4<f32>,
+  near_distance: f32,
+  far_distance: f32,
+  texel_size: f32,
+  _padding: f32,
+}
+
+struct CsmUniforms {
+  light_direction: vec4<f32>,
+  light_view: mat4x4<f32>,
+  cascades: array<ShadowCascade, 4>,
+  cascade_count: u32,
+  pcf_kernel_size: u32,
+  depth_bias: f32,
+  slope_bias: f32,
+  shadow_map_size: f32,
+  debug_mode: u32,
+  evsm_positive_exp: f32,
+  evsm_negative_exp: f32,
+  peter_panning_offset: f32,
+  enable_unclipped_depth: u32,
+  depth_clip_factor: f32,
+  technique: u32,
+  technique_flags: u32,
+  _pad1a: f32,
+  _pad1b: f32,
+  _pad1c: f32,
+  technique_params: vec4<f32>,
+  technique_reserved: vec4<f32>,
+  cascade_blend_range: f32,
+  _pad2a: f32,
+  _pad2b: f32,
+  _pad2c: f32,
+  _pad2d: array<vec4<f32>, 6>,
+}
+
+@group(2) @binding(0) var<storage, read> csm_uniforms: CsmUniforms;
+@group(2) @binding(1) var shadow_maps: texture_depth_2d_array;
+@group(2) @binding(2) var shadow_sampler: sampler_comparison;
+@group(2) @binding(3) var moment_maps: texture_2d_array<f32>;
+@group(2) @binding(4) var moment_sampler: sampler;
+
 struct VsIn {
   // Per-vertex attributes
   @location(0) position: vec3<f32>,
@@ -95,6 +139,19 @@ fn vs_main(in: VsIn) -> VsOut {
   return out;
 }
 
+struct ShadowVsOut {
+  @builtin(position) pos: vec4<f32>,
+}
+
+@vertex
+fn vs_shadow(in: VsIn) -> ShadowVsOut {
+  var out: ShadowVsOut;
+  let M = mat4x4<f32>(in.i_m0, in.i_m1, in.i_m2, in.i_m3);
+  let pos_ws = M * vec4<f32>(in.position, 1.0);
+  out.pos = U.proj * U.view * pos_ws;
+  return out;
+}
+
 fn saturate(value: f32) -> f32 {
   return clamp(value, 0.0, 1.0);
 }
@@ -131,6 +188,52 @@ fn terrain_height_delta(world_pos: vec3<f32>) -> f32 {
   return world_pos.y - terrain_height;
 }
 
+fn mesh_shadow_visibility(world_pos: vec3<f32>) -> f32 {
+  let cascade_count = min(csm_uniforms.cascade_count, 4u);
+  if (cascade_count == 0u) {
+    return 1.0;
+  }
+
+  let view_pos = U.view * vec4<f32>(world_pos, 1.0);
+  let view_depth = abs(view_pos.z);
+  var cascade_idx = cascade_count - 1u;
+  for (var i: u32 = 0u; i < cascade_count; i = i + 1u) {
+    if (view_depth <= csm_uniforms.cascades[i].far_distance) {
+      cascade_idx = i;
+      break;
+    }
+  }
+
+  let cascade = csm_uniforms.cascades[cascade_idx];
+  let light_space = cascade.light_view_proj * vec4<f32>(world_pos, 1.0);
+  if (abs(light_space.w) <= 1e-6) {
+    return 1.0;
+  }
+  let ndc = light_space.xyz / light_space.w;
+  let shadow_uv = vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
+  if (shadow_uv.x < 0.0 || shadow_uv.x > 1.0 || shadow_uv.y < 0.0 || shadow_uv.y > 1.0) {
+    return 1.0;
+  }
+  let compare_depth = clamp(ndc.z - max(csm_uniforms.depth_bias, 0.0), 0.0, 1.0);
+  if (csm_uniforms.pcf_kernel_size <= 1u) {
+    return textureSampleCompare(shadow_maps, shadow_sampler, shadow_uv, i32(cascade_idx), compare_depth);
+  }
+
+  let texel = 1.0 / max(csm_uniforms.shadow_map_size, 1.0);
+  var sum = 0.0;
+  var count = 0.0;
+  for (var oy: i32 = -1; oy <= 1; oy = oy + 1) {
+    for (var ox: i32 = -1; ox <= 1; ox = ox + 1) {
+      let uv = shadow_uv + vec2<f32>(f32(ox), f32(oy)) * texel;
+      if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
+        sum = sum + textureSampleCompare(shadow_maps, shadow_sampler, uv, i32(cascade_idx), compare_depth);
+        count = count + 1.0;
+      }
+    }
+  }
+  return sum / max(count, 1.0);
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   let n = normalize(in.n_ws);
@@ -151,7 +254,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     discard;
   }
 
-  let lit = base * (0.2 + 0.7 * ndotl * intensity);
+  let shadow_visibility = mesh_shadow_visibility(in.world_pos);
+  let direct_shadow = mix(0.20, 1.0, shadow_visibility);
+  let lit = base * (0.2 + 0.7 * ndotl * intensity * direct_shadow);
   var contact = 0.0;
   if (U.terrain_contact.x > 0.5) {
     let contact_distance = max(U.terrain_contact.y, 1e-4);

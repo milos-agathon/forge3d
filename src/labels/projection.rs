@@ -76,17 +76,19 @@ impl LabelProjector {
     /// If the label's projected depth is greater than the scene depth at that pixel,
     /// the label is considered occluded.
     ///
-    /// Note: This requires reading the depth buffer which is not implemented here.
-    /// For MVP, we skip depth occlusion and just use the basic projection.
     pub fn project_with_occlusion(
         &self,
         world_pos: Vec3,
         view_proj: Mat4,
-        _scene_depth: Option<f32>,
+        scene_depth: Option<f32>,
     ) -> Option<([f32; 2], f32)> {
-        // For MVP, just use basic projection
-        // Depth occlusion would require depth buffer readback
-        self.project(world_pos, view_proj)
+        let projected = self.project(world_pos, view_proj)?;
+        if let Some(depth) = scene_depth {
+            if projected.1 > depth {
+                return None;
+            }
+        }
+        Some(projected)
     }
 
     /// Get screen dimensions.
@@ -122,5 +124,15 @@ mod tests {
         // Point behind camera should return None
         let result = proj.project(Vec3::new(0.0, 0.0, -10.0), view_proj);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_project_with_occlusion_rejects_depth_behind_scene() {
+        let proj = LabelProjector::new(800, 600);
+        let visible = proj.project_with_occlusion(Vec3::ZERO, Mat4::IDENTITY, Some(0.5));
+        let hidden = proj.project_with_occlusion(Vec3::ZERO, Mat4::IDENTITY, Some(-0.1));
+
+        assert!(visible.is_some());
+        assert!(hidden.is_none());
     }
 }

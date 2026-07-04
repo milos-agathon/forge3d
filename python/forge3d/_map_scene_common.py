@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from typing import Any, Mapping, Sequence
 
 
@@ -19,6 +20,8 @@ def _json_safe(value: Any) -> Any:
         return [_json_safe(item) for item in value]
     if isinstance(value, list):
         return [_json_safe(item) for item in value]
+    if isinstance(value, os.PathLike):
+        return os.fspath(value)
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     raise TypeError(f"MapScene recipe values must be JSON-serializable, got {type(value).__name__}")

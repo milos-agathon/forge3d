@@ -355,13 +355,14 @@ impl TerrainScene {
         // Terrain scatter is composited after the terrain pass. Keep the shared instancing
         // renderer reusable, but avoid inheriting terrain-depth mismatches into this path.
         let scatter_renderer =
-            crate::render::mesh_instanced::MeshInstancedRenderer::new_with_depth_state(
+            crate::render::mesh_instanced::MeshInstancedRenderer::new_with_depth_state_and_shadow_layout(
                 device.as_ref(),
                 color_format,
                 Some(TERRAIN_DEPTH_FORMAT),
                 1,
                 wgpu::CompareFunction::Always,
                 false,
+                Some(&shadow_bind_group_layout),
             );
 
         let noop_shadow =

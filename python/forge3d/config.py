@@ -89,6 +89,12 @@ def validate_shadow_technique(technique: str) -> str:
         )
     return _normalize_choice(technique, _SHADOW_TECHNIQUES, "shadow technique")
 
+
+def _plain_mapping(value: Any, name: str) -> Dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise TypeError(f"{name} must be a mapping")
+    return copy.deepcopy(dict(value))
+
 _GI_MODES: Dict[str, str] = {
     "none": "none",
     "ibl": "ibl",
@@ -507,6 +513,10 @@ class RendererConfig:
     shadows: ShadowParams = field(default_factory=ShadowParams)
     gi: GiParams = field(default_factory=GiParams)
     atmosphere: AtmosphereParams = field(default_factory=AtmosphereParams)
+    camera: Dict[str, Any] = field(default_factory=dict)
+    sun: Dict[str, Any] = field(default_factory=dict)
+    ibl: Dict[str, Any] = field(default_factory=dict)
+    exaggeration: Optional[float] = None
     brdf_override: Optional[str] = None
 
     def to_dict(self) -> dict:
@@ -517,6 +527,14 @@ class RendererConfig:
             "gi": self.gi.to_dict(),
             "atmosphere": self.atmosphere.to_dict(),
         }
+        if self.camera:
+            data["camera"] = copy.deepcopy(self.camera)
+        if self.sun:
+            data["sun"] = copy.deepcopy(self.sun)
+        if self.ibl:
+            data["ibl"] = copy.deepcopy(self.ibl)
+        if self.exaggeration is not None:
+            data["exaggeration"] = float(self.exaggeration)
         if self.brdf_override is not None:
             data["brdf_override"] = self.brdf_override
         return data
@@ -564,6 +582,8 @@ class RendererConfig:
                 has_env = any(light.type == "environment" and light.hdr_path for light in self.lighting.lights)
                 if not has_env and self.atmosphere.hdr_path is None:
                     raise ValueError("gi mode 'ibl' requires either an environment light or atmosphere.hdr_path")
+        if self.exaggeration is not None and float(self.exaggeration) <= 0.0:
+            raise ValueError("exaggeration must be positive")
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any], default: Optional["RendererConfig"] = None) -> "RendererConfig":
@@ -593,6 +613,15 @@ class RendererConfig:
                 base.atmosphere = AtmosphereParams.from_mapping(data["atmosphere"], base.atmosphere)
             else:
                 raise TypeError("atmosphere must be a mapping")
+        if "camera" in data:
+            base.camera = _plain_mapping(data["camera"], "camera")
+        if "sun" in data:
+            base.sun = _plain_mapping(data["sun"], "sun")
+        if "ibl" in data:
+            base.ibl = _plain_mapping(data["ibl"], "ibl")
+        if "exaggeration" in data:
+            value = data["exaggeration"]
+            base.exaggeration = None if value is None else float(value)
         if "brdf_override" in data:
             value = data["brdf_override"]
             base.brdf_override = None if value is None else _normalize_choice(value, _BRDF_MODELS, "BRDF model")
@@ -655,6 +684,13 @@ def _build_override_mapping(overrides: Mapping[str, Any]) -> Dict[str, Dict[str,
                 out.setdefault("atmosphere", {}).update(value)
             else:
                 raise TypeError("atmosphere override must be a mapping")
+        elif key in {"camera", "sun", "ibl"}:
+            if isinstance(value, Mapping):
+                out.setdefault(key, {}).update(value)
+            else:
+                raise TypeError(f"{key} override must be a mapping")
+        elif key == "exaggeration":
+            out["exaggeration"] = value
         elif key == "brdf_override":
             out["brdf_override"] = value
         else:
@@ -715,6 +751,10 @@ def split_renderer_overrides(kwargs: MutableMapping[str, Any]) -> Tuple[Dict[str
         "hdr_path",
         "volumetric",
         "atmosphere",
+        "camera",
+        "sun",
+        "ibl",
+        "exaggeration",
         "brdf_override",
     }
     for key, value in list(kwargs.items()):

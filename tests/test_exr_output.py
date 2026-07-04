@@ -161,6 +161,7 @@ def test_save_aovs_exr_channels(tmp_path: Path) -> None:
         seed=3,
         frames=1,
         use_gpu=False,
+        synthetic_ok=True,
     )
     out_paths = pt.save_aovs(aovs, basename="frame0001", output_dir=str(tmp_path))
 

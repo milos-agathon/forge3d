@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from ._map_scene_common import _metadata, _metadata_dict, _same_crs
@@ -30,6 +31,238 @@ def _label_plan_seed(recipe: "SceneRecipe", layer: "LabelLayer") -> int:
     return 0
 
 
+def _terrain_heightmap_array(terrain: "TerrainSource") -> Any | None:
+    import numpy as np
+
+    data = getattr(terrain, "data", None)
+    if data is not None:
+        array = np.asarray(data, dtype=np.float32)
+        return array if array.ndim == 2 else None
+
+    path_value = getattr(terrain, "path", None)
+    if not path_value:
+        return None
+    path = Path(path_value)
+    try:
+        if path.suffix.lower() == ".npy":
+            array = np.asarray(np.load(path), dtype=np.float32)
+        else:
+            from .io import load_dem
+
+            dem = load_dem(path)
+            array = np.asarray(dem.data, dtype=np.float32)
+    except Exception:
+        return None
+    return array if array.ndim == 2 else None
+
+
+def _recipe_output_size(recipe: "SceneRecipe") -> tuple[float, float]:
+    output = getattr(recipe, "output", None)
+    width = float(getattr(output, "width", 1) or 1)
+    height = float(getattr(output, "height", 1) or 1)
+    return max(1.0, width), max(1.0, height)
+
+
+def _coordinate_has_explicit_z(record: Mapping[str, Any]) -> bool:
+    geometry = record.get("geometry") if isinstance(record.get("geometry"), Mapping) else {}
+    coordinates = geometry.get("coordinates")
+    if _is_coordinate(coordinates) and len(coordinates) > 2:
+        return True
+    for key in ("position", "world_pos"):
+        value = record.get(key)
+        if _is_coordinate(value) and len(value) > 2:
+            return True
+    return False
+
+
+def _axis_to_height_index(value: float, viewport_extent: float, height_extent: int) -> int:
+    if height_extent <= 1:
+        return 0
+    if 0.0 <= value <= 1.0 and viewport_extent > 1.0:
+        unit = value
+    else:
+        unit = value / max(viewport_extent - 1.0, 1.0)
+    unit = max(0.0, min(1.0, unit))
+    return int(round(unit * float(height_extent - 1)))
+
+
+class _TerrainOcclusionSampler:
+    def __init__(
+        self,
+        heightmap: Any,
+        *,
+        viewport_size: tuple[float, float],
+        bias: float = 0.0,
+    ) -> None:
+        self.heightmap = heightmap
+        self.viewport_width, self.viewport_height = viewport_size
+        self.bias = float(bias)
+
+    def sample_label(
+        self,
+        coords: Sequence[float],
+        *,
+        record: Mapping[str, Any],
+        label_id: str,
+    ) -> Mapping[str, Any]:
+        del label_id
+        row_count, col_count = self.heightmap.shape
+        col = _axis_to_height_index(float(coords[0]), self.viewport_width, col_count)
+        row = _axis_to_height_index(float(coords[1]), self.viewport_height, row_count)
+        elevation = float(self.heightmap[row, col])
+        explicit_z = _coordinate_has_explicit_z(record)
+        z = float(coords[2]) if len(coords) > 2 else elevation
+        height_tested = bool(explicit_z and abs(z) > 1.0e-6)
+        visible = True if not height_tested else (z + self.bias) >= elevation
+        return {
+            "elevation": elevation,
+            "source": "mapscene_terrain_heightmap",
+            "visible": bool(visible),
+            "occlusion": "terrain",
+            "bias": self.bias,
+            "sample_pixel": [int(col), int(row)],
+            "explicit_z": bool(explicit_z),
+            "height_tested": height_tested,
+        }
+
+
+class _DepthOcclusionSampler:
+    def __init__(
+        self,
+        depth_image: Any,
+        *,
+        viewport_size: tuple[float, float],
+        bias: float = 0.0,
+        source: str = "mapscene_depth_aov",
+    ) -> None:
+        import numpy as np
+
+        depth = np.asarray(depth_image, dtype=np.float32)
+        if depth.ndim != 2:
+            raise ValueError("Depth occlusion image must be a 2D array")
+        self.depth_image = depth
+        self.viewport_width, self.viewport_height = viewport_size
+        self.bias = float(bias)
+        self.source = str(source or "mapscene_depth_aov")
+
+    def sample_label(
+        self,
+        coords: Sequence[float],
+        *,
+        record: Mapping[str, Any],
+        label_id: str,
+    ) -> Mapping[str, Any]:
+        del label_id
+        row_count, col_count = self.depth_image.shape
+        col = _axis_to_height_index(float(coords[0]), self.viewport_width, col_count)
+        row = _axis_to_height_index(float(coords[1]), self.viewport_height, row_count)
+        scene_depth = float(self.depth_image[row, col])
+        explicit_z = _coordinate_has_explicit_z(record)
+        projected_depth = record.get("projected_depth", record.get("screen_depth", record.get("anchor_depth")))
+        if explicit_z:
+            label_depth = float(coords[2]) if len(coords) > 2 else scene_depth
+        elif projected_depth is not None:
+            label_depth = float(projected_depth)
+        else:
+            label_depth = float(coords[2]) if len(coords) > 2 else scene_depth
+        depth_tested = True
+        visible = label_depth <= scene_depth + self.bias
+        result: dict[str, Any] = {
+            "scene_depth": scene_depth,
+            "label_depth": label_depth,
+            "source": self.source,
+            "visible": bool(visible),
+            "occlusion": "depth_aov",
+            "bias": self.bias,
+            "sample_pixel": [int(col), int(row)],
+            "explicit_z": bool(explicit_z),
+            "depth_tested": depth_tested,
+        }
+        if not explicit_z:
+            result["elevation"] = scene_depth
+        return result
+
+
+def _label_occlusion_bias(layer: "LabelLayer") -> float:
+    metadata = _metadata_dict(getattr(layer, "metadata", None))
+    value = metadata.get("terrain_occlusion_bias", metadata.get("occlusion_bias", 0.0))
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _depth_occlusion_config(layer: "LabelLayer", terrain: "TerrainSource") -> Mapping[str, Any] | None:
+    for metadata in (
+        _metadata_dict(getattr(layer, "metadata", None)),
+        _metadata_dict(getattr(terrain, "metadata", None)),
+    ):
+        for key in ("depth_occlusion", "depth_aov", "depth_buffer", "depth_image"):
+            value = metadata.get(key)
+            if value is None:
+                continue
+            if isinstance(value, Mapping):
+                return dict(value)
+            return {"image": value}
+    return None
+
+
+def _depth_image_from_config(config: Mapping[str, Any]) -> Any | None:
+    for key in ("image", "data", "values", "depth"):
+        if key in config:
+            return config[key]
+    return None
+
+
+def _terrain_occlusion_sampler(
+    layer: "LabelLayer",
+    *,
+    recipe: "SceneRecipe",
+    terrain: "TerrainSource",
+) -> Any | None:
+    if str(getattr(layer, "occlusion", "terrain")).lower() != "terrain":
+        return None
+    depth_config = _depth_occlusion_config(layer, terrain)
+    if depth_config is not None:
+        depth_image = _depth_image_from_config(depth_config)
+        if depth_image is not None:
+            bias_value = depth_config.get("bias", _label_occlusion_bias(layer))
+            try:
+                bias = float(bias_value)
+            except (TypeError, ValueError):
+                bias = _label_occlusion_bias(layer)
+            return _DepthOcclusionSampler(
+                depth_image,
+                viewport_size=_recipe_output_size(recipe),
+                bias=bias,
+                source=str(depth_config.get("source") or "mapscene_depth_aov"),
+            )
+    heightmap = _terrain_heightmap_array(terrain)
+    if heightmap is None:
+        return None
+    return _TerrainOcclusionSampler(
+        heightmap,
+        viewport_size=_recipe_output_size(recipe),
+        bias=_label_occlusion_bias(layer),
+    )
+
+
+def _labels_with_terrain_occlusion(
+    labels: Sequence[Mapping[str, Any]] | None,
+    *,
+    enabled: bool,
+) -> list[dict[str, Any]]:
+    result = []
+    for label in labels or ():
+        item = dict(label)
+        if enabled:
+            item["requires_terrain"] = True
+            item["terrain_mode"] = "terrain"
+            item["occlusion"] = "terrain"
+        result.append(item)
+    return result
+
+
 def _label_plan_from_layer(
     layer: "LabelLayer",
     *,
@@ -48,11 +281,16 @@ def _label_plan_from_layer(
         raise TypeError("LabelLayer.plan must be a LabelPlan or LabelPlan-compatible mapping")
 
     keepouts = tuple(recipe.map_furniture.keepouts or ()) if recipe.map_furniture is not None else ()
+    terrain_sampler = _terrain_occlusion_sampler(layer, recipe=recipe, terrain=terrain)
+    labels = _labels_with_terrain_occlusion(
+        layer.labels or (),
+        enabled=terrain_sampler is not None,
+    )
     return LabelPlan.compile(
-        labels=layer.labels or (),
+        labels=labels,
         camera=recipe.camera,
         viewport=recipe.output,
-        terrain=terrain,
+        terrain=terrain_sampler if terrain_sampler is not None else terrain,
         keepouts=keepouts,
         priority_rules=layer.priority_rules or (),
         typography=layer.typography or {},

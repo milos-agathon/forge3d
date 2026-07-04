@@ -124,15 +124,26 @@ fn parse_surface(
         return Ok(());
     }
 
-    let outer_ring = rings[0]
-        .as_array()
-        .ok_or_else(|| CityJsonError::new("Ring is not an array"))?;
-    if outer_ring.len() < 3 {
+    let mut surface_rings = Vec::with_capacity(rings.len());
+    for ring in rings {
+        let parsed = parse_ring_vertices(ring, vertices)?;
+        if parsed.len() >= 3 {
+            surface_rings.push(parsed);
+        }
+    }
+    if surface_rings.is_empty() {
         return Ok(());
     }
 
-    let mut ring_verts = Vec::with_capacity(outer_ring.len());
-    for idx_val in outer_ring {
+    tessellate_surface(building, &surface_rings)
+}
+
+fn parse_ring_vertices(ring: &JsonValue, vertices: &[[f64; 3]]) -> CityJsonResult<Vec<[f64; 3]>> {
+    let values = ring
+        .as_array()
+        .ok_or_else(|| CityJsonError::new("Ring is not an array"))?;
+    let mut ring_verts = Vec::with_capacity(values.len());
+    for idx_val in values {
         let idx = idx_val
             .as_u64()
             .ok_or_else(|| CityJsonError::new("Vertex index is not a number"))?
@@ -144,19 +155,155 @@ fn parse_surface(
         }
         ring_verts.push(vertices[idx]);
     }
+    if ring_verts.len() > 1 && ring_verts.first() == ring_verts.last() {
+        ring_verts.pop();
+    }
+    Ok(ring_verts)
+}
+
+fn tessellate_surface(building: &mut BuildingGeom, rings: &[Vec<[f64; 3]>]) -> CityJsonResult<()> {
+    use lyon_path::Path;
+    use lyon_tessellation::{
+        BuffersBuilder, FillOptions, FillRule, FillTessellator, FillVertex, VertexBuffers,
+    };
+
+    let projection = SurfaceProjection::from_rings(rings)
+        .ok_or_else(|| CityJsonError::new("Surface rings are degenerate"))?;
+    let mut builder = Path::builder();
+    for ring in rings {
+        let first = projection.project(ring[0]);
+        builder.begin(lyon_path::math::Point::new(first[0], first[1]));
+        for vertex in ring.iter().skip(1) {
+            let projected = projection.project(*vertex);
+            builder.line_to(lyon_path::math::Point::new(projected[0], projected[1]));
+        }
+        builder.close();
+    }
+    let path = builder.build();
+    let mut tessellator = FillTessellator::new();
+    let mut buffers: VertexBuffers<[f32; 3], u32> = VertexBuffers::new();
+    tessellator
+        .tessellate_path(
+            &path,
+            &FillOptions::default().with_fill_rule(FillRule::EvenOdd),
+            &mut BuffersBuilder::new(&mut buffers, |vertex: FillVertex| {
+                let position = vertex.position();
+                projection.unproject([position.x, position.y])
+            }),
+        )
+        .map_err(|err| CityJsonError::new(format!("Surface tessellation failed: {err:?}")))?;
 
     let base_idx = building.positions.len() as u32 / 3;
-    for vertex in &ring_verts {
-        building.positions.push(vertex[0] as f32);
-        building.positions.push(vertex[1] as f32);
-        building.positions.push(vertex[2] as f32);
+    for vertex in &buffers.vertices {
+        building.positions.extend_from_slice(vertex);
     }
-
-    for i in 1..(ring_verts.len() as u32 - 1) {
-        building.indices.push(base_idx);
-        building.indices.push(base_idx + i);
-        building.indices.push(base_idx + i + 1);
+    for index in buffers.indices {
+        building.indices.push(base_idx + index);
     }
 
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct SurfaceProjection {
+    drop_axis: usize,
+    origin: [f64; 3],
+    normal: [f64; 3],
+}
+
+impl SurfaceProjection {
+    fn from_rings(rings: &[Vec<[f64; 3]>]) -> Option<Self> {
+        let origin = *rings.iter().find_map(|ring| ring.first())?;
+        let mut normal = None;
+        for ring in rings {
+            for i in 1..ring.len() {
+                for j in (i + 1)..ring.len() {
+                    let a = sub(ring[i], origin);
+                    let b = sub(ring[j], origin);
+                    let n = cross(a, b);
+                    if length_sq(n) > 1.0e-18 {
+                        normal = Some(n);
+                        break;
+                    }
+                }
+                if normal.is_some() {
+                    break;
+                }
+            }
+            if normal.is_some() {
+                break;
+            }
+        }
+        let normal = normal?;
+        let abs = [normal[0].abs(), normal[1].abs(), normal[2].abs()];
+        let drop_axis = if abs[0] >= abs[1] && abs[0] >= abs[2] {
+            0
+        } else if abs[1] >= abs[2] {
+            1
+        } else {
+            2
+        };
+        Some(Self {
+            drop_axis,
+            origin,
+            normal,
+        })
+    }
+
+    fn project(&self, point: [f64; 3]) -> [f32; 2] {
+        match self.drop_axis {
+            0 => [point[1] as f32, point[2] as f32],
+            1 => [point[0] as f32, point[2] as f32],
+            _ => [point[0] as f32, point[1] as f32],
+        }
+    }
+
+    fn unproject(&self, point: [f32; 2]) -> [f32; 3] {
+        let u = point[0] as f64;
+        let v = point[1] as f64;
+        let mut p = self.origin;
+        match self.drop_axis {
+            0 => {
+                p[1] = u;
+                p[2] = v;
+                p[0] = self.origin[0]
+                    - (self.normal[1] * (p[1] - self.origin[1])
+                        + self.normal[2] * (p[2] - self.origin[2]))
+                        / self.normal[0];
+            }
+            1 => {
+                p[0] = u;
+                p[2] = v;
+                p[1] = self.origin[1]
+                    - (self.normal[0] * (p[0] - self.origin[0])
+                        + self.normal[2] * (p[2] - self.origin[2]))
+                        / self.normal[1];
+            }
+            _ => {
+                p[0] = u;
+                p[1] = v;
+                p[2] = self.origin[2]
+                    - (self.normal[0] * (p[0] - self.origin[0])
+                        + self.normal[1] * (p[1] - self.origin[1]))
+                        / self.normal[2];
+            }
+        }
+        [p[0] as f32, p[1] as f32, p[2] as f32]
+    }
+}
+
+fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn length_sq(v: [f64; 3]) -> f64 {
+    v[0] * v[0] + v[1] * v[1] + v[2] * v[2]
 }

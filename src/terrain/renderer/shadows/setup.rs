@@ -16,6 +16,8 @@ impl TerrainScene {
         params: &crate::terrain::render_params::TerrainRenderParams,
         decoded: &crate::terrain::render_params::DecodedTerrainSettings,
         heightmap_view: &wgpu::TextureView,
+        heightmap_width: u32,
+        heightmap_height: u32,
     ) -> Result<ShadowSetup> {
         let phi_rad = params.cam_phi_deg.to_radians();
         let theta_rad = params.cam_theta_deg.to_radians();
@@ -167,6 +169,8 @@ impl TerrainScene {
             let bind_group = self.render_shadow_depth_passes(
                 encoder,
                 heightmap_view,
+                heightmap_width,
+                heightmap_height,
                 terrain_spacing,
                 height_exag,
                 height_min,
@@ -177,7 +181,7 @@ impl TerrainScene {
                 params.clip.0,
                 shadow_far,
                 height_curve,
-            );
+            )?;
 
             if let Some(ref mut moment_pass) = self.moment_pass {
                 if let Some(moment_texture) = &self.csm_renderer.evsm_maps {

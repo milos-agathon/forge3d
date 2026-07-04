@@ -214,12 +214,12 @@ impl VectorOverlayStack {
         let reveal_blend = wgpu::BlendState {
             color: wgpu::BlendComponent {
                 src_factor: wgpu::BlendFactor::Zero,
-                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                dst_factor: wgpu::BlendFactor::OneMinusSrc,
                 operation: wgpu::BlendOperation::Add,
             },
             alpha: wgpu::BlendComponent {
                 src_factor: wgpu::BlendFactor::Zero,
-                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                dst_factor: wgpu::BlendFactor::OneMinusSrc,
                 operation: wgpu::BlendOperation::Add,
             },
         };

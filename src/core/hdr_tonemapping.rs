@@ -1,6 +1,6 @@
 // src/core/hdr_tonemapping.rs
 // CPU-side tone mapping implementation
-// RELEVANT FILES: shaders/tonemap.wgsl
+// RELEVANT FILES: shaders/postprocess_tonemap.wgsl
 
 use super::hdr_types::ToneMappingOperator;
 use glam::Vec3;

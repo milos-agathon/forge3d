@@ -5,6 +5,10 @@ struct SkyParams {
     sun_direction_turbidity: vec4<f32>,
     ground_albedo_sun_size_sun_intensity_exposure: vec4<f32>,
     model_pad: vec4<u32>,
+    hosek_coeffs_a_d: array<vec4<f32>, 3>,
+    hosek_coeffs_e_h: array<vec4<f32>, 3>,
+    hosek_coeff_i: vec4<f32>,
+    hosek_radiance: vec4<f32>,
 }
 
 const PI: f32 = 3.14159265359;
@@ -42,8 +46,8 @@ fn sky_model(params: SkyParams) -> u32 {
 // Hosek-Wilkie sky model (2012) - More accurate than Preetham
 // ============================================================================
 
-// Hosek-Wilkie sky model coefficients (precomputed for RGB channels)
-// These are fitted polynomials for the 9 sky model parameters
+// Hosek-Wilkie sky model coefficients (precomputed for RGB channels).
+// Values are cooked on the CPU from the published native RGB coefficient tables.
 struct HosekCoeffs {
     A: vec3<f32>,
     B: vec3<f32>,
@@ -59,28 +63,37 @@ struct HosekCoeffs {
 fn hosek_wilkie_eval_channel(
     cos_theta: f32,     // cos(angle between view and zenith)
     cos_gamma: f32,     // cos(angle between view and sun)
-    cos_theta_sun: f32, // cos(sun zenith angle)
+    abcd: vec4<f32>,
+    efgh: vec4<f32>,
+    I: f32,
+    radiance: f32
+) -> f32 {
+    let gamma = acos(clamp(cos_gamma, -1.0, 1.0));
+    let ray_m = cos_gamma * cos_gamma;
+    let mie_denom = max(1.0e-4, 1.0 + I * I - 2.0 * I * cos_gamma);
+    let mie_m = (1.0 + ray_m) / pow(mie_denom, 1.5);
+    let zenith = sqrt(max(0.0, cos_theta));
+
+    return radiance
+        * (1.0 + abcd.x * exp(abcd.y / (cos_theta + 0.01)))
+        * (abcd.z + abcd.w * exp(efgh.x * gamma) + efgh.y * ray_m + efgh.z * mie_m + efgh.w * zenith);
+}
+
+fn approximate_hosek_eval_channel(
+    cos_theta: f32,
+    cos_gamma: f32,
     A: f32, B: f32, C: f32, D: f32, E: f32, F: f32, G: f32, H: f32, I: f32
 ) -> f32 {
     let gamma = acos(clamp(cos_gamma, -1.0, 1.0));
     let chi = (1.0 + cos_gamma * cos_gamma) / pow(1.0 + H * H - 2.0 * H * cos_gamma, 1.5);
-
     let exp_term = exp(E * gamma);
-    let ray_m = (1.0 + A * exp(B / (cos_theta + 0.01)));
-
     return (1.0 + A * exp(B / (cos_theta + 0.01))) *
            (C + D * exp_term + F * chi + G * cos_gamma + I * sqrt(max(0.0, cos_theta)));
 }
 
-fn hosek_wilkie_compute_coeffs(turbidity: f32, albedo: f32, sun_elevation: f32) -> HosekCoeffs {
-    // Simplified coefficient computation - in production, these would be from lookup tables
-    // For now, using approximate values based on turbidity
-
+fn approximate_hosek_compute_coeffs(turbidity: f32, albedo: f32, sun_elevation: f32) -> HosekCoeffs {
     let t = clamp(turbidity, 1.0, 10.0);
-    let t2 = t * t;
-    let t3 = t2 * t;
 
-    // These are simplified approximations - full implementation would use the paper's datasets
     var coeffs: HosekCoeffs;
 
     // RGB channel coefficients (approximate)
@@ -125,39 +138,67 @@ fn hosek_wilkie_compute_coeffs(turbidity: f32, albedo: f32, sun_elevation: f32) 
 }
 
 fn eval_hosek_wilkie(view_dir: vec3<f32>, params: SkyParams) -> vec3<f32> {
-    // Compute angles
     let cos_theta = max(0.0, view_dir.y);  // angle to zenith
     let sun_direction = sky_sun_direction(params);
     let cos_gamma = dot(view_dir, sun_direction);  // angle to sun
-    let cos_theta_sun = max(0.0, sun_direction.y);  // sun zenith angle
 
-    // Compute sky model coefficients
+    var sky_color: vec3<f32>;
+    sky_color.x = hosek_wilkie_eval_channel(
+        cos_theta,
+        cos_gamma,
+        params.hosek_coeffs_a_d[0],
+        params.hosek_coeffs_e_h[0],
+        params.hosek_coeff_i.x,
+        params.hosek_radiance.x,
+    );
+    sky_color.y = hosek_wilkie_eval_channel(
+        cos_theta,
+        cos_gamma,
+        params.hosek_coeffs_a_d[1],
+        params.hosek_coeffs_e_h[1],
+        params.hosek_coeff_i.y,
+        params.hosek_radiance.y,
+    );
+    sky_color.z = hosek_wilkie_eval_channel(
+        cos_theta,
+        cos_gamma,
+        params.hosek_coeffs_a_d[2],
+        params.hosek_coeffs_e_h[2],
+        params.hosek_coeff_i.z,
+        params.hosek_radiance.z,
+    );
+
+    return max(sky_color, vec3<f32>(0.0));
+}
+
+fn eval_approximate_hosek(view_dir: vec3<f32>, params: SkyParams) -> vec3<f32> {
+    let cos_theta = max(0.0, view_dir.y);
+    let sun_direction = sky_sun_direction(params);
+    let cos_gamma = dot(view_dir, sun_direction);
+    let cos_theta_sun = max(0.0, sun_direction.y);
     let sun_elevation = asin(cos_theta_sun);
-    let coeffs = hosek_wilkie_compute_coeffs(
+    let coeffs = approximate_hosek_compute_coeffs(
         sky_turbidity(params),
         sky_ground_albedo(params),
         sun_elevation,
     );
 
-    // Evaluate for each RGB channel
     var sky_color: vec3<f32>;
-    sky_color.x = hosek_wilkie_eval_channel(cos_theta, cos_gamma, cos_theta_sun,
+    sky_color.x = approximate_hosek_eval_channel(cos_theta, cos_gamma,
         coeffs.A.x, coeffs.B.x, coeffs.C.x, coeffs.D.x, coeffs.E.x,
         coeffs.F.x, coeffs.G.x, coeffs.H.x, coeffs.I.x);
-    sky_color.y = hosek_wilkie_eval_channel(cos_theta, cos_gamma, cos_theta_sun,
+    sky_color.y = approximate_hosek_eval_channel(cos_theta, cos_gamma,
         coeffs.A.y, coeffs.B.y, coeffs.C.y, coeffs.D.y, coeffs.E.y,
         coeffs.F.y, coeffs.G.y, coeffs.H.y, coeffs.I.y);
-    sky_color.z = hosek_wilkie_eval_channel(cos_theta, cos_gamma, cos_theta_sun,
+    sky_color.z = approximate_hosek_eval_channel(cos_theta, cos_gamma,
         coeffs.A.z, coeffs.B.z, coeffs.C.z, coeffs.D.z, coeffs.E.z,
         coeffs.F.z, coeffs.G.z, coeffs.H.z, coeffs.I.z);
 
-    // Zenith luminance normalization
-    let zenith_y = hosek_wilkie_eval_channel(1.0, cos_theta_sun, cos_theta_sun,
+    let zenith_y = approximate_hosek_eval_channel(1.0, cos_theta_sun,
         coeffs.A.y, coeffs.B.y, coeffs.C.y, coeffs.D.y, coeffs.E.y,
         coeffs.F.y, coeffs.G.y, coeffs.H.y, coeffs.I.y);
 
     sky_color = sky_color / max(zenith_y, 0.01);
-
     return max(sky_color, vec3<f32>(0.0));
 }
 
@@ -319,9 +360,10 @@ fn eval_sky(view_dir: vec3<f32>, params: SkyParams) -> vec3<f32> {
 
     var sky_color: vec3<f32>;
 
-    // Choose sky model
     if (sky_model(params) == 1u) {
         sky_color = eval_hosek_wilkie(normalized_view, params);
+    } else if (sky_model(params) == 2u) {
+        sky_color = eval_approximate_hosek(normalized_view, params);
     } else {
         sky_color = eval_preetham(normalized_view, params);
     }

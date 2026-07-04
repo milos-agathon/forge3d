@@ -143,6 +143,7 @@ impl LineRenderer {
     pub fn upload_lines(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         instances: &[LineInstance],
     ) -> Result<(), RenderError> {
         if instances.is_empty() {
@@ -184,8 +185,7 @@ impl LineRenderer {
                 instance_data.len() as u64,
             );
 
-            // Note: In production, this command buffer should be submitted
-            // by the calling renderer, not here
+            queue.submit(Some(encoder.finish()));
         }
 
         Ok(())

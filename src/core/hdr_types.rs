@@ -1,6 +1,6 @@
 // src/core/hdr_types.rs
 // Type definitions for HDR rendering and tone mapping
-// RELEVANT FILES: shaders/tonemap.wgsl
+// RELEVANT FILES: shaders/postprocess_tonemap.wgsl
 
 use wgpu::TextureFormat;
 

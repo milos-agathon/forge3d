@@ -198,8 +198,9 @@ impl PbrPipelineWithShadows {
             include_str!("../../shaders/shadows.wgsl").replace("@group(2)", "@group(3)");
 
         let shader_source = format!(
-            "{}\n{}",
+            "{}\n{}\n{}",
             shadows_source,
+            include_str!("../../shaders/includes/tonemap_common.wgsl"),
             include_str!("../../shaders/pbr.wgsl")
         );
 

@@ -28,34 +28,38 @@ def _chunk(chunk_type: bytes, data: bytes) -> bytes:
     )
 
 
-def _as_png_writable_array(array: np.ndarray) -> tuple[np.ndarray, int]:
+def _as_png_writable_array(array: np.ndarray) -> tuple[np.ndarray, int, int]:
     arr = np.ascontiguousarray(array)
-    if arr.dtype != np.uint8:
-        raise ValueError("PNG encoder requires uint8 data")
+    if arr.dtype == np.uint8:
+        bit_depth = 8
+    elif arr.dtype == np.uint16:
+        bit_depth = 16
+    else:
+        raise ValueError("PNG encoder requires uint8 or uint16 data")
     if arr.ndim == 2:
-        return arr, 0
+        return arr, 0, bit_depth
     if arr.ndim == 3 and arr.shape[2] == 3:
-        return arr, 2
+        return arr, 2, bit_depth
     if arr.ndim == 3 and arr.shape[2] == 4:
-        return arr, 6
+        return arr, 6, bit_depth
     raise ValueError(f"Unsupported array shape: {arr.shape}")
 
 
 def encode_png(array: np.ndarray, *, compress_level: int = 6) -> bytes:
-    arr, color_type = _as_png_writable_array(array)
+    arr, color_type, bit_depth = _as_png_writable_array(array)
     height, width = arr.shape[:2]
     raw = bytearray()
     if arr.ndim == 2:
         for row in arr:
             raw.append(0)
-            raw.extend(row.tobytes())
+            raw.extend(row.astype(">u2", copy=False).tobytes() if bit_depth == 16 else row.tobytes())
     else:
         flat = arr.reshape(height, -1)
         for row in flat:
             raw.append(0)
-            raw.extend(row.tobytes())
+            raw.extend(row.astype(">u2", copy=False).tobytes() if bit_depth == 16 else row.tobytes())
 
-    ihdr = struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0)
+    ihdr = struct.pack(">IIBBBBB", width, height, bit_depth, color_type, 0, 0, 0)
     return b"".join(
         (
             _PNG_SIGNATURE,

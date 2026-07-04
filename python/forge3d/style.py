@@ -6,7 +6,7 @@ files into forge3d's native vector and label styles.
 
 Supported layer types (v1):
 - fill: Polygon fill with color, opacity, outline
-- line: Polyline with color, width, opacity
+- line: Polyline with color, width, opacity, caps, joins, and dashes
 - circle: Point circles with color, radius, opacity
 
 This is local/provided feature styling, not streamed MVT rendering or full
@@ -39,12 +39,12 @@ from .diagnostics import (
 P0_SUPPORTED_STYLE_LAYER_TYPES = ("fill", "line", "circle")
 _SUPPORTED_PAINT_FIELDS = {
     "fill": {"fill-color", "fill-opacity", "fill-outline-color"},
-    "line": {"line-color", "line-width", "line-opacity"},
+    "line": {"line-color", "line-width", "line-opacity", "line-dasharray"},
     "circle": {"circle-color", "circle-radius", "circle-opacity"},
 }
 _SUPPORTED_LAYOUT_FIELDS = {
     "fill": {"visibility"},
-    "line": {"visibility"},
+    "line": {"visibility", "line-cap", "line-join"},
     "circle": {"visibility"},
 }
 
@@ -77,6 +77,7 @@ class PaintProps:
     line_color: Any = None
     line_width: Any = None
     line_opacity: Any = None
+    line_dasharray: Any = None
     text_color: Any = None
     text_halo_color: Any = None
     text_halo_width: Any = None
@@ -241,6 +242,7 @@ def _parse_layer(data: dict) -> StyleLayer:
         line_color=paint_data.get("line-color"),
         line_width=paint_data.get("line-width"),
         line_opacity=paint_data.get("line-opacity"),
+        line_dasharray=paint_data.get("line-dasharray"),
         text_color=paint_data.get("text-color"),
         text_halo_color=paint_data.get("text-halo-color"),
         text_halo_width=paint_data.get("text-halo-width"),

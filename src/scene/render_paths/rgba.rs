@@ -230,6 +230,144 @@ impl Scene {
             }
         }
 
+        #[cfg(feature = "enable-gpu-instancing")]
+        let has_instanced_batches =
+            self.mesh_instanced_renderer.is_some() && !self.instanced_batches.is_empty();
+        #[cfg(not(feature = "enable-gpu-instancing"))]
+        let has_instanced_batches = false;
+
+        if has_instanced_batches || self.text3d_enabled {
+            let (target_view, resolve_target) = if self.sample_count > 1 {
+                (
+                    self.msaa_view
+                        .as_ref()
+                        .expect("MSAA view missing when sample_count > 1"),
+                    Some(&self.color_view),
+                )
+            } else {
+                (&self.color_view, None)
+            };
+            let depth_attachment = if self.sample_count > 1 {
+                self.depth_view
+                    .as_ref()
+                    .map(|view| wgpu::RenderPassDepthStencilAttachment {
+                        view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Discard,
+                        }),
+                        stencil_ops: None,
+                    })
+            } else {
+                None
+            };
+            let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("scene-rp-rgba-forward"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target_view,
+                    resolve_target,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: depth_attachment,
+                ..Default::default()
+            });
+
+            #[cfg(feature = "enable-gpu-instancing")]
+            {
+                if has_instanced_batches {
+                    let view = self.scene.view;
+                    let proj = self.scene.proj;
+                    if let Some(renderer) = self.mesh_instanced_renderer.as_mut() {
+                        renderer.reset_draw_batch_uniforms();
+                        for batch in &self.instanced_batches {
+                            renderer.draw_batch_params(
+                                &g.device,
+                                &mut rp,
+                                &g.queue,
+                                view,
+                                proj,
+                                batch.color,
+                                batch.light_dir,
+                                batch.light_intensity,
+                                [0.0; 4],
+                                [0.0; 4],
+                                [0.0; 4],
+                                [0.0, 0.75, 2.5, 0.0],
+                                [0.0, 3.0, 0.35, 0.65],
+                                None,
+                                &batch.vbuf,
+                                &batch.ibuf,
+                                &batch.instbuf,
+                                batch.index_count,
+                                batch.instance_count,
+                            );
+                        }
+                    }
+                }
+            }
+
+            if self.text3d_enabled {
+                if let Some(ref mut tm) = self.text3d_renderer {
+                    let g = crate::core::gpu::ctx();
+                    tm.set_view_proj(self.scene.view, self.scene.proj);
+                    tm.upload_uniforms(&g.queue);
+                    for inst in &self.text3d_instances {
+                        tm.draw_instance_with_light(
+                            &mut rp,
+                            &g.queue,
+                            inst.model,
+                            inst.color,
+                            inst.light_dir,
+                            inst.light_intensity,
+                            inst.metallic,
+                            inst.roughness,
+                            &inst.vbuf,
+                            &inst.ibuf,
+                            inst.index_count,
+                        );
+                    }
+                }
+            }
+        }
+
+        if self.overlay_renderer.is_some() || self.text_overlay_enabled {
+            let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("scene-rp-rgba-overlays"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+
+            if let Some(ref ov) = self.overlay_renderer {
+                ov.render(&mut rp);
+            }
+
+            if self.text_overlay_enabled {
+                if let Some(ref mut tr) = self.text_overlay_renderer {
+                    let g = crate::core::gpu::ctx();
+                    tr.set_resolution(self.width, self.height);
+                    tr.set_alpha(self.text_overlay_alpha);
+                    tr.set_enabled(true);
+                    tr.upload_uniforms(&g.queue);
+                    if !self.text_instances.is_empty() {
+                        let inst = self.text_instances.clone();
+                        tr.upload_instances(&g.device, &g.queue, &inst);
+                    }
+                    tr.render(&mut rp);
+                }
+            }
+        }
+
         if self.ssao_enabled {
             self.ssao
                 .dispatch(
@@ -243,6 +381,7 @@ impl Scene {
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
         }
 
+        self.render_clouds(encoder).map_err(cloud_render_err)?;
         self.render_dof(encoder).map_err(dof_err)?;
         Ok(())
     }

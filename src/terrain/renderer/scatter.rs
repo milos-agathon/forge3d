@@ -135,6 +135,7 @@ impl TerrainScene {
         encoder: &mut wgpu::CommandEncoder,
         render_targets: &RenderTargets,
         heightmap_view: &wgpu::TextureView,
+        shadow_bind_group: Option<&wgpu::BindGroup>,
         state: &ScatterRenderState,
     ) -> Result<()> {
         if self.scatter_batches.is_empty() {
@@ -242,6 +243,7 @@ impl TerrainScene {
                     wind.wind_bend_fade,
                     batch.terrain_blend.uniform(),
                     batch.terrain_contact.uniform(),
+                    shadow_bind_group,
                     batch.level_vbuf(draw.level_index),
                     batch.level_ibuf(draw.level_index),
                     instbuf,
@@ -273,6 +275,7 @@ impl TerrainScene {
                         [0.0; 4],
                         batch.terrain_blend.uniform(),
                         batch.terrain_contact.uniform(),
+                        shadow_bind_group,
                         vbuf,
                         ibuf,
                         &hlod_instbuf,
@@ -295,13 +298,14 @@ impl TerrainScene {
         }
 
         self.scatter_renderer =
-            crate::render::mesh_instanced::MeshInstancedRenderer::new_with_depth_state(
+            crate::render::mesh_instanced::MeshInstancedRenderer::new_with_depth_state_and_shadow_layout(
                 self.device.as_ref(),
                 self.color_format,
                 Some(TERRAIN_DEPTH_FORMAT),
                 sample_count,
                 wgpu::CompareFunction::LessEqual,
                 false,
+                Some(&self.shadow_bind_group_layout),
             );
         self.scatter_renderer_sample_count = sample_count;
     }

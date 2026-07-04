@@ -199,11 +199,10 @@ class RestirConfig:
 
 
 class RestirDI:
-    """ReSTIR DI (Direct Illumination) implementation for many-light scenarios.
+    """Experimental ReSTIR DI facade for many-light scenarios.
 
-    This class provides reservoir-based importance sampling with temporal and spatial
-    reuse to efficiently handle scenes with thousands of lights while maintaining
-    low variance in the lighting estimation.
+    CPU helpers can build and sample light reservoirs. Rendering requires native
+    ReSTIR functions; without them, ``render_frame`` raises ``RuntimeError``.
     """
 
     def __init__(self, config: Optional[RestirConfig] = None):
@@ -225,6 +224,14 @@ class RestirDI:
                 spatial_radius=self.config.spatial_radius,
                 max_temporal_age=self.config.max_temporal_age,
                 bias_correction=self.config.bias_correction
+            )
+
+        if self._native_restir is None:
+            warnings.warn(
+                "RestirDI is experimental: native ReSTIR rendering is not available in this build; "
+                "CPU light sampling helpers work, but render_frame() will raise RuntimeError.",
+                UserWarning,
+                stacklevel=2,
             )
 
     def add_light(self,

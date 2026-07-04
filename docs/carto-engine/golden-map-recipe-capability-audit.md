@@ -1,6 +1,6 @@
 # 1. Executive summary
 
-forge3d is already a capable cartographic rendering engine for terrain-first map production: the repository proves heightfield rendering, viewer snapshots, raster draping, vector overlays, labels, map furniture, Cloud Optimized GeoTIFF access, point-cloud rendering, typed MapScene recipes, validation, bundles, support diagnostics, and visual-golden testing. The strongest proven capabilities are terrain rendering and camera control (`README.md:44-48`, `python/forge3d/__init__.pyi:160-171`), raster overlays (`python/forge3d/terrain_params.py:1403-1462`, `python/forge3d/__init__.pyi:398`), labels and vector overlays (`examples/labels_styles_picking/fuji_labels_demo.py:536-1081`, `python/forge3d/label_plan.py:214-507`), COG and point-cloud support (`python/forge3d/cog.py:37-368`, `python/forge3d/pointcloud.py:1-608`), and public MapScene/SceneRecipe behavior (`python/forge3d/__init__.py:431-451`, `python/forge3d/map_scene.py:1010-1044`, `python/forge3d/map_scene.py:1231-1867`). The weakest proven gaps are not raw rendering features and not absence of a typed scene API; they are missing evidence-derived recipe-family manifests/helpers for gallery-style recipes, missing reusable alignment/styling/compositing helpers, thin public coverage for example-only workflows, and insufficient golden fixtures for the polished recipe outputs already present in `examples/`. I inspected 1,743 files by inventory, including 130 non-cache files under `examples/` and 117 runnable example scripts, and kept 23 recipe families from repo evidence. The biggest difference between "an example can produce a beautiful output" and "forge3d exposes this as reusable engine capability" is that scripts repeatedly hardcode data acquisition, reprojection, rasterization, palettes, blend modes, camera settings, lighting, labels, and final poster layout, while forge3d exposes lower-level rendering plus selected typed scene pieces. Top 5 forge3d-only next actions: create recipe-family manifests from existing examples, add reusable raster/vector alignment and drape helpers, promote repeated palette and bivariate/categorical styling logic, add deterministic golden fixtures for representative recipes, and harden MapScene render adapters plus diagnostics for buildings, point clouds, overlays, labels, and map furniture.
+forge3d is already a capable cartographic rendering engine for terrain-first map production: the repository proves heightfield rendering, viewer snapshots, raster draping, vector overlays, labels, map furniture, Cloud Optimized GeoTIFF access, point-cloud rendering, typed MapScene recipes, validation, bundles, support diagnostics, and visual-golden testing. The strongest proven capabilities are terrain rendering and camera control (`README.md:44-48`, `python/forge3d/__init__.pyi:160-171`), raster overlays (`python/forge3d/terrain_params.py:1403-1462`, `python/forge3d/__init__.pyi:398`), labels and vector overlays (`examples/labels_styles_picking/fuji_labels_demo.py:536-1081`, `python/forge3d/label_plan.py:214-507`), COG and point-cloud support (`python/forge3d/cog.py:37-368`, `python/forge3d/pointcloud.py:1-608`), and public MapScene/SceneRecipe behavior (`python/forge3d/__init__.py:431-451`, `python/forge3d/map_scene.py:1010-1044`, `python/forge3d/map_scene.py:1231-1867`). The weakest proven gaps are not raw rendering features and not absence of a typed scene API; they are missing evidence-derived recipe-family manifests/helpers for gallery-style recipes, missing reusable alignment/styling/compositing helpers, thin public coverage for example-only workflows, and insufficient golden fixtures for the polished recipe outputs already present in `examples/`. I inspected 1,743 files by inventory, including 130 non-cache files under `examples/` and 117 runnable example scripts, and narrowed the active MapScene roadmap to 13 static recipe families after excluding standalone picking and video/temporal workflows. The biggest difference between "an example can produce a beautiful output" and "forge3d exposes this as reusable engine capability" is that scripts repeatedly hardcode data acquisition, reprojection, rasterization, palettes, blend modes, camera settings, lighting, labels, and final poster layout, while forge3d exposes lower-level rendering plus selected typed scene pieces. Top 5 forge3d-only next actions: create recipe-family manifests from existing examples, add reusable raster/vector alignment and drape helpers, promote repeated palette and bivariate/categorical styling logic, add deterministic golden fixtures for representative recipes, and harden MapScene render adapters plus diagnostics for buildings, point clouds, overlays, labels, and map furniture.
 
 Counts used by this audit:
 
@@ -14,13 +14,15 @@ Counts used by this audit:
 | Tests inspected | 230 | Non-cache files under `tests/` |
 | Generated/golden assets inspected | 93 | Non-cache files under `tests/golden/`, `docs/gallery/images/`, `docs/tutorials/images/`, `examples/out/`, `output/`, `terrain_tv12_output/`, `terrain_tv2_output/`, and `logs/gallery-regen-20260315/` |
 | Examples inspected, total non-cache | 130 | 117 runnable examples, 7 support files, 3 notebooks, 3 generated outputs under `examples/out/` |
-| Recipe families discovered | 23 | Section 3 |
+| Historical recipe families discovered | 23 | Section 3 evidence inventory before MapScene scoping |
+| Active static MapScene recipe families | 13 | Roadmap scope in Section 9 |
 | Proven capabilities in the matrix | 19 | Section 5 rows with `proven_in_forge3d` after current-main reconciliation |
-| Critical/high gaps | 11 | Section 6 rows G-001 through G-011 |
+| Critical/high active gaps | 10 | Section 6 rows G-001 through G-009 plus G-011 |
 
 ## Current-main reconciliation notes
 
-- Claims kept from the original report: bottom-up recipe discovery from `examples/`, 23 recipe families, example-only status for most polished gallery-style scripts, and the need for recipe-level golden fixtures.
+- Claims kept from the original report: bottom-up recipe discovery from `examples`, example-only status for most polished gallery-style scripts, and the need for recipe-level golden fixtures.
+- Scope narrowed for the active MapScene roadmap: standalone picking and video/temporal workflows are excluded, leaving 13 static recipe families split into first and next batches.
 - Claims corrected: high-level recipe API is not `not_found`; `SceneRecipe`, `MapScene`, validation, render, save/load bundle, support matrices, and diagnostics exist as public forge3d evidence.
 - Paths changed: canonical MapScene example references now use root-level MapScene example files; duplicate nested MapScene copies were verified but are no longer treated as canonical evidence paths.
 - Counts changed: total inventory moved from 1,004 to 1,743 files; runnable example count is now explicit at 117; tests moved to 230; docs moved to 105; generated/golden assets moved to 93.
@@ -103,19 +105,15 @@ Rows that name directories summarize the counted inventory. Rows that name files
 | `population_spike_worldpop` | repo_file_name | `examples/population_spike_worldpop/poland_population_spikes.py`, `poland_population_spikes_height_shade.py` | Population spikes or height-shaded density over terrain/poster | population raster, optional DEM, palette, labels, camera | viewer IPC, overlay, snapshot | `exists_only_as_example_or_script_logic` |
 | `population_ghsl_3d` | clustered_from_multiple_examples | `examples/population_ghsl/southeast_europe_population_3d.py`, `southeast_europe_population_spikes_enhanced_3d.py`, regional variants | GHSL population extrusion/spikes with reference overlay and final plate | GHSL population raster, boundaries, labels, palette, camera | terrain/overlay/snapshot plus script compositing | `exists_only_as_example_or_script_logic` |
 | `builtup_cover_3d` | clustered_from_multiple_examples | `examples/population_ghsl/iberia_builtup_cover_3d.py`, Romania/Turkey variants | Built-up cover intensity over terrain | built-up raster, DEM, boundary mask, palette, camera | terrain, overlay, snapshot | `exists_only_as_example_or_script_logic` |
-| `humanity_globe_video` | repo_file_name | `examples/population_global_gpw/humanity_globe_video.py`, root duplicate | Rotating globe video from population-density classes | GPW density raster, class palette, frame count, text labels | helper modules and image export; core globe recipe not public | `exists_only_as_example_or_script_logic` |
-| `hydrology_river_basins` | repo_file_name | `examples/hydrology_river_basins/poland_river_basins_forge3d.py`, `pnoa_river_showcase.py`, `turkiye_river_basins_3d.py` | Basin polygons and river lines over terrain/poster | DEM, basin polygons, river lines, palette, camera, map text | terrain, overlay, snapshot; river styling in scripts | `exists_only_as_example_or_script_logic` |
-| `wildfire_smoke` | repo_file_name | `examples/wildfire_smoke/california_fire_smoke_effect.py`, `california_wildfire_smoke_video.py`, `california_cigar_smoke_demo.py` | Smoke density plume overlay/animation | terrain/raster base, smoke density, wind params, palette, frame count | overlay and image/video export by scripts | `exists_only_as_example_or_script_logic` |
-| `satellite_timelapse` | repo_file_name | `examples/satellite_timelapse/mount_hood_white_cloud_timelapse.py`, `khumbu_icefall_sentinel_timelapse.py`, `bryce_canyon_storm_timelapse.py` | Time-sequenced satellite/cloud/terrain frames | raster frames, DEM, timestamps, sun/camera parameters | terrain, overlay, snapshot; sequence control in scripts | `exists_only_as_example_or_script_logic` |
+| `hydrology_river` | repo_file_name | `examples/hydrology_river_basins/poland_river_basins_forge3d.py`, `pnoa_river_showcase.py`, `turkiye_river_basins_3d.py` | River lines with optional basin/context polygons over terrain/poster | DEM, river lines, optional basin polygons, palette, camera, map text | terrain, overlay, snapshot; river styling in scripts | `exists_only_as_example_or_script_logic` |
 | `urban_osm_city` | clustered_from_multiple_examples | `examples/urban_osm/osm_city_demo.py`, `osm_city_daycycle.py`, `buildings_viewer_interactive.py` | OSM water/roads/rail/buildings/labels in city-scale render | OSM vectors, building footprints/heights, roads, water, labels, sun/camera | building helpers, water methods, vector overlay, snapshots | `exists_only_as_example_or_script_logic` |
-| `osm_city_flood_daycycle` | repo_file_name | `examples/urban_osm/osm_city_flood_daycycle.py` | Flood extent animation over lightweight urban scene | waterway geometry, flood cells, terrain/urban surface, frame count, labels | image rendering helpers; flood model script-only | `exists_only_as_example_or_script_logic` |
 | `rotterdam_solar_potential_shadow_study` | repo_file_name | `examples/urban_osm/rotterdam_solar_potential_shadow_study.py` | 3D building roof solar-potential and shadow study | building roof surfaces, sun position, irradiance reference, OSM context, palette | building mesh concepts, lighting/shadow concepts; solar analysis script-only | `exists_only_as_example_or_script_logic` |
 | `luxembourg_rail_overlay` | repo_file_name | `examples/urban_osm/luxembourg_rail_overlay.py` | Rail lines converted to draped quads over terrain | vector lines, DEM, rail palette, z offset, camera | terrain, vector overlay, snapshot | `partially_proven` |
 | `barcelona_travel_time_3d` | repo_file_name | `examples/urban_osm/barcelona_travel_time_3d.py`, root duplicate | Drive-time road network over 3D terrain poster | OSM roads, origin, speed model, DEM, road overlay, camera, poster text | terrain, raster overlay, snapshot; routing/rasterization script-only | `exists_only_as_example_or_script_logic` |
 | `helsinki_transit_daycycle` | repo_file_name | `examples/urban_osm/helsinki_transit_daycycle.py`, root duplicate | Daily transit and traffic animation over OSM city surface | GTFS trips, traffic counts, buildings, roads, rails, camera, frame count | projection helpers and frame export in script; forge3d rendering limited | `exists_only_as_example_or_script_logic` |
 | `uk_ireland_lighthouse_map` | repo_file_name | `examples/urban_osm/uk_ireland_lighthouse_map.py` | Lighthouse points and glow over terrain/poster | DEM/Terrarium samples, lighthouse points, labels, glow style, layout | terrain/sample helpers and image composition by script | `exists_only_as_example_or_script_logic` |
 | `mapscene_showcases` | clustered_from_multiple_examples | `examples/mapscene_terrain_raster.py`, `examples/mapscene_vector_labels.py`, `examples/mapscene_bundled_datasets_showcase.py`, `examples/mapscene_p1_assets_bundle_showcase.py`, `examples/mapscene_buildings_labels.py` | Typed scene validation, deterministic render, bundles | synthetic DEM/raster/vector/labels/buildings, output spec | `MapScene`, `TerrainSource`, `RasterOverlay`, `LabelLayer`, bundles | `partially_proven` |
-| `labels_styles_picking` | repo_file_name | `examples/labels_styles_picking/fuji_labels_demo.py`, `style_viewer_interactive.py`, picking demos | Labels, styled vector overlays, picking, depth/halo | DEM, points/lines/polygons, style JSON, font atlas, labels, camera | labels, style, vector overlays, picking | `proven_in_forge3d` |
+| `terrain_label` | clustered_from_label_examples | `examples/labels_styles_picking/fuji_labels_demo.py`, `examples/mapscene_vector_labels.py` | Terrain labels, callouts, and style defaults for a static MapScene workflow | DEM, point/line labels, font/style defaults, camera | labels, style, vector overlays; recipe-level terrain-label defaults missing | `partially_proven` |
 | `pointcloud_cog` | repo_file_name | `examples/pointcloud_cog/pointcloud_viewer_interactive.py`, `cog_streaming_demo.py` | Point-cloud viewer plus COG terrain tile access | LAS/LAZ/COPC/EPT or COG, camera, cache budget, snapshot | point-cloud API, COG API, viewer snapshot | `proven_in_forge3d` |
 
 # 4. Golden recipe cards
@@ -860,11 +858,11 @@ forge3d does not expose this as a reusable globe or animation recipe; the script
 - The helper declares class thresholds, palette, orbit, and output frame size.
 - A golden still frame catches palette, class, and lighting regressions.
 
-## Recipe: `hydrology_river_basins`
+## Recipe: `hydrology_river`
 
 ### Name provenance
 
-Derived from `examples/hydrology_river_basins/` and repeated river basin scripts.
+Derived from `examples/hydrology_river_basins/` and repeated river scripts. Basin polygons remain optional context, not part of the canonical recipe ID.
 
 ### Representative files
 
@@ -877,7 +875,7 @@ Derived from `examples/hydrology_river_basins/` and repeated river basin scripts
 
 ### Intended cartographic purpose
 
-Render river basins, waterways, and terrain as 3D-style regional maps or posters.
+Render waterways and terrain as 3D-style regional maps or posters, with basin polygons only as optional context.
 
 ### Required input data
 
@@ -1707,31 +1705,27 @@ MapScene is the right forge3d-owned direction, but key adapters are partial and 
 - Diagnostics are stable for unsupported building/point-cloud paths.
 - Bundled scene reloads and renders the same output.
 
-## Recipe: `labels_styles_picking`
+## Recipe: `terrain_label`
 
 ### Name provenance
 
-Derived from `examples/labels_styles_picking/`.
+Derived from terrain label examples, especially `examples/labels_styles_picking/fuji_labels_demo.py` and `examples/mapscene_vector_labels.py`.
 
 ### Representative files
 
 - `examples/labels_styles_picking/fuji_labels_demo.py:2-15`
 - `examples/labels_styles_picking/fuji_labels_demo.py:536-1081`
-- `examples/labels_styles_picking/style_viewer_interactive.py:2-36`
-- `examples/labels_styles_picking/style_viewer_interactive.py:444-550`
-- `examples/labels_styles_picking/picking_demo.py:2-9`
-- `python/forge3d/style.py:281-826`
+- `examples/mapscene_vector_labels.py:1-140`
 - `python/forge3d/label_plan.py:214-1150`
 
 ### Intended cartographic purpose
 
-Render terrain labels, line labels, callouts, style-driven vector overlays, and interactive feature picking.
+Render terrain labels, line labels, and callouts as a static MapScene workflow. Standalone picking is out of scope for the MapScene recipe roadmap.
 
 ### Required input data
 
 - DEM / heightfield
-- points / lines / polygons
-- style JSON
+- label points / lines / callouts
 - labels / annotations
 - font atlas
 - z offsets
@@ -1741,9 +1735,7 @@ Render terrain labels, line labels, callouts, style-driven vector overlays, and 
 
 - Fuji labels docstring and snapshot usage are at `fuji_labels_demo.py:2-15`.
 - Fuji loads terrain, PBR, font atlas, labels, line labels, and snapshot at `:536-1081`.
-- Style viewer documents style JSON vector overlays at `style_viewer_interactive.py:2-36` and loads terrain/overlay/snapshot at `:444-550`.
-- Picking demo documents feature picking at `picking_demo.py:2-9`.
-- `python/forge3d/style.py:281-826` validates style support and builds vector/label configs.
+- `examples/mapscene_vector_labels.py:1-140` creates a typed MapScene with vector labels.
 - `python/forge3d/label_plan.py:214-1150` plans label candidates and payloads.
 
 ### Current forge3d support status
@@ -1757,11 +1749,11 @@ Render terrain labels, line labels, callouts, style-driven vector overlays, and 
 3. clipping / masking, if present: nodata mask in style viewer.
 4. DEM / heightfield preprocessing: terrain load.
 5. raster preprocessing: optional nodata mask overlay.
-6. vector preprocessing: GPKG/style vectors converted to overlay payloads.
+6. vector preprocessing: label anchors and optional line paths converted to label payloads.
 7. terrain generation: viewer terrain path.
 8. raster draping / overlay: optional mask overlay.
-9. vector rendering / extrusion / overlay: vector overlay API and style configs.
-10. styling / palette / material assignment: style support module and example args.
+9. vector rendering / extrusion / overlay: optional vector context behind labels.
+10. styling / palette / material assignment: label style and halo defaults.
 11. lighting / shading: PBR, sky, denoise options in Fuji example.
 12. camera / view: script camera and terrain settings.
 13. labels / annotations / legend, if present: labels, line labels, callouts, font atlas.
@@ -1880,8 +1872,8 @@ Core point-cloud and COG APIs are proven, but MapScene render integration and cr
 | Continuous colormaps | terrain, built-up, climate, solar | `proven_in_forge3d` | `src/colormap/mod.rs:13-41`, `python/forge3d/terrain_demo.py:310-357` | Built-in colormaps and demo builder | Data-aware normalization metadata | `RasterLayer.style_with_colormap(...)` | `P1_core_recipe_support` | Min/max and palette are declared/tested |
 | Vector polygon overlay | hydrology, urban, MapScene, labels | `proven_in_forge3d` | `python/forge3d/style.py:764-826`, `tests/test_vector_drape.py:21-366` | Vector overlay configs and tests | Attribute-driven recipe styling | `VectorLayer.style_by_attribute(...)` | `P1_core_recipe_support` | Polygon fixture renders with style |
 | Vector line overlay | rail, hydrology, travel-time, labels | `proven_in_forge3d` | `tests/test_vector_drape.py:21-366`, `examples/urban_osm/luxembourg_rail_overlay.py:156-275` | Drape/render support | Public line stroke helper without manual quads | `VectorLineLayer.stroke(...)` | `P1_core_recipe_support` | Line fixture renders width/z offset |
-| Vector z/depth/halo | rail, labels, picking | `proven_in_forge3d` | `examples/labels_styles_picking/fuji_labels_demo.py:327-336`, `tests/test_vector_drape.py:21-366` | Depth, bias, halo settings | Golden coverage across terrain slopes | `VectorLayer.drape_settings(...)` | `P2_quality_and_scale` | Halo/depth golden passes |
-| Labels and annotations | labels, lighthouse, population, Helsinki | `proven_in_forge3d` | `docs/guides/label_support_matrix.md:5-18`, `examples/labels_styles_picking/fuji_labels_demo.py:720-1081` | Point/line/callout label APIs | Recipe defaults and font fixture | `LabelLayer.from_features(...)` | `P1_core_recipe_support` | Label fixture renders deterministic text |
+| Vector z/depth/halo | rail, terrain labels | `proven_in_forge3d` | `examples/labels_styles_picking/fuji_labels_demo.py:327-336`, `tests/test_vector_drape.py:21-366` | Depth, bias, halo settings | Golden coverage across terrain slopes | `VectorLayer.drape_settings(...)` | `P2_quality_and_scale` | Halo/depth golden passes |
+| Labels and annotations | terrain_label, lighthouse, population, Helsinki | `proven_in_forge3d` | `docs/guides/label_support_matrix.md:5-18`, `examples/labels_styles_picking/fuji_labels_demo.py:720-1081` | Point/line/callout label APIs | Recipe defaults and font fixture | `LabelLayer.from_features(...)` | `P1_core_recipe_support` | Label fixture renders deterministic text |
 | Label planning/export | labels and MapScene | `proven_in_forge3d` | `python/forge3d/label_plan.py:214-1150` | Candidate planning and payloads | Wider recipe integration | `LabelPlan.for_scene(...)` | `P2_quality_and_scale` | Overlap result is stable |
 | Map furniture | map plates, climate, hydrology, population | `proven_in_forge3d` | `docs/tutorials/gis-track/03-build-a-map-plate.md:29-58`, `tests/test_map_plate_layout.py:156-305` | Legend, scale bar, north arrow | Unified plate recipe and bivariate legend | `MapPlate` / `Legend.bivariate(...)` | `P1_core_recipe_support` | Furniture fixture has stable layout |
 | Camera controls | all rendered recipes | `proven_in_forge3d` | `README.md:44-48`, `python/forge3d/__init__.pyi:160-171` | Orbit/look-at/snapshot path | Camera presets tied to recipe manifests | `Scene.set_camera(...)` | `P0_foundation` | Camera hash/render size stable |
@@ -1900,14 +1892,14 @@ Core point-cloud and COG APIs are proven, but MapScene render integration and cr
 | Building footprint/extrusion recipe | urban, solar, MapScene buildings | `partially_proven` | `python/forge3d/buildings.py:268-613`, `python/forge3d/map_scene.py:1631` | Building helper API and diagnostics | Deterministic MapScene render adapter | `BuildingLayer.extrude(...)` | `P1_core_recipe_support` | Building fixture renders or reports stable support |
 | Roads / water / context layers | urban, travel-time, Helsinki | `exists_only_as_example_or_script_logic` | `examples/urban_osm/osm_city_demo.py:699-859` | OSM parsing/styling in scripts | Reusable context layer builder | `UrbanContextLayer` | `P1_core_recipe_support` | Road/water fixture renders by style |
 | Temporal frame sequencing | smoke, satellite, Helsinki, flood | `exists_only_as_example_or_script_logic` | `examples/urban_osm/helsinki_transit_daycycle.py:1499-1596` | Per-script frame loops | Public sequence render helper | `Scene.render_sequence(...)` | `P2_quality_and_scale` | Two-frame fixture output deterministic |
-| Globe population layer | humanity_globe_video | `exists_only_as_example_or_script_logic` | `examples/population_global_gpw/humanity_globe_video.py:331-607` | Script renderer | Public globe raster layer | `GlobeLayer.from_latlon_raster(...)` | `P3_polish` | One-frame globe fixture rendered |
+| Globe population layer | excluded from active MapScene roadmap | `exists_only_as_example_or_script_logic` | `examples/population_global_gpw/humanity_globe_video.py:331-607` | Script renderer | Not in current static MapScene recipe scope | none for this roadmap | out_of_scope | Keep as script-only unless video/globe scope is reopened |
 | Evidence-derived recipe-family manifests/helpers | all discovered gallery-style recipe families | `not_found` | Section 3; examples encode family-specific decisions manually despite existing `SceneRecipe` / `MapScene` | Root examples and typed scene primitives exist | Per-family manifests/defaults/helpers derived from examples | `RecipeManifest` as metadata feeding existing `SceneRecipe` / `MapScene` | `P0_foundation` | Existing examples can emit or validate family metadata without replacing MapScene |
 
 # 6. Gap register
 
 | Gap ID | Capability | Recipe affected | Evidence | Severity | Why it matters | Recommended forge3d-only action | Acceptance criteria |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| G-001 | Recipe-family manifests and provenance | all 23 families | Section 3; `SceneRecipe`/`MapScene` exist, but examples still encode family decisions in scripts | critical | Reusable gallery-style recipes cannot be validated, documented, or compared without declared inputs/defaults | Add a lightweight forge3d recipe-family manifest format that references existing examples and feeds existing MapScene pieces where applicable | At least five existing examples emit/validate manifests with source paths and defaults |
+| G-001 | Recipe-family manifests and provenance | active MapScene first and next batches | Section 3; `SceneRecipe`/`MapScene` exist, but examples still encode family decisions in scripts | critical | Reusable gallery-style recipes cannot be validated, documented, or compared without declared inputs/defaults | Add a lightweight forge3d recipe-family manifest format that references existing examples and feeds existing MapScene pieces where applicable | At least six first-batch examples emit/validate manifests with source paths and defaults |
 | G-002 | Raster/vector/terrain alignment diagnostics | landcover, climate, hydrology, rail, travel-time | `docs/tutorials/gis-track/02-drape-overlays-on-terrain.md:61-69` | critical | Beautiful overlays fail as reusable recipes when extent/shape/projection assumptions are hidden | Add alignment metadata and validation codes to raster/vector layer helpers | A mismatched tiny fixture fails with a stable diagnostic code |
 | G-003 | Reusable pass compositing and blend modes | REM, Barcelona, landcover, hydrology | `examples/urban_osm/barcelona_travel_time_3d.py:1475-1644` | critical | Two-pass color/relief blends are repeated by hand and are not protected by tests | Add declared blend/pass composition helpers in forge3d | A two-pass fixture reproduces a known composite golden |
 | G-004 | Recipe-level golden fixtures | all polished map outputs | `tests/test_terrain_visual_goldens.py:149-283` only covers terrain | critical | Current goldens do not protect the recipe outputs that motivated the audit | Add small deterministic recipe goldens under forge3d tests/fixtures | At least terrain+raster, categorical, bivariate, vector-line, label, building/diagnostic, point-cloud/diagnostic fixtures exist |
@@ -1916,9 +1908,9 @@ Core point-cloud and COG APIs are proven, but MapScene render integration and cr
 | G-007 | Public line-stroke layer helper | rail, hydrology, travel-time | `examples/urban_osm/luxembourg_rail_overlay.py:156-275` | high | Users must convert lines to quads manually for common map line recipes | Add line layer stroke helper backed by existing vector overlay path | Line fixture renders width, join, cap, z offset, and depth bias |
 | G-008 | Urban context layer builder | urban OSM, Helsinki, Barcelona | `examples/urban_osm/osm_city_demo.py:699-859` | high | Roads, water, rails, and buildings repeat parsing/styling in scripts | Add forge3d-owned context layer helpers for already-used feature types | Tiny urban fixture renders roads/water/buildings with declared style |
 | G-009 | Map plate composition | climate, population, hydrology, lighthouse | `docs/tutorials/gis-track/03-build-a-map-plate.md:29-58` and script layouts | high | Legends, scale bars, titles, and credits are scattered across scripts | Add a map plate helper that composes existing `Legend`, `ScaleBar`, and `NorthArrow` | Plate fixture validates positions and output size |
-| G-010 | Temporal sequence rendering | smoke, satellite, flood, Helsinki | `examples/urban_osm/helsinki_transit_daycycle.py:1499-1596` | high | Animations cannot be reused without copying frame loops and encoding code | Add `Scene.render_sequence(...)` or equivalent forge3d-owned frame helper | Two-frame sequence fixture writes deterministic frame paths and metadata |
+| G-010 | Temporal sequence rendering | excluded from active MapScene roadmap | `examples/urban_osm/helsinki_transit_daycycle.py:1499-1596` | deferred | Animations need separate video/sequence scope | none for this roadmap | No sequence fixture required for the static MapScene batches |
 | G-011 | Documentation-to-test traceability | all first-class recipes | README/docs list capabilities, tests cover only some outputs | high | Docs can drift from actual support levels | Add recipe docs that link each capability to tests and fixture outputs | Each first-class recipe doc cites a passing test and fixture image |
-| G-012 | Globe raster layer | humanity_globe_video | `examples/population_global_gpw/humanity_globe_video.py:331-607` | medium | The globe video is script-only and separate from Scene/MapScene | Decide whether globe raster rendering is in current forge3d scope; if yes, add a tiny fixture | One-frame globe output or explicit `not_found` support diagnostic |
+| G-012 | Globe raster layer | excluded from active MapScene roadmap | `examples/population_global_gpw/humanity_globe_video.py:331-607` | deferred | The globe video is script-only and separate from Scene/MapScene | none for this roadmap | Keep as script-only unless video/globe scope is reopened |
 | G-013 | Generated output provenance | gallery and `examples/out` images | `docs/gallery/images/`, `examples/out/` | low | Some generated assets are useful but not tied to exact scripts/inputs | Add metadata sidecars for selected canonical outputs | Selected outputs list source script, inputs, command, and expected hash/tolerance |
 
 # 7. Proposed forge3d-only abstraction direction
@@ -1960,42 +1952,58 @@ Core point-cloud and COG APIs are proven, but MapScene render integration and cr
 | `landcover_esri_tiny` | `examples/landcover_esri/bosnia_terrain_landcover_viewer.py` | `landcover_esri_terrain_viewer` | tiny DEM, 4-class raster, palette | categorical overlay draped on terrain | class-color swap, alpha, alignment | missing tiny canonical asset |
 | `climate_bivariate_tiny` | `examples/climate_bivariate/europe_bivariate_climate_map.py` | `climate_bivariate` | tiny DEM, two rasters, 4x4 palette | bivariate matrix overlay and legend | axis swap, bin drift, legend mismatch | missing tiny canonical asset |
 | `population_spike_tiny` | `examples/population_spike_worldpop/poland_population_spikes.py` | `population_spike_worldpop` | small density grid, mask, palette | deterministic spike/height-shade output | scale, threshold, color, camera drift | missing tiny canonical asset |
-| `hydrology_line_drape_tiny` | `examples/hydrology_river_basins/poland_river_basins_forge3d.py` | `hydrology_river_basins` | tiny DEM, one basin polygon, one river line | colored basin plus draped river line | clipping, line width, color, drape offset | missing tiny canonical asset |
+| `hydrology_line_drape_tiny` | `examples/hydrology_river_basins/poland_river_basins_forge3d.py` | `hydrology_river` | tiny DEM and one river line, optional basin/context polygon | draped river line with optional context | clipping, line width, color, drape offset | missing tiny canonical asset |
 | `luxembourg_rail_line_tiny` | `examples/urban_osm/luxembourg_rail_overlay.py` | `luxembourg_rail_overlay` | tiny DEM and rail line | line stroke over terrain with depth/z offset | line triangulation, halo/depth, z offset | missing tiny canonical asset |
-| `fuji_labels_tiny` | `examples/labels_styles_picking/fuji_labels_demo.py` | `labels_styles_picking` | tiny DEM, points/line labels, font atlas | point labels, line label, callout | anchor, glyph, halo, overlap drift | partially; label code exists |
+| `terrain_label_tiny` | `examples/labels_styles_picking/fuji_labels_demo.py` | `terrain_label` | tiny DEM, points/line labels, font atlas | point labels, line label, callout | anchor, glyph, halo, overlap drift | partially; label code exists |
 | `mapscene_bundle_tiny` | `examples/mapscene_terrain_raster.py` | `mapscene_showcases` | synthetic DEM/raster/vector/labels | valid scene, render path, bundle reload | support diagnostics, bundle drift | yes, examples synthesize assets |
 | `pointcloud_cog_tiny` | `examples/pointcloud_cog/pointcloud_viewer_interactive.py` | `pointcloud_cog` | tiny point cloud or stable diagnostic fixture | point colors, memory report, snapshot/diagnostic | cache, color fallback, support drift | partially; tests cover COG |
 | `urban_building_tiny` | `examples/urban_osm/buildings_viewer_interactive.py` | `urban_osm_city` | few building footprints/heights, roads/water | extruded buildings with context layers | height defaults, layer order, camera | missing tiny canonical asset |
-| `flood_two_frame_tiny` | `examples/urban_osm/osm_city_flood_daycycle.py` | `osm_city_flood_daycycle` | small activation grid and surface | two water levels with stable overlay | flood extent, alpha, label drift | missing tiny canonical asset |
-| `smoke_frame_tiny` | `examples/wildfire_smoke/california_fire_smoke_effect.py` | `wildfire_smoke` | small smoke density grid and base terrain | translucent plume overlay | density-to-alpha/color, blend drift | missing tiny canonical asset |
 
 # 9. Final prioritized forge3d-only roadmap
 
-## Phase 1: evidence-to-recipe foundation
+Active MapScene recipe scope:
+
+- First batch: `terrain_demo`, `terrain_label`, `landcover_esri_terrain_viewer`, `climate_bivariate`, `hydrology_river`, and `mapscene_showcases`.
+- Next batch: `terrain_relief_rem`, `population_spike_worldpop`, `population_ghsl_3d`, `builtup_cover_3d`, `pointcloud_cog`, `urban_osm_city`, and `luxembourg_rail_overlay`.
+- Excluded from this MapScene roadmap: `labels_styles_picking` as a standalone recipe, because `terrain_label` covers the needed label workflow; `wildfire_smoke`, `satellite_timelapse`, `osm_city_flood_daycycle`, and `humanity_globe_video`, because video/temporal recipes are out of scope.
+
+Roadmap ordering rule:
+
+- `docs/carto-engine/mapscene-enrichment-capability-ranking.md` is the build-order input for MapScene enrichment.
+- Capabilities are built in that ranked order unless the ranking document is updated with new script/recipe evidence.
+- First-batch recipe pressure does not override the ranking; Studio/product exposure remains a separate downstream gate.
+
+## Phase 1: ranked MapScene foundation
 
 | Task | Exact objective | Affected files or likely file areas | Dependency | Acceptance criteria | Risk if skipped |
 | --- | --- | --- | --- | --- | --- |
-| P1-1 | Add a small recipe manifest schema for existing examples | `python/forge3d/map_scene.py`, new docs under `docs/carto-engine/`, selected examples metadata | none | Five representative examples validate manifests with source paths, inputs, camera, lighting, output, and status | Example logic remains undocumented and hard to test |
-| P1-2 | Create recipe inventory docs from Section 3 | `docs/carto-engine/`, `docs/gallery/` | P1-1 | Docs list all 23 families and link evidence files | New work repeats stale or generic categories |
-| P1-3 | Add alignment diagnostics for raster/vector/terrain recipes | `python/forge3d/terrain_params.py`, `python/forge3d/map_scene.py`, tests | P1-1 | Shape/extent mismatch produces stable diagnostic code | Overlay recipes remain fragile |
-| P1-4 | Select canonical tiny inputs for golden fixtures | `tests/fixtures/`, `tests/golden/`, `docs/gallery/images/` | P1-2 | Fixture list has owner/source/example/expected output metadata | Goldens cannot be deterministic |
+| P1-1 | Rank 1: add recipe-family manifest/provenance | `python/forge3d/recipe_manifest.py`, `python/forge3d/map_scene.py`, `docs/carto-engine/`, selected fixture metadata | none | First-batch manifests serialize deterministically with source paths, inputs, defaults, support status, diagnostics, and fixture intent | Example logic remains undocumented and hard to test |
+| P1-2 | Rank 2: add MapScene spatial alignment diagnostics bridge | `python/forge3d/map_scene.py`, thin reuse of `python/forge3d/gis.py`, validation tests | P1-1 | Terrain/raster/vector CRS, extent, shape, and grid mismatches produce stable diagnostic codes | Overlay recipes remain fragile |
+| P1-3 | Rank 3: render MapScene map plate composition | `python/forge3d/map_scene.py`, `python/forge3d/_map_scene_render.py`, `python/forge3d/legend.py`, `python/forge3d/scale_bar.py`, `python/forge3d/north_arrow.py`, plate tests | P1-2 | Tiny static PNG fixture renders title, legend, scale bar, north arrow, caption, and keepouts deterministically | Poster outputs remain script-only |
+| P1-4 | Rank 4: add population surface / spike height style | `python/forge3d/map_scene.py`, `python/forge3d/style.py`, raster helpers, population fixture tests | P1-2 | Tiny population raster validates domain/nodata/height scale and renders or reports stable support diagnostics | Population recipes remain script-only |
+| P1-5 | Rank 5: add multi-pass compositing / blend modes | `python/forge3d/map_scene.py`, `python/forge3d/_map_scene_render.py`, image math tests | P1-3 | Two tiny named passes compose with known `alpha-over`, `multiply`, and `screen` pixel results | Landcover, climate, hydrology, relief, and built-up recipes keep one-off compositing |
+| P1-6 | Rank 6: add recipe-level golden/diagnostic fixtures | `tests/fixtures/`, `tests/golden/`, recipe fixture tests, docs metadata | P1-1 | Each first-batch recipe has one deterministic fixture manifest and expected render-or-diagnostic outcome | Capability gaps remain invisible until examples drift |
+| P1-7 | Rank 7: add terrain camera / lighting / relief presets | `python/forge3d/map_scene.py`, `python/forge3d/terrain_demo.py`, `python/forge3d/terrain_params.py`, preset tests | P1-1 | A `cartographic_relief` preset serializes to stable camera, sun, exaggeration, and relief defaults | Terrain-like recipes keep duplicating camera/light defaults |
 
-## Phase 2: reusable forge3d recipe API
+## Phase 2: ranked reusable recipe API
 
 | Task | Exact objective | Affected files or likely file areas | Dependency | Acceptance criteria | Risk if skipped |
 | --- | --- | --- | --- | --- | --- |
-| P2-1 | Promote categorical and bivariate raster styles | `python/forge3d/style.py`, `python/forge3d/terrain_params.py`, tests | P1-3 | Landcover and bivariate tiny fixtures render with declared styles and legends | Landcover/climate scripts keep duplicating palette logic |
-| P2-2 | Add public line stroke/drape helper | `python/forge3d/style.py`, vector overlay modules, `tests/test_vector_drape.py` | P1-3 | Line fixture renders without user-side triangulation | Rail/hydrology/travel-time keep manual quad code |
-| P2-3 | Add map plate helper around existing furniture | `python/forge3d/legend.py`, `scale_bar.py`, `north_arrow.py`, tests | P1-4 | Plate fixture positions legend, scale, north arrow, title deterministically | Poster outputs remain script-only |
-| P2-4 | Harden MapScene adapters and support diagnostics | `python/forge3d/map_scene.py`, buildings/pointcloud modules, tests | P1-1 | Building/point-cloud layers render tiny fixtures or report stable support diagnostics | Typed scenes cannot cover important examples |
-| P2-5 | Add minimal urban context layer helpers | `python/forge3d/buildings.py`, style/vector helpers, examples | P2-2 | Tiny urban fixture renders roads, water, and buildings with declared styles | Urban examples remain large one-offs |
+| P2-1 | Rank 8: add categorical/thematic raster style | `python/forge3d/style.py`, `python/forge3d/legend.py`, `python/forge3d/gis.py`, tests | P1-5 | Tiny class raster maps to expected RGBA and legend rows with nodata handling | Landcover and built-up scripts keep duplicating palette logic |
+| P2-2 | Rank 9: add vector line stroke / drape helper | `python/forge3d/style.py`, vector overlay modules, `tests/test_vector_drape.py` | P1-2 | Tiny river/rail line renders with width, halo, drape, and z-offset without user-side triangulation | Rail, hydrology, and urban roads keep manual line code |
+| P2-3 | Rank 10: add bivariate raster style | `python/forge3d/style.py`, `python/forge3d/legend.py`, raster helper tests | P1-5 | Two tiny rasters classify into expected palette cells and bivariate legend axes | Climate scripts keep one-off bivariate classifiers |
+| P2-4 | Rank 11: add building MapScene render adapter | `python/forge3d/map_scene.py`, `python/forge3d/buildings.py`, building tests | P1-6 | One rectangular building validates and renders nonblank or reports an explicit stable support diagnostic | Building showcases and urban examples stay partial |
+| P2-5 | Rank 12: add docs-to-test support traceability | `docs/carto-engine/`, fixture manifests, docs tests | P1-6 | Each active recipe row cites required capability tokens, a fixture, and test evidence | Roadmap rows drift away from tested behavior |
+| P2-6 | Rank 13: add urban context layer builder | `python/forge3d/buildings.py`, `python/forge3d/gis.py`, style/vector helpers, urban fixture tests | P2-2, P2-4 | Cached/sample OSM-like geometries produce roads, water, and buildings layers without live network access | Urban examples remain large one-offs |
+| P2-7 | Rank 14: add label recipe defaults / font fixture | `python/forge3d/map_scene.py`, `python/forge3d/label_plan.py`, label fixture tests | P1-6 | Terrain label defaults use deterministic font/style fixtures and stable label-plan validation | Terrain-label recipes keep carrying ad hoc font/style defaults |
+| P2-8 | Rank 15: add PointCloud + COG MapScene source adapters | `python/forge3d/map_scene.py`, `python/forge3d/pointcloud.py`, `python/forge3d/cog.py`, adapter tests | P1-2 | Static point-cloud and COG descriptors validate and render deterministic sample output or stable diagnostics | PointCloud/COG stays outside typed recipe flow |
 
 ## Phase 3: quality gates and hardening
 
 | Task | Exact objective | Affected files or likely file areas | Dependency | Acceptance criteria | Risk if skipped |
 | --- | --- | --- | --- | --- | --- |
-| P3-1 | Add recipe-level visual goldens | `tests/golden/`, recipe fixture tests | P1-4, P2 tasks | At least eight recipe fixtures compare images or stable diagnostics | Visual regressions in flagship recipes go uncaught |
-| P3-2 | Add sequence fixture support | sequence helpers/tests | P2-3 | Two-frame satellite/smoke/flood fixture writes deterministic frames | Animated recipes keep bespoke loops |
+| P3-1 | Promote ranked fixtures to visual goldens where render support exists | `tests/golden/`, recipe fixture tests | P1-6, relevant P2 tasks | At least eight recipe fixtures compare images or stable diagnostics | Visual regressions in flagship recipes go uncaught |
+| P3-2 | Add second-batch static MapScene fixtures after their ranked dependencies land | `tests/fixtures/`, `tests/golden/`, recipe fixture tests | P1/P2 ranked dependencies | Terrain relief, population, built-up, point-cloud/COG, urban, and rail fixtures validate or render with stable diagnostics | Next-batch static recipes stay script-only |
 | P3-3 | Document support matrices per recipe | `docs/guides/`, `docs/carto-engine/` | P2 tasks | Each first-class recipe lists supported, partial, and unsupported capabilities with tests | Users misread examples as reusable APIs |
 | P3-4 | Add command metadata for selected gallery outputs | `docs/gallery/`, generated-output sidecars | P3-1 | Canonical images list command, inputs, source script, and tolerance | Gallery images cannot serve as regression evidence |
 
@@ -2004,5 +2012,4 @@ Core point-cloud and COG APIs are proven, but MapScene render integration and cr
 1. Which generated images under `docs/gallery/images/` and `examples/out/` should become canonical golden fixtures?
 2. For duplicated root examples and topic-folder examples, which path should be considered authoritative when line evidence differs?
 3. Are there private or omitted scripts for LA heat or other scenes that should be included in the recipe inventory?
-4. Should `humanity_globe_video` become a forge3d-owned globe recipe, or should it stay documented as script-only example logic?
-5. Which public API surface is considered stable for first-class recipes: `Scene`, viewer IPC helpers, `MapScene`, or a combination of those existing forge3d surfaces?
+4. Which public API surface is considered stable for first-class recipes: `Scene`, viewer IPC helpers, `MapScene`, or a combination of those existing forge3d surfaces?
