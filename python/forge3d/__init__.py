@@ -459,7 +459,7 @@ from .map_scene import (
     TypographySettings,
     VectorOverlay,
 )
-from .recipe_manifest import recipe_manifest
+from . import recipe_manifest
 from .alignment import (
     alignment_report,
     alignment_residual,

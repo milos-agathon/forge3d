@@ -1,0 +1,109 @@
+{
+  "alignment": {
+    "crs": "example_defined",
+    "notes": "existing SceneRecipe examples own their synthetic source alignment"
+  },
+  "annotations_defaults": {
+    "mapscene_reference": "SceneRecipe"
+  },
+  "camera_defaults": {
+    "source": "SceneRecipe"
+  },
+  "diagnostics": [
+    "recipe_manifest_mapscene_partial"
+  ],
+  "golden_fixture_intent": {
+    "note": "mapscene_bundle_tiny fixture exists through synthetic examples; recipe-level visual golden remains deferred",
+    "source_test": "tests/test_mapscene_save_bundle.py",
+    "status": "exists"
+  },
+  "layers": [
+    {
+      "layer_id": "scene_recipe",
+      "layer_type": "mapscene_recipe",
+      "required": true,
+      "role": "typed_scene_reference"
+    }
+  ],
+  "lighting_defaults": {
+    "source": "SceneRecipe"
+  },
+  "non_goals": [
+    "no SceneRecipe schema duplication",
+    "no MapScene behavior changes",
+    "no building or point-cloud adapter hardening"
+  ],
+  "open_questions": [],
+  "optional_inputs": [
+    {
+      "kind": "synthetic_assets",
+      "name": "fixture_assets",
+      "role": "examples"
+    }
+  ],
+  "preprocessing": {
+    "source": "SceneRecipe"
+  },
+  "produced_outputs": [
+    {
+      "deterministic": true,
+      "format": "png",
+      "kind": "render",
+      "path": "example_defined"
+    },
+    {
+      "deterministic": true,
+      "format": "forge3d",
+      "kind": "bundle",
+      "path": "example_defined"
+    }
+  ],
+  "recipe_family": "mapscene_showcases",
+  "recipe_id": "mapscene_showcases_recipe_manifest",
+  "render_export_defaults": {
+    "path_policy": "example_defined",
+    "source": "SceneRecipe"
+  },
+  "required_inputs": [
+    {
+      "kind": "mapscene_recipe",
+      "name": "scene_recipe",
+      "role": "typed_scene"
+    }
+  ],
+  "schema_version": "1",
+  "source_evidence": [
+    {
+      "line_end": 115,
+      "line_start": 115,
+      "note": "mapscene showcase family evidence",
+      "path": "docs/carto-engine/golden-map-recipe-capability-audit.md"
+    },
+    {
+      "line_end": 264,
+      "line_start": 264,
+      "note": "P1-1 mapscene fixture row",
+      "path": "docs/carto-engine/g-001-p1-1-recipe-manifest-implementation-plan.md"
+    }
+  ],
+  "source_examples": [
+    "tests/test_mapscene_examples.py",
+    "tests/test_mapscene_recipe_contract.py",
+    "tests/test_mapscene_save_bundle.py"
+  ],
+  "status": "partially_proven",
+  "styling_defaults": {
+    "source": "SceneRecipe"
+  },
+  "support_status": {
+    "mapscene_compatibility": "partially_proven",
+    "mapscene_core": "proven_in_forge3d",
+    "recipe_manifest": "proven_in_forge3d"
+  },
+  "tests": [
+    "tests/test_recipe_manifest.py::test_first_batch_fixture_manifests_construct_and_validate",
+    "tests/test_mapscene_recipe_contract.py",
+    "tests/test_mapscene_save_bundle.py",
+    "tests/test_mapscene_support_status.py"
+  ]
+}
