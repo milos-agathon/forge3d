@@ -80,11 +80,7 @@ pub fn create_sky_resources(device: &Arc<Device>, width: u32, height: u32) -> Sk
         entry_point: "cs_render_sky",
     });
 
-    let sky_params_data = SkyUniforms {
-        sun_direction_turbidity: [0.3, 0.8, -0.5, 2.0],
-        ground_albedo_sun_size_sun_intensity_exposure: [0.3, 1.0, 5.0, 1.0],
-        model_pad: [0, 0, 0, 0],
-    };
+    let sky_params_data = SkyUniforms::new([0.3, 0.8, -0.5], 2.0, 0.3, 1.0, 5.0, 1.0, 0);
     let sky_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("viewer.sky.params"),
         contents: bytemuck::bytes_of(&sky_params_data),
@@ -125,5 +121,30 @@ pub fn create_sky_resources(device: &Arc<Device>, width: u32, height: u32) -> Sk
         sky_camera,
         sky_output,
         sky_output_view,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::create_sky_resources;
+    use std::sync::Arc;
+
+    #[test]
+    fn creates_sky_pipeline_when_adapter_available() {
+        let instance = wgpu::Instance::default();
+        let Some(adapter) =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        else {
+            eprintln!("No GPU adapter available, skipping viewer sky pipeline test");
+            return;
+        };
+        let Ok((device, _queue)) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
+        else {
+            eprintln!("Could not request GPU device, skipping viewer sky pipeline test");
+            return;
+        };
+
+        let _resources = create_sky_resources(&Arc::new(device), 16, 16);
     }
 }

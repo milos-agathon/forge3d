@@ -12,6 +12,61 @@ pub struct SkyUniforms {
     pub sun_direction_turbidity: [f32; 4],
     pub ground_albedo_sun_size_sun_intensity_exposure: [f32; 4],
     pub model_pad: [u32; 4], // x=model (0=Preetham, 1=Hosek-Wilkie)
+    pub hosek_coeffs_a_d: [[f32; 4]; 3],
+    pub hosek_coeffs_e_h: [[f32; 4]; 3],
+    pub hosek_coeff_i: [f32; 4],
+    pub hosek_radiance: [f32; 4],
+}
+
+impl SkyUniforms {
+    pub fn new(
+        sun_direction: [f32; 3],
+        turbidity: f32,
+        ground_albedo: f32,
+        sun_size: f32,
+        sun_intensity: f32,
+        exposure: f32,
+        model: u32,
+    ) -> Self {
+        let turbidity = turbidity.clamp(1.0, 10.0);
+        let ground_albedo = ground_albedo.clamp(0.0, 1.0);
+        let solar_elevation = sun_direction[1]
+            .clamp(0.0, 1.0)
+            .asin()
+            .clamp(0.0, std::f32::consts::FRAC_PI_2);
+        let hosek =
+            crate::terrain::hosek_sky::hosek_rgb_sky(turbidity, ground_albedo, solar_elevation);
+
+        Self {
+            sun_direction_turbidity: [
+                sun_direction[0],
+                sun_direction[1],
+                sun_direction[2],
+                turbidity,
+            ],
+            ground_albedo_sun_size_sun_intensity_exposure: [
+                ground_albedo,
+                sun_size.max(0.0),
+                sun_intensity.max(0.0),
+                exposure.max(0.0),
+            ],
+            model_pad: [model, 0, 0, 0],
+            hosek_coeffs_a_d: hosek.uniform_a_d(),
+            hosek_coeffs_e_h: hosek.uniform_e_h(),
+            hosek_coeff_i: hosek.uniform_i(),
+            hosek_radiance: hosek.uniform_radiance(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod sky_tests {
+    use super::SkyUniforms;
+
+    #[test]
+    fn sky_uniforms_match_wgsl_size() {
+        assert_eq!(std::mem::size_of::<SkyUniforms>(), 176);
+    }
 }
 
 /// Std140-compatible packed layout for VolumetricUniforms

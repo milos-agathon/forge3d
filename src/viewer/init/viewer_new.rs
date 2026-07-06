@@ -322,18 +322,19 @@ impl Viewer {
 
 /// Read sky parameters from environment variables
 fn read_sky_env_params() -> SkyUniforms {
-    let mut params = SkyUniforms {
-        sun_direction_turbidity: [0.3, 0.8, 0.5, 2.5],
-        ground_albedo_sun_size_sun_intensity_exposure: [0.2, 1.0, 20.0, 1.0],
-        model_pad: [1, 0, 0, 0],
-    };
+    let sun_direction = [0.3, 0.8, 0.5];
+    let mut model = 1;
+    let mut turbidity = 2.5;
+    let mut ground_albedo = 0.2;
+    let mut exposure = 1.0;
+    let mut sun_intensity = 20.0;
 
     if let Ok(model_str) = std::env::var("FORGE3D_SKY_MODEL") {
         let key = model_str
             .trim()
             .to_ascii_lowercase()
             .replace(['-', '_', ' '], "");
-        params.model_pad[0] = match key.as_str() {
+        model = match key.as_str() {
             "preetham" => 0,
             "hosekwilkie" => 1,
             _ => 1,
@@ -341,26 +342,34 @@ fn read_sky_env_params() -> SkyUniforms {
     }
     if let Ok(v) = std::env::var("FORGE3D_SKY_TURBIDITY") {
         if let Ok(f) = v.parse::<f32>() {
-            params.sun_direction_turbidity[3] = f.clamp(1.0, 10.0);
+            turbidity = f;
         }
     }
     if let Ok(v) = std::env::var("FORGE3D_SKY_GROUND") {
         if let Ok(f) = v.parse::<f32>() {
-            params.ground_albedo_sun_size_sun_intensity_exposure[0] = f.clamp(0.0, 1.0);
+            ground_albedo = f;
         }
     }
     if let Ok(v) = std::env::var("FORGE3D_SKY_EXPOSURE") {
         if let Ok(f) = v.parse::<f32>() {
-            params.ground_albedo_sun_size_sun_intensity_exposure[3] = f.max(0.0);
+            exposure = f;
         }
     }
     if let Ok(v) = std::env::var("FORGE3D_SKY_INTENSITY") {
         if let Ok(f) = v.parse::<f32>() {
-            params.ground_albedo_sun_size_sun_intensity_exposure[2] = f.max(0.0);
+            sun_intensity = f;
         }
     }
 
-    params
+    SkyUniforms::new(
+        sun_direction,
+        turbidity,
+        ground_albedo,
+        1.0,
+        sun_intensity,
+        exposure,
+        model,
+    )
 }
 
 /// Create CSM depth pipeline resources

@@ -172,11 +172,15 @@ impl Viewer {
             let expose: f32 = self.sky_exposure.max(0.0);
             let sun_i: f32 = self.sky_sun_intensity.max(0.0);
 
-            let sky_params_frame = SkyUniforms {
-                sun_direction_turbidity: [sun_dir_ws.x, sun_dir_ws.y, sun_dir_ws.z, turb],
-                ground_albedo_sun_size_sun_intensity_exposure: [ground, 1.0, sun_i, expose],
-                model_pad: [model_id, 0, 0, 0],
-            };
+            let sky_params_frame = SkyUniforms::new(
+                [sun_dir_ws.x, sun_dir_ws.y, sun_dir_ws.z],
+                turb,
+                ground,
+                1.0,
+                sun_i,
+                expose,
+                model_id,
+            );
             self.queue
                 .write_buffer(&self.sky_params, 0, bytemuck::bytes_of(&sky_params_frame));
 
