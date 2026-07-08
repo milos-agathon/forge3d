@@ -20,12 +20,21 @@ use wgpu::{Buffer, Device, Queue};
 /// the PT reference's +/-0.5px tent reconstruction filter).
 const SSAA: u32 = 4;
 
-/// Gap-4 routing status — ROUTED. Do not delete this marker or stop
-/// consuming the shared entry points it names; the module test below fails
-/// if this raster becomes an unacknowledged private fork again.
+/// Gap-4 routing status — EXPLICITLY BLOCKED on the strict reading. Do not
+/// delete this marker or stop consuming the shared entry points it names;
+/// the module test below fails if this raster becomes an unacknowledged
+/// private fork.
 ///
-/// The adjudication raster image is produced through established forge3d
-/// raster/offscreen infrastructure:
+/// The strict AEQUITAS requirement reads "existing raster path" as the
+/// viewer/production raster renderer. That routing remains blocked without a
+/// broad rewrite, and would break the parity contract even if attempted: the
+/// viewer and terrain renderers shade with their own PBR/POM stacks, not the
+/// pt_shade parity estimator this gate needs, and `offscreen::brdf_tile`
+/// renders one sphere with no shadows or multi-object scene. AEQUITAS must
+/// therefore not be called complete while this marker says "blocked".
+///
+/// What IS shared (and test-enforced below) — every mechanical stage flows
+/// through offscreen/core infrastructure rather than private code:
 /// - geometry: `offscreen::sphere::generate_uv_sphere` + the scene's
 ///   `ReferenceSceneDesc::{plane_mesh, environment_raw, camera_basis}`;
 /// - render targets, depth-tested multi-draw pass encoding, submission, and
@@ -37,15 +46,16 @@ const SSAA: u32 = 4;
 ///   (applied by `py_functions::adjudication::render_adjudication_pair` to
 ///   BOTH the PT and raster HDR buffers).
 ///
-/// The only scene-specific parts left in this module are, by necessity, the
-/// parity fragment shader (adjudication_raster.wgsl evaluates the PT parity
-/// estimator, which no other raster path implements or should implement),
-/// its uniform schema, and the PT-matched tent SSAA downsample.
+/// The scene-specific residue is, by necessity, the parity fragment shader
+/// (adjudication_raster.wgsl evaluates the PT parity estimator, which no
+/// production raster path implements or should implement), its uniform
+/// schema, and the PT-matched tent SSAA downsample.
 pub const ADJUDICATION_RASTER_ROUTING_STATUS: &str =
-    "routed: targets/pass-encoding/readback via offscreen::forward + \
-     core::hdr_readback; geometry via offscreen::sphere + ReferenceSceneDesc; \
-     resolve via core::tonemap; scene-specific residue is the parity shader, \
-     its uniforms, and the PT-matched tent downsample";
+    "blocked: not routed through the viewer/production raster renderer (its \
+     PBR/POM shading cannot express the pt_shade parity estimator without a \
+     broad rewrite); mechanical stages are shared — targets/pass/readback via \
+     offscreen::forward + core::hdr_readback, geometry via offscreen::sphere \
+     + ReferenceSceneDesc, resolve via core::tonemap";
 
 /// Must match `AdjUniforms` in adjudication_raster.wgsl (304 bytes).
 #[repr(C)]
@@ -375,15 +385,18 @@ mod tests {
     use super::ADJUDICATION_RASTER_ROUTING_STATUS;
 
     #[test]
-    fn raster_twin_routes_through_shared_offscreen_infra() {
-        // Gap-4 contract: the adjudication raster must stay routed through
-        // the established offscreen infrastructure — targets, pass encoding,
-        // and HDR readback through offscreen::forward (which reads back via
-        // core::hdr_readback and accounts staging in the memory tracker),
-        // geometry through offscreen::sphere + ReferenceSceneDesc, resolve
-        // through the shared tonemap. This test fails if the module drifts
-        // back into an unacknowledged private fork of any of those stages.
-        assert!(ADJUDICATION_RASTER_ROUTING_STATUS.starts_with("routed:"));
+    fn raster_twin_is_explicitly_blocked_and_reuses_shared_infra() {
+        // Gap-4 contract: the custom raster pipeline is only sanctioned while
+        // it is explicitly marked blocked (not routed through the
+        // viewer/production raster renderer) AND keeps every mechanical stage
+        // on shared infrastructure — targets, pass encoding, and HDR readback
+        // through offscreen::forward (which reads back via core::hdr_readback
+        // and accounts staging in the memory tracker), geometry through
+        // offscreen::sphere + ReferenceSceneDesc, resolve through the shared
+        // tonemap. This test fails if the blocked marker is dropped without
+        // real routing, or if the module drifts into an unacknowledged
+        // private fork of any of those stages.
+        assert!(ADJUDICATION_RASTER_ROUTING_STATUS.starts_with("blocked:"));
         let src = include_str!("adjudication_raster.rs");
         for shared in [
             "forward::ForwardTargets::new",
