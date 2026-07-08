@@ -486,6 +486,12 @@ struct TerrainVTUniforms {
     config0: vec4<u32>,
     config1: vec4<u32>,
     config2: vec4<u32>,
+    // TerrainVtFamilyInfo: per-family single source of truth, refreshed each
+    // frame from CPU residency state. x = enabled (0/1), y = page-table layer
+    // offset, z = atlas layer (0 while families share one atlas layer),
+    // w = registered source count. Must match TerrainVTUniformsGpu in
+    // src/terrain/renderer/virtual_texture.rs.
+    family_info: array<vec4<u32>, 3>,
 }
 
 struct TerrainVTFallbackColors {
@@ -560,7 +566,7 @@ struct TerrainSubsurfaceState {
 /// aspect: angle from north (0 = north, PI/2 = east, PI = south, 3PI/2 = west)
 fn compute_terrain_attributes(world_normal: vec3<f32>) -> vec4<f32> {
     // Slope: angle from vertical (Z-up coordinate system)
-    // slope = acos(dot(normal, up)) where up = (0,0,1)
+    // slope = acos(det_dot3(normal, up)) where up = (0,0,1)
     let slope = acos(clamp(world_normal.z, -1.0, 1.0));
     
     // Aspect: direction the slope faces (azimuth of steepest descent)
@@ -798,12 +804,12 @@ fn evaluate_terrain_subsurface(
         return vec3<f32>(0.0, 0.0, 0.0);
     }
 
-    let n_dot_l = saturate(dot(normal, light_dir));
+    let n_dot_l = saturate(det_dot3(normal, light_dir));
     let wrap_width = 0.45 * state.strength;
     let wrapped = saturate((n_dot_l + wrap_width) / (1.0 + wrap_width));
     let wrap_boost = max(wrapped - n_dot_l, 0.0);
 
-    let view_backscatter = pow(saturate(dot(view_dir, -light_dir)), 4.0);
+    let view_backscatter = det_pow(saturate(det_dot3(view_dir, -light_dir)), 4.0);
     let backscatter = view_backscatter * (0.25 + 0.75 * (1.0 - n_dot_l));
     let scatter_profile = max(wrap_boost * 1.35, backscatter * 0.30);
 
@@ -875,8 +881,8 @@ fn sample_water_reflection(
 // Returns 0 at normal incidence (looking straight down), 1 at grazing angles
 fn calculate_water_fresnel(view_dir: vec3<f32>, surface_normal: vec3<f32>) -> f32 {
     let fresnel_power = water_reflection_uniforms.reflection_params.y;
-    let n_dot_v = max(0.0, dot(surface_normal, view_dir));
-    let fresnel = pow(1.0 - n_dot_v, fresnel_power);
+    let n_dot_v = max(0.0, det_dot3(surface_normal, view_dir));
+    let fresnel = det_pow(1.0 - n_dot_v, fresnel_power);
     return clamp(fresnel, 0.0, 1.0);
 }
 
@@ -980,15 +986,15 @@ fn sample_shadow_evsm_terrain(
     let c_neg = csm_uniforms.evsm_negative_exp;
     
     // Warp receiver depth
-    let warp_depth_pos = exp(c_pos * receiver_depth);
-    let warp_depth_neg = -exp(-c_neg * receiver_depth);
+    let warp_depth_pos = det_exp(c_pos * receiver_depth);
+    let warp_depth_neg = -det_exp(-c_neg * receiver_depth);
     
-    // Positive exponent (moments.rg): E[exp(c * x)], E[exp(c * x)^2]
+    // Positive exponent (moments.rg): E[det_exp(c * x)], E[det_exp(c * x)^2]
     let mean_pos = moments.r;
     let mean_sq_pos = moments.g;
     let variance_pos = max(mean_sq_pos - mean_pos * mean_pos, 0.0001);
     
-    // Negative exponent (moments.ba): E[exp(-c * x)], E[exp(-c * x)^2]
+    // Negative exponent (moments.ba): E[det_exp(-c * x)], E[det_exp(-c * x)^2]
     let mean_neg = moments.b;
     let mean_sq_neg = moments.a;
     let variance_neg = max(mean_sq_neg - mean_neg * mean_neg, 0.0001);
@@ -1079,8 +1085,8 @@ fn sample_shadow_pcf_terrain(
     
     // Apply depth bias to prevent shadow acne
     // Combine constant bias with slope-scaled bias for grazing angles
-    let light_dir_norm = normalize(csm_uniforms.light_direction.xyz);
-    let n_dot_l = max(dot(normal, light_dir_norm), 0.0);
+    let light_dir_norm = det_normalize3(csm_uniforms.light_direction.xyz);
+    let n_dot_l = max(det_dot3(normal, light_dir_norm), 0.0);
     let slope_factor = clamp(1.0 - n_dot_l, 0.0, 1.0);
     let bias = csm_uniforms.depth_bias
         + csm_uniforms.slope_bias * slope_factor
@@ -1336,7 +1342,16 @@ struct FragmentOutput {
     @location(1) aov_albedo : vec4<f32>,   // Base color before lighting (RGB) + alpha
     @location(2) aov_normal : vec4<f32>,   // Normalized world-space normal (RGB) + alpha
     @location(3) aov_depth : vec4<f32>,    // Linear depth normalized to [0,1] (R) + padding
+    // VERITAS: albedo-family VT source id of the dominant material layer's
+    // dominant triplanar projection (R32Uint target; 0 == SOURCE_ID_NONE)
+    @location(4) source_id : u32,
 };
+
+// VERITAS: resolved in the material splat loop (where layer weights and
+// triplanar context are in scope) and handed to the fragment output at the
+// AOV write block. Stays 0 (SOURCE_ID_NONE) whenever the material albedo
+// path does not run (VT disabled, colormap-only albedo, background).
+var<private> terrain_vt_albedo_source_id: u32 = 0u;
 
 fn sample_height(uv : vec2<f32>) -> f32 {
     let uv_clamped = clamp(uv, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
@@ -1365,7 +1380,7 @@ fn apply_height_curve01(t: f32) -> f32 {
     var curved = t;
     if (mode == 1u) { // pow
         let p = max(u_shading.height_curve.z, 0.01);
-        curved = pow(t, p);
+        curved = det_pow(t, p);
     } else if (mode == 2u) { // smoothstep
         curved = t * t * (3.0 - 2.0 * t);
     } else if (mode == 3u) { // lut
@@ -1575,7 +1590,7 @@ fn calculate_normal_lod_aware(uv: vec2<f32>) -> vec3<f32> {
     let world_texel = texel_uv * spacing; // Texel size in world units
     
     let vertical_scale = max(u_terrain.spacing_h_exag.z * 0.5, 1e-3);
-    return normalize(vec3<f32>(-dx / world_texel.x, vertical_scale, -dy / world_texel.y));
+    return det_normalize3(vec3<f32>(-dx / world_texel.x, vertical_scale, -dy / world_texel.y));
 }
 
 /// Sprint 2: Multi-scale height normal for enhanced edge visibility.
@@ -1657,7 +1672,7 @@ fn calculate_normal_multiscale(uv: vec2<f32>) -> vec3<f32> {
     combined_dx /= total_weight;
     combined_dy /= total_weight;
     
-    return normalize(vec3<f32>(-combined_dx, vertical_scale, -combined_dy));
+    return det_normalize3(vec3<f32>(-combined_dx, vertical_scale, -combined_dy));
 }
 
 /// Calculate normal from height map using Sobel filter (LEGACY - not LOD-aware).
@@ -1679,7 +1694,7 @@ fn calculate_normal(uv : vec2<f32>, texel_size : vec2<f32>) -> vec3<f32> {
     let dy = (bl + 2.0 * b + br) - (tl + 2.0 * t + tr);
 
     let vertical_scale = max(u_terrain.spacing_h_exag.z * 0.5, 1e-3);
-    return normalize(vec3<f32>(-dx, vertical_scale, -dy));
+    return det_normalize3(vec3<f32>(-dx, vertical_scale, -dy));
 }
 
 /// Compute geometric normal from screen-space derivatives of world position.
@@ -1691,7 +1706,7 @@ fn calculate_normal_ddxddy(world_pos: vec3<f32>) -> vec3<f32> {
     // Note: order matters for winding direction
     let n = cross(ddx_pos, ddy_pos);
     // Ensure normal points "up" (positive Y in our coordinate system)
-    let n_norm = normalize(n);
+    let n_norm = det_normalize3(n);
     return select(n_norm, -n_norm, n_norm.y < 0.0);
 }
 
@@ -1701,7 +1716,7 @@ fn calculate_normal_ddxddy(world_pos: vec3<f32>) -> vec3<f32> {
 fn compute_triplanar_weights(normal: vec3<f32>, blend_sharpness: f32) -> vec3<f32> {
     let abs_n = abs(normal);
     // Use higher blend sharpness for cleaner projection transitions
-    let sharpen = pow(abs_n + vec3<f32>(1e-4), vec3<f32>(blend_sharpness * 1.5));
+    let sharpen = det_pow3(abs_n + vec3<f32>(1e-4), vec3<f32>(blend_sharpness * 1.5));
     let weight_sum = sharpen.x + sharpen.y + sharpen.z;
     return sharpen / max(weight_sum, 1e-4);
 }
@@ -1745,13 +1760,10 @@ fn terrain_vt_enabled() -> bool {
 }
 
 fn terrain_vt_family_enabled(family_slot: u32) -> bool {
-    var bit = 1u;
-    if (family_slot == TERRAIN_VT_FAMILY_NORMAL) {
-        bit = 2u;
-    } else if (family_slot == TERRAIN_VT_FAMILY_MASK) {
-        bit = 4u;
+    if (family_slot >= 3u) {
+        return false;
     }
-    return (terrain_vt_uniforms.config0.x & bit) != 0u;
+    return terrain_vt_uniforms.family_info[family_slot].x != 0u;
 }
 
 fn terrain_vt_material_index(layer: f32) -> u32 {
@@ -1796,8 +1808,8 @@ fn terrain_vt_page_dims(mip_level: u32) -> vec2<u32> {
 
 fn terrain_vt_page_table_layer(family_slot: u32, material_index: u32, mip_level: u32) -> i32 {
     let max_mip_levels = max(terrain_vt_uniforms.config2.x, 1u);
-    let material_count = max(terrain_vt_uniforms.config2.y, 1u);
-    return i32(((family_slot * material_count) + material_index) * max_mip_levels + mip_level);
+    let family_base = terrain_vt_uniforms.family_info[min(family_slot, 2u)].y;
+    return i32(family_base + material_index * max_mip_levels + mip_level);
 }
 
 fn terrain_vt_feedback_index(family_slot: u32, material_index: u32, mip_level: u32, tile_x: u32, tile_y: u32) -> u32 {
@@ -1828,15 +1840,23 @@ fn terrain_vt_write_feedback(family_slot: u32, material_index: u32, mip_level: u
     );
 }
 
-fn terrain_vt_sample_family_uv(
+// Shared residency-gated page walk. Returns vec4(linear_rgb, 1.0) when a
+// resident tile (page-table is_resident flag) was sampled, and
+// vec4(fallback_rgb_as_authored, 0.0) when the family is disabled or no tile
+// along the mip chain is resident. Never samples atlas memory for
+// non-resident tiles.
+fn terrain_vt_resolve_family_uv(
     family_slot: u32,
     uv: vec2<f32>,
     ddx_uv: vec2<f32>,
     ddy_uv: vec2<f32>,
     layer: f32,
-) -> vec3<f32> {
+) -> vec4<f32> {
     if (!terrain_vt_enabled() || !terrain_vt_family_enabled(family_slot)) {
-        return terrain_vt_fallback_color(family_slot, terrain_vt_material_index(layer)).rgb;
+        return vec4<f32>(
+            terrain_vt_fallback_color(family_slot, terrain_vt_material_index(layer)).rgb,
+            0.0,
+        );
     }
 
     let material_index = terrain_vt_material_index(layer);
@@ -1873,7 +1893,10 @@ fn terrain_vt_sample_family_uv(
             let inner_texel = clamp(texel_in_page, vec2<f32>(0.0, 0.0), vec2<f32>(tile_size - 1.0, tile_size - 1.0));
             let atlas_uv = vec2<f32>(entry.x, entry.y)
                 + (vec2<f32>(tile_border, tile_border) + inner_texel + vec2<f32>(0.5, 0.5)) / atlas_size;
-            return textureSampleLevel(terrain_vt_atlas, terrain_vt_sampler, atlas_uv, 0.0).rgb;
+            return vec4<f32>(
+                textureSampleLevel(terrain_vt_atlas, terrain_vt_sampler, atlas_uv, 0.0).rgb,
+                1.0,
+            );
         }
         if (mip_level + 1u >= max_mip_levels) {
             break;
@@ -1881,7 +1904,115 @@ fn terrain_vt_sample_family_uv(
         mip_level = mip_level + 1u;
     }
 
-    return terrain_vt_fallback_color(family_slot, material_index).rgb;
+    return vec4<f32>(terrain_vt_fallback_color(family_slot, material_index).rgb, 0.0);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// VERITAS: per-pixel provenance.
+// Same residency-gated page walk as terrain_vt_resolve_family_uv, but
+// returns the stable source id of the tile actually sampled
+// (family_slot * capacity + material_index + 1) instead of a color, and 0
+// (SOURCE_ID_NONE) when the family is disabled or the whole mip chain is
+// non-resident (i.e. the color path used the fallback). Never writes
+// feedback, so streaming behaviour is untouched.
+// ──────────────────────────────────────────────────────────────────────────
+fn terrain_vt_resolve_source_id(
+    family_slot: u32,
+    uv: vec2<f32>,
+    ddx_uv: vec2<f32>,
+    ddy_uv: vec2<f32>,
+    layer: f32,
+) -> u32 {
+    if (!terrain_vt_enabled() || !terrain_vt_family_enabled(family_slot)) {
+        return 0u;
+    }
+    let material_index = terrain_vt_material_index(layer);
+    let virtual_size = vec2<f32>(
+        f32(max(terrain_vt_uniforms.config1.x, 1u)),
+        f32(max(terrain_vt_uniforms.config1.y, 1u)),
+    );
+    let tile_size = f32(max(terrain_vt_uniforms.config0.y, 1u));
+    let max_mip_levels = max(terrain_vt_uniforms.config2.x, 1u);
+    let virtual_texel = fract(uv) * virtual_size;
+    var mip_level = terrain_vt_desired_mip(ddx_uv, ddy_uv);
+    loop {
+        let page_dims = terrain_vt_page_dims(mip_level);
+        let page_size = vec2<f32>(tile_size * exp2(f32(mip_level)), tile_size * exp2(f32(mip_level)));
+        let page = min(vec2<u32>(virtual_texel / page_size), page_dims - vec2<u32>(1u, 1u));
+        let entry = textureLoad(
+            terrain_vt_page_table,
+            vec2<i32>(i32(page.x), i32(page.y)),
+            terrain_vt_page_table_layer(family_slot, material_index, mip_level),
+            0,
+        );
+        if (entry.z > 0.5) {
+            return family_slot * TERRAIN_VT_MATERIAL_CAPACITY + material_index + 1u;
+        }
+        if (mip_level + 1u >= max_mip_levels) {
+            break;
+        }
+        mip_level = mip_level + 1u;
+    }
+    return 0u;
+}
+
+// VERITAS: albedo source id at the dominant triplanar projection of one
+// material layer (argmax triplanar weight; ties prefer the Y axis, then X).
+// Single-source attribution by definition — never a blend.
+fn terrain_vt_source_id_triplanar(
+    world_pos: vec3<f32>,
+    normal: vec3<f32>,
+    scale: f32,
+    blend_sharpness: f32,
+    layer: f32,
+) -> u32 {
+    let weights = compute_triplanar_weights(normal, blend_sharpness);
+    let dpdx_world = dpdx(world_pos) * scale;
+    let dpdy_world = dpdy(world_pos) * scale;
+    var uv = world_pos.yz * scale;
+    var ddx_uv = dpdx_world.yz;
+    var ddy_uv = dpdy_world.yz;
+    if (weights.y >= weights.x && weights.y >= weights.z) {
+        uv = world_pos.xz * scale;
+        ddx_uv = dpdx_world.xz;
+        ddy_uv = dpdy_world.xz;
+    } else if (weights.z > weights.x) {
+        uv = world_pos.xy * scale;
+        ddx_uv = dpdx_world.xy;
+        ddy_uv = dpdy_world.xy;
+    }
+    return terrain_vt_resolve_source_id(TERRAIN_VT_FAMILY_ALBEDO, uv, ddx_uv, ddy_uv, layer);
+}
+
+fn terrain_vt_sample_family_uv(
+    family_slot: u32,
+    uv: vec2<f32>,
+    ddx_uv: vec2<f32>,
+    ddy_uv: vec2<f32>,
+    layer: f32,
+) -> vec3<f32> {
+    // Color (albedo) path: resident tiles yield linear color; fallback colors
+    // are authored as linear and used as-is.
+    return terrain_vt_resolve_family_uv(family_slot, uv, ddx_uv, ddy_uv, layer).rgb;
+}
+
+// Data-family sampling (normal / mask): resident tiles are decoded back to
+// the authored byte values (the atlas view is sRGB, so undo the implicit
+// sRGB->linear decode); non-resident tiles return the authored fallback
+// EXACTLY, with w = 0. The flat default normal fallback (0.5, 0.5, 1.0) thus
+// decodes to the geometric surface normal instead of a tilted/corrupted one.
+fn terrain_vt_sample_family_data(
+    family_slot: u32,
+    uv: vec2<f32>,
+    ddx_uv: vec2<f32>,
+    ddy_uv: vec2<f32>,
+    layer: f32,
+) -> vec4<f32> {
+    let resolved = terrain_vt_resolve_family_uv(family_slot, uv, ddx_uv, ddy_uv, layer);
+    if (resolved.w > 0.5) {
+        return vec4<f32>(linear_to_srgb(resolved.rgb), 1.0);
+    }
+    return resolved;
 }
 
 fn sample_material_layer_uv(
@@ -1935,6 +2066,10 @@ fn sample_triplanar(
     return color_x * weights.x + color_y * weights.y + color_z * weights.z;
 }
 
+// Triplanar sampling for the data families (normal / mask). Returns the
+// blended authored-space values in .rgb and the residency coverage in .w
+// (1 = every contributing projection sampled a resident tile, 0 = pure
+// fallback). Partial residency blends continuously between the two.
 fn sample_triplanar_vt_family(
     family_slot: u32,
     world_pos : vec3<f32>,
@@ -1942,7 +2077,7 @@ fn sample_triplanar_vt_family(
     scale : f32,
     blend_sharpness : f32,
     layer : f32,
-) -> vec3<f32> {
+) -> vec4<f32> {
     let weights = compute_triplanar_weights(normal, blend_sharpness);
     let uv_x = world_pos.yz * scale;
     let uv_y = world_pos.xz * scale;
@@ -1956,15 +2091,15 @@ fn sample_triplanar_vt_family(
     let ddx_z = dpdx_world.xy;
     let ddy_z = dpdy_world.xy;
 
-    let color_x = terrain_vt_sample_family_uv(family_slot, uv_x, ddx_x, ddy_x, layer);
-    let color_y = terrain_vt_sample_family_uv(family_slot, uv_y, ddx_y, ddy_y, layer);
-    let color_z = terrain_vt_sample_family_uv(family_slot, uv_z, ddx_z, ddy_z, layer);
-    return color_x * weights.x + color_y * weights.y + color_z * weights.z;
+    let sample_x = terrain_vt_sample_family_data(family_slot, uv_x, ddx_x, ddy_x, layer);
+    let sample_y = terrain_vt_sample_family_data(family_slot, uv_y, ddx_y, ddy_y, layer);
+    let sample_z = terrain_vt_sample_family_data(family_slot, uv_z, ddx_z, ddy_z, layer);
+    return sample_x * weights.x + sample_y * weights.y + sample_z * weights.z;
 }
 
 fn build_tbn(normal : vec3<f32>) -> mat3x3<f32> {
     let up = select(vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(0.0, 0.0, 1.0), abs(normal.y) > 0.99);
-    let tangent = normalize(cross(up, normal));
+    let tangent = det_normalize3(cross(up, normal));
     let bitangent = cross(normal, tangent);
     return mat3x3<f32>(tangent, bitangent, normal);
 }
@@ -1973,9 +2108,9 @@ fn apply_encoded_tangent_normal(base_normal: vec3<f32>, encoded_rgb: vec3<f32>, 
     if (mask_value <= 0.001 || strength <= 0.001) {
         return base_normal;
     }
-    let tangent_normal = normalize(encoded_rgb * 2.0 - vec3<f32>(1.0, 1.0, 1.0));
-    let mapped = normalize(build_tbn(base_normal) * tangent_normal);
-    return normalize(mix(base_normal, mapped, clamp(strength * mask_value, 0.0, 1.0)));
+    let tangent_normal = det_normalize3(encoded_rgb * 2.0 - vec3<f32>(1.0, 1.0, 1.0));
+    let mapped = det_normalize3(build_tbn(base_normal) * tangent_normal);
+    return det_normalize3(mix(base_normal, mapped, clamp(strength * mask_value, 0.0, 1.0)));
 }
 
 fn material_map_mask(uv: vec2<f32>) -> f32 {
@@ -2024,7 +2159,7 @@ fn procedural_detail_normal(world_pos: vec3<f32>, scale: f32) -> vec3<f32> {
     let gradient = vec3<f32>(nx, ny, nz) * 2.0;
     
     // Return as tangent-space normal (z=1 is unperturbed up)
-    return normalize(vec3<f32>(gradient.x, gradient.z, 1.0));
+    return det_normalize3(vec3<f32>(gradient.x, gradient.z, 1.0));
 }
 
 /// Reoriented Normal Mapping (RNM) blend for combining detail normals
@@ -2035,7 +2170,7 @@ fn blend_rnm(base_n: vec3<f32>, detail_n: vec3<f32>) -> vec3<f32> {
     // This gives better results than simple linear blending
     let t = base_n + vec3<f32>(0.0, 0.0, 1.0);
     let u = detail_n * vec3<f32>(-1.0, -1.0, 1.0);
-    return normalize(t * dot(t, u) - u * t.z);
+    return det_normalize3(t * det_dot3(t, u) - u * t.z);
 }
 
 /// Calculate distance fade factor for micro-detail
@@ -2139,11 +2274,11 @@ fn sample_dem_detail_normal(uv: vec2<f32>) -> vec3<f32> {
     // Decode from [0,1] to [-1,1] per channel (tangent space: R=X, G=Y, B=Z)
     let decoded = sample.rgb * 2.0 - 1.0;
     // Ensure valid normal (avoid NaN from zero-length vectors)
-    let length_sq = dot(decoded, decoded);
+    let length_sq = det_dot3(decoded, decoded);
     if (length_sq < 0.0001) {
         return vec3<f32>(0.0, 0.0, 1.0); // Neutral normal
     }
-    return normalize(decoded);
+    return det_normalize3(decoded);
 }
 
 /// Apply micro-detail to normal
@@ -2175,7 +2310,7 @@ fn apply_detail_normal(
     let detail_z = procedural_detail_normal(vec3<f32>(world_pos.x, world_pos.y, 0.0) * uv_scale, 1.0);
     
     // Blend triplanar detail normals
-    let blended_detail = normalize(
+    let blended_detail = det_normalize3(
         detail_x * weights.x + 
         detail_y * weights.y + 
         detail_z * weights.z
@@ -2185,13 +2320,13 @@ fn apply_detail_normal(
     let tbn = build_tbn(base_normal);
     
     // Transform detail normal to world space
-    let detail_world = normalize(tbn * blended_detail);
+    let detail_world = det_normalize3(tbn * blended_detail);
     
     // RNM blend with strength and fade
     let effective_strength = detail_strength * fade;
     let blended = blend_rnm(base_normal, mix(vec3<f32>(0.0, 0.0, 1.0), blended_detail, effective_strength));
     
-    return normalize(tbn * blended);
+    return det_normalize3(tbn * blended);
 }
 
 /// P6: Apply DEM-derived detail normal to geometric normal
@@ -2229,7 +2364,7 @@ fn apply_dem_detail_normal(
     let effective_strength = detail_strength * fade;
     let blended = blend_rnm(base_normal, mix(vec3<f32>(0.0, 0.0, 1.0), detail_tangent, effective_strength));
     
-    return normalize(tbn * blended);
+    return det_normalize3(tbn * blended);
 }
 
 fn rotate_y(v : vec3<f32>, sin_theta : f32, cos_theta : f32) -> vec3<f32> {
@@ -2255,7 +2390,7 @@ fn parallax_occlusion_mapping(
         return uv;
     }
 
-    let view_dir = normalize(view_dir_tangent);
+    let view_dir = det_normalize3(view_dir_tangent);
     let min_s = clamp(max(min_steps, 1u), 1u, POM_MAX_STEPS);
     let max_s = clamp(max(max_steps, min_s), min_s, POM_MAX_STEPS);
     let refine_count = min(refine_steps, POM_MAX_REFINE_STEPS);
@@ -2268,7 +2403,7 @@ fn parallax_occlusion_mapping(
     if (length(dir_xy) < 1e-5) {
         return uv;
     }
-    let parallax_dir = normalize(dir_xy) * height_scale;
+    let parallax_dir = det_normalize2(dir_xy) * height_scale;
 
     var current_uv = uv;
     var current_layer = 0.0;
@@ -2315,12 +2450,12 @@ fn calculate_pbr_brdf(
     metallic : f32,
     f0 : vec3<f32>
 ) -> vec3<f32> {
-    let halfway = normalize(view_dir + light_dir);
+    let halfway = det_normalize3(view_dir + light_dir);
 
-    let n_dot_l = max(dot(normal, light_dir), 0.0);
-    let n_dot_v = max(dot(normal, view_dir), 0.0);
-    let n_dot_h = max(dot(normal, halfway), 0.0);
-    let v_dot_h = max(dot(view_dir, halfway), 0.0);
+    let n_dot_l = max(det_dot3(normal, light_dir), 0.0);
+    let n_dot_v = max(det_dot3(normal, view_dir), 0.0);
+    let n_dot_h = max(det_dot3(normal, halfway), 0.0);
+    let v_dot_h = max(det_dot3(view_dir, halfway), 0.0);
 
     if (n_dot_l <= 0.0 || n_dot_v <= 0.0) {
         return vec3<f32>(0.0, 0.0, 0.0);
@@ -2337,7 +2472,7 @@ fn calculate_pbr_brdf(
     let g1_v = n_dot_v / (n_dot_v * (1.0 - k_sq) + k_sq);
     let geometry = g1_l * g1_v;
 
-    let fresnel = f0 + (vec3<f32>(1.0, 1.0, 1.0) - f0) * pow(1.0 - v_dot_h, 5.0);
+    let fresnel = f0 + (vec3<f32>(1.0, 1.0, 1.0) - f0) * det_pow(1.0 - v_dot_h, 5.0);
 
     let specular = (distribution * geometry) * fresnel / max(4.0 * n_dot_l * n_dot_v, 1e-3);
     let k_d = (vec3<f32>(1.0, 1.0, 1.0) - fresnel) * (1.0 - metallic);
@@ -2361,7 +2496,7 @@ fn lambert_contrast(l: f32, k: f32) -> f32 {
     // k=0: linear (l^1), k=1: sqrt (l^0.5) which has steeper slope at low values
     // This increases derivative for darker pixels, creating more local contrast
     let exponent = 1.0 - k * 0.5;  // Range [0.5, 1.0]
-    return pow(l_clamped + 1e-6, exponent);  // Small epsilon to avoid pow(0, x) issues
+    return det_pow(l_clamped + 1e-6, exponent);  // Small epsilon to avoid det_pow(0, x) issues
 }
 
 /// Split-normal PBR BRDF: uses smooth normal for specular (eliminates aliasing),
@@ -2378,18 +2513,18 @@ fn calculate_pbr_brdf_split_normal(
     f0 : vec3<f32>,
     lambert_k : f32               // P5-L: Lambert contrast parameter [0,1]
 ) -> vec3<f32> {
-    let halfway = normalize(view_dir + light_dir);
+    let halfway = det_normalize3(view_dir + light_dir);
 
     // Diffuse uses detailed normal for surface variation
-    let n_dot_l_diff_raw = max(dot(diffuse_normal, light_dir), 0.0);
+    let n_dot_l_diff_raw = max(det_dot3(diffuse_normal, light_dir), 0.0);
     // P5-L: Apply contrast curve to diffuse Lambert term
     let n_dot_l_diff = lambert_contrast(n_dot_l_diff_raw, lambert_k);
     
     // Specular uses smooth normal to avoid aliasing
-    let n_dot_l_spec = max(dot(specular_normal, light_dir), 0.0);
-    let n_dot_v = max(dot(specular_normal, view_dir), 0.0);
-    let n_dot_h = max(dot(specular_normal, halfway), 0.0);
-    let v_dot_h = max(dot(view_dir, halfway), 0.0);
+    let n_dot_l_spec = max(det_dot3(specular_normal, light_dir), 0.0);
+    let n_dot_v = max(det_dot3(specular_normal, view_dir), 0.0);
+    let n_dot_h = max(det_dot3(specular_normal, halfway), 0.0);
+    let v_dot_h = max(det_dot3(view_dir, halfway), 0.0);
 
     if (n_dot_l_diff <= 0.0 && n_dot_l_spec <= 0.0) {
         return vec3<f32>(0.0, 0.0, 0.0);
@@ -2409,7 +2544,7 @@ fn calculate_pbr_brdf_split_normal(
     let geometry = g1_l * g1_v;
 
     // Fresnel
-    let fresnel = f0 + (vec3<f32>(1.0, 1.0, 1.0) - f0) * pow(1.0 - v_dot_h, 5.0);
+    let fresnel = f0 + (vec3<f32>(1.0, 1.0, 1.0) - f0) * det_pow(1.0 - v_dot_h, 5.0);
 
     // Specular term (smooth normal) - only if facing light
     var specular = vec3<f32>(0.0);
@@ -2440,17 +2575,17 @@ fn calculate_pbr_brdf_split_roughness(
     f0 : vec3<f32>,
     lambert_k : f32            // P5-L: Lambert contrast parameter [0,1]
 ) -> vec3<f32> {
-    let halfway = normalize(view_dir + light_dir);
+    let halfway = det_normalize3(view_dir + light_dir);
 
-    let n_dot_l_raw = max(dot(normal, light_dir), 0.0);
+    let n_dot_l_raw = max(det_dot3(normal, light_dir), 0.0);
     // P5-L: Apply contrast curve to diffuse Lambert term
     let n_dot_l_diff = lambert_contrast(n_dot_l_raw, lambert_k);
     // Specular uses unmodified n_dot_l for physically correct highlights
     let n_dot_l_spec = n_dot_l_raw;
     
-    let n_dot_v = max(dot(normal, view_dir), 0.0);
-    let n_dot_h = max(dot(normal, halfway), 0.0);
-    let v_dot_h = max(dot(view_dir, halfway), 0.0);
+    let n_dot_v = max(det_dot3(normal, view_dir), 0.0);
+    let n_dot_h = max(det_dot3(normal, halfway), 0.0);
+    let v_dot_h = max(det_dot3(view_dir, halfway), 0.0);
 
     if (n_dot_l_raw <= 0.0 || n_dot_v <= 0.0) {
         return vec3<f32>(0.0, 0.0, 0.0);
@@ -2470,7 +2605,7 @@ fn calculate_pbr_brdf_split_roughness(
     let geometry = g1_l * g1_v;
 
     // Fresnel (unchanged - doesn't depend on roughness directly in Schlick)
-    let fresnel = f0 + (vec3<f32>(1.0, 1.0, 1.0) - f0) * pow(1.0 - v_dot_h, 5.0);
+    let fresnel = f0 + (vec3<f32>(1.0, 1.0, 1.0) - f0) * det_pow(1.0 - v_dot_h, 5.0);
 
     // Specular term (uses specular_roughness, unmodified n_dot_l)
     let specular = (distribution * geometry) * fresnel / max(4.0 * n_dot_l_spec * n_dot_v, 1e-3) * n_dot_l_spec;
@@ -2530,7 +2665,7 @@ fn eval_ibl_split(
     var result: IblSplit;
     
     // Clamp inputs for numeric safety
-    let n_dot_v = saturate(dot(n, v));
+    let n_dot_v = saturate(det_dot3(n, v));
     let roughness_clamped = saturate(roughness);
     result.n_dot_v = n_dot_v;
     
@@ -2572,7 +2707,7 @@ fn eval_ibl_split(
 
 /// Compute luminance (relative luminance for sRGB primaries)
 fn luminance(c: vec3<f32>) -> f32 {
-    return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    return det_dot3(c, vec3<f32>(0.2126, 0.7152, 0.0722));
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -2666,13 +2801,13 @@ fn apply_atmospheric_fog(
     let height_falloff = fog_uniforms.params0.y;
     let base_height = fog_uniforms.params0.z;
     let fragment_elevation = max(world_pos.z - base_height, 0.0);
-    let height_factor = exp(-height_falloff * fragment_elevation);
+    let height_factor = det_exp(-height_falloff * fragment_elevation);
 
     var fog_result = base_color;
 
     if (fog_enabled) {
         let density = density_raw * density_raw;
-        let extinction = exp(-density * view_distance * height_factor * 0.005);
+        let extinction = det_exp(-density * view_distance * height_factor * 0.005);
         let inscatter = select(fog_uniforms.fog_inscatter.rgb, sky_color, sky_enabled);
         fog_result = mix(inscatter, fog_result, extinction);
     }
@@ -2687,13 +2822,13 @@ fn apply_atmospheric_fog(
         let low_sun = 1.0 - smoothstep(0.18, 0.72, sun_elevation);
         let haze = clamp((turbidity - 1.0) / 9.0, 0.0, 1.0);
         let sun_energy = clamp(sun_intensity * (0.5 + sun_size * 0.35), 0.0, 8.0);
-        let aerial_factor = 1.0 - exp(-aerial_density * view_distance * (0.08 + haze * 0.04));
+        let aerial_factor = 1.0 - det_exp(-aerial_density * view_distance * (0.08 + haze * 0.04));
         let aerial_amount = clamp(
             aerial_factor * (0.8 + haze * 0.25 + sun_energy * 0.05),
             0.0,
             1.0,
         );
-        let luma = dot(fog_result, vec3<f32>(0.2126, 0.7152, 0.0722));
+        let luma = det_dot3(fog_result, vec3<f32>(0.2126, 0.7152, 0.0722));
         let desaturated = mix(fog_result, vec3<f32>(luma), aerial_amount * (0.4 + haze * 0.15));
         let warm_tint = mix(
             vec3<f32>(1.0, 1.0, 1.0),
@@ -2725,7 +2860,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     // A point is above the plane if n·p + d > 0, i.e., p.y > h
     if (water_reflection_uniforms.enable_flags.y > 0.5) {
         let plane = water_reflection_uniforms.water_plane;
-        let dist_to_plane = dot(plane.xyz, input.world_position) + plane.w;
+        let dist_to_plane = det_dot3(plane.xyz, input.world_position) + plane.w;
         if (dist_to_plane < 0.0) {
             discard;
         }
@@ -2735,7 +2870,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     let debug_mode = u32(u_overlay.params1.y + 0.5);
     
     // Compute all normal variants for diagnostics
-    let base_normal = normalize(input.world_normal);
+    let base_normal = det_normalize3(input.world_normal);
     let lod_info = compute_height_lod(uv);
     let height_lod = lod_info.lod;
     
@@ -2780,7 +2915,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     // This preserves average orientation while increasing local contrast
     let normal_delta = height_normal - base_normal;
     let amplified_delta = normal_delta * normal_strength;
-    let amplified_height_normal = normalize(base_normal + amplified_delta);
+    let amplified_height_normal = det_normalize3(base_normal + amplified_delta);
     
     let normal_blend = lod_fade;  // Full blend at near LOD, fades at distance
     // Capture pre-normalized normal for specular AA (Toksvig)
@@ -2809,7 +2944,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         -(r01 * tx + r11 * ty + r21 * tz),
         -(r02 * tx + r12 * ty + r22 * tz),
     );
-    let view_dir = normalize(camera_pos - input.world_position);
+    let view_dir = det_normalize3(camera_pos - input.world_position);
     let view_dir_tangent = tbn * view_dir;
 
     let min_steps = clamp(u32(u_shading.pom_steps.x + 0.5), 1u, 128u);
@@ -2888,7 +3023,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             let dist = abs(height_norm - center);
             // Smooth Gaussian-like falloff instead of linear cutoff
             let sigma = blend_half * 1.5;
-            let height_weight = exp(-dist * dist / (2.0 * sigma * sigma));
+            let height_weight = det_exp(-dist * dist / (2.0 * sigma * sigma));
             
             // Modulate by slope: rock/bare materials favor steep slopes
             // Layer 0 (rock) prefers steep, layer 1 (grass) prefers flat
@@ -2919,7 +3054,13 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     let vt_normal_enabled = terrain_vt_enabled() && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_NORMAL);
     let vt_mask_enabled = terrain_vt_enabled() && terrain_vt_family_enabled(TERRAIN_VT_FAMILY_MASK);
     var vt_normal_encoded = vec3<f32>(0.0, 0.0, 0.0);
-    var vt_mask_value = 0.0;
+    // Mask family channels (DIFFERENTIA recovered-material convention):
+    // r = material-map gate, g = roughness, b = ambient occlusion (reserved).
+    var vt_mask_data = vec3<f32>(0.0, 0.0, 0.0);
+    var vt_mask_residency = 0.0;
+    // VERITAS: attribution is single-source — the albedo source id of the
+    // dominant (max-weight, first index wins ties) material layer.
+    var dominant_layer_weight = -1.0;
     for (var idx = 0; idx < 4; idx = idx + 1) {
         if (idx < layer_count) {
             let weight = weights[idx];
@@ -2935,10 +3076,22 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
                 lod_value
             );
             albedo = albedo + sample_rgb * weight;
+            if (weight > dominant_layer_weight) {
+                dominant_layer_weight = weight;
+                terrain_vt_albedo_source_id = terrain_vt_source_id_triplanar(
+                    input.world_position,
+                    base_normal,
+                    tri_scale,
+                    tri_blend,
+                    layer,
+                );
+            }
             roughness = roughness + u_shading.layer_roughness[idx] * weight;
             metallic = metallic + u_shading.layer_metallic[idx] * weight;
             if (vt_normal_enabled) {
-                let encoded_linear = sample_triplanar_vt_family(
+                // Already in authored byte space; non-resident tiles blend in
+                // the exact flat-normal fallback (graceful degradation).
+                let normal_sample = sample_triplanar_vt_family(
                     TERRAIN_VT_FAMILY_NORMAL,
                     input.world_position,
                     base_normal,
@@ -2946,7 +3099,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
                     tri_blend,
                     layer,
                 );
-                vt_normal_encoded = vt_normal_encoded + linear_to_srgb(encoded_linear) * weight;
+                vt_normal_encoded = vt_normal_encoded + normal_sample.rgb * weight;
             }
             if (vt_mask_enabled) {
                 let mask_sample = sample_triplanar_vt_family(
@@ -2956,8 +3109,9 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
                     tri_scale,
                     tri_blend,
                     layer,
-                ).r;
-                vt_mask_value = vt_mask_value + mask_sample * weight;
+                );
+                vt_mask_data = vt_mask_data + mask_sample.rgb * weight;
+                vt_mask_residency = vt_mask_residency + mask_sample.w * weight;
             }
         }
     }
@@ -2997,7 +3151,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         // Beer-Lambert absorption: deeper water = more blue, absorbs red first
         let absorption = vec3<f32>(0.8, 0.15, 0.02); // RGB absorption per unit depth  
         let max_depth = 3.0; // Visual depth scaling
-        let transmittance = exp(-absorption * water_depth_value * max_depth);
+        let transmittance = det_exp3(-absorption * water_depth_value * max_depth);
         
         // Deep water color - saturated blue matching reference image
         // Reference shows bright blue lake - boost saturation significantly
@@ -3041,13 +3195,13 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         let wave_dy = (wave1 + wave2 + wave3) * wind_sin + cross_wave * wind_cos;
         
         // Build perturbed normal (Y is up)
-        shading_normal = normalize(vec3<f32>(wave_dx, 1.0, wave_dy));
+        shading_normal = det_normalize3(vec3<f32>(wave_dx, 1.0, wave_dy));
     }
 
     if (!is_water) {
         var map_mask = material_map_mask(parallax_uv);
         if (vt_mask_enabled) {
-            map_mask = map_mask * clamp(vt_mask_value, 0.0, 1.0);
+            map_mask = map_mask * clamp(vt_mask_data.r, 0.0, 1.0);
         }
         if (vt_normal_enabled) {
             shading_normal = apply_encoded_tangent_normal(
@@ -3064,6 +3218,16 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             map_mask
         );
         roughness = apply_material_roughness_map(roughness, parallax_uv, map_mask);
+        if (vt_mask_enabled) {
+            // Feed the mask family's roughness channel into the BRDF, gated by
+            // residency coverage: fragments whose mask tiles are not yet
+            // resident keep the current default roughness.
+            roughness = mix(
+                roughness,
+                clamp(vt_mask_data.g, 0.04, 1.0),
+                clamp(vt_mask_residency, 0.0, 1.0)
+            );
+        }
     }
     
     // ──────────────────────────────────────────────────────────────────────────
@@ -3219,7 +3383,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         let dndx = dpdx(shading_normal);
         let dndy = dpdy(shading_normal);
         // Raw variance: average squared magnitude of derivatives
-        let raw_variance = 0.5 * (dot(dndx, dndx) + dot(dndy, dndy));
+        let raw_variance = 0.5 * (det_dot3(dndx, dndx) + det_dot3(dndy, dndy));
         
         // SpecAA in the main path (beauty mode, debug=0) is effectively disabled
         // by using a very high variance threshold. This preserves natural terrain detail.
@@ -3264,10 +3428,10 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     var f0 = mix(vec3<f32>(0.04, 0.04, 0.04), albedo, metallic);
     if (is_water) {
         let ior = 1.33;
-        let f0_scalar = pow((ior - 1.0) / (ior + 1.0), 2.0);
+        let f0_scalar = det_pow((ior - 1.0) / (ior + 1.0), 2.0);
         f0 = vec3<f32>(f0_scalar, f0_scalar, f0_scalar);
     }
-    let light_dir = normalize(u_terrain.sun_exposure.xyz);
+    let light_dir = det_normalize3(u_terrain.sun_exposure.xyz);
     
     // P3: Use split-roughness BRDF for terrain direct lighting
     // base_roughness for diffuse (crisp detail), specular_roughness for specular (anti-aliased)
@@ -3275,7 +3439,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     if (TERRAIN_USE_BRDF_DISPATCH) {
         // Use unified BRDF dispatch (allows model switching) with specular roughness
         let shading_params = terrain_to_shading_params(specular_roughness, metallic, TERRAIN_BRDF_MODEL);
-        let n_dot_l = max(dot(shading_normal, light_dir), 0.0);
+        let n_dot_l = max(det_dot3(shading_normal, light_dir), 0.0);
         lighting = eval_brdf(shading_normal, view_dir, light_dir, albedo, shading_params) * n_dot_l;
     } else {
         // P3: Use split-roughness BRDF - Toksvig on specular only
@@ -3573,7 +3737,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             sin(screen_pos.x * 5.1 - screen_pos.y * 8.3) * perturb_strength,
             0.0
         );
-        let sparkle_normal = normalize(shading_normal + perturb);
+        let sparkle_normal = det_normalize3(shading_normal + perturb);
         
         // CRITICAL: Recompute variance on the PERTURBED normal
         // This is where SpecAA must detect the high-frequency variation
@@ -3584,7 +3748,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             let dndy_sparkle = dpdy(sparkle_normal);
             // Use same 100x amplification as main path
             let sigma_scale = max(u_overlay.params2.w, 1.0) * 100.0;
-            let sparkle_sigma2 = 0.5 * (dot(dndx_sparkle, dndx_sparkle) + dot(dndy_sparkle, dndy_sparkle)) * sigma_scale;
+            let sparkle_sigma2 = 0.5 * (det_dot3(dndx_sparkle, dndx_sparkle) + det_dot3(dndy_sparkle, dndy_sparkle)) * sigma_scale;
             sparkle_sigma2_for_debug = sparkle_sigma2;  // Save raw value for debug
             let sparkle_sigma2_clamped = clamp(sparkle_sigma2, 0.0, 1.0);
             
@@ -3605,7 +3769,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         );
         
         // Extract specular component (approximate: assume kD same ratio)
-        let n_dot_v_sparkle = saturate(dot(sparkle_normal, view_dir));
+        let n_dot_v_sparkle = saturate(det_dot3(sparkle_normal, view_dir));
         let f_sparkle = fresnel_schlick_roughness(n_dot_v_sparkle, f0, sparkle_roughness);
         let kS_sparkle = f_sparkle;
         let kD_sparkle = (vec3<f32>(1.0) - kS_sparkle) * (1.0 - metallic);
@@ -3663,13 +3827,13 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             sin(screen_pos.x * 5.1 - screen_pos.y * 8.3) * perturb_strength,
             0.0
         );
-        let sparkle_normal_dbg = normalize(shading_normal + perturb);
+        let sparkle_normal_dbg = det_normalize3(shading_normal + perturb);
         
         // Compute variance on perturbed normal
         let dndx_dbg = dpdx(sparkle_normal_dbg);
         let dndy_dbg = dpdy(sparkle_normal_dbg);
         let sigma_scale_dbg = max(u_overlay.params2.w, 1.0) * 100.0;
-        let sparkle_sigma2_dbg = 0.5 * (dot(dndx_dbg, dndx_dbg) + dot(dndy_dbg, dndy_dbg)) * sigma_scale_dbg;
+        let sparkle_sigma2_dbg = 0.5 * (det_dot3(dndx_dbg, dndx_dbg) + det_dot3(dndy_dbg, dndy_dbg)) * sigma_scale_dbg;
         
         // Visualize (no additional scaling - should already be visible with 100x)
         let sigma2_vis_sparkle = clamp(sparkle_sigma2_dbg, 0.0, 1.0);
@@ -3862,7 +4026,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         // Shows raw lambert term as grayscale for shadow-field diagnosis.
         // White = sun-facing, Black = shadow-facing.
         // ROI_A should show moderate gray, ROI_B should show brighter values.
-        let ndotl_terrain = max(dot(shading_normal, light_dir), 0.0);
+        let ndotl_terrain = max(det_dot3(shading_normal, light_dir), 0.0);
         out.color = vec4<f32>(vec3<f32>(ndotl_terrain), 1.0);
         return out;
     } else if (debug_mode == DBG_SHADOW_FACTOR) {
@@ -3877,7 +4041,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         // Shows final linear color before tonemapping (clamped for display).
         // Useful for diagnosing tonemap compression issues.
         // Compute terrain shading inline for this debug mode
-        let ndotl_dbg = max(dot(shading_normal, light_dir), 0.0);
+        let ndotl_dbg = max(det_dot3(shading_normal, light_dir), 0.0);
         let sun_int_dbg = length(u_shading.light_params.rgb);
         let ambient_dbg = 0.18;
         let sun_peak_dbg = 0.42;
@@ -3898,11 +4062,11 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             // Water: specular-dominant shading (minimal diffuse, strong reflections)
             // Fresnel is already baked into eval_ibl via fresnel_schlick_roughness
             // Direct specular from sun
-            let n_dot_v = max(dot(shading_normal, view_dir), 0.001);
-            let n_dot_l = max(dot(shading_normal, light_dir), 0.0);
-            let h = normalize(view_dir + light_dir);
-            let n_dot_h = max(dot(shading_normal, h), 0.0);
-            let v_dot_h = max(dot(view_dir, h), 0.001);
+            let n_dot_v = max(det_dot3(shading_normal, view_dir), 0.001);
+            let n_dot_l = max(det_dot3(shading_normal, light_dir), 0.0);
+            let h = det_normalize3(view_dir + light_dir);
+            let n_dot_h = max(det_dot3(shading_normal, h), 0.0);
+            let v_dot_h = max(det_dot3(view_dir, h), 0.001);
             
             // GGX Distribution for water - use proper alpha² without over-clamping
             // For very smooth surfaces (roughness ~0.01), D can legitimately reach 10000+
@@ -3914,7 +4078,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             let D = alpha2 / (PI * denom * denom);
             
             // Fresnel (Schlick) using v_dot_h for correct specular Fresnel
-            let fresnel = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - v_dot_h, 5.0);
+            let fresnel = f0 + (vec3<f32>(1.0) - f0) * det_pow(1.0 - v_dot_h, 5.0);
             
             // Geometry term (Smith GGX, height-correlated)
             // For very smooth surfaces, G approaches 1.0
@@ -4007,7 +4171,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
             // Reference quantiles: q5=0.10, q50=0.35, q95=0.65
             
             // Compute lambert term for hillshade-like appearance
-            let n_dot_l_terrain = max(dot(shading_normal, light_dir), 0.0);
+            let n_dot_l_terrain = max(det_dot3(shading_normal, light_dir), 0.0);
             
             // Style Match Fix: Compress dynamic range while preserving local contrast
             // Reference has compressed highlights (D1) and readable shadow detail
@@ -4277,7 +4441,7 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     out.aov_albedo = vec4<f32>(albedo, 1.0);
 
     // AOV Normal: Normalized world-space shading normal in signed float space
-    out.aov_normal = vec4<f32>(normalize(shading_normal), 1.0);
+    out.aov_normal = vec4<f32>(det_normalize3(shading_normal), 1.0);
 
     // AOV Depth: Linear view-space depth normalized to [0,1] based on clip planes
     // Compute view-space position to get linear depth
@@ -4291,6 +4455,10 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
         1.0
     );
     out.aov_depth = vec4<f32>(depth_normalized, depth_normalized, depth_normalized, 1.0);
+
+    // VERITAS: co-emitted with the color at composite time so the source map
+    // and the image always describe the same frame.
+    out.source_id = terrain_vt_albedo_source_id;
 
     return out;
 }

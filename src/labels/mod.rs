@@ -18,6 +18,7 @@ pub mod declutter;
 pub mod layer;
 pub mod leader;
 pub mod line_label;
+pub mod optimal;
 mod projection;
 #[cfg(feature = "extension-module")]
 pub mod py_bindings;
@@ -35,6 +36,9 @@ pub use layer::{
 };
 pub use leader::{create_leader_line, generate_leader_vertices};
 pub use line_label::{compute_glyph_advances, compute_line_label_placement};
+pub use optimal::{
+    declutter_optimal, ladder_candidates, OptimalOutcome, RationaleRecord, SolverCandidate,
+};
 pub use projection::LabelProjector;
 pub use rtree::LabelRTree;
 pub use types::{

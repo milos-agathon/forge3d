@@ -109,7 +109,7 @@ def test_public_tiles3d_validator_reports_incomplete_render_workflow(tmp_path):
     assert report.layer_summaries[0].details["tile_count"] == 1
 
 
-def test_terrain_vt_validator_reports_non_albedo_families():
+def test_terrain_vt_validator_reports_all_native_families_supported():
     from forge3d.terrain_params import (
         TerrainVTSettings,
         VTLayerFamily,
@@ -123,12 +123,18 @@ def test_terrain_vt_validator_reports_non_albedo_families():
 
     report = validate_terrain_vt_support(settings, layer_id="terrain.vt")
 
-    assert report.status == "error"
-    assert [diag.code for diag in report.diagnostics] == [
-        "vt_unsupported_family",
-        "vt_unsupported_family",
+    assert report.status == "ok"
+    assert report.diagnostics == ()
+    assert report.supported_features == {
+        "vt.albedo": "supported",
+        "vt.mask": "supported",
+        "vt.normal": "supported",
+    }
+    assert report.layer_summaries[0].details["native_supported_families"] == [
+        "albedo",
+        "mask",
+        "normal",
     ]
-    assert [diag.details["family"] for diag in report.diagnostics] == ["mask", "normal"]
 
 
 def test_label_validator_reports_experimental_paths_and_missing_glyphs():

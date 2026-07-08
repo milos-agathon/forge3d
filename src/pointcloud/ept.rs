@@ -258,6 +258,7 @@ impl EptDataset {
             positions,
             colors,
             intensities: None,
+            classifications: None,
         })
     }
 
@@ -278,6 +279,7 @@ pub struct PointData {
     pub positions: Vec<f32>,
     pub colors: Option<Vec<u8>>,
     pub intensities: Option<Vec<u16>>,
+    pub classifications: Option<Vec<u8>>,
 }
 
 fn read_dim_value(data: &[u8], dim: &EptDimension) -> f64 {

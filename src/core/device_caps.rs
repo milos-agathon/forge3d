@@ -2,7 +2,7 @@
 //!
 //! Provides structured access to GPU device capabilities, limits, and features.
 
-use super::gpu::ctx;
+use super::gpu::try_ctx;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -51,7 +51,7 @@ pub struct DeviceCaps {
 impl DeviceCaps {
     /// Create DeviceCaps from current GPU context
     pub fn from_current_device() -> PyResult<Self> {
-        let g = ctx();
+        let g = try_ctx()?;
         let adapter_info = g.adapter.get_info();
         let device_limits = g.device.limits();
 

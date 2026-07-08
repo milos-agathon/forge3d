@@ -91,6 +91,8 @@ class TestNativeModuleSymbols:
         "VectorInfo",
         "AffineTransform",
         "CrsTransform",
+        # CARTOGRAPHER-PRIME: grounded optimal-declutter rationale
+        "LabelRationale",
     ]
 
     @pytest.mark.parametrize("cls_name", EXPECTED_CLASSES)
@@ -119,11 +121,29 @@ class TestNativeModuleSymbols:
         "hybrid_render",
         "configure_csm",
         "global_memory_metrics",
+        "set_memory_budget_policy",
+        "get_memory_budget_policy",
+        "io_import_gltf_with_materials_py",
+        "decode_b3dm_py",
+        "tiles3d_traverse_py",
+        "decode_pnts_py",
+        "vector_render_oit_edl_py",
+        "read_laz_point_attributes",
+        "copc_read_node_points",
+        # AEQUITAS: PT-vs-raster adjudication pair
+        "render_adjudication_pair",
+        # PROMETHEUS: GPU terrain path-traced reference
+        "hybrid_render_terrain_reference",
+        # VERITAS: per-pixel cryptographic provenance
+        "seal_provenance",
+        "verify_provenance",
         "verify_license_signature",
         "license_public_key_hex",
         # P0.4: TBN mesh generation
         "mesh_generate_cube_tbn",
         "mesh_generate_plane_tbn",
+        # CARTOGRAPHER-PRIME: bounded-optimal label declutter
+        "declutter_optimal",
         # G-002a1: Rust-backed GIS raster metadata/write foundation
         "read_raster_info",
         "read_raster",
@@ -672,6 +692,8 @@ class TestPackageLevelApiContracts:
         "HdrFrame",
         "__version__",
         "has_gpu",
+        "device_probe",
+        "native_import_error",
         "open_viewer",
         "open_viewer_async",
         "render_offscreen_rgba",
@@ -687,6 +709,17 @@ class TestPackageLevelApiContracts:
         "LicenseError",
         "render_offline",
         "oidn_available",
+        # AEQUITAS: PT-vs-raster adjudication pair
+        "render_adjudication_pair",
+        # VERITAS: per-pixel cryptographic provenance
+        "seal_provenance",
+        "verify_provenance",
+        # SUTURA: zero-placeholder MapScene contract
+        "MapSceneNativeUnavailable",
+        "CompiledScenePlan",
+        # CARTOGRAPHER-PRIME: bounded-optimal label solve + rationale
+        "declutter_optimal",
+        "LabelRationale",
     ]
 
     @pytest.mark.parametrize("attr_name", EXPECTED_PACKAGE_ATTRS)
@@ -780,6 +813,7 @@ class TestIoFunctionContracts:
         "io_export_obj_py",
         "io_export_stl_py",
         "io_import_gltf_py",
+        "io_import_gltf_with_materials_py",
     ]
 
     @pytest.mark.parametrize("fn_name", IO_FUNCTIONS)
@@ -1050,6 +1084,11 @@ class TestSsgiSsrSettingsWiring:
         """Scene must expose native SDF text quads with halo fields."""
         assert hasattr(_native.Scene, "add_native_text_rect_uv_halo")
         assert callable(getattr(_native.Scene, "add_native_text_rect_uv_halo"))
+
+    def test_terrain_params_exposes_screen_space_settings(self):
+        """TerrainRenderParams must expose decoded SSAO/SSGI/SSR/TAA settings."""
+        assert hasattr(_native.TerrainRenderParams, "screen_space_settings")
+        assert callable(getattr(_native.TerrainRenderParams, "screen_space_settings"))
 
 
 # ===========================================================================
@@ -1406,6 +1445,10 @@ class TestCopcLazDecompression:
         """read_laz_points_info() is callable from the native module."""
         assert hasattr(_native, "read_laz_points_info")
 
+    def test_read_laz_point_attributes_function_exists(self):
+        """read_laz_point_attributes() is callable from the native module."""
+        assert hasattr(_native, "read_laz_point_attributes")
+
     # ---- Fixture-based LAZ decompression validation ----
 
     def _fixture_path(self):
@@ -1458,6 +1501,15 @@ class TestCopcLazDecompression:
         _, coords, _ = _native.read_laz_points_info(self._fixture_path())
         # 3 points * 3 coords = 9 values
         assert len(coords) == 9
+
+    def test_laz_attributes_include_classification_and_intensity(self):
+        """Native LAZ samples expose per-point classification and intensity attributes."""
+        result = _native.read_laz_point_attributes(self._fixture_path(), 3)
+        assert result["point_count"] > 0
+        assert len(result["coords"]) == 9
+        assert len(result["intensities"]) == 3
+        assert len(result["classifications"]) == 3
+        assert all(isinstance(v, int) for v in result["classifications"])
 
     def test_read_laz_nonexistent_file_raises(self):
         """Reading a nonexistent file raises IOError."""

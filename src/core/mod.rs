@@ -28,10 +28,10 @@ pub mod bloom;
 // staging_rings and fence_tracker are declared below with feature flags
 pub mod compressed_textures; // O3: Compressed texture pipeline
 pub mod feedback_buffer; // O4: GPU feedback buffer for tile visibility
+pub mod provenance; // VERITAS: per-pixel source provenance commitment
 pub mod texture_format; // O3: Texture format registry and detection
 pub mod texture_format_defs; // O3: Texture format definitions
 pub mod tile_cache;
-pub mod virtual_texture; // O4: Virtual texture streaming system // O4: LRU tile cache for virtual textures
 
 // New framegraph implementation
 pub mod framegraph_impl;

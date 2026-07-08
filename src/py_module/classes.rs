@@ -45,6 +45,7 @@ pub(crate) fn register_py_classes(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<crate::animation::CameraState>()?;
     m.add_class::<crate::labels::py_bindings::PyLabelStyle>()?;
     m.add_class::<crate::labels::py_bindings::PyLabelFlags>()?;
+    m.add_class::<crate::labels::py_bindings::PyLabelRationale>()?;
     m.add_class::<crate::smoke::py::PySmokeDomain>()?;
     m.add_class::<crate::smoke::py::PySmokeEmitter>()?;
     m.add_class::<crate::smoke::py::PySmokeStepSettings>()?;

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import forge3d as f3d
 
 
@@ -42,11 +44,14 @@ def test_albedo_only_vt_scene_validates_and_renders(tmp_path):
     assert summary.details["families"] == ["albedo"]
     assert summary.details["native_supported_families"] == ["albedo"]
 
+    # The fixture DEM has no renderable heightmap: render must block with a
+    # structured diagnostic instead of writing a CPU placeholder.
     output_path = tmp_path / "albedo-vt.png"
-    render_report = scene.render(str(output_path), allow_placeholder=True)
-
-    assert output_path.exists()
-    assert render_report.status == "ok"
+    with pytest.raises(f3d.MapSceneNativeUnavailable):
+        scene.render(str(output_path))
+    assert not output_path.exists()
+    assert scene.last_validation_report is not None
+    assert scene.last_validation_report.status == "ok"
 
 
 def test_non_albedo_vt_families_are_deterministic_supported_families():
@@ -71,14 +76,16 @@ def test_non_albedo_vt_families_are_deterministic_supported_families():
     assert first.unsupported_features == {}
 
 
-def test_non_albedo_vt_request_no_longer_blocks_render(tmp_path):
+def test_non_albedo_vt_request_does_not_block_validation(tmp_path):
     scene = _scene_with_vt(["albedo", "normal"])
     output_path = tmp_path / "silently-skipped-normal.png"
 
-    report = scene.render(str(output_path), allow_placeholder=True)
+    # Non-albedo VT families no longer block validation; rendering itself is
+    # blocked only because the fixture terrain has no native heightmap.
+    with pytest.raises(f3d.MapSceneNativeUnavailable):
+        scene.render(str(output_path))
 
-    assert output_path.exists()
-    assert report.status == "ok"
+    assert not output_path.exists()
     assert scene.last_validation_report is not None
     assert scene.last_validation_report.status == "ok"
     assert "vt.normal" not in scene.last_validation_report.unsupported_features

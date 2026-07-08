@@ -1,0 +1,208 @@
+# TERRA-DETERMINATA: cross-vendor bit-exact rendering gate.
+#
+# Renders the canonical terrain+CSM+IBL reference scene (forge3d.determinism)
+# on a {intel, amd, nvidia, apple, wasm} matrix and fails the build if any two
+# produced SHA-256 hashes differ, or if any differs from the committed golden
+# tests/goldens/determinism/terra_determinata_v1.sha256. Zero-byte tolerance.
+#
+# Gated vs informational legs (follows the repo convention of skipping visual
+# goldens on unsupported hosted GPUs, see ci.yml test-golden-images):
+#   - apple  : GATED. macos-14 runners have a real Apple Silicon GPU (Metal).
+#              continue-on-error: false. If hosted macOS proves flaky move this
+#              leg to a self-hosted Apple runner, do not soften the diff.
+#   - intel  : informational on hosted ubuntu (no Intel GPU; llvmpipe/lavapipe
+#              are software adapters). Becomes gated on a self-hosted
+#              gpu-intel runner.
+#   - amd    : informational on hosted windows (no AMD GPU; WARP is software).
+#              Becomes gated on a self-hosted gpu-amd runner.
+#   - nvidia : informational on hosted ubuntu (no NVIDIA GPU). Becomes gated
+#              on a self-hosted gpu-nvidia runner.
+#   - wasm   : the relaxed-SIMD build-policy check is GATED (RUSTFLAGS /
+#              .cargo config must never enable +relaxed-simd — it is
+#              nondeterministic by design). The render itself is informational
+#              until a browser-backed WebGPU runner exists.
+#
+# Informational legs still attempt a real render: if a hardware adapter is
+# present they upload a hash that the diff job enforces; if not they upload an
+# explicit ABSENT marker with the reason (loud, never a silent placeholder).
+
+name: determinism-matrix
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/shaders/includes/determinism.wgsl'
+      - 'src/shaders/includes/tonemap_common.wgsl'
+      - 'src/shaders/csm.wgsl'
+      - 'src/shaders/lighting_ibl.wgsl'
+      - 'src/shaders/terrain_pbr_pom.wgsl'
+      - 'src/core/gpu.rs'
+      - 'python/forge3d/determinism.py'
+      - 'tests/test_determinism_hash.py'
+      - 'tests/goldens/determinism/**'
+      - '.github/workflows/determinism-matrix.yml'
+
+env:
+  SCENE: terra_determinata_v1
+
+jobs:
+  render:
+    name: render (${{ matrix.leg }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: intel
+            os: ubuntu-latest
+            backend: vulkan
+            gated: false
+          - leg: amd
+            os: windows-latest
+            backend: dx12
+            gated: false
+          - leg: nvidia
+            os: ubuntu-latest
+            backend: vulkan
+            gated: false
+          - leg: apple
+            os: macos-14
+            backend: metal
+            gated: true
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ !matrix.gated }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Mesa Vulkan drivers (Linux legs)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools libvulkan1
+      - name: Build extension
+        run: |
+          python -m pip install -U pip maturin numpy
+          maturin develop --release
+      - name: Render canonical scene
+        shell: bash
+        env:
+          FORGE3D_DETERMINISTIC: '1'
+          WGPU_BACKENDS: ${{ matrix.backend }}
+        run: |
+          mkdir -p hash-out
+          set +e
+          python -m forge3d.determinism \
+            --scene "$SCENE" --width 512 --height 512 \
+            --out-png "hash-out/${SCENE}.png" | tee render.log
+          status=$?
+          set -e
+          if [ $status -eq 0 ]; then
+            python - <<'EOF'
+          import json, pathlib
+          last = pathlib.Path('render.log').read_text().strip().splitlines()[-1]
+          sha = json.loads(last)['sha256']
+          pathlib.Path('hash-out/${{ env.SCENE }}.sha256').write_text(sha + '\n')
+          print('hash:', sha)
+          EOF
+          elif [ "${{ matrix.gated }}" = "true" ]; then
+            echo "GATED leg '${{ matrix.leg }}' failed to render — failing the build."
+            exit $status
+          else
+            echo "informational leg '${{ matrix.leg }}': no usable hardware adapter on this hosted runner" \
+              | tee "hash-out/${SCENE}.ABSENT"
+            tail -n 20 render.log >> "hash-out/${SCENE}.ABSENT" || true
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: determinism-hash-${{ matrix.leg }}
+          path: hash-out/
+          if-no-files-found: error
+
+  wasm-policy:
+    name: render (wasm) — relaxed-SIMD policy gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Forbid relaxed-SIMD in any build configuration (GATED)
+        run: |
+          # Relaxed SIMD is nondeterministic by design (results may vary per
+          # engine/hardware). The wasm build path must never enable it:
+          # RUSTFLAGS / target-features must NOT include +relaxed-simd.
+          if grep -rn "relaxed-simd" .cargo/ Cargo.toml pyproject.toml .github/workflows/ --include='*' 2>/dev/null | grep -v "determinism-matrix.yml"; then
+            echo "relaxed-simd found in build configuration — nondeterministic, forbidden."
+            exit 1
+          fi
+          echo "OK: no build path enables +relaxed-simd."
+      - name: Document informational render status
+        run: |
+          mkdir -p hash-out
+          echo "informational leg 'wasm': hosted runners have no browser WebGPU device;" \
+               "render leg activates when a browser-backed runner (e.g. wgpu-in-chrome) is available." \
+               > "hash-out/${SCENE}.ABSENT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: determinism-hash-wasm
+          path: hash-out/
+          if-no-files-found: error
+
+  diff:
+    name: diff hashes (zero-byte tolerance)
+    needs: [render, wasm-policy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: determinism-hash-*
+          path: hashes
+      - name: Fail on any pairwise or golden mismatch
+        shell: python
+        run: |
+          import pathlib, sys
+
+          scene = "terra_determinata_v1"
+          golden_file = pathlib.Path(f"tests/goldens/determinism/{scene}.sha256")
+          golden = golden_file.read_text().split()[0].strip() if golden_file.exists() else None
+
+          produced = {}
+          absent = {}
+          for artifact_dir in sorted(pathlib.Path("hashes").glob("determinism-hash-*")):
+              leg = artifact_dir.name.removeprefix("determinism-hash-")
+              sha_file = artifact_dir / f"{scene}.sha256"
+              absent_file = artifact_dir / f"{scene}.ABSENT"
+              if sha_file.exists():
+                  produced[leg] = sha_file.read_text().split()[0].strip()
+              elif absent_file.exists():
+                  absent[leg] = absent_file.read_text().splitlines()[0]
+
+          print("produced hashes:")
+          for leg, sha in sorted(produced.items()):
+              print(f"  {leg:8s} {sha}")
+          for leg, why in sorted(absent.items()):
+              print(f"informational/absent: {leg}: {why}")
+          if golden:
+              print(f"committed golden: {golden}")
+          else:
+              print("WARNING: no committed golden found", file=sys.stderr)
+
+          failures = []
+          values = sorted(set(produced.values()))
+          if len(values) > 1:
+              failures.append(f"pairwise mismatch across legs: {produced}")
+          if golden and any(sha != golden for sha in produced.values()):
+              failures.append(f"mismatch against committed golden {golden}: {produced}")
+          if golden is None and produced:
+              failures.append("hashes were produced but no golden is committed")
+          if not produced:
+              print("no leg produced a hash (all informational legs device-absent);"
+                    " nothing to diff — the gated legs enforce the contract.")
+          if failures:
+              print("DETERMINISM FAILURE (zero-byte tolerance):", file=sys.stderr)
+              for f in failures:
+                  print("  " + f, file=sys.stderr)
+              sys.exit(1)
+          print("determinism diff: OK")

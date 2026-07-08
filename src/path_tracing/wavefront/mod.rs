@@ -1,6 +1,6 @@
 // src/path_tracing/wavefront/mod.rs
 // Wavefront Path Tracer: Main scheduler and orchestration
-// Queue-based GPU path tracing with persistent threads and stream compaction
+// Queue-based GPU path tracing with persistent threads
 
 pub mod pipeline;
 pub mod queues;
@@ -61,6 +61,7 @@ pub struct WavefrontScheduler {
     aov_normal: Buffer,
     medium_params: Buffer,
     hair_segments: Buffer,
+    environment_params: Buffer,
 }
 
 impl WavefrontScheduler {
@@ -179,11 +180,21 @@ impl WavefrontScheduler {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let dummy_seg: [u32; 4] = [0; 4];
+        // One zeroed HairSegment: the WGSL struct (pt_intersect.wgsl) has a
+        // 48-byte stride (vec3 members -> 16-byte struct alignment), so the
+        // minimum valid binding is 48 bytes, not 16.
+        let dummy_seg: [u32; 12] = [0; 12];
         let hair_segments = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("hair-segments"),
             contents: bytemuck::cast_slice(&dummy_seg),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+        let environment =
+            crate::path_tracing::reference_scene::adjudication_scene().environment_raw();
+        let environment_params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("reference-environment-uniform"),
+            contents: bytemuck::bytes_of(&environment),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
         Ok(Self {
@@ -216,6 +227,7 @@ impl WavefrontScheduler {
             aov_normal,
             medium_params,
             hair_segments,
+            environment_params,
         })
     }
 }

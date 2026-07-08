@@ -35,7 +35,7 @@ impl WavefrontScheduler {
             accum_bind_group,
         )?;
         let max_iterations = MAX_DEPTH * 2;
-        for iteration in 0..max_iterations {
+        for _iteration in 0..max_iterations {
             let ray_count =
                 self.queue_buffers
                     .get_active_ray_count(&self.device, &self.queue, &mut encoder)?;
@@ -61,21 +61,26 @@ impl WavefrontScheduler {
                 scene_bind_group,
                 accum_bind_group,
             )?;
-            if iteration % 2 == 0 && iteration > 0 {
-                self.dispatch_compact(&mut encoder)?;
-            }
         }
         self.queue.submit(std::iter::once(encoder.finish()));
         self.frame_index += 1;
         Ok(())
     }
 
+    /// Render one wavefront frame and return the number of wavefront
+    /// iterations executed (each iteration = intersect + shade + shadow +
+    /// scatter over the currently active ray wave). A genuine path-traced
+    /// frame executes >= 2 iterations: the primary wave plus at least one
+    /// BSDF-sampled bounce wave. Errors if the active-ray count is zero
+    /// immediately after raygen — that means the queue state or the
+    /// active-count readback is broken, and hiding it behind a one-iteration
+    /// fallback would silently degrade the render into a primary-only pass.
     pub fn render_frame_simple(
         &mut self,
         uniforms_buffer: &Buffer,
         scene_bind_group: &BindGroup,
         accum_bind_group: &BindGroup,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<u32, Box<dyn std::error::Error>> {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -98,14 +103,50 @@ impl WavefrontScheduler {
             accum_bind_group,
         )?;
         let max_iterations = MAX_DEPTH * 2;
-        let mut did_any = false;
+        let mut iterations_executed = 0u32;
+        // Rays consumed in completed iterations. The ray queue is append-only
+        // within a frame (raygen + each scatter wave push at increasing
+        // indices); every iteration drains all rays present when it starts,
+        // so the consumed prefix after iteration k is the in_count that was
+        // current when iteration k was dispatched. out_count itself is NOT
+        // trustworthy between iterations: the persistent-thread pop pattern
+        // over-increments it past in_count once the wave drains, which is
+        // exactly the corruption that used to silently reduce this loop to a
+        // single (direct-lighting-only) iteration.
+        let mut consumed_rays = 0u32;
         for iteration in 0..max_iterations {
-            let ray_count =
-                self.queue_buffers
-                    .get_active_ray_count(&self.device, &self.queue, &mut encoder)?;
-            if ray_count == 0 && did_any {
+            let header = self.queue_buffers.read_ray_queue_header(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+            )?;
+            if header.in_count > header.capacity {
+                // Scatter's atomicAdd bumps in_count even when the capacity
+                // guard drops the write, so this detects silently lost bounce
+                // rays (a biased render) instead of hiding them.
+                return Err(format!(
+                    "wavefront ray queue overflow: {} rays pushed into capacity {}",
+                    header.in_count, header.capacity
+                )
+                .into());
+            }
+            let active = header.in_count.saturating_sub(consumed_rays);
+            if active == 0 {
+                if iteration == 0 {
+                    // Raygen always pushes width*height primary rays; zero
+                    // active rays here means the queue state or the readback
+                    // is broken. Fail loudly instead of hiding it behind a
+                    // one-iteration fallback.
+                    return Err("wavefront raygen produced zero active rays; \
+                                queue state or active-count readback is broken"
+                        .into());
+                }
                 break;
             }
+            // read_ray_queue_header stalled on all prior GPU work, so these
+            // header writes land before this iteration's dispatches.
+            self.queue_buffers
+                .begin_iteration(&self.queue, consumed_rays);
             self.dispatch_intersect(&mut encoder, uniforms_buffer, scene_bind_group)?;
             self.dispatch_shade(
                 &mut encoder,
@@ -125,13 +166,15 @@ impl WavefrontScheduler {
                 scene_bind_group,
                 accum_bind_group,
             )?;
-            did_any = true;
-            if iteration % 2 == 0 && iteration > 0 {
-                self.dispatch_compact(&mut encoder)?;
-            }
+            // This iteration consumes every ray present when it started.
+            consumed_rays = header.in_count;
+            iterations_executed += 1;
+            // NOTE: no queue compaction here — compaction would relocate
+            // queue entries and invalidate the consumed-prefix bookkeeping
+            // (see the removal note in dispatch.rs).
         }
         self.queue.submit(std::iter::once(encoder.finish()));
         self.frame_index += 1;
-        Ok(())
+        Ok(iterations_executed)
     }
 }

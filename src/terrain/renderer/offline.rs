@@ -369,7 +369,8 @@ impl TerrainScene {
                 ],
             });
         let tonemap_shader_source = format!(
-            "{}\n{}",
+            "{}\n{}\n{}",
+            include_str!("../../shaders/includes/determinism.wgsl"),
             include_str!("../../shaders/includes/tonemap_common.wgsl"),
             include_str!("../../shaders/tonemap_terrain_offline.wgsl")
         );
@@ -495,6 +496,7 @@ impl TerrainScene {
             render_targets.internal_width,
             render_targets.internal_height,
             1,
+            false,
         );
         let beauty_accumulation = crate::terrain::AccumulationBuffer::new(
             self.device.as_ref(),
@@ -547,6 +549,9 @@ impl TerrainScene {
             &self.material_layer_bind_group_layout,
             OFFLINE_HDR_FORMAT,
             1,
+            // VERITAS source-id capture is one-shot only; accumulation would
+            // average ids, which is meaningless.
+            false,
         );
         let hdr_background_blit_pipeline = Self::create_depth_blit_pipeline(
             self.device.as_ref(),
@@ -1059,12 +1064,7 @@ impl TerrainScene {
         pass.set_bind_group(5, water_reflection_bind_group, &[]);
         pass.set_bind_group(6, material_layer_bind_group, &[]);
 
-        let vertex_count = if params.camera_mode.to_lowercase() == "mesh" {
-            let grid_size: u32 = 512;
-            6 * (grid_size - 1) * (grid_size - 1)
-        } else {
-            3
-        };
+        let vertex_count = self.terrain_vertex_count(params);
         pass.draw(0..vertex_count, 0..1);
         Ok(())
     }
@@ -1835,6 +1835,7 @@ impl TerrainRenderer {
             Some(albedo_texture),
             Some(normal_texture),
             Some(depth_texture),
+            None,
             out_width,
             out_height,
         );

@@ -1,3 +1,4 @@
+use crate::core::memory_tracker::global_tracker;
 use wgpu::{Buffer, BufferUsages, CommandEncoder, Device, Queue};
 
 #[repr(C)]
@@ -98,9 +99,6 @@ pub struct QueueBuffers {
     pub miss_queue: Buffer,
     pub shadow_queue_header: Buffer,
     pub shadow_queue: Buffer,
-    pub ray_queue_compacted: Buffer,
-    pub ray_flags: Buffer,
-    pub prefix_sums: Buffer,
 }
 
 impl QueueBuffers {
@@ -117,7 +115,6 @@ impl QueueBuffers {
         let hit_size = (std::mem::size_of::<Hit>() * capacity as usize) as u64;
         let scatter_size = (std::mem::size_of::<ScatterRay>() * capacity as usize) as u64;
         let shadow_size = (std::mem::size_of::<ShadowRay>() * capacity as usize) as u64;
-        let flags_size = (std::mem::size_of::<u32>() * capacity as usize) as u64;
 
         Ok(Self {
             capacity,
@@ -131,9 +128,6 @@ impl QueueBuffers {
             miss_queue: create_data_buffer(device, "miss-queue", ray_size),
             shadow_queue_header,
             shadow_queue: create_data_buffer(device, "shadow-queue", shadow_size),
-            ray_queue_compacted: create_data_buffer(device, "ray-queue-compacted", ray_size),
-            ray_flags: create_data_buffer(device, "ray-flags", flags_size),
-            prefix_sums: create_data_buffer(device, "prefix-sums", flags_size),
         })
     }
 
@@ -151,11 +145,99 @@ impl QueueBuffers {
 
     pub fn get_active_ray_count(
         &self,
-        _device: &Device,
-        _queue: &Queue,
-        _encoder: &mut CommandEncoder,
+        device: &Device,
+        queue: &Queue,
+        encoder: &mut CommandEncoder,
     ) -> Result<u32, Box<dyn std::error::Error>> {
-        Ok(0)
+        Ok(self
+            .read_ray_queue_header(device, queue, encoder)?
+            .active_count())
+    }
+
+    /// Read back the full ray-queue header (submits all pending encoder work
+    /// and stalls until the copy completes; `encoder` is replaced with a fresh
+    /// one). The caller owns interpreting `in_count`/`out_count`: after an
+    /// iteration the persistent-thread pop pattern leaves `out_count`
+    /// over-incremented past `in_count` (every launched thread's final failed
+    /// pop still bumps the counter), so `active_count()` is only meaningful
+    /// straight after raygen — mid-frame accounting must be reconstructed on
+    /// the CPU (see `WavefrontScheduler::render_frame_simple`).
+    pub fn read_ray_queue_header(
+        &self,
+        device: &Device,
+        queue: &Queue,
+        encoder: &mut CommandEncoder,
+    ) -> Result<QueueHeader, Box<dyn std::error::Error>> {
+        let header_size = std::mem::size_of::<QueueHeader>() as u64;
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("ray-queue-header-readback"),
+            size: header_size,
+            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        global_tracker().track_buffer_allocation(header_size, true);
+
+        encoder.copy_buffer_to_buffer(&self.ray_queue_header, 0, &staging, 0, header_size);
+        let next_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("wavefront-after-active-ray-count"),
+        });
+        let pending = std::mem::replace(encoder, next_encoder);
+        queue.submit(Some(pending.finish()));
+
+        let read_result = (|| -> Result<QueueHeader, Box<dyn std::error::Error>> {
+            let slice = staging.slice(..);
+            let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
+            slice.map_async(wgpu::MapMode::Read, move |result| {
+                sender.send(result).ok();
+            });
+            device.poll(wgpu::Maintain::Wait);
+            let map_result = pollster::block_on(receiver.receive())
+                .ok_or("ray queue header readback callback dropped")?;
+            map_result.map_err(|e| format!("ray queue header readback failed: {e:?}"))?;
+            let data = slice.get_mapped_range();
+            let header = *bytemuck::from_bytes::<QueueHeader>(&data[..header_size as usize]);
+            drop(data);
+            staging.unmap();
+            Ok(header)
+        })();
+
+        global_tracker().free_buffer_allocation(header_size, true);
+        read_result
+    }
+
+    /// Prepare the queues for one wavefront iteration.
+    ///
+    /// The ray queue is append-only within a frame: raygen and the scatter
+    /// stage push at monotonically increasing `in_count` indices, while the
+    /// persistent-thread pop pattern over-increments `out_count` once a wave
+    /// drains. Rewriting `out_count` to the exact number of rays consumed in
+    /// completed iterations makes both the active count and the next wave's
+    /// pop indices correct.
+    ///
+    /// The hit/scatter/shadow/miss queues are strictly intra-iteration
+    /// (produced and consumed inside a single wave), so their headers are
+    /// reset to empty each iteration; this also keeps them from accumulating
+    /// the same out-count corruption and from overflowing across bounces.
+    ///
+    /// Must be called after all previously submitted GPU work has completed
+    /// (i.e. after `read_ray_queue_header`, which stalls) and before the
+    /// iteration's dispatches are submitted.
+    pub fn begin_iteration(&self, queue: &Queue, consumed_rays: u32) {
+        // QueueHeader layout: in_count @0, out_count @4, capacity @8.
+        queue.write_buffer(
+            &self.ray_queue_header,
+            4,
+            bytemuck::bytes_of(&consumed_rays),
+        );
+        let empty: [u32; 2] = [0, 0];
+        for header in [
+            &self.hit_queue_header,
+            &self.scatter_queue_header,
+            &self.shadow_queue_header,
+            &self.miss_queue_header,
+        ] {
+            queue.write_buffer(header, 0, bytemuck::cast_slice(&empty));
+        }
     }
 }
 
@@ -175,4 +257,40 @@ fn create_data_buffer(device: &Device, label: &str, size: u64) -> Buffer {
         usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
         mapped_at_creation: false,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn device_queue() -> Option<(Device, Queue)> {
+        let instance = wgpu::Instance::default();
+        let adapter =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None)).ok()
+    }
+
+    #[test]
+    fn active_ray_count_reads_queue_header_state() {
+        let Some((device, queue)) = device_queue() else {
+            return;
+        };
+        let queues = QueueBuffers::new(&device, 16).expect("queue buffers");
+        let header = QueueHeader {
+            in_count: 7,
+            out_count: 2,
+            capacity: 16,
+            _pad: 0,
+        };
+        queue.write_buffer(&queues.ray_queue_header, 0, bytemuck::bytes_of(&header));
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("active-ray-count-test"),
+        });
+
+        let got = queues
+            .get_active_ray_count(&device, &queue, &mut encoder)
+            .expect("active ray count");
+
+        assert_eq!(got, 5);
+    }
 }

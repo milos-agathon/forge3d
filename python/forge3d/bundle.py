@@ -24,7 +24,9 @@ from typing import Any, Iterable, Mapping
 from ._license import _check_pro_access
 from .diagnostics import ValidationReport
 
-BUNDLE_VERSION = 2
+# Version 3 adds the frozen compile-phase plan (scene/compiled_plan.json).
+# Version 2 bundles remain readable: MapScene.load_bundle recompiles once.
+BUNDLE_VERSION = 3
 BUNDLE_EXTENSION = "forge3d"
 _LABEL_KINDS = {"point", "line", "curved", "callout"}
 

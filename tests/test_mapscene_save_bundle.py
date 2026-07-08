@@ -72,7 +72,7 @@ def test_save_bundle_writes_deterministic_review_bundle_with_label_plan(tmp_path
     first_report = _label_scene().save_bundle(str(first_path))
     second_report = _label_scene().save_bundle(str(second_path))
 
-    assert first_report.status == "error"
+    assert first_report.status == "ok"
     assert first_report.to_dict() == second_report.to_dict()
     assert _read_json(first_path / "manifest.json") == _read_json(second_path / "manifest.json")
     assert _read_json(first_path / "scene" / "mapscene_recipe.json") == _read_json(
@@ -89,8 +89,8 @@ def test_save_bundle_writes_deterministic_review_bundle_with_label_plan(tmp_path
     point_source = _read_json(first_path / "scene" / "layer_sources" / "points.json")
 
     assert state["validation_report"] == first_report.to_dict()
-    assert review["renderable"] is False
-    assert review["render_status"] == "blocked_by_diagnostics"
+    assert review["renderable"] is True
+    assert review["render_status"] == "ready_for_render"
     assert review["last_render_backend"] is None
     assert review["output"]["format"] == "png"
     assert review["source_layer_ids"] == ["labels", "ortho", "points", "roads", "terrain"]
@@ -102,8 +102,12 @@ def test_save_bundle_writes_deterministic_review_bundle_with_label_plan(tmp_path
     assert vector_source["source_reference"]["source_id"] == "roads-fixture"
     assert point_source["source_reference"]["source_id"] == "points-fixture"
     assert vector_source["features"][0]["id"] == "road-1"
-    diagnostic_layers = {diagnostic["layer_id"] for diagnostic in state["validation_report"]["diagnostics"]}
-    assert "points" in diagnostic_layers
+    # SUTURA: point clouds are classified native-required in the serialized
+    # recipe; rendering without native composition blocks with a diagnostic.
+    assert point_source["payload"]["support_level"] == "native-required"
+    compiled_plan = _read_json(first_path / "scene" / "compiled_plan.json")
+    assert "labels" in compiled_plan["compiled_label_plans"]
+    assert compiled_plan["depth_cull"]["camera_terrain_key"]
 
 
 def test_save_bundle_preserves_blocking_diagnostics_without_render_success_claim(tmp_path):

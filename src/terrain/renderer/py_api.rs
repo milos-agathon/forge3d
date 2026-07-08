@@ -6,7 +6,7 @@ use numpy::PyUntypedArrayMethods;
 impl TerrainRenderer {
     #[new]
     pub fn new(session: &crate::core::session::Session) -> PyResult<Self> {
-        let ctx = crate::core::gpu::ctx();
+        let ctx = crate::core::gpu::try_ctx()?;
         let scene = TerrainScene::new(
             ctx.device.clone(),
             ctx.queue.clone(),
@@ -692,6 +692,43 @@ impl TerrainRenderer {
             ))
         })?;
         Ok(material_vt.get_stats())
+    }
+
+    /// VERITAS: contributing-tile records for the last rendered frame.
+    ///
+    /// Blocking drain of the VT feedback stream, resolved on the CPU to the
+    /// resident mip each sampled texel actually landed on. Returns one dict
+    /// per deduplicated tile: `{family, family_slot, source_id, tile_x,
+    /// tile_y, mip_level, content_hash}` (hash hex-encoded). Empty when the
+    /// terrain VT (or its feedback path) is inactive.
+    #[pyo3(text_signature = "(self)")]
+    fn read_contributing_tiles(&self, py: Python<'_>) -> PyResult<PyObject> {
+        use crate::core::provenance::{to_hex, FAMILY_NAMES};
+
+        let tiles = self
+            .scene
+            .read_material_vt_contributing_tiles()
+            .map_err(|e| {
+                PyRuntimeError::new_err(format!("Failed to read contributing tiles: {e:#}"))
+            })?;
+
+        let out = pyo3::types::PyList::empty_bound(py);
+        for tile in tiles {
+            let dict = pyo3::types::PyDict::new_bound(py);
+            let family = FAMILY_NAMES
+                .get(tile.family_slot as usize)
+                .copied()
+                .unwrap_or("unknown");
+            dict.set_item("family", family)?;
+            dict.set_item("family_slot", tile.family_slot)?;
+            dict.set_item("source_id", tile.source_id)?;
+            dict.set_item("tile_x", tile.tile_x)?;
+            dict.set_item("tile_y", tile.tile_y)?;
+            dict.set_item("mip_level", tile.mip_level)?;
+            dict.set_item("content_hash", to_hex(&tile.content_hash))?;
+            out.append(dict)?;
+        }
+        Ok(out.into())
     }
 
     #[cfg(feature = "enable-renderer-config")]

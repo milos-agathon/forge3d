@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Dict, Any
 import numpy as np
 
+from ._native import NATIVE_AVAILABLE, get_native_module
 from .diagnostics import (
     LayerSummary,
     ValidationReport,
@@ -110,6 +111,50 @@ class Tileset:
         if uri.startswith("http://") or uri.startswith("https://"):
             return Path(uri)
         return self.base_path / uri
+
+
+@dataclass
+class Tiles3dDataset:
+    """Native-backed 3D Tiles dataset wrapper."""
+
+    path: Path
+    tileset: Tileset
+
+    @classmethod
+    def from_tileset_json(cls, path: str | Path) -> "Tiles3dDataset":
+        path = Path(path)
+        return cls(path=path, tileset=load_tileset(path))
+
+    def traverse(
+        self,
+        camera_position: Tuple[float, float, float],
+        *,
+        sse_threshold: float = 16.0,
+        max_depth: int = 32,
+    ) -> List[Dict[str, Any]]:
+        native = get_native_module() if NATIVE_AVAILABLE else None
+        native_traverse = getattr(native, "tiles3d_traverse_py", None) if native else None
+        if callable(native_traverse):
+            return [
+                dict(tile)
+                for tile in native_traverse(
+                    str(self.path),
+                    tuple(float(v) for v in camera_position),
+                    float(sse_threshold),
+                    int(max_depth),
+                )
+            ]
+
+        renderer = Tiles3dRenderer(sse_threshold=sse_threshold, max_depth=max_depth)
+        return [
+            {
+                "uri": tile.tile.content_uri(),
+                "resolved_path": str(self.tileset.resolve_uri(tile.tile.content_uri() or "")),
+                "sse": float(tile.sse),
+                "depth": int(tile.depth),
+            }
+            for tile in renderer.get_visible_tiles(self.tileset, camera_position)
+        ]
 
 
 def _parse_bounding_volume(data: Dict) -> BoundingVolume:
@@ -312,6 +357,16 @@ def decode_b3dm(data: bytes) -> Dict[str, Any]:
     Raises:
         NotImplementedError: glTF mesh extraction is not yet implemented
     """
+    native = get_native_module() if NATIVE_AVAILABLE else None
+    native_decode = getattr(native, "decode_b3dm_py", None) if native else None
+    if callable(native_decode):
+        decoded = dict(native_decode(data))
+        for key in ("feature_table", "batch_table"):
+            value = decoded.get(key)
+            if isinstance(value, str) and value:
+                decoded[key] = json.loads(value)
+        return decoded
+
     if len(data) < 28:
         raise ValueError("B3DM file too small")
 
@@ -363,6 +418,24 @@ def decode_pnts(data: bytes) -> Dict[str, Any]:
     Returns:
         Dict with positions, colors, normals
     """
+    native = get_native_module() if NATIVE_AVAILABLE else None
+    native_decode = getattr(native, "decode_pnts_py", None) if native else None
+    if callable(native_decode):
+        decoded = dict(native_decode(data))
+        point_count = int(decoded.get("point_count", 0))
+        decoded["positions"] = np.asarray(decoded["positions"], dtype=np.float32).reshape(point_count, 3)
+        if decoded.get("colors") is not None:
+            decoded["colors"] = np.asarray(decoded["colors"], dtype=np.uint8).reshape(point_count, 3)
+        if decoded.get("colors_rgba") is not None:
+            decoded["colors_rgba"] = np.asarray(decoded["colors_rgba"], dtype=np.uint8).reshape(point_count, 4)
+        if decoded.get("normals") is not None:
+            decoded["normals"] = np.asarray(decoded["normals"], dtype=np.float32).reshape(point_count, 3)
+        for key in ("feature_table", "batch_table"):
+            value = decoded.get(key)
+            if isinstance(value, str) and value:
+                decoded[key] = json.loads(value)
+        return decoded
+
     if len(data) < 28:
         raise ValueError("PNTS file too small")
 

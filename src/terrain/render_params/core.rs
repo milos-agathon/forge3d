@@ -19,6 +19,7 @@ pub struct DecodedTerrainSettings {
     pub vector_overlay: VectorOverlaySettingsNative,
     pub tonemap: TonemapSettingsNative,
     pub aov: AovSettingsNative,
+    pub screen_space: ScreenSpaceSettingsNative,
     pub dof: DofSettingsNative,
     pub motion_blur: MotionBlurSettingsNative,
     pub lens_effects: LensEffectsSettingsNative,

@@ -8,6 +8,10 @@ pub(super) fn register_io_import_py_functions(m: &Bound<'_, PyModule>) -> PyResu
         crate::io::gltf_read::io_import_gltf_py,
         m
     )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::io::gltf_read::io_import_gltf_with_materials_py,
+        m
+    )?)?;
 
     m.add_function(wrap_pyfunction!(
         crate::import::osm_buildings::import_osm_buildings_extrude_py,

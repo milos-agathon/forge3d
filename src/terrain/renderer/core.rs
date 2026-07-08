@@ -114,6 +114,9 @@ pub struct TerrainScene {
     pub(super) reflection_probe_mip_levels: u32,
     pub(super) aov_pipeline: Mutex<Option<wgpu::RenderPipeline>>,
     pub(super) aov_pipeline_sample_count: Mutex<u32>,
+    /// VERITAS: whether the cached AOV pipeline carries the 5th R32Uint
+    /// source-id target (rebuilt when this toggles, like sample count).
+    pub(super) aov_pipeline_source_id: Mutex<bool>,
     pub(super) _dof_renderer: Mutex<Option<crate::core::dof::DofRenderer>>,
     pub(super) offline_state: Mutex<Option<OfflineAccumulationState>>,
     #[cfg(feature = "enable-gpu-instancing")]
@@ -128,6 +131,11 @@ pub struct TerrainScene {
     pub(super) config: Arc<Mutex<crate::render::params::RendererConfig>>,
     pub(super) material_vt: Mutex<super::virtual_texture::TerrainMaterialVT>,
     pub(super) viewer_heightmap: Option<ViewerTerrainData>,
+    pub(super) clipmap_vertex_count: u32,
+    pub(super) clipmap_index_count: u32,
+    pub(super) clipmap_vertex_buffer: Option<wgpu::Buffer>,
+    pub(super) clipmap_index_buffer: Option<wgpu::Buffer>,
+    pub(super) _tracked_scene_textures: Vec<crate::core::resource_tracker::ResourceHandle>,
 }
 
 pub struct ViewerTerrainData {
@@ -219,11 +227,84 @@ pub(super) struct OverlayBinding {
 pub(super) struct PipelineCache {
     pub(super) sample_count: u32,
     pub(super) pipeline: wgpu::RenderPipeline,
+    pub(super) clipmap_pipeline: Option<wgpu::RenderPipeline>,
 }
 
 pub(super) const TERRAIN_DEFAULT_CASCADE_SPLITS: [f32; 4] = [50.0, 200.0, 800.0, 3000.0];
 pub(super) const MATERIAL_LAYER_CAPACITY: usize = 4;
 pub(super) const TERRAIN_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
+pub(super) fn terrain_camera_mode_tag(camera_mode: &str) -> &str {
+    camera_mode.split(':').next().unwrap_or(camera_mode).trim()
+}
+
+pub(super) fn is_mesh_camera_mode(camera_mode: &str) -> bool {
+    terrain_camera_mode_tag(camera_mode).eq_ignore_ascii_case("mesh")
+}
+
+pub(super) fn is_clipmap_camera_mode(camera_mode: &str) -> bool {
+    terrain_camera_mode_tag(camera_mode).eq_ignore_ascii_case("clipmap")
+}
+
+pub(super) fn clipmap_camera_config(
+    camera_mode: &str,
+) -> Option<crate::terrain::clipmap::ClipmapConfig> {
+    if !is_clipmap_camera_mode(camera_mode) {
+        return None;
+    }
+    let mut parts = camera_mode.split(':').skip(1);
+    let ring_count = parts
+        .next()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(4)
+        .clamp(1, 8);
+    let ring_resolution = parts
+        .next()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(64)
+        .clamp(4, 256);
+    let center_resolution = parts
+        .next()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(ring_resolution)
+        .clamp(4, 256);
+    let skirt_depth = parts
+        .next()
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(10.0)
+        .max(0.0);
+    let morph_range = parts
+        .next()
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(0.3)
+        .clamp(0.0, 1.0);
+    Some(crate::terrain::clipmap::ClipmapConfig {
+        ring_count,
+        ring_resolution,
+        center_resolution,
+        skirt_depth,
+        morph_range,
+    })
+}
+
+impl TerrainScene {
+    pub(super) fn terrain_vertex_count(
+        &self,
+        params: &crate::terrain::render_params::TerrainRenderParams,
+    ) -> u32 {
+        if is_clipmap_camera_mode(&params.camera_mode) {
+            let grid_size = clipmap_camera_config(&params.camera_mode)
+                .map(|config| config.ring_resolution.max(4))
+                .unwrap_or(64);
+            return 6 * (grid_size - 1) * (grid_size - 1);
+        }
+        if is_mesh_camera_mode(&params.camera_mode) {
+            let grid_size: u32 = 512;
+            return 6 * (grid_size - 1) * (grid_size - 1);
+        }
+        3
+    }
+}
 
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Pod, Zeroable)]

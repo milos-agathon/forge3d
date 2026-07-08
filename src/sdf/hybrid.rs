@@ -32,12 +32,15 @@ pub struct HybridScene {
 }
 
 /// Keep a process-lifetime storage buffer to satisfy bind group layout requirements.
+/// Sized to hold one element of the largest runtime-sized array it stands in
+/// for (WGSL `BvhNode`, 48 bytes) — wgpu validates that a bound buffer covers
+/// at least one array element.
 fn dummy_storage_buffer() -> &'static wgpu::Buffer {
     static DUMMY: OnceCell<wgpu::Buffer> = OnceCell::new();
     DUMMY.get_or_init(|| {
         ctx().device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("hybrid-dummy-storage"),
-            size: 4,
+            size: 64,
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         })
@@ -299,7 +302,7 @@ impl HybridScene {
         // Create buffers
         let vertices_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("hybrid-mesh-vertices"),
-            size: vertices_data.len().max(4) as u64,
+            size: vertices_data.len().max(std::mem::size_of::<Vertex>()) as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -313,7 +316,10 @@ impl HybridScene {
 
         let bvh_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("hybrid-mesh-bvh"),
-            size: bvh_data.len().max(4) as u64,
+            size: bvh_data
+                .len()
+                .max(std::mem::size_of::<crate::accel::cpu_bvh::BvhNode>())
+                as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });

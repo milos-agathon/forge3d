@@ -15,10 +15,16 @@ pub(super) struct TerrainAovTargets {
     pub(super) albedo: AovAttachmentTarget,
     pub(super) normal: AovAttachmentTarget,
     pub(super) depth: AovAttachmentTarget,
+    /// VERITAS: optional single-sample R32Uint per-pixel source-id target.
+    pub(super) source_id: Option<AovAttachmentTarget>,
 }
 
 impl TerrainScene {
-    fn ensure_aov_pipeline_sample_count(&self, effective_msaa: u32) -> Result<()> {
+    fn ensure_aov_pipeline_sample_count(
+        &self,
+        effective_msaa: u32,
+        include_source_id: bool,
+    ) -> Result<()> {
         let mut aov_pipeline = self
             .aov_pipeline
             .lock()
@@ -27,8 +33,15 @@ impl TerrainScene {
             .aov_pipeline_sample_count
             .lock()
             .map_err(|_| anyhow!("TerrainRenderer AOV sample count mutex poisoned"))?;
+        let mut source_id_flag = self
+            .aov_pipeline_source_id
+            .lock()
+            .map_err(|_| anyhow!("TerrainRenderer AOV source-id flag mutex poisoned"))?;
 
-        if aov_pipeline.is_none() || *sample_count != effective_msaa {
+        if aov_pipeline.is_none()
+            || *sample_count != effective_msaa
+            || *source_id_flag != include_source_id
+        {
             let light_buffer = self
                 .light_buffer
                 .lock()
@@ -44,11 +57,44 @@ impl TerrainScene {
                 &self.material_layer_bind_group_layout,
                 self.color_format,
                 effective_msaa,
+                include_source_id,
             ));
             *sample_count = effective_msaa;
+            *source_id_flag = include_source_id;
         }
 
         Ok(())
+    }
+
+    /// VERITAS: single-sample R32Uint source-id attachment, tracked against
+    /// the memory registry (freed when the owning `AovFrame` drops).
+    fn create_source_id_attachment_target(&self, width: u32, height: u32) -> AovAttachmentTarget {
+        let internal_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain.aov.source_id"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Uint,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        crate::core::memory_tracker::global_tracker().track_texture_allocation(
+            width,
+            height,
+            wgpu::TextureFormat::R32Uint,
+        );
+        let internal_view = internal_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        AovAttachmentTarget {
+            internal_texture,
+            internal_view,
+            _msaa_texture: None,
+            msaa_view: None,
+        }
     }
 
     fn create_aov_attachment_target(
@@ -111,6 +157,7 @@ impl TerrainScene {
         width: u32,
         height: u32,
         sample_count: u32,
+        include_source_id: bool,
     ) -> TerrainAovTargets {
         TerrainAovTargets {
             albedo: self.create_aov_attachment_target(
@@ -131,6 +178,8 @@ impl TerrainScene {
                 height,
                 sample_count,
             ),
+            source_id: include_source_id
+                .then(|| self.create_source_id_attachment_target(width, height)),
         }
     }
 
@@ -208,7 +257,7 @@ impl TerrainScene {
             None
         };
 
-        let color_attachments = [
+        let mut color_attachments = vec![
             Some(wgpu::RenderPassColorAttachment {
                 view: color_view,
                 resolve_target,
@@ -251,6 +300,18 @@ impl TerrainScene {
                 },
             }),
         ];
+        // VERITAS: 5th target — cleared to zeros (SOURCE_ID_NONE) so pixels
+        // no terrain fragment touches carry no attribution.
+        if let Some(source_id) = aov_targets.source_id.as_ref() {
+            color_attachments.push(Some(wgpu::RenderPassColorAttachment {
+                view: &source_id.internal_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    store: wgpu::StoreOp::Store,
+                },
+            }));
+        }
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -281,12 +342,7 @@ impl TerrainScene {
             pass.set_bind_group(5, water_reflection_bind_group, &[]);
             pass.set_bind_group(6, material_layer_bind_group, &[]);
 
-            let vertex_count = if params.camera_mode.to_lowercase() == "mesh" {
-                let grid_size: u32 = 512;
-                6 * (grid_size - 1) * (grid_size - 1)
-            } else {
-                3
-            };
+            let vertex_count = self.terrain_vertex_count(params);
             pass.draw(0..vertex_count, 0..1);
         }
 
@@ -464,13 +520,29 @@ impl TerrainScene {
             );
         }
 
+        // VERITAS: the source-id map must describe exactly the emitted image —
+        // R32Uint cannot be multisample-resolved and must not be rescaled, so
+        // unsupported configurations are explicit errors, never silent skips.
+        let want_source_id = decoded.aov.enabled && decoded.aov.source_id;
+        if want_source_id && effective_msaa > 1 {
+            return Err(anyhow!(
+                "AOV source_id capture requires msaa_samples=1 (R32Uint targets cannot be multisample-resolved); got {effective_msaa}"
+            ));
+        }
+
         self.ensure_pipeline_sample_count(effective_msaa)?;
-        self.ensure_aov_pipeline_sample_count(effective_msaa)?;
+        self.ensure_aov_pipeline_sample_count(effective_msaa, want_source_id)?;
         let render_targets = self.create_render_targets(params, requested_msaa, effective_msaa)?;
+        if want_source_id && render_targets.needs_scaling {
+            return Err(anyhow!(
+                "AOV source_id capture requires render_scale=1.0 (per-pixel attribution cannot be resampled)"
+            ));
+        }
         let aov_targets = self.create_aov_render_targets(
             render_targets.internal_width,
             render_targets.internal_height,
             effective_msaa,
+            want_source_id,
         );
 
         let mut encoder = self
@@ -689,6 +761,9 @@ impl TerrainScene {
             } else {
                 None
             },
+            // VERITAS: needs_scaling is rejected above, so the internal
+            // texture is already at the final output dimensions.
+            aov_targets.source_id.map(|target| target.internal_texture),
             final_width,
             final_height,
         );

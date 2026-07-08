@@ -10,6 +10,10 @@ use std::collections::HashSet;
 pub struct PlacementCandidate {
     /// Label identifier.
     pub label_id: u64,
+    /// Index of this candidate anchor within its label's candidate set.
+    /// `(label_id, anchor_index)` is the deterministic total order used by
+    /// the optimal solver for tie-breaking.
+    pub anchor_index: u32,
     /// Screen position (x, y).
     pub position: [f32; 2],
     /// Bounding box: [min_x, min_y, max_x, max_y].
@@ -20,6 +24,9 @@ pub struct PlacementCandidate {
     pub cost: f32,
     /// Whether this candidate is currently selected.
     pub selected: bool,
+    /// Visibility gate: anchors occluded by terrain silhouettes are marked
+    /// `false` at compile time and contribute zero placements.
+    pub visible: bool,
 }
 
 /// Declutter algorithm configuration.
@@ -41,6 +48,12 @@ pub struct DeclutterConfig {
     pub seed: u64,
     /// Margin around labels for collision.
     pub margin: f32,
+    /// Certified optimality gap tolerance for the optimal solver
+    /// (fraction of the objective upper bound; 0.02 = 2%).
+    pub gap_tolerance: f64,
+    /// Branch-and-bound node budget for the optimal solver; when exceeded
+    /// the solver returns its best incumbent with an honest (larger) gap.
+    pub node_budget: u64,
 }
 
 impl Default for DeclutterConfig {
@@ -54,6 +67,8 @@ impl Default for DeclutterConfig {
             distance_weight: 0.5,
             seed: 42,
             margin: 2.0,
+            gap_tolerance: 0.02,
+            node_budget: 200_000,
         }
     }
 }
@@ -153,6 +168,11 @@ pub fn declutter_greedy(
     let mut placed_bounds: Vec<[f32; 4]> = Vec::new();
 
     for candidate in &mut candidates {
+        // Occluded anchors contribute zero placements.
+        if !candidate.visible {
+            candidate.selected = false;
+            continue;
+        }
         // Check if this candidate overlaps with any placed label
         let overlaps = placed_bounds
             .iter()
@@ -282,6 +302,8 @@ pub enum DeclutterAlgorithm {
     Greedy,
     /// Simulated annealing (slower, better results).
     Annealing,
+    /// Bounded-optimal branch-and-bound (deterministic, certified gap).
+    Optimal,
 }
 
 /// Run decluttering with the specified algorithm.
@@ -293,6 +315,7 @@ pub fn declutter(
     match algorithm {
         DeclutterAlgorithm::Greedy => declutter_greedy(candidates, config),
         DeclutterAlgorithm::Annealing => declutter_annealing(candidates, config),
+        DeclutterAlgorithm::Optimal => super::optimal::declutter_optimal_result(candidates, config),
     }
 }
 
@@ -304,6 +327,7 @@ mod tests {
         let size = 50.0;
         PlacementCandidate {
             label_id: id,
+            anchor_index: 0,
             position: [x, y],
             bounds: [
                 x - size / 2.0,
@@ -314,6 +338,7 @@ mod tests {
             priority,
             cost: 0.0,
             selected: false,
+            visible: true,
         }
     }
 

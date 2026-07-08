@@ -8,8 +8,24 @@ pub struct AovFrame {
     albedo_texture: Option<wgpu::Texture>,
     normal_texture: Option<wgpu::Texture>,
     depth_texture: Option<wgpu::Texture>,
+    /// VERITAS: per-pixel VT source-id map (R32Uint, 0 == SOURCE_ID_NONE).
+    /// Tracked in the memory registry at creation; freed in `Drop`.
+    source_id_texture: Option<wgpu::Texture>,
     width: u32,
     height: u32,
+}
+
+#[cfg(feature = "extension-module")]
+impl Drop for AovFrame {
+    fn drop(&mut self) {
+        if self.source_id_texture.is_some() {
+            crate::core::memory_tracker::global_tracker().free_texture_allocation(
+                self.width,
+                self.height,
+                wgpu::TextureFormat::R32Uint,
+            );
+        }
+    }
 }
 
 #[cfg(feature = "images")]
@@ -138,12 +154,14 @@ fn build_terrain_exr_channels(
 
 #[cfg(feature = "extension-module")]
 impl AovFrame {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
         albedo_texture: Option<wgpu::Texture>,
         normal_texture: Option<wgpu::Texture>,
         depth_texture: Option<wgpu::Texture>,
+        source_id_texture: Option<wgpu::Texture>,
         width: u32,
         height: u32,
     ) -> Self {
@@ -153,6 +171,7 @@ impl AovFrame {
             albedo_texture,
             normal_texture,
             depth_texture,
+            source_id_texture,
             width,
             height,
         }
@@ -249,6 +268,39 @@ impl AovFrame {
     #[getter]
     fn has_depth(&self) -> bool {
         self.depth_texture.is_some()
+    }
+
+    #[getter]
+    fn has_source_id(&self) -> bool {
+        self.source_id_texture.is_some()
+    }
+
+    /// VERITAS: per-pixel VT source-id map as a `(H, W)` uint32 array.
+    /// `0` is `SOURCE_ID_NONE` (no attribution); nonzero values are the
+    /// stable ids recorded in the provenance manifest's `source_table`.
+    fn source_id<'py>(&self, py: Python<'py>) -> PyResult<&'py numpy::PyArray2<u32>> {
+        let texture = self.source_id_texture.as_ref().ok_or_else(|| {
+            PyRuntimeError::new_err(
+                "Source-id AOV not available (enable AovSettings.source_id before rendering)",
+            )
+        })?;
+        let data = py
+            .allow_threads(|| {
+                crate::core::hdr::read_r32uint_texture(
+                    &self.device,
+                    &self.queue,
+                    texture,
+                    self.width,
+                    self.height,
+                )
+            })
+            .map_err(|err| PyRuntimeError::new_err(format!("readback failed: {err}")))?;
+        let arr =
+            ndarray::Array2::from_shape_vec((self.height as usize, self.width as usize), data)
+                .map_err(|_| {
+                    PyRuntimeError::new_err("failed to reshape source-id buffer into numpy array")
+                })?;
+        Ok(arr.into_pyarray_bound(py).into_gil_ref())
     }
 
     fn albedo<'py>(&self, py: Python<'py>) -> PyResult<&'py numpy::PyArray3<f32>> {
@@ -393,12 +445,13 @@ impl AovFrame {
 
     fn __repr__(&self) -> String {
         format!(
-            "AovFrame(width={}, height={}, albedo={}, normal={}, depth={})",
+            "AovFrame(width={}, height={}, albedo={}, normal={}, depth={}, source_id={})",
             self.width,
             self.height,
             self.albedo_texture.is_some(),
             self.normal_texture.is_some(),
-            self.depth_texture.is_some()
+            self.depth_texture.is_some(),
+            self.source_id_texture.is_some()
         )
     }
 }

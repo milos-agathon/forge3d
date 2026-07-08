@@ -15,7 +15,7 @@ impl PyScreenSpaceGI {
     #[new]
     #[pyo3(signature = (width=1280, height=720))]
     pub fn new(width: u32, height: u32) -> PyResult<Self> {
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         let manager = crate::core::screen_space_effects::ScreenSpaceEffectsManager::new(
             g.device.as_ref(),
             width,
@@ -31,7 +31,7 @@ impl PyScreenSpaceGI {
 
     /// Enable SSAO
     pub fn enable_ssao(&mut self) -> PyResult<()> {
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         self.manager
             .enable_effect(
                 g.device.as_ref(),
@@ -42,7 +42,7 @@ impl PyScreenSpaceGI {
 
     /// Enable SSGI
     pub fn enable_ssgi(&mut self) -> PyResult<()> {
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         self.manager
             .enable_effect(
                 g.device.as_ref(),
@@ -53,7 +53,7 @@ impl PyScreenSpaceGI {
 
     /// Enable SSR
     pub fn enable_ssr(&mut self) -> PyResult<()> {
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         self.manager
             .enable_effect(
                 g.device.as_ref(),
@@ -77,7 +77,7 @@ impl PyScreenSpaceGI {
 
     /// Resize underlying GBuffer to a new size
     pub fn resize(&mut self, width: u32, height: u32) -> PyResult<()> {
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         self.manager
             .gbuffer_mut()
             .resize(g.device.as_ref(), width, height)
@@ -89,7 +89,7 @@ impl PyScreenSpaceGI {
 
     /// Execute enabled GI passes for the current frame
     pub fn execute(&mut self) -> PyResult<()> {
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         let mut encoder = g
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {

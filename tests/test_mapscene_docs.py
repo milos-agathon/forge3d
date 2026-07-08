@@ -49,7 +49,8 @@ def test_mapscene_public_api_is_documented_with_truthful_support_levels():
     assert "MapScene.save_bundle" in offline
     assert "| `MapScene.render` PNG/EXR path | `supported` |" in offline
     assert "GPU-terrain" in api
-    assert "allow_placeholder=True" in api
+    assert "allow_placeholder" not in api, "the placeholder escape hatch was removed by SUTURA"
+    assert "MapSceneNativeUnavailable" in api
     assert "last_render_backend" in api
     assert "GPU-terrain PNG/EXR output" in offline
     assert "recipe_manifest" in api

@@ -55,23 +55,35 @@ fn hue_shift(color: vec3<f32>, shift: f32) -> vec3<f32> {
     return clamp(shifted, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
-fn simple_wave(uv: vec2<f32>, time: f32, amplitude: f32, frequency: f32, speed: f32) -> f32 {
-    let wave1 = sin(uv.x * frequency + time * speed) * amplitude;
-    let wave2 = sin(uv.y * frequency * 1.3 + time * speed * 0.8) * amplitude * 0.7;
-    let wave3 = sin((uv.x + uv.y) * frequency * 0.6 + time * speed * 1.2) * amplitude * 0.5;
-    return wave1 + wave2 + wave3;
+fn gerstner_phase(uv: vec2<f32>, dir: vec2<f32>, frequency: f32, speed: f32, time: f32) -> f32 {
+    return dot(uv, dir) * frequency + time * speed;
+}
+
+fn gerstner_height(uv: vec2<f32>, time: f32, amplitude: f32, frequency: f32, speed: f32) -> f32 {
+    let dir1 = normalize(vec2<f32>(1.0, 0.35));
+    let dir2 = normalize(vec2<f32>(-0.45, 1.0));
+    let dir3 = normalize(vec2<f32>(0.7, 0.7));
+    let h1 = sin(gerstner_phase(uv, dir1, frequency, speed, time)) * amplitude;
+    let h2 = sin(gerstner_phase(uv, dir2, frequency * 1.7, speed * 0.75, time)) * amplitude * 0.45;
+    let h3 = sin(gerstner_phase(uv, dir3, frequency * 2.4, speed * 1.25, time)) * amplitude * 0.22;
+    return h1 + h2 + h3;
+}
+
+fn gerstner_slope(uv: vec2<f32>, time: f32, amplitude: f32, frequency: f32, speed: f32) -> vec2<f32> {
+    let dir1 = normalize(vec2<f32>(1.0, 0.35));
+    let dir2 = normalize(vec2<f32>(-0.45, 1.0));
+    let dir3 = normalize(vec2<f32>(0.7, 0.7));
+    let p1 = gerstner_phase(uv, dir1, frequency, speed, time);
+    let p2 = gerstner_phase(uv, dir2, frequency * 1.7, speed * 0.75, time);
+    let p3 = gerstner_phase(uv, dir3, frequency * 2.4, speed * 1.25, time);
+    return dir1 * cos(p1) * amplitude * frequency
+         + dir2 * cos(p2) * amplitude * 0.45 * frequency * 1.7
+         + dir3 * cos(p3) * amplitude * 0.22 * frequency * 2.4;
 }
 
 fn water_normal(uv: vec2<f32>, time: f32, amplitude: f32, frequency: f32, speed: f32) -> vec3<f32> {
-    let epsilon = 0.01;
-    let h_center = simple_wave(uv, time, amplitude, frequency, speed);
-    let h_right = simple_wave(uv + vec2<f32>(epsilon, 0.0), time, amplitude, frequency, speed);
-    let h_up = simple_wave(uv + vec2<f32>(0.0, epsilon), time, amplitude, frequency, speed);
-
-    let tangent_x = vec3<f32>(epsilon, h_right - h_center, 0.0);
-    let tangent_z = vec3<f32>(0.0, h_up - h_center, epsilon);
-
-    return normalize(cross(tangent_x, tangent_z));
+    let slope = gerstner_slope(uv, time, amplitude, frequency, speed);
+    return normalize(vec3<f32>(-slope.x, 1.0, -slope.y));
 }
 
 fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
@@ -143,8 +155,8 @@ fn vs_main(in: VsIn) -> VsOut {
     let frequency = water_uniforms.wave_params.y;
     let speed = water_uniforms.wave_params.z;
 
-    // Calculate wave displacement
-    let wave_height = simple_wave(in.uv, time, amplitude, frequency, speed);
+    // Gerstner-style wave displacement with analytic normals.
+    let wave_height = gerstner_height(in.uv, time, amplitude, frequency, speed);
     let displaced_pos = in.position + vec3<f32>(0.0, wave_height, 0.0);
 
     // Transform vertex to world space

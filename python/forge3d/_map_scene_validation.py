@@ -20,6 +20,88 @@ from .diagnostics import (
 )
 
 
+# ---------------------------------------------------------------------------
+# SUTURA: native-required layer classification (zero silent placeholders)
+# ---------------------------------------------------------------------------
+#
+# Every MapScene layer is native-required: it either renders through a concrete
+# native symbol or the render is blocked with a structured fatal diagnostic.
+# This mirrors the diagnose-before-render precedent documented in
+# docs/guides/competitive_positioning.md (textured PBR buildings, VT runtime).
+
+_NATIVE_CAPABILITY_SYMBOLS: dict[str, tuple[str, ...]] = {
+    "terrain": ("TerrainRenderer", "Session"),
+    "raster": ("Scene",),
+    "labels": ("Scene",),
+    "vector": ("vector_render_oit_py", "vector_render_polygons_fill_py"),
+    "buildings": ("Scene",),
+    "point_cloud": ("vector_render_oit_py",),
+    "tiles3d": ("vector_render_oit_py",),
+}
+
+_LAYER_CAPABILITY_KINDS: dict[str, str] = {
+    "RasterOverlay": "raster",
+    "VectorOverlay": "vector",
+    "LabelLayer": "labels",
+    "BuildingLayer": "buildings",
+    "PointCloudLayer": "point_cloud",
+    "Tiles3DLayer": "tiles3d",
+}
+
+
+def required_native_symbols(kind: str) -> tuple[str, ...]:
+    """Concrete native symbols a capability kind needs to render."""
+    return _NATIVE_CAPABILITY_SYMBOLS.get(str(kind), ())
+
+
+def probe_native_capability(kind: str) -> bool:
+    """Return True when the concrete native symbols for ``kind`` are importable."""
+    symbols = required_native_symbols(kind)
+    if not symbols:
+        return False
+    try:
+        from ._native import get_native_module
+
+        native_module = get_native_module()
+    except Exception:
+        return False
+    if native_module is None:
+        return False
+    return all(hasattr(native_module, symbol) for symbol in symbols)
+
+
+def classify_layer(layer: Any) -> str:
+    """Classify a recipe layer as ``"native"`` or ``"diagnostic_block"``.
+
+    A layer classifies ``diagnostic_block`` when the concrete native symbol it
+    needs is absent (or the layer type is unknown); there is no CPU-placeholder
+    third outcome.
+    """
+    kind = _LAYER_CAPABILITY_KINDS.get(type(layer).__name__)
+    if kind is None:
+        return "diagnostic_block"
+    return "native" if probe_native_capability(kind) else "diagnostic_block"
+
+
+def diagnostic_block(
+    *,
+    layer: str,
+    reason: str,
+    required_native: str,
+    details: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Structured fatal diagnostic for a layer that cannot render natively."""
+    block: dict[str, Any] = {
+        "status": "diagnostic_block",
+        "layer": str(layer),
+        "reason": str(reason),
+        "required_native": str(required_native),
+    }
+    if details:
+        block["details"] = _json_safe(dict(details))
+    return block
+
+
 def _dimension_memory_bytes(metadata: Mapping[str, Any] | None, *, channels: int = 4) -> int | None:
     data = _metadata_dict(metadata)
     explicit = _explicit_memory_bytes(data)
@@ -391,15 +473,7 @@ def _p2_building_texture_diagnostics(
             strongest_support = "placeholder/fallback"
 
     if not diagnostics:
-        first_intent = details["textured_materials"][0]
-        diagnostics.append(
-            _unsupported_feature_diagnostic(
-                "building textured PBR render path",
-                layer_id=layer_id,
-                object_id=str(first_intent["object_id"]),
-            )
-        )
-        strongest_support = "unsupported"
+        strongest_support = "supported"
 
     details["textured_material_status"] = strongest_support or "unsupported"
     return diagnostics, details, strongest_support

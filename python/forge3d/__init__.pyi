@@ -4,7 +4,7 @@
 # RELEVANT FILES: python/forge3d/__init__.py, python/forge3d/config.py, src/render/params.rs, examples/terrain_demo.py
 # ruff: noqa: F401
 from __future__ import annotations
-from typing import Tuple, Optional, Sequence, Any, Dict, Literal, Mapping, Callable
+from typing import Tuple, Optional, Sequence, Any, Dict, List, Literal, Mapping, Callable
 import os
 import numpy as np
 from . import gis
@@ -35,7 +35,10 @@ from .terrain_params import (
     ShadowSettings,
     FogSettings,
     ReflectionSettings,
+    WaterSettings,
+    CloudSettings,
     HeightAoSettings,
+    ScreenSpaceSettings,
     SunVisibilitySettings,
     ProbeSettings,
     ReflectionProbeSettings,
@@ -65,6 +68,7 @@ from .diagnostics import (
     ValidationReport,
     crs_mismatch_diagnostic,
     estimated_gpu_memory_diagnostic,
+    memory_tracking_completeness_report,
     experimental_feature_diagnostic,
     label_rejection_summary_diagnostic,
     missing_glyphs_diagnostic,
@@ -90,12 +94,14 @@ from .label_plan import (
     RejectedLabel,
 )
 from .map_scene import (
+    CompiledScenePlan as CompiledScenePlan,
     FontAtlas as FontAtlas,
     FontFallbackRange as FontFallbackRange,
     LabelLayer as LabelLayer,
     LightingPreset as LightingPreset,
     MapFurnitureLayer as MapFurnitureLayer,
     MapScene as MapScene,
+    MapSceneNativeUnavailable as MapSceneNativeUnavailable,
     BuildingLayer as MapSceneBuildingLayer,
     OrbitCamera as OrbitCamera,
     OutputSpec as OutputSpec,
@@ -618,9 +624,12 @@ class AovFrame:
     def has_normal(self) -> bool: ...
     @property
     def has_depth(self) -> bool: ...
+    @property
+    def has_source_id(self) -> bool: ...
     def albedo(self) -> np.ndarray: ...
     def normal(self) -> np.ndarray: ...
     def depth(self) -> np.ndarray: ...
+    def source_id(self) -> np.ndarray: ...
     def save_albedo(self, path: PathLikeStr) -> None: ...
     def save_normal(self, path: PathLikeStr) -> None: ...
     def save_depth(self, path: PathLikeStr) -> None: ...
@@ -740,6 +749,7 @@ class TerrainRenderer:
     ) -> None: ...
     def clear_material_vt_sources(self) -> None: ...
     def get_material_vt_stats(self) -> Dict[str, float]: ...
+    def read_contributing_tiles(self) -> List[Dict[str, Any]]: ...
 
 class OfflineProgress:
     samples_so_far: int
@@ -850,6 +860,20 @@ def vector_render_oit_py(
     stroke_width: Optional[Sequence[float]] = ...,
 ) -> np.ndarray: ...  # (H,W,4) uint8
 
+def vector_render_oit_edl_py(
+    width: int,
+    height: int,
+    *,
+    points_xy: Optional[Sequence[Tuple[float, float]]] = ...,
+    point_rgba: Optional[Sequence[Tuple[float, float, float, float]]] = ...,
+    point_size: Optional[Sequence[float]] = ...,
+    polylines: Optional[Sequence[Sequence[Tuple[float, float]]]] = ...,
+    polyline_rgba: Optional[Sequence[Tuple[float, float, float, float]]] = ...,
+    stroke_width: Optional[Sequence[float]] = ...,
+    edl_strength: float = ...,
+    edl_radius_px: float = ...,
+) -> np.ndarray: ...  # (H,W,4) uint8
+
 def vector_render_pick_map_py(
     width: int,
     height: int,
@@ -907,10 +931,27 @@ def dem_normalize(heightmap: np.ndarray, *, mode: str = ..., out_range: Tuple[fl
 
 def render_debug_pattern_frame(width: int, height: int) -> Any: ...
 
+class DeviceProbeResult(TypedDict, total=False):
+    # status is always present: "ok" | "no_adapter" | "probe_error" | "native_missing".
+    status: str
+    # Present on every non-"ok" status.
+    reason: str
+    remediation: str
+    # Adapter fields, present when status == "ok".
+    name: str
+    vendor: int
+    device: int
+    device_type: str
+    backend: str
+    software_fallback: bool
+
 def enumerate_adapters() -> list[dict[str, Any]]: ...
-def device_probe(backend: Optional[str] = ...) -> dict[str, Any]: ...
+def device_probe(backend: Optional[str] = ...) -> DeviceProbeResult: ...
+def native_import_error() -> BaseException | None: ...
 
 def memory_metrics() -> Dict[str, Any]: ...
+def set_budget_policy(policy: str) -> str: ...
+def get_budget_policy() -> str: ...
 def budget_remaining() -> int: ...
 def utilization_ratio() -> float: ...
 def override_memory_limit(limit_bytes: int) -> None: ...
@@ -1126,6 +1167,68 @@ class PointBuffer:
 # P2.2: COPC LAZ decompression
 def copc_laz_enabled() -> bool: ...
 def read_laz_points_info(path: str) -> Tuple[int, list[float], bool]: ...
+def read_laz_point_attributes(path: str, sample_count: int = ...) -> Dict[str, Any]: ...
+def copc_read_node_points(
+    path: str,
+    depth: int = ...,
+    x: int = ...,
+    y: int = ...,
+    z: int = ...,
+    budget: Optional[int] = ...,
+) -> Dict[str, Any]: ...
+
+# VERITAS: per-pixel cryptographic provenance
+def seal_provenance(
+    source_map: np.ndarray,
+    contributing_tiles: Sequence[Dict[str, Any]],
+    private_key: bytes,
+) -> bytes: ...
+def verify_provenance(source_map: np.ndarray, manifest: bytes) -> bool: ...
+
+# CARTOGRAPHER-PRIME: bounded-optimal, silhouette-aware label declutter
+class LabelRationale:
+    def records(self) -> List[Dict[str, Any]]: ...
+    def render(self) -> List[str]: ...
+    def __len__(self) -> int: ...
+
+def declutter_optimal(
+    candidates: Sequence[
+        Tuple[int, int, Tuple[float, float, float, float], float, bool]
+    ],
+    gap_tolerance: float = ...,
+    node_budget: int = ...,
+    margin: float = ...,
+) -> Tuple[List[Tuple[int, int]], float, LabelRationale]: ...
+
+# AEQUITAS: PT-vs-raster perceptual adjudication pair
+def render_adjudication_pair(
+    width: int,
+    height: int,
+    spp: int,
+) -> Tuple[np.ndarray, np.ndarray, Dict[str, Dict[str, float]]]: ...
+
+# PROMETHEUS: converged GPU path-traced terrain reference (sun + IBL)
+def hybrid_render_terrain_reference(
+    heightmap: np.ndarray,
+    width: int,
+    height: int,
+    cam: Dict[str, Any],
+    spacing: Tuple[float, float] = ...,
+    exaggeration: float = ...,
+    albedo: Tuple[float, float, float] = ...,
+    sun_azimuth_deg: float = ...,
+    sun_elevation_deg: float = ...,
+    sun_intensity: float = ...,
+    env_map: Optional[np.ndarray] = ...,
+    env_intensity: float = ...,
+    mesh_vertices: Optional[np.ndarray] = ...,
+    mesh_indices: Optional[np.ndarray] = ...,
+    spp: int = ...,
+    max_frames: int = ...,
+    min_frames: int = ...,
+    variance_threshold: float = ...,
+    seed: int = ...,
+) -> Dict[str, Any]: ...
 
 # P2.3: Label style bindings
 class LabelFlags:

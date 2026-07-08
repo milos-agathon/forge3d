@@ -107,7 +107,9 @@ def test_bundle_persists_required_p1_review_fields_and_label_payloads(tmp_path):
     assert terrain_source["metadata"]["nodata"] == -9999.0
 
 
-def test_bundle_load_reconstructs_renderable_scene_when_assets_are_available(tmp_path):
+def test_bundle_load_reconstructs_scene_and_blocks_without_native_terrain(tmp_path):
+    import pytest
+
     import forge3d as f3d
 
     bundle = tmp_path / "roundtrip.forge3d"
@@ -115,13 +117,18 @@ def test_bundle_load_reconstructs_renderable_scene_when_assets_are_available(tmp
     _renderable_fixture_scene().save_bundle(bundle)
 
     loaded = f3d.MapScene.load_bundle(bundle)
-    report = loaded.render(str(output), allow_placeholder=True)
 
-    assert output.exists()
-    assert output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-    assert report.status == "ok"
-    assert loaded.last_render_backend == "placeholder"
+    # The compiled label plan is rehydrated verbatim from the bundle.
+    assert loaded.compiled_plan is not None
     assert loaded.compiled_label_plans["labels.cities"].accepted
+
+    # The fixture DEM does not exist on disk, so rendering blocks with a
+    # structured diagnostic instead of writing a CPU placeholder.
+    with pytest.raises(f3d.MapSceneNativeUnavailable) as excinfo:
+        loaded.render(str(output))
+    assert not output.exists()
+    assert excinfo.value.diagnostic["status"] == "diagnostic_block"
+    assert excinfo.value.diagnostic["layer"] == "terrain"
 
 
 def test_bundle_load_reports_missing_external_assets_with_structured_diagnostics(tmp_path):

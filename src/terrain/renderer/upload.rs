@@ -298,19 +298,62 @@ impl TerrainScene {
             decoded.light.intensity,
         ]);
 
-        let is_mesh_mode = params.camera_mode.to_lowercase() == "mesh";
-        let spacing = if is_mesh_mode {
+        let is_mesh_mode = is_mesh_camera_mode(&params.camera_mode);
+        let is_clipmap_mode = is_clipmap_camera_mode(&params.camera_mode);
+        let spacing = if is_mesh_mode || is_clipmap_mode {
             params.terrain_span.max(1e-3)
         } else {
             1.0
         };
         uniforms.extend_from_slice(&[spacing, spacing, params.z_scale, params.render_scale]);
 
-        let camera_mode = if is_mesh_mode { 1.0 } else { 0.0 };
-        let grid_size = 512.0;
+        let camera_mode = if is_mesh_mode || is_clipmap_mode {
+            1.0
+        } else {
+            0.0
+        };
+        let grid_size = clipmap_camera_config(&params.camera_mode)
+            .map(|config| config.ring_resolution as f32)
+            .unwrap_or(512.0);
         uniforms.extend_from_slice(&[camera_mode, grid_size, params.clip.0, params.clip.1]);
 
         uniforms
+    }
+
+    pub(super) fn prepare_clipmap_vertices(
+        &mut self,
+        params: &render_params::TerrainRenderParams,
+    ) -> Result<()> {
+        let Some(config) = clipmap_camera_config(&params.camera_mode) else {
+            self.clipmap_vertex_count = 0;
+            self.clipmap_index_count = 0;
+            self.clipmap_vertex_buffer = None;
+            self.clipmap_index_buffer = None;
+            return Ok(());
+        };
+
+        let mesh = crate::terrain::clipmap::level::clipmap_generate(
+            &config,
+            glam::Vec2::ZERO,
+            params.terrain_span.max(1.0),
+        );
+        self.clipmap_vertex_count = mesh.vertex_count();
+        self.clipmap_index_count = mesh.index_count();
+        self.clipmap_vertex_buffer = Some(self.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.clipmap.vertex_buffer"),
+                contents: bytemuck::cast_slice(&mesh.vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            },
+        ));
+        self.clipmap_index_buffer = Some(self.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.clipmap.index_buffer"),
+                contents: bytemuck::cast_slice(&mesh.indices),
+                usage: wgpu::BufferUsages::INDEX,
+            },
+        ));
+        Ok(())
     }
 
     pub(super) fn build_camera_matrices(

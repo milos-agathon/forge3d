@@ -1,6 +1,13 @@
 // Cascaded Shadow Maps - Main Implementation
 // Complete CSM pipeline with 3-4 cascades, PCF/EVSM kernels, and peter-panning prevention
 // RELEVANT FILES: src/pipeline/pbr.rs, python/forge3d/lighting.py, tests/test_b4_csm.py
+//
+// TERRA-DETERMINATA: all reductions and transcendentals in this file are pinned
+// through the det_* helpers in includes/determinism.wgsl, which the Rust shader
+// assembly concatenates ahead of this source (see pbr/shadow.rs). PCF sums a
+// fixed, index-ordered tap set into a single accumulator; cascade selection
+// snaps its boundary compare to CSM_CASCADE_SNAP_EPS so a one-ULP depth
+// difference cannot flip cascades at a boundary.
 
 // Shadow cascade data structure
 struct ShadowCascade {
@@ -49,22 +56,28 @@ struct CsmUniforms {
 const PI: f32 = 3.14159265359;
 const SHADOW_EPSILON: f32 = 0.00001;
 const MAX_SHADOW_DISTANCE: f32 = 1000.0;
+// Cascade boundary snap: a depth within this distance of a cascade's far plane
+// is treated as inside it, so per-vendor ULP wobble in view_depth cannot flip
+// the selected cascade (and with it the whole filtered result) at a boundary.
+const CSM_CASCADE_SNAP_EPS: f32 = 1.0e-4;
 
-// Transform world position to light space for specific cascade
+// Transform world position to light space for specific cascade.
+// Applied as two pinned mat4*vec4 products (no mat4*mat4 reduction, whose
+// inner dot ordering is driver-defined).
 fn world_to_light_space(world_pos: vec3<f32>, cascade_idx: u32) -> vec4<f32> {
-    let light_space_pos = csm_uniforms.cascades[cascade_idx].light_projection *
-                         csm_uniforms.light_view *
-                         vec4<f32>(world_pos, 1.0);
-    return light_space_pos;
+    let view_pos = det_mat4_mul_vec4(csm_uniforms.light_view, vec4<f32>(world_pos, 1.0));
+    return det_mat4_mul_vec4(csm_uniforms.cascades[cascade_idx].light_projection, view_pos);
 }
 
-// Select appropriate cascade based on view space depth
+// Select appropriate cascade based on view space depth.
+// Deterministic comparison chain in fixed cascade order; the boundary test is
+// snapped to CSM_CASCADE_SNAP_EPS (documented above).
 fn select_cascade(view_depth: f32) -> u32 {
     var cascade_idx = csm_uniforms.cascade_count - 1u;
 
     // Find the first cascade that contains this depth
     for (var i = 0u; i < csm_uniforms.cascade_count; i++) {
-        if (view_depth <= csm_uniforms.cascades[i].far_distance) {
+        if (view_depth <= csm_uniforms.cascades[i].far_distance + CSM_CASCADE_SNAP_EPS) {
             cascade_idx = i;
             break;
         }
@@ -75,21 +88,25 @@ fn select_cascade(view_depth: f32) -> u32 {
 
 // Calculate slope-scaled depth bias to prevent shadow acne
 fn calculate_depth_bias(world_normal: vec3<f32>, cascade_idx: u32) -> f32 {
-    let light_dir = normalize(-csm_uniforms.light_direction.xyz);
-    let n_dot_l = max(dot(world_normal, light_dir), 0.001);
+    let light_dir = det_normalize3(-csm_uniforms.light_direction.xyz);
+    let n_dot_l = max(det_dot3(world_normal, light_dir), 0.001);
 
     // Slope-scaled bias: bias increases as surface becomes more parallel to light
-    let slope_scale = sqrt(1.0 - n_dot_l * n_dot_l) / n_dot_l;
+    let n_dot_l_sq = n_dot_l * n_dot_l;
+    let sin_sq = 1.0 - n_dot_l_sq;
+    let slope_scale = sqrt(sin_sq) / n_dot_l;
     let texel_size = csm_uniforms.cascades[cascade_idx].texel_size;
 
-    return csm_uniforms.depth_bias + csm_uniforms.slope_bias * slope_scale * texel_size;
+    let slope_term = csm_uniforms.slope_bias * slope_scale;
+    return det_fma(slope_term, texel_size, csm_uniforms.depth_bias);
 }
 
 // Basic shadow test (single sample, no filtering)
 fn sample_shadow_basic(light_space_pos: vec4<f32>, cascade_idx: u32, bias: f32) -> f32 {
     // Perspective divide and convert to texture coordinates [0,1]
     let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let shadow_coords = proj_coords * 0.5 + 0.5;
+    let scaled = proj_coords * 0.5;
+    let shadow_coords = scaled + vec3<f32>(0.5);
 
     // Check bounds - return unshadowed if outside
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
@@ -98,18 +115,26 @@ fn sample_shadow_basic(light_space_pos: vec4<f32>, cascade_idx: u32, bias: f32) 
         return 1.0;
     }
 
-    // Apply bias and peter-panning offset
-    let test_depth = shadow_coords.z - bias - csm_uniforms.peter_panning_offset;
+    // Apply bias and peter-panning offset (two pinned sequential subtractions)
+    let biased_depth = shadow_coords.z - bias;
+    let test_depth = biased_depth - csm_uniforms.peter_panning_offset;
 
     // Single depth comparison
     return textureSampleCompare(shadow_maps, shadow_sampler,
                                shadow_coords.xy, cascade_idx, test_depth);
 }
 
-// PCF (Percentage-Closer Filtering) implementation
+// PCF (Percentage-Closer Filtering) implementation.
+// Determinism contract: the tap set is FIXED (kernel_size^2 taps, iterated in
+// index order x-major then y) and accumulated into a single scalar in that
+// canonical order — no early-out, no data-dependent tap count, no atomics.
+// Out-of-bounds taps contribute 1.0 (lit) and the sum is divided by the fixed
+// tap count, so a one-ULP coordinate wobble at the map edge changes at most
+// one tap's value, never which taps are summed.
 fn sample_shadow_pcf(light_space_pos: vec4<f32>, cascade_idx: u32, bias: f32) -> f32 {
     let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let shadow_coords = proj_coords * 0.5 + 0.5;
+    let scaled = proj_coords * 0.5;
+    let shadow_coords = scaled + vec3<f32>(0.5);
 
     // Bounds check
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
@@ -118,41 +143,44 @@ fn sample_shadow_pcf(light_space_pos: vec4<f32>, cascade_idx: u32, bias: f32) ->
         return 1.0;
     }
 
-    let test_depth = shadow_coords.z - bias - csm_uniforms.peter_panning_offset;
+    let biased_depth = shadow_coords.z - bias;
+    let test_depth = biased_depth - csm_uniforms.peter_panning_offset;
 
     // PCF kernel configuration
     let kernel_size = i32(csm_uniforms.pcf_kernel_size);
     let half_kernel = kernel_size / 2;
     let texel_size = 1.0 / csm_uniforms.shadow_map_size;
 
-    // Accumulate shadow samples from PCF kernel
+    // Accumulate the fixed tap set in canonical index order
     var shadow_factor = 0.0;
-    var sample_count = 0.0;
 
     for (var x = -half_kernel; x <= half_kernel; x++) {
         for (var y = -half_kernel; y <= half_kernel; y++) {
             let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
             let sample_coords = shadow_coords.xy + offset;
 
-            // Individual sample bounds check
-            if (sample_coords.x >= 0.0 && sample_coords.x <= 1.0 &&
-                sample_coords.y >= 0.0 && sample_coords.y <= 1.0) {
-
-                shadow_factor += textureSampleCompare(shadow_maps, shadow_sampler,
-                                                    sample_coords, cascade_idx, test_depth);
-                sample_count += 1.0;
-            }
+            let in_bounds = sample_coords.x >= 0.0 && sample_coords.x <= 1.0 &&
+                sample_coords.y >= 0.0 && sample_coords.y <= 1.0;
+            let clamped_coords = clamp(sample_coords, vec2<f32>(0.0), vec2<f32>(1.0));
+            let tap = textureSampleCompare(shadow_maps, shadow_sampler,
+                                           clamped_coords, cascade_idx, test_depth);
+            // Out-of-bounds taps are lit; the tap SET never changes.
+            shadow_factor += select(1.0, tap, in_bounds);
         }
     }
 
-    // Normalize by actual sample count (handles edge cases)
-    return select(0.0, shadow_factor / sample_count, sample_count > 0.0);
+    let taps_per_axis = half_kernel * 2 + 1;
+    let tap_count = f32(taps_per_axis * taps_per_axis);
+    return shadow_factor / tap_count;
 }
 
 // Optimized Poisson disk PCF for higher quality
+// Fixed 16-tap disk, iterated in array order with a single sequential
+// accumulator; out-of-bounds taps contribute 1.0 so the tap set is invariant.
 fn sample_shadow_poisson(light_space_pos: vec4<f32>, cascade_idx: u32, bias: f32) -> f32 {
     let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let shadow_coords = proj_coords * 0.5 + 0.5;
+    let scaled = proj_coords * 0.5;
+    let shadow_coords = scaled + vec3<f32>(0.5);
 
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
         shadow_coords.y < 0.0 || shadow_coords.y > 1.0 ||
@@ -160,7 +188,8 @@ fn sample_shadow_poisson(light_space_pos: vec4<f32>, cascade_idx: u32, bias: f32
         return 1.0;
     }
 
-    let test_depth = shadow_coords.z - bias - csm_uniforms.peter_panning_offset;
+    let biased_depth = shadow_coords.z - bias;
+    let test_depth = biased_depth - csm_uniforms.peter_panning_offset;
 
     // Optimized 16-sample Poisson disk pattern
     let poisson_samples = array<vec2<f32>, 16>(
@@ -196,7 +225,8 @@ fn sample_shadow_poisson(light_space_pos: vec4<f32>, cascade_idx: u32, bias: f32
 // EVSM (Exponential Variance Shadow Maps) implementation
 fn sample_shadow_evsm(light_space_pos: vec4<f32>, cascade_idx: u32) -> f32 {
     let proj_coords = light_space_pos.xyz / light_space_pos.w;
-    let shadow_coords = proj_coords * 0.5 + 0.5;
+    let scaled = proj_coords * 0.5;
+    let shadow_coords = scaled + vec3<f32>(0.5);
 
     if (shadow_coords.x < 0.0 || shadow_coords.x > 1.0 ||
         shadow_coords.y < 0.0 || shadow_coords.y > 1.0 ||
@@ -211,29 +241,33 @@ fn sample_shadow_evsm(light_space_pos: vec4<f32>, cascade_idx: u32) -> f32 {
 
     // Positive EVSM
     let pos_exp = csm_uniforms.evsm_positive_exp;
-    let pos_depth = exp(pos_exp * fragment_depth);
+    let pos_depth = det_exp(pos_exp * fragment_depth);
     let pos_m1 = moments.r;
     let pos_m2 = moments.g;
 
-    // Chebyshev's inequality for variance shadow mapping
+    // Chebyshev's inequality for variance shadow mapping (pinned mul/add order)
     var pos_shadow = 1.0;
     if (fragment_depth > pos_m1) {
-        let variance = pos_m2 - pos_m1 * pos_m1;
+        let pos_m1_sq = pos_m1 * pos_m1;
+        let variance = pos_m2 - pos_m1_sq;
         let d = fragment_depth - pos_m1;
-        pos_shadow = variance / (variance + d * d);
+        let d_sq = d * d;
+        pos_shadow = variance / (variance + d_sq);
     }
 
     // Negative EVSM for light bleeding reduction
     let neg_exp = csm_uniforms.evsm_negative_exp;
-    let neg_depth = exp(-neg_exp * fragment_depth);
+    let neg_depth = det_exp(-neg_exp * fragment_depth);
     let neg_m1 = moments.b;
     let neg_m2 = moments.a;
 
     var neg_shadow = 1.0;
     if (fragment_depth < neg_m1) {
-        let variance = neg_m2 - neg_m1 * neg_m1;
+        let neg_m1_sq = neg_m1 * neg_m1;
+        let variance = neg_m2 - neg_m1_sq;
         let d = neg_m1 - fragment_depth;
-        neg_shadow = variance / (variance + d * d);
+        let d_sq = d * d;
+        neg_shadow = variance / (variance + d_sq);
     }
 
     // Combine positive and negative results
@@ -312,7 +346,7 @@ fn apply_cascade_debug(base_color: vec3<f32>, world_pos: vec3<f32>, view_depth: 
 
     // Blend base color with cascade debug color
     let debug_intensity = select(0.0, 0.4, csm_uniforms.debug_mode == 1u);
-    return mix(base_color, debug_color, debug_intensity);
+    return det_mix3(base_color, debug_color, debug_intensity);
 }
 
 // Shadow overdraw debug visualization
@@ -322,8 +356,8 @@ fn apply_overdraw_debug(base_color: vec3<f32>, shadow_factor: f32) -> vec3<f32> 
     }
 
     // Visualize shadow intensity: red = fully shadowed, green = fully lit
-    let debug_color = mix(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), shadow_factor);
-    return mix(base_color, debug_color, 0.5);
+    let debug_color = det_mix3(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), shadow_factor);
+    return det_mix3(base_color, debug_color, 0.5);
 }
 
 // Cascade transition smoothing (reduces cascade boundary artifacts)
@@ -350,7 +384,7 @@ fn smooth_cascade_transition(world_pos: vec3<f32>, view_depth: f32, world_normal
 
             // Blend based on distance to boundary
             let blend_factor = boundary_distance / transition_zone;
-            return mix(next_shadow, current_shadow, blend_factor);
+            return det_mix(next_shadow, current_shadow, blend_factor);
         }
     }
 

@@ -6,6 +6,7 @@ from dataclasses import dataclass, fields
 from typing import Any, Mapping, Sequence
 
 from ._map_scene_common import _layer_id, _stable_hash
+from .style import evaluate_color_expr, evaluate_number_expr
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,31 @@ def _color(value: Any, fallback: tuple[int, int, int, int]) -> tuple[int, int, i
         a = max(0, min(255, int(round((values[3] if len(values) > 3 else fallback[3]) * (255.0 if len(values) > 3 and values[3] <= 1.0 else 1.0)))))
         return r, g, b, a
     return fallback
+
+
+def _is_style_expression(value: Any) -> bool:
+    return isinstance(value, list) and bool(value) and isinstance(value[0], str)
+
+
+def _properties(feature: Any) -> dict[str, Any]:
+    if not isinstance(feature, Mapping):
+        return {}
+    properties = feature.get("properties")
+    return dict(properties) if isinstance(properties, Mapping) else {}
+
+
+def _feature_color(value: Any, properties: Mapping[str, Any], fallback: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    if _is_style_expression(value):
+        evaluated = evaluate_color_expr(value, dict(properties))
+        return _color(evaluated, fallback) if evaluated is not None else fallback
+    return _color(value, fallback)
+
+
+def _feature_number(value: Any, properties: Mapping[str, Any], default: float) -> float:
+    if _is_style_expression(value):
+        evaluated = evaluate_number_expr(value, dict(properties))
+        return float(evaluated) if evaluated is not None else float(default)
+    return _number(value, default)
 
 
 def _style_layers(layer: Any, layer_type: str) -> list[Mapping[str, Any]]:
@@ -1261,21 +1287,69 @@ def _composite_recipe_layers(
             line_layout = _layout(layer, "line")
             fill_paint = _paint(layer, "fill")
             fallback_rgb = _rgb(layer.to_dict(), salt="vector")
-            line_color = _color(line_paint.get("line-color"), (*fallback_rgb, 255))
-            line_opacity = _number(line_paint.get("line-opacity"), line_color[3] / 255.0)
+            line_color_value = line_paint.get("line-color")
+            line_color = (
+                (*fallback_rgb, 255)
+                if _is_style_expression(line_color_value)
+                else _color(line_color_value, (*fallback_rgb, 255))
+            )
+            line_opacity_value = line_paint.get("line-opacity")
+            line_opacity = (
+                line_color[3] / 255.0
+                if _is_style_expression(line_opacity_value)
+                else _number(line_opacity_value, line_color[3] / 255.0)
+            )
             line_color = (line_color[0], line_color[1], line_color[2], max(0, min(255, int(round(line_opacity * 255.0)))))
             line_width = _resolve_line_width_px(layer, line_paint, recipe, width, height)
             line_cap = str(line_layout.get("line-cap") or getattr(layer, "line_cap", "butt") or "butt").lower()
             line_join = str(line_layout.get("line-join") or getattr(layer, "line_join", "miter") or "miter").lower()
             miter_limit = _number(line_layout.get("line-miter-limit"), 4.0)
             dash_array = getattr(layer, "dash_array", None) or line_paint.get("line-dasharray")
-            fill_color = _color(fill_paint.get("fill-color"), (*fallback_rgb, 160))
-            fill_opacity = _number(fill_paint.get("fill-opacity"), fill_color[3] / 255.0)
+            fill_color_value = fill_paint.get("fill-color")
+            fill_color = (
+                (*fallback_rgb, 160)
+                if _is_style_expression(fill_color_value)
+                else _color(fill_color_value, (*fallback_rgb, 160))
+            )
+            fill_opacity_value = fill_paint.get("fill-opacity")
+            fill_opacity = (
+                fill_color[3] / 255.0
+                if _is_style_expression(fill_opacity_value)
+                else _number(fill_opacity_value, fill_color[3] / 255.0)
+            )
             fill_color = (fill_color[0], fill_color[1], fill_color[2], max(0, min(255, int(round(fill_opacity * 255.0)))))
             for feature in layer.features or ():
                 geometry = feature.get("geometry") if isinstance(feature, Mapping) else None
                 if not isinstance(geometry, Mapping):
                     continue
+                properties = _properties(feature)
+                feature_line_color = _feature_color(line_color_value, properties, line_color)
+                feature_line_opacity = _feature_number(
+                    line_opacity_value,
+                    properties,
+                    feature_line_color[3] / 255.0,
+                )
+                feature_line_color = (
+                    feature_line_color[0],
+                    feature_line_color[1],
+                    feature_line_color[2],
+                    max(0, min(255, int(round(feature_line_opacity * 255.0)))),
+                )
+                feature_line_width = line_width
+                if getattr(layer, "width_px", None) is None and _is_style_expression(line_paint.get("line-width")):
+                    feature_line_width = max(1.0, _feature_number(line_paint.get("line-width"), properties, line_width))
+                feature_fill_color = _feature_color(fill_color_value, properties, fill_color)
+                feature_fill_opacity = _feature_number(
+                    fill_opacity_value,
+                    properties,
+                    feature_fill_color[3] / 255.0,
+                )
+                feature_fill_color = (
+                    feature_fill_color[0],
+                    feature_fill_color[1],
+                    feature_fill_color[2],
+                    max(0, min(255, int(round(feature_fill_opacity * 255.0)))),
+                )
                 geometry_type = str(geometry.get("type", "")).lower()
                 if geometry_type in {"polygon", "multipolygon"}:
                     for polygon_rings in _geometry_polygon_rings(geometry):
@@ -1284,7 +1358,7 @@ def _composite_recipe_layers(
                             for ring in polygon_rings
                             if len(ring) >= 3
                         ]
-                        _draw_polygon_fill(base, pixel_rings, fill_color)
+                        _draw_polygon_fill(base, pixel_rings, feature_fill_color)
                         for ring_points in pixel_rings:
                             if ring_points and ring_points[0] != ring_points[-1]:
                                 ring_points = [*ring_points, ring_points[0]]
@@ -1292,8 +1366,8 @@ def _composite_recipe_layers(
                                 _draw_polyline(
                                     base,
                                     ring_points,
-                                    line_color,
-                                    width_px=line_width,
+                                    feature_line_color,
+                                    width_px=feature_line_width,
                                     cap=line_cap,
                                     join=line_join,
                                     dash_array=dash_array,
@@ -1303,13 +1377,19 @@ def _composite_recipe_layers(
 
                 points = [_point_to_pixel(point, width, height) for point in _geometry_points(geometry)]
                 if len(points) == 1:
-                    _draw_pixel_block(base, points[0][0], points[0][1], line_color, radius=max(1, int(round(line_width))))
+                    _draw_pixel_block(
+                        base,
+                        points[0][0],
+                        points[0][1],
+                        feature_line_color,
+                        radius=max(1, int(round(feature_line_width))),
+                    )
                 else:
                     _draw_polyline(
                         base,
                         points,
-                        line_color,
-                        width_px=line_width,
+                        feature_line_color,
+                        width_px=feature_line_width,
                         cap=line_cap,
                         join=line_join,
                         dash_array=dash_array,

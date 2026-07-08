@@ -97,8 +97,8 @@ impl PyCogDataset {
         lod: u32,
     ) -> PyResult<pyo3::Bound<'py, numpy::PyArray2<f32>>> {
         let heights = self
-            .reader
-            .read_tile(x, y, lod)
+            ._runtime
+            .block_on(self.reader.read_tile_async(x, y, lod))
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to read tile: {:?}", e)))?;
 
         let header = self.reader.header();

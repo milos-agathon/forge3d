@@ -32,6 +32,7 @@ from ._png import save_png as _save_png
 # -----------------------------------------------------------------------------
 from ._native import (
     get_native_module as _get_native_module,
+    native_import_error,
 )
 from ._gpu import (
     enumerate_adapters,
@@ -41,6 +42,8 @@ from ._gpu import (
 )
 from .mem import (
     memory_metrics,
+    set_budget_policy,
+    get_budget_policy,
     budget_remaining,
     utilization_ratio,
     override_memory_limit,
@@ -51,8 +54,7 @@ _NATIVE_MODULE = _get_native_module()
 # -----------------------------------------------------------------------------
 # Native exports (when available)
 # -----------------------------------------------------------------------------
-if _NATIVE_MODULE is not None:
-    for _name in (
+_NATIVE_ONLY_EXPORTS = (
         "Scene",
         "Session",
         "Colormap1D",
@@ -88,6 +90,7 @@ if _NATIVE_MODULE is not None:
         "is_weighted_oit_available",
         "vector_oit_and_pick_demo",
         "vector_render_oit_py",
+        "vector_render_oit_edl_py",
         "vector_render_pick_map_py",
         "vector_render_oit_and_pick_py",
         "vector_render_polygons_fill_py",
@@ -95,9 +98,59 @@ if _NATIVE_MODULE is not None:
         "ClipmapMesh",  # P2.1/M5: Clipmap terrain
         "clipmap_generate_py",  # P2.1/M5: Clipmap generation function
         "calculate_triangle_reduction_py",  # P2.1/M5: Triangle reduction calculation
-    ):
+        "PointBuffer",  # P2.1: point cloud GPU buffer
+        "copc_laz_enabled",  # P2.2: COPC/LAZ feature gate
+        "read_laz_points_info",  # P2.2: LAZ fixture decode info
+        "read_laz_point_attributes",  # P2.3: LAZ classification/intensity samples
+        "copc_read_node_points",  # P2.3: native COPC node decode
+        "render_adjudication_pair",  # AEQUITAS: PT-vs-raster adjudication pair
+        "hybrid_render_terrain_reference",  # PROMETHEUS: terrain PT reference
+        "seal_provenance",  # VERITAS: Merkle+Ed25519 seal over VT provenance
+        "verify_provenance",  # VERITAS: native manifest verification
+        "declutter_optimal",  # CARTOGRAPHER-PRIME: bounded-optimal label solve
+        "LabelRationale",  # CARTOGRAPHER-PRIME: grounded solver rationale
+)
+
+if _NATIVE_MODULE is not None:
+    for _name in _NATIVE_ONLY_EXPORTS:
         if hasattr(_NATIVE_MODULE, _name):
             globals()[_name] = getattr(_NATIVE_MODULE, _name)
+
+
+class _NativeSymbolMissing(AttributeError):
+    """Raised when a native-only forge3d symbol is accessed but unavailable.
+
+    Inherits AttributeError so ``hasattr(forge3d, name)`` probes stay False
+    instead of erroring; ``from forge3d import Scene`` still surfaces an
+    import-flavored failure because the import machinery converts a module
+    ``__getattr__`` AttributeError into ImportError. (CPython forbids
+    inheriting from both ImportError and AttributeError — their C-level
+    instance layouts conflict.)
+    """
+
+
+def __getattr__(name: str):
+    if name in _NATIVE_ONLY_EXPORTS:
+        if _NATIVE_MODULE is None:
+            cause = native_import_error()
+            detail = (
+                f"the compiled extension forge3d._forge3d failed to import: {cause!r}"
+                if cause is not None
+                else "the compiled extension forge3d._forge3d is not built"
+            )
+            raise _NativeSymbolMissing(
+                f"forge3d.{name} requires the native extension, but {detail}. "
+                "Reinstall the wheel (pip install --force-reinstall forge3d) or "
+                "rebuild from a checkout with: maturin develop --release"
+            )
+        raise _NativeSymbolMissing(
+            f"forge3d.{name} is not provided by this build of forge3d._forge3d "
+            "(the extension imported, but the symbol is missing — typically the "
+            "wheel was built without the Cargo feature that provides it). "
+            "Rebuild with the matching feature enabled, e.g.: "
+            "maturin develop --release --features <feature>"
+        )
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # -----------------------------------------------------------------------------
 # Colormaps
@@ -118,7 +171,10 @@ from .terrain_params import (
     ShadowSettings,
     FogSettings,
     ReflectionSettings,
+    WaterSettings,
+    CloudSettings,
     HeightAoSettings,
+    ScreenSpaceSettings,
     SunVisibilitySettings,
     ProbeSettings,
     ReflectionProbeSettings,
@@ -141,6 +197,7 @@ from .denoise_oidn import oidn_available, oidn_denoise
 from . import presets
 from . import animation
 from . import gis
+from . import thematic
 from . import camera_rigs
 
 # -----------------------------------------------------------------------------
@@ -408,6 +465,7 @@ from .diagnostics import (
     ValidationReport,
     crs_mismatch_diagnostic,
     estimated_gpu_memory_diagnostic,
+    memory_tracking_completeness_report,
     experimental_feature_diagnostic,
     label_rejection_summary_diagnostic,
     missing_glyphs_diagnostic,
@@ -441,12 +499,14 @@ from .label_plan import (
 # Typed MapScene recipe contract
 # -----------------------------------------------------------------------------
 from .map_scene import (
+    CompiledScenePlan,
     FontAtlas,
     FontFallbackRange,
     LabelLayer,
     LightingPreset,
     MapFurnitureLayer,
     MapScene,
+    MapSceneNativeUnavailable,
     BuildingLayer as MapSceneBuildingLayer,
     OrbitCamera,
     OutputSpec,
@@ -508,6 +568,16 @@ __all__ = [
     "SunPosition",
     "sun_position",
     "sun_position_utc",
+    # AEQUITAS: PT-vs-raster adjudication
+    "render_adjudication_pair",
+    # PROMETHEUS: GPU terrain path-traced reference
+    "hybrid_render_terrain_reference",
+    # VERITAS: per-pixel cryptographic provenance
+    "seal_provenance",
+    "verify_provenance",
+    # CARTOGRAPHER-PRIME: bounded-optimal label solve + rationale
+    "declutter_optimal",
+    "LabelRationale",
     # Configuration
     "RendererConfig",
     "TerrainRenderParamsConfig",
@@ -516,7 +586,10 @@ __all__ = [
     "ShadowSettings",
     "FogSettings",
     "ReflectionSettings",
+    "WaterSettings",
+    "CloudSettings",
     "HeightAoSettings",
+    "ScreenSpaceSettings",
     "SunVisibilitySettings",
     "ProbeSettings",
     "ReflectionProbeSettings",
@@ -547,15 +620,24 @@ __all__ = [
     "get_device",
     "enumerate_adapters",
     "device_probe",
+    "native_import_error",
     "set_point_shape_mode",
     "set_point_lod_threshold",
     "is_weighted_oit_available",
     "vector_oit_and_pick_demo",
     "vector_render_oit_py",
+    "vector_render_oit_edl_py",
     "vector_render_pick_map_py",
     "vector_render_oit_and_pick_py",
     "vector_render_polygons_fill_py",
     "memory_metrics",
+    "PointBuffer",
+    "copc_laz_enabled",
+    "read_laz_points_info",
+    "read_laz_point_attributes",
+    "copc_read_node_points",
+    "set_budget_policy",
+    "get_budget_policy",
     "budget_remaining",
     "utilization_ratio",
     "override_memory_limit",
@@ -572,6 +654,7 @@ __all__ = [
     # Modules
     "geometry",
     "gis",
+    "thematic",
     "io",
     "terrain_scatter",
     "animation",
@@ -660,6 +743,7 @@ __all__ = [
     "ValidationReport",
     "crs_mismatch_diagnostic",
     "estimated_gpu_memory_diagnostic",
+    "memory_tracking_completeness_report",
     "experimental_feature_diagnostic",
     "label_rejection_summary_diagnostic",
     "missing_glyphs_diagnostic",
@@ -684,6 +768,8 @@ __all__ = [
     "RejectedLabel",
     # Typed MapScene recipe contract
     "MapScene",
+    "MapSceneNativeUnavailable",
+    "CompiledScenePlan",
     "SceneRecipe",
     "TerrainSource",
     "RasterOverlay",

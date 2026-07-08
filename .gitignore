@@ -73,6 +73,16 @@ tmp/
 codex-review/
 codex-gis-g002*-review.zip
 g-002*-review-*.zip
+logs/*-audit.json
+logs/mcp-puppeteer-*.log.gz
+*.pdb
+
+# Generated agent docs and review packs
+docs/audits/
+docs/prompts/
+docs/perf/
+docs/fable-prompt-library.md
+docs/superpowers/plans/2026-07-*.md
 
 # Translations
 *.mo
@@ -266,6 +276,20 @@ __pycache__/
 !docs/gallery/thumbs/*.jpg
 !docs/tutorials/images/*.png
 !docs/tutorials/images/*.jpg
+tests/golden/adjudication/
+tests/golden/hybrid_terrain/
+tests/golden/labels/
+tests/goldens/
+tests/golden/recipes/mapscene_auto_water.png
+tests/golden/recipes/mapscene_clipmap_large_region.png
+tests/golden/recipes/mapscene_cloud_shadows.png
+tests/golden/recipes/mapscene_copc_points.png
+tests/golden/recipes/mapscene_label_arabic_joining.png
+tests/golden/recipes/mapscene_screen_space_contact.png
+tests/golden/recipes/mapscene_screen_space_reflection.png
+tests/golden/recipes/mapscene_textured_gltf_landmark.png
+tests/golden/recipes/mapscene_thematic_choropleth.png
+tests/golden/recipes/mapscene_tiles3d_points.png
 /out/
 /diag_out/
 /artifacts/

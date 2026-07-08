@@ -179,7 +179,9 @@ impl TerrainScene {
 
         let vt_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("vt_uniforms"),
-            size: 64,
+            // Must cover TerrainVTUniformsGpu (3x vec4<u32> config + 3x
+            // vec4<u32> per-family info = 96 bytes).
+            size: 96,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -315,7 +317,22 @@ impl TerrainScene {
             color_format,
             1,
         );
-
+        let clipmap_pipeline = if adapter.get_info().backend == wgpu::Backend::Vulkan {
+            None
+        } else {
+            Some(Self::create_clipmap_render_pipeline(
+                device.as_ref(),
+                &bind_group_layout,
+                light_buffer_layout,
+                &ibl_bind_group_layout,
+                &shadow_bind_group_layout,
+                &fog_bind_group_layout,
+                &water_reflection_bind_group_layout,
+                &material_layer_bind_group_layout,
+                color_format,
+                1,
+            ))
+        };
         let water_reflection_pipeline = Self::create_render_pipeline(
             device.as_ref(),
             &bind_group_layout,
@@ -401,10 +418,30 @@ impl TerrainScene {
         tracker.track_buffer_allocation(probe_grid_uniform_alloc_bytes, false);
         tracker.track_buffer_allocation(probe_ssbo_alloc_bytes, false);
         tracker.track_buffer_allocation(reflection_probe_grid_uniform_alloc_bytes, false);
+        let tracked_scene_textures = vec![
+            crate::core::resource_tracker::register_texture(1, 1, wgpu::TextureFormat::Rgba8Unorm),
+            crate::core::resource_tracker::register_texture(256, 1, wgpu::TextureFormat::R32Float),
+            crate::core::resource_tracker::register_texture(1, 1, wgpu::TextureFormat::R8Unorm),
+            crate::core::resource_tracker::register_texture(1, 1, wgpu::TextureFormat::R32Float),
+            crate::core::resource_tracker::register_texture(512, 512, color_format),
+            crate::core::resource_tracker::register_texture(
+                512,
+                512,
+                wgpu::TextureFormat::Depth32Float,
+            ),
+            crate::core::resource_tracker::register_texture(
+                1,
+                1,
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+            ),
+            crate::core::resource_tracker::register_texture(1, 1, wgpu::TextureFormat::Rgba32Float),
+            crate::core::resource_tracker::register_texture(1, 1, wgpu::TextureFormat::Rgba16Float),
+        ];
 
         let pipeline_cache = PipelineCache {
             sample_count: 1,
             pipeline,
+            clipmap_pipeline,
         };
 
         Ok(Self {
@@ -518,6 +555,7 @@ impl TerrainScene {
             config: Arc::new(Mutex::new(crate::render::params::RendererConfig::default())),
             aov_pipeline: Mutex::new(None),
             aov_pipeline_sample_count: Mutex::new(1),
+            aov_pipeline_source_id: Mutex::new(false),
             _dof_renderer: Mutex::new(None),
             offline_state: Mutex::new(None),
             #[cfg(feature = "enable-gpu-instancing")]
@@ -530,6 +568,11 @@ impl TerrainScene {
             scatter_last_frame_stats: crate::terrain::scatter::TerrainScatterFrameStats::default(),
             material_vt: Mutex::new(super::virtual_texture::TerrainMaterialVT::new()),
             viewer_heightmap: None,
+            clipmap_vertex_count: 0,
+            clipmap_index_count: 0,
+            clipmap_vertex_buffer: None,
+            clipmap_index_buffer: None,
+            _tracked_scene_textures: tracked_scene_textures,
         })
     }
 

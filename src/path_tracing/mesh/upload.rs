@@ -4,6 +4,35 @@ use anyhow::Result;
 use wgpu::util::DeviceExt;
 use wgpu::{BufferUsages, Device, Queue};
 
+/// BVH node padded to the WGSL `BvhNode` layout consumed by the wavefront
+/// kernels (pt_intersect/pt_shadow): vec3 members force a 16-byte struct
+/// alignment there, so the array stride is 48 bytes — not the 40 bytes of the
+/// packed CPU `BvhNode`. Field offsets: aabb_min@0, left@12, aabb_max@16,
+/// right@28, flags@32.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct GpuBvhNode48 {
+    aabb_min: [f32; 3],
+    left: u32,
+    aabb_max: [f32; 3],
+    right: u32,
+    flags: u32,
+    _pad: [u32; 3],
+}
+
+impl From<&BvhNode> for GpuBvhNode48 {
+    fn from(n: &BvhNode) -> Self {
+        Self {
+            aabb_min: n.aabb_min,
+            left: n.left,
+            aabb_max: n.aabb_max,
+            right: n.right,
+            flags: n.flags,
+            _pad: [0; 3],
+        }
+    }
+}
+
 /// Build a mesh atlas from multiple MeshCPU/BvhCPU pairs.
 /// The atlas concatenates all vertices, indices (triangles), and BVH nodes into three buffers,
 /// and creates a descriptor table describing offsets/counts for each BLAS.
@@ -15,7 +44,7 @@ pub fn build_mesh_atlas(device: &Device, items: &[(MeshCPU, BvhCPU)]) -> anyhow:
     // Concatenate vertices, indices, nodes
     let mut all_vertices: Vec<GpuVertex> = Vec::new();
     let mut all_indices: Vec<u32> = Vec::new(); // triangle index stream (3 per triangle)
-    let mut all_nodes: Vec<BvhNode> = Vec::new();
+    let mut all_nodes: Vec<GpuBvhNode48> = Vec::new();
     let mut descs: Vec<BlasDesc> = Vec::with_capacity(items.len());
 
     let mut vtx_ofs: u32 = 0;
@@ -39,10 +68,10 @@ pub fn build_mesh_atlas(device: &Device, items: &[(MeshCPU, BvhCPU)]) -> anyhow:
         }
         tri_ofs += tri_count;
 
-        // BVH nodes
+        // BVH nodes (padded to the 48-byte WGSL stride)
         let start_node = node_ofs;
         let node_count = bvh.node_count();
-        all_nodes.extend_from_slice(&bvh.nodes);
+        all_nodes.extend(bvh.nodes.iter().map(GpuBvhNode48::from));
         node_ofs += node_count;
 
         // Descriptor entry

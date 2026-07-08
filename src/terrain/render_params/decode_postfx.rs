@@ -67,6 +67,11 @@ pub(super) fn parse_aov_settings(params: &Bound<'_, PyAny>) -> AovSettingsNative
                 .getattr("depth")
                 .and_then(|v| v.extract())
                 .unwrap_or(true);
+            // VERITAS: off unless the AovSettings dataclass carries the flag.
+            let source_id: bool = aov
+                .getattr("source_id")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
             let output_dir: Option<String> = aov
                 .getattr("output_dir")
                 .and_then(|v| {
@@ -86,6 +91,7 @@ pub(super) fn parse_aov_settings(params: &Bound<'_, PyAny>) -> AovSettingsNative
                 albedo,
                 normal,
                 depth,
+                source_id,
                 output_dir,
                 format,
             }
@@ -94,6 +100,64 @@ pub(super) fn parse_aov_settings(params: &Bound<'_, PyAny>) -> AovSettingsNative
         }
     } else {
         AovSettingsNative::default()
+    }
+}
+
+pub(super) fn parse_screen_space_settings(params: &Bound<'_, PyAny>) -> ScreenSpaceSettingsNative {
+    if let Ok(screen_space) = params.getattr("screen_space") {
+        if !screen_space.is_none() {
+            let ssao_enabled: bool = screen_space
+                .getattr("ssao_enabled")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            let ssgi_enabled: bool = screen_space
+                .getattr("ssgi_enabled")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            let ssr_enabled: bool = screen_space
+                .getattr("ssr_enabled")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            let taa_enabled: bool = screen_space
+                .getattr("taa_enabled")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            let enabled: bool = screen_space
+                .getattr("enabled")
+                .and_then(|v| v.extract())
+                .unwrap_or(false);
+            ScreenSpaceSettingsNative {
+                enabled: enabled || ssao_enabled || ssgi_enabled || ssr_enabled || taa_enabled,
+                ssao_enabled,
+                ssao_radius: screen_space
+                    .getattr("ssao_radius")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(1.5),
+                ssao_intensity: screen_space
+                    .getattr("ssao_intensity")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(1.0),
+                ssgi_enabled,
+                ssgi_intensity: screen_space
+                    .getattr("ssgi_intensity")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(1.0),
+                ssr_enabled,
+                ssr_intensity: screen_space
+                    .getattr("ssr_intensity")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(1.0),
+                taa_enabled,
+                temporal_alpha: screen_space
+                    .getattr("temporal_alpha")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(0.1),
+            }
+        } else {
+            ScreenSpaceSettingsNative::default()
+        }
+    } else {
+        ScreenSpaceSettingsNative::default()
     }
 }
 

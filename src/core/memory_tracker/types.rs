@@ -7,6 +7,8 @@ pub struct MemoryMetrics {
     pub texture_bytes: u64,
     pub host_visible_bytes: u64,
     pub total_bytes: u64,
+    pub peak_host_visible_bytes: u64,
+    pub peak_total_bytes: u64,
     pub limit_bytes: u64,
     pub within_budget: bool,
     pub utilization_ratio: f64,
@@ -16,6 +18,7 @@ pub struct MemoryMetrics {
     pub staging_ring_count: u32,
     pub staging_buffer_size: u64,
     pub staging_buffer_stalls: u64,
+    pub budget_policy: &'static str,
 }
 
 /// Statistics from defragmentation operation

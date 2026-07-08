@@ -1,12 +1,20 @@
 use super::*;
 
 impl HybridPathTracer {
+    /// Render the hybrid scene. `terrain` makes the DEM heightfield a
+    /// first-class primitive of the traversal: when `Some`, the real min-max
+    /// pyramid, DEM texture, env map and terrain uniforms are bound (flags
+    /// bit 0 set), so `TraversalMode::Hybrid` mixes terrain with mesh/SDF and
+    /// `TraversalMode::TerrainOnly` selects it as the primary intersectable.
+    /// When `None`, inert placeholders are bound and the terrain branch is
+    /// disabled.
     pub fn render(
         &self,
         width: u32,
         height: u32,
         spheres: &[Sphere],
         hybrid_scene: &HybridScene,
+        terrain: Option<&super::terrain_heightfield::TerrainPtScene>,
         params: HybridTracerParams,
     ) -> Result<Vec<u8>, RenderError> {
         let device = &ctx().device;
@@ -101,10 +109,16 @@ impl HybridPathTracer {
         let bg0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("hybrid-pt-bg0"),
             layout: &self.layouts.uniforms,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: base_ubo.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: base_ubo.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: lighting_ubo.as_entire_binding(),
+                },
+            ],
         });
 
         let mut bg1_entries = vec![
@@ -132,13 +146,114 @@ impl HybridPathTracer {
             layout: &self.layouts.scene,
             entries: &bg1_entries,
         });
+        // Terrain resources: real DEM/pyramid/env when a terrain scene is
+        // supplied (PROMETHEUS first-class terrain), inert placeholders
+        // otherwise. The `main` entry never touches the Welford/reservoir
+        // buffers, so those stay minimal dummies in both cases.
+        let dummy_tex = |label: &str, format: wgpu::TextureFormat| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+        };
+        let dummy_height = dummy_tex("hybrid-pt-dummy-height", wgpu::TextureFormat::R32Float);
+        let dummy_minmax = dummy_tex("hybrid-pt-dummy-minmax", wgpu::TextureFormat::Rg32Float);
+        let dummy_env = dummy_tex("hybrid-pt-dummy-env", wgpu::TextureFormat::Rgba32Float);
+        let (height_view, minmax_view, env_view) = match terrain {
+            Some(t) => (
+                t.pyramid
+                    .height_texture
+                    .create_view(&wgpu::TextureViewDescriptor::default()),
+                t.pyramid
+                    .minmax_texture
+                    .create_view(&wgpu::TextureViewDescriptor::default()),
+                t.env_texture
+                    .create_view(&wgpu::TextureViewDescriptor::default()),
+            ),
+            None => (
+                dummy_height.create_view(&wgpu::TextureViewDescriptor::default()),
+                dummy_minmax.create_view(&wgpu::TextureViewDescriptor::default()),
+                dummy_env.create_view(&wgpu::TextureViewDescriptor::default()),
+            ),
+        };
+        // Terrain uniforms: real block (flags bit 0 set) or zeroed (bit 0
+        // unset -> terrain branch disabled in the traversal).
+        let terrain_uniforms = match terrain {
+            Some(t) => t.uniforms(1, 2),
+            None => <super::terrain_heightfield::TerrainPtUniforms as bytemuck::Zeroable>::zeroed(),
+        };
+        let terrain_ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("hybrid-pt-terrain-ubo"),
+            contents: bytemuck::bytes_of(&terrain_uniforms),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let dummy_welford = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("hybrid-pt-dummy-welford"),
+            size: 16,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        // Reservoir dummies must hold at least one canonical 80-byte element.
+        let reservoir_stride = std::mem::size_of::<crate::path_tracing::restir::Reservoir>() as u64;
+        let dummy_reservoir = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("hybrid-pt-dummy-reservoir"),
+            size: reservoir_stride,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let dummy_reservoir_prev = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("hybrid-pt-dummy-reservoir-prev"),
+            size: reservoir_stride,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
         let bg2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("hybrid-pt-bg2"),
             layout: &self.layouts.accum,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: accum_buf.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: accum_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&height_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&minmax_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: terrain_ubo.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: dummy_welford.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: dummy_reservoir.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(&env_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: dummy_reservoir_prev.as_entire_binding(),
+                },
+            ],
         });
 
         let mut bg3_entries = vec![wgpu::BindGroupEntry {
@@ -156,14 +271,6 @@ impl HybridPathTracer {
             layout: &self.layouts.output,
             entries: &bg3_entries,
         });
-        let bg4 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("hybrid-pt-bg4"),
-            layout: &self.layouts.lighting,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: lighting_ubo.as_entire_binding(),
-            }],
-        });
 
         let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("hybrid-pt-encoder"),
@@ -178,7 +285,6 @@ impl HybridPathTracer {
             cpass.set_bind_group(1, &bg1, &[]);
             cpass.set_bind_group(2, &bg2, &[]);
             cpass.set_bind_group(3, &bg3, &[]);
-            cpass.set_bind_group(4, &bg4, &[]);
             cpass.dispatch_workgroups((width + 7) / 8, (height + 7) / 8, 1);
         }
 

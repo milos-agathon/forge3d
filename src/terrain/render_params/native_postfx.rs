@@ -8,5 +8,7 @@ pub use camera::{
     DofMethodNative, DofQualityNative, DofSettingsNative, LensEffectsSettingsNative,
     MotionBlurSettingsNative,
 };
-pub use quality::{AovSettingsNative, DenoiseMethodNative, DenoiseSettingsNative};
+pub use quality::{
+    AovSettingsNative, DenoiseMethodNative, DenoiseSettingsNative, ScreenSpaceSettingsNative,
+};
 pub use tonemap::TonemapSettingsNative;

@@ -62,6 +62,10 @@ impl TerrainScene {
                 .join("\n")
         }
 
+        // Pinned-order float helpers must lead the module so every det_* call
+        // site below (tonemap_common, lighting_ibl, terrain) resolves.
+        let determinism = include_str!("../../shaders/includes/determinism.wgsl");
+
         // Load nested includes for lighting.wgsl
         let lights = include_str!("../../shaders/lights.wgsl");
 
@@ -98,7 +102,8 @@ impl TerrainScene {
 
         // Concatenate in dependency order
         format!(
-            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            determinism,
             lights,
             brdf_common,
             brdf_lambert,
@@ -159,6 +164,107 @@ impl TerrainScene {
                 module: &shader,
                 entry_point: "vs_main",
                 buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: TERRAIN_DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: sample_count,
+                ..Default::default()
+            },
+            multiview: None,
+        })
+    }
+
+    pub(super) fn create_clipmap_render_pipeline(
+        device: &wgpu::Device,
+        bind_group_layout: &wgpu::BindGroupLayout,
+        light_buffer_layout: &wgpu::BindGroupLayout,
+        ibl_bind_group_layout: &wgpu::BindGroupLayout,
+        shadow_bind_group_layout: &wgpu::BindGroupLayout,
+        fog_bind_group_layout: &wgpu::BindGroupLayout,
+        water_reflection_bind_group_layout: &wgpu::BindGroupLayout,
+        material_layer_bind_group_layout: &wgpu::BindGroupLayout,
+        color_format: wgpu::TextureFormat,
+        sample_count: u32,
+    ) -> wgpu::RenderPipeline {
+        let mut shader_source = Self::preprocess_terrain_shader();
+        shader_source.push_str(
+            r#"
+
+@vertex
+fn vs_clipmap_main(
+    @location(0) clip_pos_xz : vec2<f32>,
+    @location(1) clip_uv : vec2<f32>,
+    @location(2) clip_morph : vec2<f32>
+) -> VertexOutput {
+    var out : VertexOutput;
+
+    let uv = clamp(clip_uv, vec2<f32>(0.0), vec2<f32>(1.0));
+    let h_raw = textureSampleLevel(height_tex, height_samp, uv, 0.0).r;
+    let t_geom = get_height_geom_t(h_raw);
+    let h_min = u_shading.clamp0.x;
+    let h_max = u_shading.clamp0.y;
+    let h_disp = h_min + apply_height_curve01(t_geom) * (h_max - h_min);
+    let h_exag = u_terrain.spacing_h_exag.z;
+    let h_center = (h_min + h_max) * 0.5;
+    let skirt_offset = select(0.0, u_terrain.camera_mode_params.y * 0.001, clip_morph.x < 0.0);
+    let world_z_centered = (h_disp - h_center - skirt_offset) * h_exag;
+    let world_z_original = (h_disp - skirt_offset) * h_exag;
+
+    out.world_position = vec3<f32>(clip_pos_xz.x, clip_pos_xz.y, world_z_original);
+    out.world_normal = vec3<f32>(0.0, 0.0, 1.0);
+    out.tex_coord = uv;
+    out.clip_position = u_terrain.proj * u_terrain.view * vec4<f32>(
+        clip_pos_xz.x,
+        clip_pos_xz.y,
+        world_z_centered,
+        1.0
+    );
+    return out;
+}
+"#,
+        );
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("terrain_pbr_pom.clipmap.shader"),
+            source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("terrain_pbr_pom.clipmap.pipeline_layout"),
+            bind_group_layouts: &[
+                bind_group_layout,
+                light_buffer_layout,
+                ibl_bind_group_layout,
+                &shadow_bind_group_layout,
+                fog_bind_group_layout,
+                water_reflection_bind_group_layout,
+                material_layer_bind_group_layout,
+            ],
+            push_constant_ranges: &[],
+        });
+
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("terrain_pbr_pom.clipmap.pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_clipmap_main",
+                buffers: &[crate::terrain::clipmap::ClipmapVertex::desc()],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -248,7 +354,11 @@ impl TerrainScene {
     }
 
     /// M1: Create AOV-enabled render pipeline with multiple render targets
-    /// This pipeline outputs to 4 color targets: beauty, albedo, normal, depth
+    /// This pipeline outputs to 4 color targets: beauty, albedo, normal, depth.
+    /// VERITAS: with `include_source_id` a 5th `R32Uint` target carries the
+    /// per-pixel VT source-id map (requires sample_count == 1 — R32Uint is
+    /// not multisample-capable).
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn create_aov_render_pipeline(
         device: &wgpu::Device,
         bind_group_layout: &wgpu::BindGroupLayout,
@@ -260,6 +370,7 @@ impl TerrainScene {
         material_layer_bind_group_layout: &wgpu::BindGroupLayout,
         color_format: wgpu::TextureFormat,
         sample_count: u32,
+        include_source_id: bool,
     ) -> wgpu::RenderPipeline {
         let shader_source = Self::preprocess_terrain_shader();
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -286,6 +397,40 @@ impl TerrainScene {
         // Target 1: Albedo (base color before lighting)
         // Target 2: Normal (normalized world-space normal, signed float)
         // Target 3: Depth (linear depth normalized)
+        // Target 4 (optional, VERITAS): per-pixel VT source id (R32Uint)
+        let mut targets = vec![
+            // Target 0: Beauty
+            Some(wgpu::ColorTargetState {
+                format: color_format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            }),
+            // Target 1: Albedo
+            Some(wgpu::ColorTargetState {
+                format: wgpu::TextureFormat::Rgba16Float,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            }),
+            // Target 2: Normal
+            Some(wgpu::ColorTargetState {
+                format: wgpu::TextureFormat::Rgba16Float,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            }),
+            // Target 3: Depth
+            Some(wgpu::ColorTargetState {
+                format: wgpu::TextureFormat::Rgba16Float,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            }),
+        ];
+        if include_source_id {
+            targets.push(Some(wgpu::ColorTargetState {
+                format: wgpu::TextureFormat::R32Uint,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            }));
+        }
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("terrain_pbr_pom.aov.pipeline"),
             layout: Some(&pipeline_layout),
@@ -297,32 +442,7 @@ impl TerrainScene {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: "fs_main",
-                targets: &[
-                    // Target 0: Beauty
-                    Some(wgpu::ColorTargetState {
-                        format: color_format,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                    // Target 1: Albedo
-                    Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba16Float,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                    // Target 2: Normal
-                    Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba16Float,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                    // Target 3: Depth
-                    Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba16Float,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                ],
+                targets: &targets,
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: Some(wgpu::DepthStencilState {

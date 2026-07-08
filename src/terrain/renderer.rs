@@ -55,8 +55,8 @@ pub use self::core::{TerrainRenderer, TerrainScene, ViewerTerrainData};
 use self::atmosphere::create_atmosphere_init_resources;
 use self::bind_groups::create_base_bind_group_layouts;
 use self::core::{
-    IblUniforms, NoopShadow, OverlayBinding, PipelineCache, MATERIAL_LAYER_CAPACITY,
-    TERRAIN_DEFAULT_CASCADE_SPLITS,
+    clipmap_camera_config, is_clipmap_camera_mode, is_mesh_camera_mode, IblUniforms, NoopShadow,
+    OverlayBinding, PipelineCache, MATERIAL_LAYER_CAPACITY, TERRAIN_DEFAULT_CASCADE_SPLITS,
 };
 use self::height_ao::create_heightfield_init_resources;
 use self::msaa::{assert_msaa_invariants, log_msaa_debug, select_effective_msaa, MsaaInvariants};

@@ -160,7 +160,7 @@ pub fn geometry_instance_mesh_gpu_render_py(
     let indices: Vec<u32> = base.indices.clone();
 
     // GPU context
-    let g = crate::core::gpu::ctx();
+    let g = crate::core::gpu::try_ctx()?;
     let color_format = wgpu::TextureFormat::Rgba8UnormSrgb;
     let depth_format = Some(wgpu::TextureFormat::Depth32Float);
 

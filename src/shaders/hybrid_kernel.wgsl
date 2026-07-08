@@ -22,7 +22,8 @@ struct Uniforms {
   _pad: u32,
 }
 
-// Lighting uniforms (Group 4)
+// Lighting uniforms (Group 0, binding 1 — folded into the base uniform group
+// so the whole hybrid pipeline fits within max_bind_groups = 4)
 struct LightingUniforms {
   light_dir: vec3<f32>,           // Directional light direction
   lighting_type: u32,             // 0=flat, 1=lambertian, 2=phong, 3=blinn-phong
@@ -44,12 +45,12 @@ struct Sphere {
     _pad0: f32
 }
 
-// Bind groups
+// Bind groups (0-3 only: portable to max_bind_groups = 4 adapters)
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(0) @binding(1) var<uniform> lighting: LightingUniforms;
 @group(1) @binding(0) var<storage, read> scene_spheres: array<Sphere>;
 @group(2) @binding(0) var<storage, read_write> accum_hdr: array<vec4<f32>>;
 @group(3) @binding(0) var out_tex: texture_storage_2d<rgba16float, write>;
-@group(4) @binding(0) var<uniform> lighting: LightingUniforms;
 
 // AOV Output textures (moved into Group 3 to stay within max_bind_groups)
 @group(3) @binding(1) var aov_albedo: texture_storage_2d<rgba16float, write>;

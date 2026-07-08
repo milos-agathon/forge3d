@@ -1,5 +1,5 @@
-use crate::core::memory_tracker::{global_tracker, is_host_visible_usage};
-use wgpu::{BufferUsages, TextureFormat};
+use crate::core::memory_tracker::{calculate_texture_size, global_tracker, is_host_visible_usage};
+use wgpu::{BufferDescriptor, BufferUsages, TextureDescriptor, TextureFormat};
 
 /// Resource handle that automatically unregisters on drop
 #[derive(Debug)]
@@ -56,6 +56,32 @@ pub fn register_texture(width: u32, height: u32, format: TextureFormat) -> Resou
         height,
         format,
     }
+}
+
+/// Create and register a buffer, enforcing the configured budget policy first.
+pub fn tracked_create_buffer(
+    device: &wgpu::Device,
+    desc: &BufferDescriptor<'_>,
+) -> Result<(wgpu::Buffer, ResourceHandle), String> {
+    let is_host_visible = is_host_visible_usage(desc.usage);
+    if is_host_visible {
+        global_tracker().check_budget(desc.size)?;
+    }
+    let buffer = device.create_buffer(desc);
+    let handle = register_buffer_explicit(desc.size, is_host_visible);
+    Ok((buffer, handle))
+}
+
+/// Create and register a texture, enforcing the configured budget policy first.
+pub fn tracked_create_texture(
+    device: &wgpu::Device,
+    desc: &TextureDescriptor<'_>,
+) -> Result<(wgpu::Texture, ResourceHandle), String> {
+    let size = calculate_texture_size(desc.size.width, desc.size.height, desc.format);
+    global_tracker().check_budget(size)?;
+    let texture = device.create_texture(desc);
+    let handle = register_texture(desc.size.width, desc.size.height, desc.format);
+    Ok((texture, handle))
 }
 
 /// Register a buffer allocation with explicit host-visible flag

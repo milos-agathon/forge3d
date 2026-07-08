@@ -108,8 +108,8 @@ def test_mapscene_render_composites_building_layer(tmp_path) -> None:
 
     with_building = tmp_path / "with-building.png"
     without_building = tmp_path / "without-building.png"
-    report = _scene([layer]).render(str(with_building), allow_placeholder=True)
-    _scene([]).render(str(without_building), allow_placeholder=True)
+    report = _scene([layer]).render(str(with_building))
+    _scene([]).render(str(without_building))
 
     from PIL import Image
 
@@ -216,7 +216,7 @@ def test_native_offscreen_uses_terrain_scatter_buildings_without_projected_compo
 
     monkeypatch.setattr(map_scene, "_composite_native_building_layers", fail_projected_compositor)
 
-    result = map_scene._render_native_offscreen_result(scene.recipe, {}, allow_placeholder=True)
+    result = map_scene._render_native_offscreen_result(scene.recipe, scene.compile_plan())
 
     assert result is not None
     assert result.metadata["building_backend"] == "terrain_scatter_instanced_mesh"

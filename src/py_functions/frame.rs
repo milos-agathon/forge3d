@@ -7,7 +7,7 @@ pub(crate) fn render_debug_pattern_frame(
     width: u32,
     height: u32,
 ) -> PyResult<Py<Frame>> {
-    let ctx = crate::core::gpu::ctx();
+    let ctx = crate::core::gpu::try_ctx()?;
     let texture = crate::util::debug_pattern::render_debug_pattern(
         ctx.device.as_ref(),
         ctx.queue.as_ref(),

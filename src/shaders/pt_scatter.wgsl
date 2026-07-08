@@ -55,8 +55,16 @@ struct QueueHeader {
     _pad: u32,
 }
 
+struct ReferenceEnvironment {
+    env_ground: vec4<f32>,
+    env_sky: vec4<f32>,
+    miss_ground: vec4<f32>,
+    miss_sky: vec4<f32>,
+}
+
 // Bind Group 3: Accum/Output (HDR accum buffer or storage texture)
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(1) @binding(21) var<uniform> reference_environment: ReferenceEnvironment;
 @group(2) @binding(0) var<storage, read_write> scatter_queue_header: QueueHeader;
 @group(2) @binding(1) var<storage, read_write> scatter_queue: array<ScatterRay>;
 @group(2) @binding(2) var<storage, read_write> ray_queue_header: QueueHeader;
@@ -113,9 +121,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         
         let miss_ray = miss_queue[miss_idx];
         
-        // Compute background color (simple sky gradient)
+        // Compute background color from ReferenceSceneDesc.
         let sky_t = 0.5 * (miss_ray.d.y + 1.0);
-        let sky_color = mix(vec3<f32>(0.6, 0.7, 0.9), vec3<f32>(0.1, 0.2, 0.5), sky_t);
+        let sky_color = mix(reference_environment.miss_ground.rgb, reference_environment.miss_sky.rgb, sky_t);
         
         // Apply throughput and accumulate to pixel
         let contrib = miss_ray.throughput * sky_color;

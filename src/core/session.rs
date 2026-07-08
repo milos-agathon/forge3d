@@ -28,7 +28,7 @@ impl Session {
     #[new]
     #[pyo3(signature = (window=false, backend=None))]
     pub fn new(window: bool, backend: Option<&str>) -> PyResult<Self> {
-        let ctx = super::gpu::ctx();
+        let ctx = super::gpu::try_ctx()?;
 
         if window {
             return Err(PyNotImplementedError::new_err(

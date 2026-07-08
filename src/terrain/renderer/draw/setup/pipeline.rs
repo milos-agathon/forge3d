@@ -97,6 +97,23 @@ impl TerrainScene {
                 self.color_format,
                 effective_msaa,
             );
+            pipeline_cache.clipmap_pipeline =
+                if self.adapter.get_info().backend == wgpu::Backend::Vulkan {
+                    None
+                } else {
+                    Some(Self::create_clipmap_render_pipeline(
+                        self.device.as_ref(),
+                        &self.bind_group_layout,
+                        light_buffer.bind_group_layout(),
+                        &self.ibl_bind_group_layout,
+                        &self.shadow_bind_group_layout,
+                        &self.fog_bind_group_layout,
+                        &self.water_reflection_bind_group_layout,
+                        &self.material_layer_bind_group_layout,
+                        self.color_format,
+                        effective_msaa,
+                    ))
+                };
             pipeline_cache.sample_count = effective_msaa;
         }
         Ok(())

@@ -1,6 +1,5 @@
 use super::types::{HdrFormat, HdrTexture, HdrTextureConfig};
 use crate::core::error::{RenderError, RenderResult};
-use crate::core::gpu::ctx;
 use crate::core::memory_tracker::global_tracker;
 use std::num::NonZeroU32;
 
@@ -61,7 +60,7 @@ pub fn create_texture_rgb32f_with_alpha(
 fn create_hdr_texture_internal(data: &[u8], config: HdrTextureConfig) -> RenderResult<HdrTexture> {
     validate_config(&config)?;
 
-    let g = ctx();
+    let g = crate::core::gpu::try_ctx()?;
     let format = config.format.to_wgpu();
 
     let texture_size =

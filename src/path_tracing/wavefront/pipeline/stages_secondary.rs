@@ -59,35 +59,4 @@ impl WavefrontPipelines {
             }),
         )
     }
-
-    pub(super) fn create_compact_pipeline(
-        device: &Device,
-        shader: &ShaderModule,
-        uniforms_layout: &BindGroupLayout,
-        scene_layout: &BindGroupLayout,
-    ) -> Result<ComputePipeline, Box<dyn std::error::Error>> {
-        let queue_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("compact-queue-layout"),
-            entries: &[
-                aov_entry(0, false),
-                aov_entry(1, false),
-                aov_entry(2, false),
-                aov_entry(3, false),
-                aov_entry(4, false),
-            ],
-        });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("compact-pipeline-layout"),
-            bind_group_layouts: &[uniforms_layout, scene_layout, &queue_layout],
-            push_constant_ranges: &[],
-        });
-        Ok(
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("compact-pipeline"),
-                layout: Some(&pipeline_layout),
-                module: shader,
-                entry_point: "main",
-            }),
-        )
-    }
 }

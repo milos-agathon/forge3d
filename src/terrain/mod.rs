@@ -87,6 +87,10 @@ pub mod renderer;
 #[cfg(feature = "extension-module")]
 pub use renderer::{TerrainRenderer, TerrainScene as TerrainRendererScene};
 
+// Per-family VT residency accounting; device-free so its unit tests run
+// without the extension-module feature.
+pub(crate) mod vt_family_residency;
+
 pub mod probes;
 
 use numpy::IntoPyArray;

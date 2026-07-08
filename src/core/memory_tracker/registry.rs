@@ -1,8 +1,10 @@
 use super::helpers::calculate_texture_size;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, Ordering};
 use wgpu::TextureFormat;
 
 const MEMORY_BUDGET_LIMIT: u64 = 512 * 1024 * 1024;
+const BUDGET_POLICY_ENFORCE: u8 = 0;
+const BUDGET_POLICY_WARN: u8 = 1;
 
 /// Global memory tracking registry for GPU resources.
 pub struct ResourceRegistry {
@@ -11,12 +13,15 @@ pub struct ResourceRegistry {
     pub(super) buffer_bytes: AtomicU64,
     pub(super) texture_bytes: AtomicU64,
     pub(super) host_visible_bytes: AtomicU64,
+    pub(super) peak_host_visible_bytes: AtomicU64,
+    pub(super) peak_total_bytes: AtomicU64,
     pub(super) resident_tiles: AtomicU32,
     pub(super) resident_tile_bytes: AtomicU64,
     pub(super) staging_bytes_in_flight: AtomicU64,
     pub(super) staging_ring_count: AtomicU32,
     pub(super) staging_buffer_size: AtomicU64,
     pub(super) staging_buffer_stalls: AtomicU64,
+    pub(super) budget_policy: AtomicU8,
     pub(super) budget_limit: u64,
 }
 
@@ -28,22 +33,56 @@ impl ResourceRegistry {
             buffer_bytes: AtomicU64::new(0),
             texture_bytes: AtomicU64::new(0),
             host_visible_bytes: AtomicU64::new(0),
+            peak_host_visible_bytes: AtomicU64::new(0),
+            peak_total_bytes: AtomicU64::new(0),
             resident_tiles: AtomicU32::new(0),
             resident_tile_bytes: AtomicU64::new(0),
             staging_bytes_in_flight: AtomicU64::new(0),
             staging_ring_count: AtomicU32::new(0),
             staging_buffer_size: AtomicU64::new(0),
             staging_buffer_stalls: AtomicU64::new(0),
+            budget_policy: AtomicU8::new(BUDGET_POLICY_WARN),
             budget_limit: MEMORY_BUDGET_LIMIT,
+        }
+    }
+
+    pub fn set_budget_policy(&self, policy: &str) -> Result<&'static str, String> {
+        let normalized = match policy {
+            "enforce" => {
+                self.budget_policy
+                    .store(BUDGET_POLICY_ENFORCE, Ordering::Relaxed);
+                "enforce"
+            }
+            "warn" => {
+                self.budget_policy
+                    .store(BUDGET_POLICY_WARN, Ordering::Relaxed);
+                "warn"
+            }
+            _ => {
+                return Err(format!(
+                    "Unknown memory budget policy {policy:?}; expected 'enforce' or 'warn'"
+                ));
+            }
+        };
+        Ok(normalized)
+    }
+
+    pub fn get_budget_policy(&self) -> &'static str {
+        match self.budget_policy.load(Ordering::Relaxed) {
+            BUDGET_POLICY_WARN => "warn",
+            _ => "enforce",
         }
     }
 
     pub fn track_buffer_allocation(&self, size: u64, is_host_visible: bool) {
         self.buffer_count.fetch_add(1, Ordering::Relaxed);
-        self.buffer_bytes.fetch_add(size, Ordering::Relaxed);
+        let buffer_bytes = self.buffer_bytes.fetch_add(size, Ordering::Relaxed) + size;
+        let texture_bytes = self.texture_bytes.load(Ordering::Relaxed);
+        self.record_peak_total(buffer_bytes.saturating_add(texture_bytes));
 
         if is_host_visible {
-            self.host_visible_bytes.fetch_add(size, Ordering::Relaxed);
+            let host_visible = self.host_visible_bytes.fetch_add(size, Ordering::Relaxed) + size;
+            self.record_peak_host_visible(host_visible);
         }
     }
 
@@ -71,7 +110,9 @@ impl ResourceRegistry {
     pub fn track_texture_allocation(&self, width: u32, height: u32, format: TextureFormat) {
         let size = calculate_texture_size(width, height, format);
         self.texture_count.fetch_add(1, Ordering::Relaxed);
-        self.texture_bytes.fetch_add(size, Ordering::Relaxed);
+        let texture_bytes = self.texture_bytes.fetch_add(size, Ordering::Relaxed) + size;
+        let buffer_bytes = self.buffer_bytes.load(Ordering::Relaxed);
+        self.record_peak_total(buffer_bytes.saturating_add(texture_bytes));
     }
 
     pub fn free_texture_allocation(&self, width: u32, height: u32, format: TextureFormat) {
@@ -117,6 +158,22 @@ impl ResourceRegistry {
 
     pub fn clear_staging_stats(&self) {
         self.set_staging_stats(0, 0, 0, 0);
+    }
+
+    fn record_peak_total(&self, value: u64) {
+        let _ =
+            self.peak_total_bytes
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                    Some(current.max(value))
+                });
+    }
+
+    fn record_peak_host_visible(&self, value: u64) {
+        let _ = self.peak_host_visible_bytes.fetch_update(
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+            |current| Some(current.max(value)),
+        );
     }
 }
 

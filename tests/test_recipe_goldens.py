@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import json
 import shutil
+import struct
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -34,6 +36,8 @@ class RecipeGolden:
     build: Callable[[Path], f3d.MapScene]
     expected_features: tuple[str, ...]
     bit_depth: int = 8
+    ssim_min: float = SSIM_MIN
+    mean_abs_max: float = MEAN_ABS_MAX
 
     @property
     def golden_path(self) -> Path:
@@ -51,8 +55,74 @@ def _heightmap(size: int = 8) -> np.ndarray:
     return (0.25 * xx + 0.75 * yy).astype(np.float32)
 
 
+def _water_heightmap(size: int = 8) -> np.ndarray:
+    dem = np.ones((size, size), dtype=np.float32)
+    dem[2 : size - 2, 2 : size - 2] = 0.0
+    return dem
+
+
 def _write_rgba_png(path: Path, rgba: np.ndarray) -> Path:
     f3d.numpy_to_png(path, np.ascontiguousarray(rgba, dtype=np.uint8))
+    return path
+
+
+def _pad4(data: bytes, pad: bytes = b" ") -> bytes:
+    return data + pad * ((4 - (len(data) % 4)) % 4)
+
+
+def _write_pnts_fixture(path: Path) -> Path:
+    positions_array = np.asarray(
+        [
+            [0.0, 0.0, 0.0],
+            [2.0, 1.0, 0.0],
+            [4.0, 2.0, 0.0],
+            [6.0, 3.0, 0.0],
+            [8.0, 4.0, 0.0],
+            [10.0, 5.0, 0.0],
+            [3.0, 6.0, 0.0],
+            [5.0, 7.0, 0.0],
+            [7.0, 8.0, 0.0],
+        ],
+        dtype="<f4",
+    )
+    colors = np.asarray(
+        [
+            [244, 63, 94],
+            [249, 115, 22],
+            [234, 179, 8],
+            [34, 197, 94],
+            [20, 184, 166],
+            [14, 165, 233],
+            [99, 102, 241],
+            [168, 85, 247],
+            [236, 72, 153],
+        ],
+        dtype=np.uint8,
+    )
+    positions = positions_array.tobytes()
+    feature_table = _pad4(
+        json.dumps(
+            {
+                "POINTS_LENGTH": int(len(positions_array)),
+                "POSITION": {"byteOffset": 0},
+                "RGB": {"byteOffset": len(positions)},
+            },
+            separators=(",", ":"),
+        ).encode("utf-8"),
+        b" ",
+    )
+    feature_binary = _pad4(positions + colors.tobytes(), b"\x00")
+    byte_length = 28 + len(feature_table) + len(feature_binary)
+    path.write_bytes(
+        b"".join(
+            [
+                b"pnts",
+                struct.pack("<IIIIII", 1, byte_length, len(feature_table), len(feature_binary), 0, 0),
+                feature_table,
+                feature_binary,
+            ]
+        )
+    )
     return path
 
 
@@ -98,11 +168,13 @@ def _base_scene(
     map_furniture: f3d.MapFurnitureLayer | None = None,
     terrain_metadata: dict[str, object] | None = None,
     lighting_settings: dict[str, object] | None = None,
+    heightmap: np.ndarray | None = None,
 ) -> f3d.MapScene:
+    data = _heightmap() if heightmap is None else np.asarray(heightmap, dtype=np.float32)
     metadata = {
         "source_id": f"{scene_id}-dem",
-        "width": 8,
-        "height": 8,
+        "width": int(data.shape[1]),
+        "height": int(data.shape[0]),
         "asset_status": "fixture",
         "bounds": (-122.5, 46.6, -121.9, 47.0),
     }
@@ -110,7 +182,7 @@ def _base_scene(
         metadata.update(terrain_metadata)
     return f3d.MapScene(
         terrain=f3d.TerrainSource(
-            data=_heightmap(),
+            data=data,
             crs="EPSG:32610",
             metadata=metadata,
             elevation_sampling_available=True,
@@ -229,6 +301,48 @@ def _label_halo_depth(tmp_path: Path) -> f3d.MapScene:
     )
 
 
+def _label_arabic_joining(tmp_path: Path) -> f3d.MapScene:
+    from forge3d.text_atlas import bake_atlas, save_atlas
+
+    shaped_glyphs = ["\ufe8e", "\ufe92", "\ufea3", "\ufeae", "\ufee3"]
+    charset = sorted(set("مرحبا" + "".join(shaped_glyphs)))
+    atlas = bake_atlas(charset=charset, font_size=34, px_range=8, padding=4)
+    atlas_png, atlas_json = save_atlas(
+        atlas,
+        tmp_path / "arabic_joining_atlas.png",
+        tmp_path / "arabic_joining_atlas.json",
+    )
+    return _base_scene(
+        tmp_path,
+        "mapscene_label_arabic_joining",
+        width=128,
+        height=80,
+        layers=[
+            f3d.LabelLayer(
+                layer_id="labels",
+                labels=[
+                    {
+                        "id": "arabic-city",
+                        "text": "مرحبا",
+                        "geometry": {"type": "Point", "coordinates": (52.0, 34.0, 0.0)},
+                        "typography": {
+                            "color": [1.0, 1.0, 1.0, 1.0],
+                            "halo_color": [0.0, 0.0, 0.0, 0.9],
+                            "halo_width_px": 3.0,
+                        },
+                    }
+                ],
+                glyph_atlas={
+                    "glyphs": charset,
+                    "image_path": str(atlas_png),
+                    "metrics_path": str(atlas_json),
+                    "source_path": str(atlas_json),
+                },
+            )
+        ],
+    )
+
+
 def _label_occlusion_ridge(tmp_path: Path) -> f3d.MapScene:
     return _base_scene(
         tmp_path,
@@ -257,6 +371,17 @@ def _label_occlusion_ridge(tmp_path: Path) -> f3d.MapScene:
                 ],
                 glyph_atlas={"glyphs": sorted(set("FrontHidden"))},
                 occlusion="terrain",
+                # SUTURA: depth occlusion culls against a depth source that is
+                # serialized with the recipe, never a live GPU frame, so the
+                # compiled plan (and this golden) reproduce after a bundle
+                # round-trip.
+                metadata={
+                    "depth_occlusion": {
+                        "image": np.full((16, 16), 0.5, dtype=np.float32).tolist(),
+                        "source": "serialized_depth_proxy",
+                        "bias": 0.0,
+                    }
+                },
             )
         ],
     )
@@ -329,6 +454,76 @@ def _vector_stroke_quality_4x(tmp_path: Path) -> f3d.MapScene:
     )
 
 
+def _choropleth(tmp_path: Path) -> f3d.MapScene:
+    values = np.asarray([12.0, 28.0, 57.0, 83.0], dtype=np.float32)
+    result = f3d.thematic.classify(values, scheme="quantile", k=4)
+    classes = result["classes"]
+    palette = {
+        1: "#edf8fb",
+        2: "#b2e2e2",
+        3: "#66c2a4",
+        4: "#238b45",
+    }
+    features = []
+    for idx, cls in enumerate(classes.tolist()):
+        x0 = 0.10 + (idx % 2) * 0.42
+        y0 = 0.14 + (idx // 2) * 0.38
+        x1 = x0 + 0.32
+        y1 = y0 + 0.28
+        features.append(
+            {
+                "id": f"zone-{idx}",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)]],
+                },
+                "properties": {"class": int(cls), "value": float(values[idx])},
+            }
+        )
+    return _base_scene(
+        tmp_path,
+        "mapscene_thematic_choropleth",
+        width=128,
+        height=88,
+        layers=[
+            f3d.VectorOverlay(
+                layer_id="classified-zones",
+                crs="EPSG:32610",
+                features=features,
+                width_px=2,
+                style={
+                    "version": 8,
+                    "layers": [
+                        {
+                            "id": "zones-fill",
+                            "type": "fill",
+                            "paint": {
+                                "fill-color": [
+                                    "match",
+                                    ["get", "class"],
+                                    1,
+                                    palette[1],
+                                    2,
+                                    palette[2],
+                                    3,
+                                    palette[3],
+                                    palette[4],
+                                ],
+                                "fill-opacity": 0.84,
+                            },
+                        },
+                        {
+                            "id": "zones-outline",
+                            "type": "line",
+                            "paint": {"line-color": "#0f172a", "line-width": 2},
+                        },
+                    ],
+                },
+            )
+        ],
+    )
+
+
 def _offline_aovs(tmp_path: Path) -> f3d.MapScene:
     return _base_scene(
         tmp_path,
@@ -371,6 +566,84 @@ def _buildings(tmp_path: Path) -> f3d.MapScene:
         metadata={"source_id": "inline-buildings", "asset_status": "fixture"},
     )
     return _base_scene(tmp_path, "mapscene_buildings", layers=[building], width=128, height=88)
+
+
+def _screen_space_contact(tmp_path: Path) -> f3d.MapScene:
+    scene = _buildings(tmp_path)
+    scene.recipe.lighting = f3d.LightingPreset(
+        name="outdoor_sun",
+        intensity=1.1,
+        settings={
+            "screen_space": {
+                "ssao": {"enabled": True, "radius": 2.6, "intensity": 1.35},
+                "ssgi": {"enabled": True, "intensity": 0.45},
+                "taa": {"enabled": True, "temporal_alpha": 0.18},
+            }
+        },
+    )
+    scene.recipe.output.path = str(tmp_path / "mapscene_screen_space_contact.png")
+    return scene
+
+
+def _screen_space_reflection(tmp_path: Path) -> f3d.MapScene:
+    return _base_scene(
+        tmp_path,
+        "mapscene_screen_space_reflection",
+        width=128,
+        height=80,
+        heightmap=_water_heightmap(),
+        terrain_metadata={"water": {"enabled": True, "auto_mask": True, "level": 0.1, "slope_threshold": 1.0}},
+        lighting_settings={
+            "water": {"enabled": True, "auto_mask": True, "level": 0.1, "slope_threshold": 1.0},
+            "screen_space": {
+                "ssr": {"enabled": True, "intensity": 0.85},
+            },
+        },
+    )
+
+
+def _textured_gltf_landmark(tmp_path: Path) -> f3d.MapScene:
+    from tests.test_gltf_import import _write_material_glb
+
+    gltf_path = tmp_path / "textured-landmark.glb"
+    _write_material_glb(gltf_path)
+    texture = np.zeros((16, 16, 4), dtype=np.uint8)
+    texture[..., 0] = np.linspace(40, 230, 16, dtype=np.uint8)[None, :]
+    texture[..., 1] = np.linspace(230, 60, 16, dtype=np.uint8)[:, None]
+    texture[..., 2] = 120
+    texture[..., 3] = 255
+    texture[::2, :, 2] = 220
+    texture[:, ::2, 0] = 245
+    texture_path = _write_rgba_png(tmp_path / "textured-landmark-albedo.png", texture)
+    layer = f3d.MapSceneBuildingLayer(
+        layer_id="textured-landmark",
+        source={"path": str(gltf_path), "source_format": "gltf"},
+        support_level="supported",
+        geometry_count=1,
+        material_status="textured_pbr",
+        metadata={
+            "source_id": "textured-landmark",
+            "gltf_path": str(gltf_path),
+            "screen_rect": [0.34, 0.16, 0.68, 0.70],
+            "textured_materials": [
+                {
+                    "material_id": "mat_red",
+                    "object_id": "landmark",
+                    "albedo_texture": str(texture_path),
+                    "texture_format": "png",
+                    "uv_available": True,
+                }
+            ],
+        },
+    )
+    return _base_scene(
+        tmp_path,
+        "mapscene_textured_gltf_landmark",
+        layers=[layer],
+        width=128,
+        height=88,
+        lighting_settings={"screen_space": {"ssao": {"enabled": True, "radius": 1.8, "intensity": 0.65}}},
+    )
 
 
 def _furniture(tmp_path: Path) -> f3d.MapScene:
@@ -416,6 +689,137 @@ def _material_maps(tmp_path: Path) -> f3d.MapScene:
     )
 
 
+def _clipmap_large_region(tmp_path: Path) -> f3d.MapScene:
+    size = 32
+    x = np.linspace(-1.0, 1.0, size, dtype=np.float32)
+    y = np.linspace(-1.0, 1.0, size, dtype=np.float32)
+    xx, yy = np.meshgrid(x, y)
+    dem = (0.35 * np.sin(xx * np.pi * 2.0) + 0.22 * np.cos(yy * np.pi * 3.0)).astype(np.float32)
+    return _base_scene(
+        tmp_path,
+        "mapscene_clipmap_large_region",
+        width=128,
+        height=80,
+        heightmap=dem,
+        terrain_metadata={
+            "clipmap": {
+                "enabled": True,
+                "levels": 4,
+                "ring_resolution": 32,
+                "terrain_extent_m": 100_000.0,
+                "max_resident_height_bytes": 4 * 32 * 32 * 4,
+            }
+        },
+        lighting_settings={"exaggeration": 1.2},
+    )
+
+
+def _auto_water(tmp_path: Path) -> f3d.MapScene:
+    return _base_scene(
+        tmp_path,
+        "mapscene_auto_water",
+        width=128,
+        height=80,
+        heightmap=_water_heightmap(),
+        terrain_metadata={"water": {"enabled": True, "auto_mask": True, "level": 0.1, "slope_threshold": 1.0}},
+        lighting_settings={"water": {"enabled": True, "auto_mask": True, "level": 0.1, "slope_threshold": 1.0}},
+    )
+
+
+def _cloud_shadows(tmp_path: Path) -> f3d.MapScene:
+    dem = np.zeros((16, 16), dtype=np.float32)
+    dem[5:11, 5:11] = 0.35
+    return _base_scene(
+        tmp_path,
+        "mapscene_cloud_shadows",
+        width=128,
+        height=80,
+        heightmap=dem,
+        terrain_metadata={
+            "width": 16,
+            "height": 16,
+            "source_id": "cloud-shadow-dem",
+            "clouds": {
+                "enabled": True,
+                "shadows_enabled": True,
+                "coverage": 0.72,
+                "density": 0.48,
+                "shadow_strength": 0.38,
+                "quality": "high",
+            },
+        },
+    )
+
+
+def _tiles3d_points(tmp_path: Path) -> f3d.MapScene:
+    pnts_path = _write_pnts_fixture(tmp_path / "points.pnts")
+    tileset_path = tmp_path / "tileset.json"
+    tileset_path.write_text(
+        json.dumps(
+            {
+                "asset": {"version": "1.0"},
+                "geometricError": 0.0,
+                "root": {
+                    "boundingVolume": {"sphere": [5.0, 4.0, 0.0, 8.0]},
+                    "geometricError": 0.0,
+                    "content": {"uri": pnts_path.name},
+                },
+            },
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
+    return _base_scene(
+        tmp_path,
+        "mapscene_tiles3d_points",
+        width=128,
+        height=80,
+        layers=[
+            f3d.Tiles3DLayer.from_tileset_json(
+                tileset_path,
+                layer_id="fixture-pnts-tileset",
+                metadata={
+                    "bounds": [0.0, 0.0, 10.0, 8.0],
+                    "point_size": 5.0,
+                    "camera_position": [5.0, 4.0, 25.0],
+                    "shading": "edl",
+                    "edl_strength": 2.0,
+                    "edl_radius_px": 2.0,
+                },
+            )
+        ],
+    )
+
+
+def _copc_points(tmp_path: Path) -> f3d.MapScene:
+    from tests.test_pointcloud_gpu_integration import _write_tiny_copc
+
+    copc_path = tmp_path / "tiny.copc.laz"
+    _write_tiny_copc(str(copc_path))
+    return _base_scene(
+        tmp_path,
+        "mapscene_copc_points",
+        width=128,
+        height=80,
+        layers=[
+            f3d.PointCloudLayer(
+                layer_id="fixture-copc-points",
+                path=copc_path,
+                crs="EPSG:32610",
+                point_count=2,
+                metadata={
+                    "bounds": [101.0, 202.0, 101.1, 202.1],
+                    "point_budget": 2,
+                    "point_size": 6.0,
+                    "shading": "edl",
+                    "edl_strength": 2.0,
+                    "edl_radius_px": 2.0,
+                },
+            )
+        ],
+    )
+
+
 def _png16_color(tmp_path: Path) -> f3d.MapScene:
     return _base_scene(tmp_path, "mapscene_png16_color", bit_depth=16, width=80, height=48)
 
@@ -424,14 +828,40 @@ RECIPE_GOLDENS = (
     RecipeGolden("mapscene_terrain_raster", "terrain_raster", _terrain_raster, ("mapscene.render_png", "mapscene.render_backend")),
     RecipeGolden("mapscene_vector_labels", "labels_vectors", _vector_labels, ("mapscene.vector_composite", "mapscene.label_composite")),
     RecipeGolden("mapscene_label_halo_depth", "labels_depth_occlusion", _label_halo_depth, ("mapscene.label_composite",)),
+    RecipeGolden(
+        "mapscene_label_arabic_joining",
+        "labels_complex_scripts",
+        _label_arabic_joining,
+        ("mapscene.label_composite",),
+        ssim_min=0.990,
+    ),
     RecipeGolden("mapscene_label_occlusion_ridge", "labels_depth_occlusion", _label_occlusion_ridge, ("mapscene.label_composite",)),
     RecipeGolden("mapscene_vector_stroke_quality", "vector_stroke_quality", _vector_stroke_quality, ("mapscene.vector_composite",)),
     RecipeGolden("mapscene_vector_stroke_quality_4x", "vector_stroke_quality", _vector_stroke_quality_4x, ("mapscene.vector_composite",)),
+    RecipeGolden("mapscene_thematic_choropleth", "thematic_choropleth", _choropleth, ("mapscene.vector_composite",)),
     RecipeGolden("mapscene_offline_aovs", "offline_accumulation", _offline_aovs, ("mapscene.offline_accumulation", "mapscene.aov_export")),
     RecipeGolden("mapscene_buildings", "buildings", _buildings, ("mapscene.building_composite", "mapscene.building_gpu_mesh_composite")),
+    RecipeGolden("mapscene_screen_space_contact", "screen_space_effects", _screen_space_contact, ("mapscene.screen_space", "mapscene.ssao", "mapscene.ssgi", "mapscene.taa")),
+    RecipeGolden("mapscene_screen_space_reflection", "screen_space_effects", _screen_space_reflection, ("mapscene.screen_space", "mapscene.ssr")),
+    RecipeGolden("mapscene_textured_gltf_landmark", "gltf_textured_assets", _textured_gltf_landmark, ("gltf.textured_mapscene_render", "buildings.textured_pbr")),
     RecipeGolden("mapscene_furniture_graticule", "map_furniture", _furniture, ("mapscene.furniture_composite",)),
     RecipeGolden("mapscene_alignment_utm", "alignment_crs", _alignment, ("mapscene.vector_composite",)),
     RecipeGolden("mapscene_material_maps", "terrain_materials", _material_maps, ("mapscene.render_png",)),
+    RecipeGolden("mapscene_clipmap_large_region", "clipmap_large_region", _clipmap_large_region, ("terrain.clipmap_planner", "terrain.clipmap_bounded_grid", "terrain.clipmap_bounded_memory")),
+    RecipeGolden("mapscene_auto_water", "water_masks", _auto_water, ("mapscene.render_png", "mapscene.water_mask")),
+    RecipeGolden("mapscene_cloud_shadows", "cloud_shadows", _cloud_shadows, ("mapscene.render_png", "mapscene.cloud_shadows")),
+    RecipeGolden(
+        "mapscene_tiles3d_points",
+        "point_cloud_tiles",
+        _tiles3d_points,
+        ("point_cloud.mapscene_render", "tiles3d.mapscene_render", "point_cloud.edl"),
+    ),
+    RecipeGolden(
+        "mapscene_copc_points",
+        "point_cloud_tiles",
+        _copc_points,
+        ("point_cloud.mapscene_render", "point_cloud.edl"),
+    ),
     RecipeGolden("mapscene_png16_color", "output_color", _png16_color, ("mapscene.render_png_16bit",), bit_depth=16),
 )
 
@@ -462,10 +892,10 @@ def _assert_matches_golden(spec: RecipeGolden, actual_path: Path) -> None:
     assert actual.shape == expected.shape
     mean_abs = float(np.mean(np.abs(actual[..., :3].astype(np.float32) - expected[..., :3].astype(np.float32))))
     score = ssim(actual[..., :3], expected[..., :3], data_range=255.0)
-    if score < SSIM_MIN or mean_abs > MEAN_ABS_MAX:
+    if score < spec.ssim_min or mean_abs > spec.mean_abs_max:
         _write_failure_artifacts(spec, actual, expected)
-    assert score >= SSIM_MIN, f"{spec.scene_id} SSIM too low: {score:.6f}"
-    assert mean_abs <= MEAN_ABS_MAX, f"{spec.scene_id} mean absolute difference too high: {mean_abs:.4f}"
+    assert score >= spec.ssim_min, f"{spec.scene_id} SSIM too low: {score:.6f}"
+    assert mean_abs <= spec.mean_abs_max, f"{spec.scene_id} mean absolute difference too high: {mean_abs:.4f}"
 
 
 def test_recipe_golden_manifest_catalog_has_required_coverage() -> None:
@@ -515,7 +945,7 @@ def test_recipe_goldens_render_and_match(tmp_path, spec: RecipeGolden) -> None:
             "golden_path": str(spec.golden_path.relative_to(ROOT)).replace("\\", "/"),
             "command": spec.command,
             "backend": "gpu_terrain",
-            "tolerance": {"ssim_min": SSIM_MIN, "mean_abs_max": MEAN_ABS_MAX},
+            "tolerance": {"ssim_min": spec.ssim_min, "mean_abs_max": spec.mean_abs_max},
         },
     )
     intent = manifest["golden_fixture_intent"]

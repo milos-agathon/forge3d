@@ -199,7 +199,7 @@ pub(crate) fn render_brdf_tile_impl<'py>(
         debug_kind: Some(debug_kind),
     };
 
-    let ctx = crate::core::gpu::ctx();
+    let ctx = crate::core::gpu::try_ctx()?;
     let buffer = crate::offscreen::brdf_tile::render_brdf_tile_with_overrides(
         ctx.device.as_ref(),
         ctx.queue.as_ref(),

@@ -22,9 +22,9 @@ pub(super) fn vector_runtime_err<E: std::fmt::Display>(error: E) -> PyErr {
     PyRuntimeError::new_err(error.to_string())
 }
 
-pub(super) fn gpu_device_queue() -> (Arc<wgpu::Device>, Arc<wgpu::Queue>) {
-    let gpu = crate::core::gpu::ctx();
-    (Arc::clone(&gpu.device), Arc::clone(&gpu.queue))
+pub(super) fn gpu_device_queue() -> PyResult<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+    let gpu = crate::core::gpu::try_ctx()?;
+    Ok((Arc::clone(&gpu.device), Arc::clone(&gpu.queue)))
 }
 
 pub(super) fn viewport_dims(width: u32, height: u32) -> [f32; 2] {
@@ -48,7 +48,9 @@ pub(super) fn create_rgba_target(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::COPY_SRC
+            | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -83,7 +85,7 @@ pub(super) fn upload_vector_scene(
     point_defs: &[PointDef],
     poly_defs: &[PolylineDef],
 ) -> PyResult<UploadedVectorScene> {
-    let (device, queue) = gpu_device_queue();
+    let (device, queue) = gpu_device_queue()?;
     let mut point_renderer = PointRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb)
         .map_err(vector_runtime_err)?;
     let mut line_renderer = LineRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb)

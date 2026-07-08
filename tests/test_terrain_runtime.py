@@ -31,3 +31,21 @@ def test_terrain_rendering_available_short_circuits_on_hosted_macos_ci(monkeypat
         assert terrain_runtime.terrain_rendering_available() is False
     finally:
         terrain_runtime.terrain_rendering_available.cache_clear()
+
+
+def test_terrain_rendering_available_uses_child_probe(monkeypatch) -> None:
+    terrain_runtime.terrain_rendering_available.cache_clear()
+    monkeypatch.setattr(terrain_runtime.f3d, "has_gpu", lambda: True)
+    monkeypatch.setattr(terrain_runtime.f3d, "device_probe", lambda _: {"status": "ok"})
+    monkeypatch.setattr(terrain_runtime, "_adapter_is_terrain_safe", lambda _: True)
+    monkeypatch.setattr(terrain_runtime, "REQUIRED_SYMBOLS", ())
+
+    class Result:
+        returncode = 1
+
+    monkeypatch.setattr(terrain_runtime.subprocess, "run", lambda *_, **__: Result())
+
+    try:
+        assert terrain_runtime.terrain_rendering_available() is False
+    finally:
+        terrain_runtime.terrain_rendering_available.cache_clear()

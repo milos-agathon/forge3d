@@ -6,6 +6,8 @@ pub(super) fn register_rendering_py_functions(m: &Bound<'_, PyModule>) -> PyResu
     crate::terrain::cog::py_bindings::register_cog_bindings(m)?;
 
     m.add_function(wrap_pyfunction!(_pt_render_gpu, m)?)?;
+    m.add_function(wrap_pyfunction!(hybrid_render_terrain_reference, m)?)?;
+    m.add_function(wrap_pyfunction!(render_adjudication_pair, m)?)?;
     m.add_function(wrap_pyfunction!(render_brdf_tile, m)?)?;
     m.add_function(wrap_pyfunction!(render_brdf_tile_overrides, m)?)?;
     m.add_function(wrap_pyfunction!(
@@ -17,6 +19,8 @@ pub(super) fn register_rendering_py_functions(m: &Bound<'_, PyModule>) -> PyResu
         m
     )?)?;
     m.add_function(wrap_pyfunction!(read_laz_points_info_py, m)?)?;
+    m.add_function(wrap_pyfunction!(read_laz_point_attributes_py, m)?)?;
+    m.add_function(wrap_pyfunction!(copc_read_node_points_py, m)?)?;
     m.add_function(wrap_pyfunction!(copc_laz_enabled_py, m)?)?;
     m.add_function(wrap_pyfunction!(
         crate::geo::reproject::proj_available_py,

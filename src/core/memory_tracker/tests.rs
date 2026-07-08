@@ -21,13 +21,32 @@ fn registry_basic_operations() {
     assert_eq!(metrics.buffer_count, 0);
     assert_eq!(metrics.buffer_bytes, 0);
     assert_eq!(metrics.host_visible_bytes, 0);
+    assert_eq!(metrics.peak_host_visible_bytes, 1024);
+    assert_eq!(metrics.peak_total_bytes, 1024);
 }
 
 #[test]
 fn budget_checking() {
     let registry = ResourceRegistry::new();
+    registry.set_budget_policy("enforce").unwrap();
     assert!(registry.check_budget(100 * 1024 * 1024).is_ok());
     assert!(registry.check_budget(600 * 1024 * 1024).is_err());
+}
+
+#[test]
+fn budget_policy_controls_over_budget_checks() {
+    let registry = ResourceRegistry::new();
+
+    assert_eq!(registry.get_budget_policy(), "warn");
+    assert!(registry.check_budget(600 * 1024 * 1024).is_ok());
+
+    assert_eq!(registry.set_budget_policy("warn").unwrap(), "warn");
+    assert_eq!(registry.get_metrics().budget_policy, "warn");
+    assert!(registry.check_budget(600 * 1024 * 1024).is_ok());
+
+    assert_eq!(registry.set_budget_policy("enforce").unwrap(), "enforce");
+    assert!(registry.check_budget(600 * 1024 * 1024).is_err());
+    assert!(registry.set_budget_policy("ignore").is_err());
 }
 
 #[test]

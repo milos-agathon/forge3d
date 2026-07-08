@@ -493,6 +493,70 @@ class ObjMaterial:
     diffuse_texture: Optional[str]
 
 
+@dataclass
+class GltfTextureTransform:
+    offset: np.ndarray  # (2,)
+    rotation: float
+    scale: np.ndarray  # (2,)
+    tex_coord: Optional[int]
+
+
+@dataclass
+class GltfTextureSlot:
+    texture_index: int
+    image_index: int
+    tex_coord: int
+    transform: Optional[GltfTextureTransform]
+
+
+@dataclass
+class GltfMaterial:
+    index: int
+    name: Optional[str]
+    base_color_factor: np.ndarray  # (4,)
+    metallic_factor: float
+    roughness_factor: float
+    alpha_mode: str
+    alpha_cutoff: Optional[float]
+    double_sided: bool
+    emissive_factor: np.ndarray  # (3,)
+    has_base_color_texture: bool
+    has_metallic_roughness_texture: bool
+    has_normal_texture: bool
+    has_occlusion_texture: bool
+    has_emissive_texture: bool
+    unlit: bool
+    base_color_texture: Optional[GltfTextureSlot]
+    metallic_roughness_texture: Optional[GltfTextureSlot]
+    normal_texture: Optional[GltfTextureSlot]
+    occlusion_texture: Optional[GltfTextureSlot]
+    emissive_texture: Optional[GltfTextureSlot]
+
+
+def _gltf_texture_slot_from_py(value: Any) -> Optional[GltfTextureSlot]:
+    if value is None:
+        return None
+    transform_value = value.get("transform")
+    transform = None
+    if transform_value is not None:
+        transform = GltfTextureTransform(
+            offset=np.asarray(transform_value["offset"], dtype=np.float32),
+            rotation=float(transform_value["rotation"]),
+            scale=np.asarray(transform_value["scale"], dtype=np.float32),
+            tex_coord=(
+                None
+                if transform_value["tex_coord"] is None
+                else int(transform_value["tex_coord"])
+            ),
+        )
+    return GltfTextureSlot(
+        texture_index=int(value["texture_index"]),
+        image_index=int(value["image_index"]),
+        tex_coord=int(value["tex_coord"]),
+        transform=transform,
+    )
+
+
 def load_obj(
     path: str,
     *,
@@ -710,14 +774,57 @@ def import_osm_buildings_from_geojson(
     return _mesh_from_py(result)  # type: ignore[arg-type]
 
 
-def import_gltf(path: str) -> MeshBuffers:
-    """Import the first mesh primitive from a glTF 2.0 file (.gltf or .glb).
+def import_gltf(
+    path: str,
+    *,
+    with_materials: bool = False,
+) -> MeshBuffers | Tuple[MeshBuffers, List[GltfMaterial], List[Optional[int]]]:
+    """Import mesh primitives from a glTF 2.0 file (.gltf or .glb).
 
     Parameters
     ----------
     path: str
         Path to a .gltf (JSON) or .glb (binary) file. Supports embedded buffers and external.
+    with_materials: bool, default False
+        If True, also return material summaries and per-imported-primitive material indices.
     """
     _ensure_native()
+    if with_materials:
+        result = _forge3d.io_import_gltf_with_materials_py(str(path))
+        mesh = _mesh_from_py(result["mesh"])  # type: ignore[arg-type]
+        materials: List[GltfMaterial] = []
+        for md in result["materials"]:
+            materials.append(
+                GltfMaterial(
+                    index=int(md["index"]),
+                    name=(None if md["name"] is None else str(md["name"])),
+                    base_color_factor=np.asarray(md["base_color_factor"], dtype=np.float32),
+                    metallic_factor=float(md["metallic_factor"]),
+                    roughness_factor=float(md["roughness_factor"]),
+                    alpha_mode=str(md["alpha_mode"]),
+                    alpha_cutoff=(None if md["alpha_cutoff"] is None else float(md["alpha_cutoff"])),
+                    double_sided=bool(md["double_sided"]),
+                    emissive_factor=np.asarray(md["emissive_factor"], dtype=np.float32),
+                    has_base_color_texture=bool(md["has_base_color_texture"]),
+                    has_metallic_roughness_texture=bool(md["has_metallic_roughness_texture"]),
+                    has_normal_texture=bool(md["has_normal_texture"]),
+                    has_occlusion_texture=bool(md["has_occlusion_texture"]),
+                    has_emissive_texture=bool(md["has_emissive_texture"]),
+                    unlit=bool(md["unlit"]),
+                    base_color_texture=_gltf_texture_slot_from_py(md["base_color_texture"]),
+                    metallic_roughness_texture=_gltf_texture_slot_from_py(
+                        md["metallic_roughness_texture"]
+                    ),
+                    normal_texture=_gltf_texture_slot_from_py(md["normal_texture"]),
+                    occlusion_texture=_gltf_texture_slot_from_py(md["occlusion_texture"]),
+                    emissive_texture=_gltf_texture_slot_from_py(md["emissive_texture"]),
+                )
+            )
+        primitive_materials = [
+            None if item is None else int(item)
+            for item in result["primitive_materials"]
+        ]
+        return mesh, materials, primitive_materials
+
     result = _forge3d.io_import_gltf_py(str(path))
     return _mesh_from_py(result)  # type: ignore[arg-type]

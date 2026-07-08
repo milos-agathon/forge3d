@@ -9,6 +9,7 @@ import tempfile
 
 from forge3d.tiles3d import (
     load_tileset,
+    Tiles3dDataset,
     Tiles3dRenderer,
     SseParams,
     BoundingVolume,
@@ -135,6 +136,15 @@ class TestTraversal:
         
         # Lower threshold = more refinement = more tiles
         assert len(visible_low) >= len(visible_high)
+
+    def test_dataset_traverse_uses_native_sse(self, sample_tileset_path):
+        dataset = Tiles3dDataset.from_tileset_json(sample_tileset_path)
+
+        visible = dataset.traverse((0.0, 0.0, 200.0), sse_threshold=16.0)
+
+        assert visible
+        assert {"uri", "resolved_path", "sse", "depth"} <= set(visible[0])
+        assert all(tile["uri"].endswith(".b3dm") for tile in visible)
 
     def test_visible_tiles_have_content(self, sample_tileset_path):
         """Test that all visible tiles have content URIs."""

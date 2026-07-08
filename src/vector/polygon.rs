@@ -105,6 +105,12 @@ impl PolygonRenderer {
                             shader_location: 1,
                             format: wgpu::VertexFormat::Float32x2,
                         },
+                        // Fill color
+                        wgpu::VertexAttribute {
+                            offset: 16,
+                            shader_location: 2,
+                            format: wgpu::VertexFormat::Float32x4,
+                        },
                     ],
                 }],
             },
@@ -186,6 +192,7 @@ impl PolygonRenderer {
         }
 
         let path = path_builder.build();
+        let fill_color = polygon.style.fill_color;
 
         // Tessellate with appropriate fill rule
         let result = tessellator.tessellate_path(
@@ -195,6 +202,7 @@ impl PolygonRenderer {
                 PolygonVertex {
                     position: [vertex.position().x, vertex.position().y],
                     uv: [0.0, 0.0], // UV will be computed in shader based on bbox
+                    color: fill_color,
                 }
             }),
         );

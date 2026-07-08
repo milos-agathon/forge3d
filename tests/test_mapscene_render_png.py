@@ -146,34 +146,20 @@ def _supported_scene(seed: int = 19) -> f3d.MapScene:
     )
 
 
-def test_render_requires_explicit_placeholder_for_symbolic_scene(tmp_path):
+def test_render_blocks_symbolic_scene_without_native_terrain(tmp_path):
     output_path = tmp_path / "blocked-placeholder.png"
     scene = _supported_scene()
 
-    with pytest.raises(RuntimeError, match="allow_placeholder=True"):
+    with pytest.raises(f3d.MapSceneNativeUnavailable) as excinfo:
         scene.render(str(output_path))
 
-    assert not output_path.exists()
-
-
-def test_render_writes_placeholder_png_when_explicitly_allowed(tmp_path):
-    first_path = tmp_path / "first.png"
-
-    scene = _supported_scene()
-    report = scene.render(str(first_path), allow_placeholder=True)
-
-    assert first_path.exists()
-    assert first_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-    assert report.status == "ok"
-    assert report.supported_features["mapscene.render_png"] == "supported"
-    assert "mapscene.render_backend" not in report.unsupported_features
-    assert not any(
-        diagnostic.code == "placeholder_fallback" and diagnostic.layer_id == "mapscene.render_png"
-        for diagnostic in report.diagnostics
-    )
+    assert not output_path.exists(), "a blocked render must not write placeholder pixels"
+    block = excinfo.value.diagnostic
+    assert block["status"] == "diagnostic_block"
+    assert block["layer"] == "terrain"
+    assert block["required_native"]
     assert scene.last_validation_report is not None
-    assert scene.last_render_path == str(first_path)
-    assert scene.last_render_backend == "placeholder"
+    assert scene.last_render_backend is None
 
 
 def test_save_png_deterministic_writes_bit_exact_rgba16(tmp_path):
@@ -193,12 +179,14 @@ def test_save_png_deterministic_writes_bit_exact_rgba16(tmp_path):
 
 
 def test_render_writes_16bit_png_when_requested(tmp_path):
+    if not terrain_rendering_available():
+        pytest.skip("16-bit MapScene render requires a terrain-capable GPU runtime")
     output_path = tmp_path / "map-16bit.png"
-    scene = _supported_scene()
+    scene = _native_asset_scene(tmp_path)
     scene.recipe.output.path = str(output_path)
     scene.recipe.output.bit_depth = 16
 
-    report = scene.render(allow_placeholder=True)
+    report = scene.render()
 
     assert _png_ihdr(output_path) == (48, 32, 16, 6)
     assert report.supported_features["output.bit_depth.16"] == "supported"
@@ -207,11 +195,13 @@ def test_render_writes_16bit_png_when_requested(tmp_path):
 
 
 def test_render_uses_output_spec_path_for_supported_png(tmp_path):
+    if not terrain_rendering_available():
+        pytest.skip("MapScene render requires a terrain-capable GPU runtime")
     output_path = tmp_path / "from-output-spec.png"
-    scene = _supported_scene()
+    scene = _native_asset_scene(tmp_path)
     scene.recipe.output.path = str(output_path)
 
-    report = scene.render(allow_placeholder=True)
+    report = scene.render()
 
     assert output_path.exists()
     assert report.status == "ok"
@@ -220,34 +210,25 @@ def test_render_uses_output_spec_path_for_supported_png(tmp_path):
 
 
 def test_render_output_changes_when_source_data_changes(tmp_path):
-    first_path = tmp_path / "first.png"
-    second_path = tmp_path / "second.png"
-    first_scene = _supported_scene(seed=19)
-    second_scene = _supported_scene(seed=19)
-    second_scene.recipe.layers = (
-        f3d.RasterOverlay(
-            layer_id="ortho-alt",
-            path="fixtures/alternate-ortho.tif",
-            crs="EPSG:32610",
-            opacity=0.35,
-            metadata={"width": 16, "height": 16, "source_id": "alternate-raster", "asset_status": "fixture"},
-        ),
-        f3d.VectorOverlay(
-            layer_id="roads-alt",
-            crs="EPSG:32610",
-            features=[
-                {
-                    "id": "road-alt",
-                    "geometry": {"type": "LineString", "coordinates": [(1.0, 0.0), (0.0, 1.0)]},
-                    "properties": {"class": "secondary"},
-                }
-            ],
-            style={"version": 8, "layers": [{"id": "roads-alt", "type": "line", "paint": {"line-color": "#00ff00"}}]},
-        ),
-    )
+    if not terrain_rendering_available():
+        pytest.skip("MapScene render requires a terrain-capable GPU runtime")
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    first_path = first_dir / "render.png"
+    second_path = second_dir / "render.png"
+    first_scene = _native_asset_scene(first_dir)
+    second_scene = _native_asset_scene(second_dir)
 
-    first_report = first_scene.render(str(first_path), allow_placeholder=True)
-    second_report = second_scene.render(str(second_path), allow_placeholder=True)
+    # Change the second scene's raster overlay source pixels on disk.
+    raster = np.zeros((32, 48, 4), dtype=np.uint8)
+    raster[..., 0] = 220
+    raster[..., 3] = 255
+    save_png_deterministic(second_dir / "ortho.png", raster)
+
+    first_report = first_scene.render(str(first_path))
+    second_report = second_scene.render(str(second_path))
 
     assert first_report.status == "ok"
     assert second_report.status == "ok"
@@ -360,11 +341,8 @@ def test_render_uses_native_offscreen_for_real_terrain_and_raster_assets(tmp_pat
             return rgba
 
     monkeypatch.setattr(map_scene, "_native_scene_class", lambda: FakeNativeScene)
-
-    def fail_source_derived_render(*_args, **_kwargs):
-        raise AssertionError("source-derived fallback was used for fixture-backed native render")
-
-    monkeypatch.setattr(map_scene, "_render_source_derived_rgba", fail_source_derived_render)
+    # SUTURA: the source-derived CPU fallback renderer no longer exists.
+    assert not hasattr(map_scene, "_render_source_derived_rgba")
     output_path = tmp_path / "native-offscreen.png"
 
     report = scene.render(str(output_path))
@@ -533,24 +511,15 @@ def test_gpu_backend_blocks_label_vector_cpu_fallback_without_placeholder(tmp_pa
     monkeypatch.setattr(map_scene, "_composite_native_vector_layers", lambda base, _recipe: (base, False))
     output_path = tmp_path / "styled-composite.png"
 
-    with pytest.raises(RuntimeError, match="native label/vector compositing"):
+    with pytest.raises(f3d.MapSceneNativeUnavailable) as excinfo:
         scene.render(str(output_path))
 
-    report = scene.render(str(output_path), allow_placeholder=True)
-
-    from forge3d._png import load_png_rgba
-
-    image = load_png_rgba(output_path)
-    green_pixels = np.count_nonzero((image[..., 0] == 0) & (image[..., 1] == 255) & (image[..., 2] == 0))
-    red_pixels = np.count_nonzero((image[..., 0] > 160) & (image[..., 1] < 80) & (image[..., 2] < 80))
-    blue_pixels = np.count_nonzero((image[..., 2] > 120) & (image[..., 0] < 120) & (image[..., 1] < 120))
-
-    assert report.status == "ok"
-    assert report.supported_features["mapscene.vector_composite"] == "supported"
-    assert report.supported_features["mapscene.label_composite"] == "supported"
-    assert green_pixels > 50
-    assert red_pixels > 5
-    assert blue_pixels > 5
+    assert not output_path.exists(), "a blocked render must not write placeholder pixels"
+    blocks = excinfo.value.diagnostics
+    assert {block["layer"] for block in blocks} == {"roads", "labels"}
+    for block in blocks:
+        assert block["status"] == "diagnostic_block"
+        assert block["required_native"]
 
 
 def test_public_label_vector_render_is_deterministic_and_not_placeholder(tmp_path):
@@ -572,11 +541,8 @@ def test_public_label_vector_render_is_deterministic_and_not_placeholder(tmp_pat
     assert first.compiled_label_plans["labels"].to_dict()["accepted"] == second.compiled_label_plans["labels"].to_dict()["accepted"]
     assert first_path.read_bytes() == second_path.read_bytes()
 
-    placeholder = map_scene._render_source_derived_rgba(first.recipe, first.compiled_label_plans)
-    placeholder_path = tmp_path / "placeholder.png"
-    save_png_deterministic(placeholder_path, placeholder)
-
-    assert first_path.read_bytes() != placeholder_path.read_bytes()
+    # SUTURA: the CPU placeholder renderer no longer exists at all.
+    assert not hasattr(map_scene, "_render_source_derived_rgba")
 
 
 def test_gpu_backend_uses_native_sdf_text_for_labels(tmp_path, monkeypatch):
@@ -706,12 +672,26 @@ def test_gpu_backend_uses_native_vector_oit_for_line_layers(tmp_path, monkeypatc
                     {
                         "id": "road-1",
                         "geometry": {"type": "LineString", "coordinates": [(0.0, 0.0), (1.0, 1.0)]},
+                        "properties": {"class": "primary", "width": 3},
+                    },
+                    {
+                        "id": "road-2",
+                        "geometry": {"type": "LineString", "coordinates": [(1.0, 0.0), (0.0, 1.0)]},
+                        "properties": {"class": "secondary", "width": 5},
                     }
                 ],
-                width_px=3,
                 style={
                     "version": 8,
-                    "layers": [{"id": "roads", "type": "line", "paint": {"line-color": "#00ff00"}}],
+                    "layers": [
+                        {
+                            "id": "roads",
+                            "type": "line",
+                            "paint": {
+                                "line-color": ["match", ["get", "class"], "primary", "#00ff00", "#ff0000"],
+                                "line-width": ["get", "width"],
+                            },
+                        }
+                    ],
                 },
             )
         ],
@@ -763,12 +743,576 @@ def test_gpu_backend_uses_native_vector_oit_for_line_layers(tmp_path, monkeypatc
     assert calls["vector"]["points_xy"] is None
     assert calls["vector"]["point_rgba"] is None
     assert calls["vector"]["point_size"] is None
-    assert calls["vector"]["stroke_width"] == [3.0]
-    assert calls["vector"]["polyline_rgba"] == [(0.0, 1.0, 0.0, 1.0)]
+    assert calls["vector"]["stroke_width"] == [3.0, 5.0]
+    assert calls["vector"]["polyline_rgba"] == [(0.0, 1.0, 0.0, 1.0), (1.0, 0.0, 0.0, 1.0)]
     polyline = calls["vector"]["polylines"][0]
     assert polyline[0] == (-1.0, 1.0)
     assert polyline[-1] == (1.0, -1.0)
     assert calls["composite"] == ((64, 80, 4), (64, 80, 4), False)
+
+
+def test_gpu_backend_uses_native_oit_for_inline_point_cloud_layer(tmp_path, monkeypatch):
+    scene = f3d.MapScene(
+        terrain=f3d.TerrainSource(
+            data=np.zeros((8, 8), dtype=np.float32),
+            crs="EPSG:32610",
+            metadata={"width": 8, "height": 8, "source_id": "inline-dem"},
+        ),
+        camera=f3d.OrbitCamera(target=(0.0, 0.0, 0.0), distance=100.0),
+        lighting=f3d.LightingPreset(name="daylight"),
+        output=f3d.OutputSpec(width=80, height=64, format="png"),
+        layers=[
+            f3d.PointCloudLayer(
+                layer_id="sample-points",
+                crs="EPSG:32610",
+                point_count=2,
+                metadata={
+                    "positions": [[0.0, 0.0, 0.0], [10.0, 5.0, 1.0]],
+                    "bounds": [0.0, 0.0, 10.0, 5.0],
+                    "color": "#ff8000",
+                    "point_size": 6.0,
+                },
+            )
+        ],
+    )
+    calls: dict[str, object] = {}
+
+    def fake_terrain(_recipe, _heightmap):
+        rgba = np.zeros((64, 80, 4), dtype=np.uint8)
+        rgba[..., 3] = 255
+        return map_scene._MapSceneNativeRenderResult(rgba=rgba)
+
+    def fake_vector_render(width, height, *, points_xy=None, point_rgba=None, point_size=None, polylines=None, polyline_rgba=None, stroke_width=None):
+        calls["vector"] = {
+            "size": (width, height),
+            "points_xy": points_xy,
+            "point_rgba": point_rgba,
+            "point_size": point_size,
+            "polylines": polylines,
+            "polyline_rgba": polyline_rgba,
+            "stroke_width": stroke_width,
+        }
+        return np.zeros((height, width, 4), dtype=np.uint8)
+
+    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result", fake_terrain)
+    monkeypatch.setattr(f3d, "vector_render_oit_py", fake_vector_render)
+
+    report = scene.render(str(tmp_path / "point-cloud.png"))
+
+    assert calls["vector"]["size"] == (80, 64)
+    assert calls["vector"]["points_xy"] == [(-1.0, 1.0), (1.0, -1.0)]
+    assert calls["vector"]["point_rgba"] == [(1.0, pytest.approx(128 / 255), 0.0, pytest.approx(220 / 255))] * 2
+    assert calls["vector"]["point_size"] == [6.0, 6.0]
+    assert calls["vector"]["polylines"] is None
+    assert report.supported_features["point_cloud.mapscene_render"] == "supported"
+    assert scene.last_render_metadata["point_cloud_backend"] == "native_oit_points"
+
+
+def test_gpu_backend_uses_edl_oit_for_point_cloud_layer(tmp_path, monkeypatch):
+    scene = f3d.MapScene(
+        terrain=f3d.TerrainSource(
+            data=np.zeros((8, 8), dtype=np.float32),
+            crs="EPSG:32610",
+            metadata={"width": 8, "height": 8, "source_id": "inline-dem"},
+        ),
+        camera=f3d.OrbitCamera(target=(0.0, 0.0, 0.0), distance=100.0),
+        lighting=f3d.LightingPreset(name="daylight"),
+        output=f3d.OutputSpec(width=80, height=64, format="png"),
+        layers=[
+            f3d.PointCloudLayer(
+                layer_id="edl-points",
+                crs="EPSG:32610",
+                point_count=2,
+                metadata={
+                    "positions": [[0.0, 0.0, 0.0], [10.0, 5.0, 1.0]],
+                    "bounds": [0.0, 0.0, 10.0, 5.0],
+                    "point_size": 6.0,
+                    "shading": "edl",
+                    "edl_strength": 2.25,
+                    "edl_radius_px": 3.0,
+                },
+            )
+        ],
+    )
+    calls: dict[str, object] = {}
+
+    def fake_terrain(_recipe, _heightmap):
+        rgba = np.zeros((64, 80, 4), dtype=np.uint8)
+        rgba[..., 3] = 255
+        return map_scene._MapSceneNativeRenderResult(rgba=rgba)
+
+    def fail_plain_oit(*_args, **_kwargs):
+        raise AssertionError("plain OIT path used for EDL point cloud")
+
+    def fake_edl_render(width, height, *, points_xy=None, point_size=None, edl_strength=None, edl_radius_px=None, **_kwargs):
+        calls["edl"] = {
+            "size": (width, height),
+            "points_xy": points_xy,
+            "point_size": point_size,
+            "edl_strength": edl_strength,
+            "edl_radius_px": edl_radius_px,
+        }
+        return np.zeros((height, width, 4), dtype=np.uint8)
+
+    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result", fake_terrain)
+    monkeypatch.setattr(f3d, "vector_render_oit_py", fail_plain_oit)
+    monkeypatch.setattr(f3d, "vector_render_oit_edl_py", fake_edl_render, raising=False)
+
+    report = scene.render(str(tmp_path / "point-cloud-edl.png"))
+
+    assert calls["edl"]["size"] == (80, 64)
+    assert calls["edl"]["points_xy"] == [(-1.0, 1.0), (1.0, -1.0)]
+    assert calls["edl"]["point_size"] == [6.0, 6.0]
+    assert calls["edl"]["edl_strength"] == 2.25
+    assert calls["edl"]["edl_radius_px"] == 3.0
+    assert report.supported_features["point_cloud.edl"] == "supported"
+    assert scene.last_render_metadata["point_cloud_edl_backend"] == "weighted_oit_depth_edl"
+
+
+def test_gpu_backend_uses_pointcloud_dataset_for_file_backed_layer(tmp_path, monkeypatch):
+    point_path = tmp_path / "points.laz"
+    point_path.write_bytes(b"LASF")
+    scene = f3d.MapScene(
+        terrain=f3d.TerrainSource(
+            data=np.zeros((8, 8), dtype=np.float32),
+            crs="EPSG:32610",
+            metadata={"width": 8, "height": 8, "source_id": "inline-dem"},
+        ),
+        camera=f3d.OrbitCamera(target=(0.0, 0.0, 0.0), distance=100.0),
+        lighting=f3d.LightingPreset(name="daylight"),
+        output=f3d.OutputSpec(width=80, height=64, format="png"),
+        layers=[
+            f3d.PointCloudLayer(
+                layer_id="sample-points",
+                path=str(point_path),
+                crs="EPSG:32610",
+                point_count=2,
+                metadata={"point_size": 5.0, "point_budget": 2},
+            )
+        ],
+    )
+    calls: dict[str, object] = {}
+
+    class FakeBounds:
+        min = (100.0, 200.0, 0.0)
+        max = (110.0, 205.0, 1.0)
+
+    class FakePointData:
+        positions = np.asarray([[100.0, 200.0, 0.0], [110.0, 205.0, 1.0]], dtype=np.float32)
+        colors = np.asarray([[255, 0, 0], [0, 128, 255]], dtype=np.uint8)
+
+    class FakeDataset:
+        bounds = FakeBounds()
+
+        def read_points(self, *, budget=None):
+            calls["budget"] = budget
+            return FakePointData()
+
+    def fake_terrain(_recipe, _heightmap):
+        rgba = np.zeros((64, 80, 4), dtype=np.uint8)
+        rgba[..., 3] = 255
+        return map_scene._MapSceneNativeRenderResult(rgba=rgba)
+
+    def fake_vector_render(width, height, *, points_xy=None, point_rgba=None, point_size=None, **_kwargs):
+        calls["vector"] = {
+            "size": (width, height),
+            "points_xy": points_xy,
+            "point_rgba": point_rgba,
+            "point_size": point_size,
+        }
+        return np.zeros((height, width, 4), dtype=np.uint8)
+
+    import forge3d.pointcloud as pointcloud_mod
+
+    def fake_open_pointcloud(path):
+        calls["path"] = Path(path)
+        return FakeDataset()
+
+    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result", fake_terrain)
+    monkeypatch.setattr(pointcloud_mod, "open_pointcloud", fake_open_pointcloud)
+    monkeypatch.setattr(f3d, "vector_render_oit_py", fake_vector_render)
+
+    report = scene.render(str(tmp_path / "point-cloud-file.png"))
+
+    assert calls["path"] == point_path
+    assert calls["budget"] == 2
+    assert calls["vector"]["points_xy"] == [(-1.0, 1.0), (1.0, -1.0)]
+    assert calls["vector"]["point_rgba"] == [
+        (1.0, 0.0, 0.0, pytest.approx(220 / 255)),
+        (0.0, pytest.approx(128 / 255), 1.0, pytest.approx(220 / 255)),
+    ]
+    assert calls["vector"]["point_size"] == [5.0, 5.0]
+    assert report.supported_features["point_cloud.mapscene_render"] == "supported"
+
+
+def test_gpu_backend_uses_pnts_tiles3d_layer_as_oit_points(tmp_path, monkeypatch):
+    pnts_path = tmp_path / "tile.pnts"
+    pnts_path.write_bytes(b"pnts")
+    scene = f3d.MapScene(
+        terrain=f3d.TerrainSource(
+            data=np.zeros((8, 8), dtype=np.float32),
+            crs="EPSG:32610",
+            metadata={"width": 8, "height": 8, "source_id": "inline-dem"},
+        ),
+        camera=f3d.OrbitCamera(target=(0.0, 0.0, 0.0), distance=100.0),
+        lighting=f3d.LightingPreset(name="daylight"),
+        output=f3d.OutputSpec(width=80, height=64, format="png"),
+        layers=[
+            f3d.Tiles3DLayer(
+                layer_id="points-tile",
+                source={"path": str(pnts_path), "source_format": "pnts"},
+                metadata={"point_size": 7.0},
+            )
+        ],
+    )
+    calls: dict[str, object] = {}
+
+    def fake_terrain(_recipe, _heightmap):
+        rgba = np.zeros((64, 80, 4), dtype=np.uint8)
+        rgba[..., 3] = 255
+        return map_scene._MapSceneNativeRenderResult(rgba=rgba)
+
+    def fake_decode_pnts(data):
+        calls["pnts_bytes"] = data
+        return {
+            "point_count": 2,
+            "positions": np.asarray([[0.0, 0.0, 0.0], [2.0, 4.0, 1.0]], dtype=np.float32),
+            "colors": np.asarray([[10, 20, 30], [40, 50, 60]], dtype=np.uint8),
+        }
+
+    def fake_vector_render(width, height, *, points_xy=None, point_rgba=None, point_size=None, **_kwargs):
+        calls["vector"] = {
+            "size": (width, height),
+            "points_xy": points_xy,
+            "point_rgba": point_rgba,
+            "point_size": point_size,
+        }
+        return np.zeros((height, width, 4), dtype=np.uint8)
+
+    import forge3d.tiles3d as tiles3d_mod
+
+    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result", fake_terrain)
+    monkeypatch.setattr(tiles3d_mod, "decode_pnts", fake_decode_pnts)
+    monkeypatch.setattr(f3d, "vector_render_oit_py", fake_vector_render)
+
+    report = scene.render(str(tmp_path / "tiles-pnts.png"))
+
+    assert calls["pnts_bytes"] == b"pnts"
+    assert calls["vector"]["points_xy"] == [(-1.0, 1.0), (1.0, -1.0)]
+    assert calls["vector"]["point_rgba"] == [
+        (pytest.approx(10 / 255), pytest.approx(20 / 255), pytest.approx(30 / 255), pytest.approx(220 / 255)),
+        (pytest.approx(40 / 255), pytest.approx(50 / 255), pytest.approx(60 / 255), pytest.approx(220 / 255)),
+    ]
+    assert calls["vector"]["point_size"] == [7.0, 7.0]
+    assert report.supported_features["tiles3d.mapscene_render"] == "supported"
+
+
+def test_gpu_backend_uses_tileset_json_pnts_content_as_oit_points(tmp_path, monkeypatch):
+    tileset_path = tmp_path / "tileset.json"
+    pnts_path = tmp_path / "child.pnts"
+    tileset_path.write_text('{"asset":{"version":"1.0"},"geometricError":0,"root":{"boundingVolume":{"sphere":[0,0,0,1]},"geometricError":0}}')
+    pnts_path.write_bytes(b"pnts")
+    scene = f3d.MapScene(
+        terrain=f3d.TerrainSource(
+            data=np.zeros((8, 8), dtype=np.float32),
+            crs="EPSG:32610",
+            metadata={"width": 8, "height": 8, "source_id": "inline-dem"},
+        ),
+        camera=f3d.OrbitCamera(target=(0.0, 0.0, 0.0), distance=100.0),
+        lighting=f3d.LightingPreset(name="daylight"),
+        output=f3d.OutputSpec(width=80, height=64, format="png"),
+        layers=[
+            f3d.Tiles3DLayer(
+                layer_id="points-tileset",
+                source={"path": str(tileset_path), "source_format": "tileset.json"},
+                metadata={"point_size": 3.0, "camera_position": [1.0, 2.0, 3.0], "sse_threshold": 8.0},
+            )
+        ],
+    )
+    calls: dict[str, object] = {}
+
+    class FakeDataset:
+        @classmethod
+        def from_tileset_json(cls, path):
+            calls["tileset_path"] = Path(path)
+            return cls()
+
+        def traverse(self, camera_position, *, sse_threshold=16.0, max_depth=32):
+            calls["traverse"] = (camera_position, sse_threshold, max_depth)
+            return [{"resolved_path": str(pnts_path)}, {"resolved_path": str(tmp_path / "mesh.b3dm")}]
+
+    def fake_terrain(_recipe, _heightmap):
+        rgba = np.zeros((64, 80, 4), dtype=np.uint8)
+        rgba[..., 3] = 255
+        return map_scene._MapSceneNativeRenderResult(rgba=rgba)
+
+    def fake_decode_pnts(data):
+        calls["pnts_bytes"] = data
+        return {
+            "point_count": 2,
+            "positions": np.asarray([[5.0, 5.0, 0.0], [7.0, 9.0, 1.0]], dtype=np.float32),
+            "colors": np.asarray([[90, 80, 70], [60, 50, 40]], dtype=np.uint8),
+        }
+
+    def fake_vector_render(width, height, *, points_xy=None, point_rgba=None, point_size=None, **_kwargs):
+        calls["vector"] = {
+            "size": (width, height),
+            "points_xy": points_xy,
+            "point_rgba": point_rgba,
+            "point_size": point_size,
+        }
+        return np.zeros((height, width, 4), dtype=np.uint8)
+
+    import forge3d.tiles3d as tiles3d_mod
+
+    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result", fake_terrain)
+    monkeypatch.setattr(tiles3d_mod, "Tiles3dDataset", FakeDataset)
+    monkeypatch.setattr(tiles3d_mod, "decode_pnts", fake_decode_pnts)
+    monkeypatch.setattr(f3d, "vector_render_oit_py", fake_vector_render)
+
+    report = scene.render(str(tmp_path / "tileset-pnts.png"))
+
+    assert calls["tileset_path"] == tileset_path
+    assert calls["traverse"] == ((1.0, 2.0, 3.0), 8.0, 32)
+    assert calls["pnts_bytes"] == b"pnts"
+    assert calls["vector"]["points_xy"] == [(-1.0, 1.0), (1.0, -1.0)]
+    assert calls["vector"]["point_size"] == [3.0, 3.0]
+    assert report.supported_features["tiles3d.mapscene_render"] == "supported"
+
+
+def test_gpu_backend_uses_b3dm_tiles3d_layer_as_oit_wireframe(tmp_path, monkeypatch):
+    b3dm_path = tmp_path / "tile.b3dm"
+    b3dm_path.write_bytes(b"b3dm")
+    scene = f3d.MapScene(
+        terrain=f3d.TerrainSource(
+            data=np.zeros((8, 8), dtype=np.float32),
+            crs="EPSG:32610",
+            metadata={"width": 8, "height": 8, "source_id": "inline-dem"},
+        ),
+        camera=f3d.OrbitCamera(target=(0.0, 0.0, 0.0), distance=100.0),
+        lighting=f3d.LightingPreset(name="daylight"),
+        output=f3d.OutputSpec(width=80, height=64, format="png"),
+        layers=[
+            f3d.Tiles3DLayer(
+                layer_id="mesh-tile",
+                source={"path": str(b3dm_path), "source_format": "b3dm"},
+                metadata={"bounds": [0.0, 0.0, 2.0, 2.0], "mesh_width": 4.0, "mesh_color": "#3366ff"},
+            )
+        ],
+    )
+    calls: dict[str, object] = {}
+
+    def fake_terrain(_recipe, _heightmap):
+        rgba = np.zeros((64, 80, 4), dtype=np.uint8)
+        rgba[..., 3] = 255
+        return map_scene._MapSceneNativeRenderResult(rgba=rgba)
+
+    def fake_decode_b3dm(data):
+        calls["b3dm_bytes"] = data
+        return {
+            "positions": np.asarray([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=np.float32),
+            "indices": np.asarray([0, 1, 2], dtype=np.uint32),
+        }
+
+    def fake_vector_render(width, height, *, points_xy=None, polylines=None, polyline_rgba=None, stroke_width=None, **_kwargs):
+        calls["vector"] = {
+            "size": (width, height),
+            "points_xy": points_xy,
+            "polylines": polylines,
+            "polyline_rgba": polyline_rgba,
+            "stroke_width": stroke_width,
+        }
+        return np.zeros((height, width, 4), dtype=np.uint8)
+
+    import forge3d.tiles3d as tiles3d_mod
+
+    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result", fake_terrain)
+    monkeypatch.setattr(tiles3d_mod, "decode_b3dm", fake_decode_b3dm)
+    monkeypatch.setattr(f3d, "vector_render_oit_py", fake_vector_render)
+
+    report = scene.render(str(tmp_path / "tiles-b3dm.png"))
+
+    assert calls["b3dm_bytes"] == b"b3dm"
+    assert calls["vector"]["points_xy"] is None
+    assert calls["vector"]["polylines"] == [[(-1.0, 1.0), (1.0, 1.0), (-1.0, -1.0), (-1.0, 1.0)]]
+    assert calls["vector"]["polyline_rgba"] == [(pytest.approx(51 / 255), pytest.approx(102 / 255), 1.0, pytest.approx(230 / 255))]
+    assert calls["vector"]["stroke_width"] == [4.0]
+    assert report.supported_features["tiles3d.mapscene_render"] == "supported"
+    assert scene.last_render_metadata["tiles3d_backend"] == "native_oit_geometry"
+    assert "point_cloud_backend" not in scene.last_render_metadata
+
+
+def test_gpu_backend_uses_tileset_json_b3dm_content_as_oit_wireframe(tmp_path, monkeypatch):
+    tileset_path = tmp_path / "tileset.json"
+    b3dm_path = tmp_path / "child.b3dm"
+    tileset_path.write_text('{"asset":{"version":"1.0"},"geometricError":0,"root":{"boundingVolume":{"sphere":[0,0,0,1]},"geometricError":0}}')
+    b3dm_path.write_bytes(b"b3dm")
+    scene = f3d.MapScene(
+        terrain=f3d.TerrainSource(
+            data=np.zeros((8, 8), dtype=np.float32),
+            crs="EPSG:32610",
+            metadata={"width": 8, "height": 8, "source_id": "inline-dem"},
+        ),
+        camera=f3d.OrbitCamera(target=(0.0, 0.0, 0.0), distance=100.0),
+        lighting=f3d.LightingPreset(name="daylight"),
+        output=f3d.OutputSpec(width=80, height=64, format="png"),
+        layers=[
+            f3d.Tiles3DLayer(
+                layer_id="mesh-tileset",
+                source={"path": str(tileset_path), "source_format": "tileset.json"},
+                metadata={"bounds": [0.0, 0.0, 2.0, 2.0], "camera_position": [1.0, 1.0, 4.0]},
+            )
+        ],
+    )
+    calls: dict[str, object] = {}
+
+    class FakeDataset:
+        @classmethod
+        def from_tileset_json(cls, path):
+            calls["tileset_path"] = Path(path)
+            return cls()
+
+        def traverse(self, camera_position, *, sse_threshold=16.0, max_depth=32):
+            calls["traverse"] = (camera_position, sse_threshold, max_depth)
+            return [{"resolved_path": str(b3dm_path)}, {"resolved_path": str(tmp_path / "points.pnts.ignore")}]
+
+    def fake_terrain(_recipe, _heightmap):
+        rgba = np.zeros((64, 80, 4), dtype=np.uint8)
+        rgba[..., 3] = 255
+        return map_scene._MapSceneNativeRenderResult(rgba=rgba)
+
+    def fake_decode_b3dm(data):
+        calls["b3dm_bytes"] = data
+        return {
+            "positions": np.asarray([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 2.0, 0.0]], dtype=np.float32),
+            "indices": np.asarray([0, 1, 2], dtype=np.uint32),
+        }
+
+    def fake_vector_render(width, height, *, polylines=None, stroke_width=None, **_kwargs):
+        calls["vector"] = {"size": (width, height), "polylines": polylines, "stroke_width": stroke_width}
+        return np.zeros((height, width, 4), dtype=np.uint8)
+
+    import forge3d.tiles3d as tiles3d_mod
+
+    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result", fake_terrain)
+    monkeypatch.setattr(tiles3d_mod, "Tiles3dDataset", FakeDataset)
+    monkeypatch.setattr(tiles3d_mod, "decode_b3dm", fake_decode_b3dm)
+    monkeypatch.setattr(f3d, "vector_render_oit_py", fake_vector_render)
+
+    report = scene.render(str(tmp_path / "tileset-b3dm.png"))
+
+    assert calls["tileset_path"] == tileset_path
+    assert calls["traverse"] == ((1.0, 1.0, 4.0), 16.0, 32)
+    assert calls["b3dm_bytes"] == b"b3dm"
+    assert calls["vector"]["polylines"] == [[(-1.0, 1.0), (1.0, 1.0), (-1.0, -1.0), (-1.0, 1.0)]]
+    assert calls["vector"]["stroke_width"] == [2.0]
+    assert report.supported_features["tiles3d.mapscene_render"] == "supported"
+    assert scene.last_render_metadata["tiles3d_backend"] == "native_oit_geometry"
+
+
+def test_gpu_backend_precise_polygon_path_uses_data_driven_fill_and_outline(tmp_path, monkeypatch):
+    scene = f3d.MapScene(
+        terrain=f3d.TerrainSource(
+            data=np.zeros((8, 8), dtype=np.float32),
+            crs="EPSG:32610",
+            metadata={"width": 8, "height": 8, "source_id": "inline-dem"},
+        ),
+        camera=f3d.OrbitCamera(target=(0.0, 0.0, 0.0), distance=100.0),
+        lighting=f3d.LightingPreset(name="daylight"),
+        output=f3d.OutputSpec(width=80, height=64, format="png"),
+        layers=[
+            f3d.VectorOverlay(
+                layer_id="zones",
+                crs="EPSG:32610",
+                features=[
+                    {
+                        "id": "zone-1",
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[(0.1, 0.1), (0.4, 0.1), (0.4, 0.4), (0.1, 0.4), (0.1, 0.1)]],
+                        },
+                        "properties": {"zone": "park", "opacity": 0.5, "stroke": 2},
+                    },
+                    {
+                        "id": "zone-2",
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[(0.6, 0.6), (0.9, 0.6), (0.9, 0.9), (0.6, 0.9), (0.6, 0.6)]],
+                        },
+                        "properties": {"zone": "industrial", "opacity": 0.75, "stroke": 4},
+                    },
+                ],
+                style={
+                    "version": 8,
+                    "layers": [
+                        {
+                            "id": "zones-fill",
+                            "type": "fill",
+                            "paint": {
+                                "fill-color": ["match", ["get", "zone"], "park", "#00ff00", "#ff0000"],
+                                "fill-opacity": ["get", "opacity"],
+                            },
+                        },
+                        {
+                            "id": "zones-outline",
+                            "type": "line",
+                            "paint": {
+                                "line-color": ["match", ["get", "zone"], "park", "#0000ff", "#ffff00"],
+                                "line-width": ["get", "stroke"],
+                            },
+                        },
+                    ],
+                },
+            )
+        ],
+    )
+    calls: dict[str, object] = {"polygons": None, "lines": None}
+
+    def fake_terrain(_recipe, _heightmap):
+        rgba = np.zeros((64, 80, 4), dtype=np.uint8)
+        rgba[..., 3] = 255
+        return map_scene._MapSceneNativeRenderResult(rgba=rgba)
+
+    def fake_polygon_render(width, height, exteriors, holes=None, fill_rgba=None, stroke_rgba=None, stroke_width=None, fill_rgba_list=None, coordinates_are_ndc=None):
+        calls["polygons"] = {
+            "size": (width, height),
+            "exterior_count": len(exteriors),
+            "holes": holes,
+            "fill_rgba": fill_rgba,
+            "fill_rgba_list": fill_rgba_list,
+            "coordinates_are_ndc": coordinates_are_ndc,
+        }
+        rgba = np.zeros((height, width, 4), dtype=np.uint8)
+        return rgba
+
+    def fake_vector_render(width, height, *, points_xy=None, point_rgba=None, point_size=None, polylines=None, polyline_rgba=None, stroke_width=None):
+        calls["lines"] = {
+            "size": (width, height),
+            "polylines": polylines,
+            "polyline_rgba": polyline_rgba,
+            "stroke_width": stroke_width,
+        }
+        rgba = np.zeros((height, width, 4), dtype=np.uint8)
+        return rgba
+
+    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result", fake_terrain)
+    monkeypatch.setattr(f3d, "vector_render_polygons_fill_py", fake_polygon_render)
+    monkeypatch.setattr(f3d, "vector_render_oit_py", fake_vector_render)
+
+    output_path = tmp_path / "polygon-choropleth.png"
+    scene.render(str(output_path))
+
+    assert output_path.exists()
+    assert calls["polygons"]["size"] == (80, 64)
+    assert calls["polygons"]["exterior_count"] == 2
+    assert calls["polygons"]["coordinates_are_ndc"] is True
+    fills = calls["polygons"]["fill_rgba_list"]
+    assert fills[0][:3] == (0.0, 1.0, 0.0)
+    assert fills[0][3] == pytest.approx(128 / 255)
+    assert fills[1][:3] == (1.0, 0.0, 0.0)
+    assert fills[1][3] == pytest.approx(191 / 255)
+    assert calls["lines"]["polyline_rgba"] == [(0.0, 0.0, 1.0, 1.0), (1.0, 1.0, 0.0, 1.0)]
+    assert calls["lines"]["stroke_width"] == [2.0, 4.0]
 
 
 def test_outputspec_offline_fields_roundtrip_through_recipe():
@@ -960,7 +1504,10 @@ def test_render_records_offline_samples_and_writes_aovs(tmp_path, monkeypatch):
         (str(tmp_path / "offline_aov-depth.exr"), (12, 16), "depth", 0.75),
         (str(tmp_path / "offline_aov-normal.exr"), (12, 16, 3), "normal", 0.5),
     ]
-    assert scene.last_render_metadata == {
+    render_metadata = dict(scene.last_render_metadata)
+    assert render_metadata.pop("offline_accumulation_ms") >= 0.0
+    assert render_metadata.pop("timing_source") == "python_perf_counter"
+    assert render_metadata == {
         "samples_used": 3,
         "target_samples": 3,
         "denoiser_used": "atrous",
@@ -1038,33 +1585,15 @@ def test_render_blocks_placeholder_when_native_adapter_is_unavailable(tmp_path, 
     monkeypatch.setattr(f3d, "TerrainRenderer", UnavailableTerrainRenderer)
     output_path = tmp_path / "fallback.png"
 
-    with pytest.raises(RuntimeError, match="allow_placeholder=True"):
+    with pytest.raises(f3d.MapSceneNativeUnavailable) as excinfo:
         scene.render(str(output_path))
 
     assert not output_path.exists()
-
-
-def test_render_falls_back_when_explicitly_allowed(tmp_path, monkeypatch):
-    scene = _native_asset_scene(tmp_path)
-
-    class PanicException(BaseException):
-        pass
-
-    PanicException.__module__ = "pyo3_runtime"
-
-    class UnavailableTerrainRenderer:
-        def __init__(self, *_args):
-            raise PanicException("No suitable GPU adapter")
-
-    monkeypatch.setattr(f3d, "TerrainRenderer", UnavailableTerrainRenderer)
-    output_path = tmp_path / "fallback.png"
-
-    report = scene.render(str(output_path), allow_placeholder=True)
-
-    assert output_path.exists()
-    assert report.status == "ok"
-    assert report.supported_features["mapscene.render_png"] == "supported"
-    assert scene.last_render_backend == "placeholder"
+    block = excinfo.value.diagnostic
+    assert block["status"] == "diagnostic_block"
+    assert block["layer"] == "terrain"
+    assert "TerrainRenderer" in block["required_native"]
+    assert scene.last_render_backend is None
 
 
 def test_render_geotiff_terrain_reaches_native_offscreen_adapter(tmp_path, monkeypatch):

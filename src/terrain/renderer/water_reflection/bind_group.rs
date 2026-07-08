@@ -153,12 +153,7 @@ impl TerrainScene {
                 pass.set_bind_group(4, fog_bind_group, &[]);
                 pass.set_bind_group(5, &reflection_pass_water_bind_group, &[]);
                 pass.set_bind_group(6, material_layer_bind_group, &[]);
-                let vertex_count = if params.camera_mode.to_lowercase() == "mesh" {
-                    let grid_size: u32 = 512;
-                    6 * (grid_size - 1) * (grid_size - 1)
-                } else {
-                    3
-                };
+                let vertex_count = self.terrain_vertex_count(params);
                 pass.draw(0..vertex_count, 0..1);
             }
 

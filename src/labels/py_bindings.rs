@@ -1,9 +1,15 @@
 // src/labels/py_bindings.rs
-// PyO3 bindings for label style types (P2.3)
-// Exposes LabelStyle and LabelFlags to Python
+// PyO3 bindings for label style types (P2.3) and the CARTOGRAPHER-PRIME
+// optimal-declutter rationale.
+// Exposes LabelStyle, LabelFlags, and LabelRationale to Python
 
 use pyo3::prelude::*;
 
+#[cfg(feature = "extension-module")]
+use pyo3::types::PyDict;
+
+#[cfg(feature = "extension-module")]
+use super::optimal::RationaleRecord;
 use super::types::{LabelFlags, LabelStyle};
 
 /// Python wrapper for LabelFlags.
@@ -211,5 +217,185 @@ impl From<&PyLabelStyle> for LabelStyle {
             flags: LabelFlags::from(&s.flags),
             horizon_fade_angle: s.horizon_fade_angle,
         }
+    }
+}
+
+/// Overlap resolution for quantized areas: quantized-square units -> px^2.
+#[cfg(feature = "extension-module")]
+const AREA_SCALE: f64 = super::optimal::COORD_SCALE * super::optimal::COORD_SCALE;
+
+#[cfg(feature = "extension-module")]
+fn conflict_to_dict(py: Python<'_>, entry: &(u64, u32, i64)) -> PyResult<Py<PyDict>> {
+    let d = PyDict::new_bound(py);
+    d.set_item("label_id", entry.0)?;
+    d.set_item("candidate_index", entry.1)?;
+    d.set_item("overlap_area_px", entry.2 as f64 / AREA_SCALE)?;
+    Ok(d.unbind())
+}
+
+#[cfg(feature = "extension-module")]
+fn conflicts_to_text(entries: &[(u64, u32, i64)]) -> String {
+    entries
+        .iter()
+        .map(|(label_id, candidate_index, area_q)| {
+            format!(
+                "label {} candidate {} (overlap {:.2} px^2)",
+                label_id,
+                candidate_index,
+                *area_q as f64 / AREA_SCALE
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Grounded rationale for a bounded-optimal declutter solve.
+///
+/// Holds the typed decision records emitted by the solver; every rendered
+/// line derives solely from these records (never a post-hoc narrative).
+#[cfg(feature = "extension-module")]
+#[pyclass(module = "forge3d._forge3d", name = "LabelRationale")]
+#[derive(Clone)]
+pub struct PyLabelRationale {
+    pub(crate) records: Vec<RationaleRecord>,
+}
+
+#[cfg(feature = "extension-module")]
+#[pymethods]
+impl PyLabelRationale {
+    /// Typed decision records as a list of dicts (each with a "kind" key).
+    fn records(&self, py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
+        let weight_scale = super::optimal::WEIGHT_SCALE;
+        self.records
+            .iter()
+            .map(|record| {
+                let d = PyDict::new_bound(py);
+                match record {
+                    RationaleRecord::Placed {
+                        label_id,
+                        candidate_index,
+                        weight_q,
+                        displaced,
+                    } => {
+                        d.set_item("kind", "placed")?;
+                        d.set_item("label_id", label_id)?;
+                        d.set_item("candidate_index", candidate_index)?;
+                        d.set_item("weight", *weight_q as f64 / weight_scale)?;
+                        d.set_item(
+                            "displaced",
+                            displaced
+                                .iter()
+                                .map(|entry| conflict_to_dict(py, entry))
+                                .collect::<PyResult<Vec<_>>>()?,
+                        )?;
+                    }
+                    RationaleRecord::Dropped {
+                        label_id,
+                        candidate_index,
+                        weight_q,
+                        priority_lost,
+                        blocking,
+                    } => {
+                        d.set_item("kind", "dropped")?;
+                        d.set_item("label_id", label_id)?;
+                        d.set_item("candidate_index", candidate_index)?;
+                        d.set_item("weight", *weight_q as f64 / weight_scale)?;
+                        d.set_item("priority_lost", priority_lost)?;
+                        d.set_item(
+                            "blocking",
+                            blocking
+                                .iter()
+                                .map(|entry| conflict_to_dict(py, entry))
+                                .collect::<PyResult<Vec<_>>>()?,
+                        )?;
+                    }
+                    RationaleRecord::OccludedCandidate {
+                        label_id,
+                        candidate_index,
+                    } => {
+                        d.set_item("kind", "occluded_candidate")?;
+                        d.set_item("label_id", label_id)?;
+                        d.set_item("candidate_index", candidate_index)?;
+                    }
+                    RationaleRecord::Solver {
+                        nodes_explored,
+                        certified,
+                        gap,
+                        gap_tolerance,
+                    } => {
+                        d.set_item("kind", "solver")?;
+                        d.set_item("nodes_explored", nodes_explored)?;
+                        d.set_item("certified", certified)?;
+                        d.set_item("gap", gap)?;
+                        d.set_item("gap_tolerance", gap_tolerance)?;
+                    }
+                }
+                Ok(d.unbind())
+            })
+            .collect()
+    }
+
+    /// Human-readable lines derived purely from the recorded decisions.
+    fn render(&self) -> Vec<String> {
+        self.records
+            .iter()
+            .map(|record| match record {
+                RationaleRecord::Placed {
+                    label_id,
+                    candidate_index,
+                    weight_q,
+                    displaced,
+                } => {
+                    let mut line = format!(
+                        "placed label {} at candidate {} (weight {:.3})",
+                        label_id,
+                        candidate_index,
+                        *weight_q as f64 / super::optimal::WEIGHT_SCALE
+                    );
+                    if !displaced.is_empty() {
+                        line.push_str("; displaced ");
+                        line.push_str(&conflicts_to_text(displaced));
+                    }
+                    line
+                }
+                RationaleRecord::Dropped {
+                    label_id,
+                    candidate_index,
+                    priority_lost,
+                    blocking,
+                    ..
+                } => format!(
+                    "dropped label {} candidate {} ({}): blocked by {}",
+                    label_id,
+                    candidate_index,
+                    if *priority_lost { "priority_lost" } else { "collision" },
+                    conflicts_to_text(blocking)
+                ),
+                RationaleRecord::OccludedCandidate {
+                    label_id,
+                    candidate_index,
+                } => format!(
+                    "occluded anchor: label {} candidate {} excluded by silhouette/depth visibility",
+                    label_id, candidate_index
+                ),
+                RationaleRecord::Solver {
+                    nodes_explored,
+                    certified,
+                    gap,
+                    gap_tolerance,
+                } => format!(
+                    "solver: {} nodes explored, certified={}, gap={:.6} (tolerance {:.6})",
+                    nodes_explored, certified, gap, gap_tolerance
+                ),
+            })
+            .collect()
+    }
+
+    fn __len__(&self) -> usize {
+        self.records.len()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("LabelRationale({} records)", self.records.len())
     }
 }

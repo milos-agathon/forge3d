@@ -227,3 +227,23 @@ def test_native_vector_oit_line_output_has_visible_alpha() -> None:
     assert int(np.max(point_image[..., 0])) > 0
     assert int(np.max(point_image[..., 3])) > 0
     assert np.count_nonzero(point_image[..., 3]) > 0
+
+
+def test_native_vector_oit_edl_output_has_visible_alpha() -> None:
+    if not hasattr(f3d, "vector_render_oit_edl_py") or not f3d.has_gpu():
+        return
+
+    image = f3d.vector_render_oit_edl_py(
+        64,
+        48,
+        points_xy=[(-0.2, -0.2), (0.2, 0.2)],
+        point_rgba=[(1.0, 0.2, 0.1, 1.0), (0.2, 0.8, 1.0, 1.0)],
+        point_size=[12.0, 12.0],
+        edl_strength=2.0,
+        edl_radius_px=2.0,
+    )
+
+    assert image.shape == (48, 64, 4)
+    assert int(np.max(image[..., :3])) > 0
+    assert int(np.max(image[..., 3])) > 0
+    assert np.count_nonzero(image[..., 3]) > 0

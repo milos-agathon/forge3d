@@ -3,7 +3,9 @@
 // Provides headless, reproducible PBR tile rendering without viewer dependencies
 // RELEVANT FILES: src/offscreen/brdf_tile.rs, src/pipeline/pbr.rs, src/shaders/pbr.wgsl
 
+pub mod adjudication_raster;
 pub mod brdf_tile;
+pub mod forward;
 pub mod pipeline;
 pub mod sphere;
 

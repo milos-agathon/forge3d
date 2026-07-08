@@ -1,6 +1,6 @@
 //! P2.1/M5: Complete clipmap level with center block and nested rings.
 
-use super::ring::{make_center_block, make_ring};
+use super::ring::{make_center_block, make_ring, make_ring_skirts};
 use super::vertex::ClipmapVertex;
 use super::ClipmapConfig;
 use crate::terrain::tiling::TileId;
@@ -104,7 +104,7 @@ impl ClipmapLevel {
             let vertex_start = all_vertices.len() as u32;
             let index_start = all_indices.len() as u32;
 
-            let (ring_verts, ring_indices) = make_ring(
+            let (mut ring_verts, mut ring_indices) = make_ring(
                 ring_idx,
                 current_inner,
                 current_outer,
@@ -113,6 +113,14 @@ impl ClipmapLevel {
                 self.terrain_extent,
                 self.config.morph_range,
             );
+            let (skirt_verts, skirt_indices) = make_ring_skirts(
+                &ring_verts,
+                &ring_indices,
+                self.config.skirt_depth,
+                ring_idx,
+            );
+            ring_verts.extend(skirt_verts);
+            ring_indices.extend(skirt_indices);
 
             // Offset indices by current vertex count
             let offset_indices: Vec<u32> = ring_indices.iter().map(|&i| i + vertex_start).collect();

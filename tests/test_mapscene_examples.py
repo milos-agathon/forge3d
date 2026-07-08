@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 import forge3d.map_scene as map_scene
 
 
@@ -49,10 +51,14 @@ def test_terrain_raster_example_validates_renders_and_bundles(tmp_path, monkeypa
     assert Path(payload["bundle_path"]).exists()
     assert "placeholder_fallback" not in payload["diagnostic_codes"]
 
-    monkeypatch.setattr(map_scene, "_render_native_offscreen_result", lambda _recipe, _plans, **_kwargs: None)
-    placeholder_scene = module.build_scene(tmp_path / "placeholder")
-    placeholder_scene.render(allow_placeholder=True)
-    assert Path(payload["png_path"]).read_bytes() != Path(placeholder_scene.last_render_path).read_bytes()
+    # When the native offscreen backend is unavailable the render blocks with
+    # a structured diagnostic instead of writing a CPU placeholder.
+    monkeypatch.setattr(map_scene, "_render_native_offscreen_result", lambda _recipe, _compiled, **_kwargs: None)
+    blocked_scene = module.build_scene(tmp_path / "blocked")
+    with pytest.raises(map_scene.MapSceneNativeUnavailable) as excinfo:
+        blocked_scene.render()
+    assert excinfo.value.diagnostic["status"] == "diagnostic_block"
+    assert blocked_scene.last_render_path is None
 
 
 def test_vector_labels_example_compiles_label_plan_and_bundles(tmp_path):

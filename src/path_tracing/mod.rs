@@ -4,6 +4,7 @@
 // RELEVANT FILES:src/path_tracing/compute.rs,src/shaders/pt_kernel.wgsl,python/forge3d/path_tracing.py,src/lib.rs
 
 pub mod accel;
+pub mod adjudication;
 pub mod alias_table;
 pub mod aov;
 pub mod compute;
@@ -12,6 +13,7 @@ pub mod hybrid_compute;
 pub mod io;
 pub mod lighting;
 pub mod mesh;
+pub mod reference_scene;
 pub mod restir;
 pub mod wavefront;
 

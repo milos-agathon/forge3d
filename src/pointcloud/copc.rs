@@ -42,6 +42,7 @@ pub struct PointData {
     pub positions: Vec<f32>,
     pub colors: Option<Vec<u8>>,
     pub intensities: Option<Vec<u16>>,
+    pub classifications: Option<Vec<u8>>,
 }
 
 /// Result of scanning all VLRs in a COPC file

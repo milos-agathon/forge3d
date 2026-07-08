@@ -40,6 +40,7 @@ impl TerrainRenderParams {
             vector_overlay: parse_vector_overlay_settings(&params),
             tonemap: parse_tonemap_settings(&params),
             aov: parse_aov_settings(&params),
+            screen_space: parse_screen_space_settings(&params),
             dof: parse_dof_settings(&params),
             motion_blur: parse_motion_blur_settings(&params),
             lens_effects: parse_lens_effects_settings(&params),

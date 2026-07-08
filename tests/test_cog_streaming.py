@@ -185,6 +185,41 @@ class TestCogRangeRead:
         for tile in tiles:
             assert tile.dtype == np.float32
 
+    def test_native_reads_deflate_predictor_tiled_tiff(self, tmp_path):
+        """Test native COG path decodes horizontal-predictor tiled TIFF data."""
+        if not cog_available():
+            pytest.skip("Native COG unavailable")
+        if not rasterio_available():
+            pytest.skip("rasterio unavailable for predictor fixture generation")
+
+        import rasterio
+        from rasterio.transform import from_origin
+        from forge3d.cog import CogDataset
+
+        expected = (np.arange(16 * 16, dtype=np.uint16).reshape(16, 16) * 3) + 7
+        path = tmp_path / "predictor_deflate_tiled.tif"
+        with rasterio.open(
+            path,
+            "w",
+            driver="GTiff",
+            width=16,
+            height=16,
+            count=1,
+            dtype="uint16",
+            tiled=True,
+            blockxsize=16,
+            blockysize=16,
+            compress="deflate",
+            predictor=2,
+            transform=from_origin(0, 16, 1, 1),
+        ) as dst:
+            dst.write(expected, 1)
+
+        ds = CogDataset(f"file://{path}", cache_size_mb=4)
+        actual = ds.read_tile(0, 0, lod=0)
+
+        np.testing.assert_array_equal(actual, expected.astype(np.float32))
+
 
 class TestCogOverviews:
     """P3.2: Test COG overview detection and selection."""

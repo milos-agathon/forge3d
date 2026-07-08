@@ -238,9 +238,13 @@ def test_curved_label_depth_occlusion_is_documented_unsupported_substitution() -
     )
 
 
-def test_mapscene_render_auto_wires_depth_aov_into_label_occlusion(tmp_path, monkeypatch) -> None:
+def test_mapscene_render_reads_frozen_compile_phase_label_plan(tmp_path, monkeypatch) -> None:
+    """SUTURA: render must draw the frozen compiled plan, never re-plan from a live GPU depth frame."""
+
     class FakeAovFrame:
         def depth(self):
+            # A live GPU depth frame that, if (incorrectly) wired into label
+            # occlusion during render, would cull the "behind" label.
             return np.full((4, 4), 0.5, dtype=np.float32)
 
     def fake_terrain_result(recipe, heightmap):
@@ -257,9 +261,7 @@ def test_mapscene_render_auto_wires_depth_aov_into_label_occlusion(tmp_path, mon
 
     def fake_label_composite(base, recipe, plans):
         plan = plans["labels"]
-        observed["accepted"] = [label.label_id for label in plan.accepted]
-        observed["rejected"] = [(label.label_id, label.reason) for label in plan.rejected]
-        observed["source"] = plan.rejected[0].details["terrain_sample"]["source"]
+        observed["plan_payload"] = plan.to_dict()
         return base, True
 
     monkeypatch.setattr(map_scene, "_render_terrain_renderer_result", fake_terrain_result)
@@ -285,7 +287,7 @@ def test_mapscene_render_auto_wires_depth_aov_into_label_occlusion(tmp_path, mon
                     {
                         "id": "behind",
                         "text": "Behind",
-                        "geometry": {"type": "Point", "coordinates": [32.0, 32.0, 0.75]},
+                        "geometry": {"type": "Point", "coordinates": [24.0, 48.0, 0.75]},
                     },
                 ],
                 glyph_atlas={"glyphs": sorted(set("FrontBehind"))},
@@ -294,12 +296,20 @@ def test_mapscene_render_auto_wires_depth_aov_into_label_occlusion(tmp_path, mon
         ],
     )
 
+    compiled = scene.compile_plan()
+    frozen_payload = compiled.label_plans["labels"].to_dict()
+
     scene.render()
 
-    assert observed["accepted"] == ["front"]
-    assert observed["rejected"] == [("behind", "terrain_occluded")]
-    assert observed["source"] == "mapscene_depth_aov"
-    assert [label.label_id for label in scene.compiled_label_plans["labels"].accepted] == ["front"]
+    # The render phase received exactly the frozen compile-phase plan ...
+    assert observed["plan_payload"] == frozen_payload
+    # ... and mutated no label state: the plan is unchanged after render.
+    assert compiled.label_plans["labels"].to_dict() == frozen_payload
+    assert scene.compiled_plan is compiled
+    # No label was culled against the live GPU depth frame during render.
+    for label in compiled.label_plans["labels"].rejected:
+        sample = label.details.get("terrain_sample") or {}
+        assert sample.get("source") != "mapscene_depth_aov"
 
 
 def _real_depth_occlusion_scene(path: Path, *, extra_labels: int = 0) -> f3d.MapScene:
@@ -315,6 +325,15 @@ def _real_depth_occlusion_scene(path: Path, *, extra_labels: int = 0) -> f3d.Map
             "geometry": {"type": "Point", "coordinates": [32.0, 32.0, 0.95]},
         },
     ]
+    # SUTURA: the depth source for occlusion culling is serialized with the
+    # recipe (a deterministic compile-phase proxy), never a live GPU frame.
+    depth_metadata = {
+        "depth_occlusion": {
+            "image": np.full((16, 16), 0.5, dtype=np.float32).tolist(),
+            "source": "serialized_depth_proxy",
+            "bias": 0.0,
+        }
+    }
     for index in range(extra_labels):
         labels.append(
             {
@@ -339,26 +358,36 @@ def _real_depth_occlusion_scene(path: Path, *, extra_labels: int = 0) -> f3d.Map
                 labels=labels,
                 glyph_atlas={"glyphs": sorted(set("FrontBehindP0123456789"))},
                 occlusion="terrain",
+                metadata=depth_metadata,
             )
         ],
         reproducibility_profile=f3d.ReproducibilityProfile(seed=7),
     )
 
 
-def test_real_render_depth_aov_occludes_and_releases_declutter_slot(tmp_path) -> None:
+def test_real_render_compile_phase_depth_occludes_and_releases_declutter_slot(tmp_path) -> None:
     if not terrain_rendering_available():
-        pytest.skip("real depth-AOV label occlusion requires a terrain-capable GPU runtime")
+        pytest.skip("real compile-phase label occlusion requires a terrain-capable GPU runtime")
 
     scene = _real_depth_occlusion_scene(tmp_path / "occlusion.png")
-    scene.render()
-    plan = scene.compiled_label_plans["labels"]
+    compiled = scene.compile_plan()
+    plan = compiled.label_plans["labels"]
 
-    assert scene.last_render_backend == "gpu_terrain"
+    # Depth occlusion is resolved at compile time from the serialized proxy:
+    # "behind" is culled, which releases its declutter slot for "front".
     assert [label.label_id for label in plan.accepted] == ["front"]
     assert [(label.label_id, label.reason) for label in plan.rejected] == [
         ("behind", "terrain_occluded")
     ]
-    assert plan.rejected[0].details["terrain_sample"]["source"] == "mapscene_depth_aov"
+    assert plan.rejected[0].details["terrain_sample"]["source"] == "serialized_depth_proxy"
+
+    frozen_payload = plan.to_dict()
+    scene.render()
+
+    # The render phase drew the frozen plan without mutating it.
+    assert scene.last_render_backend == "gpu_terrain"
+    assert scene.compiled_plan is compiled
+    assert compiled.label_plans["labels"].to_dict() == frozen_payload
 
 
 def test_real_render_depth_occlusion_is_deterministic_for_dense_points(tmp_path) -> None:

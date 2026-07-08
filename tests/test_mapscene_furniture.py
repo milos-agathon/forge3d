@@ -101,8 +101,8 @@ def test_mapscene_render_composites_map_furniture(tmp_path):
     )
     furnished = _furniture_scene(furnished_path, furniture=furniture)
 
-    plain.render(allow_placeholder=True)
-    report = furnished.render(allow_placeholder=True)
+    plain.render()
+    report = furnished.render()
 
     from PIL import Image
 
@@ -151,7 +151,7 @@ def test_mapscene_graticule_render_uses_scene_target_crs(monkeypatch, tmp_path):
         target_crs="EPSG:3857",
     )
 
-    scene.render(allow_placeholder=True)
+    scene.render()
 
     assert calls
     assert calls[-1]["target_crs"] == "EPSG:3857"
@@ -207,7 +207,7 @@ def test_mapscene_scale_bar_config_scales_with_output_dpi(monkeypatch, tmp_path)
         output_metadata={"dpi": 300},
     )
 
-    scene.render(allow_placeholder=True)
+    scene.render()
 
     assert configs
     assert configs[-1].width_px == 140

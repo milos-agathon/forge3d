@@ -2,13 +2,15 @@ use super::super::*;
 
 #[pyfunction]
 pub(crate) fn engine_info(py: Python<'_>) -> PyResult<Py<PyDict>> {
-    let info = engine_context::engine_info();
+    let info = engine_context::engine_info()?;
     let d = PyDict::new_bound(py);
     d.set_item("backend", info.backend)?;
     d.set_item("adapter_name", info.adapter_name)?;
     d.set_item("device_name", info.device_name)?;
     d.set_item("max_texture_dimension_2d", info.max_texture_dimension_2d)?;
     d.set_item("max_buffer_size", info.max_buffer_size)?;
+    d.set_item("device_type", info.device_type)?;
+    d.set_item("software_fallback", info.software_fallback)?;
     Ok(d.into())
 }
 
@@ -106,7 +108,7 @@ pub(crate) fn c5_build_framegraph_report(py: Python<'_>) -> PyResult<Py<PyDict>>
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 pub(crate) fn c6_mt_record_demo(py: Python<'_>) -> PyResult<Py<PyDict>> {
-    let g = crate::core::gpu::ctx();
+    let g = crate::core::gpu::try_ctx()?;
     let device = Arc::clone(&g.device);
     let queue = Arc::clone(&g.queue);
 
@@ -161,7 +163,7 @@ pub(crate) fn c6_mt_record_demo(py: Python<'_>) -> PyResult<Py<PyDict>> {
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 pub(crate) fn c7_async_compute_demo(py: Python<'_>) -> PyResult<Py<PyDict>> {
-    let g = crate::core::gpu::ctx();
+    let g = crate::core::gpu::try_ctx()?;
     let device = Arc::clone(&g.device);
     let queue = Arc::clone(&g.queue);
 
@@ -228,6 +230,8 @@ pub(crate) fn global_memory_metrics(py: Python<'_>) -> PyResult<PyObject> {
     d.set_item("texture_bytes", metrics.texture_bytes)?;
     d.set_item("host_visible_bytes", metrics.host_visible_bytes)?;
     d.set_item("total_bytes", metrics.total_bytes)?;
+    d.set_item("peak_host_visible_bytes", metrics.peak_host_visible_bytes)?;
+    d.set_item("peak_total_bytes", metrics.peak_total_bytes)?;
     d.set_item("limit_bytes", metrics.limit_bytes)?;
     d.set_item("within_budget", metrics.within_budget)?;
     d.set_item("utilization_ratio", metrics.utilization_ratio)?;
@@ -237,7 +241,25 @@ pub(crate) fn global_memory_metrics(py: Python<'_>) -> PyResult<PyObject> {
     d.set_item("staging_ring_count", metrics.staging_ring_count)?;
     d.set_item("staging_buffer_size", metrics.staging_buffer_size)?;
     d.set_item("staging_buffer_stalls", metrics.staging_buffer_stalls)?;
+    d.set_item("budget_policy", metrics.budget_policy)?;
     Ok(d.into())
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn set_memory_budget_policy(policy: &str) -> PyResult<String> {
+    crate::core::memory_tracker::global_tracker()
+        .set_budget_policy(policy)
+        .map(str::to_owned)
+        .map_err(pyo3::exceptions::PyValueError::new_err)
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn get_memory_budget_policy() -> PyResult<String> {
+    Ok(crate::core::memory_tracker::global_tracker()
+        .get_budget_policy()
+        .to_string())
 }
 
 #[cfg(feature = "extension-module")]
@@ -269,8 +291,28 @@ pub(crate) fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<
         d.set_item("device", info.device)?;
         d.set_item("device_type", format!("{:?}", info.device_type))?;
         d.set_item("backend", format!("{:?}", info.backend))?;
+        d.set_item(
+            "software_fallback",
+            info.device_type == wgpu::DeviceType::Cpu,
+        )?;
     } else {
-        d.set_item("status", "unavailable")?;
+        d.set_item("status", "no_adapter")?;
+        d.set_item(
+            "reason",
+            format!(
+                "no GPU adapter (hardware or software) exposed for backends {mask:?}{}",
+                backend
+                    .as_deref()
+                    .map(|b| format!(" (requested backend '{b}')"))
+                    .unwrap_or_default(),
+            ),
+        )?;
+        d.set_item(
+            "remediation",
+            "Verify GPU drivers are installed, pin a backend via WGPU_BACKENDS \
+             (vulkan|dx12|metal|gl), or install a software rasterizer for headless use \
+             (Windows ships WARP; on Linux install Mesa's lavapipe).",
+        )?;
         // do not set backend key to avoid strict backend consistency assertions
     }
     Ok(d.into_py(py))

@@ -18,6 +18,8 @@ __all__ = [
     "memory_metrics",
     "update_memory_usage",
     "enforce_memory_budget",
+    "set_budget_policy",
+    "get_budget_policy",
     "budget_remaining",
     "utilization_ratio",
     "override_memory_limit",
@@ -32,7 +34,16 @@ def memory_metrics() -> Dict[str, float]:
     metrics.setdefault("staging_ring_count", 0)
     metrics.setdefault("staging_buffer_size", 0)
     metrics.setdefault("staging_buffer_stalls", 0)
+    metrics.setdefault("budget_policy", get_budget_policy())
     return metrics
+
+
+def set_budget_policy(policy: str) -> str:
+    return _memory.set_budget_policy(policy)
+
+
+def get_budget_policy() -> str:
+    return _memory.get_budget_policy()
 
 
 def enforce_memory_budget() -> None:

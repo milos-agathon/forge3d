@@ -102,6 +102,7 @@ class PointData:
     positions: np.ndarray  # (N, 3) float32
     colors: Optional[np.ndarray] = None  # (N, 3) uint8
     intensities: Optional[np.ndarray] = None  # (N,) uint16
+    classifications: Optional[np.ndarray] = None  # (N,) uint8
 
     @property
     def point_count(self) -> int:
@@ -309,6 +310,7 @@ class CopcDataset:
             user_id = vlr_header[2:18].decode("utf-8").rstrip("\x00")
 
             if user_id == "copc":
+                self._is_copc = True
                 content_size = int.from_bytes(vlr_header[20:22], "little")
                 content = f.read(content_size)
 
@@ -427,6 +429,37 @@ class CopcDataset:
 
         return OctreeBounds(tuple(min_pt), tuple(max_pt))
 
+    def read_points(self, key: OctreeKey | None = None, budget: int | None = None) -> PointData:
+        """Read decoded points for a COPC node through the native decoder."""
+        from ._native import NATIVE_AVAILABLE, get_native_module
+
+        if not NATIVE_AVAILABLE:
+            raise RuntimeError("CopcDataset.read_points requires the compiled native extension")
+        native = get_native_module()
+        fn = getattr(native, "copc_read_node_points", None)
+        if fn is None:
+            raise RuntimeError("native copc_read_node_points is unavailable")
+
+        node_key = key or OctreeKey.root()
+        result = fn(
+            str(self.path),
+            int(node_key.depth),
+            int(node_key.x),
+            int(node_key.y),
+            int(node_key.z),
+            None if budget is None else int(budget),
+        )
+        positions = np.asarray(result["positions"], dtype=np.float32).reshape((-1, 3))
+        colors = result.get("colors")
+        intensities = result.get("intensities")
+        classifications = result.get("classifications")
+        return PointData(
+            positions=positions,
+            colors=None if colors is None else np.asarray(colors, dtype=np.uint8).reshape((-1, 3)),
+            intensities=None if intensities is None else np.asarray(intensities, dtype=np.uint16),
+            classifications=None if classifications is None else np.asarray(classifications, dtype=np.uint8),
+        )
+
 
 class EptDataset:
     """EPT dataset handle."""
@@ -542,6 +575,24 @@ class EptDataset:
 def open_laz(path: str | Path) -> LazDataset:
     """Open a LAZ/LAS file (non-hierarchical)."""
     return LazDataset(Path(path))
+
+
+def read_laz_point_attributes(path: str | Path, sample_count: int = 3) -> Dict[str, Any]:
+    """Read native LAS/LAZ sample attributes including intensity and classification."""
+    from ._native import NATIVE_AVAILABLE, get_native_module
+
+    if not NATIVE_AVAILABLE:
+        raise RuntimeError("read_laz_point_attributes requires the compiled native extension")
+    native = get_native_module()
+    fn = getattr(native, "read_laz_point_attributes", None)
+    if fn is None:
+        raise RuntimeError("native read_laz_point_attributes is unavailable")
+
+    result = dict(fn(str(path), int(sample_count)))
+    result["coords"] = np.asarray(result["coords"], dtype=np.float64).reshape((-1, 3))
+    result["intensities"] = np.asarray(result["intensities"], dtype=np.uint16)
+    result["classifications"] = np.asarray(result["classifications"], dtype=np.uint8)
+    return result
 
 
 def open_copc(path: str | Path) -> CopcDataset | LazDataset:

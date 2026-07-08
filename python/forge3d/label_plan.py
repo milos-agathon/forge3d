@@ -157,6 +157,89 @@ def _requires_complex_shaping(text: str) -> bool:
     )
 
 
+_ARABIC_FORMS: dict[str, tuple[str, str, str | None, str | None, str]] = {
+    "\u0627": ("\ufe8d", "\ufe8e", None, None, "R"),
+    "\u0628": ("\ufe8f", "\ufe90", "\ufe91", "\ufe92", "D"),
+    "\u0629": ("\ufe93", "\ufe94", None, None, "R"),
+    "\u062a": ("\ufe95", "\ufe96", "\ufe97", "\ufe98", "D"),
+    "\u062b": ("\ufe99", "\ufe9a", "\ufe9b", "\ufe9c", "D"),
+    "\u062c": ("\ufe9d", "\ufe9e", "\ufe9f", "\ufea0", "D"),
+    "\u062d": ("\ufea1", "\ufea2", "\ufea3", "\ufea4", "D"),
+    "\u062e": ("\ufea5", "\ufea6", "\ufea7", "\ufea8", "D"),
+    "\u062f": ("\ufea9", "\ufeaa", None, None, "R"),
+    "\u0630": ("\ufeab", "\ufeac", None, None, "R"),
+    "\u0631": ("\ufead", "\ufeae", None, None, "R"),
+    "\u0632": ("\ufeaf", "\ufeb0", None, None, "R"),
+    "\u0633": ("\ufeb1", "\ufeb2", "\ufeb3", "\ufeb4", "D"),
+    "\u0634": ("\ufeb5", "\ufeb6", "\ufeb7", "\ufeb8", "D"),
+    "\u0635": ("\ufeb9", "\ufeba", "\ufebb", "\ufebc", "D"),
+    "\u0636": ("\ufebd", "\ufebe", "\ufebf", "\ufec0", "D"),
+    "\u0637": ("\ufec1", "\ufec2", "\ufec3", "\ufec4", "D"),
+    "\u0638": ("\ufec5", "\ufec6", "\ufec7", "\ufec8", "D"),
+    "\u0639": ("\ufec9", "\ufeca", "\ufecb", "\ufecc", "D"),
+    "\u063a": ("\ufecd", "\ufece", "\ufecf", "\ufed0", "D"),
+    "\u0641": ("\ufed1", "\ufed2", "\ufed3", "\ufed4", "D"),
+    "\u0642": ("\ufed5", "\ufed6", "\ufed7", "\ufed8", "D"),
+    "\u0643": ("\ufed9", "\ufeda", "\ufedb", "\ufedc", "D"),
+    "\u0644": ("\ufedd", "\ufede", "\ufedf", "\ufee0", "D"),
+    "\u0645": ("\ufee1", "\ufee2", "\ufee3", "\ufee4", "D"),
+    "\u0646": ("\ufee5", "\ufee6", "\ufee7", "\ufee8", "D"),
+    "\u0647": ("\ufee9", "\ufeea", "\ufeeb", "\ufeec", "D"),
+    "\u0648": ("\ufeed", "\ufeee", None, None, "R"),
+    "\u0649": ("\ufeef", "\ufef0", None, None, "R"),
+    "\u064a": ("\ufef1", "\ufef2", "\ufef3", "\ufef4", "D"),
+}
+
+
+def _arabic_joining_type(char: str) -> str | None:
+    forms = _ARABIC_FORMS.get(char)
+    return None if forms is None else forms[4]
+
+
+def _shape_arabic_run(text: str) -> list[str]:
+    chars = list(text)
+    shaped: list[str] = []
+    for index, char in enumerate(chars):
+        forms = _ARABIC_FORMS.get(char)
+        if forms is None:
+            shaped.append(char)
+            continue
+        isolated, final, initial, medial, joining = forms
+        prev_joining = _arabic_joining_type(chars[index - 1]) if index > 0 else None
+        next_joining = _arabic_joining_type(chars[index + 1]) if index + 1 < len(chars) else None
+        connects_prev = bool(prev_joining in {"D"} and joining in {"D", "R"})
+        connects_next = bool(joining == "D" and next_joining in {"D", "R"})
+        if joining == "D" and connects_prev and connects_next and medial is not None:
+            shaped.append(medial)
+        elif connects_prev:
+            shaped.append(final)
+        elif joining == "D" and connects_next and initial is not None:
+            shaped.append(initial)
+        else:
+            shaped.append(isolated)
+    return list(reversed(shaped))
+
+
+def _shape_label_glyphs(text: str) -> tuple[list[str] | None, Mapping[str, Any]]:
+    if not _requires_complex_shaping(text):
+        return list(text), {}
+    if all(char.isspace() or char in _ARABIC_FORMS for char in text):
+        glyphs: list[str] = []
+        run: list[str] = []
+        for char in text:
+            if char.isspace():
+                if run:
+                    glyphs.extend(_shape_arabic_run("".join(run)))
+                    run.clear()
+                glyphs.append(char)
+            else:
+                run.append(char)
+        if run:
+            glyphs.extend(_shape_arabic_run("".join(run)))
+        return glyphs, {"shaping": "arabic_presentation_forms", "direction": "rtl"}
+    return None, {"shaping": "unsupported_complex_script"}
+
+
 def _call_terrain_sampler(terrain: Any, coords: Sequence[float]) -> Mapping[str, Any]:
     sampler = getattr(terrain, "sample", None) or (terrain if callable(terrain) else None)
     if sampler is None:
@@ -207,6 +290,53 @@ def _terrain_sample(
                 return {"elevation": _number(result), "source": type(terrain).__name__, "visible": True}
         return _call_terrain_sampler(terrain, coords)
     return {}
+
+
+def _native_declutter_optimal() -> Any | None:
+    """Return the native bounded-optimal declutter solver, or ``None``."""
+    try:
+        from ._native import get_native_module
+
+        native = get_native_module()
+    except Exception:
+        return None
+    if native is None:
+        return None
+    return getattr(native, "declutter_optimal", None)
+
+
+def _candidate_visibility_records(
+    record: Mapping[str, Any],
+    terrain: Any,
+    label_id: str,
+    candidates: Sequence["LabelCandidate"],
+) -> list[dict[str, Any]]:
+    """Compile-time silhouette/depth visibility gate over candidate anchors.
+
+    Samples the terrain depth/silhouette proxy at every candidate anchor and
+    marks occluded anchors ``visible=False`` so they contribute zero
+    placements; each occluded anchor yields a grounded rationale record
+    citing the sampled depth versus the anchor depth.
+    """
+    records: list[dict[str, Any]] = []
+    if terrain is None or not _requires_terrain(record):
+        return records
+    for candidate in candidates:
+        sample = _terrain_sample(record, terrain, label_id, candidate.anchor)
+        if sample.get("visible") is not False:
+            continue
+        details = dict(candidate.details or {})
+        details["visible"] = False
+        candidate.details = _json_safe(details)
+        records.append(
+            {
+                "kind": "occluded_anchor",
+                "label_id": label_id,
+                "candidate_id": candidate.candidate_id,
+                "terrain_sample": _json_safe(dict(sample)),
+            }
+        )
+    return records
 
 
 def _candidate_policy(record: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -781,8 +911,10 @@ class LabelPlan:
     bounds: Mapping[str, Any] | None = None
     seed: int = 0
     payload_version: int = PAYLOAD_VERSION
+    rationale: Sequence[Mapping[str, Any]] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
+        self.rationale = tuple(_json_safe(dict(record)) for record in self.rationale or ())
         self.accepted = sorted(
             (
                 label if isinstance(label, AcceptedLabel) else AcceptedLabel.from_dict(label)
@@ -823,8 +955,13 @@ class LabelPlan:
         typography: Mapping[str, Any] | None = None,
         glyph_atlas: Any | None = None,
         seed: int = 0,
+        declutter: str = "optimal",
+        gap_tolerance: float = 0.02,
+        declutter_node_budget: int = 200_000,
     ) -> "LabelPlan":
         del camera
+        if declutter not in {"optimal", "greedy"}:
+            raise ValueError("LabelPlan.compile declutter must be 'optimal' or 'greedy'")
         viewport_size = _viewport_size(viewport)
         keepout_payload = [
             region.to_dict() if isinstance(region, KeepoutRegion) else KeepoutRegion.from_dict(region).to_dict()
@@ -837,6 +974,7 @@ class LabelPlan:
         rejected: list[RejectedLabel] = []
         diagnostics: list[Diagnostic] = []
         missing_by_label: dict[str, list[str]] = {}
+        rationale_records: list[dict[str, Any]] = []
 
         records = sorted(_iter_label_records(labels), key=lambda item: _label_sort_key(item[1], item[0]))
         for fallback_key, record in records:
@@ -844,6 +982,7 @@ class LabelPlan:
             source_id = str(record.get("source_id", label_id))
             text = str(record.get("text", ""))
             ordering_key = f"{label_id}:{source_id}:{_stable_json(record)}"
+            glyph_sequence, shaping_details = _shape_label_glyphs(text)
 
             if not text.strip():
                 rejected.append(
@@ -856,7 +995,7 @@ class LabelPlan:
                 )
                 continue
 
-            if _requires_complex_shaping(text):
+            if glyph_sequence is None:
                 diagnostics.append(
                     experimental_feature_diagnostic(
                         "complex-script shaping",
@@ -871,12 +1010,12 @@ class LabelPlan:
                         reason="unsupported_geometry_type",
                         diagnostic_refs=["experimental_feature"],
                         ordering_key=ordering_key,
-                        details={"shaping": "complex_script"},
+                        details=dict(shaping_details),
                     )
                 )
                 continue
 
-            missing = sorted({char for char in text if atlas_glyphs is not None and char not in atlas_glyphs})
+            missing = sorted({char for char in glyph_sequence if atlas_glyphs is not None and char not in atlas_glyphs})
             if missing:
                 missing_by_label[label_id] = missing
                 rejected.append(
@@ -1032,6 +1171,14 @@ class LabelPlan:
                     continue
 
             if terrain_sample.get("visible") is False:
+                rationale_records.append(
+                    {
+                        "kind": "occluded_anchor",
+                        "label_id": label_id,
+                        "candidate_id": candidate.candidate_id,
+                        "terrain_sample": _json_safe(dict(terrain_sample)),
+                    }
+                )
                 diagnostic_refs = ["label_rejection_summary"]
                 if terrain_sample.get("unavailable") is True:
                     diagnostics.append(
@@ -1080,6 +1227,9 @@ class LabelPlan:
                 )
                 continue
 
+            rationale_records.extend(
+                _candidate_visibility_records(record, terrain, label_id, candidates)
+            )
             accepted.append(
                 AcceptedLabel(
                     label_id=label_id,
@@ -1091,14 +1241,24 @@ class LabelPlan:
                     priority_class=str(record.get("priority_class", "default")),
                     screen_bounds=screen_bounds,
                     world_bounds=world_bounds,
-                    typography=_normalize_typography(typography or record.get("typography") or {}),
-                    glyphs=list(text),
+                    typography={
+                        **_normalize_typography(typography or record.get("typography") or {}),
+                        **dict(shaping_details),
+                    },
+                    glyphs=list(glyph_sequence),
                     ordering_key=ordering_key,
                 )
             )
 
-        accepted, collision_rejections = _resolve_label_collisions(accepted)
+        accepted, collision_rejections, solve_records = _resolve_label_placements(
+            accepted,
+            declutter=declutter,
+            gap_tolerance=float(gap_tolerance),
+            node_budget=int(declutter_node_budget),
+            diagnostics=diagnostics,
+        )
         rejected.extend(collision_rejections)
+        rationale_records.extend(solve_records)
 
         for label_id, glyphs in sorted(missing_by_label.items()):
             diagnostics.append(missing_glyphs_diagnostic(glyphs, layer_id="labels", object_id=label_id))
@@ -1118,6 +1278,7 @@ class LabelPlan:
             diagnostics=diagnostics,
             bounds=bounds,
             seed=seed,
+            rationale=rationale_records,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -1128,6 +1289,7 @@ class LabelPlan:
             "rejected": [label.to_dict() for label in self.rejected],
             "diagnostics": [diagnostic.to_dict() for diagnostic in self.diagnostics],
             "bounds": _json_safe(dict(self.bounds or {})),
+            "rationale": [dict(record) for record in self.rationale],
         }
 
     @classmethod
@@ -1139,7 +1301,15 @@ class LabelPlan:
             bounds=data.get("bounds") or {},
             seed=int(data.get("seed", 0)),
             payload_version=int(data.get("payload_version", PAYLOAD_VERSION)),
+            rationale=data.get("rationale") or (),
         )
+
+    def render_rationale(self) -> list[str]:
+        """Human-readable design rationale derived solely from the recorded
+        solver decisions — every line cites the actual geometry (overlap
+        areas, displaced label ids, sampled depths) captured at solve time.
+        """
+        return [_render_rationale_record(record) for record in self.rationale]
 
     def _payload_with_backend(
         self,
@@ -1256,6 +1426,235 @@ def _resolve_label_collisions(
         )
 
     return winners, rejected
+
+
+def _collision_rejection(label: AcceptedLabel, winner: AcceptedLabel) -> RejectedLabel:
+    label_score = float(label.candidate.score)
+    winner_score = float(winner.candidate.score)
+    reason = "priority_lost" if label_score < winner_score else "collision"
+    return RejectedLabel(
+        label_id=label.label_id,
+        source_id=label.source_id,
+        reason=reason,
+        candidate_id=label.candidate.candidate_id,
+        diagnostic_refs=["label_rejection_summary"],
+        ordering_key=label.ordering_key,
+        details={
+            "collides_with": winner.label_id,
+            "candidate_bounds": list(label.screen_bounds or ()),
+            "winner_bounds": list(winner.screen_bounds or ()),
+            "candidate_priority": label_score,
+            "candidate_priority_class": label.priority_class,
+            "winner_priority": winner_score,
+            "winner_priority_class": winner.priority_class,
+        },
+    )
+
+
+def _translate_native_rationale(native_rationale: Any, ordered: Sequence[AcceptedLabel]) -> list[dict[str, Any]]:
+    """Map native solver records (index-keyed) back to plan label ids."""
+    records: list[dict[str, Any]] = []
+    for raw in native_rationale.records():
+        record = dict(raw)
+        kind = str(record.get("kind", ""))
+        if kind in {"placed", "dropped", "occluded_candidate"}:
+            label = ordered[int(record.pop("label_id"))]
+            record.pop("candidate_index", None)
+            record["label_id"] = label.label_id
+            record["candidate_id"] = label.candidate.candidate_id
+            for key in ("displaced", "blocking"):
+                if key not in record:
+                    continue
+                entries = []
+                for entry in record[key]:
+                    other = ordered[int(entry["label_id"])]
+                    entries.append(
+                        {
+                            "label_id": other.label_id,
+                            "candidate_id": other.candidate.candidate_id,
+                            "overlap_area_px": float(entry.get("overlap_area_px", 0.0)),
+                        }
+                    )
+                record[key] = entries
+        elif kind == "solver":
+            record["algorithm"] = "optimal"
+        records.append(_json_safe(record))
+    return records
+
+
+def _resolve_label_placements_optimal(
+    accepted: Sequence[AcceptedLabel],
+    solver: Any,
+    *,
+    gap_tolerance: float,
+    node_budget: int,
+) -> tuple[list[AcceptedLabel], list[RejectedLabel], list[dict[str, Any]]]:
+    """Bounded-optimal select-or-drop placement over the compiled candidates.
+
+    Each label contributes its compiled primary candidate box; the native
+    branch-and-bound solver maximizes total placed priority weight under
+    pairwise non-overlap, with deterministic quantized arithmetic.
+    """
+    ordered = sorted(
+        accepted,
+        key=lambda label: (label.ordering_key or label.label_id, label.label_id),
+    )
+    solver_input = []
+    for index, label in enumerate(ordered):
+        bounds = _rect_bounds(label.screen_bounds)
+        if bounds is None:
+            anchor = label.candidate.anchor
+            bounds = [anchor[0], anchor[1], anchor[0], anchor[1]]
+        solver_input.append(
+            (
+                index,
+                0,
+                (float(bounds[0]), float(bounds[1]), float(bounds[2]), float(bounds[3])),
+                float(label.candidate.score),
+                True,
+            )
+        )
+    placements, _gap, native_rationale = solver(
+        solver_input,
+        gap_tolerance=float(gap_tolerance),
+        node_budget=int(node_budget),
+        margin=0.0,
+    )
+    placed_indices = {int(index) for index, _candidate in placements}
+
+    winners: list[AcceptedLabel] = []
+    rejections: list[RejectedLabel] = []
+    placed_labels = [ordered[index] for index in sorted(placed_indices)]
+    for index, label in enumerate(ordered):
+        if index in placed_indices:
+            winners.append(label)
+            continue
+        blockers = sorted(
+            (
+                placed
+                for placed in placed_labels
+                if _rects_intersect(label.screen_bounds, placed.screen_bounds)
+            ),
+            key=lambda placed: (
+                -float(placed.candidate.score),
+                placed.ordering_key or placed.label_id,
+                placed.label_id,
+            ),
+        )
+        if not blockers:
+            # The solve only drops a conflict-free label when its weight is
+            # negative; keep the greedy place-everything-that-fits contract.
+            winners.append(label)
+            placed_labels.append(label)
+            continue
+        rejections.append(_collision_rejection(label, blockers[0]))
+
+    return winners, rejections, _translate_native_rationale(native_rationale, ordered)
+
+
+def _resolve_label_placements(
+    accepted: Sequence[AcceptedLabel],
+    *,
+    declutter: str,
+    gap_tolerance: float,
+    node_budget: int,
+    diagnostics: list[Diagnostic],
+) -> tuple[list[AcceptedLabel], list[RejectedLabel], list[dict[str, Any]]]:
+    """Resolve final placements with the requested declutter engine.
+
+    ``optimal`` uses the native bounded-optimal solver; when the native
+    module is unavailable the greedy engine runs instead and the plan
+    carries an explicit placeholder-fallback diagnostic — never a silent
+    downgrade.
+    """
+    solver = _native_declutter_optimal() if declutter == "optimal" else None
+    if declutter == "optimal" and solver is not None:
+        return _resolve_label_placements_optimal(
+            accepted,
+            solver,
+            gap_tolerance=gap_tolerance,
+            node_budget=node_budget,
+        )
+    if declutter == "optimal":
+        diagnostics.append(
+            placeholder_fallback_diagnostic("optimal_declutter", layer_id="labels")
+        )
+    winners, rejections = _resolve_label_collisions(accepted)
+    records: list[dict[str, Any]] = []
+    for rejection in rejections:
+        details = dict(rejection.details or {})
+        records.append(
+            {
+                "kind": "dropped",
+                "label_id": rejection.label_id,
+                "candidate_id": rejection.candidate_id,
+                "priority_lost": rejection.reason == "priority_lost",
+                "blocking": [{"label_id": details.get("collides_with")}],
+            }
+        )
+    records.append(
+        {
+            "kind": "solver",
+            "algorithm": "greedy",
+            "gap": None,
+            "certified": False,
+            "nodes_explored": len(tuple(accepted)),
+            "gap_tolerance": float(gap_tolerance),
+        }
+    )
+    return winners, rejections, records
+
+
+def _conflict_text(entries: Sequence[Mapping[str, Any]] | None) -> str:
+    parts = []
+    for entry in entries or ():
+        label = entry.get("label_id")
+        area = entry.get("overlap_area_px")
+        if area is None:
+            parts.append(f"label {label!r}")
+        else:
+            parts.append(f"label {label!r} (overlap {float(area):.2f} px^2)")
+    return ", ".join(parts)
+
+
+def _render_rationale_record(record: Mapping[str, Any]) -> str:
+    kind = str(record.get("kind", ""))
+    if kind == "placed":
+        line = (
+            f"placed {record.get('label_id')!r} at candidate "
+            f"{record.get('candidate_id')!r} (weight {float(record.get('weight', 0.0)):.3f})"
+        )
+        if record.get("displaced"):
+            line += "; displaced " + _conflict_text(record.get("displaced"))
+        return line
+    if kind == "dropped":
+        reason = "priority_lost" if record.get("priority_lost") else "collision"
+        return (
+            f"dropped {record.get('label_id')!r} ({reason}): blocked by "
+            + _conflict_text(record.get("blocking"))
+        )
+    if kind in {"occluded_anchor", "occluded_candidate"}:
+        sample = record.get("terrain_sample") or {}
+        scene_depth = sample.get("scene_depth", sample.get("elevation"))
+        label_depth = sample.get("label_depth")
+        anchor = record.get("candidate_id") or record.get("label_id")
+        if scene_depth is not None and label_depth is not None:
+            return (
+                f"occluded anchor {anchor!r}: terrain depth {float(scene_depth):.3f} "
+                f"nearer than anchor depth {float(label_depth):.3f}"
+            )
+        if scene_depth is not None:
+            return f"occluded anchor {anchor!r}: terrain elevation {float(scene_depth):.3f} occludes anchor"
+        return f"occluded anchor {anchor!r}: silhouette/depth visibility gate"
+    if kind == "solver":
+        gap = record.get("gap")
+        gap_text = "n/a" if gap is None else f"{float(gap):.6f}"
+        return (
+            f"solver[{record.get('algorithm', 'optimal')}]: "
+            f"{record.get('nodes_explored', 0)} nodes, "
+            f"certified={bool(record.get('certified'))}, gap={gap_text}"
+        )
+    return f"record[{kind}]"
 
 
 __all__ = [

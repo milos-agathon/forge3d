@@ -15,7 +15,7 @@ pub use blend::{
 #[cfg(feature = "weighted-oit")]
 use crate::core::error::RenderError;
 #[cfg(feature = "weighted-oit")]
-use pipeline::{create_accumulation_textures, create_compose_pipeline};
+use pipeline::{create_accumulation_textures, create_compose_pipeline, create_edl_pipeline};
 
 #[cfg(feature = "weighted-oit")]
 /// OIT rendering state and resources.
@@ -115,6 +115,31 @@ impl WeightedOIT {
         render_pass.set_pipeline(&self.compose_pipeline);
         render_pass.set_bind_group(0, &self.compose_bind_group, &[]);
         render_pass.draw(0..3, 0..1);
+    }
+
+    /// Access the OIT depth view for post-process passes such as point-cloud EDL.
+    pub fn depth_view(&self) -> &wgpu::TextureView {
+        &self.depth_view
+    }
+
+    /// Create an Eye-Dome Lighting post-process pipeline for a composed OIT color target.
+    pub fn create_edl_pipeline(
+        &self,
+        device: &wgpu::Device,
+        color_view: &wgpu::TextureView,
+        strength: f32,
+        radius_px: f32,
+    ) -> (wgpu::RenderPipeline, wgpu::BindGroup) {
+        create_edl_pipeline(
+            device,
+            self.target_format,
+            color_view,
+            &self.depth_view,
+            self.width,
+            self.height,
+            strength,
+            radius_px,
+        )
     }
 
     /// Resize OIT buffers.

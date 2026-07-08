@@ -4,6 +4,7 @@ use crate::vector::api::PolygonDef;
 fn parse_and_normalize_polygons(
     exteriors: Vec<numpy::PyReadonlyArray2<'_, f64>>,
     holes: Option<Vec<Vec<numpy::PyReadonlyArray2<'_, f64>>>>,
+    normalize: bool,
 ) -> PyResult<Vec<PolygonDef>> {
     let mut min_x = f32::INFINITY;
     let mut min_y = f32::INFINITY;
@@ -52,21 +53,23 @@ fn parse_and_normalize_polygons(
         max_y = 1.0;
     }
 
-    let center_x = 0.5 * (min_x + max_x);
-    let center_y = 0.5 * (min_y + max_y);
-    let dx = (max_x - min_x).max(1e-6);
-    let dy = (max_y - min_y).max(1e-6);
-    let norm_scale = 100.0 / dx.max(dy);
+    if normalize {
+        let center_x = 0.5 * (min_x + max_x);
+        let center_y = 0.5 * (min_y + max_y);
+        let dx = (max_x - min_x).max(1e-6);
+        let dy = (max_y - min_y).max(1e-6);
+        let norm_scale = 100.0 / dx.max(dy);
 
-    for poly in &mut polys {
-        for vertex in &mut poly.exterior {
-            vertex.x = (vertex.x - center_x) * norm_scale;
-            vertex.y = (vertex.y - center_y) * norm_scale;
-        }
-        for hole in &mut poly.holes {
-            for vertex in hole {
+        for poly in &mut polys {
+            for vertex in &mut poly.exterior {
                 vertex.x = (vertex.x - center_x) * norm_scale;
                 vertex.y = (vertex.y - center_y) * norm_scale;
+            }
+            for hole in &mut poly.holes {
+                for vertex in hole {
+                    vertex.x = (vertex.x - center_x) * norm_scale;
+                    vertex.y = (vertex.y - center_y) * norm_scale;
+                }
             }
         }
     }
@@ -124,8 +127,20 @@ fn compute_polygon_view_proj(polys: &[PolygonDef], width: u32, height: u32) -> [
     ]
 }
 
+fn extract_optional_rgba_list(obj: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<[f32; 4]>> {
+    if let Some(value) = obj {
+        Ok(value
+            .extract::<Vec<(f32, f32, f32, f32)>>()?
+            .into_iter()
+            .map(|(r, g, b, a)| [r, g, b, a])
+            .collect())
+    } else {
+        Ok(Vec::new())
+    }
+}
+
 #[cfg(feature = "extension-module")]
-#[pyfunction]
+#[pyfunction(signature = (width, height, exteriors, holes=None, fill_rgba=None, stroke_rgba=None, stroke_width=None, fill_rgba_list=None, coordinates_are_ndc=None))]
 pub(crate) fn vector_render_polygons_fill_py(
     py: Python<'_>,
     width: u32,
@@ -135,9 +150,19 @@ pub(crate) fn vector_render_polygons_fill_py(
     fill_rgba: Option<(f32, f32, f32, f32)>,
     stroke_rgba: Option<(f32, f32, f32, f32)>,
     stroke_width: Option<f32>,
+    fill_rgba_list: Option<&Bound<'_, PyAny>>,
+    coordinates_are_ndc: Option<bool>,
 ) -> PyResult<Py<PyAny>> {
-    let polys = parse_and_normalize_polygons(exteriors, holes)?;
-    let (device, queue) = gpu_device_queue();
+    let normalize = !coordinates_are_ndc.unwrap_or(false);
+    let mut polys = parse_and_normalize_polygons(exteriors, holes, normalize)?;
+    let fill = fill_rgba.unwrap_or((0.2, 0.4, 0.8, 1.0));
+    let fill_colors = extract_optional_rgba_list(fill_rgba_list)?;
+    for (index, poly) in polys.iter_mut().enumerate() {
+        poly.style.fill_color = *fill_colors
+            .get(index)
+            .unwrap_or(&[fill.0, fill.1, fill.2, fill.3]);
+    }
+    let (device, queue) = gpu_device_queue()?;
 
     let mut renderer =
         crate::vector::PolygonRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb)
@@ -176,15 +201,19 @@ pub(crate) fn vector_render_polygons_fill_py(
             timestamp_writes: None,
         });
 
-        let fill = fill_rgba.unwrap_or((0.2, 0.4, 0.8, 1.0));
         let stroke = stroke_rgba.unwrap_or((0.0, 0.0, 0.0, 1.0));
         let total_indices: u32 = packed.iter().map(|poly| poly.indices.len() as u32).sum();
 
+        let transform = if normalize {
+            compute_polygon_view_proj(&polys, width, height)
+        } else {
+            glam::Mat4::IDENTITY.to_cols_array_2d()
+        };
         renderer
             .render(
                 &mut pass,
                 &queue,
-                &compute_polygon_view_proj(&polys, width, height),
+                &transform,
                 [fill.0, fill.1, fill.2, fill.3],
                 [stroke.0, stroke.1, stroke.2, stroke.3],
                 stroke_width.unwrap_or(1.0),

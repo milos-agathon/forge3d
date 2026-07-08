@@ -19,14 +19,18 @@ def _base_scene(*, render_policy=f3d.RenderFailurePolicy.CONTINUE_ON_WARNING, la
     )
 
 
-def test_render_performs_validation_and_continues_on_warnings_by_default(tmp_path):
+def test_render_performs_validation_and_blocks_without_native_terrain(tmp_path):
     scene = _base_scene(diagnostics_policy={"gpu_memory_budget_bytes": 1})
     output_path = tmp_path / "warning.png"
 
-    report = scene.render(str(output_path), allow_placeholder=True)
+    with pytest.raises(f3d.MapSceneNativeUnavailable) as excinfo:
+        scene.render(str(output_path))
 
-    assert output_path.exists()
-    assert report.status == "warning"
+    assert not output_path.exists(), "a blocked render must not write placeholder pixels"
+    block = excinfo.value.diagnostic
+    assert block["status"] == "diagnostic_block"
+    assert block["layer"] == "terrain"
+    assert block["required_native"]
     assert scene.last_validation_report is not None
     assert scene.last_validation_report.status == "warning"
     assert scene.last_validation_report.render_blocked(f3d.RenderFailurePolicy.CONTINUE_ON_WARNING) is False

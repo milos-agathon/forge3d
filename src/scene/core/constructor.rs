@@ -6,7 +6,7 @@ impl Scene {
         colormap: Option<String>,
     ) -> PyResult<Self> {
         let grid = grid.unwrap_or(128).max(2);
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
 
         let sample_count = 1;
         let (color, color_view) = create_color_texture(&g.device, width, height);
@@ -234,4 +234,3 @@ impl Scene {
         })
     }
 }
-

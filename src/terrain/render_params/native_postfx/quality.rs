@@ -5,6 +5,8 @@ pub struct AovSettingsNative {
     pub albedo: bool,
     pub normal: bool,
     pub depth: bool,
+    /// VERITAS: capture the per-pixel VT source-id map (R32Uint attachment).
+    pub source_id: bool,
     pub output_dir: Option<String>,
     pub format: String,
 }
@@ -17,6 +19,7 @@ impl Default for AovSettingsNative {
             albedo: true,
             normal: true,
             depth: true,
+            source_id: false,
             output_dir: None,
             format: "png".to_string(),
         }
@@ -27,6 +30,39 @@ impl Default for AovSettingsNative {
 impl AovSettingsNative {
     pub fn any_enabled(&self) -> bool {
         self.enabled && (self.albedo || self.normal || self.depth)
+    }
+}
+
+#[cfg(feature = "extension-module")]
+#[derive(Clone)]
+pub struct ScreenSpaceSettingsNative {
+    pub enabled: bool,
+    pub ssao_enabled: bool,
+    pub ssao_radius: f32,
+    pub ssao_intensity: f32,
+    pub ssgi_enabled: bool,
+    pub ssgi_intensity: f32,
+    pub ssr_enabled: bool,
+    pub ssr_intensity: f32,
+    pub taa_enabled: bool,
+    pub temporal_alpha: f32,
+}
+
+#[cfg(feature = "extension-module")]
+impl Default for ScreenSpaceSettingsNative {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            ssao_enabled: false,
+            ssao_radius: 1.5,
+            ssao_intensity: 1.0,
+            ssgi_enabled: false,
+            ssgi_intensity: 1.0,
+            ssr_enabled: false,
+            ssr_intensity: 1.0,
+            taa_enabled: false,
+            temporal_alpha: 0.1,
+        }
     }
 }
 

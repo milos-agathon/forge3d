@@ -81,10 +81,15 @@ fn xorshift32(state: ptr<function, u32>) -> f32 {
     return f32(x) / 4294967296.0;
 }
 
-// Tent filter for anti-aliasing
+// Tent-distributed sample in [-1, 1] via inverse-CDF transform of a uniform
+// variate. NOTE: the previous version returned the tent PDF *value* (uniform
+// on [0, 1]), which as a jitter offset produced an off-center box filter with
+// a +0.25px mean bias in x and y instead of a zero-mean tent.
 fn tent_filter(u: f32) -> f32 {
-    let t = 2.0 * u - 1.0;
-    return select(1.0 + t, 1.0 - t, t < 0.0);
+    if (u < 0.5) {
+        return sqrt(2.0 * u) - 1.0;
+    }
+    return 1.0 - sqrt(2.0 * (1.0 - u));
 }
 
 // -----------------------------------------------------------------------------

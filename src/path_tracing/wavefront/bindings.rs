@@ -50,6 +50,7 @@ impl WavefrontScheduler {
                 entry(18, &self.aov_normal),
                 entry(19, &self.medium_params),
                 entry(20, &self.hair_segments),
+                entry(21, &self.environment_params),
             ],
         }))
     }

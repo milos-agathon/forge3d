@@ -54,3 +54,26 @@ def save_aovs(
 ) -> Dict[str, str]: ...
 
 def iter_tiles(width: int, height: int, tile: int) -> Iterable[Tuple[int, int, int, int]]: ...
+
+def hybrid_render_terrain_reference(
+    heightmap: np.ndarray,
+    width: int,
+    height: int,
+    camera: dict | None = ...,
+    *,
+    spacing: Tuple[float, float] = ...,
+    exaggeration: float = ...,
+    albedo: Tuple[float, float, float] = ...,
+    sun_azimuth_deg: float = ...,
+    sun_elevation_deg: float = ...,
+    sun_intensity: float = ...,
+    env_map: np.ndarray | None = ...,
+    env_intensity: float = ...,
+    mesh_vertices: np.ndarray | None = ...,
+    mesh_indices: np.ndarray | None = ...,
+    spp: int = ...,
+    max_frames: int = ...,
+    min_frames: int = ...,
+    variance_threshold: float = ...,
+    seed: int = ...,
+) -> Dict[str, object]: ...

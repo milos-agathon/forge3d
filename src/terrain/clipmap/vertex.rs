@@ -1,6 +1,7 @@
 //! P2.1/M5: Clipmap vertex format with geo-morphing support.
 
 use bytemuck::{Pod, Zeroable};
+use wgpu::vertex_attr_array;
 
 /// Clipmap vertex with geo-morph data for seamless LOD transitions.
 ///
@@ -20,6 +21,9 @@ pub struct ClipmapVertex {
 }
 
 impl ClipmapVertex {
+    const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
+        vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x2];
+
     /// Create a new clipmap vertex.
     pub fn new(x: f32, z: f32, u: f32, v: f32, morph_weight: f32, ring_index: u32) -> Self {
         Self {
@@ -64,26 +68,7 @@ impl ClipmapVertex {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                // position: vec2<f32>
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-                // uv: vec2<f32>
-                wgpu::VertexAttribute {
-                    offset: 8,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-                // morph_data: vec2<f32>
-                wgpu::VertexAttribute {
-                    offset: 16,
-                    shader_location: 2,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-            ],
+            attributes: &Self::ATTRIBUTES,
         }
     }
 }

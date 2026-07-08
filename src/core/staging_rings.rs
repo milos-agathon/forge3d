@@ -7,7 +7,9 @@
 use crate::core::fence_tracker::FenceTracker;
 use crate::core::memory_tracker::global_tracker;
 use std::sync::{Arc, Mutex};
-use wgpu::{Buffer, BufferDescriptor, BufferUsages, Device, Queue};
+use wgpu::{Buffer, BufferDescriptor, BufferUsages, CommandEncoder, Device, Queue, Texture};
+
+const COPY_BYTES_PER_ROW_ALIGNMENT: u32 = 256;
 
 /// Statistics for staging ring buffer usage
 #[derive(Debug, Clone, Default)]
@@ -42,7 +44,7 @@ impl StagingBuffer {
         let buffer = device.create_buffer(&BufferDescriptor {
             label,
             size,
-            usage: BufferUsages::COPY_SRC | BufferUsages::MAP_WRITE,
+            usage: BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
@@ -60,7 +62,7 @@ impl StagingBuffer {
     }
 
     fn can_allocate(&self, requested_size: u64) -> bool {
-        !self.in_use && (self.offset + requested_size <= self.size)
+        self.offset + requested_size <= self.size
     }
 
     fn allocate(&mut self, size: u64) -> Option<u64> {
@@ -179,6 +181,70 @@ impl StagingRing {
         None
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn upload_texture_region(
+        &mut self,
+        encoder: &mut CommandEncoder,
+        queue: &Queue,
+        texture: &Texture,
+        origin: wgpu::Origin3d,
+        data: &[u8],
+        width: u32,
+        height: u32,
+        bytes_per_pixel: u32,
+    ) -> bool {
+        if width == 0 || height == 0 || bytes_per_pixel == 0 {
+            return false;
+        }
+        let bytes_per_row = width.saturating_mul(bytes_per_pixel);
+        let expected_len = bytes_per_row as usize * height as usize;
+        if data.len() != expected_len {
+            return false;
+        }
+
+        let padded_bytes_per_row = align_to(bytes_per_row, COPY_BYTES_PER_ROW_ALIGNMENT);
+        let upload_size = padded_bytes_per_row as u64 * height as u64;
+        let Some((buffer, offset)) = self.allocate(upload_size) else {
+            return false;
+        };
+
+        if padded_bytes_per_row == bytes_per_row {
+            queue.write_buffer(buffer, offset, data);
+        } else {
+            let mut padded = vec![0u8; upload_size as usize];
+            for row in 0..height as usize {
+                let src_start = row * bytes_per_row as usize;
+                let dst_start = row * padded_bytes_per_row as usize;
+                padded[dst_start..dst_start + bytes_per_row as usize]
+                    .copy_from_slice(&data[src_start..src_start + bytes_per_row as usize]);
+            }
+            queue.write_buffer(buffer, offset, &padded);
+        }
+
+        encoder.copy_buffer_to_texture(
+            wgpu::ImageCopyBuffer {
+                buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::ImageCopyTexture {
+                texture,
+                mip_level: 0,
+                origin,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        true
+    }
+
     /// Advance to the next ring buffer with fence synchronization
     pub fn advance(&mut self, fence_value: u64) -> bool {
         // Submit fence for current buffer
@@ -241,6 +307,13 @@ impl StagingRing {
     }
 }
 
+fn align_to(value: u32, alignment: u32) -> u32 {
+    if alignment == 0 {
+        return value;
+    }
+    value.div_ceil(alignment) * alignment
+}
+
 impl Drop for StagingRing {
     fn drop(&mut self) {
         global_tracker().clear_staging_stats();
@@ -299,6 +372,23 @@ mod tests {
 
         let stats = ring.stats();
         assert_eq!(stats.bytes_in_flight, 256);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_allocations_share_current_ring() {
+        let Some((device, queue)) = create_test_device().await else {
+            return;
+        };
+        let mut ring = StagingRing::new(device, queue, 3, 1024);
+
+        let first_offset = ring.allocate(128).map(|(_, offset)| offset);
+        let second_offset = ring.allocate(256).map(|(_, offset)| offset);
+
+        assert_eq!(first_offset, Some(0));
+        assert_eq!(second_offset, Some(128));
+        let stats = ring.stats();
+        assert_eq!(stats.bytes_in_flight, 384);
+        assert_eq!(stats.current_ring_index, 0);
     }
 
     #[tokio::test]

@@ -10,11 +10,14 @@ from typing import Dict
 from ._native import NATIVE_AVAILABLE, get_native_module
 
 MEMORY_LIMIT_BYTES: int = 512 * 1024 * 1024  # 512 MiB budget for host-visible memory
+BUDGET_POLICY: str = "warn"
 _GLOBAL_MEMORY = {
     "buffer_count": 0,
     "texture_count": 0,
     "buffer_bytes": 0,
     "texture_bytes": 0,
+    "peak_total_bytes": 0,
+    "peak_host_visible_bytes": 0,
 }
 
 
@@ -45,13 +48,20 @@ def update_memory_usage(
     _GLOBAL_MEMORY["texture_count"] = max(
         0, _GLOBAL_MEMORY["texture_count"] + int(texture_count_delta)
     )
+    total = int(_GLOBAL_MEMORY["buffer_bytes"]) + int(_GLOBAL_MEMORY["texture_bytes"])
+    host_visible = int(_GLOBAL_MEMORY["buffer_bytes"])
+    _GLOBAL_MEMORY["peak_total_bytes"] = max(int(_GLOBAL_MEMORY["peak_total_bytes"]), total)
+    _GLOBAL_MEMORY["peak_host_visible_bytes"] = max(
+        int(_GLOBAL_MEMORY["peak_host_visible_bytes"]),
+        host_visible,
+    )
 
 
 def _fallback_metrics() -> Dict[str, float]:
     buffer_bytes = int(_GLOBAL_MEMORY["buffer_bytes"])
     texture_bytes = int(_GLOBAL_MEMORY["texture_bytes"])
     total = buffer_bytes + texture_bytes
-    host_visible = min(buffer_bytes, MEMORY_LIMIT_BYTES)
+    host_visible = buffer_bytes
     within = host_visible <= MEMORY_LIMIT_BYTES
     utilization = host_visible / MEMORY_LIMIT_BYTES if MEMORY_LIMIT_BYTES else 0.0
     return {
@@ -61,6 +71,8 @@ def _fallback_metrics() -> Dict[str, float]:
         "texture_bytes": texture_bytes,
         "total_bytes": total,
         "host_visible_bytes": host_visible,
+        "peak_total_bytes": int(_GLOBAL_MEMORY["peak_total_bytes"]),
+        "peak_host_visible_bytes": int(_GLOBAL_MEMORY["peak_host_visible_bytes"]),
         "limit_bytes": MEMORY_LIMIT_BYTES,
         "within_budget": bool(within),
         "utilization_ratio": float(utilization),
@@ -70,6 +82,7 @@ def _fallback_metrics() -> Dict[str, float]:
         "staging_ring_count": 0,
         "staging_buffer_size": 0,
         "staging_buffer_stalls": 0,
+        "budget_policy": BUDGET_POLICY,
     }
 
 
@@ -94,6 +107,8 @@ def memory_metrics() -> Dict[str, float]:
                 "total_bytes",
                 metrics.get("buffer_bytes", 0) + metrics.get("texture_bytes", 0),
             )
+            metrics.setdefault("peak_total_bytes", metrics.get("total_bytes", 0))
+            metrics.setdefault("peak_host_visible_bytes", metrics.get("host_visible_bytes", 0))
             metrics.setdefault("limit_bytes", MEMORY_LIMIT_BYTES)
             metrics.setdefault("within_budget", True)
             metrics.setdefault("utilization_ratio", 0.0)
@@ -103,13 +118,40 @@ def memory_metrics() -> Dict[str, float]:
             metrics.setdefault("staging_ring_count", 0)
             metrics.setdefault("staging_buffer_size", 0)
             metrics.setdefault("staging_buffer_stalls", 0)
+            metrics.setdefault("budget_policy", BUDGET_POLICY)
             return metrics
 
     return _fallback_metrics()
 
 
+def set_budget_policy(policy: str) -> str:
+    """Set memory-budget behavior to ``'enforce'`` or ``'warn'``."""
+    global BUDGET_POLICY
+    policy = str(policy).strip().lower()
+    if policy not in {"enforce", "warn"}:
+        raise ValueError("Unknown memory budget policy; expected 'enforce' or 'warn'")
+
+    native = get_native_module() if NATIVE_AVAILABLE else None
+    native_fn = getattr(native, "set_memory_budget_policy", None) if native else None
+    if callable(native_fn):
+        policy = str(native_fn(policy))
+
+    BUDGET_POLICY = policy
+    return BUDGET_POLICY
+
+
+def get_budget_policy() -> str:
+    native = get_native_module() if NATIVE_AVAILABLE else None
+    native_fn = getattr(native, "get_memory_budget_policy", None) if native else None
+    if callable(native_fn):
+        return str(native_fn())
+    return BUDGET_POLICY
+
+
 def enforce_memory_budget() -> None:
     """Raise RuntimeError if the host-visible memory budget is exceeded."""
+    if get_budget_policy() != "enforce":
+        return
     metrics = memory_metrics()
     if not metrics.get("within_budget", True):
         raise RuntimeError(
@@ -122,5 +164,7 @@ __all__ = [
     "aligned_row_size",
     "update_memory_usage",
     "memory_metrics",
+    "set_budget_policy",
+    "get_budget_policy",
     "enforce_memory_budget",
 ]

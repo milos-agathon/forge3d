@@ -219,6 +219,40 @@ class ReflectionSettings:
 
 
 @dataclass
+class WaterSettings:
+    """Terrain water-mask settings for MapScene/TerrainRenderer."""
+
+    enabled: bool = False
+    auto_mask: bool = False
+    mask_path: Optional[str] = None
+    level: Optional[float] = None
+    slope_threshold: float = 0.02
+
+    def __post_init__(self) -> None:
+        if self.slope_threshold < 0.0:
+            raise ValueError("slope_threshold must be >= 0")
+
+
+@dataclass
+class CloudSettings:
+    """Terrain cloud-shadow settings for MapScene/TerrainRenderer."""
+
+    enabled: bool = False
+    shadows_enabled: bool = False
+    coverage: float = 0.5
+    density: float = 0.5
+    shadow_strength: float = 0.35
+    quality: str = "medium"
+
+    def __post_init__(self) -> None:
+        for name in ("coverage", "density", "shadow_strength"):
+            if not 0.0 <= float(getattr(self, name)) <= 1.0:
+                raise ValueError(f"{name} must be in [0, 1]")
+        if str(self.quality) not in {"low", "medium", "high", "ultra"}:
+            raise ValueError("quality must be one of: low, medium, high, ultra")
+
+
+@dataclass
 class BloomSettings:
     """M2: Bloom post-processing configuration.
     
@@ -242,6 +276,29 @@ class BloomSettings:
             raise ValueError("intensity must be >= 0")
         if self.radius <= 0.0:
             raise ValueError("radius must be > 0")
+
+
+@dataclass
+class ScreenSpaceSettings:
+    """Screen-space effect settings passed to terrain/MapScene renders."""
+
+    enabled: bool = False
+    ssao_enabled: bool = False
+    ssao_radius: float = 1.5
+    ssao_intensity: float = 1.0
+    ssgi_enabled: bool = False
+    ssgi_intensity: float = 1.0
+    ssr_enabled: bool = False
+    ssr_intensity: float = 1.0
+    taa_enabled: bool = False
+    temporal_alpha: float = 0.1
+
+    def __post_init__(self) -> None:
+        for name in ("ssao_radius", "ssao_intensity", "ssgi_intensity", "ssr_intensity"):
+            if float(getattr(self, name)) < 0.0:
+                raise ValueError(f"{name} must be non-negative")
+        if not 0.0 <= float(self.temporal_alpha) <= 1.0:
+            raise ValueError("temporal_alpha must be in [0, 1]")
 
 
 @dataclass
@@ -691,6 +748,9 @@ class AovSettings:
     albedo: bool = True    # Export albedo AOV when enabled
     normal: bool = True    # Export world-space normal AOV when enabled
     depth: bool = True     # Export linear depth AOV when enabled
+    # VERITAS: per-pixel VT source-id map (uint32; 0 == SOURCE_ID_NONE).
+    # Requires msaa_samples=1 and render_scale=1.0. Off by default.
+    source_id: bool = False
     output_dir: Optional[str] = None  # Directory for AOV output (None = same as beauty)
     format: str = "png"    # Output format: "png" or "exr" (M2)
     
@@ -1339,6 +1399,16 @@ class TerrainVTSettings:
     max_mip_levels: int = 8
     use_feedback: bool = True
 
+    @property
+    def families(self) -> Tuple[str, ...]:
+        """Requested family names, in layer order.
+
+        These are the families propagated end-to-end into the native render;
+        each requested family must have a registered VT source or the native
+        renderer raises a fatal diagnostic instead of degrading silently.
+        """
+        return tuple(layer.family for layer in self.layers)
+
     def __post_init__(self) -> None:
         families = [l.family for l in self.layers]
         if len(families) != len(set(families)):
@@ -1805,6 +1875,10 @@ class TerrainRenderParams:
     fog: Optional[FogSettings] = None
     # P4: Water planar reflections (defaults to disabled for P3 compatibility)
     reflection: Optional[ReflectionSettings] = None
+    # Terrain water-mask settings for GPU water shading.
+    water: Optional[WaterSettings] = None
+    # Terrain cloud-shadow settings, defaults disabled for compatibility.
+    clouds: Optional[CloudSettings] = None
     # P5: AO weight/multiplier (0.0 = no AO effect, 1.0 = full AO). Default 0.0 for P4 compatibility.
     ao_weight: float = 0.0
     # P6: Micro-detail (defaults to disabled for P5 compatibility)
@@ -1830,6 +1904,8 @@ class TerrainRenderParams:
     aa_seed: Optional[int] = None
     # M2: Bloom post-processing (defaults to disabled for backward compatibility)
     bloom: Optional[BloomSettings] = None
+    # Screen-space effects bridge (SSAO/SSGI/SSR/TAA), defaults disabled.
+    screen_space: Optional[ScreenSpaceSettings] = None
     # M4: Material layering (snow/rock/wetness, defaults to disabled for backward compatibility)
     materials: Optional[MaterialLayerSettings] = None
     # M5: Vector overlay settings (depth test, halos)
@@ -1868,6 +1944,10 @@ class TerrainRenderParams:
         # Default reflection to disabled if not provided
         if self.reflection is None:
             self.reflection = ReflectionSettings()
+        if self.water is None:
+            self.water = WaterSettings()
+        if self.clouds is None:
+            self.clouds = CloudSettings()
         # Default detail to disabled if not provided
         if self.detail is None:
             self.detail = DetailSettings()
@@ -2067,6 +2147,8 @@ def make_terrain_params_config(
     overlays: Optional[list] = None,
     fog: Optional[FogSettings] = None,
     reflection: Optional[ReflectionSettings] = None,
+    water: Optional[WaterSettings] = None,
+    clouds: Optional[CloudSettings] = None,
     ao_weight: float = 0.0,
     detail: Optional[DetailSettings] = None,
     height_ao: Optional[HeightAoSettings] = None,
@@ -2076,6 +2158,7 @@ def make_terrain_params_config(
     aa_samples: int = 1,  # M1: Accumulation AA sample count (1 = no AA)
     aa_seed: Optional[int] = None,  # M1: Accumulation AA seed for determinism
     bloom: Optional[BloomSettings] = None,  # M2: Bloom post-processing
+    screen_space: Optional[ScreenSpaceSettings] = None,  # Screen-space effects bridge
     materials: Optional[MaterialLayerSettings] = None,  # M4: Material layering
     vector_overlay: Optional[VectorOverlaySettings] = None,  # M5: Vector overlay settings
     tonemap: Optional[TonemapSettings] = None,  # M6: Tonemap settings
@@ -2086,6 +2169,7 @@ def make_terrain_params_config(
     denoise: Optional[DenoiseSettings] = None,  # M5: Denoise settings
     volumetrics: Optional[VolumetricsSettings] = None,  # M6: Volumetrics settings
     sky: Optional[SkySettings] = None,  # M6: Sky settings
+    vt: Optional[TerrainVTSettings] = None,  # TV20: Terrain material virtual texturing
     overlay: Optional[OverlaySettings] = None,  # Overlay settings (lit texture overlays)
     terrain_crs: Optional[str] = None,  # P3-reproject: Terrain CRS for auto-reprojection
     terrain_data_revision: Optional[int] = None,
@@ -2214,6 +2298,8 @@ def make_terrain_params_config(
         lambert_contrast=lambert_contrast,
         fog=fog,
         reflection=reflection,
+        water=water,
+        clouds=clouds,
         ao_weight=ao_weight,
         detail=detail,
         height_ao=height_ao,
@@ -2225,6 +2311,7 @@ def make_terrain_params_config(
         aa_samples=int(aa_samples),
         aa_seed=aa_seed,
         bloom=bloom,
+        screen_space=screen_space,
         materials=materials,
         vector_overlay=vector_overlay,
         tonemap=tonemap,
@@ -2235,6 +2322,7 @@ def make_terrain_params_config(
         denoise=denoise,
         volumetrics=volumetrics,
         sky=sky,
+        vt=vt,
         overlay=overlay,
         terrain_crs=terrain_crs,
         terrain_data_revision=terrain_data_revision,
@@ -2247,7 +2335,10 @@ __all__ = [
     "ShadowSettings",
     "FogSettings",
     "ReflectionSettings",
+    "WaterSettings",
+    "CloudSettings",
     "BloomSettings",
+    "ScreenSpaceSettings",
     "HeightAoSettings",
     "SunVisibilitySettings",
     "ProbeSettings",

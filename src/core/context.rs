@@ -4,7 +4,8 @@
 
 use std::fmt;
 
-pub use super::gpu::{ctx, GpuContext};
+use super::error::RenderResult;
+pub use super::gpu::{ctx, try_ctx, GpuContext};
 
 /// High-level engine/adapter information collected from the active GPU context.
 #[derive(Debug, Clone)]
@@ -19,6 +20,10 @@ pub struct EngineInfo {
     pub max_texture_dimension_2d: u32,
     /// Maximum buffer size in bytes.
     pub max_buffer_size: u64,
+    /// Device type reported by the adapter (discretegpu, integratedgpu, virtualgpu, cpu, other).
+    pub device_type: String,
+    /// True when the context runs on a software fallback adapter (WARP/lavapipe).
+    pub software_fallback: bool,
 }
 
 impl fmt::Display for EngineInfo {
@@ -32,19 +37,24 @@ impl fmt::Display for EngineInfo {
 }
 
 /// Retrieve high-level engine/device information from the active GPU context.
-pub fn engine_info() -> EngineInfo {
-    let ctx = ctx();
+///
+/// Returns a device error (catchable `RuntimeError` in Python) instead of
+/// panicking when no adapter — hardware or software fallback — is available.
+pub fn engine_info() -> RenderResult<EngineInfo> {
+    let ctx = try_ctx()?;
     let adapter_info = ctx.adapter.get_info();
     let limits = ctx.device.limits();
 
     let backend = format!("{:?}", adapter_info.backend).to_lowercase();
     let adapter_name = adapter_info.name.clone();
 
-    EngineInfo {
+    Ok(EngineInfo {
         backend,
         adapter_name: adapter_name.clone(),
         device_name: adapter_name,
         max_texture_dimension_2d: limits.max_texture_dimension_2d,
         max_buffer_size: limits.max_buffer_size,
-    }
+        device_type: format!("{:?}", adapter_info.device_type).to_lowercase(),
+        software_fallback: ctx.software_fallback,
+    })
 }

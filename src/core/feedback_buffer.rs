@@ -7,6 +7,8 @@
 use crate::core::tile_cache::TileId;
 use bytemuck::{Pod, Zeroable};
 use std::collections::HashSet;
+use std::sync::mpsc::{Receiver, TryRecvError};
+use std::sync::Mutex;
 use wgpu::{Buffer, BufferDescriptor, BufferUsages, CommandEncoder, Device, Queue};
 
 /// GPU feedback buffer for collecting tile visibility information
@@ -15,6 +17,7 @@ pub struct FeedbackBuffer {
     feedback_buffer: Buffer,
     /// CPU-readable staging buffer for feedback readback  
     readback_buffer: Buffer,
+    pending_readback: Mutex<Option<Receiver<Result<(), wgpu::BufferAsyncError>>>>,
 }
 
 /// Feedback entry structure (matches GPU layout)
@@ -56,6 +59,7 @@ impl FeedbackBuffer {
         Ok(Self {
             feedback_buffer,
             readback_buffer,
+            pending_readback: Mutex::new(None),
         })
     }
 
@@ -74,6 +78,25 @@ impl FeedbackBuffer {
             0,
             self.feedback_buffer.size(),
         );
+    }
+
+    /// Whether a non-blocking readback map is currently in flight.
+    pub fn has_pending_readback(&self) -> bool {
+        self.pending_readback.lock().unwrap().is_some()
+    }
+
+    fn start_readback_if_needed(&self) {
+        let mut pending = self.pending_readback.lock().unwrap();
+        if pending.is_some() {
+            return;
+        }
+
+        let buffer_slice = self.readback_buffer.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = sender.send(result);
+        });
+        *pending = Some(receiver);
     }
 
     /// Read feedback data from GPU (async)
@@ -142,6 +165,87 @@ impl FeedbackBuffer {
         self.readback_buffer.unmap();
 
         Ok(entries)
+    }
+
+    /// Read raw feedback entries, waiting for (or starting) the readback map.
+    ///
+    /// Unlike [`read_feedback_entries`], this cooperates with the
+    /// non-blocking [`try_read_feedback_entries`] path: if an async map is
+    /// already in flight it waits for that map instead of issuing a second
+    /// (invalid) `map_async` on the same buffer.
+    pub fn read_feedback_entries_blocking(
+        &self,
+        device: &Device,
+    ) -> Result<Vec<FeedbackEntry>, String> {
+        let pending = { self.pending_readback.lock().unwrap().take() };
+        let receiver = match pending {
+            Some(receiver) => receiver,
+            None => {
+                let buffer_slice = self.readback_buffer.slice(..);
+                let (sender, receiver) = std::sync::mpsc::channel();
+                buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+                    let _ = sender.send(result);
+                });
+                receiver
+            }
+        };
+
+        device.poll(wgpu::Maintain::Wait);
+
+        receiver
+            .recv()
+            .map_err(|e| format!("Failed to receive feedback data: {}", e))?
+            .map_err(|e| format!("Failed to map feedback buffer: {:?}", e))?;
+
+        let buffer_slice = self.readback_buffer.slice(..);
+        let data = buffer_slice.get_mapped_range();
+        let entries = self.parse_feedback_entries(&data);
+
+        drop(data);
+        self.readback_buffer.unmap();
+
+        Ok(entries)
+    }
+
+    /// Try to read raw feedback entries without blocking the frame.
+    ///
+    /// The first call starts a map operation and returns `Ok(None)`. Later calls
+    /// poll the device once and return entries only after the map callback fires.
+    pub fn try_read_feedback_entries(
+        &self,
+        device: &Device,
+    ) -> Result<Option<Vec<FeedbackEntry>>, String> {
+        self.start_readback_if_needed();
+        device.poll(wgpu::Maintain::Poll);
+
+        let map_result = {
+            let mut pending = self.pending_readback.lock().unwrap();
+            let Some(receiver) = pending.as_ref() else {
+                return Ok(None);
+            };
+            match receiver.try_recv() {
+                Ok(result) => {
+                    *pending = None;
+                    result
+                }
+                Err(TryRecvError::Empty) => return Ok(None),
+                Err(TryRecvError::Disconnected) => {
+                    *pending = None;
+                    return Err("Feedback readback callback channel closed".to_string());
+                }
+            }
+        };
+
+        map_result.map_err(|e| format!("Failed to map feedback buffer: {:?}", e))?;
+
+        let buffer_slice = self.readback_buffer.slice(..);
+        let data = buffer_slice.get_mapped_range();
+        let entries = self.parse_feedback_entries(&data);
+
+        drop(data);
+        self.readback_buffer.unmap();
+
+        Ok(Some(entries))
     }
 
     /// Parse raw feedback data into deduplicated feedback entries.

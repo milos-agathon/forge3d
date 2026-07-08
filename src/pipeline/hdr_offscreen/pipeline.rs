@@ -150,7 +150,8 @@ impl HdrOffscreenPipeline {
 
         // Create tonemap pipeline
         let tonemap_shader_source = format!(
-            "{}\n{}",
+            "{}\n{}\n{}",
+            include_str!("../../shaders/includes/determinism.wgsl"),
             include_str!("../../shaders/includes/tonemap_common.wgsl"),
             include_str!("../../shaders/postprocess_tonemap.wgsl")
         );

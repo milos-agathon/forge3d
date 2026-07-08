@@ -1,17 +1,25 @@
+pub mod adjudication;
 pub mod brdf;
 pub mod csm;
 pub mod diagnostics;
 pub mod frame;
+pub mod labels;
 pub mod path_tracing;
 pub mod pointcloud;
+pub mod provenance;
+pub mod tiles3d;
 pub mod vector;
 pub mod viewer;
 
+pub(crate) use adjudication::*;
 pub(crate) use brdf::*;
 pub(crate) use csm::*;
 pub(crate) use diagnostics::*;
 pub(crate) use frame::*;
+pub(crate) use labels::*;
 pub(crate) use path_tracing::*;
 pub(crate) use pointcloud::*;
+pub(crate) use provenance::*;
+pub(crate) use tiles3d::*;
 pub(crate) use vector::*;
 pub(crate) use viewer::*;

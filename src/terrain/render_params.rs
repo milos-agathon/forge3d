@@ -43,7 +43,8 @@ use native_overlays::VectorOverlaySettingsNative;
 use native_postfx::{
     AovSettingsNative, DenoiseMethodNative, DenoiseSettingsNative, DofMethodNative,
     DofQualityNative, DofSettingsNative, LensEffectsSettingsNative, MotionBlurSettingsNative,
-    SkySettingsNative, TonemapSettingsNative, VolumetricsModeNative, VolumetricsSettingsNative,
+    ScreenSpaceSettingsNative, SkySettingsNative, TonemapSettingsNative, VolumetricsModeNative,
+    VolumetricsSettingsNative,
 };
 pub(crate) use native_probes::{ProbeSettingsNative, ReflectionProbeSettingsNative};
 pub(crate) use native_vt::{TerrainVTSettingsNative, VTLayerFamilyNative};

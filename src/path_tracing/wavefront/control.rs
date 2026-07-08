@@ -102,6 +102,14 @@ impl WavefrontScheduler {
             .write_buffer(&self.medium_params, 0, bytemuck::cast_slice(&val));
     }
 
+    pub fn set_environment_params(
+        &self,
+        environment: &crate::path_tracing::reference_scene::ReferenceEnvironmentRaw,
+    ) {
+        self.queue
+            .write_buffer(&self.environment_params, 0, bytemuck::bytes_of(environment));
+    }
+
     pub fn set_hair_segments_buffer(&mut self, buffer: Buffer) {
         self.hair_segments = buffer;
     }
@@ -136,5 +144,12 @@ impl WavefrontScheduler {
 
     pub fn set_blas_descs_buffer(&mut self, buffer: Buffer) {
         self.blas_descs = buffer;
+    }
+
+    /// Whether the ReSTIR scene-spatial bind group has been initialized
+    /// (i.e. `dispatch_restir_spatial` would not early-return for a missing
+    /// scene binding).
+    pub fn restir_scene_bound(&self) -> bool {
+        self.restir_scene_spatial_bind_group.is_some()
     }
 }

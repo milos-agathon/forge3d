@@ -16,7 +16,12 @@ use crate::sdf::HybridScene;
 
 mod layouts;
 mod render;
+mod render_terrain;
 mod setup;
+pub mod terrain_heightfield;
+
+pub use render_terrain::{TerrainReferenceDesc, TerrainReferenceOutput};
+pub use terrain_heightfield::TerrainPtScene;
 
 /// Additional uniforms for hybrid traversal
 #[repr(C)]
@@ -53,6 +58,8 @@ pub enum TraversalMode {
     Hybrid = 0,
     SdfOnly = 1,
     MeshOnly = 2,
+    /// Terrain heightfield as the primary intersectable (PROMETHEUS).
+    TerrainOnly = 3,
 }
 
 impl Default for TraversalMode {
@@ -121,6 +128,14 @@ impl Default for HybridTracerParams {
 pub struct HybridPathTracer {
     layouts: HybridBindGroupLayouts,
     pipeline: wgpu::ComputePipeline,
+    /// Accumulating terrain-reference entry (`main_terrain`).
+    pipeline_terrain: wgpu::ComputePipeline,
+    /// One-shot ReSTIR G-buffer entry (`main_terrain_gbuffer`).
+    pipeline_terrain_gbuffer: wgpu::ComputePipeline,
+    /// Canonical ReSTIR reuse passes (pt_restir_temporal/spatial.wgsl)
+    /// dispatched between terrain accumulation frames.
+    pipeline_restir_temporal: wgpu::ComputePipeline,
+    pipeline_restir_spatial: wgpu::ComputePipeline,
 }
 
 struct HybridBindGroupLayouts {
@@ -128,5 +143,9 @@ struct HybridBindGroupLayouts {
     scene: wgpu::BindGroupLayout,
     accum: wgpu::BindGroupLayout,
     output: wgpu::BindGroupLayout,
-    lighting: wgpu::BindGroupLayout,
+    terrain_gbuffer: wgpu::BindGroupLayout,
+    restir_temporal: wgpu::BindGroupLayout,
+    restir_spatial_scene: wgpu::BindGroupLayout,
+    restir_spatial_reuse: wgpu::BindGroupLayout,
+    empty: wgpu::BindGroupLayout,
 }

@@ -206,6 +206,12 @@ class RecipeManifest:
     )
     non_goals: Sequence[str] = field(default_factory=tuple)
     open_questions: Sequence[str] = field(default_factory=tuple)
+    # SUTURA: frozen compile-phase state. ``compiled_label_plans`` maps
+    # layer_id -> LabelPlan payload; ``depth_cull`` records the deterministic
+    # depth-occlusion decisions (per-label visibility flags keyed by the
+    # camera+terrain hash) so a reloaded bundle reproduces the identical cull.
+    compiled_label_plans: Mapping[str, Any] = field(default_factory=dict)
+    depth_cull: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.source_examples = [str(path) for path in self.source_examples]
@@ -227,6 +233,8 @@ class RecipeManifest:
         self.golden_fixture_intent = _golden_fixture_intent(self.golden_fixture_intent)
         self.non_goals = [str(goal) for goal in self.non_goals]
         self.open_questions = [str(question) for question in self.open_questions]
+        self.compiled_label_plans = _dict(self.compiled_label_plans)
+        self.depth_cull = _dict(self.depth_cull)
 
 
 def manifest_from_dict(data: Mapping[str, Any]) -> RecipeManifest:
@@ -254,11 +262,13 @@ def manifest_from_dict(data: Mapping[str, Any]) -> RecipeManifest:
         golden_fixture_intent=_dict(data.get("golden_fixture_intent")),
         non_goals=_list(data.get("non_goals")),
         open_questions=_list(data.get("open_questions")),
+        compiled_label_plans=_dict(data.get("compiled_label_plans")),
+        depth_cull=_dict(data.get("depth_cull")),
     )
 
 
 def manifest_to_dict(manifest: RecipeManifest) -> dict[str, Any]:
-    return {
+    payload = {
         "schema_version": str(manifest.schema_version),
         "recipe_family": str(manifest.recipe_family),
         "recipe_id": str(manifest.recipe_id),
@@ -283,10 +293,39 @@ def manifest_to_dict(manifest: RecipeManifest) -> dict[str, Any]:
         "non_goals": [str(goal) for goal in manifest.non_goals],
         "open_questions": [str(question) for question in manifest.open_questions],
     }
+    # SUTURA compiled-plan fields are serialized only when present so legacy
+    # (non-compiled) manifests keep their existing byte format; a compiled
+    # manifest always carries both keys and round-trips byte-identically.
+    if manifest.compiled_label_plans or manifest.depth_cull:
+        payload["compiled_label_plans"] = _json_value(manifest.compiled_label_plans)
+        payload["depth_cull"] = _json_value(manifest.depth_cull)
+    return payload
+
+
+def _canonical_json_value(value: Any) -> Any:
+    """Canonicalize a JSON value for byte-stable serialization.
+
+    Floats are normalized (``-0.0`` -> ``0.0``; non-finite values are
+    rejected) so that ``manifest_to_json`` -> ``manifest_from_json`` ->
+    ``manifest_to_json`` round-trips byte-identically: ``json`` serializes
+    floats via ``repr``, which is exact for every finite normalized float.
+    """
+    if isinstance(value, Mapping):
+        return {str(key): _canonical_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_canonical_json_value(item) for item in value]
+    if isinstance(value, bool) or value is None or isinstance(value, (int, str)):
+        return value
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            raise ValueError("RecipeManifest serialization does not permit NaN or infinite floats")
+        return 0.0 if value == 0.0 else value
+    return value
 
 
 def manifest_to_json(manifest: RecipeManifest) -> str:
-    return json.dumps(manifest_to_dict(manifest), indent=2, sort_keys=True) + "\n"
+    payload = _canonical_json_value(manifest_to_dict(manifest))
+    return json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
 
 
 def manifest_from_json(text: str) -> RecipeManifest:

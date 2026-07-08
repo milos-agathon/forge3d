@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+import numpy as np
+
 from ._native import get_native_module
 
 
@@ -64,6 +66,28 @@ def read_raster(
         window=window,
         masked=masked,
     )
+
+
+def derive_water_mask(
+    heightmap: Any,
+    *,
+    level: float | None = None,
+    quantile: float = 0.15,
+    slope_threshold: float = 0.02,
+) -> np.ndarray:
+    """Derive a simple float32 water mask from low, flat DEM regions."""
+
+    dem = np.asarray(heightmap, dtype=np.float32)
+    if dem.ndim != 2:
+        raise ValueError("heightmap must be a 2D array")
+    finite = np.isfinite(dem)
+    if not finite.any():
+        return np.zeros(dem.shape, dtype=np.float32)
+    threshold = float(level) if level is not None else float(np.nanquantile(dem[finite], float(quantile)))
+    gy, gx = np.gradient(np.where(finite, dem, threshold))
+    slope = np.hypot(gx, gy)
+    mask = finite & (dem <= threshold) & (slope <= float(slope_threshold))
+    return np.ascontiguousarray(mask.astype(np.float32))
 
 
 def read_vector(

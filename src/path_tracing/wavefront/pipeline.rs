@@ -12,7 +12,6 @@ pub struct WavefrontPipelines {
     pub intersect: ComputePipeline,
     pub shade: ComputePipeline,
     pub scatter: ComputePipeline,
-    pub compact: ComputePipeline,
     pub shadow: ComputePipeline,
     pub restir_init: ComputePipeline,
     pub restir_temporal: ComputePipeline,
@@ -47,10 +46,6 @@ impl WavefrontPipelines {
         let scatter_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("pt-scatter-shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/pt_scatter.wgsl").into()),
-        });
-        let compact_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("pt-compact-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/pt_compact.wgsl").into()),
         });
         let shadow_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("pt-shadow-shader"),
@@ -130,12 +125,6 @@ impl WavefrontPipelines {
             &scene_bind_group_layout,
             &accum_bind_group_layout,
         )?;
-        let compact = Self::create_compact_pipeline(
-            device,
-            &compact_shader,
-            &uniforms_bind_group_layout,
-            &scene_bind_group_layout,
-        )?;
         let shadow = Self::create_shadow_pipeline(
             device,
             &shadow_shader,
@@ -182,7 +171,6 @@ impl WavefrontPipelines {
             intersect,
             shade,
             scatter,
-            compact,
             shadow,
             restir_init,
             restir_temporal,

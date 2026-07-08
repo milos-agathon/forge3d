@@ -9,6 +9,7 @@ pub(super) fn register_interactive_py_functions(m: &Bound<'_, PyModule>) -> PyRe
     m.add_function(wrap_pyfunction!(is_weighted_oit_available, m)?)?;
     m.add_function(wrap_pyfunction!(vector_oit_and_pick_demo, m)?)?;
     m.add_function(wrap_pyfunction!(vector_render_oit_py, m)?)?;
+    m.add_function(wrap_pyfunction!(vector_render_oit_edl_py, m)?)?;
     m.add_function(wrap_pyfunction!(vector_render_pick_map_py, m)?)?;
     m.add_function(wrap_pyfunction!(vector_render_oit_and_pick_py, m)?)?;
     m.add_function(wrap_pyfunction!(vector_render_polygons_fill_py, m)?)?;

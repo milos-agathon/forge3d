@@ -256,6 +256,106 @@ pub fn read_r32_texture(
     Ok(values)
 }
 
+/// VERITAS: read scalar R32Uint data (per-pixel source-id map) from a
+/// texture. The transient host-visible staging buffer is routed through the
+/// memory tracker and released before returning.
+pub fn read_r32uint_texture(
+    device: &Device,
+    queue: &Queue,
+    texture: &Texture,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u32>, String> {
+    let bpp = 4u32;
+    let unpadded_bytes_per_row = width * bpp;
+    let padded_bytes_per_row = {
+        let alignment = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        ((unpadded_bytes_per_row + alignment - 1) / alignment) * alignment
+    };
+
+    let buffer_size = (padded_bytes_per_row * height) as u64;
+    let memory_tracker = crate::core::memory_tracker::global_tracker();
+    memory_tracker.track_buffer_allocation(buffer_size, true);
+    let staging_buffer = device.create_buffer(&BufferDescriptor {
+        label: Some("r32uint_staging_buffer"),
+        size: buffer_size,
+        usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let release_staging = |staging_buffer: &wgpu::Buffer| {
+        staging_buffer.destroy();
+        memory_tracker.free_buffer_allocation(buffer_size, true);
+    };
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("r32uint_copy_encoder"),
+    });
+    encoder.copy_texture_to_buffer(
+        ImageCopyTexture {
+            texture,
+            mip_level: 0,
+            origin: Origin3d::ZERO,
+            aspect: TextureAspect::All,
+        },
+        wgpu::ImageCopyBuffer {
+            buffer: &staging_buffer,
+            layout: ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(padded_bytes_per_row),
+                rows_per_image: Some(height),
+            },
+        },
+        Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+
+    queue.submit(Some(encoder.finish()));
+    device.poll(wgpu::Maintain::Wait);
+
+    let buffer_slice = staging_buffer.slice(..);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = sender.send(result);
+    });
+    device.poll(wgpu::Maintain::Wait);
+    let map_result = receiver
+        .recv()
+        .map_err(|e| format!("Buffer mapping callback lost: {e}"));
+    let map_result = match map_result {
+        Ok(inner) => inner.map_err(|e| format!("Buffer mapping failed: {e:?}")),
+        Err(e) => Err(e),
+    };
+    if let Err(e) = map_result {
+        release_staging(&staging_buffer);
+        return Err(e);
+    }
+
+    let data = buffer_slice.get_mapped_range();
+    let mut values = Vec::with_capacity((width * height) as usize);
+    for y in 0..height {
+        let row_offset = (y * padded_bytes_per_row) as usize;
+        for x in 0..width {
+            let pixel_offset = row_offset + (x * bpp) as usize;
+            let bytes = [
+                data[pixel_offset],
+                data[pixel_offset + 1],
+                data[pixel_offset + 2],
+                data[pixel_offset + 3],
+            ];
+            values.push(u32::from_le_bytes(bytes));
+        }
+    }
+
+    drop(data);
+    staging_buffer.unmap();
+    release_staging(&staging_buffer);
+    Ok(values)
+}
+
 /// Convert raw buffer data to f32 vector based on texture format
 fn convert_to_floats(
     data: &[u8],

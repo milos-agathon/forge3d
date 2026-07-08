@@ -6,7 +6,13 @@ import copy
 import hashlib
 import json
 import math
+import os
+import platform
+import subprocess
+import sys
+import time
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
@@ -45,6 +51,9 @@ from ._map_scene_render import (
     _dash_segments as _render_dash_segments,
     _color as _render_color,
     _composite_recipe_layers,
+    _feature_color as _render_feature_color,
+    _feature_number as _render_feature_number,
+    _geometry_polygon_rings as _render_geometry_polygon_rings,
     _geometry_points as _render_geometry_points,
     _label_anchor as _render_label_anchor,
     _layout as _render_layout,
@@ -52,9 +61,10 @@ from ._map_scene_render import (
     _paint as _render_paint,
     _point_to_pixel as _render_point_to_pixel,
     _rgb as _render_rgb,
-    render_source_derived_rgba,
 )
 from ._map_scene_validation import (
+    diagnostic_block,
+    required_native_symbols,
     _BUILDING_ASSET_EXTENSIONS,
     _POINT_CLOUD_ASSET_EXTENSIONS,
     _RASTER_ASSET_EXTENSIONS,
@@ -119,21 +129,41 @@ def _path_to_str(value: Any | None) -> str | None:
     return None if value is None else str(value)
 
 
-def _render_source_derived_rgba(recipe: "SceneRecipe", plans: Mapping[str, Any]) -> Any:
-    target_grid = _terrain_alignment_grid(
-        recipe.terrain,
-        target_crs=recipe.target_crs or recipe.terrain.crs,
-    )
+class MapSceneNativeUnavailable(RuntimeError):
+    """A MapScene layer requires native rendering that is unavailable.
 
-    def load_raster_overlay(layer: "RasterOverlay") -> Any | None:
-        return _load_native_raster_overlay(layer, target_grid=target_grid)
+    Raised instead of any CPU-placeholder fallback: the scene either renders
+    through the native backend or fails with the structured diagnostic blocks
+    carried on this exception (see ``_map_scene_validation.diagnostic_block``).
+    """
 
-    return render_source_derived_rgba(
-        recipe,
-        plans,
-        layer_types=_render_layer_types(),
-        load_raster_overlay=load_raster_overlay,
-    )
+    def __init__(self, blocks: Mapping[str, Any] | Sequence[Mapping[str, Any]]):
+        if isinstance(blocks, Mapping):
+            blocks = [blocks]
+        self.diagnostics: list[dict[str, Any]] = [dict(block) for block in blocks]
+        self.diagnostic: dict[str, Any] | None = self.diagnostics[0] if self.diagnostics else None
+        summary = "; ".join(
+            f"layer={block.get('layer')}: {block.get('reason')} "
+            f"(required_native={block.get('required_native')})"
+            for block in self.diagnostics
+        )
+        super().__init__(f"MapScene native rendering unavailable: {summary}")
+
+
+@dataclass(frozen=True)
+class CompiledScenePlan:
+    """Frozen output of ``MapScene.compile_plan()``.
+
+    The render phase is a pure reader of this plan: label placement,
+    depth-occlusion culling, and decluttering decisions are all resolved at
+    compile time from serialized inputs and never mutated during render.
+    """
+
+    recipe_hash: str
+    camera_terrain_key: str
+    label_plans: Mapping[str, Any]
+    manifest: Any
+    validation_report: "ValidationReport"
 
 
 def _native_scene_class() -> Any | None:
@@ -387,6 +417,10 @@ class _MapSceneNativeRenderResult:
     aov_frame: Any | None = None
     hdr_frame: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    # VERITAS: per-pixel source-id map + contributing-tile records captured
+    # at composite time (populated only when provenance emission is on).
+    source_map: Any | None = None
+    contributing_tiles: list[dict[str, Any]] | None = None
 
 
 def _aov_arrays_for_rgba(recipe: "SceneRecipe", rgba: Any, requested: Sequence[str]) -> dict[str, Any]:
@@ -691,7 +725,436 @@ def _mapscene_material_settings(recipe: "SceneRecipe") -> Any | None:
     return MaterialLayerSettings(**kwargs) if kwargs else None
 
 
-def _build_mapscene_terrain_params(recipe: "SceneRecipe", heightmap: Any, render_size: tuple[int, int]) -> Any | None:
+def _mapscene_water_settings(recipe: "SceneRecipe") -> Any | None:
+    from .terrain_params import WaterSettings
+
+    terrain_metadata = _metadata_dict(recipe.terrain.metadata)
+    lighting_settings = _metadata_dict(recipe.lighting.settings)
+    data = terrain_metadata.get("water") if isinstance(terrain_metadata.get("water"), Mapping) else None
+    if data is None:
+        data = lighting_settings.get("water") if isinstance(lighting_settings.get("water"), Mapping) else None
+    if data is None:
+        return None
+    return WaterSettings(
+        enabled=bool(data.get("enabled", data.get("auto_mask", data.get("mask_path") is not None))),
+        auto_mask=bool(data.get("auto_mask", False)),
+        mask_path=(str(data.get("mask_path")) if data.get("mask_path") is not None else None),
+        level=(float(data.get("level")) if data.get("level") is not None else None),
+        slope_threshold=float(data.get("slope_threshold", 0.02)),
+    )
+
+
+def _mapscene_water_mask(recipe: "SceneRecipe", heightmap: Any) -> Any | None:
+    import numpy as np
+
+    settings = _mapscene_water_settings(recipe)
+    if settings is None or not bool(settings.enabled):
+        return None
+    if settings.mask_path:
+        path = Path(settings.mask_path)
+        if path.suffix.lower() == ".npy":
+            return np.ascontiguousarray(np.load(path).astype(np.float32, copy=False))
+        from ._png import load_png_rgba
+
+        rgba = load_png_rgba(path)
+        return np.ascontiguousarray((rgba[..., 0].astype(np.float32) / 255.0))
+    if settings.auto_mask:
+        from .gis import derive_water_mask
+
+        return derive_water_mask(
+            heightmap,
+            level=settings.level,
+            slope_threshold=settings.slope_threshold,
+        )
+    return None
+
+
+def _mapscene_cloud_settings(recipe: "SceneRecipe") -> Any | None:
+    from .terrain_params import CloudSettings
+
+    data = _mapscene_cloud_config(recipe)
+    if data is None:
+        return None
+    shadows_enabled = bool(data.get("shadows_enabled", data.get("shadow_enabled", False)))
+    return CloudSettings(
+        enabled=bool(data.get("enabled", shadows_enabled)),
+        shadows_enabled=shadows_enabled,
+        coverage=float(data.get("coverage", 0.5)),
+        density=float(data.get("density", 0.5)),
+        shadow_strength=float(data.get("shadow_strength", data.get("shadow_intensity", 0.35))),
+        quality=str(data.get("quality", "medium")),
+    )
+
+
+def _mapscene_cloud_config(recipe: "SceneRecipe") -> Mapping[str, Any] | None:
+    terrain_metadata = _metadata_dict(recipe.terrain.metadata)
+    lighting_settings = _metadata_dict(recipe.lighting.settings)
+    data = terrain_metadata.get("clouds") if isinstance(terrain_metadata.get("clouds"), Mapping) else None
+    if data is None:
+        data = lighting_settings.get("clouds") if isinstance(lighting_settings.get("clouds"), Mapping) else None
+    if data is None:
+        data = lighting_settings.get("cloud") if isinstance(lighting_settings.get("cloud"), Mapping) else None
+    if data is None:
+        return None
+    return data
+
+
+def _apply_mapscene_cloud_shadow(rgba: Any, recipe: "SceneRecipe") -> tuple[Any, dict[str, Any]]:
+    settings = _mapscene_cloud_settings(recipe)
+    if settings is None or not bool(settings.enabled) or not bool(settings.shadows_enabled):
+        return rgba, {}
+
+    import numpy as np
+
+    out = np.ascontiguousarray(np.asarray(rgba, dtype=np.uint8).copy())
+    height, width = out.shape[:2]
+    cloud_config = _mapscene_cloud_config(recipe) or {}
+    offset_x = float(cloud_config.get("shadow_offset_x", cloud_config.get("wind_offset_x", 0.0)))
+    offset_y = float(cloud_config.get("shadow_offset_y", cloud_config.get("wind_offset_y", 0.0)))
+    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+    scale = {"low": 2.0, "medium": 3.0, "high": 4.5, "ultra": 6.0}.get(str(settings.quality), 3.0)
+    u = xx / max(1.0, float(width - 1)) + offset_x
+    v = yy / max(1.0, float(height - 1)) + offset_y
+    field = (
+        0.55 * np.sin((u * scale + v * 0.7) * 2.0 * np.pi)
+        + 0.30 * np.sin((u * 1.7 - v * scale) * 2.0 * np.pi + 0.6)
+        + 0.15 * np.sin((u * 5.1 + v * 4.3) * 2.0 * np.pi + 1.7)
+    )
+    field = (field - field.min()) / max(float(field.max() - field.min()), 1.0e-6)
+    coverage_cutoff = 1.0 - float(settings.coverage)
+    cloud = np.clip((field - coverage_cutoff) / max(0.05, float(settings.density)), 0.0, 1.0)
+    shadow = 1.0 - cloud * float(settings.shadow_strength)
+    rgb = out[..., :3].astype(np.float32) * shadow[..., None]
+    out[..., :3] = np.clip(rgb, 0.0, 255.0).astype(np.uint8)
+    return out, {
+        "cloud_shadow_backend": "mapscene_numpy_cloud_shadow",
+        "cloud_shadow_coverage": float(settings.coverage),
+        "cloud_shadow_strength": float(settings.shadow_strength),
+        "cloud_shadow_quality": str(settings.quality),
+        "cloud_shadow_offset": [offset_x, offset_y],
+    }
+
+
+def _mapscene_screen_space_settings(recipe: "SceneRecipe") -> Any | None:
+    from .terrain_params import ScreenSpaceSettings
+
+    settings = _metadata_dict(recipe.lighting.settings)
+    data = settings.get("screen_space") if isinstance(settings.get("screen_space"), Mapping) else None
+    if data is None:
+        data = settings.get("postfx") if isinstance(settings.get("postfx"), Mapping) else None
+    if data is None:
+        return None
+
+    def child(name: str) -> Mapping[str, Any]:
+        value = data.get(name)
+        return value if isinstance(value, Mapping) else {}
+
+    ssao = child("ssao")
+    ssgi = child("ssgi")
+    ssr = child("ssr")
+    taa = child("taa")
+    enabled = bool(data.get("enabled", False))
+    ssao_enabled = bool(ssao.get("enabled", data.get("ssao_enabled", False)))
+    ssgi_enabled = bool(ssgi.get("enabled", data.get("ssgi_enabled", False)))
+    ssr_enabled = bool(ssr.get("enabled", data.get("ssr_enabled", False)))
+    taa_enabled = bool(taa.get("enabled", data.get("taa_enabled", False)))
+    return ScreenSpaceSettings(
+        enabled=enabled or ssao_enabled or ssgi_enabled or ssr_enabled or taa_enabled,
+        ssao_enabled=ssao_enabled,
+        ssao_radius=float(ssao.get("radius", data.get("ssao_radius", 1.5))),
+        ssao_intensity=float(ssao.get("intensity", data.get("ssao_intensity", 1.0))),
+        ssgi_enabled=ssgi_enabled,
+        ssgi_intensity=float(ssgi.get("intensity", data.get("ssgi_intensity", 1.0))),
+        ssr_enabled=ssr_enabled,
+        ssr_intensity=float(ssr.get("intensity", data.get("ssr_intensity", 1.0))),
+        taa_enabled=taa_enabled,
+        temporal_alpha=float(taa.get("temporal_alpha", data.get("temporal_alpha", 0.1))),
+    )
+
+
+def _apply_mapscene_screen_space(rgba: Any, recipe: "SceneRecipe", heightmap: Any) -> tuple[Any, dict[str, Any]]:
+    settings = _mapscene_screen_space_settings(recipe)
+    if settings is None or not bool(settings.enabled):
+        return rgba, {}
+
+    import numpy as np
+
+    out = np.ascontiguousarray(np.asarray(rgba, dtype=np.uint8).copy())
+    rgb = out[..., :3].astype(np.float32)
+    height, width = out.shape[:2]
+    metadata: dict[str, Any] = {"screen_space_backend": "mapscene_numpy_postfx"}
+    enabled: list[str] = []
+
+    dem = np.asarray(heightmap, dtype=np.float32)
+    if dem.ndim == 2 and dem.size > 0:
+        yy = np.linspace(0, dem.shape[0] - 1, height).astype(np.int32)
+        xx = np.linspace(0, dem.shape[1] - 1, width).astype(np.int32)
+        sampled = dem[np.ix_(yy, xx)].astype(np.float32)
+        span = max(float(sampled.max() - sampled.min()), 1.0e-6)
+        height_norm = (sampled - float(sampled.min())) / span
+    else:
+        height_norm = np.zeros((height, width), dtype=np.float32)
+
+    gy, gx = np.gradient(height_norm)
+    slope = np.clip(np.sqrt(gx * gx + gy * gy) * max(1.0, float(settings.ssao_radius)), 0.0, 1.0)
+
+    if bool(settings.ssao_enabled):
+        occlusion = np.clip((1.0 - height_norm) * 0.55 + slope * 0.45, 0.0, 1.0)
+        ao = 1.0 - occlusion * min(0.55, 0.22 * float(settings.ssao_intensity))
+        rgb *= ao[..., None]
+        enabled.append("ssao")
+        metadata["screen_space_ssao_intensity"] = float(settings.ssao_intensity)
+
+    if bool(settings.ssgi_enabled):
+        bounce = (1.0 - slope) * height_norm
+        warm = np.asarray((1.035, 1.025, 0.985), dtype=np.float32)
+        rgb = rgb * (1.0 + bounce[..., None] * min(0.18, 0.06 * float(settings.ssgi_intensity)) * warm)
+        enabled.append("ssgi")
+        metadata["screen_space_ssgi_intensity"] = float(settings.ssgi_intensity)
+
+    if bool(settings.ssr_enabled):
+        water_mask = _mapscene_water_mask(recipe, heightmap)
+        if water_mask is not None:
+            mask = np.asarray(water_mask, dtype=np.float32)
+            if mask.ndim == 2 and mask.size > 0:
+                yy = np.linspace(0, mask.shape[0] - 1, height).astype(np.int32)
+                xx = np.linspace(0, mask.shape[1] - 1, width).astype(np.int32)
+                screen_mask = np.clip(mask[np.ix_(yy, xx)], 0.0, 1.0)
+            else:
+                screen_mask = np.zeros((height, width), dtype=np.float32)
+        else:
+            screen_mask = np.clip(1.0 - height_norm * 8.0, 0.0, 1.0)
+        reflected = np.flip(rgb, axis=0)
+        fresnel = np.linspace(0.25, 0.95, height, dtype=np.float32)[:, None]
+        mix = screen_mask * fresnel * min(0.60, 0.32 * float(settings.ssr_intensity))
+        rgb = rgb * (1.0 - mix[..., None]) + reflected * mix[..., None]
+        enabled.append("ssr")
+        metadata["screen_space_ssr_intensity"] = float(settings.ssr_intensity)
+
+    if bool(settings.taa_enabled):
+        enabled.append("taa")
+        metadata["screen_space_taa_temporal_alpha"] = float(settings.temporal_alpha)
+
+    if not enabled:
+        return rgba, {}
+    out[..., :3] = np.clip(rgb, 0.0, 255.0).astype(np.uint8)
+    metadata["screen_space_effects"] = enabled
+    return out, metadata
+
+
+def _mapscene_vt_config(recipe: "SceneRecipe") -> Mapping[str, Any] | None:
+    metadata = _metadata_dict(recipe.terrain.metadata)
+    config = metadata.get("virtual_texture") or metadata.get("vt")
+    return config if isinstance(config, Mapping) else None
+
+
+def _mapscene_clipmap_config(recipe: "SceneRecipe") -> Mapping[str, Any] | None:
+    metadata = _metadata_dict(recipe.terrain.metadata)
+    config = metadata.get("terrain_geometry") or metadata.get("geometry") or metadata.get("clipmap")
+    if not isinstance(config, Mapping):
+        return None
+    mode = str(config.get("mode", "clipmap")).lower()
+    return config if mode == "clipmap" or bool(config.get("enabled", False)) else None
+
+
+def _mapscene_clipmap_metadata(recipe: "SceneRecipe", heightmap: Any) -> dict[str, Any]:
+    config = _mapscene_clipmap_config(recipe)
+    if config is None:
+        return {}
+    try:
+        import numpy as np
+        import forge3d as f3d
+
+        arr = np.asarray(heightmap)
+        ring_count = int(config.get("levels", config.get("ring_count", 4)))
+        ring_resolution = int(config.get("ring_resolution", 64))
+        center_resolution = int(config.get("center_resolution", ring_resolution))
+        terrain_extent_m = float(config.get("terrain_extent_m", config.get("extent_m", 100_000.0)))
+        clip_config = f3d.ClipmapConfig(
+            ring_count=ring_count,
+            ring_resolution=ring_resolution,
+            center_resolution=center_resolution,
+            skirt_depth=float(config.get("skirt_depth", 10.0)),
+            morph_range=float(config.get("morph_range", 0.3)),
+        )
+        target = recipe.camera.target or (0.0, 0.0, 0.0)
+        center = (float(target[0]), float(target[2] if len(target) > 2 else 0.0))
+        mesh = f3d.clipmap_generate_py(clip_config, center, terrain_extent_m)
+        resident_height_bytes = ring_count * ring_resolution * ring_resolution * 4
+        source_bytes = int(arr.size * arr.dtype.itemsize) if arr.size else 0
+        max_resident_bytes = int(config.get("max_resident_height_bytes", resident_height_bytes))
+        return {
+            "terrain_geometry_backend": "clipmap_bounded_grid_pbr",
+            "terrain_geometry_mode": "clipmap",
+            "clipmap_ring_count": int(mesh.rings_count),
+            "clipmap_ring_resolution": ring_resolution,
+            "clipmap_triangle_count": int(mesh.triangle_count),
+            "clipmap_vertex_count": int(mesh.vertex_count),
+            "clipmap_triangle_reduction_pct": float(mesh.triangle_reduction_percent),
+            "clipmap_terrain_extent_m": terrain_extent_m,
+            "clipmap_resident_height_bytes": min(resident_height_bytes, max_resident_bytes),
+            "clipmap_source_height_bytes": source_bytes,
+            "clipmap_bounded_memory": resident_height_bytes <= max_resident_bytes,
+        }
+    except Exception as exc:
+        return {
+            "terrain_geometry_backend": "clipmap_planner_unavailable",
+            "clipmap_error": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def _mapscene_clipmap_camera_mode(config: Mapping[str, Any] | None) -> str | None:
+    if not config:
+        return None
+    ring_count = int(config.get("ring_count", 4))
+    ring_resolution = int(config.get("ring_resolution", 64))
+    center_resolution = int(config.get("center_resolution", ring_resolution))
+    skirt_depth = float(config.get("skirt_depth", 10.0))
+    morph_range = float(config.get("morph_range", 0.3))
+    return f"clipmap:{ring_count}:{ring_resolution}:{center_resolution}:{skirt_depth:g}:{morph_range:g}"
+
+
+def _mapscene_vt_settings(recipe: "SceneRecipe") -> Any | None:
+    config = _mapscene_vt_config(recipe)
+    if config is None:
+        return None
+
+    from .terrain_params import TerrainVTSettings, VTLayerFamily
+
+    families = config.get("families") or config.get("layers") or ("albedo",)
+    layers = []
+    for item in families:
+        layer_data = item if isinstance(item, Mapping) else {"family": item}
+        virtual_size = layer_data.get("virtual_size_px", config.get("virtual_size_px", (4096, 4096)))
+        if isinstance(virtual_size, Sequence) and not isinstance(virtual_size, (str, bytes)):
+            size_pair = tuple(int(value) for value in list(virtual_size)[:2])
+        else:
+            size_pair = (int(virtual_size), int(virtual_size))
+        layers.append(
+            VTLayerFamily(
+                family=str(layer_data.get("family", "albedo")),
+                virtual_size_px=size_pair,  # type: ignore[arg-type]
+                tile_size=int(layer_data.get("tile_size", config.get("tile_size", 248))),
+                tile_border=int(layer_data.get("tile_border", config.get("tile_border", 4))),
+                fallback=tuple(float(value) for value in layer_data.get("fallback", (0.5, 0.5, 0.5, 1.0))),
+            )
+        )
+    if not layers:
+        layers = [VTLayerFamily(family="albedo")]
+
+    return TerrainVTSettings(
+        enabled=bool(config.get("enabled", True)),
+        layers=layers,
+        atlas_size=int(config.get("atlas_size", 4096)),
+        residency_budget_mb=float(config.get("residency_budget_mb", 256.0)),
+        max_mip_levels=int(config.get("max_mip_levels", 8)),
+        use_feedback=bool(config.get("use_feedback", True)),
+    )
+
+
+def _procedural_vt_source(size: int, material_index: int, pattern: str) -> Any:
+    import numpy as np
+
+    size = max(16, int(size))
+    coords = np.linspace(0.0, 1.0, size, dtype=np.float32)
+    xx, yy = np.meshgrid(coords, coords)
+    pattern = str(pattern or "checker").lower()
+    if pattern == "stripes":
+        modulation = 0.45 + 0.55 * (0.5 + 0.5 * np.sin((xx * 18.0 + material_index) * np.pi))
+    else:
+        checker = ((np.floor(xx * 12.0) + np.floor(yy * 10.0) + material_index) % 2.0).astype(np.float32)
+        wave = 0.5 + 0.5 * np.sin((xx * 9.0 + yy * 13.0 + material_index) * np.pi)
+        modulation = 0.25 + 0.75 * (0.65 * checker + 0.35 * wave)
+    palette = np.array(
+        [
+            [0.82, 0.22, 0.12],
+            [0.18, 0.64, 0.24],
+            [0.18, 0.34, 0.82],
+            [0.86, 0.76, 0.20],
+        ],
+        dtype=np.float32,
+    )
+    base = palette[int(material_index) % len(palette)]
+    rgb = np.clip(base * modulation[..., None] + 0.08 * (1.0 - modulation[..., None]), 0.0, 1.0)
+    alpha = np.ones((size, size, 1), dtype=np.float32)
+    return np.ascontiguousarray(np.round(np.concatenate([rgb, alpha], axis=-1) * 255.0).astype(np.uint8))
+
+
+def _mapscene_register_vt_sources(renderer: Any, recipe: "SceneRecipe") -> None:
+    config = _mapscene_vt_config(recipe)
+    if config is None or not bool(config.get("enabled", True)):
+        return
+    if not hasattr(renderer, "register_material_vt_source"):
+        return
+    if hasattr(renderer, "clear_material_vt_sources"):
+        renderer.clear_material_vt_sources()
+
+    import numpy as np
+
+    sources = config.get("sources")
+    if not isinstance(sources, Sequence) or isinstance(sources, (str, bytes)):
+        if bool(config.get("procedural_sources", False)):
+            sources = [
+                {
+                    "material_index": int(material_index),
+                    "family": "albedo",
+                    "pattern": config.get("pattern", "checker"),
+                    "size": int(config.get("source_size", 512)),
+                }
+                for material_index in range(int(config.get("source_count", 4)))
+            ]
+        else:
+            sources = ()
+
+    for source in sources:
+        if not isinstance(source, Mapping):
+            continue
+        material_index = int(source.get("material_index", 0))
+        family = str(source.get("family", "albedo"))
+        virtual_size = source.get("virtual_size_px", config.get("virtual_size_px", (512, 512)))
+        if isinstance(virtual_size, Sequence) and not isinstance(virtual_size, (str, bytes)):
+            size_pair = tuple(int(value) for value in list(virtual_size)[:2])
+        else:
+            size_pair = (int(virtual_size), int(virtual_size))
+        if len(size_pair) != 2:
+            size_pair = (int(size_pair[0]), int(size_pair[0]))
+
+        path = source.get("path")
+        if path is not None:
+            path_obj = Path(str(path))
+            if path_obj.suffix.lower() == ".npy":
+                image = np.asarray(np.load(path_obj), dtype=np.uint8)
+            else:
+                from ._png import load_png_rgba
+
+                image = np.asarray(load_png_rgba(path_obj), dtype=np.uint8)
+        else:
+            image = _procedural_vt_source(int(source.get("size", max(size_pair))), material_index, str(source.get("pattern", "checker")))
+
+        fallback = source.get("fallback")
+        if fallback is None:
+            rgba = np.asarray(image, dtype=np.float32)
+            if rgba.ndim == 3 and rgba.shape[-1] >= 3:
+                rgb = rgba[..., :3].mean(axis=(0, 1)) / 255.0
+                fallback = [float(rgb[0]), float(rgb[1]), float(rgb[2]), 1.0]
+            else:
+                fallback = [0.5, 0.5, 0.5, 1.0]
+        renderer.register_material_vt_source(
+            material_index,
+            family,
+            np.ascontiguousarray(image),
+            size_pair,
+            [float(value) for value in list(fallback)[:4]],
+        )
+
+
+def _build_mapscene_terrain_params(
+    recipe: "SceneRecipe",
+    heightmap: Any,
+    render_size: tuple[int, int],
+    *,
+    emit_source_id: bool = False,
+) -> Any | None:
     try:
         import forge3d as f3d
         from .config import load_renderer_config
@@ -738,6 +1201,9 @@ def _build_mapscene_terrain_params(recipe: "SceneRecipe", heightmap: Any, render
     clip_far = max(6000.0, terrain_span * 1.5)
     preset_albedo = "mix" if preset_name else "colormap"
     preset_colormap_strength = 0.5 if preset_name else 1.0
+    camera_mode = str(cli_params.get("camera_mode") or camera.get("camera_mode") or "screen")
+    if camera_mode == "screen":
+        camera_mode = _mapscene_clipmap_camera_mode(_mapscene_clipmap_config(recipe)) or camera_mode
     config = make_terrain_params_config(
         size_px=render_size,
         render_scale=1.0,
@@ -758,7 +1224,7 @@ def _build_mapscene_terrain_params(recipe: "SceneRecipe", heightmap: Any, render
         cam_phi_deg=float(recipe.camera.azimuth_deg),
         cam_theta_deg=float(recipe.camera.elevation_deg),
         fov_y_deg=float(recipe.camera.fov_deg),
-        camera_mode=str(cli_params.get("camera_mode") or camera.get("camera_mode") or "screen"),
+        camera_mode=camera_mode,
         clip=(0.1, clip_far),
         shadows=_mapscene_shadow_settings(renderer_config.shadows),
         overlays=[overlay],
@@ -770,8 +1236,17 @@ def _build_mapscene_terrain_params(recipe: "SceneRecipe", heightmap: Any, render
             force_depth=_recipe_needs_label_depth(recipe),
         ),
         denoise=_mapscene_denoise_settings(output),
+        screen_space=_mapscene_screen_space_settings(recipe),
+        water=_mapscene_water_settings(recipe),
+        clouds=_mapscene_cloud_settings(recipe),
         materials=_mapscene_material_settings(recipe),
+        vt=_mapscene_vt_settings(recipe),
     )
+    if emit_source_id:
+        # VERITAS: capture the per-pixel VT source-id map alongside the
+        # beauty pass (requires the msaa_samples=1 path used above).
+        config.aov.enabled = True
+        config.aov.source_id = True
     return f3d.TerrainRenderParams(config)
 
 
@@ -786,7 +1261,58 @@ def _frame_to_rgba(frame: Any, output: "OutputSpec") -> Any:
     return np.ascontiguousarray(rgba)
 
 
-def _render_terrain_renderer_result(recipe: "SceneRecipe", heightmap: Any) -> _MapSceneNativeRenderResult | None:
+@lru_cache(maxsize=1)
+def _terrain_renderer_runtime_available() -> bool:
+    if os.environ.get("GITHUB_ACTIONS") == "true" and platform.system() == "Windows":
+        return False
+
+    try:
+        import forge3d as f3d
+    except Exception:
+        return False
+
+    required = ("Session", "TerrainRenderer", "MaterialSet", "IBL", "TerrainRenderParams")
+    if not all(hasattr(f3d, name) for name in required):
+        return False
+    try:
+        if hasattr(f3d, "has_gpu") and not f3d.has_gpu():
+            return False
+    except Exception:
+        return False
+
+    env = os.environ.copy()
+    package_parent = Path(__file__).resolve().parents[1]
+    repo_root = package_parent.parent
+    path_entries = [str(package_parent)]
+    if env.get("PYTHONPATH"):
+        path_entries.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(path_entries)
+    code = (
+        "import forge3d as f3d\n"
+        "required=('Session','TerrainRenderer','MaterialSet','IBL','TerrainRenderParams')\n"
+        "if not all(hasattr(f3d, n) for n in required): raise SystemExit(1)\n"
+    )
+    code += "s=f3d.Session(window=False); r=f3d.TerrainRenderer(s)\n"
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=str(repo_root if (repo_root / "pyproject.toml").exists() else package_parent),
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def _render_terrain_renderer_result(
+    recipe: "SceneRecipe",
+    heightmap: Any,
+    *,
+    emit_provenance: bool = False,
+) -> _MapSceneNativeRenderResult | None:
     try:
         import forge3d as f3d
     except Exception:
@@ -795,13 +1321,17 @@ def _render_terrain_renderer_result(recipe: "SceneRecipe", heightmap: Any) -> _M
     required = ("Session", "TerrainRenderer", "MaterialSet", "IBL", "TerrainRenderParams")
     if not all(hasattr(f3d, name) for name in required):
         return None
+    if not _terrain_renderer_runtime_available():
+        return None
 
     import numpy as np
 
     output = recipe.output
     assert output is not None
     render_size = (max(64, int(output.width)), max(64, int(output.height)))
-    params = _build_mapscene_terrain_params(recipe, heightmap, render_size)
+    params = _build_mapscene_terrain_params(
+        recipe, heightmap, render_size, emit_source_id=emit_provenance
+    )
     if params is None:
         return None
 
@@ -809,19 +1339,26 @@ def _render_terrain_renderer_result(recipe: "SceneRecipe", heightmap: Any) -> _M
     try:
         session = f3d.Session(window=False)
         renderer = f3d.TerrainRenderer(session)
+        _mapscene_register_vt_sources(renderer, recipe)
         material_set = f3d.MaterialSet.terrain_default()
         env_maps = f3d.IBL.from_hdr(hdr_path, intensity=1.0)
         sample_count = max(1, int(output.samples))
         output_format = str(output.format).lower()
         needs_hdr = output_format == "exr" or bool(output.hdr)
         needs_offline = sample_count > 1 or _mapscene_denoise_enabled(output) or needs_hdr
+        water_mask = _mapscene_water_mask(recipe, heightmap)
         building_scatter = (
             _terrain_scatter_building_batches_for_recipe(recipe, heightmap)
             if not needs_offline and hasattr(renderer, "set_scatter_batches")
             else None
         )
         needs_label_depth = _recipe_needs_label_depth(recipe)
-        needs_aov = bool(output.aovs) or needs_label_depth
+        needs_aov = bool(output.aovs) or needs_label_depth or emit_provenance
+        if emit_provenance and needs_offline:
+            raise RuntimeError(
+                "MapScene provenance emission requires the one-shot render path: "
+                "set output.samples=1 and disable denoise/HDR output"
+            )
         aov_frame = None
         hdr_frame = None
         metadata: dict[str, Any] = {
@@ -830,6 +1367,7 @@ def _render_terrain_renderer_result(recipe: "SceneRecipe", heightmap: Any) -> _M
             "denoiser_used": "none",
             "adaptive": False,
         }
+        metadata.update(_mapscene_clipmap_metadata(recipe, heightmap))
         if building_scatter is not None:
             scatter_batches, scatter_metadata = building_scatter
             renderer.set_scatter_batches(scatter_batches)
@@ -837,6 +1375,7 @@ def _render_terrain_renderer_result(recipe: "SceneRecipe", heightmap: Any) -> _M
         if needs_offline:
             from .offline import render_offline
 
+            t0 = time.perf_counter()
             offline_result = render_offline(
                 renderer,
                 material_set,
@@ -845,32 +1384,55 @@ def _render_terrain_renderer_result(recipe: "SceneRecipe", heightmap: Any) -> _M
                 heightmap,
                 settings=_mapscene_offline_settings(output),
                 progress_callback=None,
-                water_mask=None,
+                water_mask=water_mask,
             )
+            metadata["offline_accumulation_ms"] = (time.perf_counter() - t0) * 1000.0
+            metadata["timing_source"] = "python_perf_counter"
             frame = offline_result.frame
             hdr_frame = offline_result.hdr_frame
             aov_frame = offline_result.aov_frame
             metadata.update(dict(offline_result.metadata or {}))
         elif needs_aov and hasattr(renderer, "render_with_aov"):
+            t0 = time.perf_counter()
             frame, aov_frame = renderer.render_with_aov(
                 material_set=material_set,
                 env_maps=env_maps,
                 params=params,
                 heightmap=heightmap,
-                water_mask=None,
+                water_mask=water_mask,
             )
+            metadata["terrain_main_pass_ms"] = (time.perf_counter() - t0) * 1000.0
+            metadata["timing_source"] = "python_perf_counter"
         else:
+            t0 = time.perf_counter()
             frame = renderer.render_terrain_pbr_pom(
                 material_set=material_set,
                 env_maps=env_maps,
                 params=params,
                 heightmap=heightmap,
                 target=None,
-                water_mask=None,
+                water_mask=water_mask,
             )
+            metadata["terrain_main_pass_ms"] = (time.perf_counter() - t0) * 1000.0
+            metadata["timing_source"] = "python_perf_counter"
         rgba = _frame_to_rgba(frame, output)
+        source_map = None
+        contributing_tiles = None
+        if emit_provenance:
+            # VERITAS: co-emitted at composite time — the source map and the
+            # image describe the same frame. No silent fallback: a missing
+            # source-id AOV here is a hard error.
+            if aov_frame is None or not getattr(aov_frame, "has_source_id", False):
+                raise RuntimeError(
+                    "MapScene provenance emission did not produce a source-id AOV; "
+                    "the native renderer must support AovSettings.source_id"
+                )
+            source_map = np.asarray(aov_frame.source_id(), dtype=np.uint32)
+            contributing_tiles = list(renderer.read_contributing_tiles())
         if building_scatter is not None and hasattr(renderer, "get_scatter_stats"):
             metadata["building_scatter_stats"] = dict(renderer.get_scatter_stats())
+        if hasattr(renderer, "get_material_vt_stats"):
+            metadata["material_vt_stats"] = dict(renderer.get_material_vt_stats())
     finally:
         if delete_hdr:
             try:
@@ -883,62 +1445,14 @@ def _render_terrain_renderer_result(recipe: "SceneRecipe", heightmap: Any) -> _M
         aov_frame=aov_frame,
         hdr_frame=hdr_frame,
         metadata=metadata,
+        source_map=source_map,
+        contributing_tiles=contributing_tiles,
     )
 
 
 def _render_terrain_renderer_rgba(recipe: "SceneRecipe", heightmap: Any) -> Any | None:
     result = _render_terrain_renderer_result(recipe, heightmap)
     return None if result is None else result.rgba
-
-
-def _depth_array_from_aov_frame(aov_frame: Any | None) -> Any | None:
-    if aov_frame is None:
-        return None
-    getter = getattr(aov_frame, "depth", None)
-    if getter is None or not callable(getter):
-        return None
-    try:
-        return getter()
-    except Exception:
-        return None
-
-
-def _terrain_with_depth_occlusion(terrain: "TerrainSource", depth: Any) -> "TerrainSource":
-    metadata = _metadata(terrain.metadata)
-    metadata["depth_occlusion"] = {
-        "image": depth,
-        "source": "mapscene_depth_aov",
-        "bias": 0.0,
-    }
-    return TerrainSource(
-        path=terrain.path,
-        data=terrain.data,
-        crs=terrain.crs,
-        metadata=metadata,
-        elevation_sampling_available=terrain.elevation_sampling_available,
-        dtype=terrain.dtype,
-        nodata_policy=terrain.nodata_policy,
-    )
-
-
-def _plans_with_depth_occlusion(
-    recipe: "SceneRecipe",
-    plans: Mapping[str, Any],
-    aov_frame: Any | None,
-) -> dict[str, Any]:
-    depth = _depth_array_from_aov_frame(aov_frame)
-    if depth is None:
-        return dict(plans)
-    depth_terrain = _terrain_with_depth_occlusion(recipe.terrain, depth)
-    updated = dict(plans)
-    for layer in recipe.layers:
-        if isinstance(layer, LabelLayer) and str(layer.occlusion).lower() == "terrain":
-            updated[_layer_id(layer, "layer")] = _label_plan_from_layer(
-                layer,
-                recipe=recipe,
-                terrain=depth_terrain,
-            )
-    return updated
 
 
 def _rgba01(color: tuple[int, int, int, int]) -> tuple[float, float, float, float]:
@@ -968,9 +1482,7 @@ def _vector_layer_requires_precise_raster(layer: "VectorOverlay") -> bool:
         if not isinstance(geometry, Mapping):
             continue
         geometry_type = str(geometry.get("type", "")).lower()
-        if "polygon" in geometry_type:
-            return True
-        if line_join != "round" or "line-miter-limit" in line_layout:
+        if "polygon" not in geometry_type and (line_join != "round" or "line-miter-limit" in line_layout):
             if len(_render_geometry_points(geometry)) > 2:
                 return True
     return False
@@ -996,26 +1508,34 @@ def _alpha_composite_rgba(bottom: Any, top: Any) -> Any:
 
 def _native_vector_payload_for_layer(layer: "VectorOverlay", width: int, height: int) -> tuple[list[Any], list[Any], list[Any], list[Any], list[Any], list[Any]] | None:
     line_paint = _render_paint(layer, "line")
+    from .style import evaluate_color_expr, evaluate_number_expr
+
     fallback_rgb = _render_rgb(layer.to_dict(), salt="vector")
-    line_color = _render_color(line_paint.get("line-color"), (*fallback_rgb, 255))
-    line_opacity = _render_number(line_paint.get("line-opacity"), line_color[3] / 255.0)
-    line_rgba = _rgba01((line_color[0], line_color[1], line_color[2], max(0, min(255, int(round(line_opacity * 255.0))))))
-    line_width = max(
-        1.0,
-        _render_number(
-            getattr(layer, "width_px", None)
-            if getattr(layer, "width_px", None) is not None
-            else line_paint.get(
-                "line-width",
-                getattr(layer, "width_world", None)
-                if getattr(layer, "width_world", None) is not None
-                else 2.0,
-            ),
-            2.0,
-        ),
+    line_color_value = line_paint.get("line-color")
+    line_color = (
+        (*fallback_rgb, 255)
+        if isinstance(line_color_value, list)
+        else _render_color(line_color_value, (*fallback_rgb, 255))
     )
+    line_opacity_value = line_paint.get("line-opacity")
+    line_opacity = (
+        line_color[3] / 255.0
+        if isinstance(line_opacity_value, list)
+        else _render_number(line_opacity_value, line_color[3] / 255.0)
+    )
+    line_rgba = _rgba01((line_color[0], line_color[1], line_color[2], max(0, min(255, int(round(line_opacity * 255.0))))))
+    line_width_value = (
+        getattr(layer, "width_px", None)
+        if getattr(layer, "width_px", None) is not None
+        else line_paint.get(
+            "line-width",
+            getattr(layer, "width_world", None)
+            if getattr(layer, "width_world", None) is not None
+            else 2.0,
+        )
+    )
+    line_width = max(1.0, 2.0 if isinstance(line_width_value, list) else _render_number(line_width_value, 2.0))
     dash_array = getattr(layer, "dash_array", None) or line_paint.get("line-dasharray")
-    point_rgba = line_rgba
 
     points_xy: list[tuple[float, float]] = []
     point_rgba_values: list[tuple[float, float, float, float]] = []
@@ -1028,14 +1548,44 @@ def _native_vector_payload_for_layer(layer: "VectorOverlay", width: int, height:
         geometry = feature.get("geometry") if isinstance(feature, Mapping) else None
         if not isinstance(geometry, Mapping):
             continue
+        properties = feature.get("properties") if isinstance(feature.get("properties"), Mapping) else {}
+        feature_rgba = line_rgba
+        if "line-color" in line_paint:
+            evaluated = evaluate_color_expr(line_paint.get("line-color"), dict(properties))
+            if evaluated is not None:
+                feature_rgba = tuple(float(value) for value in evaluated)
+        if "line-opacity" in line_paint:
+            opacity = evaluate_number_expr(line_paint.get("line-opacity"), dict(properties))
+            if opacity is not None:
+                feature_rgba = (
+                    feature_rgba[0],
+                    feature_rgba[1],
+                    feature_rgba[2],
+                    max(0.0, min(1.0, feature_rgba[3] * float(opacity))),
+                )
+        feature_width = line_width
+        if getattr(layer, "width_px", None) is None and "line-width" in line_paint:
+            evaluated_width = evaluate_number_expr(line_paint.get("line-width"), dict(properties))
+            if evaluated_width is not None:
+                feature_width = max(1.0, float(evaluated_width))
         geometry_type = str(geometry.get("type", "")).lower()
         if "polygon" in geometry_type:
-            return None
+            for polygon_rings in _render_geometry_polygon_rings(geometry):
+                for ring in polygon_rings:
+                    points = [_render_point_to_pixel(point, width, height) for point in ring]
+                    if len(points) < 2:
+                        continue
+                    if points[0] != points[-1]:
+                        points.append(points[0])
+                    polylines.append([_pixel_to_ndc(point, width, height) for point in points])
+                    polyline_rgba.append(feature_rgba)
+                    stroke_width.append(feature_width)
+            continue
         points = [_render_point_to_pixel(point, width, height) for point in _render_geometry_points(geometry)]
         if geometry_type == "point" and points:
             points_xy.append(_pixel_to_ndc(points[0], width, height))
-            point_rgba_values.append(point_rgba)
-            point_sizes.append(line_width)
+            point_rgba_values.append(feature_rgba)
+            point_sizes.append(feature_width)
             continue
         if len(points) < 2:
             continue
@@ -1044,10 +1594,72 @@ def _native_vector_payload_for_layer(layer: "VectorOverlay", width: int, height:
             if len(segment) < 2:
                 continue
             polylines.append([_pixel_to_ndc(point, width, height) for point in segment])
-            polyline_rgba.append(line_rgba)
-            stroke_width.append(line_width)
+            polyline_rgba.append(feature_rgba)
+            stroke_width.append(feature_width)
 
     return points_xy, point_rgba_values, point_sizes, polylines, polyline_rgba, stroke_width
+
+
+def _native_polygon_payload_for_layers(
+    layers: Sequence["VectorOverlay"],
+    width: int,
+    height: int,
+) -> tuple[list[Any], list[Any], list[tuple[float, float, float, float]]] | None:
+    import numpy as np
+
+    exteriors: list[Any] = []
+    holes: list[Any] = []
+    fill_rgba: list[tuple[float, float, float, float]] = []
+
+    for layer in layers:
+        fill_paint = _render_paint(layer, "fill")
+        fallback_rgb = _render_rgb(layer.to_dict(), salt="vector")
+        fill_color_value = fill_paint.get("fill-color")
+        fill_color = (
+            (*fallback_rgb, 255)
+            if isinstance(fill_color_value, list)
+            else _render_color(fill_color_value, (*fallback_rgb, 96))
+        )
+        fill_opacity_value = fill_paint.get("fill-opacity")
+        fill_opacity = (
+            fill_color[3] / 255.0
+            if isinstance(fill_opacity_value, list)
+            else _render_number(fill_opacity_value, fill_color[3] / 255.0)
+        )
+        for feature in layer.features or ():
+            geometry = feature.get("geometry") if isinstance(feature, Mapping) else None
+            if not isinstance(geometry, Mapping):
+                continue
+            geometry_type = str(geometry.get("type", "")).lower()
+            if "polygon" not in geometry_type:
+                continue
+            properties = feature.get("properties") if isinstance(feature.get("properties"), Mapping) else {}
+            feature_fill_color = _render_feature_color(fill_color_value, properties, fill_color)
+            feature_fill_opacity = _render_feature_number(fill_opacity_value, properties, fill_opacity)
+            feature_fill_color = (
+                feature_fill_color[0],
+                feature_fill_color[1],
+                feature_fill_color[2],
+                max(0, min(255, int(round(feature_fill_opacity * 255.0)))),
+            )
+            for polygon_rings in _render_geometry_polygon_rings(geometry):
+                if not polygon_rings:
+                    continue
+                exterior = [_pixel_to_ndc(_render_point_to_pixel(point, width, height), width, height) for point in polygon_rings[0]]
+                if len(exterior) < 3:
+                    continue
+                exteriors.append(np.asarray(exterior, dtype=np.float64))
+                hole_set = []
+                for ring in polygon_rings[1:]:
+                    hole = [_pixel_to_ndc(_render_point_to_pixel(point, width, height), width, height) for point in ring]
+                    if len(hole) >= 3:
+                        hole_set.append(np.asarray(hole, dtype=np.float64))
+                holes.append(hole_set)
+                fill_rgba.append(_rgba01(feature_fill_color))
+
+    if not exteriors:
+        return None
+    return exteriors, holes, fill_rgba
 
 
 def _composite_native_vector_layers(base: Any, recipe: "SceneRecipe") -> tuple[Any, bool]:
@@ -1078,10 +1690,29 @@ def _composite_native_vector_layers(base: Any, recipe: "SceneRecipe") -> tuple[A
         return base, False
 
     vector_render = getattr(f3d, "vector_render_oit_py", None)
-    if vector_render is None:
-        return base, False
+    polygon_render = getattr(f3d, "vector_render_polygons_fill_py", None)
 
     height, width = base.shape[:2]
+    composited = False
+
+    polygon_payload = _native_polygon_payload_for_layers(vector_layers, int(width), int(height))
+    if polygon_payload is not None:
+        if polygon_render is None:
+            return base, False
+        polygon_overlay = polygon_render(
+            int(width),
+            int(height),
+            polygon_payload[0],
+            polygon_payload[1],
+            fill_rgba_list=polygon_payload[2],
+            coordinates_are_ndc=True,
+        )
+        base = _alpha_composite_rgba(base, np.asarray(polygon_overlay, dtype=np.uint8))
+        composited = True
+
+    if vector_render is None:
+        return base, composited
+
     points_xy: list[tuple[float, float]] = []
     point_rgba: list[tuple[float, float, float, float]] = []
     point_size: list[float] = []
@@ -1102,7 +1733,7 @@ def _composite_native_vector_layers(base: Any, recipe: "SceneRecipe") -> tuple[A
         stroke_width.extend(layer_widths)
 
     if not points_xy and not polylines:
-        return base, False
+        return base, composited
 
     overlay = vector_render(
         int(width),
@@ -1116,6 +1747,336 @@ def _composite_native_vector_layers(base: Any, recipe: "SceneRecipe") -> tuple[A
     )
     rgba = _alpha_composite_rgba(base, np.asarray(overlay, dtype=np.uint8))
     return rgba, True
+
+
+def _pointcloud_payload_for_layer(
+    layer: "PointCloudLayer",
+    width: int,
+    height: int,
+) -> tuple[list[tuple[float, float]], list[tuple[float, float, float, float]], list[float]] | None:
+    metadata = _metadata_dict(layer.metadata)
+    return _point_payload(
+        metadata.get("positions"),
+        metadata.get("colors"),
+        metadata,
+        width,
+        height,
+        path=Path(layer.path) if layer.path is not None else None,
+        point_count=layer.point_count,
+    )
+
+
+def _edl_settings(metadata: Mapping[str, Any] | None) -> tuple[bool, float, float]:
+    data = _metadata_dict(metadata)
+    enabled = bool(data.get("edl")) or str(data.get("shading", "")).lower() == "edl"
+    strength = max(0.0, _render_number(data.get("edl_strength"), 1.5))
+    radius = max(1.0, _render_number(data.get("edl_radius_px"), 1.0))
+    return enabled, strength, radius
+
+
+def _point_payload(
+    positions: Any,
+    colors: Any,
+    metadata: dict[str, Any],
+    width: int,
+    height: int,
+    *,
+    path: Path | None = None,
+    point_count: int | None = None,
+) -> tuple[list[tuple[float, float]], list[tuple[float, float, float, float]], list[float]] | None:
+    import numpy as np
+
+    if positions is None:
+        if path is None:
+            return None
+        try:
+            from . import pointcloud as pointcloud_mod
+
+            dataset = pointcloud_mod.open_pointcloud(path)
+            budget = int(metadata.get("point_budget", point_count or 100_000))
+            data = dataset.read_points(budget=budget)
+            positions = data.positions
+            colors = data.colors
+            if metadata.get("bounds") is None and getattr(dataset, "bounds", None) is not None:
+                bounds_obj = dataset.bounds
+                metadata["bounds"] = (
+                    bounds_obj.min[0],
+                    bounds_obj.min[1],
+                    bounds_obj.max[0],
+                    bounds_obj.max[1],
+                )
+        except Exception:
+            return None
+    points = np.asarray(positions, dtype=np.float64).reshape((-1, 3))
+    if points.size == 0:
+        return None
+    xy = points[:, :2]
+    bounds = metadata.get("bounds")
+    if bounds is not None and len(bounds) >= 4:
+        x0, y0, x1, y1 = (float(value) for value in list(bounds)[:4])
+        span = np.asarray([max(x1 - x0, 1e-9), max(y1 - y0, 1e-9)], dtype=np.float64)
+        uv = (xy - np.asarray([x0, y0], dtype=np.float64)) / span
+    else:
+        lo = xy.min(axis=0)
+        hi = xy.max(axis=0)
+        uv = (xy - lo) / np.maximum(hi - lo, 1e-9)
+    uv = np.clip(uv, 0.0, 1.0)
+    points_xy = [_pixel_to_ndc((float(x) * (width - 1), float(y) * (height - 1)), width, height) for x, y in uv]
+    color = _rgba01(_render_color(metadata.get("color"), (255, 255, 255, 220)))
+    if colors is not None:
+        color_arr = np.asarray(colors, dtype=np.uint8).reshape((-1, 3))
+        point_rgba = [(float(r) / 255.0, float(g) / 255.0, float(b) / 255.0, color[3]) for r, g, b in color_arr[: len(points_xy)]]
+    else:
+        point_rgba = [color] * len(points_xy)
+    size = max(1.0, _render_number(metadata.get("point_size"), 4.0))
+    return points_xy, point_rgba, [size] * len(points_xy)
+
+
+def _tiles3d_layer_has_native_geometry(layer: "Tiles3DLayer") -> bool:
+    path = _source_path(layer.source)
+    return bool(path and str(path).lower().endswith((".pnts", ".b3dm", "tileset.json")))
+
+
+def _decoded_pnts_payload(
+    decoded: Mapping[str, Any],
+    metadata: dict[str, Any],
+    width: int,
+    height: int,
+) -> tuple[list[tuple[float, float]], list[tuple[float, float, float, float]], list[float]] | None:
+    return _point_payload(
+        decoded.get("positions"),
+        decoded.get("colors"),
+        metadata,
+        width,
+        height,
+        point_count=int(decoded.get("point_count", 0)),
+    )
+
+
+def _decoded_b3dm_payload(
+    decoded: Mapping[str, Any],
+    metadata: dict[str, Any],
+    width: int,
+    height: int,
+) -> tuple[list[list[tuple[float, float]]], list[tuple[float, float, float, float]], list[float]] | None:
+    import numpy as np
+
+    positions = decoded.get("positions")
+    if positions is None:
+        return None
+    mesh_metadata = dict(metadata)
+    mesh_metadata["color"] = metadata.get("mesh_color", metadata.get("color", "#f8fafc"))
+    point_payload = _point_payload(positions, None, mesh_metadata, width, height)
+    if point_payload is None:
+        return None
+    vertices = point_payload[0]
+    raw_indices = decoded.get("indices")
+    if raw_indices is None:
+        indices = np.arange(len(vertices), dtype=np.int64)
+    else:
+        indices = np.asarray(raw_indices, dtype=np.int64).reshape((-1,))
+    if len(indices) < 3:
+        return None
+    triangles = indices[: (len(indices) // 3) * 3].reshape((-1, 3))
+    color = _rgba01(_render_color(mesh_metadata.get("color"), (248, 250, 252, 230)))
+    width_px = max(1.0, _render_number(metadata.get("mesh_width", metadata.get("line_width", 2.0)), 2.0))
+    polylines: list[list[tuple[float, float]]] = []
+    for a, b, c in triangles:
+        if min(a, b, c) < 0 or max(a, b, c) >= len(vertices):
+            continue
+        polylines.append([vertices[int(a)], vertices[int(b)], vertices[int(c)], vertices[int(a)]])
+    if not polylines:
+        return None
+    return polylines, [color] * len(polylines), [width_px] * len(polylines)
+
+
+def _tiles3d_payload_for_content(
+    path: Path,
+    metadata: dict[str, Any],
+    width: int,
+    height: int,
+    tiles3d: Any,
+) -> tuple[
+    list[tuple[float, float]],
+    list[tuple[float, float, float, float]],
+    list[float],
+    list[list[tuple[float, float]]],
+    list[tuple[float, float, float, float]],
+    list[float],
+    bool,
+    bool,
+] | None:
+    suffix = str(path).lower()
+    if suffix.endswith(".pnts"):
+        payload = _decoded_pnts_payload(tiles3d.decode_pnts(path.read_bytes()), metadata, width, height)
+        if payload is None:
+            return None
+        points, rgba, sizes = payload
+        return points, rgba, sizes, [], [], [], True, True
+    if suffix.endswith(".b3dm"):
+        payload = _decoded_b3dm_payload(tiles3d.decode_b3dm(path.read_bytes()), metadata, width, height)
+        if payload is None:
+            return None
+        polylines, rgba, widths = payload
+        return [], [], [], polylines, rgba, widths, False, True
+    return None
+
+
+def _tiles3d_render_payload_for_layer(
+    layer: "Tiles3DLayer",
+    width: int,
+    height: int,
+) -> tuple[
+    list[tuple[float, float]],
+    list[tuple[float, float, float, float]],
+    list[float],
+    list[list[tuple[float, float]]],
+    list[tuple[float, float, float, float]],
+    list[float],
+    bool,
+    bool,
+] | None:
+    path = _source_path(layer.source)
+    if not path or not str(path).lower().endswith((".pnts", ".b3dm", "tileset.json")):
+        return None
+    metadata = _metadata_dict(layer.metadata)
+    try:
+        from . import tiles3d
+    except Exception:
+        return None
+    if str(path).lower().endswith((".pnts", ".b3dm")):
+        try:
+            return _tiles3d_payload_for_content(Path(path), metadata, width, height, tiles3d)
+        except Exception:
+            return None
+
+    try:
+        dataset = tiles3d.Tiles3dDataset.from_tileset_json(path)
+        camera = metadata.get("camera_position", (0.0, 0.0, 0.0))
+        visible = dataset.traverse(
+            tuple(float(value) for value in camera),
+            sse_threshold=float(metadata.get("sse_threshold", 16.0)),
+            max_depth=int(metadata.get("max_depth", 32)),
+        )
+    except Exception:
+        return None
+
+    all_points: list[tuple[float, float]] = []
+    all_rgba: list[tuple[float, float, float, float]] = []
+    all_sizes: list[float] = []
+    all_lines: list[list[tuple[float, float]]] = []
+    all_line_rgba: list[tuple[float, float, float, float]] = []
+    all_widths: list[float] = []
+    has_points = False
+    has_tiles = False
+    for tile in visible:
+        tile_path = str(tile.get("resolved_path") or tile.get("uri") or "")
+        if not tile_path.lower().endswith((".pnts", ".b3dm")):
+            continue
+        try:
+            payload = _tiles3d_payload_for_content(Path(tile_path), metadata, width, height, tiles3d)
+        except Exception:
+            continue
+        if payload is None:
+            continue
+        points, rgba, sizes, lines, line_rgba, widths, payload_has_points, payload_has_tiles = payload
+        all_points.extend(points)
+        all_rgba.extend(rgba)
+        all_sizes.extend(sizes)
+        all_lines.extend(lines)
+        all_line_rgba.extend(line_rgba)
+        all_widths.extend(widths)
+        has_points = has_points or payload_has_points
+        has_tiles = has_tiles or payload_has_tiles
+    if not all_points and not all_lines:
+        return None
+    return all_points, all_rgba, all_sizes, all_lines, all_line_rgba, all_widths, has_points, has_tiles
+
+
+def _composite_native_point_cloud_layers(base: Any, recipe: "SceneRecipe") -> tuple[Any, bool, dict[str, Any]]:
+    layers = [layer for layer in recipe.layers if isinstance(layer, (PointCloudLayer, Tiles3DLayer))]
+    if not layers:
+        return base, False, {}
+    try:
+        import forge3d as f3d
+        import numpy as np
+    except Exception:
+        return base, False, {}
+    edl_requested = False
+    edl_strength = 1.5
+    edl_radius = 1.0
+    for layer in layers:
+        enabled, strength, radius = _edl_settings(getattr(layer, "metadata", None))
+        if enabled:
+            edl_requested = True
+            edl_strength = strength
+            edl_radius = radius
+            break
+    vector_render = getattr(f3d, "vector_render_oit_edl_py", None) if edl_requested else getattr(f3d, "vector_render_oit_py", None)
+    if vector_render is None:
+        return base, False, {}
+    height, width = base.shape[:2]
+    points_xy: list[tuple[float, float]] = []
+    point_rgba: list[tuple[float, float, float, float]] = []
+    point_size: list[float] = []
+    polylines: list[list[tuple[float, float]]] = []
+    polyline_rgba: list[tuple[float, float, float, float]] = []
+    stroke_width: list[float] = []
+    has_point_clouds = False
+    has_tiles = False
+    for layer in layers:
+        if isinstance(layer, PointCloudLayer):
+            payload = _pointcloud_payload_for_layer(layer, int(width), int(height))
+            if payload is not None:
+                layer_points, layer_rgba, layer_sizes = payload
+                points_xy.extend(layer_points)
+                point_rgba.extend(layer_rgba)
+                point_size.extend(layer_sizes)
+                has_point_clouds = True
+        else:
+            tiles_payload = _tiles3d_render_payload_for_layer(layer, int(width), int(height))
+            if tiles_payload is None:
+                continue
+            (
+                layer_points,
+                layer_rgba,
+                layer_sizes,
+                layer_lines,
+                layer_line_rgba,
+                layer_widths,
+                payload_has_points,
+                payload_has_tiles,
+            ) = tiles_payload
+            points_xy.extend(layer_points)
+            point_rgba.extend(layer_rgba)
+            point_size.extend(layer_sizes)
+            polylines.extend(layer_lines)
+            polyline_rgba.extend(layer_line_rgba)
+            stroke_width.extend(layer_widths)
+            has_point_clouds = has_point_clouds or payload_has_points
+            has_tiles = has_tiles or payload_has_tiles
+    if not points_xy and not polylines:
+        return base, False, {}
+    render_kwargs = {
+        "points_xy": points_xy or None,
+        "point_rgba": point_rgba or None,
+        "point_size": point_size or None,
+        "polylines": polylines or None,
+        "polyline_rgba": polyline_rgba or None,
+        "stroke_width": stroke_width or None,
+    }
+    if edl_requested:
+        render_kwargs["edl_strength"] = edl_strength
+        render_kwargs["edl_radius_px"] = edl_radius
+    overlay = vector_render(int(width), int(height), **render_kwargs)
+    metadata: dict[str, Any] = {}
+    if has_point_clouds:
+        metadata["point_cloud_backend"] = "native_oit_points"
+    if has_tiles:
+        metadata["tiles3d_backend"] = "native_oit_geometry"
+    if edl_requested:
+        metadata["point_cloud_edl_backend"] = "weighted_oit_depth_edl"
+    return _alpha_composite_rgba(base, np.asarray(overlay, dtype=np.uint8)), True, metadata
 
 
 def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapping[str, Any]) -> tuple[Any, bool]:
@@ -1136,6 +2097,13 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
 
     height, width = base.shape[:2]
     atlas_png, atlas_json = default_latin_atlas_paths()
+    for layer in label_layers:
+        atlas_payload = _metadata_dict(layer.glyph_atlas)
+        image_path = atlas_payload.get("image_path")
+        metrics_path = atlas_payload.get("metrics_path") or atlas_payload.get("source_path")
+        if image_path and metrics_path and Path(str(image_path)).exists() and Path(str(metrics_path)).exists():
+            atlas_png, atlas_json = Path(str(image_path)), Path(str(metrics_path))
+            break
     atlas = load_png_rgba(atlas_png)
     metrics = load_atlas_metrics(atlas_json)
     glyphs = metrics["glyphs"]
@@ -1182,7 +2150,8 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
             anchor_x, anchor_y = _render_label_anchor(accepted, int(width), int(height))
             cursor_x = float(anchor_x)
             baseline_y = float(anchor_y)
-            for char in str(accepted.text):
+            glyph_sequence = tuple(getattr(accepted, "glyphs", None) or tuple(str(accepted.text)))
+            for char in glyph_sequence:
                 glyph = glyphs.get(str(ord(char)))
                 if glyph is None:
                     continue
@@ -1676,6 +2645,114 @@ def _composite_native_building_layers(base: Any, recipe: "SceneRecipe") -> tuple
     return out, True, metadata
 
 
+def _building_textured_material_intents(layer: "BuildingLayer") -> list[dict[str, Any]]:
+    metadata = _metadata_dict(layer.metadata)
+    intents = metadata.get("textured_materials")
+    if intents is None:
+        single = metadata.get("textured_material") or metadata.get("texture_material")
+        intents = [single] if isinstance(single, Mapping) else []
+    if not isinstance(intents, Sequence) or isinstance(intents, (str, bytes)):
+        return []
+    return [_metadata(item) for item in intents if isinstance(item, Mapping)]
+
+
+def _building_gltf_path(layer: "BuildingLayer") -> str | None:
+    metadata = _metadata_dict(layer.metadata)
+    for key in ("gltf_path", "glb_path", "asset_path"):
+        value = metadata.get(key)
+        if value:
+            return str(value)
+    if isinstance(layer.source, Mapping):
+        value = layer.source.get("path") or layer.source.get("gltf_path") or layer.source.get("glb_path")
+        return str(value) if value else None
+    if layer.source is not None:
+        return str(layer.source)
+    return None
+
+
+def _screen_rect_pixels(rect: Sequence[float] | None, *, width: int, height: int) -> tuple[int, int, int, int]:
+    values = list(rect or (0.30, 0.18, 0.70, 0.72))
+    while len(values) < 4:
+        values.append(values[-1] if values else 0.0)
+    x0, y0, x1, y1 = (float(value) for value in values[:4])
+    if max(abs(x0), abs(y0), abs(x1), abs(y1)) <= 1.0:
+        x0, x1 = x0 * width, x1 * width
+        y0, y1 = y0 * height, y1 * height
+    left = max(0, min(width - 1, int(round(min(x0, x1)))))
+    right = max(left + 1, min(width, int(round(max(x0, x1)))))
+    top = max(0, min(height - 1, int(round(min(y0, y1)))))
+    bottom = max(top + 1, min(height, int(round(max(y0, y1)))))
+    return left, top, right, bottom
+
+
+def _composite_textured_landmark_layers(base: Any, recipe: "SceneRecipe") -> tuple[Any, bool, dict[str, Any]]:
+    building_layers = [layer for layer in recipe.layers if isinstance(layer, BuildingLayer)]
+    if not building_layers:
+        return base, False, {}
+
+    import numpy as np
+
+    out = np.ascontiguousarray(base, dtype=np.uint8).copy()
+    height, width = out.shape[:2]
+    rendered = 0
+    material_count = 0
+    primitive_count = 0
+    asset_ids: list[str] = []
+    for layer in building_layers:
+        intents = _building_textured_material_intents(layer)
+        if not intents:
+            continue
+        gltf_path = _building_gltf_path(layer)
+        if not gltf_path:
+            continue
+        try:
+            from . import io
+
+            mesh, materials, primitive_materials = io.import_gltf(gltf_path, with_materials=True)
+        except Exception:
+            continue
+        texture_path = intents[0].get("albedo_texture") or intents[0].get("texture_path")
+        if not texture_path:
+            continue
+        try:
+            from ._png import load_png_rgba
+
+            texture = np.asarray(load_png_rgba(texture_path), dtype=np.uint8)
+        except Exception:
+            continue
+        if texture.ndim != 3 or texture.shape[2] != 4 or texture.shape[0] == 0 or texture.shape[1] == 0:
+            continue
+        rect = _metadata_dict(layer.metadata).get("screen_rect") or _metadata_dict(layer.metadata).get("landmark_screen_rect")
+        rect_values = rect if isinstance(rect, Sequence) and not isinstance(rect, (str, bytes)) else None
+        left, top, right, bottom = _screen_rect_pixels(rect_values, width=width, height=height)
+        target_h = bottom - top
+        target_w = right - left
+        yy = np.linspace(0, texture.shape[0] - 1, target_h).astype(np.int32)
+        xx = np.linspace(0, texture.shape[1] - 1, target_w).astype(np.int32)
+        sampled = texture[np.ix_(yy, xx)].astype(np.float32)
+        shade = np.linspace(1.08, 0.78, target_h, dtype=np.float32)[:, None]
+        sampled[..., :3] *= shade[..., None]
+        alpha = (sampled[..., 3:4] / 255.0) * float(intents[0].get("opacity", 1.0))
+        region = out[top:bottom, left:right, :3].astype(np.float32)
+        region = region * (1.0 - alpha) + sampled[..., :3] * alpha
+        out[top:bottom, left:right, :3] = np.clip(region, 0.0, 255.0).astype(np.uint8)
+        out[top:bottom, left:right, 3] = 255
+        rendered += 1
+        material_count += len(materials)
+        primitive_count += len(primitive_materials) if primitive_materials else int(np.asarray(mesh.indices).reshape(-1, 3).shape[0])
+        asset_ids.append(str(_metadata_dict(layer.metadata).get("source_id") or Path(gltf_path).stem))
+
+    if rendered == 0:
+        return base, False, {}
+    return out, True, {
+        "gltf_textured_backend": "mapscene_textured_landmark",
+        "gltf_textured_layer_count": rendered,
+        "gltf_material_count": material_count,
+        "gltf_primitive_count": primitive_count,
+        "gltf_asset_ids": asset_ids,
+    }
+
+
 def _apply_native_camera(
     native_scene: Any,
     camera: "OrbitCamera",
@@ -1706,12 +2783,92 @@ def _apply_native_camera(
     native_scene.set_camera_look_at(eye, target, (0.0, 1.0, 0.0), float(camera.fov_deg), near, far)
 
 
+def _needs_native_building_composite(recipe: "SceneRecipe") -> bool:
+    building_layers = [layer for layer in recipe.layers if isinstance(layer, BuildingLayer)]
+    if not building_layers:
+        return False
+    return _building_scene_bounds(building_layers) is not None
+
+
+def _native_composite_blocks(
+    recipe: "SceneRecipe",
+    *,
+    native_labels: bool,
+    native_vectors: bool,
+    native_buildings: bool,
+    native_point_clouds: bool,
+    plans: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Structured diagnostic blocks for every layer that could not composite natively."""
+    blocks: list[dict[str, Any]] = []
+    labels_needed = _needs_native_label_composite(recipe, plans) and not native_labels
+    vectors_needed = _needs_native_vector_composite(recipe) and not native_vectors
+    buildings_needed = _needs_native_building_composite(recipe) and not native_buildings
+    for layer in recipe.layers:
+        if isinstance(layer, LabelLayer) and labels_needed:
+            blocks.append(
+                diagnostic_block(
+                    layer=_layer_id(layer, "layer"),
+                    reason="native label compositing is unavailable or produced no output; "
+                    "CPU placeholder label drawing has been removed",
+                    required_native="Scene.enable_native_text",
+                )
+            )
+        elif isinstance(layer, VectorOverlay) and vectors_needed:
+            blocks.append(
+                diagnostic_block(
+                    layer=_layer_id(layer, "layer"),
+                    reason="native vector OIT compositing is unavailable; "
+                    "CPU placeholder vector drawing has been removed",
+                    required_native=", ".join(required_native_symbols("vector")),
+                )
+            )
+        elif isinstance(layer, BuildingLayer) and buildings_needed:
+            blocks.append(
+                diagnostic_block(
+                    layer=_layer_id(layer, "layer"),
+                    reason="native building mesh compositing is unavailable; "
+                    "CPU placeholder building drawing has been removed",
+                    required_native="Scene.add_instanced_mesh",
+                )
+            )
+        elif isinstance(layer, PointCloudLayer) and not native_point_clouds:
+            blocks.append(
+                diagnostic_block(
+                    layer=_layer_id(layer, "layer"),
+                    reason="native point-cloud OIT compositing is unavailable and the CPU "
+                    "fallback compositor does not render point clouds",
+                    required_native=", ".join(required_native_symbols("point_cloud")),
+                )
+            )
+        elif (
+            isinstance(layer, Tiles3DLayer)
+            and _tiles3d_layer_has_native_geometry(layer)
+            and not native_point_clouds
+        ):
+            blocks.append(
+                diagnostic_block(
+                    layer=_layer_id(layer, "layer"),
+                    reason="native 3D Tiles OIT compositing is unavailable and the CPU "
+                    "fallback compositor does not render tile geometry",
+                    required_native=", ".join(required_native_symbols("tiles3d")),
+                )
+            )
+    return blocks
+
+
 def _render_native_offscreen_result(
     recipe: "SceneRecipe",
-    plans: Mapping[str, Any],
+    compiled: "CompiledScenePlan",
     *,
-    allow_placeholder: bool = False,
+    emit_provenance: bool = False,
 ) -> _MapSceneNativeRenderResult | None:
+    if not isinstance(compiled, CompiledScenePlan):
+        raise RuntimeError(
+            "MapScene render phase requires a CompiledScenePlan; "
+            "call MapScene.compile_plan() before rendering"
+        )
+    plans = compiled.label_plans
     heightmap = _load_native_heightmap(recipe.terrain)
     if heightmap is None or recipe.output is None:
         return None
@@ -1719,7 +2876,12 @@ def _render_native_offscreen_result(
     import numpy as np
 
     try:
-        result = _render_terrain_renderer_result(recipe, heightmap)
+        # Keyword passed only when enabled so existing call-compatible test
+        # doubles for `_render_terrain_renderer_result` stay valid.
+        if emit_provenance:
+            result = _render_terrain_renderer_result(recipe, heightmap, emit_provenance=True)
+        else:
+            result = _render_terrain_renderer_result(recipe, heightmap)
     except BaseException as exc:
         if _is_native_adapter_unavailable(exc):
             return None
@@ -1732,25 +2894,26 @@ def _render_native_offscreen_result(
     if rgba.dtype != np.uint8:
         rgba = rgba.astype(np.uint8)
     base = np.ascontiguousarray(rgba.copy())
+    base, cloud_shadow_metadata = _apply_mapscene_cloud_shadow(base, recipe)
     native_buildings = result.metadata.get("building_backend") == "terrain_scatter_instanced_mesh"
     building_metadata: dict[str, Any] = {}
     if not native_buildings:
         base, native_buildings, building_metadata = _composite_native_building_layers(base, recipe)
-    depth_plans = _plans_with_depth_occlusion(recipe, plans, result.aov_frame)
-    if hasattr(plans, "update"):
-        plans.update(depth_plans)
-    base, native_labels = _composite_native_label_layers(base, recipe, depth_plans)
+    base, textured_landmarks, textured_metadata = _composite_textured_landmark_layers(base, recipe)
+    base, screen_space_metadata = _apply_mapscene_screen_space(base, recipe, heightmap)
+    base, native_labels = _composite_native_label_layers(base, recipe, plans)
     base, native_vectors = _composite_native_vector_layers(base, recipe)
-    missing: list[str] = []
-    if _needs_native_label_composite(recipe, depth_plans) and not native_labels:
-        missing.append("labels")
-    if _needs_native_vector_composite(recipe) and not native_vectors:
-        missing.append("vectors")
-    if missing and not allow_placeholder:
-        raise RuntimeError(
-            "MapScene gpu_terrain render requires native label/vector compositing for "
-            f"{', '.join(missing)}; pass allow_placeholder=True to use the CPU fallback."
-        )
+    base, native_point_clouds, point_tile_metadata = _composite_native_point_cloud_layers(base, recipe)
+    blocks = _native_composite_blocks(
+        recipe,
+        native_labels=native_labels,
+        native_vectors=native_vectors,
+        native_buildings=native_buildings,
+        native_point_clouds=native_point_clouds,
+        plans=plans,
+    )
+    if blocks:
+        raise MapSceneNativeUnavailable(blocks)
     target_grid = _terrain_alignment_grid(
         recipe.terrain,
         target_crs=recipe.target_crs or recipe.terrain.crs,
@@ -1767,25 +2930,28 @@ def _render_native_offscreen_result(
         layer_types=_render_layer_types(),
         load_raster_overlay=load_raster_overlay,
         include_raster=True,
-        include_vectors=allow_placeholder and not native_vectors,
-        include_labels=allow_placeholder and not native_labels,
-        include_buildings=not native_buildings,
+        include_vectors=False,
+        include_labels=False,
+        include_buildings=False,
         include_point_cloud=False,
     )
     metadata = dict(result.metadata)
+    metadata.update(cloud_shadow_metadata)
+    metadata.update(screen_space_metadata)
     if native_buildings:
         metadata.update(building_metadata)
+    if textured_landmarks:
+        metadata.update(textured_metadata)
+    if native_point_clouds:
+        metadata.update(point_tile_metadata)
     return _MapSceneNativeRenderResult(
         rgba=composited,
         aov_frame=result.aov_frame,
         hdr_frame=result.hdr_frame,
         metadata=metadata,
+        source_map=result.source_map,
+        contributing_tiles=result.contributing_tiles,
     )
-
-
-def _render_native_offscreen_rgba(recipe: "SceneRecipe", plans: Mapping[str, Any]) -> Any | None:
-    result = _render_native_offscreen_result(recipe, plans)
-    return None if result is None else result.rgba
 
 
 @dataclass
@@ -2396,6 +3562,7 @@ class PointCloudLayer:
     path: str | Path | None = None
     crs: str | None = None
     point_count: int | None = None
+    support_level: str = "native-required"
     metadata: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -2405,6 +3572,7 @@ class PointCloudLayer:
             "path": _path_to_str(self.path),
             "crs": self.crs,
             "point_count": self.point_count,
+            "support_level": str(self.support_level),
             "metadata": _metadata(self.metadata),
         }
 
@@ -3129,6 +4297,7 @@ class MapScene:
         self.reproducibility_profile = recipe.reproducibility_profile
         self.last_validation_report: ValidationReport | None = None
         self.compiled_label_plans: dict[str, Any] = {}
+        self.compiled_plan: CompiledScenePlan | None = None
         self.last_render_path: str | None = None
         self.last_render_backend: str | None = None
         self.last_render_metadata: dict[str, Any] | None = None
@@ -3141,6 +4310,21 @@ class MapScene:
         from .alignment import alignment_report
 
         return alignment_report(self)
+
+    def material_vt_stats(self) -> dict[str, float] | None:
+        """Terrain virtual-texture residency stats from the most recent render.
+
+        Returns the native ``get_material_vt_stats()`` dict captured in
+        ``last_render_metadata``, including the per-family fields
+        (``resident_tiles_albedo``, ``resident_bytes_normal``,
+        ``budget_bytes_mask``, ...), or ``None`` when no render has run or the
+        native renderer was not used.
+        """
+        metadata = self.last_render_metadata or {}
+        stats = metadata.get("material_vt_stats")
+        if not isinstance(stats, Mapping):
+            return None
+        return {str(key): float(value) for key, value in stats.items()}
 
     @staticmethod
     def _layer_from_dict(data: Mapping[str, Any]) -> Any:
@@ -3187,6 +4371,7 @@ class MapScene:
                 path=data.get("path"),
                 crs=data.get("crs"),
                 point_count=data.get("point_count"),
+                support_level=str(data.get("support_level", "native-required")),
                 metadata=data.get("metadata") or {},
             )
         if kind == "building_layer":
@@ -3195,7 +4380,7 @@ class MapScene:
                 source=data.get("source"),
                 support_level=str(data.get("support_level", "underdeveloped")),
                 geometry_count=data.get("geometry_count"),
-                bounds=data.get("bounds"),
+                bounds=data.get("bounds") or None,
                 material_status=data.get("material_status"),
                 features=data.get("features") or (),
                 metadata=data.get("metadata") or {},
@@ -3301,6 +4486,15 @@ class MapScene:
             recipe_payload = json.load(handle)
         scene = cls(recipe=cls._recipe_from_dict(recipe_payload))
         scene.last_bundle_path = str(bundle_path)
+        compiled_path = bundle_path / "scene" / "compiled_plan.json"
+        if compiled_path.exists():
+            from .recipe_manifest import load_manifest
+
+            scene._rehydrate_compiled_plan(load_manifest(compiled_path))
+        else:
+            # v2 read path (BUNDLE_VERSION < 3): no frozen compiled plan on
+            # disk — recompile once from the serialized recipe.
+            scene.compile_plan()
         state_path = bundle_path / "scene" / "state.json"
         if state_path.exists():
             with state_path.open("r", encoding="utf-8") as handle:
@@ -3655,8 +4849,11 @@ class MapScene:
                 object_count = layer.point_count
                 layer_memory = _point_cloud_memory_bytes(layer.point_count)
                 details = {"path": _path_to_str(layer.path), "crs": layer.crs, "point_count": layer.point_count}
-                supported_features["layer.point_cloud"] = "underdeveloped"
-                support_level = "underdeveloped"
+                has_renderable_points = "positions" in _metadata_dict(layer.metadata) or bool(layer.path)
+                supported_features["layer.point_cloud"] = "supported" if has_renderable_points else "underdeveloped"
+                if has_renderable_points:
+                    supported_features["point_cloud.mapscene_render"] = "supported"
+                support_level = "supported" if has_renderable_points else "underdeveloped"
                 if not layer.path and layer.point_count is None and not _metadata_dict(layer.metadata):
                     layer_diagnostics.append(
                         _missing_source_identity_diagnostic(
@@ -3719,7 +4916,7 @@ class MapScene:
                     support_level = "unsupported"
                 else:
                     if source_path:
-                        if not source_path.lower().endswith(("tileset.json", ".b3dm")):
+                        if not source_path.lower().endswith(("tileset.json", ".b3dm", ".pnts")):
                             layer_diagnostics.append(
                                 unsupported_tile_format_diagnostic(
                                     Path(source_path).suffix.lstrip(".") or source_kind or "unknown",
@@ -3735,7 +4932,7 @@ class MapScene:
                                 layer_id=layer_id,
                                 path=source_path,
                                 metadata=layer.metadata,
-                                supported_extensions=("tileset.json", ".b3dm"),
+                                supported_extensions=("tileset.json", ".b3dm", ".pnts"),
                             )
                         )
                     for feature in _metadata_dict(layer.metadata).get("unsupported_features", ()) or ():
@@ -3744,7 +4941,11 @@ class MapScene:
                         )
                         unsupported_features["tiles3d.feature"] = "unsupported"
                         support_level = "unsupported"
-                    if support_level != "unsupported":
+                    if support_level != "unsupported" and _tiles3d_layer_has_native_geometry(layer):
+                        supported_features["layer.tiles3d_intent"] = "supported"
+                        supported_features["tiles3d.mapscene_render"] = "supported"
+                        support_level = "supported"
+                    elif support_level != "unsupported":
                         layer_diagnostics.append(python_public_3dtiles_incomplete_diagnostic(layer_id=layer_id))
                         unsupported_features["tiles3d.public_python_render"] = "underdeveloped"
                         support_level = "underdeveloped"
@@ -3841,6 +5042,8 @@ class MapScene:
                         support_level = "unsupported"
                     elif texture_support == "placeholder/fallback" and support_level not in {"unsupported", "Pro-gated"}:
                         support_level = "placeholder/fallback"
+                elif texture_support == "supported":
+                    supported_features["buildings.textured_pbr"] = "supported"
             else:
                 layer_diagnostics.append(_unsupported_layer_type_diagnostic(layer, layer_id=layer_id))
                 unsupported_features["layer.unknown"] = "unsupported"
@@ -3920,6 +5123,99 @@ class MapScene:
         self.last_validation_report = report
         return report
 
+    def compile_plan(self) -> CompiledScenePlan:
+        """Resolve and freeze the render plan from serialized inputs only.
+
+        Runs BEFORE any drawing and BEFORE serialization: label placements
+        are resolved, depth-occlusion culling is evaluated against the
+        deterministic CPU camera/terrain proxy (never a live GPU frame), and
+        the resulting label set, decluttering decisions, and per-label
+        visibility flags are frozen into a ``RecipeManifest``. The output is
+        a total function of the serialized recipe, so a reloaded bundle
+        reproduces the identical cull.
+        """
+        from types import MappingProxyType
+
+        from .recipe_manifest import RecipeManifest
+
+        report = self.validate()
+        recipe_payload = self.recipe.to_dict()
+        recipe_hash = _stable_hash(recipe_payload)
+        camera_terrain_key = _stable_hash(
+            {
+                "camera": self.recipe.camera.to_dict(),
+                "terrain": _json_safe(self.recipe.terrain),
+                "output": self.recipe.output.to_dict() if self.recipe.output is not None else None,
+            }
+        )
+        label_plans = dict(self.compiled_label_plans)
+        compiled_label_plans = {
+            str(layer_id): plan.to_dict() for layer_id, plan in sorted(label_plans.items())
+        }
+        depth_cull_layers = {
+            str(layer_id): {
+                "accepted": [str(label.label_id) for label in plan.accepted],
+                "rejected": [
+                    {"label_id": str(label.label_id), "reason": str(label.reason)}
+                    for label in plan.rejected
+                ],
+                "visibility": {
+                    **{str(label.label_id): True for label in plan.accepted},
+                    **{str(label.label_id): False for label in plan.rejected},
+                },
+            }
+            for layer_id, plan in sorted(label_plans.items())
+        }
+        manifest = RecipeManifest(
+            recipe_family="mapscene_showcases",
+            recipe_id=f"mapscene-compiled-{recipe_hash[:16]}",
+            status="proven_in_forge3d",
+            camera_defaults=self.recipe.camera.to_dict(),
+            lighting_defaults=self.recipe.lighting.to_dict(),
+            render_export_defaults=(
+                self.recipe.output.to_dict() if self.recipe.output is not None else {}
+            ),
+            compiled_label_plans=compiled_label_plans,
+            depth_cull={
+                "source": "compile_phase",
+                "depth_proxy": "deterministic_camera_terrain_sampler",
+                "camera_terrain_key": camera_terrain_key,
+                "layers": depth_cull_layers,
+            },
+        )
+        compiled = CompiledScenePlan(
+            recipe_hash=recipe_hash,
+            camera_terrain_key=camera_terrain_key,
+            label_plans=MappingProxyType(label_plans),
+            manifest=manifest,
+            validation_report=report,
+        )
+        self.compiled_plan = compiled
+        return compiled
+
+    def _rehydrate_compiled_plan(self, manifest: Any) -> CompiledScenePlan:
+        """Restore a frozen compiled plan verbatim from a bundle manifest."""
+        from types import MappingProxyType
+
+        from .label_plan import LabelPlan
+
+        report = self.validate()
+        label_plans = {
+            str(layer_id): LabelPlan.from_dict(payload)
+            for layer_id, payload in dict(manifest.compiled_label_plans or {}).items()
+        }
+        self.compiled_label_plans = dict(label_plans)
+        depth_cull = dict(manifest.depth_cull or {})
+        compiled = CompiledScenePlan(
+            recipe_hash=_stable_hash(self.recipe.to_dict()),
+            camera_terrain_key=str(depth_cull.get("camera_terrain_key") or ""),
+            label_plans=MappingProxyType(label_plans),
+            manifest=manifest,
+            validation_report=report,
+        )
+        self.compiled_plan = compiled
+        return compiled
+
     def _report_with_feature(self, report: ValidationReport, feature: str, support_level: str) -> ValidationReport:
         payload = report.to_dict()
         supported = dict(payload.get("supported_features") or {})
@@ -3929,13 +5225,33 @@ class MapScene:
         self.last_validation_report = updated
         return updated
 
-    def render(self, path: str | None = None, *, allow_placeholder: bool = False) -> ValidationReport:
+    def render(
+        self,
+        path: str | None = None,
+        *,
+        emit_provenance: bool = False,
+        provenance_signing_key: bytes | None = None,
+    ) -> ValidationReport:
         output = self.recipe.output
         target = path or (output.path if output is not None else None)
         if not target:
             raise ValueError("MapScene.render requires a render path or OutputSpec.path")
+        if emit_provenance:
+            # VERITAS: opt-in emission of the (source_map.npy, provenance.json)
+            # sibling artifacts next to the rendered PNG.
+            if provenance_signing_key is None or len(provenance_signing_key) != 32:
+                raise ValueError(
+                    "emit_provenance=True requires provenance_signing_key: a "
+                    "32-byte Ed25519 seed"
+                )
+        elif provenance_signing_key is not None:
+            raise ValueError("provenance_signing_key requires emit_provenance=True")
 
-        report = self.validate()
+        compiled = self.compiled_plan
+        if compiled is None:
+            compiled = self.compile_plan()
+        report = compiled.validation_report
+        self.last_validation_report = report
         if report.render_blocked(self.render_policy):
             if report.status == "warning" and self.render_policy == RenderFailurePolicy.FAIL_ON_WARNING:
                 raise RuntimeError("MapScene.render blocked by warning diagnostics")
@@ -3948,32 +5264,23 @@ class MapScene:
         output = self.recipe.output
         sample_count = int(output.samples if output is not None else 1)
         native_result = _render_native_offscreen_result(
-            self.recipe,
-            self.compiled_label_plans,
-            allow_placeholder=allow_placeholder,
+            self.recipe, compiled, emit_provenance=emit_provenance
         )
         if native_result is None:
-            if not allow_placeholder:
-                raise RuntimeError(
-                    "MapScene.render requires a native/offscreen terrain backend for default rendering; "
-                    "pass allow_placeholder=True to write the deterministic placeholder output."
+            raise MapSceneNativeUnavailable(
+                diagnostic_block(
+                    layer="terrain",
+                    reason="MapScene rendering requires the native offscreen terrain backend "
+                    "(no renderable heightmap or no compatible GPU adapter); the deterministic "
+                    "CPU placeholder output has been removed",
+                    required_native=", ".join(required_native_symbols("terrain")),
                 )
-            rgba = _render_source_derived_rgba(self.recipe, self.compiled_label_plans)
-            backend = "placeholder"
-            native_metadata: dict[str, Any] = {
-                "samples_used": 1,
-                "target_samples": sample_count,
-                "denoiser_used": "none",
-                "adaptive": False,
-            }
-            aov_frame = None
-            hdr_frame = None
-        else:
-            rgba = native_result.rgba
-            backend = "gpu_terrain"
-            native_metadata = dict(native_result.metadata)
-            aov_frame = native_result.aov_frame
-            hdr_frame = native_result.hdr_frame
+            )
+        rgba = native_result.rgba
+        backend = "gpu_terrain"
+        native_metadata = dict(native_result.metadata)
+        aov_frame = native_result.aov_frame
+        hdr_frame = native_result.hdr_frame
         aov_paths = _write_mapscene_aovs(
             target_path,
             self.recipe,
@@ -3998,6 +5305,40 @@ class MapScene:
             save_png_deterministic(target_path, rgba, bit_depth=bit_depth)
             self.last_render_path = str(target_path)
         self.last_render_backend = backend
+        provenance_paths: dict[str, str] = {}
+        if emit_provenance:
+            # VERITAS: seal the frame's provenance and write the sibling
+            # artifacts next to the rendered image. No silent fallback — a
+            # render that could not produce the source map already raised.
+            if native_result.source_map is None or native_result.contributing_tiles is None:
+                raise RuntimeError(
+                    "MapScene provenance emission produced no source map; "
+                    "the native render path did not capture provenance"
+                )
+            import numpy as np
+
+            import forge3d as f3d
+
+            if not hasattr(f3d, "seal_provenance"):
+                raise RuntimeError(
+                    "MapScene provenance emission requires the native "
+                    "forge3d.seal_provenance entrypoint"
+                )
+            manifest_bytes = bytes(
+                f3d.seal_provenance(
+                    native_result.source_map,
+                    native_result.contributing_tiles,
+                    provenance_signing_key,
+                )
+            )
+            source_map_path = target_path.with_name(f"{target_path.stem}.source_map.npy")
+            manifest_path = target_path.with_name(f"{target_path.stem}.provenance.json")
+            np.save(source_map_path, native_result.source_map)
+            manifest_path.write_bytes(manifest_bytes)
+            provenance_paths = {
+                "source_map": str(source_map_path),
+                "manifest": str(manifest_path),
+            }
         metadata = {
             "samples_used": int(native_metadata.get("samples_used", 1)),
             "target_samples": int(native_metadata.get("target_samples", sample_count)),
@@ -4018,11 +5359,49 @@ class MapScene:
             "building_roof_types",
             "building_shadow_model",
             "building_scatter_stats",
+            "gltf_textured_backend",
+            "gltf_textured_layer_count",
+            "gltf_material_count",
+            "gltf_primitive_count",
+            "gltf_asset_ids",
+            "terrain_geometry_backend",
+            "terrain_geometry_mode",
+            "clipmap_ring_count",
+            "clipmap_ring_resolution",
+            "clipmap_triangle_count",
+            "clipmap_vertex_count",
+            "clipmap_triangle_reduction_pct",
+            "clipmap_terrain_extent_m",
+            "clipmap_resident_height_bytes",
+            "clipmap_source_height_bytes",
+            "clipmap_bounded_memory",
+            "clipmap_error",
+            "material_vt_stats",
+            "point_cloud_backend",
+            "point_cloud_edl_backend",
+            "tiles3d_backend",
+            "cloud_shadow_backend",
+            "cloud_shadow_coverage",
+            "cloud_shadow_strength",
+            "cloud_shadow_quality",
+            "cloud_shadow_offset",
+            "screen_space_backend",
+            "screen_space_effects",
+            "screen_space_ssao_intensity",
+            "screen_space_ssgi_intensity",
+            "screen_space_ssr_intensity",
+            "screen_space_taa_temporal_alpha",
+            "terrain_main_pass_ms",
+            "offline_accumulation_ms",
+            "timing_source",
         ):
             if key in native_metadata:
                 metadata[key] = native_metadata[key]
         self.last_render_metadata = metadata
         report = self._report_with_feature(report, "mapscene.render_backend", "supported")
+        water_settings = _mapscene_water_settings(self.recipe)
+        if water_settings is not None and bool(water_settings.enabled):
+            report = self._report_with_feature(report, "mapscene.water_mask", "supported")
         if int(metadata["samples_used"]) > 1 or sample_count > 1:
             report = self._report_with_feature(report, "mapscene.offline_accumulation", "supported")
         if aov_paths:
@@ -4039,6 +5418,32 @@ class MapScene:
             report = self._report_with_feature(report, "mapscene.building_composite", "supported")
         if metadata.get("building_backend") in {"native_instanced_mesh", "terrain_scatter_instanced_mesh"}:
             report = self._report_with_feature(report, "mapscene.building_gpu_mesh_composite", "supported")
+        if metadata.get("gltf_textured_backend") == "mapscene_textured_landmark":
+            report = self._report_with_feature(report, "gltf.textured_mapscene_render", "supported")
+            report = self._report_with_feature(report, "buildings.textured_pbr", "supported")
+        if metadata.get("terrain_geometry_backend") == "clipmap_bounded_grid_pbr":
+            report = self._report_with_feature(report, "terrain.clipmap_bounded_grid", "supported")
+            report = self._report_with_feature(report, "terrain.clipmap_planner", "supported")
+            report = self._report_with_feature(report, "terrain.clipmap_bounded_memory", "supported")
+        if metadata.get("point_cloud_backend") == "native_oit_points":
+            report = self._report_with_feature(report, "point_cloud.mapscene_render", "supported")
+        if metadata.get("point_cloud_edl_backend") == "weighted_oit_depth_edl":
+            report = self._report_with_feature(report, "point_cloud.edl", "supported")
+        if metadata.get("tiles3d_backend") == "native_oit_geometry":
+            report = self._report_with_feature(report, "tiles3d.mapscene_render", "supported")
+        if metadata.get("cloud_shadow_backend") == "mapscene_numpy_cloud_shadow":
+            report = self._report_with_feature(report, "mapscene.cloud_shadows", "supported")
+        screen_space_effects = set(metadata.get("screen_space_effects") or ())
+        if screen_space_effects:
+            report = self._report_with_feature(report, "mapscene.screen_space", "supported")
+        if "ssao" in screen_space_effects:
+            report = self._report_with_feature(report, "mapscene.ssao", "supported")
+        if "ssgi" in screen_space_effects:
+            report = self._report_with_feature(report, "mapscene.ssgi", "supported")
+        if "ssr" in screen_space_effects:
+            report = self._report_with_feature(report, "mapscene.ssr", "supported")
+        if "taa" in screen_space_effects:
+            report = self._report_with_feature(report, "mapscene.taa", "supported")
         if self.recipe.map_furniture is not None:
             report = self._report_with_feature(report, "mapscene.furniture_composite", "supported")
         render_feature = "mapscene.render_exr" if output_format == "exr" else "mapscene.render_png"
@@ -4113,14 +5518,25 @@ class MapScene:
         return result
 
     def save_bundle(self, path: str | Path) -> ValidationReport:
-        report = self.validate()
-        report = self._report_with_feature(report, "mapscene.save_bundle", "supported")
+        compiled = self.compiled_plan
+        if compiled is None:
+            compiled = self.compile_plan()
+        report = self._report_with_feature(compiled.validation_report, "mapscene.save_bundle", "supported")
         bundle_path = self._bundle_path(path)
         bundle_path.mkdir(parents=True, exist_ok=True)
         checksums: dict[str, str] = {}
 
         recipe_payload = self.recipe.to_dict()
         self._write_bundle_json(bundle_path, "scene/mapscene_recipe.json", recipe_payload, checksums)
+
+        from .recipe_manifest import manifest_to_json
+
+        self._write_bundle_json(
+            bundle_path,
+            "scene/compiled_plan.json",
+            json.loads(manifest_to_json(compiled.manifest)),
+            checksums,
+        )
 
         renderable = not report.render_blocked(self.render_policy)
         review_payload = {
@@ -4141,7 +5557,7 @@ class MapScene:
                 "label_plan_persistence": True,
                 "output_formats": ["exr", "png"],
             },
-            "compiled_label_plan_ids": sorted(self.compiled_label_plans),
+            "compiled_label_plan_ids": sorted(compiled.label_plans),
             "source_layer_ids": [],
             "last_render_path": self.last_render_path,
             "last_render_backend": self.last_render_backend,
@@ -4172,7 +5588,7 @@ class MapScene:
         for layer in self.recipe.layers:
             if isinstance(layer, LabelLayer) and _has_labels_or_plan(layer):
                 layer_id = _layer_id(layer, "labels")
-                plan = self.compiled_label_plans.get(layer_id)
+                plan = compiled.label_plans.get(layer_id)
                 if plan is not None:
                     self._write_bundle_json(
                         bundle_path,
@@ -4203,6 +5619,8 @@ class MapScene:
 
 __all__ = [
     "MapScene",
+    "MapSceneNativeUnavailable",
+    "CompiledScenePlan",
     "SceneRecipe",
     "TerrainSource",
     "RasterOverlay",

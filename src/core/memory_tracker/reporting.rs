@@ -9,6 +9,8 @@ impl ResourceRegistry {
         let texture_bytes = self.texture_bytes.load(Ordering::Relaxed);
         let host_visible_bytes = self.host_visible_bytes.load(Ordering::Relaxed);
         let total_bytes = buffer_bytes + texture_bytes;
+        let peak_host_visible_bytes = self.peak_host_visible_bytes.load(Ordering::Relaxed);
+        let peak_total_bytes = self.peak_total_bytes.load(Ordering::Relaxed);
         let within_budget = host_visible_bytes <= self.budget_limit;
         let utilization_ratio = host_visible_bytes as f64 / self.budget_limit as f64;
         let resident_tiles = self.resident_tiles.load(Ordering::Relaxed);
@@ -17,6 +19,7 @@ impl ResourceRegistry {
         let staging_ring_count = self.staging_ring_count.load(Ordering::Relaxed);
         let staging_buffer_size = self.staging_buffer_size.load(Ordering::Relaxed);
         let staging_buffer_stalls = self.staging_buffer_stalls.load(Ordering::Relaxed);
+        let budget_policy = self.get_budget_policy();
 
         MemoryMetrics {
             buffer_count,
@@ -25,6 +28,8 @@ impl ResourceRegistry {
             texture_bytes,
             host_visible_bytes,
             total_bytes,
+            peak_host_visible_bytes,
+            peak_total_bytes,
             limit_bytes: self.budget_limit,
             within_budget,
             utilization_ratio,
@@ -34,6 +39,7 @@ impl ResourceRegistry {
             staging_ring_count,
             staging_buffer_size,
             staging_buffer_stalls,
+            budget_policy,
         }
     }
 
@@ -44,10 +50,15 @@ impl ResourceRegistry {
     pub fn check_budget(&self, additional_host_visible: u64) -> Result<(), String> {
         let current = self.host_visible_bytes.load(Ordering::Relaxed);
         if current.saturating_add(additional_host_visible) > self.budget_limit {
-            return Err(format!(
+            let message = format!(
                 "Memory budget exceeded: current {} bytes + requested {} bytes would exceed limit of {} bytes",
                 current, additional_host_visible, self.budget_limit
-            ));
+            );
+            if self.get_budget_policy() == "warn" {
+                log::warn!("{message}");
+                return Ok(());
+            }
+            return Err(message);
         }
         Ok(())
     }

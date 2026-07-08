@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::Instant;
 
 #[cfg(feature = "extension-module")]
@@ -6,10 +7,14 @@ use super::*;
 
 #[cfg(feature = "extension-module")]
 use crate::core::feedback_buffer::FeedbackBuffer;
+#[cfg(feature = "enable-staging-rings")]
+use crate::core::staging_rings::StagingRing;
 #[cfg(feature = "extension-module")]
 use crate::core::tile_cache::{TileCache, TileData, TileId};
 #[cfg(feature = "extension-module")]
-use crate::core::virtual_texture::PageTableEntry;
+use crate::terrain::vt_family_residency::{
+    decode_feedback_payload, FamilyResidency, FamilyResidencyTracker, TileKey, VT_FAMILY_COUNT,
+};
 
 #[cfg(feature = "extension-module")]
 const TERRAIN_VT_SUPPORTED_FAMILIES: &[&str] = &["albedo", "normal", "mask"];
@@ -33,6 +38,11 @@ pub(super) struct VTSource {
     pub virtual_size: (u32, u32),
     pub data: Vec<u8>,
     pub fallback_color: [f32; 4],
+    /// VERITAS: stable, device-independent source id
+    /// (`family_slot * 4 + material_index + 1`; 0 == SOURCE_ID_NONE).
+    pub source_id: u32,
+    /// VERITAS: SHA256 of `data`, computed once at ingest.
+    pub content_hash: [u8; 32],
 }
 
 #[cfg(feature = "extension-module")]
@@ -49,16 +59,22 @@ struct TerrainVTUniformsGpu {
     config0: [u32; 4],
     config1: [u32; 4],
     config2: [u32; 4],
+    /// Per-family info (`TerrainVtFamilyInfo`): the single source of truth the
+    /// shader reads per family. x = enabled (0/1), y = page-table layer
+    /// offset, z = atlas layer (0 while all families share one atlas layer),
+    /// w = registered source count. Matches `family_info` in
+    /// `terrain_pbr_pom.wgsl`; refreshed every `prepare_frame`.
+    family_info: [[u32; 4]; TERRAIN_VT_FAMILY_COUNT as usize],
 }
 
 #[cfg(feature = "extension-module")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct TileKey {
-    family_slot: u32,
-    material_index: u32,
-    x: u32,
-    y: u32,
-    mip_level: u32,
+#[repr(C)]
+#[derive(Clone, Copy, Default, Pod, Zeroable)]
+struct PageTableEntry {
+    atlas_u: f32,
+    atlas_v: f32,
+    is_resident: u32,
+    mip_bias: f32,
 }
 
 #[cfg(feature = "extension-module")]
@@ -74,6 +90,10 @@ struct MipImage {
 struct PreparedVTSource {
     fallback_color: [f32; 4],
     mips: Vec<MipImage>,
+    /// VERITAS: stable source id + SHA256 of the source payload (both
+    /// copied from `VTSource`, assigned at ingest).
+    source_id: u32,
+    content_hash: [u8; 32],
 }
 
 #[cfg(feature = "extension-module")]
@@ -92,6 +112,7 @@ struct TerrainMaterialVTStats {
     resident_megabytes: f32,
     source_count: u32,
     feedback_requests: u32,
+    families: [FamilyResidency; VT_FAMILY_COUNT],
 }
 
 #[cfg(feature = "extension-module")]
@@ -107,15 +128,20 @@ struct TerrainMaterialVTRuntime {
     pages_y0: u32,
     atlas_texture: wgpu::Texture,
     atlas_view: wgpu::TextureView,
+    #[cfg(feature = "enable-staging-rings")]
+    staging_ring: StagingRing,
     page_table_texture: wgpu::Texture,
     page_table_view: wgpu::TextureView,
     page_tables: Vec<Vec<PageTableEntry>>,
+    dirty_page_table_layers: HashSet<usize>,
     sources: HashMap<(u32, u32), PreparedVTSource>,
     tile_cache: TileCache,
+    family_residency: FamilyResidencyTracker,
     feedback_buffer: Option<FeedbackBuffer>,
-    pending_feedback: Vec<TileKey>,
+    pending_feedback: [Vec<TileKey>; VT_FAMILY_COUNT],
     feedback_staged: bool,
     budget_pages: u32,
+    residency_budget_mb: f32,
     source_generation: u64,
     use_feedback: bool,
     family_mask: u32,
@@ -183,12 +209,22 @@ impl TerrainMaterialVT {
             }
         }
 
+        // VERITAS provenance identity: derive the stable source id from the
+        // (family, material) slot so it is reproducible across devices and
+        // registration orders; hash the payload once at ingest.
+        let source_id = Self::family_slot(&family)
+            .map_or(crate::core::provenance::SOURCE_ID_NONE, |family_slot| {
+                crate::core::provenance::source_id_for(family_slot, material_index)
+            });
+        let content_hash = crate::core::provenance::sha256(&data);
         self.sources.insert(
             (material_index, family),
             VTSource {
                 virtual_size: virtual_size_px,
                 data,
                 fallback_color,
+                source_id,
+                content_hash,
             },
         );
         self.source_generation = self.source_generation.wrapping_add(1);
@@ -229,6 +265,24 @@ impl TerrainMaterialVT {
         out.insert(
             "feedback_requests".to_string(),
             stats.feedback_requests as f32,
+        );
+        let mut resident_bytes_total = 0u64;
+        for (slot, name) in TERRAIN_VT_SUPPORTED_FAMILIES.iter().enumerate() {
+            let family = stats.families[slot];
+            out.insert(
+                format!("resident_tiles_{name}"),
+                family.resident_tiles as f32,
+            );
+            out.insert(
+                format!("resident_bytes_{name}"),
+                family.resident_bytes as f32,
+            );
+            out.insert(format!("budget_bytes_{name}"), family.budget_bytes as f32);
+            resident_bytes_total += family.resident_bytes;
+        }
+        out.insert(
+            "resident_bytes_total".to_string(),
+            resident_bytes_total as f32,
         );
         out
     }
@@ -332,8 +386,8 @@ impl TerrainMaterialVT {
     pub fn prepare_frame(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        device: &Arc<wgpu::Device>,
+        queue: &Arc<wgpu::Queue>,
         params: &crate::terrain::render_params::TerrainRenderParams,
         decoded: &crate::terrain::render_params::DecodedTerrainSettings,
         material_count: u32,
@@ -346,18 +400,44 @@ impl TerrainMaterialVT {
         if layers.is_empty() {
             self.runtime = None;
             self.last_stats = TerrainMaterialVTStats::default();
-            Self::write_disabled_uniforms(queue, vt_uniform_buffer, vt_fallback_uniform_buffer);
+            Self::write_disabled_uniforms(
+                queue.as_ref(),
+                vt_uniform_buffer,
+                vt_fallback_uniform_buffer,
+            );
             return Ok(false);
+        }
+
+        // A requested family with no registered source is a fatal diagnostic:
+        // rendering would silently degrade the PBR result (e.g. normal-mapped
+        // lighting collapsing to fallback colors), so refuse instead.
+        for layer in &layers {
+            let has_source = self
+                .sources
+                .keys()
+                .any(|(_, family)| family == &layer.family);
+            if !has_source {
+                return Err(format!(
+                    "terrain VT: family '{}' requested but no source registered; refusing to render with corrupted PBR",
+                    layer.family
+                ));
+            }
         }
 
         let effective_material_count =
             material_count.clamp(1, super::core::MATERIAL_LAYER_CAPACITY as u32);
-        self.ensure_runtime(device, &layers, effective_material_count, &decoded.vt)?;
+        self.ensure_runtime(
+            device,
+            queue,
+            &layers,
+            effective_material_count,
+            &decoded.vt,
+        )?;
         let runtime = self.runtime.as_mut().unwrap();
         runtime.reset_frame_stats(decoded.vt.residency_budget_mb);
 
         let fallback_colors = runtime.fallback_colors();
-        Self::write_uniforms(queue, vt_uniform_buffer, runtime, true);
+        Self::write_uniforms(queue.as_ref(), vt_uniform_buffer, runtime, true);
         queue.write_buffer(
             vt_fallback_uniform_buffer,
             0,
@@ -367,15 +447,14 @@ impl TerrainMaterialVT {
         let requests =
             runtime.collect_requests(params, render_width, render_height, decoded.vt.use_feedback);
         for key in requests {
-            runtime.ensure_tile_resident(device, queue, key)?;
+            runtime.ensure_tile_resident(encoder, device.as_ref(), queue.as_ref(), key)?;
         }
-        runtime.upload_page_tables(queue);
+        runtime.upload_page_tables(queue.as_ref());
         runtime.refresh_stats();
         self.last_stats = runtime.stats;
 
         if let Some(feedback_buffer) = runtime.feedback_buffer.as_ref() {
             feedback_buffer.clear(encoder);
-            runtime.feedback_staged = false;
         }
 
         Ok(true)
@@ -390,6 +469,9 @@ impl TerrainMaterialVT {
         let Some(feedback_buffer) = runtime.feedback_buffer.as_ref() else {
             return Ok(());
         };
+        if feedback_buffer.has_pending_readback() {
+            return Ok(());
+        }
         feedback_buffer.prepare_readback(encoder);
         runtime.feedback_staged = true;
         Ok(())
@@ -398,7 +480,7 @@ impl TerrainMaterialVT {
     pub fn finish_frame(
         &mut self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        _queue: &wgpu::Queue,
     ) -> Result<(), String> {
         let Some(runtime) = self.runtime.as_mut() else {
             return Ok(());
@@ -407,17 +489,23 @@ impl TerrainMaterialVT {
             return Ok(());
         }
 
-        runtime.pending_feedback.clear();
+        for bucket in runtime.pending_feedback.iter_mut() {
+            bucket.clear();
+        }
         if let Some(feedback_buffer) = runtime.feedback_buffer.as_ref() {
-            let entries = feedback_buffer.read_feedback_entries(device, queue)?;
+            let Some(entries) = feedback_buffer.try_read_feedback_entries(device)? else {
+                return Ok(());
+            };
+            // Demux decoded entries by family so each family drives its own
+            // requested tile/mip set; a family with no feedback this frame
+            // simply contributes an empty bucket.
             for entry in entries {
-                let encoded = entry.frame_number.saturating_sub(1);
-                let material_count = runtime.material_count.max(1);
-                let family_slot = encoded / material_count;
-                let material_index = encoded % material_count;
-                if family_slot >= TERRAIN_VT_FAMILY_COUNT
-                    || !runtime.sources.contains_key(&(family_slot, material_index))
-                {
+                let Some((family_slot, material_index)) =
+                    decode_feedback_payload(entry.frame_number, runtime.material_count)
+                else {
+                    continue;
+                };
+                if !runtime.sources.contains_key(&(family_slot, material_index)) {
                     continue;
                 }
                 if entry.mip_level >= runtime.max_mip_levels {
@@ -427,7 +515,7 @@ impl TerrainMaterialVT {
                 if entry.tile_x >= pages_x || entry.tile_y >= pages_y {
                     continue;
                 }
-                runtime.pending_feedback.push(TileKey {
+                runtime.pending_feedback[family_slot as usize].push(TileKey {
                     family_slot,
                     material_index,
                     x: entry.tile_x,
@@ -435,12 +523,94 @@ impl TerrainMaterialVT {
                     mip_level: entry.mip_level,
                 });
             }
-            runtime.stats.feedback_requests = runtime.pending_feedback.len() as u32;
+            runtime.stats.feedback_requests = runtime
+                .pending_feedback
+                .iter()
+                .map(|bucket| bucket.len() as u32)
+                .sum();
         }
         runtime.feedback_staged = false;
         self.last_stats = runtime.stats;
         Ok(())
     }
+
+    /// VERITAS: drain the feedback buffer (blocking) and resolve each sampled
+    /// tile to the resident mip the shader actually landed on this frame.
+    ///
+    /// The GPU walk starts at the desired mip and climbs coarser until a
+    /// page-table entry is resident; this replays the identical walk against
+    /// the CPU page-table mirror (which was uploaded before the pass and is
+    /// unchanged since), so the leaf set describes exactly the tiles the
+    /// composite sampled. Feedback chains with no resident ancestor sampled
+    /// the fallback color and contribute no leaf (SOURCE_ID_NONE pixels).
+    pub fn read_contributing_tiles(
+        &mut self,
+        device: &wgpu::Device,
+    ) -> Result<Vec<crate::core::provenance::ContributingTile>, String> {
+        use crate::core::provenance::ContributingTile;
+
+        let Some(runtime) = self.runtime.as_mut() else {
+            return Ok(Vec::new());
+        };
+        let Some(feedback_buffer) = runtime.feedback_buffer.as_ref() else {
+            return Ok(Vec::new());
+        };
+
+        let entries = feedback_buffer.read_feedback_entries_blocking(device)?;
+        runtime.feedback_staged = false;
+
+        let mut resolved = HashSet::new();
+        for entry in entries {
+            let Some((family_slot, material_index)) =
+                decode_feedback_payload(entry.frame_number, runtime.material_count)
+            else {
+                continue;
+            };
+            if entry.mip_level >= runtime.max_mip_levels {
+                continue;
+            }
+            let (pages_x, pages_y) = runtime.pages_at_mip(entry.mip_level);
+            if entry.tile_x >= pages_x || entry.tile_y >= pages_y {
+                continue;
+            }
+            let key = TileKey {
+                family_slot,
+                material_index,
+                x: entry.tile_x,
+                y: entry.tile_y,
+                mip_level: entry.mip_level,
+            };
+            if let Some(resident) = runtime.resolve_resident_mip(key) {
+                resolved.insert(resident);
+            }
+        }
+
+        let mut tiles = Vec::with_capacity(resolved.len());
+        for key in resolved {
+            let Some(source) = runtime.sources.get(&(key.family_slot, key.material_index)) else {
+                continue;
+            };
+            tiles.push(ContributingTile {
+                family_slot: key.family_slot,
+                source_id: source.source_id,
+                tile_x: key.x,
+                tile_y: key.y,
+                mip_level: key.mip_level,
+                content_hash: source.content_hash,
+            });
+        }
+        tiles.sort_by_key(|tile| {
+            (
+                tile.family_slot,
+                tile.source_id,
+                tile.mip_level,
+                tile.tile_y,
+                tile.tile_x,
+            )
+        });
+        Ok(tiles)
+    }
+
     fn write_disabled_uniforms(
         queue: &wgpu::Queue,
         vt_uniform_buffer: &wgpu::Buffer,
@@ -450,6 +620,7 @@ impl TerrainMaterialVT {
             config0: [0, 0, 0, 0],
             config1: [0, 0, 0, 0],
             config2: [0, 0, 0, 0],
+            family_info: [[0, 0, 0, 0]; TERRAIN_VT_FAMILY_COUNT as usize],
         };
         let fallback_colors = TerrainMaterialVTRuntime::default_fallback_colors();
         queue.write_buffer(vt_uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -466,6 +637,26 @@ impl TerrainMaterialVT {
         runtime: &TerrainMaterialVTRuntime,
         enabled: bool,
     ) {
+        let mut family_info = [[0u32; 4]; TERRAIN_VT_FAMILY_COUNT as usize];
+        for (slot, info) in family_info.iter_mut().enumerate() {
+            let slot_u32 = slot as u32;
+            let family_enabled = enabled && (runtime.family_mask & (1u32 << slot_u32)) != 0;
+            let source_count = runtime
+                .sources
+                .keys()
+                .filter(|(family_slot, _)| *family_slot == slot_u32)
+                .count() as u32;
+            *info = [
+                if family_enabled && source_count > 0 {
+                    1
+                } else {
+                    0
+                },
+                slot_u32 * runtime.material_count * runtime.max_mip_levels,
+                0,
+                source_count,
+            ];
+        }
         let uniforms = TerrainVTUniformsGpu {
             config0: [
                 if enabled { runtime.family_mask } else { 0 },
@@ -485,13 +676,15 @@ impl TerrainMaterialVT {
                 runtime.slot_size,
                 if runtime.use_feedback { 1 } else { 0 },
             ],
+            family_info,
         };
         queue.write_buffer(vt_uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
     }
 
     fn ensure_runtime(
         &mut self,
-        device: &wgpu::Device,
+        device: &Arc<wgpu::Device>,
+        queue: &Arc<wgpu::Queue>,
         layers: &[&crate::terrain::render_params::VTLayerFamilyNative],
         material_count: u32,
         vt: &crate::terrain::render_params::TerrainVTSettingsNative,
@@ -517,6 +710,9 @@ impl TerrainMaterialVT {
                 && runtime.use_feedback == vt.use_feedback
                 && runtime.family_mask == family_mask
                 && runtime.layer_fallbacks == layer_fallbacks
+                // A budget change must rebuild so the shared tile-cache
+                // capacity and the per-family budgets both pick it up.
+                && runtime.residency_budget_mb == vt.residency_budget_mb
         });
         if runtime_matches {
             return Ok(());
@@ -524,6 +720,7 @@ impl TerrainMaterialVT {
 
         let runtime = TerrainMaterialVTRuntime::new(
             device,
+            queue,
             &self.sources,
             self.source_generation,
             layers,
@@ -546,7 +743,8 @@ impl TerrainMaterialVT {
 impl TerrainMaterialVTRuntime {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        device: &wgpu::Device,
+        device: &Arc<wgpu::Device>,
+        queue: &Arc<wgpu::Queue>,
         sources: &HashMap<(u32, String), VTSource>,
         source_generation: u64,
         layers: &[&crate::terrain::render_params::VTLayerFamilyNative],
@@ -586,6 +784,13 @@ impl TerrainMaterialVTRuntime {
             dimension: Some(wgpu::TextureViewDimension::D2),
             ..Default::default()
         });
+        #[cfg(feature = "enable-staging-rings")]
+        let staging_ring = {
+            let max_tile_bytes =
+                slot_size as u64 * slot_size as u64 * TERRAIN_VT_BYTES_PER_PIXEL as u64;
+            let buffer_size = max_tile_bytes.max(8 * 1024 * 1024);
+            StagingRing::new(device.clone(), queue.clone(), 3, buffer_size)
+        };
 
         let page_table_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("terrain.material_vt.page_table"),
@@ -638,6 +843,8 @@ impl TerrainMaterialVTRuntime {
                 PreparedVTSource {
                     fallback_color: source.fallback_color,
                     mips: build_rgba_mip_chain(&source.data, source.virtual_size, max_mip_levels),
+                    source_id: source.source_id,
+                    content_hash: source.content_hash,
                 },
             );
         }
@@ -651,6 +858,12 @@ impl TerrainMaterialVTRuntime {
         let budget_bytes = (residency_budget_mb * 1024.0 * 1024.0).floor() as usize;
         let budget_pages = budget_bytes.checked_div(slot_bytes).unwrap_or(0).max(1) as u32;
         let budget_pages = budget_pages.min(atlas_slots_total).max(1);
+
+        // Per-family budgets: even split of the VT residency budget across the
+        // enabled families; within-family LRU eviction keeps each family under
+        // its own share before the shared tile cache evicts globally.
+        let family_residency =
+            FamilyResidencyTracker::new(budget_bytes as u64, family_mask, slot_bytes as u64);
 
         let mut tile_cache = TileCache::new(budget_pages as usize);
         tile_cache.configure_atlas(atlas_size, atlas_size, slot_size);
@@ -667,6 +880,27 @@ impl TerrainMaterialVTRuntime {
             None
         };
 
+        // Route the VT footprint through the 512 MiB resource registry so the
+        // budget tracker sees the atlas, page table, and feedback buffers.
+        let memory_tracker = crate::core::memory_tracker::global_tracker();
+        let page_table_layers = TERRAIN_VT_FAMILY_COUNT * material_count * max_mip_levels;
+        memory_tracker.track_texture_allocation(
+            atlas_size,
+            atlas_size,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        );
+        memory_tracker.track_texture_allocation(
+            pages_x0,
+            pages_y0.saturating_mul(page_table_layers),
+            wgpu::TextureFormat::Rgba32Float,
+        );
+        if let Some(feedback) = feedback_buffer.as_ref() {
+            let feedback_bytes = feedback.buffer().size();
+            memory_tracker.track_buffer_allocation(feedback_bytes, false);
+            // The readback staging buffer is host-visible (MAP_READ).
+            memory_tracker.track_buffer_allocation(feedback_bytes, true);
+        }
+
         let mut page_tables = Vec::with_capacity(
             (TERRAIN_VT_FAMILY_COUNT * material_count * max_mip_levels) as usize,
         );
@@ -682,6 +916,8 @@ impl TerrainMaterialVTRuntime {
             }
         }
 
+        let dirty_page_table_layers = (0..page_tables.len()).collect();
+
         let mut runtime = Self {
             virtual_size: layer.virtual_size,
             tile_size: layer.tile_size,
@@ -694,15 +930,20 @@ impl TerrainMaterialVTRuntime {
             pages_y0,
             atlas_texture,
             atlas_view,
+            #[cfg(feature = "enable-staging-rings")]
+            staging_ring,
             page_table_texture,
             page_table_view,
             page_tables,
+            dirty_page_table_layers,
             sources: prepared_sources,
             tile_cache,
+            family_residency,
             feedback_buffer,
-            pending_feedback: Vec::new(),
+            pending_feedback: Default::default(),
             feedback_staged: false,
             budget_pages,
+            residency_budget_mb,
             source_generation,
             use_feedback,
             family_mask,
@@ -792,7 +1033,7 @@ impl TerrainMaterialVTRuntime {
         }
 
         if use_feedback {
-            for feedback in &self.pending_feedback {
+            for feedback in self.pending_feedback.iter().flatten() {
                 if self
                     .sources
                     .contains_key(&(feedback.family_slot, feedback.material_index))
@@ -809,6 +1050,7 @@ impl TerrainMaterialVTRuntime {
 
     fn ensure_tile_resident(
         &mut self,
+        encoder: &mut wgpu::CommandEncoder,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         key: TileKey,
@@ -816,6 +1058,7 @@ impl TerrainMaterialVTRuntime {
         let cache_tile = self.encode_cache_tile(key);
         if self.tile_cache.is_resident(&cache_tile) {
             self.tile_cache.access_tile(&cache_tile);
+            self.family_residency.note_access(key);
             self.stats.cache_hits += 1;
             return Ok(());
         }
@@ -829,17 +1072,31 @@ impl TerrainMaterialVTRuntime {
         };
 
         self.stats.cache_misses += 1;
+        // Enforce the family's own residency budget first: evict within-family
+        // LRU tiles before touching the shared pool, so one family's paging
+        // pressure never drains another family's resident set.
+        while self.family_residency.needs_eviction(key.family_slot) {
+            let Some(victim) = self.family_residency.lru_tile(key.family_slot) else {
+                break;
+            };
+            let victim_tile = self.encode_cache_tile(victim);
+            self.tile_cache.evict_tile(&victim_tile);
+            self.family_residency.on_evict(&victim);
+            self.clear_page_entry(victim);
+        }
         let Some((atlas_slot, evicted)) = self.tile_cache.allocate_tile_with_evicted(cache_tile)
         else {
             return Ok(());
         };
         for evicted_tile in evicted {
-            self.clear_page_entry(self.decode_cache_tile(evicted_tile));
+            let victim = self.decode_cache_tile(evicted_tile);
+            self.family_residency.on_evict(&victim);
+            self.clear_page_entry(victim);
         }
 
         let tile_data = self.build_tile_data(&source, key);
         let upload_start = Instant::now();
-        self.upload_tile_to_atlas(queue, &tile_data, atlas_slot);
+        self.upload_tile_to_atlas(encoder, queue, &tile_data, atlas_slot);
         let upload_ms = upload_start.elapsed().as_secs_f32() * 1000.0;
         self.stats.tiles_streamed += 1;
         self.stats.last_upload_ms = upload_ms;
@@ -848,6 +1105,7 @@ impl TerrainMaterialVTRuntime {
             ((self.stats.avg_upload_ms * (stream_count - 1.0)) + upload_ms) / stream_count;
         self.stats.evictions = self.tile_cache.stats().evictions as u32;
         self.set_page_entry(key, atlas_slot);
+        self.family_residency.on_insert(key);
         let _ = device;
         Ok(())
     }
@@ -859,51 +1117,57 @@ impl TerrainMaterialVTRuntime {
             * self.slot_size as usize
             * TERRAIN_VT_BYTES_PER_PIXEL;
         self.stats.resident_megabytes = resident_bytes as f32 / (1024.0 * 1024.0);
+        for slot in 0..VT_FAMILY_COUNT {
+            self.stats.families[slot] = self.family_residency.family(slot as u32);
+        }
+        crate::core::memory_tracker::global_tracker().set_resident_tiles(
+            self.family_residency.total_resident_tiles(),
+            self.family_residency.total_resident_bytes(),
+        );
     }
 
-    fn upload_page_tables(&self, queue: &wgpu::Queue) {
-        for family_slot in 0..TERRAIN_VT_FAMILY_COUNT {
-            for material_index in 0..self.material_count {
-                for mip_level in 0..self.max_mip_levels {
-                    let layer_index = self.layer_mip_index(family_slot, material_index, mip_level);
-                    let entries = &self.page_tables[layer_index];
-                    let (pages_x, pages_y) = self.pages_at_mip(mip_level);
-                    let packed_entries = entries
-                        .iter()
-                        .map(|entry| {
-                            [
-                                entry.atlas_u,
-                                entry.atlas_v,
-                                if entry.is_resident > 0 { 1.0 } else { 0.0 },
-                                entry.mip_bias,
-                            ]
-                        })
-                        .collect::<Vec<_>>();
-                    queue.write_texture(
-                        wgpu::ImageCopyTexture {
-                            texture: &self.page_table_texture,
-                            mip_level: 0,
-                            origin: wgpu::Origin3d {
-                                x: 0,
-                                y: 0,
-                                z: layer_index as u32,
-                            },
-                            aspect: wgpu::TextureAspect::All,
-                        },
-                        bytemuck::cast_slice(&packed_entries),
-                        wgpu::ImageDataLayout {
-                            offset: 0,
-                            bytes_per_row: Some(pages_x * 16),
-                            rows_per_image: Some(pages_y),
-                        },
-                        wgpu::Extent3d {
-                            width: pages_x,
-                            height: pages_y,
-                            depth_or_array_layers: 1,
-                        },
-                    );
-                }
-            }
+    fn upload_page_tables(&mut self, queue: &wgpu::Queue) {
+        let mut dirty_layers = self.dirty_page_table_layers.drain().collect::<Vec<_>>();
+        dirty_layers.sort_unstable();
+
+        for layer_index in dirty_layers {
+            let mip_level = (layer_index as u32) % self.max_mip_levels;
+            let entries = &self.page_tables[layer_index];
+            let (pages_x, pages_y) = self.pages_at_mip(mip_level);
+            let packed_entries = entries
+                .iter()
+                .map(|entry| {
+                    [
+                        entry.atlas_u,
+                        entry.atlas_v,
+                        if entry.is_resident > 0 { 1.0 } else { 0.0 },
+                        entry.mip_bias,
+                    ]
+                })
+                .collect::<Vec<_>>();
+            queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &self.page_table_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d {
+                        x: 0,
+                        y: 0,
+                        z: layer_index as u32,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                bytemuck::cast_slice(&packed_entries),
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(pages_x * 16),
+                    rows_per_image: Some(pages_y),
+                },
+                wgpu::Extent3d {
+                    width: pages_x,
+                    height: pages_y,
+                    depth_or_array_layers: 1,
+                },
+            );
         }
     }
 
@@ -937,20 +1201,37 @@ impl TerrainMaterialVTRuntime {
     }
 
     fn upload_tile_to_atlas(
-        &self,
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
         queue: &wgpu::Queue,
         tile_data: &TileData,
         atlas_slot: crate::core::tile_cache::AtlasSlot,
     ) {
+        let origin = wgpu::Origin3d {
+            x: atlas_slot.atlas_x,
+            y: atlas_slot.atlas_y,
+            z: 0,
+        };
+        #[cfg(feature = "enable-staging-rings")]
+        {
+            if self.staging_ring.upload_texture_region(
+                encoder,
+                queue,
+                &self.atlas_texture,
+                origin,
+                &tile_data.data,
+                tile_data.width,
+                tile_data.height,
+                TERRAIN_VT_BYTES_PER_PIXEL as u32,
+            ) {
+                return;
+            }
+        }
         queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &self.atlas_texture,
                 mip_level: 0,
-                origin: wgpu::Origin3d {
-                    x: atlas_slot.atlas_x,
-                    y: atlas_slot.atlas_y,
-                    z: 0,
-                },
+                origin,
                 aspect: wgpu::TextureAspect::All,
             },
             &tile_data.data,
@@ -976,6 +1257,7 @@ impl TerrainMaterialVTRuntime {
             entry.atlas_v = atlas_slot.atlas_v;
             entry.is_resident = 1;
             entry.mip_bias = 0.0;
+            self.dirty_page_table_layers.insert(layer_index);
         }
     }
 
@@ -994,6 +1276,44 @@ impl TerrainMaterialVTRuntime {
         let page_index = (key.y * pages_x + key.x) as usize;
         if let Some(entry) = self.page_tables[layer_index].get_mut(page_index) {
             *entry = PageTableEntry::default();
+            self.dirty_page_table_layers.insert(layer_index);
+        }
+    }
+
+    /// VERITAS: replay the shader's residency walk on the CPU page-table
+    /// mirror — climb from `key.mip_level` toward coarser mips and return the
+    /// first resident tile, or `None` when the whole chain is non-resident.
+    fn resolve_resident_mip(&self, key: TileKey) -> Option<TileKey> {
+        if key.family_slot >= TERRAIN_VT_FAMILY_COUNT || key.material_index >= self.material_count {
+            return None;
+        }
+        let mut mip_level = key.mip_level;
+        loop {
+            let (pages_x, pages_y) = self.pages_at_mip(mip_level);
+            let shift = mip_level - key.mip_level;
+            let x = (key.x >> shift).min(pages_x.saturating_sub(1));
+            let y = (key.y >> shift).min(pages_y.saturating_sub(1));
+            let layer_index = self.layer_mip_index(key.family_slot, key.material_index, mip_level);
+            let page_index = (y * pages_x + x) as usize;
+            if let Some(entry) = self
+                .page_tables
+                .get(layer_index)
+                .and_then(|table| table.get(page_index))
+            {
+                if entry.is_resident > 0 {
+                    return Some(TileKey {
+                        family_slot: key.family_slot,
+                        material_index: key.material_index,
+                        x,
+                        y,
+                        mip_level,
+                    });
+                }
+            }
+            if mip_level + 1 >= self.max_mip_levels {
+                return None;
+            }
+            mip_level += 1;
         }
     }
 
@@ -1115,6 +1435,32 @@ impl TerrainMaterialVTRuntime {
 }
 
 #[cfg(feature = "extension-module")]
+impl Drop for TerrainMaterialVTRuntime {
+    fn drop(&mut self) {
+        // Release the footprint reported to the 512 MiB resource registry in
+        // `TerrainMaterialVTRuntime::new`.
+        let memory_tracker = crate::core::memory_tracker::global_tracker();
+        let page_table_layers = TERRAIN_VT_FAMILY_COUNT * self.material_count * self.max_mip_levels;
+        memory_tracker.free_texture_allocation(
+            self.atlas_size,
+            self.atlas_size,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        );
+        memory_tracker.free_texture_allocation(
+            self.pages_x0,
+            self.pages_y0.saturating_mul(page_table_layers),
+            wgpu::TextureFormat::Rgba32Float,
+        );
+        if let Some(feedback) = self.feedback_buffer.as_ref() {
+            let feedback_bytes = feedback.buffer().size();
+            memory_tracker.free_buffer_allocation(feedback_bytes, false);
+            memory_tracker.free_buffer_allocation(feedback_bytes, true);
+        }
+        memory_tracker.clear_resident_tiles();
+    }
+}
+
+#[cfg(feature = "extension-module")]
 fn ceil_div(value: u32, divisor: u32) -> u32 {
     (value + divisor - 1) / divisor.max(1)
 }
@@ -1200,8 +1546,8 @@ impl TerrainScene {
         material_vt
             .prepare_frame(
                 encoder,
-                self.device.as_ref(),
-                self.queue.as_ref(),
+                &self.device,
+                &self.queue,
                 params,
                 decoded,
                 material_count,
@@ -1232,6 +1578,20 @@ impl TerrainScene {
             .map_err(|_| anyhow!("material_vt mutex poisoned"))?;
         material_vt
             .finish_frame(self.device.as_ref(), self.queue.as_ref())
+            .map_err(anyhow::Error::msg)
+    }
+
+    /// VERITAS: blocking drain of the VT feedback stream resolved to the
+    /// resident tiles the last frame actually sampled.
+    pub(super) fn read_material_vt_contributing_tiles(
+        &self,
+    ) -> Result<Vec<crate::core::provenance::ContributingTile>> {
+        let mut material_vt = self
+            .material_vt
+            .lock()
+            .map_err(|_| anyhow!("material_vt mutex poisoned"))?;
+        material_vt
+            .read_contributing_tiles(self.device.as_ref())
             .map_err(anyhow::Error::msg)
     }
 }

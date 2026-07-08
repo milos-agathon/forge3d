@@ -104,7 +104,13 @@ pub enum CsmQualityPreset {
     Ultra,
 }
 
-/// Get WGSL source for CSM integration
+/// Get WGSL source for CSM integration.
+/// csm.wgsl calls the pinned det_* helpers, so the determinism include must
+/// lead any module built from this source.
 pub fn csm_shader_source() -> &'static str {
-    include_str!("../../shaders/csm.wgsl")
+    concat!(
+        include_str!("../../shaders/includes/determinism.wgsl"),
+        "\n",
+        include_str!("../../shaders/csm.wgsl")
+    )
 }

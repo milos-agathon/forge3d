@@ -46,9 +46,15 @@ jobs:
               - 'examples/terrain*.py'
               - 'tests/test_terrain_visual_goldens.py'
               - 'tests/test_terrain_tv10_goldens.py'
+              - 'tests/test_terrain_vt_pbr_families.py'
               - 'tests/test_recipe_goldens.py'
+              - 'tests/test_adjudication_gate.py'
+              - 'tests/test_hybrid_terrain_pt.py'
+              - 'tests/_deltae.py'
               - 'tests/golden/terrain/**'
               - 'tests/golden/recipes/**'
+              - 'tests/golden/adjudication/**'
+              - 'tests/golden/hybrid_terrain/**'
               - 'docs/gallery/**'
 
   # ============================================================================
@@ -247,7 +253,10 @@ jobs:
           tests/test_blender_quality_integration.py
           tests/test_bloom_effect.py
           tests/test_bloom_execute_behavior.py
+          tests/test_label_optimal_solver.py
           tests/test_mesh_tbn.py
+          tests/test_provenance_offline_verify.py
+          tests/test_provenance_veritas.py
           tests/test_recipe_manifest.py
           tests/test_ssgi_ssr_wiring.py
           -v --tb=short
@@ -331,7 +340,8 @@ jobs:
           FORGE3D_RUN_TERRAIN_GOLDENS: '1'
           FORGE3D_TERRAIN_GOLDEN_ARTIFACT_DIR: tests/artifacts/terrain_goldens
           FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR: tests/artifacts/recipe_goldens
-        run: pytest tests/test_terrain_visual_goldens.py tests/test_terrain_tv10_goldens.py tests/test_recipe_goldens.py -v --tb=short
+          FORGE3D_ADJUDICATION_ARTIFACT_DIR: tests/artifacts/adjudication
+        run: pytest tests/test_terrain_visual_goldens.py tests/test_terrain_tv10_goldens.py tests/test_terrain_vt_pbr_families.py tests/test_recipe_goldens.py tests/test_adjudication_gate.py tests/test_hybrid_terrain_pt.py tests/test_provenance_veritas.py -v --tb=short
 
       - name: Skip unsupported terrain golden lane
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outcome != 'success'

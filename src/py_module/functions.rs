@@ -7,8 +7,11 @@ mod geometry;
 mod gis;
 mod interactive;
 mod io_import;
+mod labels;
 mod license;
+mod provenance;
 mod rendering;
+mod tiles3d;
 
 #[cfg(feature = "extension-module")]
 pub(crate) fn register_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -17,8 +20,11 @@ pub(crate) fn register_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     io_import::register_io_import_py_functions(m)?;
     diagnostics::register_diagnostics_py_functions(m)?;
     license::register_license_py_functions(m)?;
+    provenance::register_provenance_py_functions(m)?;
     camera::register_camera_py_functions(m)?;
     rendering::register_rendering_py_functions(m)?;
     gis::register_gis_py_functions(m)?;
+    tiles3d::register_tiles3d_py_functions(m)?;
+    labels::register_labels_py_functions(m)?;
     Ok(())
 }

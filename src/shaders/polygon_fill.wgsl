@@ -14,12 +14,14 @@ struct PolygonUniform {
 struct VertexInput {
     @location(0) position: vec2<f32>,
     @location(1) uv: vec2<f32>,
+    @location(2) color: vec4<f32>,
 }
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) world_pos: vec2<f32>,
     @location(1) uv: vec2<f32>,
+    @location(2) color: vec4<f32>,
 }
 
 @group(0) @binding(0)
@@ -34,6 +36,7 @@ fn vs_main(vertex: VertexInput) -> VertexOutput {
     out.clip_position = uniforms.transform * vec4<f32>(world_pos, 0.0, 1.0);
     out.world_pos = world_pos;
     out.uv = vertex.uv;
+    out.color = vertex.color;
     
     return out;
 }
@@ -44,5 +47,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // UV coordinates can be used for texture mapping in future versions
     
     // Write linear color; the Rgba8UnormSrgb target handles sRGB encoding.
-    return uniforms.fill_color;
+    return in.color;
 }

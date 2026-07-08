@@ -5,12 +5,13 @@ use crate::core::error::RenderError;
 use glam::Vec2;
 use std::mem;
 
-/// Packed vertex data for polygons (position + UV)
+/// Packed vertex data for polygons (position + UV + RGBA fill)
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct PolygonVertex {
     pub position: [f32; 2], // World coordinates
     pub uv: [f32; 2],       // Texture coordinates [0,1]
+    pub color: [f32; 4],    // RGBA fill color
 }
 
 /// Packed vertex data for lines (position + direction + width)
@@ -323,14 +324,17 @@ mod tests {
             PolygonVertex {
                 position: [0.0, 0.0],
                 uv: [0.0, 0.0],
+                color: [1.0, 0.0, 0.0, 1.0],
             },
             PolygonVertex {
                 position: [1.0, 0.0],
                 uv: [1.0, 0.0],
+                color: [1.0, 0.0, 0.0, 1.0],
             },
             PolygonVertex {
                 position: [0.5, 1.0],
                 uv: [0.5, 1.0],
+                color: [1.0, 0.0, 0.0, 1.0],
             },
         ];
         let indices = vec![0, 1, 2];
@@ -346,6 +350,7 @@ mod tests {
         let vertices = vec![PolygonVertex {
             position: [0.0, 0.0],
             uv: [0.0, 0.0],
+            color: [1.0, 0.0, 0.0, 1.0],
         }];
         let indices = vec![0, 1, 2]; // Index 1,2 are out of bounds
 
@@ -360,7 +365,7 @@ mod tests {
     #[test]
     fn test_memory_layout_constants() {
         // Verify struct sizes for GPU compatibility
-        assert_eq!(layout::POLYGON_VERTEX_SIZE, 16); // 2*f32 + 2*f32 = 16 bytes
+        assert_eq!(layout::POLYGON_VERTEX_SIZE, 32); // 2*f32 + 2*f32 + 4*f32 = 32 bytes
         assert_eq!(layout::LINE_VERTEX_SIZE, 24); // 2*f32 + 2*f32 + f32 + f32 = 24 bytes
         assert_eq!(layout::POINT_INSTANCE_SIZE, 44); // 2*f32 + f32 + 4*f32 + f32 + 2*f32 + f32 = 44 bytes
 

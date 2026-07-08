@@ -12,7 +12,7 @@ struct HybridUniforms {
     mesh_vertex_count: u32,
     mesh_index_count: u32,
     mesh_bvh_node_count: u32,
-    traversal_mode: u32, // 0 = hybrid, 1 = SDF only, 2 = mesh only
+    traversal_mode: u32, // 0 = hybrid, 1 = SDF only, 2 = mesh only, 3 = terrain only
     _pad: vec2u,
 }
 
@@ -185,6 +185,18 @@ fn intersect_hybrid(ray: Ray) -> HybridHitResult {
         }
     }
 
+    // Terrain heightfield (hybrid mix, or selectable as the primary
+    // intersectable via mode 3); defined in hybrid_terrain_traversal.wgsl.
+    if ((hybrid_uniforms.traversal_mode == 0u || hybrid_uniforms.traversal_mode == 3u)
+        && terrain_enabled()) {
+        var tray = ray;
+        tray.tmax = best_hit.t;
+        let terrain_hit = terrain_intersect(tray);
+        if (terrain_hit.hit != 0u && terrain_hit.t < best_hit.t) {
+            best_hit = terrain_hit;
+        }
+    }
+
     return best_hit;
 }
 
@@ -204,12 +216,27 @@ fn intersect_hybrid_optimized(ray: Ray, early_exit_distance: f32) -> HybridHitRe
         }
     }
 
+    // Terrain heightfield shadow/any-hit path shares the min-max descent.
+    if ((hybrid_uniforms.traversal_mode == 0u || hybrid_uniforms.traversal_mode == 3u)
+        && terrain_enabled()) {
+        var tray = ray;
+        tray.tmax = best_hit.t;
+        let terrain_hit = terrain_intersect(tray);
+        if (terrain_hit.hit != 0u && terrain_hit.t < best_hit.t) {
+            best_hit = terrain_hit;
+        }
+    }
+
     return best_hit;
 }
 
 // Utility function to get surface properties at hit point
 fn get_surface_properties(hit: HybridHitResult) -> vec3f {
-    // Return albedo based on hit type and material
+    // Terrain hits use the uniform terrain albedo; everything else keeps the
+    // legacy constant.
+    if (hit.hit_type == 3u) {
+        return terrain.albedo_pad.rgb;
+    }
     return vec3f(0.7, 0.7, 0.8);
 }
 

@@ -282,7 +282,10 @@ impl IBL {
             .as_ref()
             .ok_or_else(|| anyhow!("HDR image data missing for IBL resource upload"))?;
 
-        let adapter_info = crate::core::gpu::ctx().adapter.get_info();
+        let adapter_info = crate::core::gpu::try_ctx()
+            .map_err(|e| anyhow!("{e}"))?
+            .adapter
+            .get_info();
         let mut quality_to_use = if self.use_auto_quality {
             memory_budget::auto_select_ibl_quality(&adapter_info)
         } else {

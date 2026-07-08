@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import platform
+import subprocess
+import sys
 import tempfile
 from functools import lru_cache
 from pathlib import Path
@@ -88,6 +90,41 @@ def terrain_rendering_available() -> bool:
     if _running_on_unsupported_hosted_macos_ci() or _running_on_unsupported_hosted_windows_ci():
         return False
 
+    if not f3d.has_gpu() or not all(hasattr(f3d, name) for name in REQUIRED_SYMBOLS):
+        return False
+
+    probe = f3d.device_probe(os.environ.get("WGPU_BACKEND"))
+    if not _adapter_is_terrain_safe(probe):
+        return False
+
+    env = os.environ.copy()
+    env["FORGE3D_TERRAIN_PROBE_CHILD"] = "1"
+    repo = Path(__file__).resolve().parents[1]
+    path_entries = [str(repo / "tests"), str(repo / "python")]
+    if env.get("PYTHONPATH"):
+        path_entries.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(path_entries)
+
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from _terrain_runtime import _terrain_rendering_available_inprocess as p; "
+                "raise SystemExit(0 if p() else 1)",
+            ],
+            cwd=str(repo),
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def _terrain_rendering_available_inprocess() -> bool:
     if not f3d.has_gpu() or not all(hasattr(f3d, name) for name in REQUIRED_SYMBOLS):
         return False
 

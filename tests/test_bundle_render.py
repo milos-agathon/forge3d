@@ -25,10 +25,10 @@ def compute_image_hash(img_path: Path) -> str:
 
 
 def test_bundle_manifest_version():
-    """Bundle manifest version remains locked to schema version 2."""
+    """Bundle manifest version remains locked to schema version 3 (SUTURA compiled plan)."""
     manifest = BundleManifest.new("test")
     assert manifest.version == BUNDLE_VERSION
-    assert manifest.version == 2
+    assert manifest.version == 3
 
 
 def test_bundle_roundtrip_preserves_preset():

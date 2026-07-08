@@ -223,6 +223,22 @@ impl TerrainRenderParams {
         paths
     }
 
+    pub fn screen_space_settings(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let settings = &self.decoded.screen_space;
+        let dict = pyo3::types::PyDict::new_bound(py);
+        dict.set_item("enabled", settings.enabled)?;
+        dict.set_item("ssao_enabled", settings.ssao_enabled)?;
+        dict.set_item("ssao_radius", settings.ssao_radius)?;
+        dict.set_item("ssao_intensity", settings.ssao_intensity)?;
+        dict.set_item("ssgi_enabled", settings.ssgi_enabled)?;
+        dict.set_item("ssgi_intensity", settings.ssgi_intensity)?;
+        dict.set_item("ssr_enabled", settings.ssr_enabled)?;
+        dict.set_item("ssr_intensity", settings.ssr_intensity)?;
+        dict.set_item("taa_enabled", settings.taa_enabled)?;
+        dict.set_item("temporal_alpha", settings.temporal_alpha)?;
+        Ok(dict.into_py(py))
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "TerrainRenderParams(size_px=({},{}) , overlays={}, msaa_samples={})",

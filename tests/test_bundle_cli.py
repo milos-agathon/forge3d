@@ -98,8 +98,8 @@ def test_bundle_directory_structure():
         assert (bundle / "assets").is_dir()
 
 
-def test_manifest_has_version_2():
-    """Bundle manifest has version == 2."""
+def test_manifest_has_current_version():
+    """Bundle manifest has version == 3 (SUTURA compiled-plan schema)."""
     from forge3d.bundle import save_bundle, BUNDLE_VERSION
     
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -112,7 +112,7 @@ def test_manifest_has_version_2():
             manifest = json.load(f)
 
         assert manifest["version"] == BUNDLE_VERSION
-        assert manifest["version"] == 2
+        assert manifest["version"] == 3
 
 
 def test_bundle_extension_added_if_missing():

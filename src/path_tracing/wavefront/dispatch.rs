@@ -120,19 +120,14 @@ impl WavefrontScheduler {
         pass.dispatch_workgroups(workgroups, 1, 1);
         Ok(())
     }
-
-    pub(super) fn dispatch_compact(
-        &self,
-        encoder: &mut CommandEncoder,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let queue_bind_group = self.queue_buffers.create_compact_bind_group(&self.device)?;
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("compact-pass"),
-            timestamp_writes: None,
-        });
-        pass.set_pipeline(&self.pipelines.compact);
-        pass.set_bind_group(2, &queue_bind_group, &[]);
-        pass.dispatch_workgroups(1, 1, 1);
-        Ok(())
-    }
 }
+
+// NOTE (AEQUITAS queue-quality debt): the historical stream-compaction stage
+// (`dispatch_compact` + pt_compact.wgsl + the compacted/flags/prefix-sum
+// buffers) was removed as defective dead code. It was never called in
+// production, its only would-be caller bound just one of the three bind
+// groups its pipeline layout required (instant validation failure on first
+// dispatch), and its single-workgroup scan could not compact queues sized
+// width*height*QUEUE_CAPACITY_SCALE. The adjudication loop
+// (`render_frame_simple`) deliberately never compacts: compaction relocates
+// queue entries and would invalidate its consumed-prefix bookkeeping.

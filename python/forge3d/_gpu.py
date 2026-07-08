@@ -7,7 +7,17 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from ._native import NATIVE_AVAILABLE, get_native_module
+from ._native import NATIVE_AVAILABLE, get_native_module, native_import_error
+
+_REMEDIATION_NATIVE = (
+    "Reinstall the compiled extension (pip install --force-reinstall forge3d) "
+    "or rebuild it from a checkout with: maturin develop --release"
+)
+_REMEDIATION_ADAPTER = (
+    "Verify GPU drivers are installed, pin a backend via WGPU_BACKENDS "
+    "(vulkan|dx12|metal|gl), or install a software rasterizer for headless use "
+    "(Windows ships WARP; on Linux install Mesa's lavapipe)."
+)
 
 
 def _native_functions() -> tuple[Optional[Any], Optional[Any], Optional[Any]]:
@@ -39,15 +49,48 @@ def enumerate_adapters() -> List[Dict]:
 
 
 def device_probe(backend: Optional[str] = None) -> Dict:
+    """Probe GPU availability without raising.
+
+    The returned dict always carries a ``status`` key:
+
+    - ``"ok"``: an adapter was found; adapter fields (``name``, ``backend``,
+      ``device_type``, ``software_fallback``, ...) are present.
+    - ``"no_adapter"``: the native module works but no hardware or software
+      adapter is exposed for the requested backends.
+    - ``"probe_error"``: the native probe itself failed; see ``reason``.
+    - ``"native_missing"``: the compiled ``forge3d._forge3d`` extension did not
+      import; ``reason`` preserves the original import error.
+
+    Every non-``"ok"`` status includes ``reason`` and ``remediation`` fields.
+    """
     _, native_probe, _ = _native_functions()
-    if callable(native_probe):
-        try:
-            if backend is not None:
-                return native_probe(backend)
-            return native_probe()
-        except Exception:
-            pass
-    return {"status": "unavailable"}
+    if not callable(native_probe):
+        import_error = native_import_error()
+        reason = (
+            f"forge3d._forge3d failed to import: {import_error!r}"
+            if import_error is not None
+            else "forge3d._forge3d is not available (extension not built) or lacks device_probe"
+        )
+        return {
+            "status": "native_missing",
+            "reason": reason,
+            "remediation": _REMEDIATION_NATIVE,
+        }
+    try:
+        if backend is not None:
+            probe = native_probe(backend)
+        else:
+            probe = native_probe()
+    except Exception as exc:
+        return {
+            "status": "probe_error",
+            "reason": f"native device_probe raised: {exc!r}",
+            "remediation": _REMEDIATION_ADAPTER,
+        }
+    if isinstance(probe, dict) and probe.get("status") not in (None, "ok"):
+        probe.setdefault("reason", "no GPU adapter (hardware or software) was found")
+        probe.setdefault("remediation", _REMEDIATION_ADAPTER)
+    return probe
 
 
 def has_gpu() -> bool:

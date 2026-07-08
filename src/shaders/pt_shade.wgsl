@@ -99,11 +99,8 @@ fn bsdf_eval_pdf(
 // Lighting helpers: environment and area discs (A4/A20)
 // -----------------------------------------------------------------------------
 fn env_color(wi: vec3<f32>) -> vec3<f32> {
-    // Simple gradient environment as placeholder importance target
     let t = 0.5 * (wi.y + 1.0);
-    let sky = vec3<f32>(0.6, 0.75, 1.0);
-    let ground = vec3<f32>(0.2, 0.22, 0.25);
-    return mix(ground, sky, t);
+    return mix(reference_environment.env_ground.rgb, reference_environment.env_sky.rgb, t);
 }
 
 struct AreaSample {
@@ -302,6 +299,13 @@ struct RestirSettings {
 @group(1) @binding(17) var<storage, read_write> aov_depth_buf: array<vec4<f32>>;  // linear depth in .x
 @group(1) @binding(18) var<storage, read_write> aov_normal_buf: array<vec4<f32>>; // normal in .xyz
 @group(1) @binding(19) var<uniform> medium_params: MediumParams;
+struct ReferenceEnvironment {
+    env_ground: vec4<f32>,
+    env_sky: vec4<f32>,
+    miss_ground: vec4<f32>,
+    miss_sky: vec4<f32>,
+}
+@group(1) @binding(21) var<uniform> reference_environment: ReferenceEnvironment;
 @group(2) @binding(0) var<storage, read_write> hit_queue_header: QueueHeader;
 @group(2) @binding(1) var<storage, read_write> hit_queue: array<Hit>;
 @group(2) @binding(2) var<storage, read_write> scatter_queue_header: QueueHeader;
@@ -475,8 +479,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             accum_hdr[pix] = accum_hdr[pix] + vec4<f32>(add, 0.0);
         }
 
-        // Prepare RNG from hit state
-        var rng_state = h.rng_hi ^ (h.pixel * 9781u) ^ (uniforms.frame_index * 6271u);
+        // Prepare RNG from hit state.
+        // NOTE: rng_hi already contains `seed_hi ^ (pixel * 9781u) ^
+        // (frame_index * 6271u)` from pt_raygen; re-XORing the same terms here
+        // cancelled them and left every pixel of every frame with the
+        // identical RNG state, so NEE sampling never decorrelated or
+        // converged. Use distinct odd constants to keep per-pixel/per-frame
+        // decorrelation.
+        var rng_state = h.rng_hi ^ (h.pixel * 26699u) ^ (uniforms.frame_index * 30977u);
 
         let n = normalize(h.n);
         let wo = normalize(h.wo); // to camera

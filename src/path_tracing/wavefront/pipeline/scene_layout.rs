@@ -26,6 +26,7 @@ impl WavefrontPipelines {
                 aov_entry(18, false),
                 uniform_entry(19),
                 aov_entry(20, true),
+                uniform_entry(21),
             ],
         })
     }

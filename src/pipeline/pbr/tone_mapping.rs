@@ -127,6 +127,8 @@ pub fn tone_map_color(color: [f32; 3], config: ToneMappingConfig) -> [f32; 3] {
 /// Provide WGSL source for the tone mapping pass used by shaders
 pub fn tone_map_shader_source() -> &'static str {
     concat!(
+        include_str!("../../shaders/includes/determinism.wgsl"),
+        "\n",
         include_str!("../../shaders/includes/tonemap_common.wgsl"),
         "\n",
         include_str!("../../shaders/tone_map.wgsl")

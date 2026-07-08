@@ -270,6 +270,8 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
         } => {
             let algorithm_kind = if algorithm.eq_ignore_ascii_case("annealing") {
                 crate::labels::DeclutterAlgorithm::Annealing
+            } else if algorithm.eq_ignore_ascii_case("optimal") {
+                crate::labels::DeclutterAlgorithm::Optimal
             } else {
                 crate::labels::DeclutterAlgorithm::Greedy
             };

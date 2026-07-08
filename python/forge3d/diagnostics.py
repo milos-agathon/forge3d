@@ -315,7 +315,7 @@ def experimental_feature_diagnostic(
 def vt_unsupported_family_diagnostic(
     family: str,
     *,
-    supported_family: str = "albedo",
+    supported_family: str = "albedo, mask, normal",
     layer_id: str | None = None,
     object_id: str | None = None,
 ) -> Diagnostic:
@@ -323,7 +323,7 @@ def vt_unsupported_family_diagnostic(
         code="vt_unsupported_family",
         severity="error",
         message="Requested terrain virtual-texturing family is not paged by the native runtime.",
-        remediation="Use the albedo VT family or wait for native normal/mask runtime support.",
+        remediation="Use one of the native terrain VT families: albedo, normal, or mask.",
         support_level="unsupported",
         layer_id=layer_id,
         object_id=object_id,
@@ -375,6 +375,89 @@ def estimated_gpu_memory_diagnostic(
             "budget_bytes": budget_bytes,
             "estimated_bytes": int(estimated_bytes),
         },
+    )
+
+
+def memory_budget_validation_report(
+    metrics: Mapping[str, Any] | None = None,
+) -> "ValidationReport":
+    """Build a diagnostics report from memory-budget telemetry."""
+    if metrics is None:
+        from . import mem
+
+        metrics = mem.memory_metrics()
+
+    snapshot = dict(metrics)
+    host_visible_bytes = int(snapshot.get("host_visible_bytes", 0))
+    budget_bytes_raw = snapshot.get("limit_bytes")
+    budget_bytes = int(budget_bytes_raw) if budget_bytes_raw is not None else None
+    budget_policy = str(snapshot.get("budget_policy", "enforce"))
+    within_budget = bool(snapshot.get("within_budget", True))
+    diagnostic = estimated_gpu_memory_diagnostic(host_visible_bytes, budget_bytes)
+    details = dict(diagnostic.details or {})
+    details.update(
+        {
+            "budget_policy": budget_policy,
+            "buffer_bytes": int(snapshot.get("buffer_bytes", 0)),
+            "texture_bytes": int(snapshot.get("texture_bytes", 0)),
+            "within_budget": within_budget,
+        }
+    )
+    return ValidationReport(
+        diagnostics=(
+            Diagnostic(
+                code=diagnostic.code,
+                severity="warning" if not within_budget else diagnostic.severity,
+                message=diagnostic.message,
+                remediation=diagnostic.remediation,
+                support_level=diagnostic.support_level,
+                details=details,
+            ),
+        ),
+        estimated_gpu_memory_bytes=host_visible_bytes,
+    )
+
+
+def memory_tracking_completeness_report(
+    expected_bytes: int,
+    metrics: Mapping[str, Any] | None = None,
+    *,
+    min_coverage: float = 0.95,
+) -> "ValidationReport":
+    """Report whether tracked memory accounts for an expected allocation envelope."""
+    if metrics is None:
+        from . import mem
+
+        metrics = mem.memory_metrics()
+    expected = max(0, int(expected_bytes))
+    tracked = int(dict(metrics).get("host_visible_bytes", 0))
+    coverage = 1.0 if expected == 0 else tracked / float(expected)
+    ok = coverage >= float(min_coverage)
+    diagnostic = Diagnostic(
+        code="memory_tracking_completeness",
+        severity="info" if ok else "warning",
+        message=(
+            "Tracked memory coverage meets the expected allocation envelope."
+            if ok
+            else "Tracked memory coverage is below the expected allocation envelope."
+        ),
+        remediation=(
+            "No action is required."
+            if ok
+            else "Route the missing allocation path through tracked constructors or update the estimate."
+        ),
+        support_level="supported" if ok else "underdeveloped",
+        details={
+            "expected_bytes": expected,
+            "tracked_bytes": tracked,
+            "coverage_ratio": coverage,
+            "min_coverage": float(min_coverage),
+        },
+    )
+    return ValidationReport(
+        diagnostics=(diagnostic,),
+        estimated_gpu_memory_bytes=expected,
+        supported_features={"memory.tracking_completeness": "supported" if ok else "underdeveloped"},
     )
 
 
@@ -839,6 +922,8 @@ __all__ = [
     "SUPPORT_LEVELS",
     "crs_mismatch_diagnostic",
     "estimated_gpu_memory_diagnostic",
+    "memory_budget_validation_report",
+    "memory_tracking_completeness_report",
     "experimental_feature_diagnostic",
     "label_rejection_summary_diagnostic",
     "missing_external_asset_diagnostic",

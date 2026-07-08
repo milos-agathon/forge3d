@@ -833,3 +833,109 @@ def _ggx_distribution(cos_theta_h: float, alpha: float) -> float:
     cos_theta_h2 = cos_theta_h * cos_theta_h
     denom = cos_theta_h2 * (alpha2 - 1.0) + 1.0
     return alpha2 / (np.pi * denom * denom)
+
+
+def hybrid_render_terrain_reference(
+    heightmap: "np.ndarray",
+    width: int,
+    height: int,
+    camera: "dict | None" = None,
+    *,
+    spacing: "tuple[float, float]" = (1.0, 1.0),
+    exaggeration: float = 1.0,
+    albedo: "tuple[float, float, float]" = (0.6, 0.6, 0.6),
+    sun_azimuth_deg: float = 315.0,
+    sun_elevation_deg: float = 45.0,
+    sun_intensity: float = 2.5,
+    env_map: "np.ndarray | None" = None,
+    env_intensity: float = 0.35,
+    mesh_vertices: "np.ndarray | None" = None,
+    mesh_indices: "np.ndarray | None" = None,
+    spp: int = 1,
+    max_frames: int = 512,
+    min_frames: int = 32,
+    variance_threshold: float = 1e-3,
+    seed: int = 7,
+) -> dict:
+    """Converged GPU path-traced reference of a real DEM under sun + IBL.
+
+    This is the honest GPU seam (PROMETHEUS): it drives the hybrid compute
+    tracer's heightfield traversal rooted in ``HybridPathTracer::render`` /
+    ``render_terrain_reference``. The legacy :func:`hybrid_render` native
+    function remains a CPU/SDF compatibility wrapper and does NOT reach the
+    GPU terrain path.
+
+    ``mesh_vertices`` (N,3 float32) + ``mesh_indices`` (M,3 uint32) mix
+    triangle geometry into the scene through the shared hybrid traversal, so
+    terrain renders alongside existing primitives. ``spp`` sets the camera
+    samples per accumulation frame; the min-max pyramid keeps per-sample
+    texture reads O(log mips), so cost scales ~linearly from 1 to 8 spp.
+
+    Accumulates frames until the per-pixel luminance variance of the running
+    mean across the last convergence window drops below
+    ``variance_threshold`` (or raises after ``max_frames`` — no silent fake
+    convergence). Returns a dict with ``rgba`` (H,W,4) uint8,
+    ``albedo``/``normal`` (H,W,3) float32, ``depth`` (H,W) float32 world-unit
+    ray distance (NaN on miss), plus ``frames``, ``variance``, ``converged``
+    and memory diagnostics (``peak_host_visible_bytes``,
+    ``minmax_pyramid_bytes``, ``gpu_resource_bytes``).
+    """
+    if _NATIVE is None or not hasattr(_NATIVE, "hybrid_render_terrain_reference"):
+        raise RuntimeError(
+            "hybrid_render_terrain_reference requires the native forge3d "
+            "module with GPU support"
+        )
+    dem = np.ascontiguousarray(heightmap, dtype=np.float32)
+    if dem.ndim != 2:
+        raise ValueError(f"heightmap must be 2D (H, W), got shape {dem.shape}")
+    if dem.shape[0] < 2 or dem.shape[1] < 2:
+        raise ValueError(
+            f"terrain heightfield must be at least 2x2 texels, got {dem.shape[1]}x{dem.shape[0]}"
+        )
+    if not np.isfinite(dem).all():
+        raise ValueError("heightmap contains non-finite samples")
+    if int(min_frames) > int(max_frames):
+        raise ValueError(
+            f"min_frames ({min_frames}) must be <= max_frames ({max_frames})"
+        )
+    if not (1 <= int(spp) <= 64):
+        raise ValueError(f"spp must be in 1..=64, got {spp}")
+    if not (float(spacing[0]) > 0.0 and float(spacing[1]) > 0.0):
+        raise ValueError(f"spacing must be > 0, got {spacing}")
+    cam = dict(camera or {})
+    env = None
+    if env_map is not None:
+        env = np.ascontiguousarray(env_map, dtype=np.float32)
+        if env.ndim != 3 or env.shape[2] != 3:
+            raise ValueError(f"env_map must be (H, W, 3) float32, got {env.shape}")
+    if (mesh_vertices is None) != (mesh_indices is None):
+        raise ValueError("mesh_vertices and mesh_indices must be provided together")
+    mv = mi = None
+    if mesh_vertices is not None:
+        mv = np.ascontiguousarray(mesh_vertices, dtype=np.float32)
+        mi = np.ascontiguousarray(mesh_indices, dtype=np.uint32)
+        if mv.ndim != 2 or mv.shape[1] != 3:
+            raise ValueError(f"mesh_vertices must be (N, 3), got {mv.shape}")
+        if mi.ndim != 2 or mi.shape[1] != 3:
+            raise ValueError(f"mesh_indices must be (M, 3), got {mi.shape}")
+    return _NATIVE.hybrid_render_terrain_reference(
+        dem,
+        int(width),
+        int(height),
+        cam,
+        spacing=(float(spacing[0]), float(spacing[1])),
+        exaggeration=float(exaggeration),
+        albedo=(float(albedo[0]), float(albedo[1]), float(albedo[2])),
+        sun_azimuth_deg=float(sun_azimuth_deg),
+        sun_elevation_deg=float(sun_elevation_deg),
+        sun_intensity=float(sun_intensity),
+        env_map=env,
+        env_intensity=float(env_intensity),
+        mesh_vertices=mv,
+        mesh_indices=mi,
+        spp=int(spp),
+        max_frames=int(max_frames),
+        min_frames=int(min_frames),
+        variance_threshold=float(variance_threshold),
+        seed=int(seed),
+    )

@@ -67,6 +67,27 @@ def test_native_terrain_vt_runtime_accepts_material_map_families() -> None:
     assert 'const TERRAIN_VT_SUPPORTED_FAMILIES: &[&str] = &["albedo", "normal", "mask"];' in source
 
 
+def test_terrain_vt_feedback_uses_nonblocking_readback() -> None:
+    source = VT_RUNTIME.read_text(encoding="utf-8")
+    assert "try_read_feedback_entries(device)?" in source
+    assert "read_feedback_entries(device, queue)?" not in source
+
+    feedback_source = (Path(__file__).resolve().parents[1] / "src" / "core" / "feedback_buffer.rs").read_text(
+        encoding="utf-8"
+    )
+    assert "pub fn try_read_feedback_entries" in feedback_source
+    try_fn = feedback_source.split("pub fn try_read_feedback_entries", 1)[1].split("\n    }", 1)[0]
+    assert "wgpu::Maintain::Poll" in try_fn
+    assert "wgpu::Maintain::Wait" not in try_fn
+
+
+def test_terrain_vt_page_table_uploads_are_dirty_layer_scoped() -> None:
+    source = VT_RUNTIME.read_text(encoding="utf-8")
+    assert "dirty_page_table_layers: HashSet<usize>" in source
+    assert "self.dirty_page_table_layers.drain()" in source
+    assert "self.dirty_page_table_layers.insert(layer_index)" in source
+
+
 def test_vt_settings_reject_duplicate_families() -> None:
     with pytest.raises(ValueError, match="duplicate"):
         TerrainVTSettings(
@@ -513,3 +534,34 @@ class TestTerrainMaterialVirtualTexturing:
         assert stats_left["tiles_streamed"] > 0.0
         assert stats_right["tiles_streamed"] > 0.0
         assert max(stats_left["evictions"], stats_right["evictions"]) > 0.0
+
+    def test_vt_feedback_converges_with_async_readback_delay(self, tv20_render_env) -> None:
+        renderer, material_set, ibl, heightmap = tv20_render_env
+        renderer.clear_material_vt_sources()
+        _register_vt_sources(renderer, virtual_size=2048)
+
+        vt_settings = TerrainVTSettings(
+            enabled=True,
+            atlas_size=512,
+            residency_budget_mb=4.0,
+            max_mip_levels=6,
+            use_feedback=True,
+            layers=[VTLayerFamily(family="albedo", virtual_size_px=(2048, 2048))],
+        )
+
+        observed = []
+        for _ in range(4):
+            _render_beauty(
+                renderer,
+                material_set,
+                ibl,
+                heightmap,
+                vt_settings=vt_settings,
+                cam_target=(0.25, -0.25, 0.0),
+                cam_radius=1.75,
+            )
+            observed.append(renderer.get_material_vt_stats())
+
+        assert any(stats["feedback_requests"] > 0.0 for stats in observed)
+        assert observed[-1]["resident_pages"] <= observed[-1]["cache_budget_pages"]
+        assert observed[-1]["avg_upload_ms"] > 0.0

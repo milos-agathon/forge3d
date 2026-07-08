@@ -98,25 +98,22 @@ impl TerrainSpike {
 
         let buf_size = (padded_bpr * self.height) as wgpu::BufferAddress;
 
-        // B15: Check memory budget before creating host-visible readback buffer
-        let tracker = global_tracker();
-        tracker.check_budget(buf_size).map_err(|e| {
+        let usage = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ;
+        let (readback, readback_handle) = crate::core::resource_tracker::tracked_create_buffer(
+            &self.device,
+            &wgpu::BufferDescriptor {
+                label: Some("terrain-readback"),
+                size: buf_size,
+                usage,
+                mapped_at_creation: false,
+            },
+        )
+        .map_err(|e| {
             pyo3::exceptions::PyRuntimeError::new_err(format!(
                 "Memory budget exceeded during terrain readback: {}",
                 e
             ))
         })?;
-
-        let usage = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ;
-        let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("terrain-readback"),
-            size: buf_size,
-            usage,
-            mapped_at_creation: false,
-        });
-
-        // B15: Track allocation (host-visible)
-        tracker.track_buffer_allocation(buf_size, is_host_visible_usage(usage));
 
         let mut encoder = self
             .device
@@ -160,8 +157,7 @@ impl TerrainSpike {
         drop(data);
         readback.unmap();
 
-        // B15: Free allocation after use
-        tracker.free_buffer_allocation(buf_size, is_host_visible_usage(usage));
+        drop(readback_handle);
 
         let img = image::RgbaImage::from_raw(self.width, self.height, pixels)
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Invalid image buffer"))?;

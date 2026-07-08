@@ -25,28 +25,6 @@ impl QueueBuffers {
             ],
         }))
     }
-
-    pub fn create_compact_bind_group(
-        &self,
-        device: &Device,
-    ) -> Result<BindGroup, Box<dyn std::error::Error>> {
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("compact-queue-layout"),
-            entries: &storage_entries(&[0, 1, 2, 3, 4]),
-        });
-
-        Ok(device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("compact-queue-bind-group"),
-            layout: &layout,
-            entries: &[
-                bind_entry(0, &self.ray_queue_header),
-                bind_entry(1, &self.ray_queue),
-                bind_entry(2, &self.ray_queue_compacted),
-                bind_entry(3, &self.ray_flags),
-                bind_entry(4, &self.prefix_sums),
-            ],
-        }))
-    }
 }
 
 fn storage_entries(bindings: &[u32]) -> Vec<wgpu::BindGroupLayoutEntry> {

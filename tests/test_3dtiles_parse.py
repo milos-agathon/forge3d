@@ -5,16 +5,110 @@ Tests tileset.json parsing, tile tree structure, and bounding volume handling.
 
 import pytest
 import json
+import struct
 import tempfile
 from pathlib import Path
 
+import numpy as np
 from forge3d.tiles3d import (
     load_tileset,
     Tile,
     BoundingVolume,
     _parse_bounding_volume,
     _parse_tile,
+    decode_b3dm,
+    decode_pnts,
 )
+from forge3d._native import NATIVE_AVAILABLE, get_native_module
+
+
+def _pad4(data: bytes, fill: bytes = b" ") -> bytes:
+    return data + fill * ((4 - len(data) % 4) % 4)
+
+
+def _minimal_b3dm_triangle() -> bytes:
+    positions = struct.pack(
+        "<9f",
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+    )
+    indices = struct.pack("<3H", 0, 1, 2)
+    bin_chunk = _pad4(positions + indices, b"\x00")
+    gltf_json = _pad4(
+        json.dumps(
+            {
+                "asset": {"version": "2.0"},
+                "buffers": [{"byteLength": len(positions) + len(indices)}],
+                "bufferViews": [
+                    {"buffer": 0, "byteOffset": 0, "byteLength": len(positions)},
+                    {"buffer": 0, "byteOffset": len(positions), "byteLength": len(indices)},
+                ],
+                "accessors": [
+                    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3"},
+                    {"bufferView": 1, "componentType": 5123, "count": 3, "type": "SCALAR"},
+                ],
+                "meshes": [
+                    {"primitives": [{"attributes": {"POSITION": 0}, "indices": 1}]}
+                ],
+            },
+            separators=(",", ":"),
+        ).encode("utf-8"),
+        b" ",
+    )
+    glb_length = 12 + 8 + len(gltf_json) + 8 + len(bin_chunk)
+    glb = b"".join(
+        [
+            b"glTF",
+            struct.pack("<II", 2, glb_length),
+            struct.pack("<II", len(gltf_json), 0x4E4F534A),
+            gltf_json,
+            struct.pack("<II", len(bin_chunk), 0x004E4942),
+            bin_chunk,
+        ]
+    )
+    feature_table = b"{}  "
+    byte_length = 28 + len(feature_table) + len(glb)
+    return b"".join(
+        [
+            b"b3dm",
+            struct.pack("<IIIIII", 1, byte_length, len(feature_table), 0, 0, 0),
+            feature_table,
+            glb,
+        ]
+    )
+
+
+def _minimal_pnts_points() -> bytes:
+    positions = struct.pack("<6f", 0.0, 0.0, 0.0, 1.0, 2.0, 3.0)
+    colors = bytes([255, 0, 0, 0, 255, 0])
+    feature_table = _pad4(
+        json.dumps(
+            {
+                "POINTS_LENGTH": 2,
+                "POSITION": {"byteOffset": 0},
+                "RGB": {"byteOffset": len(positions)},
+            },
+            separators=(",", ":"),
+        ).encode("utf-8"),
+        b" ",
+    )
+    feature_binary = _pad4(positions + colors, b"\x00")
+    byte_length = 28 + len(feature_table) + len(feature_binary)
+    return b"".join(
+        [
+            b"pnts",
+            struct.pack("<IIIIII", 1, byte_length, len(feature_table), len(feature_binary), 0, 0),
+            feature_table,
+            feature_binary,
+        ]
+    )
 
 
 class TestBoundingVolume:
@@ -195,6 +289,30 @@ class TestTilesetParsing:
             resolved = tileset.resolve_uri("tiles/tile.b3dm")
             
             assert resolved == Path(tmpdir) / "tiles/tile.b3dm"
+
+
+class TestB3dmDecode:
+    def test_decode_b3dm_uses_native_geometry_extraction(self):
+        decoded = decode_b3dm(_minimal_b3dm_triangle())
+
+        assert decoded["vertex_count"] == 3
+        assert decoded["triangle_count"] == 1
+        assert decoded["positions"].shape == (9,)
+        assert decoded["indices"].tolist() == [0, 1, 2]
+        assert decoded["feature_table"] == {}
+
+
+class TestPntsDecode:
+    @pytest.mark.skipif(not NATIVE_AVAILABLE, reason="native extension unavailable")
+    def test_decode_pnts_uses_native_point_extraction(self):
+        assert hasattr(get_native_module(), "decode_pnts_py")
+
+        decoded = decode_pnts(_minimal_pnts_points())
+
+        assert decoded["point_count"] == 2
+        assert decoded["positions"].shape == (2, 3)
+        assert decoded["colors"].shape == (2, 3)
+        np.testing.assert_array_equal(decoded["colors"][0], np.array([255, 0, 0], dtype=np.uint8))
 
 
 class TestTileMetrics:

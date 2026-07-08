@@ -20,6 +20,9 @@ pub(crate) fn _pt_render_gpu_mesh(
     use numpy::{PyArray1, PyReadonlyArray2};
     use pyo3::exceptions::{PyRuntimeError, PyValueError};
 
+    // Fallible first GPU touch: later ctx() calls cannot fail once this succeeds.
+    crate::core::gpu::try_ctx()?;
+
     let verts_arr: PyReadonlyArray2<f32> = vertices.extract().map_err(|_| {
         PyValueError::new_err("vertices must be a NumPy array with shape (N,3) float32")
     })?;
@@ -196,7 +199,9 @@ pub(crate) fn _pt_render_gpu_mesh(
         let result = catch_unwind(AssertUnwindSafe(|| {
             let _ = hybrid.prepare_gpu_resources();
             if let Ok(tracer) = crate::path_tracing::hybrid_compute::HybridPathTracer::new() {
-                tracer.render(width, height, &[], &hybrid, params).ok()
+                tracer
+                    .render(width, height, &[], &hybrid, None, params)
+                    .ok()
             } else {
                 None
             }
