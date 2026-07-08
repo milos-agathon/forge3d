@@ -867,7 +867,7 @@ impl HybridPathTracer {
             queue.submit([enc.finish()]);
             frames += 1;
 
-            let window_full = frames % WELFORD_WINDOW == 0;
+            let window_full = frames.is_multiple_of(WELFORD_WINDOW);
             if window_full || frames == desc.max_frames {
                 let n_window = ((frames - 1) % WELFORD_WINDOW) + 1;
                 if n_window >= 2 {

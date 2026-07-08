@@ -278,7 +278,10 @@ __pycache__/
 !docs/tutorials/images/*.jpg
 tests/golden/adjudication/
 tests/golden/hybrid_terrain/
-tests/golden/labels/
+tests/golden/labels/*.png
+tests/golden/labels/*.jpg
+tests/golden/labels/*.jpeg
+tests/golden/labels/*.webp
 tests/goldens/
 tests/golden/recipes/mapscene_auto_water.png
 tests/golden/recipes/mapscene_clipmap_large_region.png

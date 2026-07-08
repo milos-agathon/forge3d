@@ -146,7 +146,7 @@ pub fn to_hex(bytes: &[u8]) -> String {
 
 /// Decode a lowercase/uppercase hex string into bytes.
 pub fn from_hex(text: &str) -> Result<Vec<u8>, String> {
-    if text.len() % 2 != 0 {
+    if !text.len().is_multiple_of(2) {
         return Err("hex string has odd length".to_string());
     }
     (0..text.len())
@@ -234,7 +234,7 @@ mod tests {
     #[test]
     fn single_leaf_root_is_its_hash() {
         let leaf = encode_tile_leaf(&tile(0, 0, 0, 0, 0)).to_vec();
-        assert_eq!(merkle_root(&[leaf.clone()]), sha256(&leaf));
+        assert_eq!(merkle_root(std::slice::from_ref(&leaf)), sha256(&leaf));
     }
 
     #[test]
