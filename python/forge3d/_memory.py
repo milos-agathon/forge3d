@@ -10,7 +10,7 @@ from typing import Dict
 from ._native import NATIVE_AVAILABLE, get_native_module
 
 MEMORY_LIMIT_BYTES: int = 512 * 1024 * 1024  # 512 MiB budget for host-visible memory
-BUDGET_POLICY: str = "warn"
+BUDGET_POLICY: str = "enforce"
 _GLOBAL_MEMORY = {
     "buffer_count": 0,
     "texture_count": 0,

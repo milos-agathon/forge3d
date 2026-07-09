@@ -19,6 +19,7 @@ __all__ = [
     "update_memory_usage",
     "enforce_memory_budget",
     "set_budget_policy",
+    "budget_policy",
     "get_budget_policy",
     "budget_remaining",
     "utilization_ratio",
@@ -39,6 +40,15 @@ def memory_metrics() -> Dict[str, float]:
 
 
 def set_budget_policy(policy: str) -> str:
+    return _memory.set_budget_policy(policy)
+
+
+def budget_policy(policy: str) -> str:
+    """Spec-named opt-in alias for :func:`set_budget_policy`.
+
+    Sets the host-visible memory budget behavior to ``'enforce'`` (default) or
+    ``'warn'`` and returns the normalized policy.
+    """
     return _memory.set_budget_policy(policy)
 
 

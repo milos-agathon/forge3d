@@ -235,6 +235,8 @@ class TestNativeModuleSymbols:
         "clear_native_degradations",
         # CENSOR: negotiated GPU capability report
         "capabilities",
+        # CENSOR: budget-enforce test helper
+        "request_host_visible_allocation_for_test",
     ]
 
     LATER_GIS_FUNCTIONS = []

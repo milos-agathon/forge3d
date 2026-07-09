@@ -99,7 +99,7 @@ impl TerrainSpike {
         let buf_size = (padded_bpr * self.height) as wgpu::BufferAddress;
 
         let usage = wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ;
-        let (readback, readback_handle) = crate::core::resource_tracker::tracked_create_buffer(
+        let readback = crate::core::resource_tracker::tracked_create_buffer(
             &self.device,
             &wgpu::BufferDescriptor {
                 label: Some("terrain-readback"),
@@ -157,7 +157,7 @@ impl TerrainSpike {
         drop(data);
         readback.unmap();
 
-        drop(readback_handle);
+        drop(readback);
 
         let img = image::RgbaImage::from_raw(self.width, self.height, pixels)
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Invalid image buffer"))?;

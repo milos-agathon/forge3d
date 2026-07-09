@@ -112,6 +112,7 @@ _NATIVE_ONLY_EXPORTS = (
         "native_degradations",  # CENSOR: global degradation sink snapshot
         "clear_native_degradations",  # CENSOR: global degradation sink reset
         "capabilities",  # CENSOR: negotiated GPU capability report
+        "request_host_visible_allocation_for_test",  # CENSOR: budget-enforce test helper
 )
 
 if _NATIVE_MODULE is not None:
@@ -606,6 +607,8 @@ __all__ = [
     "clear_native_degradations",
     # CENSOR: negotiated GPU capability report
     "capabilities",
+    # CENSOR: budget-enforce test helper
+    "request_host_visible_allocation_for_test",
     # CENSOR: typed GPU-error exceptions
     "MemoryBudgetExceeded",
     "DegradedCapability",

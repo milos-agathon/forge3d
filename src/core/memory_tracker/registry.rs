@@ -41,7 +41,7 @@ impl ResourceRegistry {
             staging_ring_count: AtomicU32::new(0),
             staging_buffer_size: AtomicU64::new(0),
             staging_buffer_stalls: AtomicU64::new(0),
-            budget_policy: AtomicU8::new(BUDGET_POLICY_WARN),
+            budget_policy: AtomicU8::new(BUDGET_POLICY_ENFORCE),
             budget_limit: MEMORY_BUDGET_LIMIT,
         }
     }

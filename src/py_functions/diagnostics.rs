@@ -262,6 +262,26 @@ pub(crate) fn get_memory_budget_policy() -> PyResult<String> {
         .to_string())
 }
 
+/// CENSOR test helper: request a host-visible allocation of `bytes` through the
+/// tracked-buffer path and immediately drop it. Under the `enforce` policy an
+/// over-budget request raises `MemoryBudgetExceeded`; otherwise returns None.
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn request_host_visible_allocation_for_test(bytes: u64, label: &str) -> PyResult<()> {
+    let ctx = crate::core::gpu::try_ctx()?;
+    let buffer = crate::core::resource_tracker::tracked_create_buffer(
+        &ctx.device,
+        &wgpu::BufferDescriptor {
+            label: Some(label),
+            size: bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        },
+    )?;
+    drop(buffer);
+    Ok(())
+}
+
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 pub(crate) fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {

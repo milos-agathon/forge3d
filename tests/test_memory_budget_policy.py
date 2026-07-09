@@ -3,6 +3,14 @@ import importlib
 import pytest
 
 
+def test_default_budget_policy_is_enforce():
+    # CENSOR contract change: the honest default host-visible budget policy is
+    # 'enforce', not 'warn'. Reload the module to read its pristine default,
+    # independent of any runtime mutation by other tests in the session.
+    memory = importlib.reload(importlib.import_module("forge3d._memory"))
+    assert memory.BUDGET_POLICY == "enforce"
+
+
 def test_set_budget_policy_validates_values():
     mem = importlib.import_module("forge3d.mem")
 
@@ -11,6 +19,14 @@ def test_set_budget_policy_validates_values():
 
     with pytest.raises(ValueError, match="budget policy"):
         mem.set_budget_policy("ignore")
+
+
+def test_budget_policy_alias_delegates_to_set_budget_policy():
+    mem = importlib.import_module("forge3d.mem")
+
+    # Spec-named opt-in alias mirrors set_budget_policy.
+    assert mem.budget_policy("warn") == "warn"
+    assert mem.budget_policy("enforce") == "enforce"
 
 
 def test_fallback_enforce_policy_raises_when_budget_exceeded(monkeypatch):

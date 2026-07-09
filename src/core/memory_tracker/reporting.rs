@@ -62,4 +62,31 @@ impl ResourceRegistry {
         }
         Ok(())
     }
+
+    /// Labeled host-visible budget check used by the CENSOR tracked-buffer
+    /// wrappers. On overage under the `enforce` policy this returns a
+    /// [`RenderError::Budget`] naming the offending allocation and the ledger's
+    /// top-5 consumers; under `warn` it logs and proceeds.
+    pub fn check_budget_labeled(
+        &self,
+        additional_host_visible: u64,
+        label: &str,
+    ) -> Result<(), crate::core::error::RenderError> {
+        let current = self.host_visible_bytes.load(Ordering::Relaxed);
+        if current.saturating_add(additional_host_visible) > self.budget_limit {
+            if self.get_budget_policy() == "warn" {
+                log::warn!(
+                    "Memory budget exceeded: allocation '{}' requesting {} bytes would exceed the 512 MiB host-visible limit (current: {} bytes)",
+                    label, additional_host_visible, current
+                );
+                return Ok(());
+            }
+            let top5 = crate::core::resource_tracker::ledger_top_consumers_string(5);
+            let message = format!(
+                "Memory budget exceeded: allocation '{label}' requesting {additional_host_visible} bytes would exceed the 512 MiB host-visible limit (current: {current} bytes); top consumers: {top5}"
+            );
+            return Err(crate::core::error::RenderError::Budget(message));
+        }
+        Ok(())
+    }
 }
