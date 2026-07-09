@@ -12,17 +12,17 @@ struct SsaoPipelines {
 struct SsaoBuffers {
     sampler: wgpu::Sampler,
     blur_sampler: wgpu::Sampler,
-    settings_buffer: wgpu::Buffer,
-    blur_settings_buffer: wgpu::Buffer,
-    view_buffer: wgpu::Buffer,
+    settings_buffer: TrackedBuffer,
+    blur_settings_buffer: TrackedBuffer,
+    view_buffer: TrackedBuffer,
 }
 struct SsaoNoiseResources {
-    texture: wgpu::Texture,
+    texture: TrackedTexture,
     view: wgpu::TextureView,
     sampler: wgpu::Sampler,
 }
 struct SsaoDepthResources {
-    texture: wgpu::Texture,
+    texture: TrackedTexture,
     view: wgpu::TextureView,
 }
 
@@ -135,7 +135,7 @@ fn create_ssao_pipelines(
     }
 }
 
-fn create_ssao_buffers(device: &wgpu::Device) -> SsaoBuffers {
+fn create_ssao_buffers(device: &wgpu::Device) -> Result<SsaoBuffers, RenderError> {
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("ssao-sampler"),
         mag_filter: wgpu::FilterMode::Linear,
@@ -150,38 +150,47 @@ fn create_ssao_buffers(device: &wgpu::Device) -> SsaoBuffers {
         mipmap_filter: wgpu::FilterMode::Linear,
         ..Default::default()
     });
-    let settings_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("ssao-settings"),
-        size: std::mem::size_of::<SsaoSettingsUniform>() as u64,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let blur_settings_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("ssao-blur-settings"),
-        size: std::mem::size_of::<SsaoSettingsUniform>() as u64,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let view_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("ssao-view-params"),
-        size: 256,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+    let settings_buffer = tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("ssao-settings"),
+            size: std::mem::size_of::<SsaoSettingsUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )?;
+    let blur_settings_buffer = tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("ssao-blur-settings"),
+            size: std::mem::size_of::<SsaoSettingsUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )?;
+    let view_buffer = tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("ssao-view-params"),
+            size: 256,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )?;
 
-    SsaoBuffers {
+    Ok(SsaoBuffers {
         sampler,
         blur_sampler,
         settings_buffer,
         blur_settings_buffer,
         view_buffer,
-    }
+    })
 }
 
 fn create_ssao_noise_resources(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-) -> SsaoNoiseResources {
+) -> Result<SsaoNoiseResources, RenderError> {
     let noise_size = 4u32;
     let mut noise_data = vec![0u8; (noise_size * noise_size * 4) as usize];
     for (i, chunk) in noise_data.chunks_mut(4).enumerate() {
@@ -191,20 +200,23 @@ fn create_ssao_noise_resources(
         chunk[2] = 0;
         chunk[3] = 255;
     }
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("ssao-noise"),
-        size: wgpu::Extent3d {
-            width: noise_size,
-            height: noise_size,
-            depth_or_array_layers: 1,
+    let texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("ssao-noise"),
+            size: wgpu::Extent3d {
+                width: noise_size,
+                height: noise_size,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    )?;
     queue.write_texture(
         wgpu::ImageCopyTexture {
             texture: &texture,
@@ -234,30 +246,37 @@ fn create_ssao_noise_resources(
         ..Default::default()
     });
 
-    SsaoNoiseResources {
+    Ok(SsaoNoiseResources {
         texture,
         view,
         sampler,
-    }
+    })
 }
 
-fn create_ssao_depth_resources(device: &wgpu::Device, width: u32, height: u32) -> SsaoDepthResources {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("ssao-depth"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+fn create_ssao_depth_resources(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+) -> Result<SsaoDepthResources, RenderError> {
+    let texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("ssao-depth"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R32Float,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    )?;
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    SsaoDepthResources { texture, view }
+    Ok(SsaoDepthResources { texture, view })
 }
 
 fn sampled_texture_layout_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {

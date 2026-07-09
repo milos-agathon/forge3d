@@ -21,12 +21,15 @@ impl Scene {
         let unpadded = self.width * bpp;
         let padded = crate::core::gpu::align_copy_bpr(unpadded);
         let size = (padded * self.height) as wgpu::BufferAddress;
-        let readback = g.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(readback_label),
-            size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let readback = crate::core::resource_tracker::tracked_create_buffer(
+            &g.device,
+            &wgpu::BufferDescriptor {
+                label: Some(readback_label),
+                size,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        )?;
         let mut enc = g
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {

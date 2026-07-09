@@ -144,7 +144,7 @@ impl TerrainScene {
             return Ok(());
         }
 
-        self.ensure_scatter_renderer_sample_count(render_targets.sample_count);
+        self.ensure_scatter_renderer_sample_count(render_targets.sample_count)?;
 
         let color_view = render_targets
             .msaa_view
@@ -295,10 +295,10 @@ impl TerrainScene {
         Ok(())
     }
 
-    fn ensure_scatter_renderer_sample_count(&mut self, sample_count: u32) {
+    fn ensure_scatter_renderer_sample_count(&mut self, sample_count: u32) -> Result<()> {
         let sample_count = sample_count.max(1);
         if self.scatter_renderer_sample_count == sample_count {
-            return;
+            return Ok(());
         }
 
         self.scatter_renderer =
@@ -310,7 +310,8 @@ impl TerrainScene {
                 wgpu::CompareFunction::LessEqual,
                 false,
                 Some(&self.shadow_bind_group_layout),
-            );
+            )?;
         self.scatter_renderer_sample_count = sample_count;
+        Ok(())
     }
 }

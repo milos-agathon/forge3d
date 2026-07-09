@@ -181,12 +181,14 @@ pub(crate) fn vector_render_oit_edl_py(
             oit.compose(&mut pass);
         }
 
-        let (edl_pipeline, edl_bind_group) = oit.create_edl_pipeline(
-            &scene.device,
-            &final_view,
-            edl_strength.max(0.0),
-            edl_radius_px.max(1.0),
-        );
+        let (edl_pipeline, edl_bind_group) = oit
+            .create_edl_pipeline(
+                &scene.device,
+                &final_view,
+                edl_strength.max(0.0),
+                edl_radius_px.max(1.0),
+            )
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("vf.Vector.RenderOITEDL.Pass"),

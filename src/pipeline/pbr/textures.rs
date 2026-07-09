@@ -4,19 +4,19 @@ use super::*;
 #[derive(Debug)]
 pub struct PbrTextures {
     /// Base color (albedo) texture - RGBA8
-    pub base_color: Option<Texture>,
+    pub base_color: Option<TrackedTexture>,
 
     /// Metallic-roughness texture - RG format (B=metallic, G=roughness)
-    pub metallic_roughness: Option<Texture>,
+    pub metallic_roughness: Option<TrackedTexture>,
 
     /// Normal map texture - RGB format (tangent space)
-    pub normal: Option<Texture>,
+    pub normal: Option<TrackedTexture>,
 
     /// Ambient occlusion texture - R format
-    pub occlusion: Option<Texture>,
+    pub occlusion: Option<TrackedTexture>,
 
     /// Emissive texture - RGB format
-    pub emissive: Option<Texture>,
+    pub emissive: Option<TrackedTexture>,
 }
 
 /// Create texture from raw data
@@ -29,21 +29,24 @@ pub(super) fn create_texture_from_data(
     width: u32,
     height: u32,
     format: TextureFormat,
-) -> Texture {
-    let texture = device.create_texture(&TextureDescriptor {
-        label: Some(label),
-        size: Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+) -> RenderResult<TrackedTexture> {
+    let texture = tracked_create_texture(
+        device,
+        &TextureDescriptor {
+            label: Some(label),
+            size: Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format,
-        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    )?;
 
     // Calculate bytes per pixel based on format
     let bytes_per_pixel = match format {
@@ -116,7 +119,7 @@ pub(super) fn create_texture_from_data(
         );
     }
 
-    texture
+    Ok(texture)
 }
 
 /// Create default 1x1 texture with specific color
@@ -125,7 +128,7 @@ pub(super) fn create_default_texture(
     queue: &Queue,
     label: &str,
     color: [u8; 4],
-) -> Texture {
+) -> RenderResult<TrackedTexture> {
     create_texture_from_data(
         device,
         queue,

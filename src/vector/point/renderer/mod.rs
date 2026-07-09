@@ -1,5 +1,6 @@
 use super::types::*;
 use crate::core::error::RenderError;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use crate::vector::api::PointDef;
 use crate::vector::data::{validate_point_instances, PointInstance};
 use crate::vector::layer::Layer;
@@ -19,12 +20,12 @@ pub use upload::cluster_points;
 /// Instanced point renderer with H20,H21,H22 enhancements
 pub struct PointRenderer {
     render_pipeline: wgpu::RenderPipeline,
-    instance_buffer: Option<wgpu::Buffer>,
-    uniform_buffer: wgpu::Buffer,
+    instance_buffer: Option<TrackedBuffer>,
+    uniform_buffer: TrackedBuffer,
     bind_group: wgpu::BindGroup,
     bind_group_layout: wgpu::BindGroupLayout,
     pick_pipeline: wgpu::RenderPipeline,
-    pick_uniform_buffer: wgpu::Buffer,
+    pick_uniform_buffer: TrackedBuffer,
     pick_bind_group: wgpu::BindGroup,
     oit_pipeline: wgpu::RenderPipeline,
     instance_capacity: usize,

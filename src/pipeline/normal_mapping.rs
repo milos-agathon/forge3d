@@ -3,12 +3,16 @@
 //! Provides GPU pipeline for rendering meshes with tangent-space normal mapping
 //! support using the TBN vertex attributes from the mesh module.
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 use crate::mesh::TbnVertex;
 use bytemuck::{Pod, Zeroable};
 use glam::Mat4;
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
-    BindGroupLayoutEntry, BindingResource, BindingType, Buffer, BufferAddress, BufferBinding,
+    BindGroupLayoutEntry, BindingResource, BindingType, BufferAddress, BufferBinding,
     BufferDescriptor, BufferUsages, Device, Queue, RenderPass, RenderPipeline,
     RenderPipelineDescriptor, SamplerBindingType, ShaderModuleDescriptor, ShaderSource, Texture,
     TextureFormat, TextureSampleType, TextureViewDimension, VertexAttribute, VertexBufferLayout,
@@ -47,15 +51,15 @@ pub struct NormalMappingPipeline {
     pipeline: RenderPipeline,
     uniforms_bind_group_layout: BindGroupLayout,
     texture_bind_group_layout: BindGroupLayout,
-    uniforms_buffer: Buffer,
-    vertex_buffer: Option<Buffer>,
-    index_buffer: Option<Buffer>,
+    uniforms_buffer: TrackedBuffer,
+    vertex_buffer: Option<TrackedBuffer>,
+    index_buffer: Option<TrackedBuffer>,
     index_count: u32,
 }
 
 impl NormalMappingPipeline {
     /// Create a new normal mapping pipeline
-    pub fn new(device: &Device, surface_format: TextureFormat) -> Self {
+    pub fn new(device: &Device, surface_format: TextureFormat) -> RenderResult<Self> {
         // Create shader module
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("normal_mapping_shader"),
@@ -189,14 +193,17 @@ impl NormalMappingPipeline {
         });
 
         // Create uniforms buffer
-        let uniforms_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("normal_mapping_uniforms"),
-            size: std::mem::size_of::<NormalMappingUniforms>() as BufferAddress,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniforms_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("normal_mapping_uniforms"),
+                size: std::mem::size_of::<NormalMappingUniforms>() as BufferAddress,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
-        Self {
+        Ok(Self {
             pipeline,
             uniforms_bind_group_layout,
             texture_bind_group_layout,
@@ -204,30 +211,42 @@ impl NormalMappingPipeline {
             vertex_buffer: None,
             index_buffer: None,
             index_count: 0,
-        }
+        })
     }
 
     /// Upload mesh data to GPU buffers
-    pub fn upload_mesh(&mut self, device: &Device, vertices: &[TbnVertex], indices: &[u32]) {
+    pub fn upload_mesh(
+        &mut self,
+        device: &Device,
+        vertices: &[TbnVertex],
+        indices: &[u32],
+    ) -> RenderResult<()> {
         // Create vertex buffer
-        let vertex_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("normal_mapping_vertices"),
-            size: (vertices.len() * std::mem::size_of::<TbnVertex>()) as BufferAddress,
-            usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let vertex_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("normal_mapping_vertices"),
+                size: (vertices.len() * std::mem::size_of::<TbnVertex>()) as BufferAddress,
+                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         // Create index buffer
-        let index_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("normal_mapping_indices"),
-            size: (indices.len() * std::mem::size_of::<u32>()) as BufferAddress,
-            usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let index_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("normal_mapping_indices"),
+                size: (indices.len() * std::mem::size_of::<u32>()) as BufferAddress,
+                usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         self.vertex_buffer = Some(vertex_buffer);
         self.index_buffer = Some(index_buffer);
         self.index_count = indices.len() as u32;
+        Ok(())
     }
 
     /// Update uniform data
@@ -310,21 +329,28 @@ pub fn compute_normal_matrix(model_matrix: Mat4) -> Mat4 {
 }
 
 /// Create a simple checkerboard normal map texture for testing
-pub fn create_checkerboard_normal_texture(device: &Device, queue: &Queue, size: u32) -> Texture {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("checkerboard_normal_texture"),
-        size: wgpu::Extent3d {
-            width: size,
-            height: size,
-            depth_or_array_layers: 1,
+pub fn create_checkerboard_normal_texture(
+    device: &Device,
+    queue: &Queue,
+    size: u32,
+) -> RenderResult<TrackedTexture> {
+    let texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("checkerboard_normal_texture"),
+            size: wgpu::Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    )?;
 
     // Generate checkerboard normal map data
     let mut data = Vec::with_capacity((size * size * 4) as usize);
@@ -362,5 +388,5 @@ pub fn create_checkerboard_normal_texture(device: &Device, queue: &Queue, size: 
         },
     );
 
-    texture
+    Ok(texture)
 }

@@ -2,6 +2,7 @@
 //! GPU tessellation with proper sRGB target rendering
 
 use crate::core::error::RenderError;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use crate::vector::api::PolygonDef;
 use crate::vector::data::{validate_polygon_vertices, PackedPolygon, PolygonVertex};
 use crate::vector::layer::Layer;
@@ -10,9 +11,9 @@ use bytemuck::{Pod, Zeroable};
 /// Polygon renderer with GPU tessellation
 pub struct PolygonRenderer {
     render_pipeline: wgpu::RenderPipeline,
-    vertex_buffer: Option<wgpu::Buffer>,
-    index_buffer: Option<wgpu::Buffer>,
-    uniform_buffer: wgpu::Buffer,
+    vertex_buffer: Option<TrackedBuffer>,
+    index_buffer: Option<TrackedBuffer>,
+    uniform_buffer: TrackedBuffer,
     bind_group: wgpu::BindGroup,
     vertex_capacity: usize,
     index_capacity: usize,
@@ -43,12 +44,15 @@ impl PolygonRenderer {
         });
 
         // Create uniform buffer
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Polygon.Uniform"),
-            size: std::mem::size_of::<PolygonUniform>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("vf.Vector.Polygon.Uniform"),
+                size: std::mem::size_of::<PolygonUniform>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -249,24 +253,30 @@ impl PolygonRenderer {
         // Reallocate vertex buffer if needed
         if total_vertices > self.vertex_capacity {
             let new_capacity = (total_vertices * 2).max(1024);
-            self.vertex_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("vf.Vector.Polygon.VertexBuffer"),
-                size: (new_capacity * std::mem::size_of::<PolygonVertex>()) as u64,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
+            self.vertex_buffer = Some(tracked_create_buffer(
+                device,
+                &wgpu::BufferDescriptor {
+                    label: Some("vf.Vector.Polygon.VertexBuffer"),
+                    size: (new_capacity * std::mem::size_of::<PolygonVertex>()) as u64,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                },
+            )?);
             self.vertex_capacity = new_capacity;
         }
 
         // Reallocate index buffer if needed
         if total_indices > self.index_capacity {
             let new_capacity = (total_indices * 2).max(3072); // At least 1024 triangles
-            self.index_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("vf.Vector.Polygon.IndexBuffer"),
-                size: (new_capacity * std::mem::size_of::<u32>()) as u64,
-                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
+            self.index_buffer = Some(tracked_create_buffer(
+                device,
+                &wgpu::BufferDescriptor {
+                    label: Some("vf.Vector.Polygon.IndexBuffer"),
+                    size: (new_capacity * std::mem::size_of::<u32>()) as u64,
+                    usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                },
+            )?);
             self.index_capacity = new_capacity;
         }
 

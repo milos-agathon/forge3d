@@ -9,12 +9,14 @@ use wgpu::{
     ColorTargetState, ColorWrites, Device, FragmentState, PipelineLayoutDescriptor, PrimitiveState,
     PrimitiveTopology, Queue, RenderPipeline, RenderPipelineDescriptor, Sampler,
     SamplerBindingType, SamplerDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages,
-    Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
+    TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
     TextureView, TextureViewDescriptor, TextureViewDimension, VertexState,
 };
 
 use crate::core::error::RenderResult;
-use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_texture, TrackedBuffer};
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -55,7 +57,7 @@ pub struct OverlayRenderer {
     pub pipeline: RenderPipeline,
 
     // resources
-    pub overlay_tex: Option<Texture>,
+    pub overlay_tex: Option<TrackedTexture>,
     pub overlay_view: Option<TextureView>,
     pub overlay_sampler: Sampler,
     pub height_sampler: Sampler,
@@ -494,7 +496,7 @@ impl OverlayRenderer {
     }
 
     /// Store overlay texture/view so GPU resources live as long as the renderer
-    pub fn set_overlay_texture(&mut self, tex: Texture, view: TextureView) {
+    pub fn set_overlay_texture(&mut self, tex: TrackedTexture, view: TextureView) {
         self.overlay_tex = Some(tex);
         self.overlay_view = Some(view);
     }

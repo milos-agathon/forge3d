@@ -126,20 +126,23 @@ impl Scene {
         }
 
         // Create texture and upload
-        let tex = g.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("native_overlay_tex"),
-            size: wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
+        let tex = crate::core::resource_tracker::tracked_create_texture(
+            &g.device,
+            &wgpu::TextureDescriptor {
+                label: Some("native_overlay_tex"),
+                size: wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         g.queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &tex,

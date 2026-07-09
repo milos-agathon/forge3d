@@ -7,7 +7,7 @@ pub struct PbrMaterialGpu {
     pub material: PbrMaterial,
 
     /// Material uniform buffer
-    pub uniform_buffer: Buffer,
+    pub uniform_buffer: TrackedBuffer,
 
     /// PBR textures
     pub textures: PbrTextures,
@@ -21,16 +21,19 @@ pub struct PbrMaterialGpu {
 
 impl PbrMaterialGpu {
     /// Create PBR material GPU resources
-    pub fn new(device: &Device, material: PbrMaterial) -> Self {
+    pub fn new(device: &Device, material: PbrMaterial) -> RenderResult<Self> {
         // Create uniform buffer
-        let uniform_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("pbr_material_uniforms"),
-            size: std::mem::size_of::<PbrMaterial>() as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("pbr_material_uniforms"),
+                size: std::mem::size_of::<PbrMaterial>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
-        Self {
+        Ok(Self {
             material,
             uniform_buffer,
             textures: PbrTextures {
@@ -42,7 +45,7 @@ impl PbrMaterialGpu {
             },
             texture_views: HashMap::new(),
             bind_group: None,
-        }
+        })
     }
 
     /// Update material properties on GPU
@@ -62,7 +65,7 @@ impl PbrMaterialGpu {
         texture_data: &[u8],
         width: u32,
         height: u32,
-    ) {
+    ) -> RenderResult<()> {
         let texture = create_texture_from_data(
             device,
             queue,
@@ -71,13 +74,14 @@ impl PbrMaterialGpu {
             width,
             height,
             TextureFormat::Rgba8UnormSrgb, // sRGB for color textures
-        );
+        )?;
 
         let view = texture.create_view(&TextureViewDescriptor::default());
 
         self.textures.base_color = Some(texture);
         self.texture_views.insert("base_color".to_string(), view);
         self.material.texture_flags |= texture_flags::BASE_COLOR;
+        Ok(())
     }
 
     /// Set metallic-roughness texture
@@ -88,7 +92,7 @@ impl PbrMaterialGpu {
         texture_data: &[u8],
         width: u32,
         height: u32,
-    ) {
+    ) -> RenderResult<()> {
         let texture = create_texture_from_data(
             device,
             queue,
@@ -97,7 +101,7 @@ impl PbrMaterialGpu {
             width,
             height,
             TextureFormat::Rgba8Unorm, // Linear for material properties
-        );
+        )?;
 
         let view = texture.create_view(&TextureViewDescriptor::default());
 
@@ -105,6 +109,7 @@ impl PbrMaterialGpu {
         self.texture_views
             .insert("metallic_roughness".to_string(), view);
         self.material.texture_flags |= texture_flags::METALLIC_ROUGHNESS;
+        Ok(())
     }
 
     /// Set normal map texture
@@ -115,7 +120,7 @@ impl PbrMaterialGpu {
         texture_data: &[u8],
         width: u32,
         height: u32,
-    ) {
+    ) -> RenderResult<()> {
         let texture = create_texture_from_data(
             device,
             queue,
@@ -124,13 +129,14 @@ impl PbrMaterialGpu {
             width,
             height,
             TextureFormat::Rgba8Unorm, // Linear for normal maps
-        );
+        )?;
 
         let view = texture.create_view(&TextureViewDescriptor::default());
 
         self.textures.normal = Some(texture);
         self.texture_views.insert("normal".to_string(), view);
         self.material.texture_flags |= texture_flags::NORMAL;
+        Ok(())
     }
 
     /// Set occlusion texture
@@ -141,7 +147,7 @@ impl PbrMaterialGpu {
         texture_data: &[u8],
         width: u32,
         height: u32,
-    ) {
+    ) -> RenderResult<()> {
         let texture = create_texture_from_data(
             device,
             queue,
@@ -150,13 +156,14 @@ impl PbrMaterialGpu {
             width,
             height,
             TextureFormat::R8Unorm, // Single channel for AO
-        );
+        )?;
 
         let view = texture.create_view(&TextureViewDescriptor::default());
 
         self.textures.occlusion = Some(texture);
         self.texture_views.insert("occlusion".to_string(), view);
         self.material.texture_flags |= texture_flags::OCCLUSION;
+        Ok(())
     }
 
     /// Set emissive texture
@@ -167,7 +174,7 @@ impl PbrMaterialGpu {
         texture_data: &[u8],
         width: u32,
         height: u32,
-    ) {
+    ) -> RenderResult<()> {
         let texture = create_texture_from_data(
             device,
             queue,
@@ -176,13 +183,14 @@ impl PbrMaterialGpu {
             width,
             height,
             TextureFormat::Rgba8UnormSrgb, // sRGB for emissive colors
-        );
+        )?;
 
         let view = texture.create_view(&TextureViewDescriptor::default());
 
         self.textures.emissive = Some(texture);
         self.texture_views.insert("emissive".to_string(), view);
         self.material.texture_flags |= texture_flags::EMISSIVE;
+        Ok(())
     }
 
     /// Create bind group for material
@@ -192,15 +200,15 @@ impl PbrMaterialGpu {
         queue: &Queue,
         layout: &wgpu::BindGroupLayout,
         sampler: &Sampler,
-    ) {
+    ) -> RenderResult<()> {
         // Create default textures for missing ones
         let default_white =
-            create_default_texture(device, queue, "default_white", [255, 255, 255, 255]);
+            create_default_texture(device, queue, "default_white", [255, 255, 255, 255])?;
         let default_normal =
-            create_default_texture(device, queue, "default_normal", [128, 128, 255, 255]);
+            create_default_texture(device, queue, "default_normal", [128, 128, 255, 255])?;
         let default_metallic_roughness =
-            create_default_texture(device, queue, "default_mr", [0, 255, 0, 255]); // No metallic, full roughness
-        let default_black = create_default_texture(device, queue, "default_black", [0, 0, 0, 0]);
+            create_default_texture(device, queue, "default_mr", [0, 255, 0, 255])?; // No metallic, full roughness
+        let default_black = create_default_texture(device, queue, "default_black", [0, 0, 0, 0])?;
 
         // Create views for default textures
         let default_white_view = default_white.create_view(&TextureViewDescriptor::default());
@@ -266,5 +274,6 @@ impl PbrMaterialGpu {
         });
 
         self.bind_group = Some(bind_group);
+        Ok(())
     }
 }

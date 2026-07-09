@@ -400,7 +400,7 @@ impl TerrainScene {
                 wgpu::CompareFunction::Always,
                 false,
                 Some(&shadow_bind_group_layout),
-            );
+            )?;
 
         let noop_shadow =
             Self::create_noop_shadow(device.as_ref(), queue.as_ref(), &shadow_bind_group_layout)?;

@@ -3,6 +3,8 @@
 // RELEVANT FILES: shaders/line_aa.wgsl
 
 use super::line_types::LineInstance;
+use crate::core::error::RenderError;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bind group helpers
@@ -83,13 +85,16 @@ pub fn create_pick_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLa
 }
 
 /// Create pick uniform buffer (H5)
-pub fn create_pick_uniform_buffer(device: &wgpu::Device) -> wgpu::Buffer {
-    device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("vf.Vector.Line.PickUniform"),
-        size: 16,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    })
+pub fn create_pick_uniform_buffer(device: &wgpu::Device) -> Result<TrackedBuffer, RenderError> {
+    tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("vf.Vector.Line.PickUniform"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )
 }
 
 /// Create pick bind group (H5)

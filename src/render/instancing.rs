@@ -170,8 +170,11 @@ pub fn geometry_instance_mesh_gpu_render_py(
         &g.device,
         color_format,
         depth_format,
-    );
-    renderer.set_mesh(&g.device, &g.queue, &vertices, &indices);
+    )
+    .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    renderer
+        .set_mesh(&g.device, &g.queue, &vertices, &indices)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
     // Camera
     let view = glam::Mat4::look_at_rh(
@@ -200,40 +203,48 @@ pub fn geometry_instance_mesh_gpu_render_py(
             r[14], r[15],
         ]);
     }
-    renderer.upload_instances_from_rowmajor(&g.device, &g.queue, &rows);
+    renderer
+        .upload_instances_from_rowmajor(&g.device, &g.queue, &rows)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
     // Offscreen targets
-    let color = g.device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("instanced_color"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+    let color = crate::core::resource_tracker::tracked_create_texture(
+        &g.device,
+        &wgpu::TextureDescriptor {
+            label: Some("instanced_color"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: color_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: color_format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-            | wgpu::TextureUsages::COPY_SRC
-            | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
+    )?;
     let color_view = color.create_view(&wgpu::TextureViewDescriptor::default());
-    let depth = g.device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("instanced_depth"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+    let depth = crate::core::resource_tracker::tracked_create_texture(
+        &g.device,
+        &wgpu::TextureDescriptor {
+            label: Some("instanced_depth"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Depth32Float,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
+    )?;
     let depth_view = depth.create_view(&wgpu::TextureViewDescriptor::default());
 
     // Encode render pass
@@ -271,12 +282,15 @@ pub fn geometry_instance_mesh_gpu_render_py(
     let row_bytes = (width * 4) as u32;
     let padded_bpr = crate::core::gpu::align_copy_bpr(row_bytes);
     let output_size = (padded_bpr * height) as u64;
-    let readback = g.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("instanced_readback"),
-        size: output_size,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+    let readback = crate::core::resource_tracker::tracked_create_buffer(
+        &g.device,
+        &wgpu::BufferDescriptor {
+            label: Some("instanced_readback"),
+            size: output_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )?;
     encoder.copy_texture_to_buffer(
         wgpu::ImageCopyTexture {
             texture: &color,

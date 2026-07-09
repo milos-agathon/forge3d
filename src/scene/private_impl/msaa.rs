@@ -7,14 +7,19 @@ impl Scene {
             None
         };
 
-        let (color, color_view) = create_color_texture(&g.device, self.width, self.height);
-        let (normal, normal_view) = create_normal_texture(&g.device, self.width, self.height);
+        let (color, color_view) =
+            create_color_texture(&g.device, self.width, self.height).map_err(|e| e.to_string())?;
+        let (normal, normal_view) =
+            create_normal_texture(&g.device, self.width, self.height).map_err(|e| e.to_string())?;
         let (msaa_color, msaa_view) =
-            create_msaa_targets(&g.device, self.width, self.height, self.sample_count);
+            create_msaa_targets(&g.device, self.width, self.height, self.sample_count)
+                .map_err(|e| e.to_string())?;
         let (msaa_normal, msaa_normal_view) =
-            create_msaa_normal_targets(&g.device, self.width, self.height, self.sample_count);
+            create_msaa_normal_targets(&g.device, self.width, self.height, self.sample_count)
+                .map_err(|e| e.to_string())?;
         let (depth, depth_view) =
-            create_depth_target(&g.device, self.width, self.height, self.sample_count);
+            create_depth_target(&g.device, self.width, self.height, self.sample_count)
+                .map_err(|e| e.to_string())?;
 
         self.depth = depth;
         self.depth_view = depth_view;

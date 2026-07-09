@@ -89,18 +89,24 @@ impl Scene {
         let g = crate::core::gpu::try_ctx()?;
         let vsize = (verts.len() * std::mem::size_of::<crate::core::text_mesh::VertexPN>()) as u64;
         let isize = (inds.len() * std::mem::size_of::<u32>()) as u64;
-        let vbuf = g.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("text3d_vbuf"),
-            size: vsize,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let ibuf = g.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("text3d_ibuf"),
-            size: isize,
-            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let vbuf = crate::core::resource_tracker::tracked_create_buffer(
+            &g.device,
+            &wgpu::BufferDescriptor {
+                label: Some("text3d_vbuf"),
+                size: vsize,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
+        let ibuf = crate::core::resource_tracker::tracked_create_buffer(
+            &g.device,
+            &wgpu::BufferDescriptor {
+                label: Some("text3d_ibuf"),
+                size: isize,
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
         g.queue.write_buffer(&vbuf, 0, bytemuck::cast_slice(&verts));
         g.queue.write_buffer(&ibuf, 0, bytemuck::cast_slice(&inds));
 

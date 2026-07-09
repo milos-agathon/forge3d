@@ -14,32 +14,39 @@ impl PointRenderer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         atlas: Option<TextureAtlas>,
-    ) {
+    ) -> Result<(), crate::core::error::RenderError> {
         self.texture_atlas = atlas;
-        self.recreate_bind_group(device, queue);
+        self.recreate_bind_group(device, queue)
     }
 
-    fn recreate_bind_group(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+    fn recreate_bind_group(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<(), crate::core::error::RenderError> {
+        static DEFAULT_TEXTURE: std::sync::OnceLock<(wgpu::TextureView, wgpu::Sampler)> =
+            std::sync::OnceLock::new();
         let (texture_view, sampler) = if let Some(atlas) = &self.texture_atlas {
             (&atlas.view, &atlas.sampler)
         } else {
-            static DEFAULT_TEXTURE: std::sync::OnceLock<(wgpu::TextureView, wgpu::Sampler)> =
-                std::sync::OnceLock::new();
-            DEFAULT_TEXTURE.get_or_init(|| {
-                let texture = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("vf.Vector.Point.DefaultTexture"),
-                    size: wgpu::Extent3d {
-                        width: 1,
-                        height: 1,
-                        depth_or_array_layers: 1,
+            if DEFAULT_TEXTURE.get().is_none() {
+                let texture = crate::core::resource_tracker::tracked_create_texture(
+                    device,
+                    &wgpu::TextureDescriptor {
+                        label: Some("vf.Vector.Point.DefaultTexture"),
+                        size: wgpu::Extent3d {
+                            width: 1,
+                            height: 1,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                        view_formats: &[],
                     },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                    view_formats: &[],
-                });
+                )?;
 
                 queue.write_texture(
                     wgpu::ImageCopyTexture {
@@ -61,11 +68,11 @@ impl PointRenderer {
                     },
                 );
 
-                (
+                let _ = DEFAULT_TEXTURE.set((
                     texture.create_view(&wgpu::TextureViewDescriptor::default()),
                     device.create_sampler(&wgpu::SamplerDescriptor::default()),
-                )
-            });
+                ));
+            }
             let (view, sampler) = DEFAULT_TEXTURE.get().unwrap();
             (view, sampler)
         };
@@ -88,6 +95,7 @@ impl PointRenderer {
                 },
             ],
         });
+        Ok(())
     }
 
     pub fn get_texture_atlas(&self) -> Option<&TextureAtlas> {

@@ -6,29 +6,37 @@ impl PbrPipelineWithShadows {
         queue: &Queue,
         material: PbrMaterial,
         enable_shadows: bool,
-    ) -> Self {
-        let material_gpu = PbrMaterialGpu::new(device, material);
+    ) -> RenderResult<Self> {
+        let material_gpu = PbrMaterialGpu::new(device, material)?;
         let scene_uniforms = PbrSceneUniforms::default();
-        let scene_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("pbr_scene_uniforms_buffer"),
-            contents: bytemuck::bytes_of(&scene_uniforms),
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-        });
+        let scene_uniform_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("pbr_scene_uniforms_buffer"),
+                contents: bytemuck::bytes_of(&scene_uniforms),
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            },
+        )?;
         let lighting_uniforms = PbrLighting::default();
-        let lighting_uniform_buffer =
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let lighting_uniform_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("pbr_lighting_uniforms_buffer"),
                 contents: bytemuck::bytes_of(&lighting_uniforms),
                 usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            });
+            },
+        )?;
 
         // P2-06: Shading (BRDF selection) uniforms using MaterialShading
         let shading_uniforms = MaterialShading::default();
-        let shading_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("pbr_shading_uniforms_buffer"),
-            contents: bytemuck::bytes_of(&shading_uniforms),
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-        });
+        let shading_uniform_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("pbr_shading_uniforms_buffer"),
+                contents: bytemuck::bytes_of(&shading_uniforms),
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            },
+        )?;
 
         let mut shadow_config = ShadowManagerConfig::default();
         shadow_config.technique = ShadowTechnique::PCF;
@@ -44,7 +52,7 @@ impl PbrPipelineWithShadows {
         let globals_bind_group_layout = Self::create_globals_bind_group_layout(device);
         let material_bind_group_layout = Self::create_material_bind_group_layout(device);
         let ibl_bind_group_layout = Self::create_ibl_bind_group_layout(device);
-        let ibl_resources = create_fallback_ibl_resources(device, queue);
+        let ibl_resources = create_fallback_ibl_resources(device, queue)?;
 
         // P1-06: Initialize light buffer for multi-light support
         let light_buffer = LightBuffer::new(device);
@@ -119,7 +127,7 @@ impl PbrPipelineWithShadows {
             shadow_manager = Some(manager);
         }
 
-        Self {
+        Ok(Self {
             material: material_gpu,
             scene_uniforms,
             scene_uniform_buffer,
@@ -141,7 +149,7 @@ impl PbrPipelineWithShadows {
             pipeline_format: None,
             tone_mapping: ToneMappingConfig::new(ToneMappingMode::Reinhard, 1.0),
             light_buffer,
-        }
+        })
     }
 
     pub fn set_shadow_enabled(&mut self, device: &Device, enabled: bool) {

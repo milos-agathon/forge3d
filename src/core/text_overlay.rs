@@ -8,13 +8,15 @@ use wgpu::{
     BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, Device, FragmentState,
     PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology, Queue, RenderPipeline,
     RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor,
-    ShaderModuleDescriptor, ShaderSource, ShaderStages, Texture, TextureDescriptor,
-    TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureView,
-    TextureViewDescriptor, VertexBufferLayout, VertexState, VertexStepMode,
+    ShaderModuleDescriptor, ShaderSource, ShaderStages, TextureDescriptor, TextureDimension,
+    TextureFormat, TextureSampleType, TextureUsages, TextureView, TextureViewDescriptor,
+    VertexBufferLayout, VertexState, VertexStepMode,
 };
 
 use crate::core::error::RenderResult;
-use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_texture, TrackedBuffer};
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -89,7 +91,7 @@ pub struct TextOverlayRenderer {
     pub instance_buf: Option<TrackedBuffer>,
     pub instance_count: u32,
 
-    pub atlas_tex: Option<Texture>,
+    pub atlas_tex: Option<TrackedTexture>,
     pub atlas_view: Option<TextureView>,
     pub atlas_sampler: Sampler,
 }
@@ -388,7 +390,7 @@ impl TextOverlayRenderer {
         Ok(())
     }
 
-    pub fn set_atlas(&mut self, atlas_tex: Texture, atlas_view: TextureView) {
+    pub fn set_atlas(&mut self, atlas_tex: TrackedTexture, atlas_view: TextureView) {
         self.atlas_tex = Some(atlas_tex);
         self.atlas_view = Some(atlas_view);
     }

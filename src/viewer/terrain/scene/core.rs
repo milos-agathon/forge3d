@@ -113,7 +113,7 @@ impl ViewerTerrainScene {
                 1,
                 wgpu::CompareFunction::LessEqual,
                 false,
-            );
+            )?;
 
         Ok(Self {
             device,

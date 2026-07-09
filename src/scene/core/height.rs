@@ -7,20 +7,23 @@ impl Scene {
         })?;
 
         let g = crate::core::gpu::try_ctx()?;
-        let tex = g.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("scene-height-r32f"),
-            size: wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
+        let tex = tracked_create_texture(
+            &g.device,
+            &wgpu::TextureDescriptor {
+                label: Some("scene-height-r32f"),
+                size: wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         let row_bytes = w * 4;
         let padded_bpr = crate::core::gpu::align_copy_bpr(row_bytes);
         let src_bytes: &[u8] = bytemuck::cast_slice::<f32, u8>(data);

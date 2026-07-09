@@ -1,50 +1,65 @@
 use super::{types::CullingUniforms, CullableInstance, IndirectDrawCommand, IndirectRenderer};
 use crate::core::error::RenderError;
-use wgpu::util::DeviceExt;
+use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_buffer_init};
 
 impl IndirectRenderer {
     pub fn new(device: &wgpu::Device) -> Result<Self, RenderError> {
         let initial_capacity = 4096;
 
-        let draw_commands_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Indirect.DrawCommands"),
-            size: (initial_capacity * std::mem::size_of::<IndirectDrawCommand>()) as u64,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::INDIRECT
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
+        let draw_commands_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("vf.Vector.Indirect.DrawCommands"),
+                size: (initial_capacity * std::mem::size_of::<IndirectDrawCommand>()) as u64,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::INDIRECT
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            },
+        )?;
 
-        let instances_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Indirect.Instances"),
-            size: (initial_capacity * std::mem::size_of::<CullableInstance>()) as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let instances_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("vf.Vector.Indirect.Instances"),
+                size: (initial_capacity * std::mem::size_of::<CullableInstance>()) as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
-        let culling_uniforms_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Indirect.CullingUniforms"),
-            size: std::mem::size_of::<CullingUniforms>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let culling_uniforms_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("vf.Vector.Indirect.CullingUniforms"),
+                size: std::mem::size_of::<CullingUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
-        let counter_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Indirect.Counters"),
-            size: 16,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let counter_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("vf.Vector.Indirect.Counters"),
+                size: 16,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
-        let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Indirect.Readback"),
-            size: 16,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let readback_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("vf.Vector.Indirect.Readback"),
+                size: 16,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         let culling_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("vf.Vector.Indirect.CullingCompute"),
@@ -137,21 +152,27 @@ impl IndirectRenderer {
 
         if instances.len() > self.instances_capacity {
             let new_capacity = (instances.len() * 2).max(1024);
-            self.instances_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("vf.Vector.Indirect.Instances"),
-                size: (new_capacity * std::mem::size_of::<CullableInstance>()) as u64,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+            self.instances_buffer = tracked_create_buffer(
+                device,
+                &wgpu::BufferDescriptor {
+                    label: Some("vf.Vector.Indirect.Instances"),
+                    size: (new_capacity * std::mem::size_of::<CullableInstance>()) as u64,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                },
+            )?;
             self.instances_capacity = new_capacity;
         }
 
         let instance_data = bytemuck::cast_slice(instances);
-        let staging_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("vf.Vector.Indirect.InstancesStaging"),
-            contents: instance_data,
-            usage: wgpu::BufferUsages::COPY_SRC,
-        });
+        let staging_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("vf.Vector.Indirect.InstancesStaging"),
+                contents: instance_data,
+                usage: wgpu::BufferUsages::COPY_SRC,
+            },
+        )?;
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("vf.Vector.Indirect.InstancesUpload"),
