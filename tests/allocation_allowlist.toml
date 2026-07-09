@@ -1,0 +1,4 @@
+# Raw wgpu allocation sites temporarily exempt from the tracked-wrapper gate.
+# Every entry needs: site = "path:line-ish-context", reason, owner, expires (YYYY-MM-DD).
+# This list may only shrink. Empty is the goal state.
+entries = []
