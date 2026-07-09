@@ -24,6 +24,21 @@ try:
 except ImportError:
     _forge3d = None
 
+
+def _record_native_setter_unavailable(fn_name: str) -> None:
+    """Record that a native lighting setter had no effect (missing/failed)."""
+    try:
+        from . import _degradation
+
+        _degradation.record(
+            "native_setter_unavailable",
+            f"lighting.{fn_name}",
+            f"{fn_name} had no effect; native binding missing/failed",
+        )
+    except Exception:
+        pass
+
+
 _PI = 3.14159265358979323846
 
 _EXPOSURE_STOPS: float = 0.0
@@ -61,6 +76,7 @@ def set_exposure_stops(stops: float) -> float:
                 setter(_EXPOSURE_SCALE)
             except Exception as exc:  # pragma: no cover - optional binding
                 warnings.warn(f"forge3d.set_exposure_scale failed: {exc}")
+                _record_native_setter_unavailable("set_exposure_scale")
     return _EXPOSURE_SCALE
 
 
@@ -776,6 +792,7 @@ class CsmController:
             )
         except Exception as exc:  # pragma: no cover
             warnings.warn(f"forge3d.configure_csm failed: {exc}")
+            _record_native_setter_unavailable("configure_csm")
 
     def set_quality_preset(self, preset: CsmQualityPreset) -> None:
         """Set CSM quality from preset."""
@@ -792,6 +809,7 @@ class CsmController:
                     setter(enabled)
                 except Exception as exc:  # pragma: no cover
                     warnings.warn(f"forge3d.set_csm_enabled failed: {exc}")
+                    _record_native_setter_unavailable("set_csm_enabled")
         self._sync_native_state()
 
     def set_light_direction(self, direction: Tuple[float, float, float]) -> None:
@@ -806,6 +824,7 @@ class CsmController:
                     setter(tuple(self._light_direction))
                 except Exception as exc:  # pragma: no cover
                     warnings.warn(f"forge3d.set_csm_light_direction failed: {exc}")
+                    _record_native_setter_unavailable("set_csm_light_direction")
 
     def configure_pcf(self, kernel_size: int) -> None:
         """Configure PCF filtering quality."""
@@ -820,6 +839,7 @@ class CsmController:
                     setter(kernel_size)
                 except Exception as exc:  # pragma: no cover
                     warnings.warn(f"forge3d.set_csm_pcf_kernel failed: {exc}")
+                    _record_native_setter_unavailable("set_csm_pcf_kernel")
         self._sync_native_state()
 
     def set_bias_parameters(self, depth_bias: float, slope_bias: float, peter_panning_offset: float) -> None:
@@ -835,6 +855,7 @@ class CsmController:
                     setter(depth_bias, slope_bias, peter_panning_offset)
                 except Exception as exc:  # pragma: no cover
                     warnings.warn(f"forge3d.set_csm_bias_params failed: {exc}")
+                    _record_native_setter_unavailable("set_csm_bias_params")
         self._sync_native_state()
 
     def set_debug_mode(self, mode: int) -> None:
@@ -854,6 +875,7 @@ class CsmController:
                     setter(mode)
                 except Exception as exc:  # pragma: no cover
                     warnings.warn(f"forge3d.set_csm_debug_mode failed: {exc}")
+                    _record_native_setter_unavailable("set_csm_debug_mode")
         self._sync_native_state()
 
     def get_cascade_info(self) -> List[Tuple[float, float, float]]:
@@ -871,6 +893,7 @@ class CsmController:
                     warnings.warn(f"forge3d.get_csm_cascade_info failed: {exc}")
 
         # Fallback: calculate expected splits
+        _record_native_setter_unavailable("get_csm_cascade_info")
         splits = calculate_cascade_splits(0.1, self.config.max_shadow_distance, self.config.cascade_count)
         return [(splits[i], splits[i+1], 1.0) for i in range(len(splits)-1)]
 
@@ -885,6 +908,7 @@ class CsmController:
                     warnings.warn(f"forge3d.validate_csm_peter_panning failed: {exc}")
 
         # Fallback validation
+        _record_native_setter_unavailable("validate_csm_peter_panning")
         return (self.config.peter_panning_offset > 0.0001 and
                 self.config.depth_bias > 0.0001)
 

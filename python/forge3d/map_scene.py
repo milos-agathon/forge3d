@@ -5271,6 +5271,7 @@ class MapScene:
         *,
         emit_provenance: bool = False,
         provenance_signing_key: bytes | None = None,
+        certificate: "bool | str | os.PathLike[str]" = False,
     ) -> ValidationReport:
         output = self.recipe.output
         target = path or (output.path if output is not None else None)
@@ -5438,6 +5439,16 @@ class MapScene:
         ):
             if key in native_metadata:
                 metadata[key] = native_metadata[key]
+        if certificate:
+            # CENSOR: emit a signed RenderCertificate for this native render.
+            # When a path is given the signed JSON is written next to the
+            # output; the deterministic payload SHA256 is always stashed into
+            # the render metadata (pop-safe: absent unless requested).
+            from . import certificate as _certificate
+
+            sha = _certificate.emit_render_certificate(certificate)
+            if sha is not None:
+                metadata["certificate_payload_sha256"] = sha
         self.last_render_metadata = metadata
         report = self._report_with_feature(report, "mapscene.render_backend", "supported")
         water_settings = _mapscene_water_settings(self.recipe)

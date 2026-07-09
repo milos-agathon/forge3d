@@ -84,6 +84,7 @@ def render_offline(
     settings: OfflineQualitySettings,
     progress_callback: Optional[Callable[[OfflineProgress], None]] = None,
     water_mask: Optional[np.ndarray] = None,
+    certificate: "bool | str | Any" = False,
 ) -> OfflineResult:
     """Render terrain through the TV12 offline accumulation pipeline.
 
@@ -92,6 +93,11 @@ def render_offline(
 
     `water_mask` is forwarded unchanged to the terrain renderer so offline renders
     honor the same terrain-water shading inputs as one-shot renders.
+
+    When ``certificate`` is truthy a signed RenderCertificate is assembled for
+    the completed render; a path value additionally writes the signed JSON
+    there, and the deterministic payload SHA256 is stashed into the result
+    metadata under ``certificate_payload_sha256``.
     """
 
     if not settings.enabled:
@@ -214,18 +220,26 @@ def render_offline(
         renderer.end_offline_accumulation()
         raise
 
+    metadata: dict[str, Any] = {
+        "samples_used": rendered,
+        "denoiser_used": denoiser_used,
+        "final_p95_delta": None if metrics is None else metrics["p95_delta"],
+        "converged_ratio": None if metrics is None else metrics["converged_tile_ratio"],
+        "target_samples": target_samples,
+        "adaptive": bool(settings.adaptive),
+    }
+    if certificate:
+        from . import certificate as _certificate
+
+        sha = _certificate.emit_render_certificate(certificate)
+        if sha is not None:
+            metadata["certificate_payload_sha256"] = sha
+
     return OfflineResult(
         frame=frame,
         hdr_frame=hdr_frame,
         aov_frame=aov_frame,
-        metadata={
-            "samples_used": rendered,
-            "denoiser_used": denoiser_used,
-            "final_p95_delta": None if metrics is None else metrics["p95_delta"],
-            "converged_ratio": None if metrics is None else metrics["converged_tile_ratio"],
-            "target_samples": target_samples,
-            "adaptive": bool(settings.adaptive),
-        },
+        metadata=metadata,
     )
 
 

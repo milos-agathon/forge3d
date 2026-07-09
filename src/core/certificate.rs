@@ -284,6 +284,43 @@ pub fn execution_report_json() -> Result<String, RenderError> {
         .map_err(|e| RenderError::render(format!("certificate serialization failed: {e}")))
 }
 
+/// Honor a `certificate=` render kwarg from the Python boundary for the LAST
+/// completed native render.
+///
+/// The value follows the render entry-point contract: `None`/`False` is off;
+/// `True` assembles a signed certificate via `forge3d.diagnostics`; any other
+/// value is treated as a filesystem path and the signed certificate is written
+/// there via `forge3d.certificate.write_certificate`. Assembly/signing and
+/// writing are delegated to the pure-Python surface so there is one signing
+/// implementation.
+#[cfg(feature = "extension-module")]
+pub fn emit_certificate_for_kwarg(
+    py: pyo3::Python<'_>,
+    certificate: Option<&pyo3::Bound<'_, pyo3::PyAny>>,
+) -> pyo3::PyResult<()> {
+    use pyo3::prelude::PyAnyMethods;
+    let Some(arg) = certificate else {
+        return Ok(());
+    };
+    if arg.is_none() {
+        return Ok(());
+    }
+    // A real Python bool: False -> off, True -> assemble-only (no file).
+    let is_path = match arg.extract::<bool>() {
+        Ok(false) => return Ok(()),
+        Ok(true) => false,
+        Err(_) => true,
+    };
+
+    let diagnostics = py.import_bound("forge3d.diagnostics")?;
+    let cert = diagnostics.call_method1("render_certificate", ())?;
+    if is_path {
+        let certificate_mod = py.import_bound("forge3d.certificate")?;
+        certificate_mod.call_method1("write_certificate", (cert, arg))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

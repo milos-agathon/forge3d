@@ -223,6 +223,14 @@ class PathTracer:
         """
         synthetic_ok = bool(kwargs.pop("synthetic_ok", False))
         _require_synthetic_ok(synthetic_ok, "PathTracer.render_rgba")
+        certificate = kwargs.pop("certificate", False)
+
+        def _finish(arr: np.ndarray) -> np.ndarray:
+            if certificate:
+                from . import certificate as _certificate
+
+                _certificate.emit_render_certificate(certificate)
+            return arr
 
         # New-style call with explicit (w,h, ...)
         if len(args) >= 2 and isinstance(args[0], (int, np.integer)) and isinstance(args[1], (int, np.integer)):
@@ -303,7 +311,7 @@ class PathTracer:
             rgba = np.empty((height, width, 4), dtype=np.uint8)
             rgba[..., :3] = (np.clip(rgb, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
             rgba[..., 3] = 255
-            return rgba
+            return _finish(rgba)
 
         # Backward-compatible path using internal size
         width, height = self._width, self._height
@@ -325,7 +333,7 @@ class PathTracer:
             rgba = np.empty((height, width, 4), dtype=np.uint8)
             rgba[..., :3] = (rgb * 255.0 + 0.5).astype(np.uint8)
             rgba[..., 3] = 255
-            return rgba
+            return _finish(rgba)
 
         # Tiled path
         out = np.empty((height, width, 4), dtype=np.uint8)
@@ -338,7 +346,7 @@ class PathTracer:
             ripple = 0.05 * np.sin(12.0 * xs + 0.7) * np.cos(9.0 * ys + 0.3)
             rgb = np.clip(rgb + ripple[..., None], 0.0, 1.0)
             out[ty : ty + th, tx : tx + tw, :3] = (rgb * 255.0 + 0.5).astype(np.uint8)
-        return out
+        return _finish(out)
 
     # A19: derive a cache key from inputs; best-effort stable representation.
     def _make_cache_key(
@@ -454,6 +462,16 @@ def _synthetic_basis(width: int, height: int, *, seed: int) -> tuple[np.ndarray,
     Uses a gradient and a seeded random field to keep determinism.
 
     """
+    try:
+        from . import _degradation
+
+        _degradation.record(
+            "synthetic_output",
+            "path_tracing.aov_basis",
+            "AOV basis is synthetic CPU data, not a GPU render",
+        )
+    except Exception:
+        pass
     rng = np.random.default_rng(int(seed))
     y = np.linspace(0.0, 1.0, int(height), dtype=np.float32)[:, None]
     x = np.linspace(0.0, 1.0, int(width), dtype=np.float32)[None, :]
@@ -673,6 +691,7 @@ def save_aovs(
 
 def render_rgba(*args, **kwargs) -> np.ndarray:
     """Render RGBA image (fallback implementation)."""
+    certificate = kwargs.pop("certificate", False)
     # Handle positional arguments for width/height
     if len(args) >= 2 and isinstance(args[0], (int, np.integer)) and isinstance(args[1], (int, np.integer)):
         width = int(args[0])
@@ -691,6 +710,10 @@ def render_rgba(*args, **kwargs) -> np.ndarray:
                 128,
                 255
             ]
+    if certificate:
+        from . import certificate as _certificate
+
+        _certificate.emit_render_certificate(certificate)
     return img
 
 # Note: render_aovs() full implementation is defined above. Avoid redefining it here

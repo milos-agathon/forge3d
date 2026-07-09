@@ -15,6 +15,16 @@ try:
 except Exception:
     NATIVE_AVAILABLE = False
     warnings.warn("Native SDF module not available, using fallback implementation")
+    try:
+        from . import _degradation as _degradation_sink
+
+        _degradation_sink.record(
+            "cpu_fallback",
+            "sdf",
+            "native SDF module unavailable; pure-Python evaluation",
+        )
+    except Exception:
+        pass
 
 # Opt-in to native SDF via env var; default to CPU fallback for broader compatibility
 USE_NATIVE_SDF = os.environ.get("F3D_USE_NATIVE_SDF", "0") == "1"

@@ -48,6 +48,7 @@ __all__ = [
     "DEV_SIGNING_SEED",
     "SCHEMA",
     "canonical_payload_bytes",
+    "emit_render_certificate",
     "payload_sha256",
     "sign_certificate",
     "verify",
@@ -248,6 +249,37 @@ def verify(
         return bool(_ed25519.verify(public_key, message, sig))
     except Exception:
         return False
+
+
+def emit_render_certificate(
+    certificate: "bool | str | os.PathLike[str] | None",
+) -> "str | None":
+    """Handle a ``certificate=`` render kwarg for the LAST completed render.
+
+    ``certificate`` follows the render entry-point contract:
+
+    * a falsy value (``False``, ``None``, ``""``) → no certificate is built and
+      ``None`` is returned;
+    * ``True`` → a signed certificate is assembled via
+      :func:`forge3d.diagnostics.render_certificate` and its payload SHA256 is
+      returned (nothing is written to disk);
+    * a path (``str`` / :class:`os.PathLike`) → the signed certificate is
+      assembled and written there via :func:`write_certificate`, and its
+      payload SHA256 is returned.
+
+    The returned value is the deterministic ``payload_sha256`` of the signed
+    certificate, suitable for stashing into render metadata. Requires a
+    completed native render in this process (see
+    :func:`forge3d.diagnostics.render_certificate`).
+    """
+    if not certificate:
+        return None
+    from . import diagnostics as _diagnostics
+
+    cert = _diagnostics.render_certificate()
+    if not isinstance(certificate, bool):
+        write_certificate(cert, os.fspath(certificate))
+    return payload_sha256(cert)
 
 
 def write_certificate(

@@ -131,18 +131,33 @@ impl Ktx2Loader {
         _header: &Ktx2Header,
     ) -> Result<Vec<u8>, String> {
         // Stub for Basis Universal transcoding; returns an error until integrated.
+        crate::core::degradation::record_degradation(
+            "format_unsupported",
+            "ktx2.basis_universal",
+            "Basis Universal transcoding is not implemented; the texture cannot be decoded",
+        );
         Err("Basis Universal transcoding not implemented".to_string())
     }
 
     /// Decompress ZSTD data
     fn decompress_zstd(&self, _data: Vec<u8>) -> Result<Vec<u8>, String> {
         // Stub for ZSTD decompression; returns an error until integrated.
+        crate::core::degradation::record_degradation(
+            "format_unsupported",
+            "ktx2.zstd",
+            "ZSTD supercompression decoding is not implemented; the texture cannot be decoded",
+        );
         Err("ZSTD decompression not implemented".to_string())
     }
 
     /// Decompress ZLIB data
     fn decompress_zlib(&self, _data: Vec<u8>) -> Result<Vec<u8>, String> {
         // Stub for ZLIB decompression; returns an error until integrated.
+        crate::core::degradation::record_degradation(
+            "format_unsupported",
+            "ktx2.zlib",
+            "ZLIB supercompression decoding is not implemented; the texture cannot be decoded",
+        );
         Err("ZLIB decompression not implemented".to_string())
     }
 
