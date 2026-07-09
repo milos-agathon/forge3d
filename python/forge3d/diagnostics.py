@@ -461,6 +461,28 @@ def memory_tracking_completeness_report(
     )
 
 
+def capabilities() -> dict[str, Any]:
+    """Report the negotiated GPU capability set for the active device.
+
+    Returns a dict with ``requested`` (features forge3d asks for),
+    ``granted`` (the subset the adapter actually provides), and ``limits``
+    (a subset of the device limits). Requesting a capability never hard-fails
+    the device: anything absent is recorded as a degradation instead.
+
+    Raises ``RuntimeError`` when the native extension is unavailable or no GPU
+    adapter can be acquired.
+    """
+    from ._native import get_native_module
+
+    native = get_native_module()
+    if native is None or not hasattr(native, "capabilities"):
+        raise RuntimeError(
+            "forge3d native extension is unavailable; capabilities() requires the "
+            "compiled _forge3d module (build with `maturin develop`)."
+        )
+    return native.capabilities()
+
+
 def label_rejection_summary_diagnostic(
     rejection_counts: Mapping[str, int],
     *,
@@ -920,6 +942,7 @@ __all__ = [
     "ValidationReport",
     "SEVERITIES",
     "SUPPORT_LEVELS",
+    "capabilities",
     "crs_mismatch_diagnostic",
     "estimated_gpu_memory_diagnostic",
     "memory_budget_validation_report",

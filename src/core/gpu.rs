@@ -14,6 +14,9 @@ pub struct GpuContext {
     /// True when no hardware adapter was found and a software rasterizer
     /// (e.g. WARP on Windows, Mesa lavapipe on Linux) is in use instead.
     pub software_fallback: bool,
+    /// Negotiated capability set: what forge3d wanted vs. what the adapter
+    /// granted. Replaces the old `Features::empty()` request.
+    pub capabilities: crate::core::capabilities::CapabilitySet,
 }
 
 static CTX: OnceCell<GpuContext> = OnceCell::new();
@@ -194,22 +197,54 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
             .max_storage_buffers_per_shader_stage
             .max(desired_storage_buffers);
 
-        let (device, queue) = pollster::block_on(adapter.request_device(
+        // Negotiate the capability set against the adapter's advertised
+        // features (records `capability_absent` degradations for anything the
+        // adapter cannot grant). Nothing here is hard-required.
+        let mut capabilities =
+            crate::core::capabilities::CapabilitySet::negotiate(adapter.features());
+
+        // Robustness: some drivers advertise features that still fail at
+        // request_device time. Requesting a feature must never hard-fail the
+        // context, so on error we record a degradation and retry once with an
+        // empty feature set before surfacing the original error.
+        let (device, queue) = match pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
-                required_features: wgpu::Features::empty(),
-                required_limits: limits,
+                required_features: capabilities.granted,
+                required_limits: limits.clone(),
                 label: Some("forge3d-device"),
             },
             None,
-        ))
-        .map_err(|e| {
-            RenderError::device(format!(
-                "request_device failed for adapter '{}' ({:?} backend): {e}. Try updating \
-                 GPU drivers, or pin a different backend via WGPU_BACKENDS \
-                 (vulkan|dx12|metal|gl).",
-                adapter_info.name, adapter_info.backend,
-            ))
-        })?;
+        )) {
+            Ok(pair) => pair,
+            Err(first_err) => {
+                crate::core::degradation::record_degradation(
+                    "capability_request_failed",
+                    "negotiated_features",
+                    &first_err.to_string(),
+                );
+                capabilities = crate::core::capabilities::CapabilitySet {
+                    wanted: capabilities.wanted,
+                    required: wgpu::Features::empty(),
+                    granted: wgpu::Features::empty(),
+                };
+                pollster::block_on(adapter.request_device(
+                    &wgpu::DeviceDescriptor {
+                        required_features: wgpu::Features::empty(),
+                        required_limits: limits,
+                        label: Some("forge3d-device"),
+                    },
+                    None,
+                ))
+                .map_err(|e| {
+                    RenderError::device(format!(
+                        "request_device failed for adapter '{}' ({:?} backend): {e}. Try updating \
+                         GPU drivers, or pin a different backend via WGPU_BACKENDS \
+                         (vulkan|dx12|metal|gl).",
+                        adapter_info.name, adapter_info.backend,
+                    ))
+                })?
+            }
+        };
 
         Ok(GpuContext {
             instance,
@@ -217,6 +252,7 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
             queue: Arc::new(queue),
             adapter: Arc::new(adapter),
             software_fallback,
+            capabilities,
         })
     })
 }
@@ -260,15 +296,31 @@ pub fn create_device_for_test() -> Option<wgpu::Device> {
         .max_storage_buffers_per_shader_stage
         .max(desired_storage_buffers);
 
-    let (device, _queue) = pollster::block_on(adapter.request_device(
+    let capabilities = crate::core::capabilities::CapabilitySet::negotiate(adapter.features());
+    let device = match pollster::block_on(adapter.request_device(
         &wgpu::DeviceDescriptor {
-            required_features: wgpu::Features::empty(),
-            required_limits: limits,
+            required_features: capabilities.granted,
+            required_limits: limits.clone(),
             label: Some("forge3d-test-device"),
         },
         None,
-    ))
-    .ok()?;
+    )) {
+        Ok((device, _queue)) => device,
+        Err(_) => {
+            // Some drivers advertise features that fail at request time; retry
+            // once with no optional features so tests still get a device.
+            pollster::block_on(adapter.request_device(
+                &wgpu::DeviceDescriptor {
+                    required_features: wgpu::Features::empty(),
+                    required_limits: limits,
+                    label: Some("forge3d-test-device"),
+                },
+                None,
+            ))
+            .ok()?
+            .0
+        }
+    };
     Some(device)
 }
 
@@ -291,14 +343,29 @@ pub fn create_device_and_queue_for_test() -> Option<(wgpu::Device, wgpu::Queue)>
         .max_storage_buffers_per_shader_stage
         .max(desired_storage_buffers);
 
-    let (device, queue) = pollster::block_on(adapter.request_device(
+    let capabilities = crate::core::capabilities::CapabilitySet::negotiate(adapter.features());
+    let (device, queue) = match pollster::block_on(adapter.request_device(
         &wgpu::DeviceDescriptor {
-            required_features: wgpu::Features::empty(),
-            required_limits: limits,
+            required_features: capabilities.granted,
+            required_limits: limits.clone(),
             label: Some("forge3d-test-device"),
         },
         None,
-    ))
-    .ok()?;
+    )) {
+        Ok(pair) => pair,
+        Err(_) => {
+            // Retry once with no optional features if a driver advertises a
+            // feature that fails at request time.
+            pollster::block_on(adapter.request_device(
+                &wgpu::DeviceDescriptor {
+                    required_features: wgpu::Features::empty(),
+                    required_limits: limits,
+                    label: Some("forge3d-test-device"),
+                },
+                None,
+            ))
+            .ok()?
+        }
+    };
     Some((device, queue))
 }

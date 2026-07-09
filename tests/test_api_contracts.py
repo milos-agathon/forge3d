@@ -230,6 +230,8 @@ class TestNativeModuleSymbols:
         # CENSOR: global degradation sink
         "native_degradations",
         "clear_native_degradations",
+        # CENSOR: negotiated GPU capability report
+        "capabilities",
     ]
 
     LATER_GIS_FUNCTIONS = []

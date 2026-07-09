@@ -111,6 +111,7 @@ _NATIVE_ONLY_EXPORTS = (
         "LabelRationale",  # CARTOGRAPHER-PRIME: grounded solver rationale
         "native_degradations",  # CENSOR: global degradation sink snapshot
         "clear_native_degradations",  # CENSOR: global degradation sink reset
+        "capabilities",  # CENSOR: negotiated GPU capability report
 )
 
 if _NATIVE_MODULE is not None:
@@ -583,6 +584,8 @@ __all__ = [
     # CENSOR: global degradation sink
     "native_degradations",
     "clear_native_degradations",
+    # CENSOR: negotiated GPU capability report
+    "capabilities",
     # Configuration
     "RendererConfig",
     "TerrainRenderParamsConfig",

@@ -340,3 +340,36 @@ pub(crate) fn native_degradations(py: Python<'_>) -> PyResult<PyObject> {
 pub(crate) fn clear_native_degradations() {
     crate::core::degradation::clear_degradations();
 }
+
+// ---------------------------------------------------------
+// CENSOR: negotiated GPU capability report
+// ---------------------------------------------------------
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn capabilities(py: Python<'_>) -> PyResult<PyObject> {
+    let ctx = crate::core::gpu::try_ctx()?;
+    let limits = ctx.device.limits();
+
+    let d = PyDict::new_bound(py);
+    d.set_item("requested", ctx.capabilities.wanted_names())?;
+    d.set_item("granted", ctx.capabilities.granted_names())?;
+
+    let lim = PyDict::new_bound(py);
+    lim.set_item("max_texture_dimension_2d", limits.max_texture_dimension_2d)?;
+    lim.set_item("max_buffer_size", limits.max_buffer_size)?;
+    lim.set_item("max_bind_groups", limits.max_bind_groups)?;
+    lim.set_item(
+        "max_storage_buffers_per_shader_stage",
+        limits.max_storage_buffers_per_shader_stage,
+    )?;
+    lim.set_item(
+        "min_uniform_buffer_offset_alignment",
+        limits.min_uniform_buffer_offset_alignment,
+    )?;
+    lim.set_item(
+        "min_storage_buffer_offset_alignment",
+        limits.min_storage_buffer_offset_alignment,
+    )?;
+    d.set_item("limits", lim)?;
+    Ok(d.into())
+}
