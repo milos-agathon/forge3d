@@ -7,7 +7,7 @@ forge3d-clippy = [
     "--workspace",
     "--all-targets",
     "--features",
-    "extension-module,default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings",
+    "extension-module,default,async_readback,copc_laz,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings",
     "--",
     "-D",
     "warnings",

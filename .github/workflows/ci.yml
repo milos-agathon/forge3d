@@ -102,10 +102,10 @@ jobs:
           sudo apt-get install -y libvulkan-dev
 
       - name: Run cargo check
-        run: cargo check --workspace --features default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings
+        run: cargo check --workspace --features default,async_readback,copc_laz,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings
 
       - name: Run cargo test (skip GPU-dependent tests)
-        run: cargo test --workspace --features default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile
+        run: cargo test --workspace --features default,async_readback,copc_laz,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile
         env:
           RUST_TEST_THREADS: 1
 
@@ -375,7 +375,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build Rust docs
-        run: cargo doc --workspace --features default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings --no-deps
+        run: cargo doc --workspace --features default,async_readback,copc_laz,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings --no-deps
 
       - name: Set up Python
         uses: actions/setup-python@v4

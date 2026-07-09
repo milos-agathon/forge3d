@@ -158,10 +158,6 @@ pub mod overlay_layer;
 // D11: 3D Text Mesh (native)
 pub mod text_mesh;
 
-// N4: Render bundles
-pub mod render_bundles;
-pub mod render_bundles_types;
-
 // O1: Staging buffer rings with fence synchronization
 #[cfg(feature = "enable-staging-rings")]
 pub mod fence_tracker;

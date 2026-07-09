@@ -1,7 +1,6 @@
 use super::effect::PostFxEffect;
 use super::resources::PostFxResourcePool;
-use crate::core::error::{RenderError, RenderResult};
-use crate::core::gpu_timing::GpuTimingManager;
+use crate::core::error::RenderResult;
 use std::collections::{HashMap, VecDeque};
 use wgpu::*;
 
@@ -118,102 +117,6 @@ impl PostFxChain {
     /// Get effect parameter
     pub fn get_effect_parameter(&self, effect_name: &str, param_name: &str) -> Option<f32> {
         self.effects.get(effect_name)?.get_parameter(param_name)
-    }
-
-    /// Execute the entire post-processing chain
-    pub fn execute_chain(
-        &mut self,
-        device: &Device,
-        queue: &Queue,
-        encoder: &mut CommandEncoder,
-        input: &TextureView,
-        output: &TextureView,
-        mut timing_manager: Option<&mut GpuTimingManager>,
-    ) -> RenderResult<()> {
-        if !self.enabled || self.execution_order.is_empty() {
-            // No effects: skip copy to avoid an extra pass.
-            return Ok(());
-        }
-
-        let chain_scope = if let Some(timer) = timing_manager.as_mut() {
-            Some(timer.begin_scope(encoder, "postfx_chain"))
-        } else {
-            None
-        };
-
-        // Execute effects in order
-        for (i, effect_name) in self.execution_order.iter().enumerate() {
-            if let Some(effect) = self.effects.get(effect_name) {
-                let is_last = i == self.execution_order.len() - 1;
-                let is_first = i == 0;
-
-                if is_last {
-                    // Execute final effect to output
-                    let effect_input = if is_first {
-                        input
-                    } else {
-                        // Use previous ping-pong buffer as input
-                        self.resource_pool
-                            .get_previous_ping_pong(0)
-                            .ok_or_else(|| {
-                                RenderError::Render(
-                                    "No previous ping-pong buffer available".to_string(),
-                                )
-                            })?
-                    };
-
-                    effect.execute(
-                        device,
-                        queue,
-                        encoder,
-                        effect_input,
-                        output,
-                        &self.resource_pool,
-                        None,
-                    )?;
-                } else {
-                    // Execute intermediate effect with ping-pong buffers
-                    let effect_input = if is_first {
-                        input
-                    } else {
-                        // Use previous ping-pong buffer as input
-                        self.resource_pool
-                            .get_previous_ping_pong(0)
-                            .ok_or_else(|| {
-                                RenderError::Render(
-                                    "No previous ping-pong buffer available".to_string(),
-                                )
-                            })?
-                    };
-
-                    // Use current ping-pong buffer as output
-                    let ping_pong_output =
-                        self.resource_pool.get_current_ping_pong(0).ok_or_else(|| {
-                            RenderError::Render("No current ping-pong buffer available".to_string())
-                        })?;
-
-                    effect.execute(
-                        device,
-                        queue,
-                        encoder,
-                        effect_input,
-                        ping_pong_output,
-                        &self.resource_pool,
-                        None,
-                    )?;
-
-                    // Swap ping-pong buffers for next effect
-                    self.resource_pool.swap_ping_pong();
-                }
-            }
-        }
-
-        // End chain timing scope
-        if let (Some(timer), Some(scope_id)) = (timing_manager, chain_scope) {
-            timer.end_scope(encoder, scope_id);
-        }
-
-        Ok(())
     }
 
     /// Get list of registered effects
