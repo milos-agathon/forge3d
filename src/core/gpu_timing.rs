@@ -394,8 +394,19 @@ impl GpuTimingManager {
     ///
     /// Reads the current slot (`frame_parity`) and blocks on device work with an
     /// explicit `Maintain::Wait`. Intended for single-submit offline renders.
+    ///
+    /// Consumes and resets the current slot on success: this is the offline
+    /// counterpart to `finish_frame`'s per-slot reset, so a caller that repeats
+    /// `resolve_queries -> submit -> get_results_blocking` without ever calling
+    /// `finish_frame` does not accumulate unbounded per-slot state or
+    /// re-report scopes from a prior call.
     pub fn get_results_blocking(&mut self) -> RenderResult<Vec<TimingResult>> {
-        pollster::block_on(self.read_results_from_slot(self.frame_parity))
+        let slot = self.frame_parity;
+        let results = pollster::block_on(self.read_results_from_slot(slot))?;
+        self.query_index[slot] = 0;
+        self.scope_labels[slot].clear();
+        self.scope_draw_calls[slot].clear();
+        Ok(results)
     }
 
     async fn read_results_from_slot(&mut self, slot: usize) -> RenderResult<Vec<TimingResult>> {
@@ -593,6 +604,32 @@ mod tests {
             r.gpu_time_ms
         );
 
+        // CENSOR Task 4 regression: a second offline single-shot round
+        // (resolve -> submit -> get_results_blocking) WITHOUT an intervening
+        // `finish_frame()` must see exactly the new scope, not the old one
+        // re-reported on top of it. This is the documented single-shot
+        // pattern an offline-render certificate path will use once per
+        // render, multiple renders per process.
+        let mut encoder2 = device.create_command_encoder(&CommandEncoderDescriptor {
+            label: Some("gpu_timing_2"),
+        });
+        let scope2 = manager.begin_scope(&mut encoder2, "test_copy");
+        encoder2.copy_buffer_to_buffer(&src, 0, &dst, 0, 4096);
+        manager.end_scope_with_draws(&mut encoder2, scope2, 1);
+        manager.resolve_queries(&mut encoder2);
+        queue.submit(std::iter::once(encoder2.finish()));
+        device.poll(Maintain::Wait);
+
+        let results2 = manager
+            .get_results_blocking()
+            .expect("get results (second single-shot read)");
+        assert_eq!(
+            results2.len(),
+            1,
+            "get_results_blocking must not accumulate scopes across calls without finish_frame"
+        );
+        assert_eq!(results2[0].name, "test_copy");
+
         // Teardown: drop GPU resources explicitly and poll so the backend
         // processes destruction work, then deliberately leak the device/queue.
         // On this driver stack (wgpu 0.19 / Windows), dropping a device that
@@ -600,6 +637,7 @@ mod tests {
         // final poll; the process is exiting anyway, so leaking is safe and
         // keeps the test harness from deadlocking.
         drop(results);
+        drop(results2);
         drop(manager);
         drop(src);
         drop(dst);
