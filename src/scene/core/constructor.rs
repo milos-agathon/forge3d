@@ -225,6 +225,7 @@ impl Scene {
             text3d_renderer: Some(text3d_renderer),
             text3d_enabled: false,
             text3d_instances: Vec::new(),
+            render_timing: std::sync::Mutex::new(None),
             #[cfg(feature = "enable-gpu-instancing")]
             mesh_instanced_renderer: Some(
                 crate::render::mesh_instanced::MeshInstancedRenderer::new(

@@ -123,6 +123,14 @@ pub struct GpuTimingManager {
     scope_labels: [Vec<String>; SLOTS],
     scope_draw_calls: [Vec<u32>; SLOTS],
 
+    /// Number of pipeline-statistics queries actually begun this frame.
+    /// Single-buffered like the stats query set. Currently no scope ever begins
+    /// a statistics query, so this stays 0 and `resolve_queries` skips the stats
+    /// range (resolving a never-written range loses the device on wgpu 0.19 /
+    /// Vulkan). A future caller that wires up statistics queries must increment
+    /// this when it writes one.
+    pipeline_stats_query_index: u32,
+
     /// Which slot the current frame writes/resolves into.
     frame_parity: usize,
 
@@ -167,6 +175,7 @@ impl GpuTimingManager {
             query_index: [0; SLOTS],
             scope_labels: [Vec::new(), Vec::new()],
             scope_draw_calls: [Vec::new(), Vec::new()],
+            pipeline_stats_query_index: 0,
             frame_parity: 0,
             supports_timestamps,
             supports_pipeline_stats,
@@ -362,14 +371,25 @@ impl GpuTimingManager {
         }
 
         // Resolve pipeline statistics queries (single-buffered).
-        if let (Some(ref query_set), Some(ref buffer)) =
-            (&self.pipeline_stats_query_set, &self.pipeline_stats_buffer)
-        {
-            encoder.resolve_query_set(query_set, 0..self.query_index[slot], buffer, 0);
+        //
+        // DEFENSIVE: only resolve when at least one statistics query was
+        // actually begun this frame. The scopes above write timestamps only and
+        // never begin a pipeline-statistics query, so `pipeline_stats_query_index`
+        // stays 0 and this range is skipped. Resolving a never-written
+        // statistics range loses the device (→ panic at the next submit) on
+        // wgpu 0.19 / Vulkan adapters that advertise PIPELINE_STATISTICS_QUERY,
+        // even when `enable_pipeline_stats` was requested by the config.
+        if self.pipeline_stats_query_index > 0 {
+            if let (Some(ref query_set), Some(ref buffer)) =
+                (&self.pipeline_stats_query_set, &self.pipeline_stats_buffer)
+            {
+                let stats_count = self.pipeline_stats_query_index;
+                encoder.resolve_query_set(query_set, 0..stats_count, buffer, 0);
 
-            if let Some(ref readback_buffer) = &self.pipeline_stats_readback_buffer {
-                let size = (self.query_index[slot] as u64) * std::mem::size_of::<u64>() as u64 * 4;
-                encoder.copy_buffer_to_buffer(buffer, 0, readback_buffer, 0, size);
+                if let Some(ref readback_buffer) = &self.pipeline_stats_readback_buffer {
+                    let size = (stats_count as u64) * std::mem::size_of::<u64>() as u64 * 4;
+                    encoder.copy_buffer_to_buffer(buffer, 0, readback_buffer, 0, size);
+                }
             }
         }
     }
@@ -383,6 +403,7 @@ impl GpuTimingManager {
         self.query_index[slot] = 0;
         self.scope_labels[slot].clear();
         self.scope_draw_calls[slot].clear();
+        self.pipeline_stats_query_index = 0;
     }
 
     /// Get timing results for the previously submitted frame (async, viewer path).
@@ -419,6 +440,7 @@ impl GpuTimingManager {
         self.query_index[slot] = 0;
         self.scope_labels[slot].clear();
         self.scope_draw_calls[slot].clear();
+        self.pipeline_stats_query_index = 0;
         Ok(results)
     }
 

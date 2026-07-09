@@ -17,6 +17,11 @@ fn main() {
         .unwrap_or_else(|| "unknown".to_string());
 
     println!("cargo:rustc-env=FORGE3D_GIT_SHA={sha}");
-    // Re-run when HEAD moves so the embedded SHA stays current.
+    // Re-run when HEAD moves so the embedded SHA stays current. `.git/HEAD`
+    // changes on branch switches; `.git/logs/HEAD` changes on every commit
+    // (including same-branch commits), so watching it refreshes the embedded
+    // SHA after an ordinary `git commit` that leaves HEAD pointing at the same
+    // ref.
     println!("cargo:rerun-if-changed=.git/HEAD");
+    println!("cargo:rerun-if-changed=.git/logs/HEAD");
 }

@@ -1,15 +1,26 @@
 impl Scene {
     pub(super) fn render_png_impl(&mut self, path: &PathBuf) -> PyResult<()> {
+        crate::core::certificate::begin_render_capture("scene.render_png");
+        let mut timing = self.take_render_timing();
+
         let g = crate::core::gpu::try_ctx()?;
         let mut encoder = g
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("scene-encoder"),
             });
-        self.encode_png_frame(&mut encoder)?;
+        self.encode_png_frame(&mut encoder, &mut timing)?;
         g.queue.submit(Some(encoder.finish()));
 
-        let mut pixels = self.readback_color_pixels("scene-readback", "copy-encoder")?;
+        let mut pixels =
+            self.readback_color_pixels("scene-readback", "copy-encoder", &mut timing)?;
+
+        // Read back live GPU-pass timings, record each into the certificate,
+        // and freeze this render's capture (one render = one capture).
+        self.record_render_timings(&mut timing);
+        self.store_render_timing(timing);
+        crate::core::certificate::finish_render_capture();
+
         self.apply_runtime_postfx_cpu(&mut pixels);
 
         let img = image::RgbaImage::from_raw(self.width, self.height, pixels)
@@ -19,11 +30,28 @@ impl Scene {
         Ok(())
     }
 
-    fn encode_png_frame(&mut self, encoder: &mut wgpu::CommandEncoder) -> PyResult<()> {
+    fn encode_png_frame(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        timing: &mut Option<crate::core::gpu_timing::GpuTimingManager>,
+    ) -> PyResult<()> {
         let g = crate::core::gpu::try_ctx()?;
+        let refl_scope = if self.reflections_enabled {
+            scene_ts_begin(timing, encoder, "scene.reflections")
+        } else {
+            None
+        };
         self.render_reflections(encoder).map_err(reflection_err)?;
+        scene_ts_end(timing, encoder, refl_scope, 0);
+
+        let cloud_shadow_scope = if self.cloud_shadows_enabled {
+            scene_ts_begin(timing, encoder, "scene.cloud_shadows")
+        } else {
+            None
+        };
         self.render_cloud_shadows(encoder)
             .map_err(cloud_shadow_err)?;
+        scene_ts_end(timing, encoder, cloud_shadow_scope, 0);
 
         if let Some(ref mut renderer) = self.reflection_renderer {
             if renderer.bind_group().is_none() {
@@ -31,6 +59,7 @@ impl Scene {
             }
         }
 
+        let main_scope = scene_ts_begin(timing, encoder, "scene.main");
         {
             let (target_view, resolve_target) = if self.sample_count > 1 {
                 (
@@ -235,8 +264,10 @@ impl Scene {
                 }
             }
         }
+        scene_ts_end(timing, encoder, main_scope, 1);
 
         if self.ssao_enabled {
+            let ssao_scope = scene_ts_begin(timing, encoder, "scene.ssao");
             self.ssao
                 .dispatch(
                     &g.device,
@@ -247,10 +278,24 @@ impl Scene {
                     &self.scene.proj,
                 )
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+            scene_ts_end(timing, encoder, ssao_scope, 0);
         }
 
+        let clouds_scope = if self.clouds_enabled {
+            scene_ts_begin(timing, encoder, "scene.clouds")
+        } else {
+            None
+        };
         self.render_clouds(encoder).map_err(cloud_render_err)?;
+        scene_ts_end(timing, encoder, clouds_scope, 0);
+
+        let dof_scope = if self.dof_enabled {
+            scene_ts_begin(timing, encoder, "scene.dof")
+        } else {
+            None
+        };
         self.render_dof(encoder).map_err(dof_err)?;
+        scene_ts_end(timing, encoder, dof_scope, 0);
         Ok(())
     }
 }
