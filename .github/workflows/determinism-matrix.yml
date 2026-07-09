@@ -108,7 +108,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers vulkan-tools libvulkan1
       - name: Build extension
+        shell: bash
         run: |
+          # maturin develop refuses to run without a virtualenv; hosted
+          # runners provide none, so create one and persist it for the
+          # render step (bin/ on unix, Scripts/ on windows).
+          python -m venv .venv
+          if [ -f .venv/bin/activate ]; then source .venv/bin/activate; else source .venv/Scripts/activate; fi
+          echo "VIRTUAL_ENV=$VIRTUAL_ENV" >> "$GITHUB_ENV"
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          echo "$PWD/.venv/Scripts" >> "$GITHUB_PATH"
           python -m pip install -U pip maturin numpy
           maturin develop --release
       - name: Render canonical scene
