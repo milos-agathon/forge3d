@@ -7,9 +7,15 @@
 #
 # Gated vs informational legs (follows the repo convention of skipping visual
 # goldens on unsupported hosted GPUs, see ci.yml test-golden-images):
-#   - apple  : GATED. macos-14 runners have a real Apple Silicon GPU (Metal).
-#              continue-on-error: false. If hosted macOS proves flaky move this
-#              leg to a self-hosted Apple runner, do not soften the diff.
+#   - apple  : GATED. Measured 2026-07-10: hosted macos-14 runners expose an
+#              "Apple Paravirtual device" (VM GPU), NOT a physical M-series
+#              chip, and wgpu 0.19's Metal backend compiles MSL with Metal's
+#              default fastMathEnabled=true (no toggle) — its hash is
+#              bit-stable across runs but systematically differs from the
+#              dx12/vulkan golden. Byte-parity requires a self-hosted
+#              M-series runner AND a wgpu with fast-math control; until then
+#              this leg documents the divergence loudly. Do not soften the
+#              diff.
 #   - intel  : informational on hosted ubuntu (no Intel GPU; llvmpipe/lavapipe
 #              are software adapters). Becomes gated on a self-hosted
 #              gpu-intel runner.
