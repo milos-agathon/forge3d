@@ -483,6 +483,48 @@ def capabilities() -> dict[str, Any]:
     return native.capabilities()
 
 
+def render_certificate(sign: bool = True) -> dict[str, Any]:
+    """Assemble a RenderCertificate for the LAST completed native render.
+
+    Loads the native, unsigned execution report
+    (``forge3d._forge3d.render_execution_report``), then merges the
+    Python-side degradation sink (:mod:`forge3d._degradation`) into the
+    ``degradations`` list — native entries win on ``(kind, name)`` collisions —
+    and re-sorts the merged list by ``(kind, name)``. When ``sign`` is true the
+    certificate is sealed with :func:`forge3d.certificate.sign_certificate`.
+
+    Raises ``RuntimeError`` when the native extension is unavailable, and
+    propagates the native error when no render has completed in this process.
+    """
+    from ._native import get_native_module
+    from . import _degradation
+    from . import certificate as _certificate
+
+    native = get_native_module()
+    if native is None or not hasattr(native, "render_execution_report"):
+        raise RuntimeError(
+            "forge3d native extension is unavailable; render_certificate() requires "
+            "the compiled _forge3d module (build with `maturin develop`) and a "
+            "completed native render."
+        )
+
+    cert: dict[str, Any] = json.loads(native.render_execution_report())
+
+    degradations = [dict(entry) for entry in (cert.get("degradations") or [])]
+    present = {(entry.get("kind"), entry.get("name")) for entry in degradations}
+    for entry in _degradation.snapshot():
+        key = (entry.get("kind"), entry.get("name"))
+        if key not in present:
+            degradations.append(dict(entry))
+            present.add(key)
+    degradations.sort(key=lambda entry: (str(entry.get("kind", "")), str(entry.get("name", ""))))
+    cert["degradations"] = degradations
+
+    if sign:
+        cert = _certificate.sign_certificate(cert)
+    return cert
+
+
 def label_rejection_summary_diagnostic(
     rejection_counts: Mapping[str, int],
     *,
@@ -957,6 +999,7 @@ __all__ = [
     "placeholder_fallback_diagnostic",
     "pro_gated_path_diagnostic",
     "python_public_3dtiles_incomplete_diagnostic",
+    "render_certificate",
     "unicode_coverage_gap_diagnostic",
     "unavailable_cache_lod_stats_diagnostic",
     "unavailable_terrain_sampler_diagnostic",
