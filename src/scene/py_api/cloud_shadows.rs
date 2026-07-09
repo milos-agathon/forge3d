@@ -21,7 +21,7 @@ impl Scene {
 
         let g = crate::core::gpu::try_ctx()?;
         let renderer =
-            crate::core::cloud_shadows::CloudShadowRenderer::new(&g.device, quality_enum);
+            crate::core::cloud_shadows::CloudShadowRenderer::new(&g.device, quality_enum)?;
 
         self.cloud_shadow_renderer = Some(renderer);
         self.cloud_shadows_enabled = true;

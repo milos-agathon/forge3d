@@ -21,7 +21,7 @@ impl Scene {
 
         let g = crate::core::gpu::try_ctx()?;
         let renderer =
-            crate::core::dof::DofRenderer::new(&g.device, self.width, self.height, quality_enum);
+            crate::core::dof::DofRenderer::new(&g.device, self.width, self.height, quality_enum)?;
 
         self.dof_renderer = Some(renderer);
         self.dof_enabled = true;

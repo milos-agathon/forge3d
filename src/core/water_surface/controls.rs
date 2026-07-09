@@ -1,4 +1,6 @@
 use super::*;
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::tracked_create_texture;
 use wgpu::{
     BindGroupDescriptor, BindGroupEntry, Extent3d, ImageCopyTexture, ImageDataLayout, Origin3d,
     TextureDescriptor, TextureDimension, TextureUsages, TextureViewDescriptor,
@@ -97,27 +99,30 @@ impl WaterSurfaceRenderer {
         data: &[u8],
         width: u32,
         height: u32,
-    ) {
+    ) -> RenderResult<()> {
         assert_eq!(
             data.len() as u32,
             width * height,
             "mask data must be width*height bytes"
         );
         self.mask_size = (width, height);
-        self.mask_texture = device.create_texture(&TextureDescriptor {
-            label: Some("water_mask_texture"),
-            size: Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        self.mask_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("water_mask_texture"),
+                size: Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::R8Unorm,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::R8Unorm,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         self.mask_view = self
             .mask_texture
             .create_view(&TextureViewDescriptor::default());
@@ -155,6 +160,7 @@ impl WaterSurfaceRenderer {
             },
         );
         self.uniforms.foam_params[3] = 1.0;
+        Ok(())
     }
 
     pub fn set_enabled(&mut self, enabled: bool) {

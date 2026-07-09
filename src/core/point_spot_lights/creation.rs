@@ -1,11 +1,13 @@
 use super::structs::PointSpotLightRenderer;
 use super::types::Light;
 use super::types::PointSpotLightUniforms;
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_buffer_init};
 use std::collections::HashMap;
-use wgpu::{self, util::DeviceExt};
+use wgpu;
 
 impl PointSpotLightRenderer {
-    pub fn new(device: &wgpu::Device, max_lights: usize) -> Self {
+    pub fn new(device: &wgpu::Device, max_lights: usize) -> RenderResult<Self> {
         let max_lights = max_lights.min(64); // Cap at reasonable limit
 
         // Load shader
@@ -207,19 +209,25 @@ impl PointSpotLightRenderer {
         let mut uniforms = PointSpotLightUniforms::default();
         uniforms.max_lights = max_lights as u32;
 
-        let uniforms_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("point_spot_lights_uniforms"),
-            contents: bytemuck::cast_slice(&[uniforms]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let uniforms_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("point_spot_lights_uniforms"),
+                contents: bytemuck::cast_slice(&[uniforms]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        )?;
 
         // Create lights storage buffer (initially empty)
-        let lights_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("point_spot_lights_buffer"),
-            size: (max_lights * std::mem::size_of::<Light>()) as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let lights_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("point_spot_lights_buffer"),
+                size: (max_lights * std::mem::size_of::<Light>()) as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         // Create shadow sampler
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -234,7 +242,7 @@ impl PointSpotLightRenderer {
             ..Default::default()
         });
 
-        Self {
+        Ok(Self {
             deferred_pipeline,
             _forward_pipeline: forward_pipeline,
             main_bind_group_layout,
@@ -252,6 +260,6 @@ impl PointSpotLightRenderer {
             max_lights,
             uniforms,
             _shadow_map_size: 1024,
-        }
+        })
     }
 }

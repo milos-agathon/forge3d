@@ -14,6 +14,7 @@
 //! single-shot renders.
 
 use super::error::{RenderError, RenderResult};
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use std::collections::HashMap;
 use std::sync::Arc;
 use wgpu::*;
@@ -108,13 +109,13 @@ pub struct GpuTimingManager {
 
     // Timestamp queries (double-buffered: one slot per frame in flight)
     timestamp_query_set: [Option<QuerySet>; SLOTS],
-    timestamp_buffer: [Option<Buffer>; SLOTS],
-    timestamp_readback_buffer: [Option<Buffer>; SLOTS],
+    timestamp_buffer: [Option<TrackedBuffer>; SLOTS],
+    timestamp_readback_buffer: [Option<TrackedBuffer>; SLOTS],
 
     // Pipeline statistics queries (single-buffered; disabled by default)
     pipeline_stats_query_set: Option<QuerySet>,
-    pipeline_stats_buffer: Option<Buffer>,
-    pipeline_stats_readback_buffer: Option<Buffer>,
+    pipeline_stats_buffer: Option<TrackedBuffer>,
+    pipeline_stats_readback_buffer: Option<TrackedBuffer>,
 
     // Per-slot timing state so a slot's labels always match its queries.
     active_scopes: HashMap<TimingScopeId, String>,
@@ -191,19 +192,25 @@ impl GpuTimingManager {
                     count: query_count,
                 });
 
-                let timestamp_buffer = self.device.create_buffer(&BufferDescriptor {
-                    label: Some("gpu_timing_timestamp_buffer"),
-                    size: buffer_size,
-                    usage: BufferUsages::QUERY_RESOLVE | BufferUsages::COPY_SRC,
-                    mapped_at_creation: false,
-                });
+                let timestamp_buffer = tracked_create_buffer(
+                    &self.device,
+                    &BufferDescriptor {
+                        label: Some(&format!("gpu_timing.resolve_slot{slot}")),
+                        size: buffer_size,
+                        usage: BufferUsages::QUERY_RESOLVE | BufferUsages::COPY_SRC,
+                        mapped_at_creation: false,
+                    },
+                )?;
 
-                let timestamp_readback = self.device.create_buffer(&BufferDescriptor {
-                    label: Some("gpu_timing_timestamp_readback"),
-                    size: buffer_size,
-                    usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-                    mapped_at_creation: false,
-                });
+                let timestamp_readback = tracked_create_buffer(
+                    &self.device,
+                    &BufferDescriptor {
+                        label: Some(&format!("gpu_timing.readback_slot{slot}")),
+                        size: buffer_size,
+                        usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+                        mapped_at_creation: false,
+                    },
+                )?;
 
                 self.timestamp_query_set[slot] = Some(query_set);
                 self.timestamp_buffer[slot] = Some(timestamp_buffer);
@@ -226,19 +233,25 @@ impl GpuTimingManager {
 
             let stats_buffer_size = (query_count as u64) * std::mem::size_of::<u64>() as u64 * 4; // 4 stats
 
-            let pipeline_stats_buffer = self.device.create_buffer(&BufferDescriptor {
-                label: Some("gpu_timing_pipeline_stats_buffer"),
-                size: stats_buffer_size,
-                usage: BufferUsages::QUERY_RESOLVE | BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            });
+            let pipeline_stats_buffer = tracked_create_buffer(
+                &self.device,
+                &BufferDescriptor {
+                    label: Some("gpu_timing.pipeline_stats_resolve"),
+                    size: stats_buffer_size,
+                    usage: BufferUsages::QUERY_RESOLVE | BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                },
+            )?;
 
-            let pipeline_stats_readback = self.device.create_buffer(&BufferDescriptor {
-                label: Some("gpu_timing_pipeline_stats_readback"),
-                size: stats_buffer_size,
-                usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            });
+            let pipeline_stats_readback = tracked_create_buffer(
+                &self.device,
+                &BufferDescriptor {
+                    label: Some("gpu_timing.pipeline_stats_readback"),
+                    size: stats_buffer_size,
+                    usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                },
+            )?;
 
             self.pipeline_stats_query_set = Some(stats_query_set);
             self.pipeline_stats_buffer = Some(pipeline_stats_buffer);
@@ -561,18 +574,26 @@ mod tests {
         );
 
         // Two small buffers to copy between; the copy is what we time.
-        let src = device.create_buffer(&BufferDescriptor {
-            label: Some("gpu_timing_test_src"),
-            size: 4096,
-            usage: BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let dst = device.create_buffer(&BufferDescriptor {
-            label: Some("gpu_timing_test_dst"),
-            size: 4096,
-            usage: BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let src = tracked_create_buffer(
+            &device,
+            &BufferDescriptor {
+                label: Some("gpu_timing_test_src"),
+                size: 4096,
+                usage: BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )
+        .expect("alloc");
+        let dst = tracked_create_buffer(
+            &device,
+            &BufferDescriptor {
+                label: Some("gpu_timing_test_dst"),
+                size: 4096,
+                usage: BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )
+        .expect("alloc");
 
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("gpu_timing"),

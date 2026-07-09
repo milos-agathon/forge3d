@@ -1,8 +1,11 @@
 use super::*;
+use crate::core::resource_tracker::{
+    tracked_create_buffer_init, tracked_create_texture, TrackedTexture,
+};
 
 /// Hierarchical Z-Buffer (min-depth pyramid) for accelerated occlusion queries
 pub struct HzbPyramid {
-    pub(crate) tex: Texture,
+    pub(crate) tex: TrackedTexture,
     pub(crate) mip_count: u32,
     width: u32,
     height: u32,
@@ -18,22 +21,25 @@ impl HzbPyramid {
         use crate::core::mipmap::calculate_mip_levels;
         let mip_count = calculate_mip_levels(width, height).max(1);
         // HZB is a float color texture (R32Float) with mip chain
-        let tex = device.create_texture(&TextureDescriptor {
-            label: Some("p5.hzb.pyramid"),
-            size: Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let tex = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("p5.hzb.pyramid"),
+                size: Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: mip_count,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::R32Float,
+                usage: TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::STORAGE_BINDING
+                    | TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: mip_count,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::R32Float,
-            usage: TextureUsages::TEXTURE_BINDING
-                | TextureUsages::STORAGE_BINDING
-                | TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        )?;
 
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("p5.hzb.build.shader"),
@@ -149,7 +155,7 @@ impl HzbPyramid {
         src_depth: &TextureView,
         levels: u32,
         reversed_z: bool,
-    ) {
+    ) -> RenderResult<()> {
         // Copy depth -> HZB level 0
         let dst0 = self.tex.create_view(&TextureViewDescriptor {
             label: Some("p5.hzb.mip0"),
@@ -192,11 +198,14 @@ impl HzbPyramid {
         let mut level_h = self.height;
         // Create uniform buffer for reversed_z flag
         let reversed_z_val: u32 = if reversed_z { 1 } else { 0 };
-        let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("p5.hzb.params"),
-            contents: bytemuck::cast_slice(&[reversed_z_val]),
-            usage: BufferUsages::UNIFORM,
-        });
+        let params_buf = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("p5.hzb.params"),
+                contents: bytemuck::cast_slice(&[reversed_z_val]),
+                usage: BufferUsages::UNIFORM,
+            },
+        )?;
         for level in 1..=build_to {
             let src_view = self.tex.create_view(&TextureViewDescriptor {
                 label: Some("p5.hzb.src.prev"),
@@ -249,6 +258,7 @@ impl HzbPyramid {
             pass.dispatch_workgroups(gx, gy, 1);
             drop(pass);
         }
+        Ok(())
     }
 
     /// Build HZB from a source DEPTH view (mip 0). Produces a full pyramid in self.tex
@@ -258,8 +268,8 @@ impl HzbPyramid {
         encoder: &mut CommandEncoder,
         src_depth: &TextureView,
         reversed_z: bool,
-    ) {
-        self.build_n(device, encoder, src_depth, self.mip_count, reversed_z);
+    ) -> RenderResult<()> {
+        self.build_n(device, encoder, src_depth, self.mip_count, reversed_z)
     }
 
     pub(crate) fn texture_view(&self) -> TextureView {

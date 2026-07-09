@@ -71,7 +71,7 @@ impl Scene {
 
         let height_ref = self.height_view.as_ref();
         if let Some(ref mut ov) = self.overlay_renderer {
-            ov.recreate_bind_group(&g.device, None, height_ref, None, None);
+            ov.recreate_bind_group(&g.device, None, height_ref, None, None)?;
             ov.upload_uniforms(&g.queue);
         }
         Ok(())

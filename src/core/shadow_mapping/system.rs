@@ -1,11 +1,14 @@
 use super::types::*;
 use crate::core::cascade_split::{generate_cascades, CascadeSplitConfig, ShadowCascade};
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 use glam::{Mat4, Vec3, Vec4};
 use wgpu::{
-    AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindingResource, Buffer,
-    BufferDescriptor, BufferUsages, CompareFunction, Device, Extent3d, FilterMode, Queue, Sampler,
-    SamplerDescriptor, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
-    TextureView, TextureViewDescriptor,
+    AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindingResource, BufferDescriptor,
+    BufferUsages, CompareFunction, Device, Extent3d, FilterMode, Queue, Sampler, SamplerDescriptor,
+    Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
+    TextureViewDescriptor,
 };
 
 /// Main shadow mapping system
@@ -17,7 +20,7 @@ pub struct ShadowMapping {
     cascade_config: CascadeSplitConfig,
 
     /// Shadow map texture array
-    shadow_maps: Option<Texture>,
+    shadow_maps: Option<TrackedTexture>,
 
     /// Shadow map views for each cascade
     cascade_views: Vec<TextureView>,
@@ -26,7 +29,7 @@ pub struct ShadowMapping {
     shadow_sampler: Option<Sampler>,
 
     /// Uniform buffer
-    uniform_buffer: Option<Buffer>,
+    uniform_buffer: Option<TrackedBuffer>,
 
     /// Bind group for shadow resources
     bind_group: Option<BindGroup>,
@@ -59,20 +62,24 @@ impl ShadowMapping {
     /// Initialize GPU resources
     pub fn initialize(&mut self, device: &Device) -> Result<(), String> {
         // Create shadow map texture array
-        let shadow_maps = device.create_texture(&TextureDescriptor {
-            label: Some("shadow_maps"),
-            size: Extent3d {
-                width: self.config.shadow_map_size,
-                height: self.config.shadow_map_size,
-                depth_or_array_layers: self.cascade_config.cascade_count,
+        let shadow_maps = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("shadow_maps"),
+                size: Extent3d {
+                    width: self.config.shadow_map_size,
+                    height: self.config.shadow_map_size,
+                    depth_or_array_layers: self.cascade_config.cascade_count,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: self.config.depth_format,
+                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: self.config.depth_format,
-            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
 
         // Create individual cascade views
         let mut cascade_views = Vec::new();
@@ -107,12 +114,16 @@ impl ShadowMapping {
         });
 
         // Create uniform buffer
-        let uniform_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("csm_uniforms"),
-            size: std::mem::size_of::<CsmUniforms>() as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("csm_uniforms"),
+                size: std::mem::size_of::<CsmUniforms>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
         self.shadow_maps = Some(shadow_maps);
         self.cascade_views = cascade_views;
@@ -311,7 +322,7 @@ impl ShadowMapping {
 
     /// Get shadow map texture
     pub fn get_shadow_maps(&self) -> Option<&Texture> {
-        self.shadow_maps.as_ref()
+        self.shadow_maps.as_ref().map(|t| t.inner())
     }
 
     /// Update configuration

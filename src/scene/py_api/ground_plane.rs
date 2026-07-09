@@ -12,7 +12,7 @@ impl Scene {
             wgpu::TextureFormat::Rgba8UnormSrgb,
             Some(wgpu::TextureFormat::Depth32Float),
             1, // sample_count
-        );
+        )?;
 
         self.ground_plane_renderer = Some(renderer);
         self.ground_plane_enabled = true;

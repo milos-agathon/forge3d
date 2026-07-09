@@ -135,7 +135,7 @@ impl ViewerTerrainScene {
         let hdr_img = crate::formats::hdr::load_hdr(path)
             .map_err(|e| anyhow::anyhow!("failed to load HDR '{}': {}", path.display(), e))?;
         let quality = IBLQuality::Low;
-        let mut ibl = IBLRenderer::new(&self.device, quality);
+        let mut ibl = IBLRenderer::new(&self.device, quality)?;
         ibl.set_base_resolution(quality.base_environment_size());
         ibl.load_environment_map(
             &self.device,

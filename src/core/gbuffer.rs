@@ -10,6 +10,7 @@
 //!   - `velocity_texture`: `Rg16Float` screen-space motion vectors for TAA (P1.1)
 
 use super::error::RenderResult;
+use super::resource_tracker::{tracked_create_texture, TrackedTexture};
 use wgpu::*;
 
 /// GBuffer configuration
@@ -51,23 +52,23 @@ impl Default for GBufferConfig {
 /// GBuffer textures for deferred rendering
 pub struct GBuffer {
     /// Depth texture (linear view-space depth; cleared to 0.0 for background)
-    pub depth_texture: Texture,
+    pub depth_texture: TrackedTexture,
     pub depth_view: TextureView,
 
     /// Normal texture (view-space normals encoded into [0,1], plus roughness in alpha)
-    pub normal_texture: Texture,
+    pub normal_texture: TrackedTexture,
     pub normal_view: TextureView,
 
     /// Material/albedo texture (diffuse/base color in RGB, metallic in alpha)
-    pub material_texture: Texture,
+    pub material_texture: TrackedTexture,
     pub material_view: TextureView,
 
     /// P1.1: Velocity texture (screen-space motion vectors for TAA/motion blur)
-    pub velocity_texture: Texture,
+    pub velocity_texture: TrackedTexture,
     pub velocity_view: TextureView,
 
     /// Optional position reconstruction texture (if not reconstructing from depth)
-    pub position_texture: Option<Texture>,
+    pub position_texture: Option<TrackedTexture>,
     pub position_view: Option<TextureView>,
 
     /// Configuration
@@ -79,20 +80,23 @@ impl GBuffer {
     pub fn new(device: &Device, config: GBufferConfig) -> RenderResult<Self> {
         // Create depth texture (single mip; HZB is built into a separate texture)
         let depth_mips = 1u32;
-        let depth_texture = device.create_texture(&TextureDescriptor {
-            label: Some("gbuffer_depth"),
-            size: Extent3d {
-                width: config.width,
-                height: config.height,
-                depth_or_array_layers: 1,
+        let depth_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("gbuffer_depth"),
+                size: Extent3d {
+                    width: config.width,
+                    height: config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: depth_mips,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: config.depth_format,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
             },
-            mip_level_count: depth_mips,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: config.depth_format,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        )?;
         // Render attachments must have exactly one mip level
         let depth_view = depth_texture.create_view(&TextureViewDescriptor {
             label: Some("gbuffer_depth_mip0"),
@@ -106,60 +110,69 @@ impl GBuffer {
         });
 
         // Create normal texture
-        let normal_texture = device.create_texture(&TextureDescriptor {
-            label: Some("gbuffer_normal"),
-            size: Extent3d {
-                width: config.width,
-                height: config.height,
-                depth_or_array_layers: 1,
+        let normal_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("gbuffer_normal"),
+                size: Extent3d {
+                    width: config.width,
+                    height: config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: config.normal_format,
+                usage: TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::RENDER_ATTACHMENT
+                    | TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: config.normal_format,
-            usage: TextureUsages::TEXTURE_BINDING
-                | TextureUsages::RENDER_ATTACHMENT
-                | TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        )?;
         let normal_view = normal_texture.create_view(&TextureViewDescriptor::default());
 
         // Create material texture
-        let material_texture = device.create_texture(&TextureDescriptor {
-            label: Some("gbuffer_material"),
-            size: Extent3d {
-                width: config.width,
-                height: config.height,
-                depth_or_array_layers: 1,
+        let material_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("gbuffer_material"),
+                size: Extent3d {
+                    width: config.width,
+                    height: config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: config.material_format,
+                usage: TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::RENDER_ATTACHMENT
+                    | TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: config.material_format,
-            usage: TextureUsages::TEXTURE_BINDING
-                | TextureUsages::RENDER_ATTACHMENT
-                | TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        )?;
         let material_view = material_texture.create_view(&TextureViewDescriptor::default());
 
         // P1.1: Create velocity texture for motion vectors
-        let velocity_texture = device.create_texture(&TextureDescriptor {
-            label: Some("gbuffer_velocity"),
-            size: Extent3d {
-                width: config.width,
-                height: config.height,
-                depth_or_array_layers: 1,
+        let velocity_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("gbuffer_velocity"),
+                size: Extent3d {
+                    width: config.width,
+                    height: config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: config.velocity_format,
+                usage: TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::RENDER_ATTACHMENT
+                    | TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: config.velocity_format,
-            usage: TextureUsages::TEXTURE_BINDING
-                | TextureUsages::RENDER_ATTACHMENT
-                | TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        )?;
         let velocity_view = velocity_texture.create_view(&TextureViewDescriptor::default());
 
         Ok(Self {

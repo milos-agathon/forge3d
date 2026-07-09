@@ -1,4 +1,6 @@
 use super::*;
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_texture, TrackedBuffer};
 use wgpu::{
     BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry,
     BindingType, BufferBindingType, BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites,
@@ -14,16 +16,19 @@ impl WaterSurfaceRenderer {
         color_format: TextureFormat,
         depth_format: Option<TextureFormat>,
         sample_count: u32,
-    ) -> Self {
+    ) -> RenderResult<Self> {
         let params = WaterSurfaceParams::default();
         let uniforms = WaterSurfaceUniforms::default();
 
-        let uniform_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("water_surface_uniform_buffer"),
-            size: std::mem::size_of::<WaterSurfaceUniforms>() as wgpu::BufferAddress,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("water_surface_uniform_buffer"),
+                size: std::mem::size_of::<WaterSurfaceUniforms>() as wgpu::BufferAddress,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("water_surface_bind_group_layout"),
@@ -58,20 +63,23 @@ impl WaterSurfaceRenderer {
             ..Default::default()
         });
         let mask_size = (1u32, 1u32);
-        let mask_texture = device.create_texture(&TextureDescriptor {
-            label: Some("water_mask_texture"),
-            size: Extent3d {
-                width: mask_size.0,
-                height: mask_size.1,
-                depth_or_array_layers: 1,
+        let mask_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("water_mask_texture"),
+                size: Extent3d {
+                    width: mask_size.0,
+                    height: mask_size.1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::R8Unorm,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::R8Unorm,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         let mask_view = mask_texture.create_view(&TextureViewDescriptor::default());
 
         let mask_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -180,9 +188,9 @@ impl WaterSurfaceRenderer {
         });
 
         let (vertex_buffer, index_buffer, index_count) =
-            Self::create_water_surface_geometry(device, params.size);
+            Self::create_water_surface_geometry(device, params.size)?;
 
-        Self {
+        Ok(Self {
             uniforms,
             params,
             uniform_buffer,
@@ -200,10 +208,13 @@ impl WaterSurfaceRenderer {
             index_count,
             animation_time: 0.0,
             enabled: true,
-        }
+        })
     }
 
-    fn create_water_surface_geometry(device: &Device, size: f32) -> (Buffer, Buffer, u32) {
+    fn create_water_surface_geometry(
+        device: &Device,
+        size: f32,
+    ) -> RenderResult<(TrackedBuffer, TrackedBuffer, u32)> {
         let half_size = size * 0.5;
         let subdivisions = 32;
         let step = size / subdivisions as f32;
@@ -230,30 +241,36 @@ impl WaterSurfaceRenderer {
             }
         }
 
-        let vertex_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("water_surface_vertex_buffer"),
-            size: (vertices.len() * std::mem::size_of::<f32>()) as wgpu::BufferAddress,
-            usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-            mapped_at_creation: true,
-        });
+        let vertex_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("water_surface_vertex_buffer"),
+                size: (vertices.len() * std::mem::size_of::<f32>()) as wgpu::BufferAddress,
+                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                mapped_at_creation: true,
+            },
+        )?;
         vertex_buffer
             .slice(..)
             .get_mapped_range_mut()
             .copy_from_slice(bytemuck::cast_slice(&vertices));
         vertex_buffer.unmap();
 
-        let index_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("water_surface_index_buffer"),
-            size: (indices.len() * std::mem::size_of::<u32>()) as wgpu::BufferAddress,
-            usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
-            mapped_at_creation: true,
-        });
+        let index_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("water_surface_index_buffer"),
+                size: (indices.len() * std::mem::size_of::<u32>()) as wgpu::BufferAddress,
+                usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
+                mapped_at_creation: true,
+            },
+        )?;
         index_buffer
             .slice(..)
             .get_mapped_range_mut()
             .copy_from_slice(bytemuck::cast_slice(&indices));
         index_buffer.unmap();
 
-        (vertex_buffer, index_buffer, indices.len() as u32)
+        Ok((vertex_buffer, index_buffer, indices.len() as u32))
     }
 }

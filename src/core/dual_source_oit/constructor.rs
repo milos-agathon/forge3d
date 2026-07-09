@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::{tracked_create_buffer_init, tracked_create_texture};
 
 impl DualSourceOITRenderer {
     /// Create new dual-source OIT renderer
@@ -25,19 +26,26 @@ impl DualSourceOITRenderer {
         });
 
         let uniforms = DualSourceOITUniforms::default();
-        let uniforms_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("DualSourceOIT.Uniforms"),
-            contents: bytemuck::bytes_of(&uniforms),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let uniforms_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("DualSourceOIT.Uniforms"),
+                contents: bytemuck::bytes_of(&uniforms),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
         let compose_uniforms = DualSourceComposeUniforms::default();
-        let compose_uniforms_buffer =
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let compose_uniforms_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("DualSourceOIT.ComposeUniforms"),
                 contents: bytemuck::bytes_of(&compose_uniforms),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
         let dual_source_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -228,51 +236,66 @@ impl DualSourceOITRenderer {
         self.width = width;
         self.height = height;
 
-        let dual_source_color_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("DualSourceOIT.ColorTexture"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let dual_source_color_texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("DualSourceOIT.ColorTexture"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
         let dual_source_color_view =
             dual_source_color_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let wboit_color_accum = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("DualSourceOIT.WBOITColorAccum"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let wboit_color_accum = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("DualSourceOIT.WBOITColorAccum"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let wboit_reveal_accum = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("DualSourceOIT.WBOITRevealAccum"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        )
+        .map_err(|e| e.to_string())?;
+        let wboit_reveal_accum = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("DualSourceOIT.WBOITRevealAccum"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R16Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R16Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
 
         self.dual_source_color_texture = Some(dual_source_color_texture);
         self.dual_source_color_view = Some(dual_source_color_view);

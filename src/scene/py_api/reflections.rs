@@ -21,7 +21,7 @@ impl Scene {
 
         let g = crate::core::gpu::try_ctx()?;
         let mut renderer =
-            crate::core::reflections::PlanarReflectionRenderer::new(&g.device, quality_enum);
+            crate::core::reflections::PlanarReflectionRenderer::new(&g.device, quality_enum)?;
 
         if let Some(previous) = self.reflection_renderer.take() {
             let prev_uniforms = previous.uniforms;

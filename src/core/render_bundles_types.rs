@@ -4,6 +4,7 @@
  * Contains configuration, statistics, and data structures for render bundles.
  */
 
+use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 use std::sync::Arc;
 
 /// Buffer configuration for bundle
@@ -112,8 +113,8 @@ pub struct BundlePerformanceStats {
 pub struct CompiledRenderBundle {
     pub bundle: wgpu::RenderBundle,
     pub config: RenderBundleConfig,
-    pub buffers: Vec<wgpu::Buffer>,
-    pub textures: Vec<wgpu::Texture>,
+    pub buffers: Vec<TrackedBuffer>,
+    pub textures: Vec<TrackedTexture>,
     pub bind_groups: Vec<wgpu::BindGroup>,
     pub stats: BundleStats,
 }

@@ -4,8 +4,10 @@
 //! automatic wrap-around and fence-based synchronization to prevent buffer reuse
 //! before completion.
 
+use crate::core::error::RenderResult;
 use crate::core::fence_tracker::FenceTracker;
 use crate::core::memory_tracker::global_tracker;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use std::sync::{Arc, Mutex};
 use wgpu::{Buffer, BufferDescriptor, BufferUsages, CommandEncoder, Device, Queue, Texture};
 
@@ -30,7 +32,7 @@ pub struct StagingStats {
 #[derive(Debug)]
 struct StagingBuffer {
     /// WGPU buffer handle
-    buffer: Buffer,
+    buffer: TrackedBuffer,
     /// Current offset within the buffer
     offset: u64,
     /// Size of this buffer
@@ -40,20 +42,23 @@ struct StagingBuffer {
 }
 
 impl StagingBuffer {
-    fn new(device: &Device, size: u64, label: Option<&str>) -> Self {
-        let buffer = device.create_buffer(&BufferDescriptor {
-            label,
-            size,
-            usage: BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+    fn new(device: &Device, size: u64, label: Option<&str>) -> RenderResult<Self> {
+        let buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label,
+                size,
+                usage: BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
-        Self {
+        Ok(Self {
             buffer,
             offset: 0,
             size,
             in_use: false,
-        }
+        })
     }
 
     fn reset(&mut self) {
@@ -117,11 +122,11 @@ impl StagingRing {
         queue: Arc<Queue>,
         ring_count: usize,
         buffer_size: u64,
-    ) -> Self {
+    ) -> RenderResult<Self> {
         let mut buffers = Vec::with_capacity(ring_count);
         for i in 0..ring_count {
             let label = format!("StagingRing_Buffer_{}", i);
-            buffers.push(StagingBuffer::new(&device, buffer_size, Some(&label)));
+            buffers.push(StagingBuffer::new(&device, buffer_size, Some(&label))?);
         }
 
         let stats = StagingStats {
@@ -139,12 +144,12 @@ impl StagingRing {
             stats: Arc::new(Mutex::new(stats)),
         };
         instance.publish_stats();
-        instance
+        Ok(instance)
     }
 
     /// Get the current active staging buffer
     pub fn current(&self) -> &Buffer {
-        &self.buffers[self.current_index].buffer
+        self.buffers[self.current_index].buffer.inner()
     }
 
     /// Get current buffer with allocation offset
@@ -157,7 +162,7 @@ impl StagingRing {
                 stats.current_ring_index = self.current_index;
             }
             self.publish_stats();
-            return Some((&self.buffers[self.current_index].buffer, offset));
+            return Some((self.buffers[self.current_index].buffer.inner(), offset));
         }
 
         // Current buffer is full, try to advance
@@ -169,7 +174,7 @@ impl StagingRing {
                     stats.current_ring_index = self.current_index;
                 }
                 self.publish_stats();
-                return Some((&self.buffers[self.current_index].buffer, offset));
+                return Some((self.buffers[self.current_index].buffer.inner(), offset));
             }
         }
 
@@ -350,7 +355,7 @@ mod tests {
         let Some((device, queue)) = create_test_device().await else {
             return;
         };
-        let ring = StagingRing::new(device, queue, 3, 1024);
+        let ring = StagingRing::new(device, queue, 3, 1024).expect("alloc");
 
         let stats = ring.stats();
         assert_eq!(stats.ring_count, 3);
@@ -364,7 +369,7 @@ mod tests {
         let Some((device, queue)) = create_test_device().await else {
             return;
         };
-        let mut ring = StagingRing::new(device, queue, 3, 1024);
+        let mut ring = StagingRing::new(device, queue, 3, 1024).expect("alloc");
 
         // Test allocation
         let result = ring.allocate(256);
@@ -379,7 +384,7 @@ mod tests {
         let Some((device, queue)) = create_test_device().await else {
             return;
         };
-        let mut ring = StagingRing::new(device, queue, 3, 1024);
+        let mut ring = StagingRing::new(device, queue, 3, 1024).expect("alloc");
 
         let first_offset = ring.allocate(128).map(|(_, offset)| offset);
         let second_offset = ring.allocate(256).map(|(_, offset)| offset);
@@ -396,7 +401,7 @@ mod tests {
         let Some((device, queue)) = create_test_device().await else {
             return;
         };
-        let mut ring = StagingRing::new(device, queue, 3, 512);
+        let mut ring = StagingRing::new(device, queue, 3, 512).expect("alloc");
 
         // Fill current buffer
         let _alloc1 = ring.allocate(512);

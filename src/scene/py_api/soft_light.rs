@@ -7,7 +7,7 @@ impl Scene {
     #[pyo3(text_signature = "($self)")]
     pub fn enable_soft_light_radius(&mut self) -> PyResult<()> {
         let g = crate::core::gpu::try_ctx()?;
-        let renderer = crate::core::soft_light_radius::SoftLightRadiusRenderer::new(&g.device);
+        let renderer = crate::core::soft_light_radius::SoftLightRadiusRenderer::new(&g.device)?;
 
         self.soft_light_radius_renderer = Some(renderer);
         self.soft_light_radius_enabled = true;

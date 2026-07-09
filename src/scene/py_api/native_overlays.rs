@@ -58,7 +58,7 @@ impl Scene {
         // Ensure height view is bound
         if let Some(ref hv) = self.height_view {
             let g = crate::core::gpu::try_ctx()?;
-            ov.recreate_bind_group(&g.device, None, Some(hv), None, None);
+            ov.recreate_bind_group(&g.device, None, Some(hv), None, None)?;
         }
         let g = crate::core::gpu::try_ctx()?;
         ov.upload_uniforms(&g.queue);
@@ -164,7 +164,7 @@ impl Scene {
         ov.overlay_view = Some(view);
         // Recreate bind group with new overlay view and existing height view
         let height_view = self.height_view.as_ref();
-        ov.recreate_bind_group(&g.device, None, height_view, None, None);
+        ov.recreate_bind_group(&g.device, None, height_view, None, None)?;
         Ok(())
     }
 }

@@ -384,7 +384,7 @@ impl IBL {
             );
         }
 
-        let mut renderer = crate::core::ibl::IBLRenderer::new(device.as_ref(), quality_to_use);
+        let mut renderer = crate::core::ibl::IBLRenderer::new(device.as_ref(), quality_to_use)?;
         // Apply enforced sizes
         renderer.set_base_resolution(base_face);
         renderer.override_specular_mip_levels(spec_mips);

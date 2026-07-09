@@ -1,4 +1,7 @@
 use super::*;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedTexture,
+};
 
 impl IBLRenderer {
     pub(super) fn upload_cubemap(
@@ -7,26 +10,30 @@ impl IBLRenderer {
         base_size: u32,
         mip_levels: u32,
         bytes: &[u8],
-    ) -> Result<(wgpu::Texture, wgpu::TextureView), String> {
+    ) -> Result<(TrackedTexture, wgpu::TextureView), String> {
         let expected_len = cubemap_data_len(base_size, mip_levels, 8);
         if bytes.len() != expected_len {
             return Err("IBL cache cubemap payload size mismatch".into());
         }
 
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("ibl.cache.cubemap"),
-            size: wgpu::Extent3d {
-                width: base_size,
-                height: base_size,
-                depth_or_array_layers: CUBE_FACE_COUNT,
+        let texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("ibl.cache.cubemap"),
+                size: wgpu::Extent3d {
+                    width: base_size,
+                    height: base_size,
+                    depth_or_array_layers: CUBE_FACE_COUNT,
+                },
+                mip_level_count: mip_levels,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: mip_levels,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
 
         let mut offset = 0usize;
         for mip in 0..mip_levels {
@@ -82,26 +89,30 @@ impl IBLRenderer {
         width: u32,
         height: u32,
         bytes: &[u8],
-    ) -> Result<(wgpu::Texture, wgpu::TextureView), String> {
+    ) -> Result<(TrackedTexture, wgpu::TextureView), String> {
         let expected = (width * height * 8) as usize;
         if bytes.len() != expected {
             return Err("IBL cache BRDF payload size mismatch".into());
         }
 
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("ibl.cache.brdf"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("ibl.cache.brdf"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
 
         let (padded, bpr) = pad_image_rows(bytes, width, height, 8);
         queue.write_texture(
@@ -155,12 +166,16 @@ impl IBLRenderer {
             let padded_face = padded_row * mip_size as usize;
             let padded_mip = padded_face * CUBE_FACE_COUNT as usize;
 
-            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(&format!("ibl.download.cubemap.buffer.mip{mip}")),
-                size: padded_mip as u64,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+            let buffer = tracked_create_buffer(
+                device,
+                &wgpu::BufferDescriptor {
+                    label: Some(&format!("ibl.download.cubemap.buffer.mip{mip}")),
+                    size: padded_mip as u64,
+                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                },
+            )
+            .map_err(|e| e.to_string())?;
 
             for face in 0..CUBE_FACE_COUNT {
                 encoder.copy_texture_to_buffer(
@@ -228,12 +243,16 @@ impl IBLRenderer {
         let padded_row = align_to(bytes_per_pixel * width as usize, COPY_ALIGNMENT);
         let padded_total = padded_row * height as usize;
 
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("ibl.download.brdf.buffer"),
-            size: padded_total as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("ibl.download.brdf.buffer"),
+                size: padded_total as u64,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("ibl.download.brdf.encoder"),

@@ -7,7 +7,7 @@ impl Viewer {
         let hdr_img = crate::formats::hdr::load_hdr(path)
             .map_err(|e| anyhow!("failed to load HDR '{}': {}", path, e))?;
 
-        let mut ibl = IBLRenderer::new(&self.device, IBLQuality::Low);
+        let mut ibl = IBLRenderer::new(&self.device, IBLQuality::Low)?;
 
         if let Some(res) = self.ibl_base_resolution {
             ibl.set_base_resolution(res);

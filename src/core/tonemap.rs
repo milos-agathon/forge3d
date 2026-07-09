@@ -4,6 +4,9 @@
 //! to sRGB output with exposure control.
 
 use super::error::RenderResult;
+use super::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 use wgpu::*;
 
 /// Tonemap post-processor for converting HDR linear to sRGB
@@ -18,7 +21,7 @@ pub struct TonemapProcessor {
     /// Current exposure value
     exposure: f32,
     /// Uniform buffer for exposure
-    uniform_buffer: Buffer,
+    uniform_buffer: TrackedBuffer,
     // M6: Extended settings
     /// White point for extended operators
     white_point: f32,
@@ -39,7 +42,7 @@ pub struct TonemapProcessor {
     /// Green-magenta tint
     tint: f32,
     /// M6: Default 1x1x1 LUT texture (identity)
-    _default_lut_texture: Texture,
+    _default_lut_texture: TrackedTexture,
     default_lut_view: TextureView,
     /// M6: LUT sampler
     lut_sampler: Sampler,
@@ -201,28 +204,34 @@ impl TonemapProcessor {
         });
 
         // Create uniform buffer
-        let uniform_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("tonemap_uniforms"),
-            size: std::mem::size_of::<TonemapUniforms>() as BufferAddress,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("tonemap_uniforms"),
+                size: std::mem::size_of::<TonemapUniforms>() as BufferAddress,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         // M6: Create default 1x1x1 identity LUT texture
-        let default_lut_texture = device.create_texture(&TextureDescriptor {
-            label: Some("tonemap_default_lut"),
-            size: Extent3d {
-                width: 2,
-                height: 2,
-                depth_or_array_layers: 2,
+        let default_lut_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("tonemap_default_lut"),
+                size: Extent3d {
+                    width: 2,
+                    height: 2,
+                    depth_or_array_layers: 2,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D3,
+                format: TextureFormat::Rgba8Unorm,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D3,
-            format: TextureFormat::Rgba8Unorm,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         let default_lut_view = default_lut_texture.create_view(&TextureViewDescriptor::default());
 
         // M6: Create LUT sampler with trilinear filtering

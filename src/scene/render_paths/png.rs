@@ -229,7 +229,7 @@ impl Scene {
                     tr.upload_uniforms(&g.queue);
                     if !self.text_instances.is_empty() {
                         let inst = self.text_instances.clone();
-                        tr.upload_instances(&g.device, &g.queue, &inst);
+                        tr.upload_instances(&g.device, &g.queue, &inst)?;
                     }
                     tr.render(&mut rp);
                 }

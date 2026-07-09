@@ -3,7 +3,7 @@ use wgpu::{
     TextureDescriptor, TextureDimension, TextureUsages,
 };
 
-use crate::core::memory_tracker::global_tracker;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::core::texture_format::{global_format_registry, TextureFormatInfo};
 
 use super::compression::{estimate_psnr, estimate_quality_score, generate_mip_levels};
@@ -16,29 +16,30 @@ impl CompressedImage {
         device: &Device,
         queue: &Queue,
         label: Option<&str>,
-    ) -> Result<Texture, String> {
-        let texture_size = self.calculate_gpu_size();
-        if let Err(e) = global_tracker().check_budget(texture_size) {
-            return Err(e);
-        }
-
-        let texture = device.create_texture(&TextureDescriptor {
-            label,
-            size: Extent3d {
-                width: self.width,
-                height: self.height,
-                depth_or_array_layers: 1,
+    ) -> Result<TrackedTexture, String> {
+        // The tracked wrapper performs registry + ledger accounting itself, so
+        // the previous manual budget check and `track_texture_allocation` call
+        // are gone (they would double-count).
+        let texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label,
+                size: Extent3d {
+                    width: self.width,
+                    height: self.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: self.mip_levels,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: self.format,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: self.mip_levels,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: self.format,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
 
         self.upload_to_texture(&texture, queue)?;
-        global_tracker().track_texture_allocation(self.width, self.height, self.format);
         Ok(texture)
     }
 

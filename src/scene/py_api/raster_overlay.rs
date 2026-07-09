@@ -99,7 +99,7 @@ impl Scene {
             // Keep GPU resources alive
             ov.set_overlay_texture(tex, view);
             // Rebind with current height view for altitude/contours
-            ov.recreate_bind_group(&g.device, None, self.height_view.as_ref(), None, None);
+            ov.recreate_bind_group(&g.device, None, self.height_view.as_ref(), None, None)?;
 
             // Set params
             ov.set_enabled(true);

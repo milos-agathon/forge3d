@@ -13,7 +13,7 @@ pub(super) fn initialize_effect(
 ) -> RenderResult<()> {
     let layouts = create_layouts(device);
     let pipelines = create_pipelines(device, &layouts);
-    let uniforms = create_uniform_buffers(device);
+    let uniforms = create_uniform_buffers(device)?;
     let (brightpass_idx, blur_temp_idx) = allocate_resource_indices(device, resource_pool)?;
 
     effect.brightpass_pipeline = Some(pipelines.brightpass);

@@ -100,7 +100,7 @@ impl Viewer {
 
         // HUD overlay renderer
         let mut hud =
-            crate::core::text_overlay::TextOverlayRenderer::new(&device, surface_config.format);
+            crate::core::text_overlay::TextOverlayRenderer::new(&device, surface_config.format)?;
         hud.set_enabled(true);
         hud.set_resolution(width, height);
 
@@ -108,7 +108,7 @@ impl Viewer {
         let mut csm_config = CsmConfig::default();
         csm_config.camera_near = config.znear;
         csm_config.camera_far = config.zfar;
-        let csm = Some(CsmShadowMap::new(device.as_ref(), csm_config.clone()));
+        let csm = Some(CsmShadowMap::new(device.as_ref(), csm_config.clone())?);
 
         // Read sky params from environment
         let sky_params_init = read_sky_env_params();

@@ -9,14 +9,17 @@ use wgpu::{
     VertexStepMode,
 };
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
+
 pub struct TextMeshRenderer {
     pipeline: RenderPipeline,
     pub uniforms: MeshUniforms,
-    uniforms_buf: Buffer,
+    uniforms_buf: TrackedBuffer,
     pub bind_group_layout: BindGroupLayout,
     pub bind_group: BindGroup,
-    vbuf: Option<Buffer>,
-    ibuf: Option<Buffer>,
+    vbuf: Option<TrackedBuffer>,
+    ibuf: Option<TrackedBuffer>,
     index_count: u32,
 }
 
@@ -25,7 +28,7 @@ impl TextMeshRenderer {
         device: &Device,
         color_format: TextureFormat,
         depth_format: Option<TextureFormat>,
-    ) -> Self {
+    ) -> RenderResult<Self> {
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("mesh_basic_shader"),
             source: ShaderSource::Wgsl(include_str!("../../shaders/mesh_basic.wgsl").into()),
@@ -104,12 +107,15 @@ impl TextMeshRenderer {
         });
 
         let uniforms = MeshUniforms::default();
-        let uniforms_buf = device.create_buffer(&BufferDescriptor {
-            label: Some("text_mesh_uniforms"),
-            size: std::mem::size_of::<MeshUniforms>() as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniforms_buf = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("text_mesh_uniforms"),
+                size: std::mem::size_of::<MeshUniforms>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("text_mesh_bg"),
             layout: &bind_group_layout,
@@ -119,7 +125,7 @@ impl TextMeshRenderer {
             }],
         });
 
-        Self {
+        Ok(Self {
             pipeline,
             uniforms,
             uniforms_buf,
@@ -128,7 +134,7 @@ impl TextMeshRenderer {
             vbuf: None,
             ibuf: None,
             index_count: 0,
-        }
+        })
     }
 
     pub fn set_mesh(
@@ -137,26 +143,33 @@ impl TextMeshRenderer {
         queue: &Queue,
         vertices: &[VertexPN],
         indices: &[u32],
-    ) {
+    ) -> RenderResult<()> {
         let vsize = (vertices.len() * std::mem::size_of::<VertexPN>()) as u64;
         let isize = (indices.len() * std::mem::size_of::<u32>()) as u64;
-        let vbuf = device.create_buffer(&BufferDescriptor {
-            label: Some("text_mesh_vbuf"),
-            size: vsize,
-            usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let ibuf = device.create_buffer(&BufferDescriptor {
-            label: Some("text_mesh_ibuf"),
-            size: isize,
-            usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let vbuf = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("text_mesh_vbuf"),
+                size: vsize,
+                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
+        let ibuf = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("text_mesh_ibuf"),
+                size: isize,
+                usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
         queue.write_buffer(&vbuf, 0, bytemuck::cast_slice(vertices));
         queue.write_buffer(&ibuf, 0, bytemuck::cast_slice(indices));
         self.vbuf = Some(vbuf);
         self.ibuf = Some(ibuf);
         self.index_count = indices.len() as u32;
+        Ok(())
     }
 
     pub fn set_model(&mut self, model: Mat4) {

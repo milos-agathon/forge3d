@@ -3,6 +3,8 @@
 
 use std::sync::Arc;
 
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer, TrackedTexture};
+
 // Re-export types and LUT helpers
 pub use super::ltc_lut::{compute_ltc_matrix, create_ltc_matrix_texture, create_ltc_scale_texture};
 pub use super::ltc_types::{LTCUniforms, RectAreaLight, LTC_LUT_FORMAT, LTC_LUT_SIZE};
@@ -16,15 +18,15 @@ pub struct LTCRectAreaLightRenderer {
     /// Maximum supported lights
     max_lights: usize,
     /// GPU buffer for light data
-    light_buffer: Option<wgpu::Buffer>,
+    light_buffer: Option<TrackedBuffer>,
     /// Uniform data buffer
-    uniform_buffer: wgpu::Buffer,
+    uniform_buffer: TrackedBuffer,
     /// Current uniform data
     uniforms: LTCUniforms,
     /// LTC lookup texture (matrix data)
-    ltc_matrix_texture: wgpu::Texture,
+    ltc_matrix_texture: TrackedTexture,
     /// LTC scale texture (amplitude/fresnel data)
-    ltc_scale_texture: wgpu::Texture,
+    ltc_scale_texture: TrackedTexture,
     /// Sampler for LTC lookup
     ltc_sampler: wgpu::Sampler,
     /// Bind group for LTC resources
@@ -39,12 +41,16 @@ impl LTCRectAreaLightRenderer {
         let uniforms = LTCUniforms::default();
 
         // Create uniform buffer
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("LTC Uniforms"),
-            size: std::mem::size_of::<LTCUniforms>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            &device,
+            &wgpu::BufferDescriptor {
+                label: Some("LTC Uniforms"),
+                size: std::mem::size_of::<LTCUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
         // Create LTC lookup textures
         let ltc_matrix_texture = create_ltc_matrix_texture(&device)?;
@@ -203,12 +209,18 @@ impl LTCRectAreaLightRenderer {
         let buffer_size = (self.max_lights * std::mem::size_of::<RectAreaLight>()) as u64;
 
         if self.light_buffer.is_none() || buffer_size > 0 {
-            self.light_buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("LTC Rect Area Lights"),
-                size: buffer_size,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
+            self.light_buffer = Some(
+                tracked_create_buffer(
+                    &self.device,
+                    &wgpu::BufferDescriptor {
+                        label: Some("LTC Rect Area Lights"),
+                        size: buffer_size,
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    },
+                )
+                .map_err(|e| e.to_string())?,
+            );
         }
 
         if let Some(buffer) = &self.light_buffer {

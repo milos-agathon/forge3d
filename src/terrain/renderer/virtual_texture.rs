@@ -790,6 +790,7 @@ impl TerrainMaterialVTRuntime {
                 slot_size as u64 * slot_size as u64 * TERRAIN_VT_BYTES_PER_PIXEL as u64;
             let buffer_size = max_tile_bytes.max(8 * 1024 * 1024);
             StagingRing::new(device.clone(), queue.clone(), 3, buffer_size)
+                .map_err(|e| e.to_string())?
         };
 
         let page_table_texture = device.create_texture(&wgpu::TextureDescriptor {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::tracked_create_texture;
 use wgpu::{ImageCopyTexture, ImageDataLayout, TextureViewDescriptor, TextureViewDimension};
 
 impl CloudRenderer {
@@ -9,20 +10,24 @@ impl CloudRenderer {
     ) -> Result<(), String> {
         let resolution = self.desired_noise_resolution();
         let (data, padded_row) = Self::build_noise_data(resolution);
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("cloud_noise_texture"),
-            size: wgpu::Extent3d {
-                width: resolution,
-                height: resolution,
-                depth_or_array_layers: resolution,
+        let texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("cloud_noise_texture"),
+                size: wgpu::Extent3d {
+                    width: resolution,
+                    height: resolution,
+                    depth_or_array_layers: resolution,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D3,
+                format: TextureFormat::R8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D3,
-            format: TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
         queue.write_texture(
             ImageCopyTexture {
                 texture: &texture,
@@ -59,20 +64,24 @@ impl CloudRenderer {
     ) -> Result<(), String> {
         let size = 256;
         let (data, padded_row) = Self::build_shape_data(size);
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("cloud_shape_texture"),
-            size: wgpu::Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 1,
+        let texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("cloud_shape_texture"),
+                size: wgpu::Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: TextureFormat::R8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
         queue.write_texture(
             ImageCopyTexture {
                 texture: &texture,
@@ -141,20 +150,24 @@ impl CloudRenderer {
             prefilter_data[offset + 3] = 255;
         }
 
-        let irradiance = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("cloud_ibl_irradiance"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 6,
+        let irradiance = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("cloud_ibl_irradiance"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 6,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
         queue.write_texture(
             ImageCopyTexture {
                 texture: &irradiance,
@@ -185,20 +198,24 @@ impl CloudRenderer {
             array_layer_count: Some(6),
         });
 
-        let prefilter = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("cloud_ibl_prefilter"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 6,
+        let prefilter = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("cloud_ibl_prefilter"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 6,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
         queue.write_texture(
             ImageCopyTexture {
                 texture: &prefilter,

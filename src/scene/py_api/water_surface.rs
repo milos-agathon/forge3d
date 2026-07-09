@@ -12,7 +12,7 @@ impl Scene {
             wgpu::TextureFormat::Rgba8UnormSrgb,
             Some(wgpu::TextureFormat::Depth32Float),
             1,
-        );
+        )?;
 
         self.water_surface_renderer = Some(renderer);
         self.water_surface_enabled = true;
