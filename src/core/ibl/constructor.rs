@@ -2,21 +2,41 @@ use super::*;
 
 impl IBLRenderer {
     pub fn new(device: &wgpu::Device, quality: IBLQuality) -> Self {
+        // TERRA-DETERMINATA: these precompute outputs feed the terrain hash,
+        // so compile every module with the same pinned deterministic helpers.
+        let determinism = include_str!("../../shaders/includes/determinism.wgsl");
         let shader_equirect = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ibl.precompute.shader.equirect"),
             source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/ibl_equirect.wgsl").into(),
+                format!(
+                    "{}\n{}",
+                    determinism,
+                    include_str!("../../shaders/ibl_equirect.wgsl")
+                )
+                .into(),
             ),
         });
         let shader_prefilter = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ibl.precompute.shader.prefilter"),
             source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/ibl_prefilter.wgsl").into(),
+                format!(
+                    "{}\n{}",
+                    determinism,
+                    include_str!("../../shaders/ibl_prefilter.wgsl")
+                )
+                .into(),
             ),
         });
         let shader_brdf = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ibl.precompute.shader.brdf"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/ibl_brdf.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                format!(
+                    "{}\n{}",
+                    determinism,
+                    include_str!("../../shaders/ibl_brdf.wgsl")
+                )
+                .into(),
+            ),
         });
 
         let equirect_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

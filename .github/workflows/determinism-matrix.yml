@@ -30,6 +30,21 @@ name: determinism-matrix
 
 on:
   workflow_dispatch:
+  # push trigger so direct-to-main work can never silently skip the matrix
+  # again (the original scaffolding landed on main without a single run).
+  push:
+    branches: [main]
+    paths:
+      - 'src/shaders/includes/determinism.wgsl'
+      - 'src/shaders/includes/tonemap_common.wgsl'
+      - 'src/shaders/csm.wgsl'
+      - 'src/shaders/lighting_ibl.wgsl'
+      - 'src/shaders/terrain_pbr_pom.wgsl'
+      - 'src/core/gpu.rs'
+      - 'python/forge3d/determinism.py'
+      - 'tests/test_determinism_hash.py'
+      - 'tests/goldens/determinism/**'
+      - '.github/workflows/determinism-matrix.yml'
   pull_request:
     paths:
       - 'src/shaders/includes/determinism.wgsl'
@@ -93,19 +108,30 @@ jobs:
           WGPU_BACKENDS: ${{ matrix.backend }}
         run: |
           mkdir -p hash-out
+          # pipefail: without it $? is tee's exit code and a failed render
+          # (e.g. the deterministic-mode software-adapter refusal) would be
+          # misread as success instead of taking the ABSENT path below.
           set +e
+          set -o pipefail
           python -m forge3d.determinism \
             --scene "$SCENE" --width 512 --height 512 \
-            --out-png "hash-out/${SCENE}.png" | tee render.log
+            --out-png "hash-out/${SCENE}.png" 2>render.err | tee render.log
           status=$?
           set -e
+          set +o pipefail
+          cat render.err
           if [ $status -eq 0 ]; then
             python - <<'EOF'
           import json, pathlib
           last = pathlib.Path('render.log').read_text().strip().splitlines()[-1]
-          sha = json.loads(last)['sha256']
+          rec = json.loads(last)
+          sha = rec['sha256']
           pathlib.Path('hash-out/${{ env.SCENE }}.sha256').write_text(sha + '\n')
+          # Persist the full JSON record (incl. adapter identity) next to the
+          # hash so the artifact is attributable to real hardware.
+          pathlib.Path('hash-out/${{ env.SCENE }}.json').write_text(json.dumps(rec) + '\n')
           print('hash:', sha)
+          print('adapter:', json.dumps(rec.get('adapter')))
           EOF
           elif [ "${{ matrix.gated }}" = "true" ]; then
             echo "GATED leg '${{ matrix.leg }}' failed to render — failing the build."
@@ -114,6 +140,7 @@ jobs:
             echo "informational leg '${{ matrix.leg }}': no usable hardware adapter on this hosted runner" \
               | tee "hash-out/${SCENE}.ABSENT"
             tail -n 20 render.log >> "hash-out/${SCENE}.ABSENT" || true
+            tail -n 20 render.err >> "hash-out/${SCENE}.ABSENT" || true
           fi
       - uses: actions/upload-artifact@v4
         with:
@@ -162,7 +189,7 @@ jobs:
       - name: Fail on any pairwise or golden mismatch
         shell: python
         run: |
-          import pathlib, sys
+          import json, pathlib, sys
 
           scene = "terra_determinata_v1"
           golden_file = pathlib.Path(f"tests/goldens/determinism/{scene}.sha256")
@@ -170,18 +197,24 @@ jobs:
 
           produced = {}
           absent = {}
+          adapters = {}
           for artifact_dir in sorted(pathlib.Path("hashes").glob("determinism-hash-*")):
               leg = artifact_dir.name.removeprefix("determinism-hash-")
               sha_file = artifact_dir / f"{scene}.sha256"
               absent_file = artifact_dir / f"{scene}.ABSENT"
+              meta_file = artifact_dir / f"{scene}.json"
               if sha_file.exists():
                   produced[leg] = sha_file.read_text().split()[0].strip()
+                  if meta_file.exists():
+                      adapters[leg] = json.loads(meta_file.read_text()).get("adapter")
               elif absent_file.exists():
                   absent[leg] = absent_file.read_text().splitlines()[0]
 
           print("produced hashes:")
           for leg, sha in sorted(produced.items()):
-              print(f"  {leg:8s} {sha}")
+              a = adapters.get(leg) or {}
+              ident = f"{a.get('name')} ({a.get('backend')}, {a.get('device_type')})" if a else "UNATTRIBUTED"
+              print(f"  {leg:8s} {sha}  adapter: {ident}")
           for leg, why in sorted(absent.items()):
               print(f"informational/absent: {leg}: {why}")
           if golden:
