@@ -367,7 +367,7 @@ impl TerrainScene {
             // adapters that also advertise PIPELINE_STATISTICS_QUERY.
             let config = crate::core::gpu_timing::GpuTimingConfig {
                 enable_timestamps: true,
-                enable_pipeline_stats: true, // TEMP bisect experiment — REVERT
+                enable_pipeline_stats: false,
                 enable_debug_markers: false,
                 label_prefix: "forge3d".to_string(),
                 max_queries_per_frame: 32,
