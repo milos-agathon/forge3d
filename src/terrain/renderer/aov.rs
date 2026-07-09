@@ -24,6 +24,7 @@ impl TerrainScene {
         &self,
         effective_msaa: u32,
         include_source_id: bool,
+        clipmap_geometry: bool,
     ) -> Result<()> {
         let mut aov_pipeline = self
             .aov_pipeline
@@ -37,10 +38,15 @@ impl TerrainScene {
             .aov_pipeline_source_id
             .lock()
             .map_err(|_| anyhow!("TerrainRenderer AOV source-id flag mutex poisoned"))?;
+        let mut clipmap_flag = self
+            .aov_pipeline_clipmap
+            .lock()
+            .map_err(|_| anyhow!("TerrainRenderer AOV clipmap flag mutex poisoned"))?;
 
         if aov_pipeline.is_none()
             || *sample_count != effective_msaa
             || *source_id_flag != include_source_id
+            || *clipmap_flag != clipmap_geometry
         {
             let light_buffer = self
                 .light_buffer
@@ -58,9 +64,11 @@ impl TerrainScene {
                 self.color_format,
                 effective_msaa,
                 include_source_id,
+                clipmap_geometry,
             ));
             *sample_count = effective_msaa;
             *source_id_flag = include_source_id;
+            *clipmap_flag = clipmap_geometry;
         }
 
         Ok(())
@@ -342,10 +350,10 @@ impl TerrainScene {
             pass.set_bind_group(5, water_reflection_bind_group, &[]);
             pass.set_bind_group(6, material_layer_bind_group, &[]);
 
-            let vertex_count = self.terrain_vertex_count(params);
-            pass.draw(0..vertex_count, 0..1);
+            self.geometry_provider()?.draw(&mut pass);
         }
 
+        let _ = params;
         Ok(())
     }
 
@@ -454,6 +462,7 @@ impl TerrainScene {
 
         let height_inputs =
             self.upload_height_inputs(heightmap, water_mask, params.terrain_data_revision)?;
+        self.prepare_geometry(params)?;
         let probe_world_span = if params.camera_mode.to_lowercase() == "mesh" {
             params.terrain_span.max(1e-3)
         } else {
@@ -530,8 +539,9 @@ impl TerrainScene {
             ));
         }
 
-        self.ensure_pipeline_sample_count(effective_msaa)?;
-        self.ensure_aov_pipeline_sample_count(effective_msaa, want_source_id)?;
+        let needs_clipmap = is_clipmap_camera_mode(&params.camera_mode);
+        self.ensure_pipeline_sample_count(effective_msaa, needs_clipmap)?;
+        self.ensure_aov_pipeline_sample_count(effective_msaa, want_source_id, needs_clipmap)?;
         let render_targets = self.create_render_targets(params, requested_msaa, effective_msaa)?;
         if want_source_id && render_targets.needs_scaling {
             return Err(anyhow!(
@@ -611,9 +621,10 @@ impl TerrainScene {
             .map(|(_, view)| view as &wgpu::TextureView)
             .unwrap_or(&self.height_curve_identity_view);
 
+        let main_height_view = self.main_pass_height_view(&height_inputs.heightmap_view);
         let pass_bind_groups = self.create_terrain_pass_bind_groups(
             &uniform_buffer,
-            &height_inputs.heightmap_view,
+            main_height_view,
             materials.material_view(),
             materials.material_sampler(),
             materials.material_normal_view(),
@@ -645,7 +656,7 @@ impl TerrainScene {
             shadow_setup.eye,
             shadow_setup.view_matrix,
             shadow_setup.proj_matrix,
-            &height_inputs.heightmap_view,
+            main_height_view,
             materials.material_view(),
             materials.material_sampler(),
             &materials.shading_buffer,

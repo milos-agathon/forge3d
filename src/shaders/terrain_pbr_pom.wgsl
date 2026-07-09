@@ -4463,3 +4463,44 @@ fn fs_main(input : VertexOutput) -> FragmentOutput {
     return out;
 }
 
+
+// ──────────────────────────────────────────────────────────────────────────
+// BOP-P2-02: Clipmap ring/skirt vertex path.
+// Consumes the CPU-generated clipmap mesh (src/terrain/clipmap/) instead of
+// the procedural grid in vs_main, sampling the same height texture and
+// feeding the same fs_main PBR fragment stage. clip_morph.x < 0 marks skirt
+// vertices, which are pushed down by a small offset derived from the ring
+// resolution (u_terrain.camera_mode_params.y) to seal cracks between LOD rings.
+// ──────────────────────────────────────────────────────────────────────────
+
+@vertex
+fn vs_clipmap_main(
+    @location(0) clip_pos_xz : vec2<f32>,
+    @location(1) clip_uv : vec2<f32>,
+    @location(2) clip_morph : vec2<f32>
+) -> VertexOutput {
+    var out : VertexOutput;
+
+    let uv = clamp(clip_uv, vec2<f32>(0.0), vec2<f32>(1.0));
+    let h_raw = textureSampleLevel(height_tex, height_samp, uv, 0.0).r;
+    let t_geom = get_height_geom_t(h_raw);
+    let h_min = u_shading.clamp0.x;
+    let h_max = u_shading.clamp0.y;
+    let h_disp = h_min + apply_height_curve01(t_geom) * (h_max - h_min);
+    let h_exag = u_terrain.spacing_h_exag.z;
+    let h_center = (h_min + h_max) * 0.5;
+    let skirt_offset = select(0.0, u_terrain.camera_mode_params.y * 0.001, clip_morph.x < 0.0);
+    let world_z_centered = (h_disp - h_center - skirt_offset) * h_exag;
+    let world_z_original = (h_disp - skirt_offset) * h_exag;
+
+    out.world_position = vec3<f32>(clip_pos_xz.x, clip_pos_xz.y, world_z_original);
+    out.world_normal = vec3<f32>(0.0, 0.0, 1.0);
+    out.tex_coord = uv;
+    out.clip_position = u_terrain.proj * u_terrain.view * vec4<f32>(
+        clip_pos_xz.x,
+        clip_pos_xz.y,
+        world_z_centered,
+        1.0
+    );
+    return out;
+}

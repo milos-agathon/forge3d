@@ -6,6 +6,16 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.31.0] - 2026-07-09
+### Added
+- Completed the Blender-outmatch P2/P3 map rendering quality pass: COG/cache streaming, indexed clipmap terrain rendering, native 3D Tiles/COPC point rendering, terrain screen-space effects, VT timing/metadata, GPU water/cloud map-scene controls, memory/timing diagnostics, textured glTF landmarks, thematic GPU styling, and Arabic label shaping coverage.
+- Added the P2/P3 implementation audit and validation evidence to `docs/3d-map-rendering-quality-blender-outmatch-plan.md`, with all P2 tasks full and evidence-based P3 deferrals recorded.
+- Added the P2 recipe golden baselines for clipmaps, 3D Tiles/COPC points, screen-space effects, water/clouds, textured glTF, thematic choropleths, and Arabic label joining.
+
+### Changed
+- Bumped the package and PyPI version to `1.31.0`.
+- Removed the recipe-golden ignore rules that kept intended P2/P3 baselines out of version control.
+
 ## [1.30.0] - 2026-07-04
 ### Added
 - Completed the Blender-outmatch P0/P1 map rendering quality block: MapScene GPU terrain rendering, labels/vectors, offline output, presets, alignment diagnostics, SDF text atlas support, material maps, buildings, cartographic furniture, Hosek-Wilkie sky, 16-bit/color pipeline work, and recipe-level golden gates.

@@ -241,13 +241,13 @@ def test_mapscene_clipmap_planner_metadata_reaches_render_report(tmp_path, monke
     scene.render(str(tmp_path / "clipmap.png"))
 
     metadata = scene.last_render_metadata
-    assert metadata["terrain_geometry_backend"] == "clipmap_bounded_grid_pbr"
+    assert metadata["terrain_geometry_backend"] == "clipmap_indexed_pbr"
     assert metadata["clipmap_ring_count"] == 4
     assert metadata["clipmap_terrain_extent_m"] == pytest.approx(100_000.0)
     assert metadata["clipmap_bounded_memory"] is True
     assert metadata["clipmap_triangle_count"] > 0
     assert scene.last_validation_report.supported_features["terrain.clipmap_planner"] == "supported"
-    assert scene.last_validation_report.supported_features["terrain.clipmap_bounded_grid"] == "supported"
+    assert scene.last_validation_report.supported_features["terrain.clipmap_indexed"] == "supported"
 
 
 def test_mapscene_records_material_vt_stats_metadata(tmp_path, monkeypatch):

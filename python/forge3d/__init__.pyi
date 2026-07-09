@@ -750,6 +750,27 @@ class TerrainRenderer:
     def clear_material_vt_sources(self) -> None: ...
     def get_material_vt_stats(self) -> Dict[str, float]: ...
     def read_contributing_tiles(self) -> List[Dict[str, Any]]: ...
+    # BOP-P2-02: runtime height-tile streaming for clipmap terrain.
+    def enable_height_streaming(
+        self,
+        terrain_extent_m: float,
+        ring_count: int = ...,
+        ring_resolution: int = ...,
+        lod: int = ...,
+        tile_resolution: int = ...,
+        max_in_flight: int = ...,
+        pool_size: int = ...,
+        dem: Optional[np.ndarray] = ...,
+        coarse_prefill: bool = ...,
+        max_resident_bytes: Optional[int] = ...,
+    ) -> None: ...
+    def disable_height_streaming(self) -> None: ...
+    def stream_height_tiles(
+        self,
+        camera_pos: Tuple[float, float, float],
+        max_uploads: int = ...,
+    ) -> Dict[str, Any]: ...
+    def height_streaming_stats(self) -> Dict[str, Any]: ...
 
 class OfflineProgress:
     samples_so_far: int

@@ -156,10 +156,11 @@ impl TerrainScene {
                 occlusion_query_set: None,
             });
 
-            let use_indexed_clipmap = is_clipmap_camera_mode(&params.camera_mode)
-                && pipeline_cache.clipmap_pipeline.is_some();
-            pass.set_pipeline(if use_indexed_clipmap {
-                pipeline_cache.clipmap_pipeline.as_ref().unwrap()
+            let geometry = self.geometry_provider()?;
+            pass.set_pipeline(if geometry.is_clipmap() {
+                pipeline_cache.clipmap_pipeline.as_ref().ok_or_else(|| {
+                    anyhow!("clipmap pipeline not initialized for clipmap geometry")
+                })?
             } else {
                 &pipeline_cache.pipeline
             });
@@ -170,25 +171,10 @@ impl TerrainScene {
             pass.set_bind_group(4, fog_bind_group, &[]);
             pass.set_bind_group(5, water_reflection_bind_group, &[]);
             pass.set_bind_group(6, material_layer_bind_group, &[]);
-
-            if use_indexed_clipmap {
-                let vertex_buffer = self
-                    .clipmap_vertex_buffer
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("clipmap vertex buffer missing"))?;
-                let index_buffer = self
-                    .clipmap_index_buffer
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("clipmap index buffer missing"))?;
-                pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..self.clipmap_index_count, 0, 0..1);
-            } else {
-                let vertex_count = self.terrain_vertex_count(params);
-                pass.draw(0..vertex_count, 0..1);
-            }
+            geometry.draw(&mut pass);
         }
 
+        let _ = params;
         Ok(())
     }
 

@@ -34,6 +34,7 @@ mod bind_groups;
 mod constructor;
 mod core;
 mod draw;
+mod geometry;
 mod height_ao;
 mod msaa;
 mod offline;
@@ -44,6 +45,7 @@ mod resources;
 #[cfg(feature = "enable-gpu-instancing")]
 mod scatter;
 mod shadows;
+mod streaming;
 mod uniforms;
 mod upload;
 mod viewer;
@@ -58,6 +60,7 @@ use self::core::{
     clipmap_camera_config, is_clipmap_camera_mode, is_mesh_camera_mode, IblUniforms, NoopShadow,
     OverlayBinding, PipelineCache, MATERIAL_LAYER_CAPACITY, TERRAIN_DEFAULT_CASCADE_SPLITS,
 };
+use self::geometry::TerrainGeometryProvider;
 use self::height_ao::create_heightfield_init_resources;
 use self::msaa::{assert_msaa_invariants, log_msaa_debug, select_effective_msaa, MsaaInvariants};
 use self::resources::create_base_init_resources;
