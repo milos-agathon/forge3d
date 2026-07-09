@@ -72,41 +72,49 @@ pub(super) fn create_dispatch_resources(
             entry_point: "main",
         });
 
-    let ubo = g
-        .device
-        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let ubo = tracked_create_buffer_init(
+        &g.device,
+        &wgpu::util::BufferInitDescriptor {
             label: Some("pt-ubo"),
             contents: bytemuck::bytes_of(&uniforms),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-    let scene_buf = g
-        .device
-        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        },
+    )?;
+    let scene_buf = tracked_create_buffer_init(
+        &g.device,
+        &wgpu::util::BufferInitDescriptor {
             label: Some("pt-scene"),
             contents: bytemuck::cast_slice(spheres),
             usage: wgpu::BufferUsages::STORAGE,
-        });
-    let (mesh_vertices, mesh_indices, mesh_bvh) = create_empty_mesh_buffers(&g.device);
-    let accum_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("pt-accum"),
-        size: (width as u64) * (height as u64) * 16,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let out_tex = g.device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("pt-out-tex"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba16Float,
-        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
+    )?;
+    let (mesh_vertices, mesh_indices, mesh_bvh) = create_empty_mesh_buffers(&g.device)?;
+    let accum_buf = tracked_create_buffer(
+        &g.device,
+        &wgpu::BufferDescriptor {
+            label: Some("pt-accum"),
+            size: (width as u64) * (height as u64) * 16,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )?;
+    let out_tex = tracked_create_texture(
+        &g.device,
+        &wgpu::TextureDescriptor {
+            label: Some("pt-out-tex"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        },
+    )?;
     let out_view = out_tex.create_view(&wgpu::TextureViewDescriptor::default());
 
     let bg0 = g.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -165,7 +173,7 @@ pub(super) fn create_dispatch_resources(
         AovKind::Emission,
         AovKind::Visibility,
     ];
-    let aov_frames = AovFrames::new(&g.device, width, height, &aovs_all);
+    let aov_frames = AovFrames::new(&g.device, width, height, &aovs_all)?;
     let aov_views: Vec<wgpu::TextureView> = aovs_all
         .iter()
         .map(|kind| {

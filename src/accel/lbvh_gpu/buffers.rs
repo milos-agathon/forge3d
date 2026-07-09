@@ -2,17 +2,17 @@ use super::*;
 
 /// GPU buffer collection for BVH construction
 pub(super) struct GpuBuffers {
-    pub(super) centroids_buffer: Buffer,
-    pub(super) prim_indices_buffer: Buffer,
-    pub(super) morton_codes_buffer: Buffer,
-    pub(super) sorted_indices_buffer: Buffer,
-    pub(super) primitive_aabbs_buffer: Buffer,
-    pub(super) nodes_buffer: Buffer,
-    pub(super) sort_temp_keys: Buffer,
-    pub(super) sort_temp_values: Buffer,
-    pub(super) sort_histogram: Buffer,
-    pub(super) sort_prefix_sums: Buffer,
-    pub(super) _node_flags_buffer: Buffer,
+    pub(super) centroids_buffer: TrackedBuffer,
+    pub(super) prim_indices_buffer: TrackedBuffer,
+    pub(super) morton_codes_buffer: TrackedBuffer,
+    pub(super) sorted_indices_buffer: TrackedBuffer,
+    pub(super) primitive_aabbs_buffer: TrackedBuffer,
+    pub(super) nodes_buffer: TrackedBuffer,
+    pub(super) sort_temp_keys: TrackedBuffer,
+    pub(super) sort_temp_values: TrackedBuffer,
+    pub(super) sort_histogram: TrackedBuffer,
+    pub(super) sort_prefix_sums: TrackedBuffer,
+    pub(super) _node_flags_buffer: TrackedBuffer,
 }
 
 impl GpuBvhBuilder {
@@ -45,84 +45,117 @@ impl GpuBvhBuilder {
         centroids: &[[f32; 3]],
         aabbs: &[Aabb],
     ) -> Result<GpuBuffers> {
-        use wgpu::util::{BufferInitDescriptor, DeviceExt};
+        use wgpu::util::BufferInitDescriptor;
 
         let node_count = 2 * prim_count - 1;
         let indices: Vec<u32> = (0..prim_count).collect();
 
         let buffers = GpuBuffers {
-            centroids_buffer: self.device.create_buffer_init(&BufferInitDescriptor {
-                label: Some("Centroids"),
-                contents: cast_slice(centroids),
-                usage: BufferUsages::STORAGE,
-            }),
+            centroids_buffer: tracked_create_buffer_init(
+                &self.device,
+                &BufferInitDescriptor {
+                    label: Some("Centroids"),
+                    contents: cast_slice(centroids),
+                    usage: BufferUsages::STORAGE,
+                },
+            )?,
 
-            prim_indices_buffer: self.device.create_buffer_init(&BufferInitDescriptor {
-                label: Some("Prim Indices"),
-                contents: cast_slice(&indices),
-                usage: BufferUsages::STORAGE,
-            }),
+            prim_indices_buffer: tracked_create_buffer_init(
+                &self.device,
+                &BufferInitDescriptor {
+                    label: Some("Prim Indices"),
+                    contents: cast_slice(&indices),
+                    usage: BufferUsages::STORAGE,
+                },
+            )?,
 
-            morton_codes_buffer: self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Morton Codes"),
-                size: (prim_count * 4) as u64,
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }),
+            morton_codes_buffer: tracked_create_buffer(
+                &self.device,
+                &wgpu::BufferDescriptor {
+                    label: Some("Morton Codes"),
+                    size: (prim_count * 4) as u64,
+                    usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                },
+            )?,
 
-            sorted_indices_buffer: self.device.create_buffer_init(&BufferInitDescriptor {
-                label: Some("Sorted Indices"),
-                contents: cast_slice(&indices),
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
-            }),
+            sorted_indices_buffer: tracked_create_buffer_init(
+                &self.device,
+                &BufferInitDescriptor {
+                    label: Some("Sorted Indices"),
+                    contents: cast_slice(&indices),
+                    usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+                },
+            )?,
 
-            primitive_aabbs_buffer: self.device.create_buffer_init(&BufferInitDescriptor {
-                label: Some("Primitive AABBs"),
-                contents: cast_slice(aabbs),
-                usage: BufferUsages::STORAGE,
-            }),
+            primitive_aabbs_buffer: tracked_create_buffer_init(
+                &self.device,
+                &BufferInitDescriptor {
+                    label: Some("Primitive AABBs"),
+                    contents: cast_slice(aabbs),
+                    usage: BufferUsages::STORAGE,
+                },
+            )?,
 
-            nodes_buffer: self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("BVH Nodes"),
-                size: (node_count * std::mem::size_of::<BvhNode>() as u32) as u64,
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            }),
+            nodes_buffer: tracked_create_buffer(
+                &self.device,
+                &wgpu::BufferDescriptor {
+                    label: Some("BVH Nodes"),
+                    size: (node_count * std::mem::size_of::<BvhNode>() as u32) as u64,
+                    usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                },
+            )?,
 
-            sort_temp_keys: self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Sort Temp Keys"),
-                size: (prim_count * 4) as u64,
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            }),
+            sort_temp_keys: tracked_create_buffer(
+                &self.device,
+                &wgpu::BufferDescriptor {
+                    label: Some("Sort Temp Keys"),
+                    size: (prim_count * 4) as u64,
+                    usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                },
+            )?,
 
-            sort_temp_values: self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Sort Temp Values"),
-                size: (prim_count * 4) as u64,
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            }),
+            sort_temp_values: tracked_create_buffer(
+                &self.device,
+                &wgpu::BufferDescriptor {
+                    label: Some("Sort Temp Values"),
+                    size: (prim_count * 4) as u64,
+                    usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                },
+            )?,
 
-            sort_histogram: self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Sort Histogram"),
-                size: 1024,
-                usage: BufferUsages::STORAGE,
-                mapped_at_creation: false,
-            }),
+            sort_histogram: tracked_create_buffer(
+                &self.device,
+                &wgpu::BufferDescriptor {
+                    label: Some("Sort Histogram"),
+                    size: 1024,
+                    usage: BufferUsages::STORAGE,
+                    mapped_at_creation: false,
+                },
+            )?,
 
-            sort_prefix_sums: self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Sort Prefix Sums"),
-                size: 1024,
-                usage: BufferUsages::STORAGE,
-                mapped_at_creation: false,
-            }),
+            sort_prefix_sums: tracked_create_buffer(
+                &self.device,
+                &wgpu::BufferDescriptor {
+                    label: Some("Sort Prefix Sums"),
+                    size: 1024,
+                    usage: BufferUsages::STORAGE,
+                    mapped_at_creation: false,
+                },
+            )?,
 
-            _node_flags_buffer: self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Node Flags"),
-                size: (node_count * 4) as u64,
-                usage: BufferUsages::STORAGE,
-                mapped_at_creation: false,
-            }),
+            _node_flags_buffer: tracked_create_buffer(
+                &self.device,
+                &wgpu::BufferDescriptor {
+                    label: Some("Node Flags"),
+                    size: (node_count * 4) as u64,
+                    usage: BufferUsages::STORAGE,
+                    mapped_at_creation: false,
+                },
+            )?,
         };
 
         Ok(buffers)

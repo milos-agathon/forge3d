@@ -1,7 +1,7 @@
 use super::types::{BlasDesc, GpuMesh, GpuVertex, MeshAtlas};
 use crate::accel::cpu_bvh::{BvhCPU, BvhNode, MeshCPU};
+use crate::core::resource_tracker::tracked_create_buffer_init;
 use anyhow::Result;
-use wgpu::util::DeviceExt;
 use wgpu::{BufferUsages, Device, Queue};
 
 /// BVH node padded to the WGSL `BvhNode` layout consumed by the wavefront
@@ -88,29 +88,41 @@ pub fn build_mesh_atlas(device: &Device, items: &[(MeshCPU, BvhCPU)]) -> anyhow:
     }
 
     // Create GPU buffers
-    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("atlas-vertex-buffer"),
-        contents: bytemuck::cast_slice(&all_vertices),
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-    });
+    let vertex_buffer = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("atlas-vertex-buffer"),
+            contents: bytemuck::cast_slice(&all_vertices),
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+        },
+    )?;
 
-    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("atlas-index-buffer"),
-        contents: bytemuck::cast_slice(&all_indices),
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-    });
+    let index_buffer = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("atlas-index-buffer"),
+            contents: bytemuck::cast_slice(&all_indices),
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+        },
+    )?;
 
-    let bvh_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("atlas-bvh-buffer"),
-        contents: bytemuck::cast_slice(&all_nodes),
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-    });
+    let bvh_buffer = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("atlas-bvh-buffer"),
+            contents: bytemuck::cast_slice(&all_nodes),
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+        },
+    )?;
 
-    let descs_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("atlas-blas-descs"),
-        contents: bytemuck::cast_slice(&descs),
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-    });
+    let descs_buffer = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("atlas-blas-descs"),
+            contents: bytemuck::cast_slice(&descs),
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+        },
+    )?;
 
     Ok(MeshAtlas {
         vertex_buffer,
@@ -155,25 +167,34 @@ pub fn upload_mesh_and_bvh(
         .collect();
 
     // Create vertex buffer
-    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Mesh Vertex Buffer"),
-        contents: bytemuck::cast_slice(&gpu_vertices),
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-    });
+    let vertex_buffer = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("Mesh Vertex Buffer"),
+            contents: bytemuck::cast_slice(&gpu_vertices),
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+        },
+    )?;
 
     // Create index buffer
-    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Mesh Index Buffer"),
-        contents: bytemuck::cast_slice(&flat_indices),
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-    });
+    let index_buffer = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("Mesh Index Buffer"),
+            contents: bytemuck::cast_slice(&flat_indices),
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+        },
+    )?;
 
     // Create BVH buffer
-    let bvh_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Mesh BVH Buffer"),
-        contents: bytemuck::cast_slice(&bvh.nodes),
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-    });
+    let bvh_buffer = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("Mesh BVH Buffer"),
+            contents: bytemuck::cast_slice(&bvh.nodes),
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+        },
+    )?;
 
     log::info!(
         "Uploaded mesh to GPU: {} vertices, {} triangles, {} BVH nodes",

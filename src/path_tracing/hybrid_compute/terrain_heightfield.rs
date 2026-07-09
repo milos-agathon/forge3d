@@ -9,9 +9,9 @@
 // RELEVANT FILES: src/shaders/hybrid_terrain_traversal.wgsl, src/path_tracing/hybrid_compute/render.rs
 
 use crate::core::error::RenderError;
-use crate::core::memory_tracker::global_tracker;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use bytemuck::{Pod, Zeroable};
-use wgpu::{Device, Queue, Texture, TextureFormat};
+use wgpu::{Device, Queue, TextureFormat};
 
 /// World -> texel transform and traversal constants consumed by
 /// hybrid_terrain_traversal.wgsl. Deliberately packed as six vec4 rows
@@ -132,8 +132,8 @@ pub fn build_minmax_mips(heights: &[f32], w: u32, h: u32) -> Result<MinMaxMips, 
 
 /// GPU min-max pyramid + the DEM height texture the leaf test samples.
 pub struct TerrainMinMaxPyramid {
-    pub height_texture: Texture,
-    pub minmax_texture: Texture,
+    pub height_texture: TrackedTexture,
+    pub minmax_texture: TrackedTexture,
     pub mip_count: u32,
     pub cell_w: u32,
     pub cell_h: u32,
@@ -147,8 +147,8 @@ pub struct TerrainMinMaxPyramid {
 impl TerrainMinMaxPyramid {
     /// Upload the DEM (R32Float, 1 mip) and its min-max pyramid (RG32Float,
     /// full chain) built from the same heightfield. Both allocations are
-    /// registered with the global memory tracker under the
-    /// `hybrid-pt-terrain-minmax` labels.
+    /// created through `tracked_create_texture`, so the global memory tracker
+    /// and allocation ledger record and release them automatically.
     pub fn from_heightfield(
         device: &Device,
         queue: &Queue,
@@ -163,20 +163,23 @@ impl TerrainMinMaxPyramid {
         let h_min = heights.iter().copied().fold(f32::INFINITY, f32::min);
         let h_max = heights.iter().copied().fold(f32::NEG_INFINITY, f32::max);
 
-        let height_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("hybrid-pt-terrain-height"),
-            size: wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
+        let height_texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("hybrid-pt-terrain-height"),
+                size: wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: TextureFormat::R32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &height_texture,
@@ -196,22 +199,24 @@ impl TerrainMinMaxPyramid {
                 depth_or_array_layers: 1,
             },
         );
-        global_tracker().track_texture_allocation(w, h, TextureFormat::R32Float);
 
-        let minmax_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("hybrid-pt-terrain-minmax"),
-            size: wgpu::Extent3d {
-                width: pot_w,
-                height: pot_h,
-                depth_or_array_layers: 1,
+        let minmax_texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("hybrid-pt-terrain-minmax"),
+                size: wgpu::Extent3d {
+                    width: pot_w,
+                    height: pot_h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: mip_count,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: TextureFormat::Rg32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: mip_count,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: TextureFormat::Rg32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         let mut byte_size = (w as u64) * (h as u64) * 4;
         for (level, ((lw, lh), data)) in mips.dims.iter().zip(mips.levels.iter()).enumerate() {
             queue.write_texture(
@@ -233,7 +238,6 @@ impl TerrainMinMaxPyramid {
                     depth_or_array_layers: 1,
                 },
             );
-            global_tracker().track_texture_allocation(*lw, *lh, TextureFormat::Rg32Float);
             byte_size += (*lw as u64) * (*lh as u64) * 8;
         }
         log::info!(
@@ -283,27 +287,6 @@ impl TerrainMinMaxPyramid {
             extra: [spp.max(1), welford_window.max(2), 0, 0],
         }
     }
-
-    fn free_tracked(&self) {
-        global_tracker().free_texture_allocation(self.width, self.height, TextureFormat::R32Float);
-        let (mut lw, mut lh) = (
-            self.cell_w.next_power_of_two(),
-            self.cell_h.next_power_of_two(),
-        );
-        for _ in 0..self.mip_count {
-            global_tracker().free_texture_allocation(lw, lh, TextureFormat::Rg32Float);
-            lw = (lw / 2).max(1);
-            lh = (lh / 2).max(1);
-        }
-    }
-}
-
-/// Frees the tracker entries on every exit path (success, `?`, or panic) so
-/// error returns cannot pollute the global memory metrics.
-impl Drop for TerrainMinMaxPyramid {
-    fn drop(&mut self) {
-        self.free_tracked();
-    }
 }
 
 /// Complete GPU terrain scene for the hybrid tracer: the min-max pyramid plus
@@ -312,7 +295,7 @@ impl Drop for TerrainMinMaxPyramid {
 /// primitive alongside mesh/SDF geometry.
 pub struct TerrainPtScene {
     pub pyramid: TerrainMinMaxPyramid,
-    pub env_texture: Texture,
+    pub env_texture: TrackedTexture,
     /// (0, 0) selects the constant-white env fallback in the kernel.
     pub env_dims: (u32, u32),
     spacing: (f32, f32),
@@ -381,20 +364,23 @@ impl TerrainPtScene {
             .chunks_exact(3)
             .flat_map(|c| [c[0], c[1], c[2], 1.0])
             .collect();
-        let env_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("hybrid-pt-terrain-env"),
-            size: wgpu::Extent3d {
-                width: env_w,
-                height: env_h,
-                depth_or_array_layers: 1,
+        let env_texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("hybrid-pt-terrain-env"),
+                size: wgpu::Extent3d {
+                    width: env_w,
+                    height: env_h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: TextureFormat::Rgba32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: TextureFormat::Rgba32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &env_texture,
@@ -414,7 +400,6 @@ impl TerrainPtScene {
                 depth_or_array_layers: 1,
             },
         );
-        global_tracker().track_texture_allocation(env_w, env_h, TextureFormat::Rgba32Float);
 
         Ok(Self {
             pyramid,
@@ -445,13 +430,6 @@ impl TerrainPtScene {
             spp,
             welford_window,
         )
-    }
-}
-
-impl Drop for TerrainPtScene {
-    fn drop(&mut self) {
-        let (ew, eh) = self.env_tracked;
-        global_tracker().free_texture_allocation(ew, eh, TextureFormat::Rgba32Float);
     }
 }
 

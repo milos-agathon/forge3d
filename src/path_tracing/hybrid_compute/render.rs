@@ -36,54 +36,72 @@ impl HybridPathTracer {
             _pad: [0; 2],
         };
 
-        let base_ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hybrid-pt-base-ubo"),
-            contents: bytemuck::bytes_of(&params.base_uniforms),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-        let hybrid_ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hybrid-pt-hybrid-ubo"),
-            contents: bytemuck::bytes_of(&hybrid_uniforms),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-        let lighting_ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hybrid-pt-lighting-ubo"),
-            contents: bytemuck::bytes_of(&params.lighting_uniforms),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let base_ubo = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("hybrid-pt-base-ubo"),
+                contents: bytemuck::bytes_of(&params.base_uniforms),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        )?;
+        let hybrid_ubo = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("hybrid-pt-hybrid-ubo"),
+                contents: bytemuck::bytes_of(&hybrid_uniforms),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        )?;
+        let lighting_ubo = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("hybrid-pt-lighting-ubo"),
+                contents: bytemuck::bytes_of(&params.lighting_uniforms),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        )?;
 
         let scene_bytes = if spheres.is_empty() {
             std::borrow::Cow::Owned(vec![0u8; std::mem::size_of::<Sphere>()])
         } else {
             std::borrow::Cow::Borrowed(bytemuck::cast_slice(spheres))
         };
-        let scene_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hybrid-pt-scene"),
-            contents: scene_bytes.as_ref(),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        let accum_size = (width as u64) * (height as u64) * 16;
-        let accum_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("hybrid-pt-accum"),
-            size: accum_size,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let out_tex = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("hybrid-pt-out-tex"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let scene_buf = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("hybrid-pt-scene"),
+                contents: scene_bytes.as_ref(),
+                usage: wgpu::BufferUsages::STORAGE,
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        )?;
+        let accum_size = (width as u64) * (height as u64) * 16;
+        let accum_buf = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("hybrid-pt-accum"),
+                size: accum_size,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
+
+        let out_tex = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("hybrid-pt-out-tex"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            },
+        )?;
         let out_view = out_tex.create_view(&wgpu::TextureViewDescriptor::default());
 
         let aovs_all = [
@@ -95,7 +113,7 @@ impl HybridPathTracer {
             AovKind::Emission,
             AovKind::Visibility,
         ];
-        let aov_frames = AovFrames::new(device, width, height, &aovs_all);
+        let aov_frames = AovFrames::new(device, width, height, &aovs_all)?;
         let aov_views: Vec<wgpu::TextureView> = aovs_all
             .iter()
             .map(|k| {
@@ -151,24 +169,27 @@ impl HybridPathTracer {
         // otherwise. The `main` entry never touches the Welford/reservoir
         // buffers, so those stay minimal dummies in both cases.
         let dummy_tex = |label: &str, format: wgpu::TextureFormat| {
-            device.create_texture(&wgpu::TextureDescriptor {
-                label: Some(label),
-                size: wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
+            tracked_create_texture(
+                device,
+                &wgpu::TextureDescriptor {
+                    label: Some(label),
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            })
+            )
         };
-        let dummy_height = dummy_tex("hybrid-pt-dummy-height", wgpu::TextureFormat::R32Float);
-        let dummy_minmax = dummy_tex("hybrid-pt-dummy-minmax", wgpu::TextureFormat::Rg32Float);
-        let dummy_env = dummy_tex("hybrid-pt-dummy-env", wgpu::TextureFormat::Rgba32Float);
+        let dummy_height = dummy_tex("hybrid-pt-dummy-height", wgpu::TextureFormat::R32Float)?;
+        let dummy_minmax = dummy_tex("hybrid-pt-dummy-minmax", wgpu::TextureFormat::Rg32Float)?;
+        let dummy_env = dummy_tex("hybrid-pt-dummy-env", wgpu::TextureFormat::Rgba32Float)?;
         let (height_view, minmax_view, env_view) = match terrain {
             Some(t) => (
                 t.pyramid
@@ -192,31 +213,43 @@ impl HybridPathTracer {
             Some(t) => t.uniforms(1, 2),
             None => <super::terrain_heightfield::TerrainPtUniforms as bytemuck::Zeroable>::zeroed(),
         };
-        let terrain_ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hybrid-pt-terrain-ubo"),
-            contents: bytemuck::bytes_of(&terrain_uniforms),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let dummy_welford = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("hybrid-pt-dummy-welford"),
-            size: 16,
-            usage: wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        });
+        let terrain_ubo = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("hybrid-pt-terrain-ubo"),
+                contents: bytemuck::bytes_of(&terrain_uniforms),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        )?;
+        let dummy_welford = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("hybrid-pt-dummy-welford"),
+                size: 16,
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            },
+        )?;
         // Reservoir dummies must hold at least one canonical 80-byte element.
         let reservoir_stride = std::mem::size_of::<crate::path_tracing::restir::Reservoir>() as u64;
-        let dummy_reservoir = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("hybrid-pt-dummy-reservoir"),
-            size: reservoir_stride,
-            usage: wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        });
-        let dummy_reservoir_prev = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("hybrid-pt-dummy-reservoir-prev"),
-            size: reservoir_stride,
-            usage: wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        });
+        let dummy_reservoir = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("hybrid-pt-dummy-reservoir"),
+                size: reservoir_stride,
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            },
+        )?;
+        let dummy_reservoir_prev = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("hybrid-pt-dummy-reservoir-prev"),
+                size: reservoir_stride,
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            },
+        )?;
         let bg2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("hybrid-pt-bg2"),
             layout: &self.layouts.accum,
@@ -290,12 +323,15 @@ impl HybridPathTracer {
 
         let row_bytes = width * 8;
         let padded_bpr = align_copy_bpr(row_bytes);
-        let read_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("hybrid-pt-read"),
-            size: (padded_bpr as u64) * (height as u64),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let read_buf = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("hybrid-pt-read"),
+                size: (padded_bpr as u64) * (height as u64),
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        )?;
 
         enc.copy_texture_to_buffer(
             wgpu::ImageCopyTexture {

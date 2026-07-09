@@ -12,13 +12,14 @@
 // RELEVANT FILES: src/path_tracing/wavefront/render.rs, src/path_tracing/reference_scene.rs
 
 use crate::core::error::RenderError;
-use crate::core::memory_tracker::global_tracker;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_buffer_init, TrackedBuffer,
+};
 use crate::path_tracing::reference_scene::ReferenceSceneDesc;
 use crate::path_tracing::wavefront::WavefrontScheduler;
 use bytemuck::{Pod, Zeroable};
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
-use wgpu::{Buffer, Device, Queue};
+use wgpu::{Device, Queue};
 
 /// Uniforms layout shared by every wavefront kernel (pt_raygen.wgsl et al.).
 /// 96 bytes; identical field placement to `compute_types::Uniforms`, but the
@@ -42,12 +43,19 @@ struct WavefrontUniforms {
     _pad_end: [u32; 3],
 }
 
-fn storage_buffer(device: &Device, label: &str, contents: &[u8]) -> Buffer {
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some(label),
-        contents,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-    })
+fn storage_buffer(
+    device: &Device,
+    label: &str,
+    contents: &[u8],
+) -> Result<TrackedBuffer, RenderError> {
+    tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        },
+    )
 }
 
 /// Render the linear-HDR path-traced reference: mean radiance over
@@ -86,25 +94,25 @@ pub fn render_pt_reference(
         device,
         "adjudication-spheres",
         bytemuck::cast_slice(&spheres),
-    );
+    )?;
     let area_lights = desc.area_lights();
     let area_lights_buffer = storage_buffer(
         device,
         "adjudication-area-lights",
         bytemuck::cast_slice(&area_lights),
-    );
+    )?;
     let dir_lights = desc.directional_lights();
     let dir_lights_buffer = storage_buffer(
         device,
         "adjudication-dir-lights",
         bytemuck::cast_slice(&dir_lights),
-    );
+    )?;
     let importance = desc.object_importance();
     let importance_buffer = storage_buffer(
         device,
         "adjudication-importance",
         bytemuck::cast_slice(&importance),
-    );
+    )?;
 
     // Ground plane as a real mesh BLAS so pt_intersect/pt_shadow see the exact
     // same two triangles the raster twin draws.
@@ -129,7 +137,7 @@ pub fn render_pt_reference(
         device,
         "adjudication-instances",
         bytemuck::cast_slice(&[plane_instance]),
-    ));
+    )?);
     scheduler.set_blas_descs_buffer(atlas.descs_buffer);
 
     // Fully bind the ReSTIR scene-spatial group and confirm it is Some, per
@@ -160,14 +168,17 @@ pub fn render_pt_reference(
     // --- Accumulation target (vec4<f32> per pixel, zero-initialized) ---
     let px_count = (width as usize) * (height as usize);
     let accum_bytes = (px_count * std::mem::size_of::<[f32; 4]>()) as u64;
-    let accum_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("adjudication-accum-hdr"),
-        size: accum_bytes,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_SRC
-            | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+    let accum_buffer = tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("adjudication-accum-hdr"),
+            size: accum_bytes,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )?;
     let accum_bind_group = scheduler.create_accum_bind_group(&accum_buffer);
 
     // --- Camera uniforms exactly as pt_raygen.wgsl consumes them ---
@@ -188,11 +199,14 @@ pub fn render_pt_reference(
         seed_lo: desc.seed_lo,
         _pad_end: [0; 3],
     };
-    let uniforms_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("adjudication-uniforms"),
-        contents: bytemuck::bytes_of(&uniforms),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
+    let uniforms_buffer = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("adjudication-uniforms"),
+            contents: bytemuck::bytes_of(&uniforms),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        },
+    )?;
 
     // --- Accumulate frames ---
     // Per-frame seed decorrelation. pt_raygen derives
@@ -233,13 +247,17 @@ pub fn render_pt_reference(
     }
 
     // --- Readback through a tracked host-visible staging buffer ---
-    let staging = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("adjudication-accum-readback"),
-        size: accum_bytes,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    global_tracker().track_buffer_allocation(accum_bytes, true);
+    // `tracked_create_buffer` records the host-visible allocation in the global
+    // ledger and releases it when `staging` is dropped below.
+    let staging = tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("adjudication-accum-readback"),
+            size: accum_bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        },
+    )?;
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("adjudication-accum-copy"),
     });
@@ -255,7 +273,6 @@ pub fn render_pt_reference(
     };
     staging.unmap();
     drop(staging);
-    global_tracker().free_buffer_allocation(accum_bytes, true);
 
     // Mean over frames; force alpha to 1 (the accum alpha channel is a ReSTIR
     // diagnostic, not coverage).

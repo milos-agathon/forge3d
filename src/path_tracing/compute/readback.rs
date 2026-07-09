@@ -91,12 +91,15 @@ fn read_texture_bytes(
     let g = try_ctx()?;
     let row_bytes = width * bytes_per_pixel;
     let padded_bpr = align_copy_bpr(row_bytes);
-    let read_buf = g.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("pt-readback"),
-        size: (padded_bpr as u64) * (height as u64),
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
+    let read_buf = tracked_create_buffer(
+        &g.device,
+        &wgpu::BufferDescriptor {
+            label: Some("pt-readback"),
+            size: (padded_bpr as u64) * (height as u64),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        },
+    )?;
 
     let mut enc = g
         .device

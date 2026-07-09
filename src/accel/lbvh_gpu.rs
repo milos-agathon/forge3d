@@ -5,11 +5,13 @@
 
 use crate::accel::types::{Aabb, BuildOptions, BuildStats, BvhHandle, BvhNode, Triangle};
 use crate::accel::{BvhBackend, GpuBvhData};
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_buffer_init, TrackedBuffer,
+};
 use anyhow::Result;
 use bytemuck::{cast_slice, Pod, Zeroable};
 use std::sync::Arc;
 use std::time::Instant;
-use wgpu::util::DeviceExt;
 use wgpu::{Buffer, BufferUsages, ComputePipeline, Device, Queue};
 
 mod buffers;
