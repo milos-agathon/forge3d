@@ -2,14 +2,18 @@
 // P0.2/M3: Separable Gaussian blur pass for VSM/EVSM/MSM moment maps
 // Applies two-pass blur (horizontal then vertical) to smooth moment statistics
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 use bytemuck::{Pod, Zeroable};
 use wgpu::{
     BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
-    BindGroupLayoutEntry, BindingResource, BindingType, Buffer, BufferBindingType,
-    BufferDescriptor, BufferUsages, ComputePipeline, ComputePipelineDescriptor, Device, Extent3d,
+    BindGroupLayoutEntry, BindingResource, BindingType, BufferBindingType, BufferDescriptor,
+    BufferUsages, ComputePipeline, ComputePipelineDescriptor, Device, Extent3d,
     PipelineLayoutDescriptor, Queue, ShaderModuleDescriptor, ShaderSource, ShaderStages,
-    StorageTextureAccess, Texture, TextureDescriptor, TextureDimension, TextureFormat,
-    TextureSampleType, TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension,
+    StorageTextureAccess, TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType,
+    TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension,
 };
 
 /// Parameters for shadow blur pass
@@ -27,9 +31,9 @@ struct BlurParams {
 pub struct ShadowBlurPass {
     pipeline: ComputePipeline,
     bind_group_layout: BindGroupLayout,
-    params_buffer: Buffer,
+    params_buffer: TrackedBuffer,
     // Intermediate texture for two-pass blur
-    intermediate_texture: Option<Texture>,
+    intermediate_texture: Option<TrackedTexture>,
     intermediate_view: Option<TextureView>,
     current_size: u32,
     current_cascades: u32,
@@ -37,7 +41,7 @@ pub struct ShadowBlurPass {
 
 impl ShadowBlurPass {
     /// Create a new shadow blur pass
-    pub fn new(device: &Device) -> Self {
+    pub fn new(device: &Device) -> RenderResult<Self> {
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("shadow_blur_shader"),
             source: ShaderSource::Wgsl(include_str!("../shaders/shadow_blur.wgsl").into()),
@@ -95,14 +99,17 @@ impl ShadowBlurPass {
             entry_point: "cs_blur",
         });
 
-        let params_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("shadow_blur_params"),
-            size: std::mem::size_of::<BlurParams>() as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let params_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("shadow_blur_params"),
+                size: std::mem::size_of::<BlurParams>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
-        Self {
+        Ok(Self {
             pipeline,
             bind_group_layout,
             params_buffer,
@@ -110,29 +117,37 @@ impl ShadowBlurPass {
             intermediate_view: None,
             current_size: 0,
             current_cascades: 0,
-        }
+        })
     }
 
     /// Ensure intermediate texture is allocated with correct size
-    fn ensure_intermediate_texture(&mut self, device: &Device, size: u32, cascades: u32) {
+    fn ensure_intermediate_texture(
+        &mut self,
+        device: &Device,
+        size: u32,
+        cascades: u32,
+    ) -> RenderResult<()> {
         if self.current_size == size && self.current_cascades == cascades {
-            return;
+            return Ok(());
         }
 
-        let texture = device.create_texture(&TextureDescriptor {
-            label: Some("shadow_blur_intermediate"),
-            size: Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: cascades,
+        let texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("shadow_blur_intermediate"),
+                size: Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: cascades,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba16Float,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
-            view_formats: &[],
-        });
+        )?;
 
         let view = texture.create_view(&TextureViewDescriptor {
             label: Some("shadow_blur_intermediate_view"),
@@ -149,6 +164,7 @@ impl ShadowBlurPass {
         self.intermediate_view = Some(view);
         self.current_size = size;
         self.current_cascades = cascades;
+        Ok(())
     }
 
     /// Execute two-pass separable Gaussian blur on moment maps
@@ -158,13 +174,13 @@ impl ShadowBlurPass {
         queue: &Queue,
         encoder: &mut wgpu::CommandEncoder,
         moment_view: &TextureView,
-        moment_texture: &Texture,
+        moment_texture: &wgpu::Texture,
         cascade_count: u32,
         shadow_map_size: u32,
         kernel_radius: u32,
-    ) {
+    ) -> RenderResult<()> {
         // Ensure intermediate texture exists
-        self.ensure_intermediate_texture(device, shadow_map_size, cascade_count);
+        self.ensure_intermediate_texture(device, shadow_map_size, cascade_count)?;
 
         let intermediate_view = self.intermediate_view.as_ref().unwrap();
 
@@ -207,6 +223,8 @@ impl ShadowBlurPass {
             shadow_map_size,
             "shadow_blur_vertical",
         );
+
+        Ok(())
     }
 
     fn execute_pass(

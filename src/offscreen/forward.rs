@@ -9,17 +9,16 @@
 
 use crate::core::error::RenderError;
 use crate::core::memory_tracker::global_tracker;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use std::ops::Range;
-use wgpu::{
-    BindGroup, Buffer, CommandEncoder, Device, Queue, RenderPipeline, Texture, TextureView,
-};
+use wgpu::{BindGroup, Buffer, CommandEncoder, Device, Queue, RenderPipeline, TextureView};
 
 /// HDR color + depth attachment pair for one offscreen forward pass.
 pub struct ForwardTargets {
     pub width: u32,
     pub height: u32,
     pub color_format: wgpu::TextureFormat,
-    pub color: Texture,
+    pub color: TrackedTexture,
     color_view: TextureView,
     depth_view: TextureView,
 }
@@ -43,26 +42,32 @@ impl ForwardTargets {
             height,
             depth_or_array_layers: 1,
         };
-        let color = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("offscreen-forward-color"),
-            size: extent,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: color_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let depth = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("offscreen-forward-depth"),
-            size: extent,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        let color = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("offscreen-forward-color"),
+                size: extent,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: color_format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            },
+        )?;
+        let depth = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("offscreen-forward-depth"),
+                size: extent,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            },
+        )?;
         let color_view = color.create_view(&wgpu::TextureViewDescriptor::default());
         let depth_view = depth.create_view(&wgpu::TextureViewDescriptor::default());
         Ok(Self {

@@ -1,13 +1,15 @@
 use super::super::{CsmRenderer, CsmUniforms, MomentGenerationPass, ShadowBlurPass};
 use super::budget;
 use super::types::*;
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::lighting::types::ShadowTechnique;
 use glam::{Mat4, Vec3};
 use std::num::NonZeroU64;
 use wgpu::{
     AddressMode, BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType,
     BufferBindingType, Device, Extent3d, FilterMode, Queue, Sampler, SamplerBindingType,
-    SamplerDescriptor, ShaderStages, Texture, TextureAspect, TextureDescriptor, TextureDimension,
+    SamplerDescriptor, ShaderStages, TextureAspect, TextureDescriptor, TextureDimension,
     TextureFormat, TextureSampleType, TextureUsages, TextureViewDescriptor, TextureViewDimension,
 };
 
@@ -16,7 +18,7 @@ pub struct ShadowManager {
     config: ShadowManagerConfig,
     renderer: CsmRenderer,
     moment_sampler: Sampler,
-    fallback_moment_texture: Option<Texture>,
+    fallback_moment_texture: Option<TrackedTexture>,
     moment_pass: Option<MomentGenerationPass>,
     /// P0.2/M3: Blur pass for VSM/EVSM/MSM soft shadows
     blur_pass: Option<ShadowBlurPass>,
@@ -26,7 +28,7 @@ pub struct ShadowManager {
 
 impl ShadowManager {
     /// Construct manager while respecting memory constraints and technique requirements.
-    pub fn new(device: &Device, mut config: ShadowManagerConfig) -> Self {
+    pub fn new(device: &Device, mut config: ShadowManagerConfig) -> RenderResult<Self> {
         let requires_moments = matches!(
             config.technique,
             ShadowTechnique::VSM | ShadowTechnique::EVSM | ShadowTechnique::MSM
@@ -35,7 +37,7 @@ impl ShadowManager {
 
         budget::enforce_memory_budget(&mut config);
 
-        let renderer = CsmRenderer::new(device, config.csm.clone());
+        let renderer = CsmRenderer::new(device, config.csm.clone())?;
 
         let moment_sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("shadow_moment_sampler"),
@@ -52,21 +54,21 @@ impl ShadowManager {
         let fallback_moment_texture = if requires_moments {
             None
         } else {
-            Some(Self::create_fallback_moment_texture(device))
+            Some(Self::create_fallback_moment_texture(device)?)
         };
 
         let memory_bytes = renderer.total_memory_bytes();
 
         // Create moment generation and blur passes if needed
         let moment_pass = if requires_moments {
-            Some(MomentGenerationPass::new(device))
+            Some(MomentGenerationPass::new(device)?)
         } else {
             None
         };
 
         // P0.2/M3: Create blur pass for VSM/EVSM/MSM soft shadows
         let blur_pass = if requires_moments {
-            Some(ShadowBlurPass::new(device))
+            Some(ShadowBlurPass::new(device)?)
         } else {
             None
         };
@@ -83,7 +85,7 @@ impl ShadowManager {
         };
 
         manager.apply_uniform_overrides();
-        manager
+        Ok(manager)
     }
 
     /// Access underlying configuration.
@@ -303,22 +305,22 @@ impl ShadowManager {
         device: &Device,
         queue: &Queue,
         encoder: &mut wgpu::CommandEncoder,
-    ) {
+    ) -> RenderResult<()> {
         // Only execute if technique requires moments
         if !self.requires_moments {
-            return;
+            return Ok(());
         }
 
         let moment_pass = match &mut self.moment_pass {
             Some(pass) => pass,
-            None => return,
+            None => return Ok(()),
         };
 
         // Get depth and moment views
         let depth_view = self.renderer.shadow_texture_view();
         let moment_texture = match &self.renderer.evsm_maps {
             Some(tex) => tex,
-            None => return,
+            None => return Ok(()),
         };
 
         let moment_view =
@@ -350,8 +352,10 @@ impl ShadowManager {
                 self.config.csm.cascade_count,
                 self.config.csm.shadow_map_size,
                 self.config.blur_kernel_radius,
-            );
+            )?;
         }
+
+        Ok(())
     }
 
     /// Returns true if the active technique reads the moment atlas.
@@ -416,20 +420,23 @@ impl ShadowManager {
         flags
     }
 
-    fn create_fallback_moment_texture(device: &Device) -> Texture {
-        device.create_texture(&TextureDescriptor {
-            label: Some("shadow_moment_fallback"),
-            size: Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 4,
+    fn create_fallback_moment_texture(device: &Device) -> RenderResult<TrackedTexture> {
+        tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("shadow_moment_fallback"),
+                size: Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 4,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba32Float,
+                usage: TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba32Float,
-            usage: TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        })
+        )
     }
 }

@@ -155,7 +155,14 @@ impl ViewerTerrainScene {
             ..Default::default()
         };
 
-        let csm = CsmRenderer::new(&self.device, csm_config);
+        let csm = match CsmRenderer::new(&self.device, csm_config) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[terrain_scene] failed to create CSM renderer: {e}");
+                self.csm_renderer = None;
+                return;
+            }
+        };
         println!(
             "[terrain_scene] CSM renderer created, shadow_map_size={}, has_moment_maps={}",
             csm.config.shadow_map_size,
@@ -183,7 +190,13 @@ impl ViewerTerrainScene {
         self.csm_uniform_buffer = Some(buffer);
 
         // Initialize MomentGenerationPass for VSM/EVSM/MSM techniques
-        self.moment_pass = Some(crate::shadows::MomentGenerationPass::new(&self.device));
+        self.moment_pass = match crate::shadows::MomentGenerationPass::new(&self.device) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                eprintln!("[terrain_scene] failed to create moment generation pass: {e}");
+                None
+            }
+        };
 
         println!("[terrain_scene] Shadows initialized (VSM/EVSM/MSM enabled)");
     }

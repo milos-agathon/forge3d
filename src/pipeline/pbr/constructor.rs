@@ -55,7 +55,7 @@ impl PbrPipelineWithShadows {
         let ibl_resources = create_fallback_ibl_resources(device, queue)?;
 
         // P1-06: Initialize light buffer for multi-light support
-        let light_buffer = LightBuffer::new(device);
+        let light_buffer = LightBuffer::new(device)?;
         // P4 spec: group(2) bindings - binding(0)=specular, binding(1)=irradiance, binding(2)=sampler, binding(3)=brdfLUT
         // Use fallback resources until the IBL renderer owns these textures.
         let ibl_bind_group = device.create_bind_group(&BindGroupDescriptor {
@@ -121,7 +121,7 @@ impl PbrPipelineWithShadows {
         let mut shadow_bind_group_layout = None;
 
         if enable_shadows {
-            let manager = ShadowManager::new(device, shadow_config.clone());
+            let manager = ShadowManager::new(device, shadow_config.clone())?;
             shadow_config = manager.config().clone();
             shadow_bind_group_layout = Some(manager.create_bind_group_layout(device));
             shadow_manager = Some(manager);

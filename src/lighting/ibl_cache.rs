@@ -2,6 +2,8 @@
 // IBL resource cache for BRDF LUT, irradiance, and prefiltered specular maps
 // P0: Simple cache with fixed-size textures (<=64 MiB budget)
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use std::sync::Arc;
 use wgpu::*;
 
@@ -15,15 +17,15 @@ pub struct IblResourceCache {
     _queue: Arc<Queue>,
 
     /// BRDF integration LUT (512x512 RG16F) ~2 MiB
-    pub brdf_lut: Option<Texture>,
+    pub brdf_lut: Option<TrackedTexture>,
     pub brdf_lut_view: Option<TextureView>,
 
     /// Irradiance cubemap (32x32x6 RGBA16F) ~0.1 MiB
-    pub irradiance_map: Option<Texture>,
+    pub irradiance_map: Option<TrackedTexture>,
     pub irradiance_map_view: Option<TextureView>,
 
     /// Prefiltered specular cubemap (128x128x6 RGBA16F with mips) ~6 MiB
-    pub specular_map: Option<Texture>,
+    pub specular_map: Option<TrackedTexture>,
     pub specular_map_view: Option<TextureView>,
 
     /// Sampler for IBL textures
@@ -59,24 +61,27 @@ impl IblResourceCache {
     }
 
     /// Initialize BRDF LUT texture (512x512 RG16F)
-    pub fn init_brdf_lut(&mut self) {
+    pub fn init_brdf_lut(&mut self) -> RenderResult<()> {
         let size = 512;
-        let texture = self.device.create_texture(&TextureDescriptor {
-            label: Some("BRDF LUT"),
-            size: Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 1,
+        let texture = tracked_create_texture(
+            &self.device,
+            &TextureDescriptor {
+                label: Some("BRDF LUT"),
+                size: Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rg16Float,
+                usage: TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_DST
+                    | TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rg16Float,
-            usage: TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_DST
-                | TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        )?;
 
         let view = texture.create_view(&TextureViewDescriptor::default());
 
@@ -84,27 +89,31 @@ impl IblResourceCache {
 
         self.brdf_lut = Some(texture);
         self.brdf_lut_view = Some(view);
+        Ok(())
     }
 
     /// Initialize irradiance cubemap (32x32x6 RGBA16F)
-    pub fn init_irradiance_map(&mut self) {
+    pub fn init_irradiance_map(&mut self) -> RenderResult<()> {
         let size = 32;
-        let texture = self.device.create_texture(&TextureDescriptor {
-            label: Some("Irradiance Cubemap"),
-            size: Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 6, // Cubemap
+        let texture = tracked_create_texture(
+            &self.device,
+            &TextureDescriptor {
+                label: Some("Irradiance Cubemap"),
+                size: Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: 6, // Cubemap
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba16Float,
+                usage: TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_DST
+                    | TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_DST
-                | TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        )?;
 
         let view = texture.create_view(&TextureViewDescriptor {
             dimension: Some(TextureViewDimension::Cube),
@@ -115,29 +124,33 @@ impl IblResourceCache {
 
         self.irradiance_map = Some(texture);
         self.irradiance_map_view = Some(view);
+        Ok(())
     }
 
     /// Initialize prefiltered specular cubemap (128x128x6 RGBA16F with mips)
-    pub fn init_specular_map(&mut self) {
+    pub fn init_specular_map(&mut self) -> RenderResult<()> {
         let size = 128;
         let mip_count = 6; // 128 -> 64 -> 32 -> 16 -> 8 -> 4
 
-        let texture = self.device.create_texture(&TextureDescriptor {
-            label: Some("Prefiltered Specular Cubemap"),
-            size: Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 6, // Cubemap
+        let texture = tracked_create_texture(
+            &self.device,
+            &TextureDescriptor {
+                label: Some("Prefiltered Specular Cubemap"),
+                size: Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: 6, // Cubemap
+                },
+                mip_level_count: mip_count,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba16Float,
+                usage: TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_DST
+                    | TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
             },
-            mip_level_count: mip_count,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_DST
-                | TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        )?;
 
         let view = texture.create_view(&TextureViewDescriptor {
             dimension: Some(TextureViewDimension::Cube),
@@ -148,13 +161,15 @@ impl IblResourceCache {
 
         self.specular_map = Some(texture);
         self.specular_map_view = Some(view);
+        Ok(())
     }
 
     /// Initialize all IBL resources
-    pub fn init_all(&mut self) {
-        self.init_brdf_lut();
-        self.init_irradiance_map();
-        self.init_specular_map();
+    pub fn init_all(&mut self) -> RenderResult<()> {
+        self.init_brdf_lut()?;
+        self.init_irradiance_map()?;
+        self.init_specular_map()?;
+        Ok(())
     }
 
     /// Calculate total memory usage in bytes

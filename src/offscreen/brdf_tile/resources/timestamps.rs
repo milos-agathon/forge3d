@@ -1,38 +1,47 @@
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
+
 pub(crate) struct TimestampResources {
     query_set: Option<wgpu::QuerySet>,
-    buffer: Option<wgpu::Buffer>,
-    readback: Option<wgpu::Buffer>,
+    buffer: Option<TrackedBuffer>,
+    readback: Option<TrackedBuffer>,
 }
 
 impl TimestampResources {
-    pub(crate) fn new(device: &wgpu::Device) -> Self {
+    pub(crate) fn new(device: &wgpu::Device) -> RenderResult<Self> {
         if !device.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
-            return Self {
+            return Ok(Self {
                 query_set: None,
                 buffer: None,
                 readback: None,
-            };
+            });
         }
 
-        Self {
+        Ok(Self {
             query_set: Some(device.create_query_set(&wgpu::QuerySetDescriptor {
                 label: Some("brdf_tile.timestamps"),
                 ty: wgpu::QueryType::Timestamp,
                 count: 2,
             })),
-            buffer: Some(device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("brdf_tile.timestamp_buffer"),
-                size: 16,
-                usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            })),
-            readback: Some(device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("brdf_tile.timestamp_readback"),
-                size: 16,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            })),
-        }
+            buffer: Some(tracked_create_buffer(
+                device,
+                &wgpu::BufferDescriptor {
+                    label: Some("brdf_tile.timestamp_buffer"),
+                    size: 16,
+                    usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                },
+            )?),
+            readback: Some(tracked_create_buffer(
+                device,
+                &wgpu::BufferDescriptor {
+                    label: Some("brdf_tile.timestamp_readback"),
+                    size: 16,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                },
+            )?),
+        })
     }
 
     pub(crate) fn write_begin(&self, encoder: &mut wgpu::CommandEncoder) {

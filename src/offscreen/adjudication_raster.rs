@@ -11,10 +11,10 @@
 // RELEVANT FILES: src/offscreen/forward.rs, src/shaders/adjudication_raster.wgsl
 
 use crate::core::error::RenderError;
+use crate::core::resource_tracker::{tracked_create_buffer_init, TrackedBuffer};
 use crate::path_tracing::reference_scene::ReferenceSceneDesc;
 use bytemuck::{Pod, Zeroable};
-use wgpu::util::DeviceExt;
-use wgpu::{Buffer, Device, Queue};
+use wgpu::{Device, Queue};
 
 /// Supersampling factor (subsamples are tent-weighted on downsample to match
 /// the PT reference's +/-0.5px tent reconstruction filter).
@@ -103,12 +103,19 @@ fn base_uniforms(desc: &ReferenceSceneDesc, rw: u32, rh: u32, aspect: f32) -> Ad
     }
 }
 
-fn uniform_buffer(device: &Device, label: &str, u: &AdjUniforms) -> Buffer {
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some(label),
-        contents: bytemuck::bytes_of(u),
-        usage: wgpu::BufferUsages::UNIFORM,
-    })
+fn uniform_buffer(
+    device: &Device,
+    label: &str,
+    u: &AdjUniforms,
+) -> Result<TrackedBuffer, RenderError> {
+    tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents: bytemuck::bytes_of(u),
+            usage: wgpu::BufferUsages::UNIFORM,
+        },
+    )
 }
 
 /// Render the linear-HDR raster reference at (width, height).
@@ -236,39 +243,54 @@ pub fn render_raster_reference(
     // --- Geometry: shared unit sphere + plane quad ---
     let (sphere_verts, sphere_indices) = crate::offscreen::sphere::generate_uv_sphere(192, 96, 1.0);
     let sphere_positions: Vec<[f32; 3]> = sphere_verts.iter().map(|v| v.position).collect();
-    let sphere_vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("adjudication-sphere-vb"),
-        contents: bytemuck::cast_slice(&sphere_positions),
-        usage: wgpu::BufferUsages::VERTEX,
-    });
-    let sphere_ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("adjudication-sphere-ib"),
-        contents: bytemuck::cast_slice(&sphere_indices),
-        usage: wgpu::BufferUsages::INDEX,
-    });
+    let sphere_vb = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("adjudication-sphere-vb"),
+            contents: bytemuck::cast_slice(&sphere_positions),
+            usage: wgpu::BufferUsages::VERTEX,
+        },
+    )?;
+    let sphere_ib = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("adjudication-sphere-ib"),
+            contents: bytemuck::cast_slice(&sphere_indices),
+            usage: wgpu::BufferUsages::INDEX,
+        },
+    )?;
     let plane = desc.plane_mesh();
-    let plane_vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("adjudication-plane-vb"),
-        contents: bytemuck::cast_slice(&plane.vertices),
-        usage: wgpu::BufferUsages::VERTEX,
-    });
+    let plane_vb = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("adjudication-plane-vb"),
+            contents: bytemuck::cast_slice(&plane.vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        },
+    )?;
     let plane_indices: Vec<u32> = plane.indices.iter().flatten().copied().collect();
-    let plane_ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("adjudication-plane-ib"),
-        contents: bytemuck::cast_slice(&plane_indices),
-        usage: wgpu::BufferUsages::INDEX,
-    });
+    let plane_ib = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("adjudication-plane-ib"),
+            contents: bytemuck::cast_slice(&plane_indices),
+            usage: wgpu::BufferUsages::INDEX,
+        },
+    )?;
 
     // --- View-projection (same pixel->ray mapping as pt_raygen's NDC math) ---
     let (origin, forward, _right, up) = desc.camera_basis();
     let view = glam::Mat4::look_at_rh(origin, origin + forward, up);
     let proj = glam::Mat4::perspective_rh(desc.fov_y_rad(), aspect, 0.05, 400.0);
     let vp = proj * view;
-    let vp_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("adjudication-vp"),
-        contents: bytemuck::cast_slice(&vp.to_cols_array()),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    let vp_buffer = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("adjudication-vp"),
+            contents: bytemuck::cast_slice(&vp.to_cols_array()),
+            usage: wgpu::BufferUsages::UNIFORM,
+        },
+    )?;
 
     // --- Per-draw uniforms: plane (also used by sky) + one per sphere ---
     let base = base_uniforms(desc, rw, rh, aspect);
@@ -282,9 +304,9 @@ pub fn render_raster_reference(
     let bind_groups: Vec<wgpu::BindGroup> = draw_uniforms
         .iter()
         .enumerate()
-        .map(|(i, u)| {
-            let ub = uniform_buffer(device, &format!("adjudication-uniforms-{i}"), u);
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
+        .map(|(i, u)| -> Result<wgpu::BindGroup, RenderError> {
+            let ub = uniform_buffer(device, &format!("adjudication-uniforms-{i}"), u)?;
+            Ok(device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("adjudication-raster-bg"),
                 layout: &bind_layout,
                 entries: &[
@@ -297,9 +319,9 @@ pub fn render_raster_reference(
                         resource: vp_buffer.as_entire_binding(),
                     },
                 ],
-            })
+            }))
         })
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
 
     // --- Targets + pass encoding + HDR readback: routed through the shared
     // offscreen forward-raster path (see ADJUDICATION_RASTER_ROUTING_STATUS).
@@ -317,8 +339,8 @@ pub fn render_raster_reference(
         crate::offscreen::forward::ForwardDraw {
             pipeline: &mesh_pipeline,
             bind_group: Some(&bind_groups[0]),
-            vertex_buffer: Some(&plane_vb),
-            index_buffer: Some(&plane_ib),
+            vertex_buffer: Some(plane_vb.inner()),
+            index_buffer: Some(plane_ib.inner()),
             index_count: plane_indices.len() as u32,
             vertices: 0..0,
         },
@@ -327,8 +349,8 @@ pub fn render_raster_reference(
         draws.push(crate::offscreen::forward::ForwardDraw {
             pipeline: &mesh_pipeline,
             bind_group: Some(bind_group),
-            vertex_buffer: Some(&sphere_vb),
-            index_buffer: Some(&sphere_ib),
+            vertex_buffer: Some(sphere_vb.inner()),
+            index_buffer: Some(sphere_ib.inner()),
             index_count: sphere_indices.len() as u32,
             vertices: 0..0,
         });

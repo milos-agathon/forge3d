@@ -57,12 +57,16 @@ pub fn read_texture_tight(
         .ok_or_else(|| anyhow!("bytes_per_row must be non-zero"))?;
     let buffer_size = (padded_bpr * height as usize) as wgpu::BufferAddress;
 
-    let staging = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("forge3d-readback-staging"),
-        size: buffer_size,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
+    let staging = crate::core::resource_tracker::tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("forge3d-readback-staging"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        },
+    )
+    .map_err(|e| anyhow!(e.to_string()))?;
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("forge3d-readback-encoder"),

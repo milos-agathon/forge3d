@@ -15,7 +15,7 @@ pub(crate) fn vector_render_pick_map_py(
     let poly_defs = build_poly_defs(&lines, &[], &[]);
     let mut scene = upload_vector_scene(&point_defs, &poly_defs)?;
     let (pick_tex, pick_view) =
-        create_pick_target(&scene.device, "vf.Vector.RenderPick.Pick", width, height);
+        create_pick_target(&scene.device, "vf.Vector.RenderPick.Pick", width, height)?;
     let mut encoder = scene
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -116,9 +116,9 @@ pub(crate) fn vector_render_oit_and_pick_py(
         )
         .map_err(vector_runtime_err)?;
         let (final_tex, final_view) =
-            create_rgba_target(&scene.device, "vf.Vector.Combine.Final", width, height);
+            create_rgba_target(&scene.device, "vf.Vector.Combine.Final", width, height)?;
         let (pick_tex, pick_view) =
-            create_pick_target(&scene.device, "vf.Vector.Combine.Pick", width, height);
+            create_pick_target(&scene.device, "vf.Vector.Combine.Pick", width, height)?;
         let mut encoder = scene
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {

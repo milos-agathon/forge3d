@@ -5,13 +5,14 @@
 use bytemuck::{Pod, Zeroable};
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
-    BindGroupLayoutEntry, BindingResource, BindingType, Buffer, BufferBindingType,
-    BufferDescriptor, BufferUsages, ComputePipeline, ComputePipelineDescriptor, Device,
-    PipelineLayoutDescriptor, Queue, ShaderModuleDescriptor, ShaderSource, ShaderStages,
-    StorageTextureAccess, Texture, TextureFormat, TextureSampleType, TextureView,
-    TextureViewDimension,
+    BindGroupLayoutEntry, BindingResource, BindingType, BufferBindingType, BufferDescriptor,
+    BufferUsages, ComputePipeline, ComputePipelineDescriptor, Device, PipelineLayoutDescriptor,
+    Queue, ShaderModuleDescriptor, ShaderSource, ShaderStages, StorageTextureAccess, Texture,
+    TextureFormat, TextureSampleType, TextureView, TextureViewDimension,
 };
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use crate::lighting::types::ShadowTechnique;
 
 /// Parameters for moment generation
@@ -35,13 +36,13 @@ struct MomentGenParams {
 pub struct MomentGenerationPass {
     pipeline: ComputePipeline,
     bind_group_layout: BindGroupLayout,
-    params_buffer: Buffer,
+    params_buffer: TrackedBuffer,
     bind_group: Option<BindGroup>,
 }
 
 impl MomentGenerationPass {
     /// Create a new moment generation pass
-    pub fn new(device: &Device) -> Self {
+    pub fn new(device: &Device) -> RenderResult<Self> {
         // Load shader
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("moment_generation_shader"),
@@ -104,19 +105,22 @@ impl MomentGenerationPass {
         });
 
         // Create params buffer
-        let params_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("moment_gen_params"),
-            size: std::mem::size_of::<MomentGenParams>() as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let params_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("moment_gen_params"),
+                size: std::mem::size_of::<MomentGenParams>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
-        Self {
+        Ok(Self {
             pipeline,
             bind_group_layout,
             params_buffer,
             bind_group: None,
-        }
+        })
     }
 
     /// Prepare bind group for rendering
@@ -220,7 +224,7 @@ mod tests {
         let Some(device) = crate::core::gpu::create_device_for_test() else {
             return;
         };
-        let _pass = MomentGenerationPass::new(&device);
+        let _pass = MomentGenerationPass::new(&device).expect("alloc");
         // Just verify it constructs without panicking
     }
 

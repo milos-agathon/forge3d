@@ -16,11 +16,11 @@ pub(super) fn render_brdf_tile(
     let request = request.prepare()?;
     log_render_request(&request);
 
-    let targets = RenderTargets::new(device, request.width, request.height);
-    let mesh = MeshBuffers::new(device, request.sphere_sectors, request.sphere_stacks);
+    let targets = RenderTargets::new(device, request.width, request.height)?;
+    let mesh = MeshBuffers::new(device, request.sphere_sectors, request.sphere_stacks)?;
     let pipeline = crate::offscreen::pipeline::BrdfTilePipeline::new(device)?;
-    let resources = UniformResources::new(device, &pipeline, &request);
-    let timestamps = TimestampResources::new(device);
+    let resources = UniformResources::new(device, &pipeline, &request)?;
+    let timestamps = TimestampResources::new(device)?;
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("offscreen.brdf_tile.encoder"),

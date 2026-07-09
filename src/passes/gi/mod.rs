@@ -11,10 +11,11 @@ pub use params::{GiCompositeParams, GiCompositeParamsStd140};
 
 use crate::core::error::RenderResult;
 use crate::core::gpu_timing::GpuTimingManager;
+use crate::core::resource_tracker::{tracked_create_buffer_init, TrackedBuffer};
 use wgpu::{
-    util::DeviceExt, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindingResource, Buffer,
-    BufferUsages, CommandEncoder, ComputePassDescriptor, ComputePipeline,
-    ComputePipelineDescriptor, Device, ShaderModuleDescriptor, ShaderSource, TextureView,
+    BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindingResource, BufferUsages,
+    CommandEncoder, ComputePassDescriptor, ComputePipeline, ComputePipelineDescriptor, Device,
+    ShaderModuleDescriptor, ShaderSource, TextureView,
 };
 
 pub struct GiPass {
@@ -22,7 +23,7 @@ pub struct GiPass {
     bind_group_layout: BindGroupLayout,
     debug_pipeline: ComputePipeline,
     debug_bind_group_layout: BindGroupLayout,
-    params_buffer: Buffer,
+    params_buffer: TrackedBuffer,
     width: u32,
     height: u32,
     params: GiCompositeParams,
@@ -50,11 +51,14 @@ impl GiPass {
 
         let params = GiCompositeParams::default();
         let params_std: GiCompositeParamsStd140 = params.into();
-        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("p5.gi.composite.params"),
-            contents: bytemuck::bytes_of(&params_std),
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-        });
+        let params_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("p5.gi.composite.params"),
+                contents: bytemuck::bytes_of(&params_std),
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            },
+        )?;
 
         Ok(Self {
             pipeline,

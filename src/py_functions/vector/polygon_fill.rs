@@ -180,7 +180,7 @@ pub(crate) fn vector_render_polygons_fill_py(
         .map_err(vector_runtime_err)?;
 
     let (final_tex, final_view) =
-        create_rgba_target(&device, "vf.Vector.PolygonFill.Final", width, height);
+        create_rgba_target(&device, "vf.Vector.PolygonFill.Final", width, height)?;
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("vf.Vector.PolygonFill.Encoder"),
     });

@@ -48,7 +48,7 @@ pub(crate) fn vector_render_oit_py(
         )
         .map_err(vector_runtime_err)?;
         let (final_tex, final_view) =
-            create_rgba_target(&scene.device, "vf.Vector.RenderOIT.Final", width, height);
+            create_rgba_target(&scene.device, "vf.Vector.RenderOIT.Final", width, height)?;
         let mut encoder = scene
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -146,13 +146,13 @@ pub(crate) fn vector_render_oit_edl_py(
         )
         .map_err(vector_runtime_err)?;
         let (final_tex, final_view) =
-            create_rgba_target(&scene.device, "vf.Vector.RenderOITEDL.Final", width, height);
+            create_rgba_target(&scene.device, "vf.Vector.RenderOITEDL.Final", width, height)?;
         let (edl_tex, edl_view) = create_rgba_target(
             &scene.device,
             "vf.Vector.RenderOITEDL.Output",
             width,
             height,
-        );
+        )?;
         let mut encoder = scene
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {

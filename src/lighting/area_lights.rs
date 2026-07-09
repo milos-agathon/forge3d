@@ -3,7 +3,8 @@
 //! Implements A20 requirements for area lights with radius-controlled
 //! penumbra softness and multi-light support with energy conservation.
 
-use glam::{Vec3, Vec4, Mat4};
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
+use glam::{Mat4, Vec3, Vec4};
 use wgpu::*;
 
 /// Area light types supported by the system
@@ -193,7 +194,7 @@ pub struct AreaLightManager {
     /// Array of area lights
     pub lights: Vec<AreaLight>,
     /// GPU buffer for light data
-    light_buffer: Option<Buffer>,
+    light_buffer: Option<TrackedBuffer>,
     /// Maximum supported lights
     max_lights: usize,
     /// Device reference
@@ -257,12 +258,18 @@ impl AreaLightManager {
 
         // Create buffer if needed
         if self.light_buffer.is_none() {
-            self.light_buffer = Some(self.device.create_buffer(&BufferDescriptor {
-                label: Some("Area Lights Buffer"),
-                size: buffer_size,
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
+            self.light_buffer = Some(
+                tracked_create_buffer(
+                    &self.device,
+                    &BufferDescriptor {
+                        label: Some("Area Lights Buffer"),
+                        size: buffer_size,
+                        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    },
+                )
+                .map_err(|e| e.to_string())?,
+            );
         }
 
         // Prepare data for upload
@@ -275,7 +282,7 @@ impl AreaLightManager {
         let data_bytes = bytemuck::cast_slice(&buffer_data);
         queue.write_buffer(self.light_buffer.as_ref().unwrap(), 0, data_bytes);
 
-        Ok(self.light_buffer.as_ref().unwrap())
+        Ok(self.light_buffer.as_ref().unwrap().inner())
     }
 
     /// Get bind group layout for area lights

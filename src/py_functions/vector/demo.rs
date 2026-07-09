@@ -59,9 +59,9 @@ pub(crate) fn vector_oit_and_pick_demo(
         )
         .map_err(vector_runtime_err)?;
         let (final_tex, final_view) =
-            create_rgba_target(&scene.device, "vf.Vector.Demo.Final", width, height);
+            create_rgba_target(&scene.device, "vf.Vector.Demo.Final", width, height)?;
         let (pick_tex, pick_view) =
-            create_pick_target(&scene.device, "vf.Vector.Demo.Pick", width, height);
+            create_pick_target(&scene.device, "vf.Vector.Demo.Pick", width, height)?;
         let mut encoder = scene
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {

@@ -2,7 +2,11 @@
 // ID buffer rendering pass for feature picking
 // Renders feature IDs to an R32Uint texture for GPU-based picking
 
-use wgpu::{BindGroup, BindGroupLayout, Buffer, Device, RenderPipeline, Texture, TextureView};
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
+use wgpu::{BindGroup, BindGroupLayout, Device, RenderPipeline, TextureView};
 
 /// Vertex format for ID buffer rendering
 #[repr(C)]
@@ -51,13 +55,13 @@ pub struct IdBufferUniforms {
 
 /// ID buffer render pass resources
 pub struct IdBufferPass {
-    id_texture: Texture,
+    id_texture: TrackedTexture,
     id_view: TextureView,
-    _depth_texture: Texture,
+    _depth_texture: TrackedTexture,
     depth_view: TextureView,
     pipeline: RenderPipeline,
     _bind_group_layout: BindGroupLayout,
-    uniform_buffer: Buffer,
+    uniform_buffer: TrackedBuffer,
     bind_group: BindGroup,
     width: u32,
     height: u32,
@@ -65,38 +69,44 @@ pub struct IdBufferPass {
 
 impl IdBufferPass {
     /// Create a new ID buffer pass
-    pub fn new(device: &Device, width: u32, height: u32) -> Self {
-        let id_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("id_buffer_texture"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+    pub fn new(device: &Device, width: u32, height: u32) -> RenderResult<Self> {
+        let id_texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("id_buffer_texture"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Uint,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Uint,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        )?;
 
         let id_view = id_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("id_buffer_depth"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let depth_texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("id_buffer_depth"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        )?;
 
         let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -114,12 +124,15 @@ impl IdBufferPass {
             }],
         });
 
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("id_buffer_uniforms"),
-            size: std::mem::size_of::<IdBufferUniforms>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("id_buffer_uniforms"),
+                size: std::mem::size_of::<IdBufferUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("id_buffer_bind_group"),
@@ -178,7 +191,7 @@ impl IdBufferPass {
             multiview: None,
         });
 
-        Self {
+        Ok(Self {
             id_texture,
             id_view,
             _depth_texture: depth_texture,
@@ -189,11 +202,11 @@ impl IdBufferPass {
             bind_group,
             width,
             height,
-        }
+        })
     }
 
     /// Get the ID texture
-    pub fn id_texture(&self) -> &Texture {
+    pub fn id_texture(&self) -> &wgpu::Texture {
         &self.id_texture
     }
 
@@ -218,7 +231,7 @@ impl IdBufferPass {
     }
 
     /// Get the uniform buffer
-    pub fn uniform_buffer(&self) -> &Buffer {
+    pub fn uniform_buffer(&self) -> &wgpu::Buffer {
         &self.uniform_buffer
     }
 

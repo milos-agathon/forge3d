@@ -112,20 +112,26 @@ pub(crate) fn c6_mt_record_demo(py: Python<'_>) -> PyResult<Py<PyDict>> {
     let device = Arc::clone(&g.device);
     let queue = Arc::clone(&g.queue);
 
-    // Create two buffers
+    // Create two tracked buffers shared with the copy tasks.
     let sz: u64 = 4096;
-    let src = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("mt_src"),
-        size: sz,
-        usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::MAP_WRITE,
-        mapped_at_creation: false,
-    }));
-    let dst = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("mt_dst"),
-        size: sz,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    }));
+    let src = Arc::new(crate::core::resource_tracker::tracked_create_buffer(
+        &device,
+        &wgpu::BufferDescriptor {
+            label: Some("mt_src"),
+            size: sz,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::MAP_WRITE,
+            mapped_at_creation: false,
+        },
+    )?);
+    let dst = Arc::new(crate::core::resource_tracker::tracked_create_buffer(
+        &device,
+        &wgpu::BufferDescriptor {
+            label: Some("mt_dst"),
+            size: sz,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        },
+    )?);
 
     let config = MtConfig {
         thread_count: 2,

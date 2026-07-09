@@ -1,5 +1,6 @@
+use crate::core::resource_tracker::TrackedBuffer;
 use crate::lighting::types::Light;
-use wgpu::{BindGroup, BindGroupLayout, Buffer};
+use wgpu::{BindGroup, BindGroupLayout};
 
 /// Maximum number of lights supported (P1 default)
 pub const MAX_LIGHTS: usize = 16;
@@ -13,11 +14,11 @@ pub const MAX_LIGHTS: usize = 16;
 /// with minimal memory overhead.
 pub struct LightBuffer {
     /// Storage buffers for light array (triple-buffered)
-    pub(crate) buffers: [Buffer; 3],
+    pub(crate) buffers: [TrackedBuffer; 3],
     /// Uniform buffer for light count (triple-buffered)
-    pub(crate) count_buffers: [Buffer; 3],
+    pub(crate) count_buffers: [TrackedBuffer; 3],
     /// Uniform buffer reserved for environment lighting parameters (P1-05).
-    pub(crate) environment_stub: Buffer,
+    pub(crate) environment_stub: TrackedBuffer,
     /// Current frame index (0, 1, 2)
     pub(crate) frame_index: usize,
     /// Monotonic frame counter used for quasi-random sampling offsets

@@ -50,7 +50,7 @@ impl TerrainScene {
         let sun_vis_bind_group_layout = heightfield_resources.sun_vis_bind_group_layout;
         let sun_vis_uniform_buffer = heightfield_resources.sun_vis_uniform_buffer;
 
-        let light_buffer = LightBuffer::new(&device);
+        let light_buffer = LightBuffer::new(&device)?;
         let color_format = wgpu::TextureFormat::Rgba8Unorm;
         let light_buffer_layout = light_buffer.bind_group_layout();
 
@@ -427,7 +427,7 @@ impl TerrainScene {
                 shadow_debug_mode
             );
         }
-        let csm_renderer = crate::shadows::CsmRenderer::new(device.as_ref(), csm_config);
+        let csm_renderer = crate::shadows::CsmRenderer::new(device.as_ref(), csm_config)?;
 
         let shadow_depth_bind_group_layout =
             Self::create_shadow_depth_bind_group_layout(device.as_ref());

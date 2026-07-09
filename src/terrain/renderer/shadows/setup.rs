@@ -116,7 +116,7 @@ impl TerrainScene {
             ShadowTechnique::VSM | ShadowTechnique::EVSM | ShadowTechnique::MSM
         );
         if requires_moments && self.moment_pass.is_none() {
-            self.moment_pass = Some(crate::shadows::MomentGenerationPass::new(&self.device));
+            self.moment_pass = Some(crate::shadows::MomentGenerationPass::new(&self.device)?);
             log::info!(
                 target: "terrain.shadow",
                 "Created moment generation pass for technique: {:?}",
