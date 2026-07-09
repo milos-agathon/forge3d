@@ -225,6 +225,8 @@ class TestNativeModuleSymbols:
         "load_building_footprints",
         "extract_building_heights",
         "estimate_local_utm",
+        # BOP-P3-03: dependency-backed complex text shaping
+        "shape_text",
     ]
 
     LATER_GIS_FUNCTIONS = []
@@ -975,6 +977,33 @@ class TestMsaaSetterRouting:
         for n in (1, 2, 4, 8):
             result = set_msaa(n)
             assert result == n
+
+
+# ===========================================================================
+# Section 13b: BOP-P2-02 TerrainRenderer height streaming API contract
+# ===========================================================================
+class TestTerrainRendererHeightStreamingContract:
+    """Class-level contract for the clipmap height-streaming runtime API.
+
+    BOP-P2-02: ClipmapStreamer + AsyncTileLoader + HeightMosaic are wired to
+    TerrainRenderer height-texture updates through these methods. Behavior
+    coverage (fly-through, bounded memory, convergence) lives in
+    tests/test_terrain_clipmap_streaming.py.
+    """
+
+    @pytest.mark.parametrize(
+        "method",
+        [
+            "enable_height_streaming",
+            "disable_height_streaming",
+            "stream_height_tiles",
+            "height_streaming_stats",
+        ],
+    )
+    def test_terrain_renderer_streaming_method_exists(self, method):
+        assert hasattr(_native.TerrainRenderer, method), (
+            f"TerrainRenderer.{method} missing from native API"
+        )
 
 
 # ===========================================================================

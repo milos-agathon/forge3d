@@ -449,6 +449,7 @@ impl TerrainScene {
 
         let height_inputs =
             self.upload_height_inputs(heightmap, water_mask, offline_params.terrain_data_revision)?;
+        self.prepare_geometry(&offline_params)?;
         let probe_world_span = if offline_params.camera_mode.to_lowercase() == "mesh" {
             offline_params.terrain_span.max(1e-3)
         } else {
@@ -552,6 +553,7 @@ impl TerrainScene {
             // VERITAS source-id capture is one-shot only; accumulation would
             // average ids, which is meaningless.
             false,
+            is_clipmap_camera_mode(&offline_params.camera_mode),
         );
         let hdr_background_blit_pipeline = Self::create_depth_blit_pipeline(
             self.device.as_ref(),
@@ -602,6 +604,10 @@ impl TerrainScene {
         state: &mut super::core::OfflineAccumulationState,
         jitter: (f32, f32),
     ) -> Result<()> {
+        // Re-prepare per sample: interleaved non-offline renders may have
+        // switched the geometry provider; the clipmap mesh cache makes this
+        // free when nothing changed.
+        self.prepare_geometry(&state.params)?;
         let (eye, view, proj) = Self::build_camera_matrices(&state.params);
         let jittered_proj = apply_jitter_to_projection(
             proj,
@@ -691,9 +697,10 @@ impl TerrainScene {
                 .map(|(_, view)| view)
                 .unwrap_or(&self.height_curve_identity_view);
 
+            let main_height_view = self.main_pass_height_view(&state.height_inputs.heightmap_view);
             let pass_bind_groups = self.create_terrain_pass_bind_groups(
                 &uniform_buffer,
-                &state.height_inputs.heightmap_view,
+                main_height_view,
                 state.materials.material_view(),
                 state.materials.material_sampler(),
                 state.materials.material_normal_view(),
@@ -725,7 +732,7 @@ impl TerrainScene {
                 eye,
                 view,
                 jittered_proj,
-                &state.height_inputs.heightmap_view,
+                main_height_view,
                 state.materials.material_view(),
                 state.materials.material_sampler(),
                 &state.materials.shading_buffer,
@@ -1064,8 +1071,8 @@ impl TerrainScene {
         pass.set_bind_group(5, water_reflection_bind_group, &[]);
         pass.set_bind_group(6, material_layer_bind_group, &[]);
 
-        let vertex_count = self.terrain_vertex_count(params);
-        pass.draw(0..vertex_count, 0..1);
+        self.geometry_provider()?.draw(&mut pass);
+        let _ = params;
         Ok(())
     }
 

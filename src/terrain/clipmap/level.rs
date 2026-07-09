@@ -118,6 +118,7 @@ impl ClipmapLevel {
                 &ring_indices,
                 self.config.skirt_depth,
                 ring_idx,
+                self.config.ring_resolution as usize + 1,
             );
             ring_verts.extend(skirt_verts);
             ring_indices.extend(skirt_indices);

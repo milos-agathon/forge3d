@@ -1,0 +1,45 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "C:\\Users\\milos\\forge3d\\logs\\.9a9fb3a1aee4abd4cecd121a192f7ef77e352837-audit.json",
+    "files": [
+        {
+            "date": 1783007513298,
+            "name": "C:\\Users\\milos\\forge3d\\logs\\mcp-puppeteer-2026-07-02.log",
+            "hash": "4c52ad1b1031cd9ffee22dae697743297b447041cac6cf578c8a790e2f226ec3"
+        },
+        {
+            "date": 1783062347362,
+            "name": "C:\\Users\\milos\\forge3d\\logs\\mcp-puppeteer-2026-07-03.log",
+            "hash": "341d5743123153d32d200032a072d574e856c155cc9106f951936fc4ddd84147"
+        },
+        {
+            "date": 1783270507094,
+            "name": "C:\\Users\\milos\\forge3d\\logs\\mcp-puppeteer-2026-07-05.log",
+            "hash": "f44e9e56c1946183db464ff86d008b9d249ddf4ec0b4ee0af69f9893f0fa759b"
+        },
+        {
+            "date": 1783338242884,
+            "name": "C:\\Users\\milos\\forge3d\\logs\\mcp-puppeteer-2026-07-06.log",
+            "hash": "e0ac21218cb4ae2deb32b7895a7cb9018725496dce610ed4f312b16c974bd4cf"
+        },
+        {
+            "date": 1783394429622,
+            "name": "C:\\Users\\milos\\forge3d\\logs\\mcp-puppeteer-2026-07-07.log",
+            "hash": "d2b03f150b83e0b8420d889e39edc98233306540868aba77f6eb4b0a0bbf59ba"
+        },
+        {
+            "date": 1783491707129,
+            "name": "C:\\Users\\milos\\forge3d\\logs\\mcp-puppeteer-2026-07-08.log",
+            "hash": "ba6b8770cb344586c239c70567b5d4aa0a9e9c8a28136404392e1b1a2c75f280"
+        },
+        {
+            "date": 1783580575409,
+            "name": "C:\\Users\\milos\\forge3d\\logs\\mcp-puppeteer-2026-07-09.log",
+            "hash": "14ce1be67f409d4e99e48987d9c1fd0bc4f23af7faf966e62eda37d65e4c7966"
+        }
+    ],
+    "hashType": "sha256"
+}

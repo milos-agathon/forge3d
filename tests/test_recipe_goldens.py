@@ -66,6 +66,17 @@ def _write_rgba_png(path: Path, rgba: np.ndarray) -> Path:
     return path
 
 
+def _arabic_font_path() -> Path | None:
+    for path in (
+        Path("C:/Windows/Fonts/arial.ttf"),
+        Path("C:/Windows/Fonts/tahoma.ttf"),
+        Path("C:/Windows/Fonts/segoeui.ttf"),
+    ):
+        if path.exists():
+            return path
+    return None
+
+
 def _pad4(data: bytes, pad: bytes = b" ") -> bytes:
     return data + pad * ((4 - (len(data) % 4)) % 4)
 
@@ -306,12 +317,21 @@ def _label_arabic_joining(tmp_path: Path) -> f3d.MapScene:
 
     shaped_glyphs = ["\ufe8e", "\ufe92", "\ufea3", "\ufeae", "\ufee3"]
     charset = sorted(set("مرحبا" + "".join(shaped_glyphs)))
-    atlas = bake_atlas(charset=charset, font_size=34, px_range=8, padding=4)
+    font_path = _arabic_font_path()
+    atlas = bake_atlas(font_path=font_path, charset=charset, font_size=34, px_range=8, padding=4)
     atlas_png, atlas_json = save_atlas(
         atlas,
         tmp_path / "arabic_joining_atlas.png",
         tmp_path / "arabic_joining_atlas.json",
     )
+    glyph_atlas = {
+        "glyphs": charset,
+        "image_path": str(atlas_png),
+        "metrics_path": str(atlas_json),
+        "source_path": str(atlas_json),
+    }
+    if font_path is not None:
+        glyph_atlas["font_path"] = str(font_path)
     return _base_scene(
         tmp_path,
         "mapscene_label_arabic_joining",
@@ -332,12 +352,7 @@ def _label_arabic_joining(tmp_path: Path) -> f3d.MapScene:
                         },
                     }
                 ],
-                glyph_atlas={
-                    "glyphs": charset,
-                    "image_path": str(atlas_png),
-                    "metrics_path": str(atlas_json),
-                    "source_path": str(atlas_json),
-                },
+                glyph_atlas=glyph_atlas,
             )
         ],
     )
@@ -847,7 +862,7 @@ RECIPE_GOLDENS = (
     RecipeGolden("mapscene_furniture_graticule", "map_furniture", _furniture, ("mapscene.furniture_composite",)),
     RecipeGolden("mapscene_alignment_utm", "alignment_crs", _alignment, ("mapscene.vector_composite",)),
     RecipeGolden("mapscene_material_maps", "terrain_materials", _material_maps, ("mapscene.render_png",)),
-    RecipeGolden("mapscene_clipmap_large_region", "clipmap_large_region", _clipmap_large_region, ("terrain.clipmap_planner", "terrain.clipmap_bounded_grid", "terrain.clipmap_bounded_memory")),
+    RecipeGolden("mapscene_clipmap_large_region", "clipmap_large_region", _clipmap_large_region, ("terrain.clipmap_planner", "terrain.clipmap_indexed", "terrain.clipmap_bounded_memory")),
     RecipeGolden("mapscene_auto_water", "water_masks", _auto_water, ("mapscene.render_png", "mapscene.water_mask")),
     RecipeGolden("mapscene_cloud_shadows", "cloud_shadows", _cloud_shadows, ("mapscene.render_png", "mapscene.cloud_shadows")),
     RecipeGolden(

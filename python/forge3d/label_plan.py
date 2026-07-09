@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 import math
+from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from .diagnostics import (
@@ -119,6 +120,60 @@ def _glyph_set(glyph_atlas: Any) -> set[str] | None:
     return None
 
 
+def _font_path_from_glyph_atlas(glyph_atlas: Any) -> str | None:
+    if not isinstance(glyph_atlas, Mapping):
+        return None
+    for key in ("font_path", "source_font_path", "font_file", "source_path"):
+        value = glyph_atlas.get(key)
+        if not value:
+            continue
+        path = Path(str(value))
+        if path.suffix.lower() in {".ttf", ".otf", ".ttc"} and path.exists():
+            return str(path)
+    coverage = glyph_atlas.get("coverage")
+    if isinstance(coverage, Mapping):
+        value = coverage.get("path") or coverage.get("font_path")
+        if value:
+            path = Path(str(value))
+            if path.suffix.lower() in {".ttf", ".otf", ".ttc"} and path.exists():
+                return str(path)
+    return None
+
+
+def _native_shape_label_glyphs(text: str, glyph_atlas: Any) -> tuple[list[str], Mapping[str, Any]] | None:
+    font_path = _font_path_from_glyph_atlas(glyph_atlas)
+    if not font_path:
+        return None
+    try:
+        from ._native import get_native_module
+
+        native = get_native_module()
+        shape_text = getattr(native, "shape_text", None)
+        if not callable(shape_text):
+            return None
+        shaped = shape_text(text, font_path, sorted(_glyph_set(glyph_atlas) or ()))
+    except Exception:
+        return None
+    glyphs = [str(glyph) for glyph in shaped.get("glyphs", []) if str(glyph)]
+    if not glyphs:
+        return None
+    atlas_glyphs = _glyph_set(glyph_atlas) or set()
+    render_glyphs = glyphs
+    arabic_compat_glyphs = _shape_arabic_text(text)
+    if arabic_compat_glyphs and atlas_glyphs and all(glyph in atlas_glyphs for glyph in arabic_compat_glyphs):
+        render_glyphs = arabic_compat_glyphs
+    details = {
+        "shaping": str(shaped.get("shaping", "rustybuzz")),
+        "engine": str(shaped.get("engine", "rustybuzz")),
+        "direction": str(shaped.get("direction", "rtl")),
+        "glyph_ids": list(shaped.get("glyph_ids", ())),
+        "clusters": list(shaped.get("clusters", ())),
+        "advances": list(shaped.get("advances", ())),
+        "render_mapping": "arabic_presentation_forms" if render_glyphs is arabic_compat_glyphs else "atlas_codepoints",
+    }
+    return render_glyphs, details
+
+
 def _rect_bounds(value: Any) -> list[float] | None:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or len(value) < 4:
         return None
@@ -220,22 +275,32 @@ def _shape_arabic_run(text: str) -> list[str]:
     return list(reversed(shaped))
 
 
-def _shape_label_glyphs(text: str) -> tuple[list[str] | None, Mapping[str, Any]]:
+def _shape_arabic_text(text: str) -> list[str] | None:
+    if not all(char.isspace() or char in _ARABIC_FORMS for char in text):
+        return None
+    glyphs: list[str] = []
+    run: list[str] = []
+    for char in text:
+        if char.isspace():
+            if run:
+                glyphs.extend(_shape_arabic_run("".join(run)))
+                run.clear()
+            glyphs.append(char)
+        else:
+            run.append(char)
+    if run:
+        glyphs.extend(_shape_arabic_run("".join(run)))
+    return glyphs
+
+
+def _shape_label_glyphs(text: str, glyph_atlas: Any | None = None) -> tuple[list[str] | None, Mapping[str, Any]]:
     if not _requires_complex_shaping(text):
         return list(text), {}
-    if all(char.isspace() or char in _ARABIC_FORMS for char in text):
-        glyphs: list[str] = []
-        run: list[str] = []
-        for char in text:
-            if char.isspace():
-                if run:
-                    glyphs.extend(_shape_arabic_run("".join(run)))
-                    run.clear()
-                glyphs.append(char)
-            else:
-                run.append(char)
-        if run:
-            glyphs.extend(_shape_arabic_run("".join(run)))
+    native_shaped = _native_shape_label_glyphs(text, glyph_atlas)
+    if native_shaped is not None:
+        return native_shaped
+    glyphs = _shape_arabic_text(text)
+    if glyphs is not None:
         return glyphs, {"shaping": "arabic_presentation_forms", "direction": "rtl"}
     return None, {"shaping": "unsupported_complex_script"}
 
@@ -982,7 +1047,7 @@ class LabelPlan:
             source_id = str(record.get("source_id", label_id))
             text = str(record.get("text", ""))
             ordering_key = f"{label_id}:{source_id}:{_stable_json(record)}"
-            glyph_sequence, shaping_details = _shape_label_glyphs(text)
+            glyph_sequence, shaping_details = _shape_label_glyphs(text, glyph_atlas)
 
             if not text.strip():
                 rejected.append(

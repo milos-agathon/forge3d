@@ -229,39 +229,42 @@ fn generate_strip_indices(indices: &mut Vec<u32>, base: u32, width: u32) {
 }
 
 /// Generate skirt vertices for a ring to hide seams.
+///
+/// `row_width` is the number of vertices per strip row (`resolution + 1` for
+/// rings built by [`make_ring`]). Skirt "curtain" quads are only emitted
+/// between consecutive vertices *within the same row*: connecting pairs
+/// across row or strip boundaries would create giant triangles spanning the
+/// whole ring (the defect caught by `tests/test_geomorph_seams.py`).
 pub fn make_ring_skirts(
     vertices: &[ClipmapVertex],
     _indices: &[u32],
     skirt_depth: f32,
     ring_index: u32,
+    row_width: usize,
 ) -> (Vec<ClipmapVertex>, Vec<u32>) {
     let mut skirt_verts = Vec::new();
     let mut skirt_indices = Vec::new();
 
-    // Find edge vertices (simplified: use vertices at ring boundaries)
-    // For each edge vertex, create a corresponding skirt vertex
     let base_idx = vertices.len() as u32;
+    let row_width = row_width.max(2);
 
     for (i, v) in vertices.iter().enumerate() {
-        // Create skirt vertex below this one
+        // Create skirt vertex below this one (depth offset applied in shader).
         let sv = ClipmapVertex::skirt(v.position[0], v.position[1], v.uv[0], v.uv[1], ring_index);
         skirt_verts.push(sv);
 
-        // Create triangles connecting original vertex to skirt
-        // This creates a vertical "curtain" at the edge
-        if i > 0 {
+        // Connect to the previous vertex only when it sits on the same row.
+        if i > 0 && i % row_width != 0 {
             let prev = i as u32 - 1;
             let curr = i as u32;
             let prev_skirt = base_idx + prev;
             let curr_skirt = base_idx + curr;
-            // Degenerate check - only add if vertices are adjacent on edge
-            // Simplified: add all for now
             skirt_indices
                 .extend_from_slice(&[prev, curr, prev_skirt, curr, curr_skirt, prev_skirt]);
         }
     }
 
-    let _ = skirt_depth; // Used in shader for Y offset
+    let _ = skirt_depth; // Used in shader for the vertical offset.
     (skirt_verts, skirt_indices)
 }
 
@@ -305,5 +308,35 @@ mod tests {
         for v in &verts {
             assert!(v.morph_weight() >= 0.0 && v.morph_weight() <= 1.0);
         }
+    }
+
+    #[test]
+    fn test_skirts_do_not_span_rows_or_strips() {
+        // Ring strips place adjacent vertices 2*cell_size apart; any skirt
+        // edge longer than that means a curtain quad was stitched across a
+        // row or strip boundary (the giant-triangle defect).
+        let resolution = 8u32;
+        let (inner, outer) = (10.0f32, 20.0f32);
+        let (verts, indices) = make_ring(1, inner, outer, resolution, Vec2::ZERO, 100.0, 0.3);
+        let (skirt_verts, skirt_indices) =
+            make_ring_skirts(&verts, &indices, 5.0, 1, resolution as usize + 1);
+
+        let all: Vec<ClipmapVertex> = verts.iter().copied().chain(skirt_verts).collect();
+        let adjacent_spacing = (outer - inner) / resolution as f32 * 2.0;
+        let mut max_edge = 0.0f32;
+        for tri in skirt_indices.chunks(3) {
+            for k in 0..3 {
+                let a = Vec2::from(all[tri[k] as usize].position);
+                let b = Vec2::from(all[tri[(k + 1) % 3] as usize].position);
+                max_edge = max_edge.max(a.distance(b));
+            }
+        }
+        assert!(!skirt_indices.is_empty());
+        assert!(
+            max_edge <= adjacent_spacing + 1e-4,
+            "skirt edge {} exceeds adjacent vertex spacing {}",
+            max_edge,
+            adjacent_spacing
+        );
     }
 }

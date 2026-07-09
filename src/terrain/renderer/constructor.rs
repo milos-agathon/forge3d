@@ -317,22 +317,10 @@ impl TerrainScene {
             color_format,
             1,
         );
-        let clipmap_pipeline = if adapter.get_info().backend == wgpu::Backend::Vulkan {
-            None
-        } else {
-            Some(Self::create_clipmap_render_pipeline(
-                device.as_ref(),
-                &bind_group_layout,
-                light_buffer_layout,
-                &ibl_bind_group_layout,
-                &shadow_bind_group_layout,
-                &fog_bind_group_layout,
-                &water_reflection_bind_group_layout,
-                &material_layer_bind_group_layout,
-                color_format,
-                1,
-            ))
-        };
+        // The clipmap pipeline is created lazily on first clipmap render
+        // (ensure_pipeline_sample_count) so grid-only renderers don't pay the
+        // extra shader-module/pipeline compilation cost.
+        let clipmap_pipeline = None;
         let water_reflection_pipeline = Self::create_render_pipeline(
             device.as_ref(),
             &bind_group_layout,
@@ -556,6 +544,7 @@ impl TerrainScene {
             aov_pipeline: Mutex::new(None),
             aov_pipeline_sample_count: Mutex::new(1),
             aov_pipeline_source_id: Mutex::new(false),
+            aov_pipeline_clipmap: Mutex::new(false),
             _dof_renderer: Mutex::new(None),
             offline_state: Mutex::new(None),
             #[cfg(feature = "enable-gpu-instancing")]
@@ -568,10 +557,8 @@ impl TerrainScene {
             scatter_last_frame_stats: crate::terrain::scatter::TerrainScatterFrameStats::default(),
             material_vt: Mutex::new(super::virtual_texture::TerrainMaterialVT::new()),
             viewer_heightmap: None,
-            clipmap_vertex_count: 0,
-            clipmap_index_count: 0,
-            clipmap_vertex_buffer: None,
-            clipmap_index_buffer: None,
+            geometry_provider: None,
+            height_streaming: None,
             _tracked_scene_textures: tracked_scene_textures,
         })
     }

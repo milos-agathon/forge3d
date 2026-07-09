@@ -320,42 +320,6 @@ impl TerrainScene {
         uniforms
     }
 
-    pub(super) fn prepare_clipmap_vertices(
-        &mut self,
-        params: &render_params::TerrainRenderParams,
-    ) -> Result<()> {
-        let Some(config) = clipmap_camera_config(&params.camera_mode) else {
-            self.clipmap_vertex_count = 0;
-            self.clipmap_index_count = 0;
-            self.clipmap_vertex_buffer = None;
-            self.clipmap_index_buffer = None;
-            return Ok(());
-        };
-
-        let mesh = crate::terrain::clipmap::level::clipmap_generate(
-            &config,
-            glam::Vec2::ZERO,
-            params.terrain_span.max(1.0),
-        );
-        self.clipmap_vertex_count = mesh.vertex_count();
-        self.clipmap_index_count = mesh.index_count();
-        self.clipmap_vertex_buffer = Some(self.device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("terrain.clipmap.vertex_buffer"),
-                contents: bytemuck::cast_slice(&mesh.vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            },
-        ));
-        self.clipmap_index_buffer = Some(self.device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("terrain.clipmap.index_buffer"),
-                contents: bytemuck::cast_slice(&mesh.indices),
-                usage: wgpu::BufferUsages::INDEX,
-            },
-        ));
-        Ok(())
-    }
-
     pub(super) fn build_camera_matrices(
         params: &render_params::TerrainRenderParams,
     ) -> (glam::Vec3, glam::Mat4, glam::Mat4) {

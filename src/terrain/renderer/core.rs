@@ -117,6 +117,9 @@ pub struct TerrainScene {
     /// VERITAS: whether the cached AOV pipeline carries the 5th R32Uint
     /// source-id target (rebuilt when this toggles, like sample count).
     pub(super) aov_pipeline_source_id: Mutex<bool>,
+    /// BOP-P2-02: whether the cached AOV pipeline consumes the indexed
+    /// clipmap vertex stream (rebuilt when this toggles, like sample count).
+    pub(super) aov_pipeline_clipmap: Mutex<bool>,
     pub(super) _dof_renderer: Mutex<Option<crate::core::dof::DofRenderer>>,
     pub(super) offline_state: Mutex<Option<OfflineAccumulationState>>,
     #[cfg(feature = "enable-gpu-instancing")]
@@ -131,10 +134,8 @@ pub struct TerrainScene {
     pub(super) config: Arc<Mutex<crate::render::params::RendererConfig>>,
     pub(super) material_vt: Mutex<super::virtual_texture::TerrainMaterialVT>,
     pub(super) viewer_heightmap: Option<ViewerTerrainData>,
-    pub(super) clipmap_vertex_count: u32,
-    pub(super) clipmap_index_count: u32,
-    pub(super) clipmap_vertex_buffer: Option<wgpu::Buffer>,
-    pub(super) clipmap_index_buffer: Option<wgpu::Buffer>,
+    pub(super) geometry_provider: Option<TerrainGeometryProvider>,
+    pub(super) height_streaming: Option<super::streaming::HeightStreamingState>,
     pub(super) _tracked_scene_textures: Vec<crate::core::resource_tracker::ResourceHandle>,
 }
 
@@ -288,6 +289,13 @@ pub(super) fn clipmap_camera_config(
 }
 
 impl TerrainScene {
+    /// Vertex count for the procedural-grid (`vs_main`) draws.
+    ///
+    /// The beauty/AOV/offline passes draw through `TerrainGeometryProvider`,
+    /// which uses the indexed clipmap mesh for clipmap camera modes; the
+    /// clipmap branch here only serves the secondary passes (water
+    /// reflection, shadow cascades) that keep a bounded procedural-grid
+    /// proxy of the terrain.
     pub(super) fn terrain_vertex_count(
         &self,
         params: &crate::terrain::render_params::TerrainRenderParams,

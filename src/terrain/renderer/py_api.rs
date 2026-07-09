@@ -741,4 +741,137 @@ impl TerrainRenderer {
         serde_json::to_string_pretty(&*config)
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to serialize config: {}", e)))
     }
+
+    /// BOP-P2-02: enable runtime height-tile streaming for clipmap terrain.
+    ///
+    /// Builds a fixed-LOD `HeightMosaic` (`2^lod` tiles per axis at
+    /// `tile_resolution` texels per tile), an `AsyncTileLoader` worker pool,
+    /// and a `ClipmapStreamer` for camera-driven tile demand. When `dem` is
+    /// given, tiles are bilinearly sliced from it on worker threads;
+    /// otherwise the synthetic procedural height reader is used. With
+    /// `coarse_prefill=True` (default) every tile slot is filled from a
+    /// low-resolution read so streaming frames show coarse terrain instead
+    /// of holes while fine tiles are in flight.
+    #[pyo3(signature = (terrain_extent_m, ring_count=4, ring_resolution=64, lod=2, tile_resolution=128, max_in_flight=16, pool_size=2, dem=None, coarse_prefill=true, max_resident_bytes=None))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn enable_height_streaming(
+        &mut self,
+        terrain_extent_m: f32,
+        ring_count: u32,
+        ring_resolution: u32,
+        lod: u32,
+        tile_resolution: u32,
+        max_in_flight: usize,
+        pool_size: usize,
+        dem: Option<PyReadonlyArray2<f32>>,
+        coarse_prefill: bool,
+        max_resident_bytes: Option<u64>,
+    ) -> PyResult<()> {
+        use std::sync::Arc;
+
+        if !(terrain_extent_m.is_finite() && terrain_extent_m > 0.0) {
+            return Err(PyRuntimeError::new_err(
+                "terrain_extent_m must be a positive finite value",
+            ));
+        }
+        let lod = lod.min(6);
+        let tile_resolution = tile_resolution.clamp(8, 1024);
+        let reader: Arc<dyn crate::terrain::page_table::HeightReader> = match dem {
+            Some(arr) => {
+                let a = arr.as_array();
+                let (h, w) = (a.shape()[0], a.shape()[1]);
+                if h < 2 || w < 2 {
+                    return Err(PyRuntimeError::new_err(
+                        "dem must be at least 2x2 for bilinear tile slicing",
+                    ));
+                }
+                Arc::new(super::streaming::DemSliceHeightReader::new(
+                    a.iter().copied().collect(),
+                    w,
+                    h,
+                ))
+            }
+            None => Arc::new(crate::terrain::page_table::SyntheticHeightReader),
+        };
+        let state = super::streaming::HeightStreamingState::new(
+            self.scene.device.as_ref(),
+            self.scene.queue.as_ref(),
+            terrain_extent_m,
+            ring_count,
+            ring_resolution,
+            lod,
+            tile_resolution,
+            max_in_flight,
+            pool_size,
+            reader,
+            coarse_prefill,
+            max_resident_bytes,
+        )
+        .map_err(|e| PyRuntimeError::new_err(format!("enable_height_streaming failed: {:#}", e)))?;
+        self.scene.height_streaming = Some(state);
+        // Force clipmap mesh regeneration around the (new) streaming center.
+        self.scene.geometry_provider = None;
+        Ok(())
+    }
+
+    /// BOP-P2-02: drop the streaming state; renders fall back to the
+    /// per-call overview heightmap.
+    pub fn disable_height_streaming(&mut self) {
+        self.scene.height_streaming = None;
+        self.scene.geometry_provider = None;
+    }
+
+    /// BOP-P2-02: one streaming step — update the clipmap center from the
+    /// camera position, request missing height tiles asynchronously, and
+    /// drain completed tiles into the GPU mosaic. Returns a stats dict.
+    #[pyo3(signature = (camera_pos, max_uploads=8))]
+    pub fn stream_height_tiles(
+        &mut self,
+        py: Python<'_>,
+        camera_pos: (f32, f32, f32),
+        max_uploads: usize,
+    ) -> PyResult<PyObject> {
+        let queue = self.scene.queue.clone();
+        let state = self.scene.height_streaming.as_mut().ok_or_else(|| {
+            PyRuntimeError::new_err(
+                "height streaming not enabled; call enable_height_streaming() first",
+            )
+        })?;
+        let stats = state.stream_step(
+            queue.as_ref(),
+            glam::Vec3::new(camera_pos.0, camera_pos.1, camera_pos.2),
+            max_uploads,
+        );
+        height_streaming_stats_to_py(py, &stats)
+    }
+
+    /// BOP-P2-02: current streaming stats without advancing the stream.
+    pub fn height_streaming_stats(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let state = self.scene.height_streaming.as_ref().ok_or_else(|| {
+            PyRuntimeError::new_err(
+                "height streaming not enabled; call enable_height_streaming() first",
+            )
+        })?;
+        height_streaming_stats_to_py(py, &state.stats())
+    }
+}
+
+fn height_streaming_stats_to_py(
+    py: Python<'_>,
+    stats: &super::streaming::HeightStreamingStats,
+) -> PyResult<PyObject> {
+    let dict = pyo3::types::PyDict::new(py);
+    dict.set_item("center", (stats.center.x, stats.center.y))?;
+    dict.set_item("pending_ring_tiles", stats.pending_ring_tiles)?;
+    dict.set_item("loaded_ring_tiles", stats.loaded_ring_tiles)?;
+    dict.set_item("resident_fine_tiles", stats.resident_fine_tiles)?;
+    dict.set_item("total_tiles", stats.total_tiles)?;
+    dict.set_item("tiles_requested", stats.tiles_requested)?;
+    dict.set_item("tiles_uploaded", stats.tiles_uploaded)?;
+    dict.set_item("coarse_prefilled", stats.coarse_prefilled)?;
+    dict.set_item("resident_height_bytes", stats.resident_height_bytes)?;
+    dict.set_item("converged", stats.converged)?;
+    dict.set_item("loader_pending", stats.loader_pending)?;
+    dict.set_item("loader_completed", stats.loader_completed)?;
+    Ok(dict.into())
 }

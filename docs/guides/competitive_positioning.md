@@ -17,7 +17,7 @@ three.js, or Unreal.
 | Unreal parity | forge3d is not a game/editor runtime. | `non-goal` |
 | Pro/native-only geospatial import paths | Must be called out honestly. | `Pro-gated` |
 | Textured PBR buildings | End-to-end textured city material rendering is diagnosed before render, not treated as scalar fallback success. | `unsupported` |
-| VT normal/mask runtime | Native runtime pages albedo only; normal and mask families must diagnose before render. | `unsupported` |
+| VT normal/mask runtime | Native runtime declares and samples albedo, normal, and mask families; per-family residency budgeting, hard missing-family diagnostics, and full beauty-lighting gates remain underdeveloped. | `underdeveloped` |
 | Advanced labels and shaping | Deterministic product paths are used where available; incomplete shaping or curved rendering paths stay diagnostic-bearing. | `experimental` |
 | Large-scene diagnostics | Memory, cache/LOD, instancing, and bottleneck summaries are offline diagnostics, not hosted streaming capability. | `underdeveloped` |
 

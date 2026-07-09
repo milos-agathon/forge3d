@@ -1,6 +1,6 @@
 [package]
 name = "forge3d"
-version = "1.30.1"
+version = "1.31.0"
 edition = "2021"
 autoexamples = false
 description = "GPU-accelerated offline 3D map rendering with Rust-first GIS vector, rasterization, mask, thematic, CRS, affine, windowing, and reprojection support"
@@ -80,6 +80,8 @@ lyon_tessellation = "1.0"
 lyon_path = "1.0"
 lyon_geom = "1.0"
 ttf-parser = "0.20"
+rustybuzz = "0.20.1"
+unicode-bidi = "0.3.18"
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync"], optional = true }
 futures-intrusive = "0.5"
 env_logger = "0.10"

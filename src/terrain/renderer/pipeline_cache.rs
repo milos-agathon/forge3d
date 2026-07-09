@@ -202,43 +202,10 @@ impl TerrainScene {
         color_format: wgpu::TextureFormat,
         sample_count: u32,
     ) -> wgpu::RenderPipeline {
-        let mut shader_source = Self::preprocess_terrain_shader();
-        shader_source.push_str(
-            r#"
-
-@vertex
-fn vs_clipmap_main(
-    @location(0) clip_pos_xz : vec2<f32>,
-    @location(1) clip_uv : vec2<f32>,
-    @location(2) clip_morph : vec2<f32>
-) -> VertexOutput {
-    var out : VertexOutput;
-
-    let uv = clamp(clip_uv, vec2<f32>(0.0), vec2<f32>(1.0));
-    let h_raw = textureSampleLevel(height_tex, height_samp, uv, 0.0).r;
-    let t_geom = get_height_geom_t(h_raw);
-    let h_min = u_shading.clamp0.x;
-    let h_max = u_shading.clamp0.y;
-    let h_disp = h_min + apply_height_curve01(t_geom) * (h_max - h_min);
-    let h_exag = u_terrain.spacing_h_exag.z;
-    let h_center = (h_min + h_max) * 0.5;
-    let skirt_offset = select(0.0, u_terrain.camera_mode_params.y * 0.001, clip_morph.x < 0.0);
-    let world_z_centered = (h_disp - h_center - skirt_offset) * h_exag;
-    let world_z_original = (h_disp - skirt_offset) * h_exag;
-
-    out.world_position = vec3<f32>(clip_pos_xz.x, clip_pos_xz.y, world_z_original);
-    out.world_normal = vec3<f32>(0.0, 0.0, 1.0);
-    out.tex_coord = uv;
-    out.clip_position = u_terrain.proj * u_terrain.view * vec4<f32>(
-        clip_pos_xz.x,
-        clip_pos_xz.y,
-        world_z_centered,
-        1.0
-    );
-    return out;
-}
-"#,
-        );
+        // `vs_clipmap_main` lives in the shared terrain_pbr_pom.wgsl module, so
+        // the clipmap geometry path shades through the exact same PBR fragment
+        // stage as the procedural-grid path.
+        let shader_source = Self::preprocess_terrain_shader();
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("terrain_pbr_pom.clipmap.shader"),
             source: wgpu::ShaderSource::Wgsl(shader_source.into()),
@@ -371,6 +338,7 @@ fn vs_clipmap_main(
         color_format: wgpu::TextureFormat,
         sample_count: u32,
         include_source_id: bool,
+        clipmap_geometry: bool,
     ) -> wgpu::RenderPipeline {
         let shader_source = Self::preprocess_terrain_shader();
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -431,13 +399,24 @@ fn vs_clipmap_main(
                 write_mask: wgpu::ColorWrites::ALL,
             }));
         }
+        let clipmap_vertex_buffers = [crate::terrain::clipmap::ClipmapVertex::desc()];
+        let (vertex_entry, vertex_buffers): (&str, &[wgpu::VertexBufferLayout]) =
+            if clipmap_geometry {
+                ("vs_clipmap_main", &clipmap_vertex_buffers)
+            } else {
+                ("vs_main", &[])
+            };
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("terrain_pbr_pom.aov.pipeline"),
+            label: Some(if clipmap_geometry {
+                "terrain_pbr_pom.aov.clipmap.pipeline"
+            } else {
+                "terrain_pbr_pom.aov.pipeline"
+            }),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main",
-                buffers: &[],
+                entry_point: vertex_entry,
+                buffers: vertex_buffers,
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,

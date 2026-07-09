@@ -102,6 +102,59 @@ information:
 These are useful when a script needs to decide between a viewer path, a native
 offscreen path, or a pure-Python fallback.
 
+`device_probe()` never raises. It always returns a dict whose `status` field is
+one of:
+
+- `"ok"` — an adapter was found; the dict carries `name`, `backend`,
+  `device_type`, and `software_fallback` (True when the adapter is a software
+  rasterizer such as WARP or lavapipe).
+- `"no_adapter"` — the native module works but no hardware or software adapter
+  is exposed for the requested backends.
+- `"probe_error"` — the probe itself failed; `reason` carries the exception.
+- `"native_missing"` — the compiled `forge3d._forge3d` extension did not
+  import; `reason` preserves the original import error.
+
+Every non-`"ok"` result includes `reason` and `remediation` fields, so scripts
+can branch or report without string-matching exception text.
+
+### If the native module fails to import
+
+When `forge3d._forge3d` cannot be imported (missing DLL, ABI mismatch, wheel
+built for another interpreter), native-only names such as `Scene`,
+`TerrainRenderer`, and `Session` are absent from the package. Accessing one
+raises an `AttributeError` that preserves the root cause instead of a bare
+name error:
+
+```text
+forge3d.Scene requires the native extension, but the compiled extension
+forge3d._forge3d failed to import: ImportError('DLL load failed ...').
+Reinstall the wheel (pip install --force-reinstall forge3d) or rebuild from a
+checkout with: maturin develop --release
+```
+
+Call `forge3d.native_import_error()` to retrieve the original import exception
+programmatically, and `device_probe()` to get the same information as a
+structured `"native_missing"` result.
+
+### If no GPU adapter is found
+
+GPU acquisition never panics. forge3d first requests a hardware adapter and,
+when none exists, automatically retries with the platform's software fallback
+adapter (WARP on Windows, Mesa's lavapipe on Linux) so headless hosts keep
+working — `engine_info()["software_fallback"]` reports honestly when the
+software path is in use, and a warning is logged. Only when even the software
+fallback is unavailable do GPU-touching calls raise a catchable
+`RuntimeError`:
+
+```text
+[Device] Device error: No suitable GPU adapter found (backends tried: DX12 |
+VULKAN | ...; WGPU_BACKENDS/WGPU_BACKEND not set). A hardware adapter was not
+found and the software fallback adapter is also unavailable. Verify GPU
+drivers are installed, pin a backend via WGPU_BACKENDS (vulkan|dx12|metal|gl),
+or install a software rasterizer for headless use (Windows ships WARP; on
+Linux install Mesa's lavapipe).
+```
+
 ## Example Map
 
 - `triangle_png.py`: minimal native renderer sanity check
