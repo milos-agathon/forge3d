@@ -129,8 +129,8 @@ pub struct PackedVertex {
 
 /// State saved before P5.1 Cornell scene setup, restored after capture
 pub struct P51CornellSceneState {
-    pub geom_vb: Option<wgpu::Buffer>,
-    pub geom_ib: Option<wgpu::Buffer>,
+    pub geom_vb: Option<crate::core::resource_tracker::TrackedBuffer>,
+    pub geom_ib: Option<crate::core::resource_tracker::TrackedBuffer>,
     pub geom_index_count: u32,
     pub sky_enabled: bool,
     pub fog_enabled: bool,

@@ -1,8 +1,8 @@
 use crate::cli::gi_types::GiVizMode;
+use crate::core::resource_tracker::{tracked_create_buffer_init, tracked_create_texture};
 use crate::core::screen_space_effects::ScreenSpaceEffectsManager;
 use crate::viewer::viewer_enums::VizMode;
 use crate::viewer::Viewer;
-use wgpu::util::DeviceExt;
 
 impl Viewer {
     pub(super) fn render_postfx_stage(
@@ -250,13 +250,20 @@ impl Viewer {
                     .write_buffer(ub, 0, bytemuck::cast_slice(&params));
                 ub
             } else {
-                let ub = self
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                let ub = match tracked_create_buffer_init(
+                    &self.device,
+                    &wgpu::util::BufferInitDescriptor {
                         label: Some("viewer.comp.uniform"),
                         contents: bytemuck::cast_slice(&params),
                         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
+                    },
+                ) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        eprintln!("[viewer] failed to allocate comp uniform: {e}");
+                        return;
+                    }
+                };
                 self.comp_uniform = Some(ub);
                 self.comp_uniform.as_ref().unwrap()
             };
@@ -301,20 +308,30 @@ impl Viewer {
                 let snap_w = self.config.width;
                 let snap_h = self.config.height;
 
-                let snap_tex = self.device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("viewer.snapshot.offscreen"),
-                    size: wgpu::Extent3d {
-                        width: snap_w,
-                        height: snap_h,
-                        depth_or_array_layers: 1,
+                let snap_tex = match tracked_create_texture(
+                    &self.device,
+                    &wgpu::TextureDescriptor {
+                        label: Some("viewer.snapshot.offscreen"),
+                        size: wgpu::Extent3d {
+                            width: snap_w,
+                            height: snap_h,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: self.config.format,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::COPY_SRC,
+                        view_formats: &[],
                     },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: self.config.format,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-                    view_formats: &[],
-                });
+                ) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        eprintln!("[viewer] failed to allocate snapshot texture: {e}");
+                        return;
+                    }
+                };
                 let snap_view = snap_tex.create_view(&wgpu::TextureViewDescriptor::default());
                 {
                     let mut pass_snap = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

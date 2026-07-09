@@ -1,3 +1,5 @@
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use crate::viewer::pointcloud::load::load_laz_points;
 use crate::viewer::pointcloud::shader::POINTCLOUD_SHADER;
 use crate::viewer::pointcloud::{ColorMode, PointCloudUniforms, PointInstance3D};
@@ -5,8 +7,8 @@ use crate::viewer::pointcloud::{ColorMode, PointCloudUniforms, PointInstance3D};
 /// Point cloud state for the viewer.
 pub struct PointCloudState {
     pub points: Vec<PointInstance3D>,
-    pub instance_buffer: Option<wgpu::Buffer>,
-    pub uniform_buffer: wgpu::Buffer,
+    pub instance_buffer: Option<TrackedBuffer>,
+    pub uniform_buffer: TrackedBuffer,
     pub bind_group: wgpu::BindGroup,
     pub pipeline: wgpu::RenderPipeline,
     pub point_count: usize,
@@ -28,18 +30,21 @@ impl PointCloudState {
         device: &wgpu::Device,
         target_format: wgpu::TextureFormat,
         _depth_format: wgpu::TextureFormat,
-    ) -> Self {
+    ) -> RenderResult<Self> {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("pointcloud.wgsl"),
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(POINTCLOUD_SHADER)),
         });
 
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("PointCloud.Uniforms"),
-            size: std::mem::size_of::<PointCloudUniforms>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("PointCloud.Uniforms"),
+                size: std::mem::size_of::<PointCloudUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("PointCloud.BindGroupLayout"),
@@ -131,7 +136,7 @@ impl PointCloudState {
             multiview: None,
         });
 
-        Self {
+        Ok(Self {
             points: Vec::new(),
             instance_buffer: None,
             uniform_buffer,
@@ -149,7 +154,7 @@ impl PointCloudState {
             cam_phi: 0.7,
             cam_theta: 0.5,
             cam_radius: 1.0,
-        }
+        })
     }
 
     pub fn handle_mouse_drag(&mut self, dx: f32, dy: f32) {
@@ -236,25 +241,30 @@ impl PointCloudState {
         self.points = points;
         self.point_count = self.points.len();
         self.color_mode = color_mode;
-        self.upload_points(device, queue);
+        self.upload_points(device, queue)
+            .map_err(|e| e.to_string())?;
 
         Ok(())
     }
 
-    fn upload_points(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+    fn upload_points(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> RenderResult<()> {
         if self.points.is_empty() {
-            return;
+            return Ok(());
         }
 
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("PointCloud.InstanceBuffer"),
-            size: (self.points.len() * std::mem::size_of::<PointInstance3D>()) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("PointCloud.InstanceBuffer"),
+                size: (self.points.len() * std::mem::size_of::<PointInstance3D>()) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&self.points));
         self.instance_buffer = Some(buffer);
+        Ok(())
     }
 
     pub fn render<'pass>(

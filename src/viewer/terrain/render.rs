@@ -73,23 +73,26 @@ pub(super) struct TerrainPbrUniforms {
 }
 
 impl ViewerTerrainScene {
-    pub(super) fn ensure_depth(&mut self, width: u32, height: u32) {
+    pub(super) fn ensure_depth(&mut self, width: u32, height: u32) -> anyhow::Result<()> {
         if self.depth_size != (width, height) {
-            let tex = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("terrain_viewer.depth"),
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
+            let tex = crate::core::resource_tracker::tracked_create_texture(
+                &self.device,
+                &wgpu::TextureDescriptor {
+                    label: Some("terrain_viewer.depth"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Depth32Float,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Depth32Float,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            });
+            )?;
             // Create depth view with explicit DepthOnly aspect for sampling
             self.depth_view = Some(tex.create_view(&wgpu::TextureViewDescriptor {
                 label: Some("terrain_viewer.depth_view"),
@@ -104,6 +107,7 @@ impl ViewerTerrainScene {
             self.depth_texture = Some(tex);
             self.depth_size = (width, height);
         }
+        Ok(())
     }
 }
 

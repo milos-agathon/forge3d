@@ -7,9 +7,11 @@ use std::sync::Arc;
 
 use winit::window::Window;
 
+use crate::core::error::RenderResult;
 use crate::core::gpu_timing::{
     create_default_config as create_gpu_timing_config, GpuTimingManager,
 };
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use crate::core::shadows::{CsmConfig, CsmShadowMap};
 use crate::render::params::SsrParams;
 
@@ -74,26 +76,26 @@ impl Viewer {
 
         // GBuffer resources (depends on GI manager)
         let gbuf =
-            create_gbuffer_resources(&device, gi.as_ref(), width, height, surface_config.format);
+            create_gbuffer_resources(&device, gi.as_ref(), width, height, surface_config.format)?;
 
         // CSM depth pipeline resources
         let (csm_depth_pipeline, csm_depth_camera) = if gi.is_some() {
-            create_csm_depth_resources(&device)
+            create_csm_depth_resources(&device)?
         } else {
             (None, None)
         };
 
         // Lit resources
-        let lit = create_lit_resources(&device, width, height);
+        let lit = create_lit_resources(&device, width, height)?;
 
         // GI baseline resources
-        let gi_base = create_gi_baseline_resources(&device, width, height);
+        let gi_base = create_gi_baseline_resources(&device, width, height)?;
 
         // Sky resources
-        let sky = create_sky_resources(&device, width, height);
+        let sky = create_sky_resources(&device, width, height)?;
 
         // Fog resources
-        let fog = create_fog_resources(&device, width, height);
+        let fog = create_fog_resources(&device, width, height)?;
 
         // Fallback pipeline
         let fb_pipeline = create_fallback_pipeline(&device, surface_config.format);
@@ -375,7 +377,7 @@ fn read_sky_env_params() -> SkyUniforms {
 /// Create CSM depth pipeline resources
 fn create_csm_depth_resources(
     device: &Arc<wgpu::Device>,
-) -> (Option<wgpu::RenderPipeline>, Option<wgpu::Buffer>) {
+) -> RenderResult<(Option<wgpu::RenderPipeline>, Option<TrackedBuffer>)> {
     let csm_depth_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("viewer.csm.depth.shader"),
         source: wgpu::ShaderSource::Wgsl(CSM_DEPTH_SHADER.into()),
@@ -447,14 +449,17 @@ fn create_csm_depth_resources(
         multiview: None,
     });
 
-    let camera = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("viewer.csm.depth.camera"),
-        size: std::mem::size_of::<[f32; 16]>() as u64,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+    let camera = tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("viewer.csm.depth.camera"),
+            size: std::mem::size_of::<[f32; 16]>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )?;
 
-    (Some(pipeline), Some(camera))
+    Ok((Some(pipeline), Some(camera)))
 }
 
 const CSM_DEPTH_SHADER: &str = r#"

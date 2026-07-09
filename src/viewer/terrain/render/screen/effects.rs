@@ -32,14 +32,25 @@ impl ViewerTerrainScene {
 
             if let Some(denoise) = denoise_pass.as_mut() {
                 let depth_view = depth_view.as_ref().unwrap();
-                denoise.apply(encoder, depth_view, iterations, sigma_color);
+                if let Err(e) = denoise.apply(encoder, depth_view, iterations, sigma_color) {
+                    eprintln!("[terrain] denoise apply failed: {e}");
+                    return;
+                }
 
                 let denoise_result = denoise
                     .get_last_result_view(iterations)
                     .unwrap_or(denoise.view_a.as_ref().unwrap());
 
                 if post_process.is_none() {
-                    *post_process = Some(PostProcessPass::new(device.clone(), *surface_format));
+                    match PostProcessPass::new(device.clone(), *surface_format) {
+                        Ok(pass) => *post_process = Some(pass),
+                        Err(e) => {
+                            eprintln!(
+                                "[terrain] failed to initialize post-process pass for denoise: {e}"
+                            );
+                            return;
+                        }
+                    }
                 }
 
                 let post_process = post_process.as_mut().unwrap();
@@ -93,7 +104,7 @@ impl ViewerTerrainScene {
                     view
                 };
 
-                vol_pass.apply(
+                if let Err(e) = vol_pass.apply(
                     encoder,
                     &self.queue,
                     color_input,
@@ -118,7 +129,9 @@ impl ViewerTerrainScene {
                         state.h_range,
                     ],
                     &self.pbr_config.volumetrics,
-                );
+                ) {
+                    eprintln!("[terrain] volumetrics apply failed: {e}");
+                }
             }
         }
 
@@ -146,7 +159,7 @@ impl ViewerTerrainScene {
                     tilt_pitch: self.pbr_config.dof.tilt_pitch,
                     tilt_yaw: self.pbr_config.dof.tilt_yaw,
                 };
-                dof.apply_from_input(
+                if let Err(e) = dof.apply_from_input(
                     encoder,
                     &self.queue,
                     depth_view,
@@ -157,7 +170,9 @@ impl ViewerTerrainScene {
                     &dof_cfg,
                     1.0,
                     state.cam_radius * 10.0,
-                );
+                ) {
+                    eprintln!("[terrain] DoF apply failed: {e}");
+                }
             }
         }
 

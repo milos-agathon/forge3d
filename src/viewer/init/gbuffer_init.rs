@@ -2,22 +2,24 @@
 // GBuffer pipeline initialization for the Viewer
 
 use std::sync::Arc;
-use wgpu::{
-    BindGroup, BindGroupLayout, Buffer, Device, RenderPipeline, Sampler, Texture, TextureView,
-};
+use wgpu::{BindGroup, BindGroupLayout, Device, RenderPipeline, Sampler, TextureView};
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 use crate::core::screen_space_effects::ScreenSpaceEffectsManager;
 
 /// Resources created during GBuffer initialization
 pub struct GBufferResources {
     pub geom_bind_group_layout: Option<BindGroupLayout>,
     pub geom_pipeline: Option<RenderPipeline>,
-    pub geom_camera_buffer: Option<Buffer>,
+    pub geom_camera_buffer: Option<TrackedBuffer>,
     pub geom_bind_group: Option<BindGroup>,
-    pub geom_vb: Option<Buffer>,
-    pub z_texture: Option<Texture>,
+    pub geom_vb: Option<TrackedBuffer>,
+    pub z_texture: Option<TrackedTexture>,
     pub z_view: Option<TextureView>,
-    pub albedo_texture: Option<Texture>,
+    pub albedo_texture: Option<TrackedTexture>,
     pub albedo_view: Option<TextureView>,
     pub albedo_sampler: Option<Sampler>,
     pub comp_bind_group_layout: Option<BindGroupLayout>,
@@ -107,36 +109,42 @@ pub fn create_gbuffer_resources(
     width: u32,
     height: u32,
     surface_format: wgpu::TextureFormat,
-) -> GBufferResources {
+) -> RenderResult<GBufferResources> {
     let gi_ref = match gi {
         Some(g) => g,
-        None => return GBufferResources::default(),
+        None => return Ok(GBufferResources::default()),
     };
 
     // Z-buffer for rasterization
-    let z_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("viewer.gbuf.z"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+    let z_texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("viewer.gbuf.z"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Depth32Float,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
+    )?;
     let z_view = z_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
     // Camera uniform
-    let geom_camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("viewer.gbuf.cam"),
-        size: (std::mem::size_of::<[[f32; 4]; 4]>() * 2) as u64,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+    let geom_camera_buffer = tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("viewer.gbuf.cam"),
+            size: (std::mem::size_of::<[[f32; 4]; 4]>() * 2) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )?;
 
     // Bind group layout: camera uniform + albedo texture + sampler
     let geom_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -265,7 +273,7 @@ pub fn create_gbuffer_resources(
     let comp_pipeline =
         super::composite_init::create_composite_pipeline(device, &comp_bgl, surface_format);
 
-    GBufferResources {
+    Ok(GBufferResources {
         geom_bind_group_layout: Some(geom_bgl),
         geom_pipeline: Some(pipeline),
         geom_camera_buffer: Some(geom_camera_buffer),
@@ -278,5 +286,5 @@ pub fn create_gbuffer_resources(
         albedo_sampler: None,
         comp_bind_group_layout: Some(comp_bgl),
         comp_pipeline: Some(comp_pipeline),
-    }
+    })
 }

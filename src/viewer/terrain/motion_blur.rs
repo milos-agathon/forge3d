@@ -1,8 +1,8 @@
 // src/viewer/terrain/motion_blur.rs
 // Motion blur via temporal accumulation across shutter interval
 
+use crate::core::resource_tracker::{tracked_create_buffer_init, TrackedBuffer};
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 
 /// Motion blur accumulation uniforms for the resolve shader
 #[repr(C)]
@@ -20,11 +20,14 @@ pub struct MotionBlurAccumulator {
     resolve_pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    uniform_buffer: wgpu::Buffer,
+    uniform_buffer: TrackedBuffer,
 }
 
 impl MotionBlurAccumulator {
-    pub fn new(device: Arc<wgpu::Device>, surface_format: wgpu::TextureFormat) -> Self {
+    pub fn new(
+        device: Arc<wgpu::Device>,
+        surface_format: wgpu::TextureFormat,
+    ) -> anyhow::Result<Self> {
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("motion_blur.bind_group_layout"),
             entries: &[
@@ -113,22 +116,25 @@ impl MotionBlurAccumulator {
             ..Default::default()
         });
 
-        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("motion_blur.uniforms"),
-            contents: bytemuck::cast_slice(&[MotionBlurUniforms {
-                screen_dims: [1.0, 1.0, 1.0, 1.0],
-                sample_count: [1.0, 0.0, 0.0, 0.0],
-            }]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let uniform_buffer = tracked_create_buffer_init(
+            &device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("motion_blur.uniforms"),
+                contents: bytemuck::cast_slice(&[MotionBlurUniforms {
+                    screen_dims: [1.0, 1.0, 1.0, 1.0],
+                    sample_count: [1.0, 0.0, 0.0, 0.0],
+                }]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        )?;
 
-        Self {
+        Ok(Self {
             device,
             resolve_pipeline,
             bind_group_layout,
             sampler,
             uniform_buffer,
-        }
+        })
     }
 
     /// Resolve the accumulated buffer to the final output

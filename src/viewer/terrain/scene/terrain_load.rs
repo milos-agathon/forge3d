@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::{tracked_create_buffer_init, tracked_create_texture};
 use crate::viewer::event_loop::update_terrain_volumetrics_report;
 use crate::viewer::ipc::TerrainVolumetricsReport;
 
@@ -49,20 +50,23 @@ impl ViewerTerrainScene {
             }
         }
 
-        let heightmap_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain_viewer.heightmap"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let heightmap_texture = tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain_viewer.heightmap"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
 
         self.queue.write_texture(
             wgpu::ImageCopyTexture {
@@ -88,21 +92,23 @@ impl ViewerTerrainScene {
         let grid_res = terrain_grid_resolution(width, height);
         let (vertices, indices) = create_grid_mesh(grid_res);
 
-        let vertex_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let vertex_buffer = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain_viewer.vertex_buffer"),
                 contents: bytemuck::cast_slice(&vertices),
                 usage: wgpu::BufferUsages::VERTEX,
-            });
+            },
+        )?;
 
-        let index_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let index_buffer = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain_viewer.index_buffer"),
                 contents: bytemuck::cast_slice(&indices),
                 usage: wgpu::BufferUsages::INDEX,
-            });
+            },
+        )?;
 
         let terrain_width = width as f32;
         let terrain_span = terrain_width.max(height as f32);
@@ -117,13 +123,14 @@ impl ViewerTerrainScene {
             water_color: [0.2, 0.4, 0.6, 0.0],
         };
 
-        let uniform_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let uniform_buffer = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain_viewer.uniform_buffer"),
                 contents: bytemuck::cast_slice(&[uniforms]),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
+            },
+        )?;
 
         let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("terrain_viewer.sampler"),

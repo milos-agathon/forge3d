@@ -4,6 +4,9 @@
 use std::sync::Arc;
 use wgpu;
 
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 use crate::viewer::event_loop::update_terrain_volumetrics_report;
 use crate::viewer::ipc::TerrainVolumetricsReport;
 use crate::viewer::terrain::volume_density::{
@@ -37,10 +40,10 @@ pub struct VolumetricsPass {
     device: Arc<wgpu::Device>,
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
-    uniform_buffer: wgpu::Buffer,
+    uniform_buffer: TrackedBuffer,
     color_sampler: wgpu::Sampler,
     depth_sampler: wgpu::Sampler,
-    fallback_density_volume_texture: Option<wgpu::Texture>,
+    fallback_density_volume_texture: Option<TrackedTexture>,
     fallback_density_volume_view: Option<wgpu::TextureView>,
     density_volume_sampler: wgpu::Sampler,
     density_volume_atlas: Option<DensityVolumeAtlasGpu>,
@@ -48,7 +51,10 @@ pub struct VolumetricsPass {
 }
 
 impl VolumetricsPass {
-    pub fn new(device: Arc<wgpu::Device>, target_format: wgpu::TextureFormat) -> Self {
+    pub fn new(
+        device: Arc<wgpu::Device>,
+        target_format: wgpu::TextureFormat,
+    ) -> anyhow::Result<Self> {
         // Create shader module
         let shader_source = include_str!("../../shaders/viewer_volumetrics.wgsl");
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -173,12 +179,15 @@ impl VolumetricsPass {
         });
 
         // Create uniform buffer
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("volumetrics.uniforms"),
-            size: std::mem::size_of::<VolumetricsUniforms>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            &device,
+            &wgpu::BufferDescriptor {
+                label: Some("volumetrics.uniforms"),
+                size: std::mem::size_of::<VolumetricsUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         // Create color sampler (filtering for color texture)
         let color_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -217,7 +226,7 @@ impl VolumetricsPass {
             ..Default::default()
         });
 
-        Self {
+        Ok(Self {
             device,
             pipeline,
             bind_group_layout,
@@ -232,34 +241,38 @@ impl VolumetricsPass {
                 memory_budget_bytes: volume_density::DENSITY_VOLUME_MEMORY_BUDGET_BYTES,
                 ..TerrainVolumetricsReport::default()
             },
-        }
+        })
     }
 
-    fn ensure_fallback_density_volume(&mut self) {
+    fn ensure_fallback_density_volume(&mut self) -> anyhow::Result<()> {
         if self.fallback_density_volume_view.is_some() {
-            return;
+            return Ok(());
         }
 
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain_viewer.density_volume_fallback"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
+        let texture = tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain_viewer.density_volume_fallback"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D3,
+                format: wgpu::TextureFormat::R16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D3,
-            format: wgpu::TextureFormat::R16Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
             dimension: Some(wgpu::TextureViewDimension::D3),
             ..Default::default()
         });
         self.fallback_density_volume_texture = Some(texture);
         self.fallback_density_volume_view = Some(view);
+        Ok(())
     }
 
     fn default_report(
@@ -282,11 +295,11 @@ impl VolumetricsPass {
         terrain_revision: u64,
         terrain_params: [f32; 4],
         config: &super::pbr_renderer::VolumetricsConfig,
-    ) {
+    ) -> anyhow::Result<()> {
         if config.density_volumes.is_empty() {
             self.density_volume_atlas = None;
             self.last_report = self.default_report(config);
-            return;
+            return Ok(());
         }
 
         let context = TerrainVolumeContext {
@@ -301,7 +314,7 @@ impl VolumetricsPass {
         let Some(data) = build_density_volume_atlas_data(context, &config.density_volumes) else {
             self.density_volume_atlas = None;
             self.last_report = self.default_report(config);
-            return;
+            return Ok(());
         };
 
         let needs_upload = self
@@ -317,7 +330,7 @@ impl VolumetricsPass {
                 data,
                 config.steps,
                 config.half_res,
-            ));
+            )?);
         } else if let Some(atlas) = self.density_volume_atlas.as_mut() {
             atlas.report.raymarch_steps = config.steps;
             atlas.report.half_res = config.half_res;
@@ -328,6 +341,7 @@ impl VolumetricsPass {
             .as_ref()
             .map(|atlas| atlas.report.clone())
             .unwrap_or_else(|| self.default_report(config));
+        Ok(())
     }
 
     pub fn current_report(&self) -> TerrainVolumetricsReport {
@@ -357,7 +371,7 @@ impl VolumetricsPass {
         sun_intensity: f32,
         terrain_params: [f32; 4], // width, min_h, h_scale, pad
         config: &super::pbr_renderer::VolumetricsConfig,
-    ) {
+    ) -> anyhow::Result<()> {
         // Update uniforms with proper alignment
         let mode = match config.mode.as_str() {
             "uniform" => 0u32,
@@ -365,7 +379,7 @@ impl VolumetricsPass {
             _ => 1u32,
         };
 
-        self.ensure_fallback_density_volume();
+        self.ensure_fallback_density_volume()?;
         self.ensure_density_volume_atlas(
             queue,
             heightmap,
@@ -373,7 +387,7 @@ impl VolumetricsPass {
             terrain_revision,
             terrain_params,
             config,
-        );
+        )?;
 
         let mut density_volume_min = [[0.0; 4]; MAX_DENSITY_VOLUMES];
         let mut density_volume_inv_size = [[0.0; 4]; MAX_DENSITY_VOLUMES];
@@ -518,5 +532,6 @@ impl VolumetricsPass {
         pass.draw(0..3, 0..1);
 
         update_terrain_volumetrics_report(self.current_report());
+        Ok(())
     }
 }
