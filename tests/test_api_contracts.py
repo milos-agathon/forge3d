@@ -227,6 +227,9 @@ class TestNativeModuleSymbols:
         "estimate_local_utm",
         # BOP-P3-03: dependency-backed complex text shaping
         "shape_text",
+        # CENSOR: global degradation sink
+        "native_degradations",
+        "clear_native_degradations",
     ]
 
     LATER_GIS_FUNCTIONS = []

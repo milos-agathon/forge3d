@@ -10,6 +10,9 @@ pub mod gpu;
 #[cfg(feature = "extension-module")]
 pub mod session;
 
+// CENSOR: global degradation sink (fallback/placeholder/absent-capability records)
+pub mod degradation;
+
 pub mod framegraph; // Legacy compatibility layer
 pub mod gpu_types;
 pub mod memory_tracker;

@@ -317,3 +317,26 @@ pub(crate) fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<
     }
     Ok(d.into_py(py))
 }
+
+// ---------------------------------------------------------
+// CENSOR: global degradation sink exposure
+// ---------------------------------------------------------
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn native_degradations(py: Python<'_>) -> PyResult<PyObject> {
+    let list = pyo3::types::PyList::empty_bound(py);
+    for d in crate::core::degradation::degradations_snapshot() {
+        let dict = pyo3::types::PyDict::new_bound(py);
+        dict.set_item("kind", &d.kind)?;
+        dict.set_item("name", &d.name)?;
+        dict.set_item("consequence", &d.consequence)?;
+        list.append(dict)?;
+    }
+    Ok(list.into())
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn clear_native_degradations() {
+    crate::core::degradation::clear_degradations();
+}

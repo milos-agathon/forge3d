@@ -109,6 +109,8 @@ _NATIVE_ONLY_EXPORTS = (
         "verify_provenance",  # VERITAS: native manifest verification
         "declutter_optimal",  # CARTOGRAPHER-PRIME: bounded-optimal label solve
         "LabelRationale",  # CARTOGRAPHER-PRIME: grounded solver rationale
+        "native_degradations",  # CENSOR: global degradation sink snapshot
+        "clear_native_degradations",  # CENSOR: global degradation sink reset
 )
 
 if _NATIVE_MODULE is not None:
@@ -578,6 +580,9 @@ __all__ = [
     # CARTOGRAPHER-PRIME: bounded-optimal label solve + rationale
     "declutter_optimal",
     "LabelRationale",
+    # CENSOR: global degradation sink
+    "native_degradations",
+    "clear_native_degradations",
     # Configuration
     "RendererConfig",
     "TerrainRenderParamsConfig",

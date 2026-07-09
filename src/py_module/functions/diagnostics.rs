@@ -14,5 +14,7 @@ pub(super) fn register_diagnostics_py_functions(m: &Bound<'_, PyModule>) -> PyRe
     m.add_function(wrap_pyfunction!(c5_build_framegraph_report, m)?)?;
     m.add_function(wrap_pyfunction!(c6_mt_record_demo, m)?)?;
     m.add_function(wrap_pyfunction!(c7_async_compute_demo, m)?)?;
+    m.add_function(wrap_pyfunction!(native_degradations, m)?)?;
+    m.add_function(wrap_pyfunction!(clear_native_degradations, m)?)?;
     Ok(())
 }
