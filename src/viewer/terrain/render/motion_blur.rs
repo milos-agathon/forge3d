@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 
 impl ViewerTerrainScene {
     pub fn render_with_motion_blur(
@@ -6,7 +7,7 @@ impl ViewerTerrainScene {
         target_format: wgpu::TextureFormat,
         width: u32,
         height: u32,
-    ) -> Option<wgpu::Texture> {
+    ) -> Option<TrackedTexture> {
         if self.terrain.is_none() {
             return None;
         }
@@ -38,22 +39,31 @@ impl ViewerTerrainScene {
         let _ = terrain;
 
         // Create accumulation texture (Rgba32Float for HDR)
-        let accum_tex = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain_viewer.motion_blur_accum"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let accum_tex = match tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain_viewer.motion_blur_accum"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        ) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("[terrain] failed to allocate motion blur accum texture: {e}");
+                return None;
+            }
+        };
         let accum_view = accum_tex.create_view(&wgpu::TextureViewDescriptor::default());
 
         // Clear accumulation buffer
@@ -140,22 +150,31 @@ impl ViewerTerrainScene {
         }
 
         // Resolve: create final output and divide by sample count
-        let output_tex = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain_viewer.motion_blur_output"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let output_tex = match tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain_viewer.motion_blur_output"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: target_format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: target_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        ) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("[terrain] failed to allocate motion blur output texture: {e}");
+                return None;
+            }
+        };
         let output_view = output_tex.create_view(&wgpu::TextureViewDescriptor::default());
 
         // Use motion blur pass to resolve
@@ -187,21 +206,31 @@ impl ViewerTerrainScene {
                 }
                 if let Some(ref mut pp) = self.post_process {
                     let lens = &self.pbr_config.lens_effects;
-                    let lens_output_tex = self.device.create_texture(&wgpu::TextureDescriptor {
-                        label: Some("terrain_viewer.motion_blur_lens_output"),
-                        size: wgpu::Extent3d {
-                            width,
-                            height,
-                            depth_or_array_layers: 1,
+                    let lens_output_tex = match tracked_create_texture(
+                        &self.device,
+                        &wgpu::TextureDescriptor {
+                            label: Some("terrain_viewer.motion_blur_lens_output"),
+                            size: wgpu::Extent3d {
+                                width,
+                                height,
+                                depth_or_array_layers: 1,
+                            },
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format: target_format,
+                            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                                | wgpu::TextureUsages::COPY_SRC,
+                            view_formats: &[],
                         },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: target_format,
-                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                            | wgpu::TextureUsages::COPY_SRC,
-                        view_formats: &[],
-                    });
+                    ) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            eprintln!("[terrain] failed to allocate motion blur lens output: {e}");
+                            self.queue.submit(std::iter::once(encoder.finish()));
+                            return Some(final_tex);
+                        }
+                    };
                     let lens_output_view =
                         lens_output_tex.create_view(&wgpu::TextureViewDescriptor::default());
 

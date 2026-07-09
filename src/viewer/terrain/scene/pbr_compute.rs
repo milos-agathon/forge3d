@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_texture};
 
 impl ViewerTerrainScene {
     pub fn init_pbr_pipeline(&mut self, target_format: wgpu::TextureFormat) -> Result<()> {
@@ -273,32 +274,38 @@ impl ViewerTerrainScene {
             let ao_height = (height as f32 * self.pbr_config.height_ao.resolution_scale) as u32;
 
             // Create AO texture
-            let ao_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("terrain_viewer.height_ao_texture"),
-                size: wgpu::Extent3d {
-                    width: ao_width,
-                    height: ao_height,
-                    depth_or_array_layers: 1,
+            let ao_texture = tracked_create_texture(
+                &self.device,
+                &wgpu::TextureDescriptor {
+                    label: Some("terrain_viewer.height_ao_texture"),
+                    size: wgpu::Extent3d {
+                        width: ao_width,
+                        height: ao_height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::R32Float,
+                    usage: wgpu::TextureUsages::STORAGE_BINDING
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R32Float,
-                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            });
+            )?;
             self.height_ao_view =
                 Some(ao_texture.create_view(&wgpu::TextureViewDescriptor::default()));
             self.height_ao_texture = Some(ao_texture);
 
             // Create uniform buffer
-            self.height_ao_uniform_buffer =
-                Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+            self.height_ao_uniform_buffer = Some(tracked_create_buffer(
+                &self.device,
+                &wgpu::BufferDescriptor {
                     label: Some("terrain_viewer.height_ao_uniforms"),
                     size: 64,
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
-                }));
+                },
+            )?);
 
             // Create bind group layout
             let ao_bind_group_layout =
@@ -388,32 +395,38 @@ impl ViewerTerrainScene {
                 (height as f32 * self.pbr_config.sun_visibility.resolution_scale) as u32;
 
             // Create sun vis texture
-            let sv_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("terrain_viewer.sun_vis_texture"),
-                size: wgpu::Extent3d {
-                    width: sv_width,
-                    height: sv_height,
-                    depth_or_array_layers: 1,
+            let sv_texture = tracked_create_texture(
+                &self.device,
+                &wgpu::TextureDescriptor {
+                    label: Some("terrain_viewer.sun_vis_texture"),
+                    size: wgpu::Extent3d {
+                        width: sv_width,
+                        height: sv_height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::R32Float,
+                    usage: wgpu::TextureUsages::STORAGE_BINDING
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R32Float,
-                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            });
+            )?;
             self.sun_vis_view =
                 Some(sv_texture.create_view(&wgpu::TextureViewDescriptor::default()));
             self.sun_vis_texture = Some(sv_texture);
 
             // Create uniform buffer
-            self.sun_vis_uniform_buffer =
-                Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+            self.sun_vis_uniform_buffer = Some(tracked_create_buffer(
+                &self.device,
+                &wgpu::BufferDescriptor {
                     label: Some("terrain_viewer.sun_vis_uniforms"),
                     size: 64,
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
-                }));
+                },
+            )?);
 
             // Create bind group layout
             let sv_bind_group_layout =

@@ -27,7 +27,9 @@ impl ViewerTerrainScene {
                 .map_err(|e| anyhow::anyhow!(e))?;
             // Rebuild composite after adding layer
             if let Some(ref terrain) = self.terrain {
-                stack.build_composite(terrain.dimensions.0, terrain.dimensions.1);
+                if let Err(e) = stack.build_composite(terrain.dimensions.0, terrain.dimensions.1) {
+                    eprintln!("[terrain] overlay composite rebuild failed: {e}");
+                }
             }
             // Enable overlay system in config
             self.pbr_config.overlay.enabled = true;
@@ -44,7 +46,11 @@ impl ViewerTerrainScene {
             if removed {
                 // Rebuild composite after removing layer
                 if let Some(ref terrain) = self.terrain {
-                    stack.build_composite(terrain.dimensions.0, terrain.dimensions.1);
+                    if let Err(e) =
+                        stack.build_composite(terrain.dimensions.0, terrain.dimensions.1)
+                    {
+                        eprintln!("[terrain] overlay composite rebuild failed: {e}");
+                    }
                 }
                 // Disable overlay system if no visible layers
                 if !stack.has_visible_layers() {
@@ -63,7 +69,9 @@ impl ViewerTerrainScene {
             stack.set_visible(id, visible);
             // Rebuild composite
             if let Some(ref terrain) = self.terrain {
-                stack.build_composite(terrain.dimensions.0, terrain.dimensions.1);
+                if let Err(e) = stack.build_composite(terrain.dimensions.0, terrain.dimensions.1) {
+                    eprintln!("[terrain] overlay composite rebuild failed: {e}");
+                }
             }
             // Update enabled state
             self.pbr_config.overlay.enabled = stack.has_visible_layers();
@@ -76,7 +84,9 @@ impl ViewerTerrainScene {
             stack.set_opacity(id, opacity);
             // Rebuild composite
             if let Some(ref terrain) = self.terrain {
-                stack.build_composite(terrain.dimensions.0, terrain.dimensions.1);
+                if let Err(e) = stack.build_composite(terrain.dimensions.0, terrain.dimensions.1) {
+                    eprintln!("[terrain] overlay composite rebuild failed: {e}");
+                }
             }
         }
     }
@@ -124,7 +134,7 @@ impl ViewerTerrainScene {
 
     /// Add a vector overlay layer. Returns layer ID.
     /// If drape is true and terrain is loaded, vertices will be draped onto terrain.
-    pub fn add_vector_overlay(&mut self, layer: VectorOverlayLayer) -> u32 {
+    pub fn add_vector_overlay(&mut self, layer: VectorOverlayLayer) -> Result<u32> {
         self.add_vector_overlay_with_id(None, layer)
     }
 
@@ -134,7 +144,7 @@ impl ViewerTerrainScene {
         &mut self,
         id: Option<u32>,
         mut layer: VectorOverlayLayer,
-    ) -> u32 {
+    ) -> Result<u32> {
         self.ensure_vector_overlay_stack();
 
         // If draping requested and terrain is loaded, drape the vertices
@@ -164,7 +174,7 @@ impl ViewerTerrainScene {
                 None => stack.add_layer(layer),
             }
         } else {
-            0
+            Ok(0)
         }
     }
 

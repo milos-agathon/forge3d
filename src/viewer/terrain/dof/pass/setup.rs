@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
-use wgpu::util::DeviceExt;
-
 use super::DofPass;
+use crate::core::resource_tracker::{tracked_create_buffer_init, tracked_create_texture};
 use crate::viewer::terrain::dof::shader::DOF_SHADER;
 use crate::viewer::terrain::dof::DofUniforms;
 
 impl DofPass {
-    pub fn new(device: Arc<wgpu::Device>, surface_format: wgpu::TextureFormat) -> Self {
+    pub fn new(
+        device: Arc<wgpu::Device>,
+        surface_format: wgpu::TextureFormat,
+    ) -> anyhow::Result<Self> {
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("dof.bind_group_layout"),
             entries: &[
@@ -103,29 +105,35 @@ impl DofPass {
             ..Default::default()
         });
 
-        let uniform_buffer_h = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("dof.uniforms_h"),
-            contents: bytemuck::cast_slice(&[DofUniforms {
-                screen_dims: [1.0, 1.0, 1.0, 1.0],
-                dof_params: [500.0, 5.6, 50.0, 16.0],
-                dof_params2: [1.0, 10000.0, 0.0, 8.0],
-                camera_params: [24.0, 500.0, 0.0, 0.0],
-            }]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let uniform_buffer_h = tracked_create_buffer_init(
+            &device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("dof.uniforms_h"),
+                contents: bytemuck::cast_slice(&[DofUniforms {
+                    screen_dims: [1.0, 1.0, 1.0, 1.0],
+                    dof_params: [500.0, 5.6, 50.0, 16.0],
+                    dof_params2: [1.0, 10000.0, 0.0, 8.0],
+                    camera_params: [24.0, 500.0, 0.0, 0.0],
+                }]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        )?;
 
-        let uniform_buffer_v = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("dof.uniforms_v"),
-            contents: bytemuck::cast_slice(&[DofUniforms {
-                screen_dims: [1.0, 1.0, 1.0, 1.0],
-                dof_params: [500.0, 5.6, 50.0, 16.0],
-                dof_params2: [1.0, 10000.0, 1.0, 8.0],
-                camera_params: [24.0, 500.0, 0.0, 0.0],
-            }]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let uniform_buffer_v = tracked_create_buffer_init(
+            &device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("dof.uniforms_v"),
+                contents: bytemuck::cast_slice(&[DofUniforms {
+                    screen_dims: [1.0, 1.0, 1.0, 1.0],
+                    dof_params: [500.0, 5.6, 50.0, 16.0],
+                    dof_params2: [1.0, 10000.0, 1.0, 8.0],
+                    camera_params: [24.0, 500.0, 0.0, 0.0],
+                }]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        )?;
 
-        Self {
+        Ok(Self {
             device,
             pipeline,
             bind_group_layout,
@@ -137,48 +145,60 @@ impl DofPass {
             intermediate_texture: None,
             intermediate_view: None,
             current_size: (0, 0),
-        }
+        })
     }
 
-    pub(super) fn ensure_textures(&mut self, width: u32, height: u32, format: wgpu::TextureFormat) {
+    pub(super) fn ensure_textures(
+        &mut self,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    ) -> anyhow::Result<()> {
         if self.current_size != (width, height) || self.input_texture.is_none() {
-            let input_tex = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("dof.input"),
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
+            let input_tex = tracked_create_texture(
+                &self.device,
+                &wgpu::TextureDescriptor {
+                    label: Some("dof.input"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            });
+            )?;
             self.input_view = Some(input_tex.create_view(&wgpu::TextureViewDescriptor::default()));
             self.input_texture = Some(input_tex);
 
-            let tex = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("dof.intermediate"),
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
+            let tex = tracked_create_texture(
+                &self.device,
+                &wgpu::TextureDescriptor {
+                    label: Some("dof.intermediate"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            });
+            )?;
             self.intermediate_view = Some(tex.create_view(&wgpu::TextureViewDescriptor::default()));
             self.intermediate_texture = Some(tex);
             self.current_size = (width, height);
         }
+        Ok(())
     }
 
     pub fn get_input_view(
@@ -186,8 +206,8 @@ impl DofPass {
         width: u32,
         height: u32,
         format: wgpu::TextureFormat,
-    ) -> &wgpu::TextureView {
-        self.ensure_textures(width, height, format);
-        self.input_view.as_ref().unwrap()
+    ) -> anyhow::Result<&wgpu::TextureView> {
+        self.ensure_textures(width, height, format)?;
+        Ok(self.input_view.as_ref().unwrap())
     }
 }

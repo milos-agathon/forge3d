@@ -169,22 +169,30 @@ impl Viewer {
             self.device
                 .create_sampler(&wgpu::SamplerDescriptor::default())
         });
-        let tex = self.albedo_texture.get_or_insert_with(|| {
-            self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("viewer.geom.albedo.empty"),
-                size: wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
+        if self.albedo_texture.is_none() {
+            let t = crate::core::resource_tracker::tracked_create_texture(
+                &self.device,
+                &wgpu::TextureDescriptor {
+                    label: Some("viewer.geom.albedo.empty"),
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            })
-        });
+            )?;
+            self.albedo_texture = Some(t);
+        }
+        let tex = match self.albedo_texture.as_ref() {
+            Some(t) => t,
+            None => return Ok(()),
+        };
         let view = self
             .albedo_view
             .get_or_insert_with(|| tex.create_view(&wgpu::TextureViewDescriptor::default()));

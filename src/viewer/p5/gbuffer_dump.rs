@@ -7,6 +7,9 @@ use glam::{Mat4, Vec3};
 use std::path::Path;
 
 use crate::cli::args::GiVizMode;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_buffer_init, tracked_create_texture,
+};
 use crate::viewer::viewer_enums::VizMode;
 use crate::viewer::viewer_render_helpers::render_view_to_rgba8_ex;
 use crate::viewer::viewer_types::{P51CornellSceneState, SceneMesh};
@@ -102,12 +105,15 @@ impl Viewer {
             let pad_align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
             let padded_bpr = ((tight_bpr + pad_align - 1) / pad_align) * pad_align;
             let buf_size = (padded_bpr * mh) as wgpu::BufferAddress;
-            let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("p5.hzb.staging"),
-                size: buf_size,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            });
+            let staging = tracked_create_buffer(
+                &self.device,
+                &wgpu::BufferDescriptor {
+                    label: Some("p5.hzb.staging"),
+                    size: buf_size,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                },
+            )?;
             let mut enc = self
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -263,8 +269,6 @@ impl Viewer {
     }
 
     pub(crate) fn setup_p51_cornell_scene(&mut self) -> anyhow::Result<P51CornellSceneState> {
-        use wgpu::util::DeviceExt;
-
         let prev = P51CornellSceneState {
             geom_vb: self.geom_vb.take(),
             geom_ib: self.geom_ib.take(),
@@ -295,20 +299,22 @@ impl Viewer {
         }
 
         let vertex_data = bytemuck::cast_slice(&scene.vertices);
-        let vb = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let vb = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("viewer.p51.cornell.vb"),
                 contents: vertex_data,
                 usage: wgpu::BufferUsages::VERTEX,
-            });
-        let ib = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            },
+        )?;
+        let ib = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("viewer.p51.cornell.ib"),
                 contents: bytemuck::cast_slice(&scene.indices),
                 usage: wgpu::BufferUsages::INDEX,
-            });
+            },
+        )?;
         self.geom_vb = Some(vb);
         self.geom_ib = Some(ib);
         self.geom_index_count = scene.indices.len() as u32;
@@ -323,20 +329,23 @@ impl Viewer {
                 px[2] = 200;
                 px[3] = 255;
             }
-            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("viewer.p51.cornell.albedo"),
-                size: wgpu::Extent3d {
-                    width: tex_size,
-                    height: tex_size,
-                    depth_or_array_layers: 1,
+            let texture = tracked_create_texture(
+                &self.device,
+                &wgpu::TextureDescriptor {
+                    label: Some("viewer.p51.cornell.albedo"),
+                    size: wgpu::Extent3d {
+                        width: tex_size,
+                        height: tex_size,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
+            )?;
             self.queue.write_texture(
                 wgpu::ImageCopyTexture {
                     texture: &texture,

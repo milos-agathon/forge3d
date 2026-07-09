@@ -118,7 +118,7 @@ impl Viewer {
         let (shadow_tex_view, shadow_uniform_buf) = if let Some(ref csm) = self.csm {
             (csm.shadow_array_view(), csm.uniform_buffer())
         } else {
-            (&self.fog_shadow_view, &self.fog_shadow_matrix)
+            (&self.fog_shadow_view, self.fog_shadow_matrix.inner())
         };
         let bg1 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("viewer.fog.bg1"),

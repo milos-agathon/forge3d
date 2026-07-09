@@ -27,7 +27,7 @@ impl ViewerTerrainScene {
         width: u32,
         height: u32,
         selected_feature_id: u32,
-    ) -> Option<wgpu::Texture> {
+    ) -> Option<crate::core::resource_tracker::TrackedTexture> {
         eprintln!("[DEBUG render_to_texture ENTRY] {}x{}", width, height);
         if self.terrain.is_none() {
             eprintln!("[DEBUG render_to_texture] No terrain, returning None");
@@ -35,13 +35,25 @@ impl ViewerTerrainScene {
         }
 
         self.prepare_snapshot_resources(width, height);
-        let (color_tex, color_view) = self.create_snapshot_color_target(
+        let (color_tex, color_view) = match self.create_snapshot_color_target(
             "terrain_viewer.snapshot_color",
             target_format,
             width,
             height,
-        );
-        let (_depth_tex, depth_view) = self.create_snapshot_depth_target(width, height);
+        ) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[terrain] failed to allocate snapshot color target: {e}");
+                return None;
+            }
+        };
+        let (_depth_tex, depth_view) = match self.create_snapshot_depth_target(width, height) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[terrain] failed to allocate snapshot depth target: {e}");
+                return None;
+            }
+        };
         let state = self.build_snapshot_render_state(encoder, target_format, width, height);
         let has_vector_overlays = self.prepare_snapshot_overlays();
 

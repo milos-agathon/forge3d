@@ -1,6 +1,7 @@
 use super::RenderAvailability;
 use glam::Mat4;
 
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::viewer::Viewer;
 
 impl Viewer {
@@ -28,7 +29,7 @@ impl Viewer {
                                config: &wgpu::SurfaceConfiguration,
                                snapshot_request: &Option<String>,
                                view_config: &crate::viewer::viewer_config::ViewerConfig|
-         -> Option<wgpu::Texture> {
+         -> Option<TrackedTexture> {
             // If snapshot requested, create offscreen texture at requested size
             let snap_tex = if snapshot_request.is_some() {
                 let (snap_w, snap_h) = if let (Some(w), Some(h)) =
@@ -38,20 +39,30 @@ impl Viewer {
                 } else {
                     (config.width, config.height)
                 };
-                let tex = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("viewer.fallback.snapshot"),
-                    size: wgpu::Extent3d {
-                        width: snap_w,
-                        height: snap_h,
-                        depth_or_array_layers: 1,
+                let tex = match tracked_create_texture(
+                    device,
+                    &wgpu::TextureDescriptor {
+                        label: Some("viewer.fallback.snapshot"),
+                        size: wgpu::Extent3d {
+                            width: snap_w,
+                            height: snap_h,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: config.format,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::COPY_SRC,
+                        view_formats: &[],
                     },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: config.format,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-                    view_formats: &[],
-                });
+                ) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        eprintln!("[viewer] failed to allocate fallback snapshot texture: {e}");
+                        return None;
+                    }
+                };
                 let snap_view = tex.create_view(&wgpu::TextureViewDescriptor::default());
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("viewer.fallback.pass.snapshot"),
@@ -185,33 +196,42 @@ impl Viewer {
 
                     // If snapshot requested, also render to offscreen texture at snapshot dimensions
                     if let Some((snap_w, snap_h)) = _snapshot_dimensions {
-                        let snap_tex = self.device.create_texture(&wgpu::TextureDescriptor {
-                            label: Some("viewer.terrain.snapshot"),
-                            size: wgpu::Extent3d {
-                                width: snap_w,
-                                height: snap_h,
-                                depth_or_array_layers: 1,
+                        match tracked_create_texture(
+                            &self.device,
+                            &wgpu::TextureDescriptor {
+                                label: Some("viewer.terrain.snapshot"),
+                                size: wgpu::Extent3d {
+                                    width: snap_w,
+                                    height: snap_h,
+                                    depth_or_array_layers: 1,
+                                },
+                                mip_level_count: 1,
+                                sample_count: 1,
+                                dimension: wgpu::TextureDimension::D2,
+                                format: self.config.format,
+                                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                                    | wgpu::TextureUsages::COPY_SRC,
+                                view_formats: &[],
                             },
-                            mip_level_count: 1,
-                            sample_count: 1,
-                            dimension: wgpu::TextureDimension::D2,
-                            format: self.config.format,
-                            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                                | wgpu::TextureUsages::COPY_SRC,
-                            view_formats: &[],
-                        });
-                        let snap_view =
-                            snap_tex.create_view(&wgpu::TextureViewDescriptor::default());
+                        ) {
+                            Ok(snap_tex) => {
+                                let snap_view =
+                                    snap_tex.create_view(&wgpu::TextureViewDescriptor::default());
 
-                        scene.render_viewer_terrain(
-                            &mut encoder,
-                            &snap_view,
-                            self.config.format,
-                            snap_w,
-                            snap_h,
-                        );
+                                scene.render_viewer_terrain(
+                                    &mut encoder,
+                                    &snap_view,
+                                    self.config.format,
+                                    snap_w,
+                                    snap_h,
+                                );
 
-                        self.pending_snapshot_tex = Some(snap_tex);
+                                self.pending_snapshot_tex = Some(snap_tex);
+                            }
+                            Err(e) => {
+                                eprintln!("[viewer] failed to allocate terrain snapshot: {e}");
+                            }
+                        }
                     }
                 }
             }

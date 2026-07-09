@@ -1,8 +1,9 @@
 use super::*;
+use crate::core::resource_tracker::tracked_create_buffer;
 
 impl VectorOverlayStack {
     /// Initialize the vector overlay render pipelines
-    pub fn init_pipelines(&mut self, surface_format: wgpu::TextureFormat) {
+    pub fn init_pipelines(&mut self, surface_format: wgpu::TextureFormat) -> anyhow::Result<()> {
         // Create bind group layout with texture/sampler for shadow integration
         let bind_group_layout =
             self.device
@@ -42,12 +43,15 @@ impl VectorOverlayStack {
                 });
 
         // Create uniform buffer
-        let uniform_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vector_overlay_uniforms"),
-            size: std::mem::size_of::<VectorOverlayUniforms>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            &self.device,
+            &wgpu::BufferDescriptor {
+                label: Some("vector_overlay_uniforms"),
+                size: std::mem::size_of::<VectorOverlayUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         // Compile shader
         let shader = self
@@ -188,6 +192,7 @@ impl VectorOverlayStack {
 
         // P0.1/M1: Initialize OIT pipelines with WBOIT blend states
         self.init_oit_pipelines(&shader, &pipeline_layout);
+        Ok(())
     }
 
     /// P0.1/M1: Initialize OIT pipelines with WBOIT blend states for transparent rendering

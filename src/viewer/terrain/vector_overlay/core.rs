@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::tracked_create_buffer_init;
 
 impl VectorOverlayStack {
     /// Create a new vector overlay stack
@@ -25,31 +26,37 @@ impl VectorOverlayStack {
     }
 
     /// Add a vector overlay layer. Returns layer ID.
-    pub fn add_layer(&mut self, layer: VectorOverlayLayer) -> u32 {
+    pub fn add_layer(&mut self, layer: VectorOverlayLayer) -> anyhow::Result<u32> {
         self.add_layer_with_id(None, layer)
     }
 
     /// Add a vector overlay layer with an externally allocated ID.
-    pub fn add_layer_with_id(&mut self, id: Option<u32>, layer: VectorOverlayLayer) -> u32 {
+    pub fn add_layer_with_id(
+        &mut self,
+        id: Option<u32>,
+        layer: VectorOverlayLayer,
+    ) -> anyhow::Result<u32> {
         let id = id.unwrap_or(self.next_id);
         self.next_id = self.next_id.max(id.saturating_add(1));
         // Create vertex buffer
-        let vertex_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let vertex_buffer = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("vector_overlay_vertices_{}", id)),
                 contents: bytemuck::cast_slice(&layer.vertices),
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            });
+            },
+        )?;
 
         // Create index buffer
-        let index_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let index_buffer = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("vector_overlay_indices_{}", id)),
                 contents: bytemuck::cast_slice(&layer.indices),
                 usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-            });
+            },
+        )?;
 
         let layer_name = layer.name.clone();
         let gpu_layer = VectorOverlayGpu {
@@ -68,7 +75,7 @@ impl VectorOverlayStack {
         self.layers.sort_by_key(|l| l.config.z_order);
 
         println!("[vector_overlay] Added layer '{layer_name}' (id={id})");
-        id
+        Ok(id)
     }
 
     /// Remove a vector overlay by ID. Returns true if found and removed.

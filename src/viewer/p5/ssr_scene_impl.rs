@@ -2,8 +2,7 @@
 // SSR scene helpers for the Viewer
 // Extracted from mod.rs as part of the viewer refactoring
 
-use wgpu::util::DeviceExt;
-
+use crate::core::resource_tracker::{tracked_create_buffer_init, tracked_create_texture};
 use crate::p5::ssr::SsrScenePreset;
 use crate::viewer::event_loop::update_ipc_stats;
 use crate::viewer::viewer_ssr_scene::{build_ssr_albedo_texture, build_ssr_scene_mesh};
@@ -17,20 +16,22 @@ impl Viewer {
         }
 
         let vertex_data = bytemuck::cast_slice(&mesh.vertices);
-        let vb = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let vb = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("viewer.ssr.scene.vb"),
                 contents: vertex_data,
                 usage: wgpu::BufferUsages::VERTEX,
-            });
-        let ib = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            },
+        )?;
+        let ib = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("viewer.ssr.scene.ib"),
                 contents: bytemuck::cast_slice(&mesh.indices),
                 usage: wgpu::BufferUsages::INDEX,
-            });
+            },
+        )?;
         self.geom_vb = Some(vb);
         self.geom_ib = Some(ib);
         self.geom_index_count = mesh.indices.len() as u32;
@@ -45,20 +46,23 @@ impl Viewer {
 
         let tex_size = 1024u32;
         let pixels = build_ssr_albedo_texture(preset, tex_size);
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("viewer.ssr.scene.albedo"),
-            size: wgpu::Extent3d {
-                width: tex_size,
-                height: tex_size,
-                depth_or_array_layers: 1,
+        let texture = tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("viewer.ssr.scene.albedo"),
+                size: wgpu::Extent3d {
+                    width: tex_size,
+                    height: tex_size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         self.queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &texture,
@@ -149,20 +153,23 @@ impl Viewer {
             }
         }
 
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("viewer.ssr.env.stripe"),
-            size: wgpu::Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 6,
+        let texture = tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("viewer.ssr.env.stripe"),
+                size: wgpu::Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: 6,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
 
         for face in 0..6 {
             self.queue.write_texture(

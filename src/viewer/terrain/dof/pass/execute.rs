@@ -14,8 +14,8 @@ impl DofPass {
         config: &DofConfig,
         near_plane: f32,
         far_plane: f32,
-    ) {
-        self.ensure_textures(width, height, format);
+    ) -> anyhow::Result<()> {
+        self.ensure_textures(width, height, format)?;
 
         let input_view = self.input_view.as_ref().unwrap();
         let intermediate_view = self.intermediate_view.as_ref().unwrap();
@@ -88,6 +88,7 @@ impl DofPass {
             output_view,
             &self.uniform_buffer_v,
         );
+        Ok(())
     }
 
     pub fn apply(
@@ -103,8 +104,8 @@ impl DofPass {
         config: &DofConfig,
         near_plane: f32,
         far_plane: f32,
-    ) {
-        self.ensure_textures(width, height, format);
+    ) -> anyhow::Result<()> {
+        self.ensure_textures(width, height, format)?;
 
         let uniforms_h = DofUniforms {
             screen_dims: [
@@ -174,6 +175,7 @@ impl DofPass {
             output_view,
             &self.uniform_buffer_v,
         );
+        Ok(())
     }
 
     fn render_pass_with_buffer(

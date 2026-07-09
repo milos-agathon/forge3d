@@ -1,5 +1,6 @@
 use super::*;
 use crate::core::ibl::{IBLQuality, IBLRenderer};
+use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_texture};
 use crate::viewer::terrain::overlay::OverlayStack;
 use half::f16;
 
@@ -28,24 +29,27 @@ impl ViewerTerrainScene {
         }
     }
 
-    fn ensure_terrain_ibl_fallback_resources(&mut self) {
+    fn ensure_terrain_ibl_fallback_resources(&mut self) -> anyhow::Result<()> {
         self.ensure_terrain_ibl_sampler();
 
         if self.terrain_ibl_fallback_cube.is_none() {
-            let cube = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("terrain_viewer_pbr.ibl_fallback_cube"),
-                size: wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 6,
+            let cube = tracked_create_texture(
+                &self.device,
+                &wgpu::TextureDescriptor {
+                    label: Some("terrain_viewer_pbr.ibl_fallback_cube"),
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 6,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba16Float,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba16Float,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
+            )?;
             let zero = f16::from_f32(0.0).to_bits();
             let one = f16::from_f32(1.0).to_bits();
             let mut texels = Vec::with_capacity(24);
@@ -86,20 +90,23 @@ impl ViewerTerrainScene {
         }
 
         if self.terrain_ibl_fallback_brdf.is_none() {
-            let brdf = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("terrain_viewer_pbr.ibl_fallback_brdf"),
-                size: wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
+            let brdf = tracked_create_texture(
+                &self.device,
+                &wgpu::TextureDescriptor {
+                    label: Some("terrain_viewer_pbr.ibl_fallback_brdf"),
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba16Float,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba16Float,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
+            )?;
             let zero = f16::from_f32(0.0).to_bits();
             let one = f16::from_f32(1.0).to_bits();
             let texels = [zero, zero, zero, one];
@@ -129,6 +136,7 @@ impl ViewerTerrainScene {
                 }));
             self.terrain_ibl_fallback_brdf = Some(brdf);
         }
+        Ok(())
     }
 
     fn load_terrain_ibl(&mut self, path: &std::path::Path) -> anyhow::Result<()> {
@@ -185,8 +193,8 @@ impl ViewerTerrainScene {
         Ok(())
     }
 
-    pub(super) fn ensure_terrain_ibl_resources(&mut self) {
-        self.ensure_terrain_ibl_fallback_resources();
+    pub(super) fn ensure_terrain_ibl_resources(&mut self) -> anyhow::Result<()> {
+        self.ensure_terrain_ibl_fallback_resources()?;
 
         let desired_path = self.pbr_config.hdr_path.clone();
         match desired_path {
@@ -215,6 +223,7 @@ impl ViewerTerrainScene {
                 }
             }
         }
+        Ok(())
     }
 
     pub(super) fn terrain_ibl_uniform_params(&self) -> [f32; 4] {
@@ -236,24 +245,30 @@ impl ViewerTerrainScene {
 
     /// Prepare PBR bind group with current uniforms (called before render pass)
     /// Gets heightmap_view internally from self.terrain to avoid borrow issues
-    pub(super) fn prepare_pbr_bind_group_internal(&mut self, uniforms: &TerrainPbrUniforms) {
+    pub(super) fn prepare_pbr_bind_group_internal(
+        &mut self,
+        uniforms: &TerrainPbrUniforms,
+    ) -> anyhow::Result<()> {
         // Ensure fallback texture exists first (before any borrows)
-        self.ensure_fallback_texture();
-        self.ensure_terrain_ibl_resources();
+        self.ensure_fallback_texture()?;
+        self.ensure_terrain_ibl_resources()?;
 
         // Early return checks
         if self.pbr_bind_group_layout.is_none() || self.terrain.is_none() {
-            return;
+            return Ok(());
         }
 
         // Create or update uniform buffer
         if self.pbr_uniform_buffer.is_none() {
-            self.pbr_uniform_buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("terrain_viewer_pbr.uniform_buffer"),
-                size: std::mem::size_of::<TerrainPbrUniforms>() as u64,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
+            self.pbr_uniform_buffer = Some(tracked_create_buffer(
+                &self.device,
+                &wgpu::BufferDescriptor {
+                    label: Some("terrain_viewer_pbr.uniform_buffer"),
+                    size: std::mem::size_of::<TerrainPbrUniforms>() as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                },
+            )?);
         }
 
         // Write uniforms
@@ -280,10 +295,10 @@ impl ViewerTerrainScene {
         if let Some(ref mut stack) = self.overlay_stack {
             if stack.is_dirty() {
                 if let Some(ref terrain) = self.terrain {
-                    stack.build_composite(terrain.dimensions.0, terrain.dimensions.1);
+                    stack.build_composite(terrain.dimensions.0, terrain.dimensions.1)?;
                 }
             }
-            stack.ensure_fallback_texture();
+            stack.ensure_fallback_texture()?;
         }
 
         // Now borrow everything we need
@@ -330,20 +345,23 @@ impl ViewerTerrainScene {
                 } else {
                     eprintln!("[WARN] CSM moment maps not created - using fallback");
                     // Create fallback moment texture
-                    let fallback = self.device.create_texture(&wgpu::TextureDescriptor {
-                        label: Some("csm_moment_fallback"),
-                        size: wgpu::Extent3d {
-                            width: 1,
-                            height: 1,
-                            depth_or_array_layers: 4,
+                    let fallback = tracked_create_texture(
+                        &self.device,
+                        &wgpu::TextureDescriptor {
+                            label: Some("csm_moment_fallback"),
+                            size: wgpu::Extent3d {
+                                width: 1,
+                                height: 1,
+                                depth_or_array_layers: 4,
+                            },
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format: wgpu::TextureFormat::Rgba16Float,
+                            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                            view_formats: &[],
                         },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::Rgba16Float,
-                        usage: wgpu::TextureUsages::TEXTURE_BINDING,
-                        view_formats: &[],
-                    });
+                    )?;
                     let moment_view = fallback.create_view(&wgpu::TextureViewDescriptor {
                         dimension: Some(wgpu::TextureViewDimension::D2Array),
                         ..Default::default()
@@ -352,7 +370,7 @@ impl ViewerTerrainScene {
                 }
             } else {
                 eprintln!("[ERROR] CSM renderer not initialized - cannot create PBR bind group");
-                return;
+                return Ok(());
             };
 
         // Moment sampler (Filtering)
@@ -375,7 +393,7 @@ impl ViewerTerrainScene {
         let csm_buffer = if let Some(buf) = &self.csm_uniform_buffer {
             buf
         } else {
-            return;
+            return Ok(());
         };
 
         // P6.2: Write CSM uniforms with technique value from pbr_config
@@ -528,28 +546,32 @@ impl ViewerTerrainScene {
                 ],
             }));
         }
+        Ok(())
     }
 
     /// Ensure fallback 1x1 white texture exists for when AO/sun_vis are disabled
-    pub(super) fn ensure_fallback_texture(&mut self) {
+    pub(super) fn ensure_fallback_texture(&mut self) -> anyhow::Result<()> {
         if self.fallback_texture.is_some() {
-            return;
+            return Ok(());
         }
 
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain_viewer.fallback_texture"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
+        let texture = tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain_viewer.fallback_texture"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
 
         // Write 1.0 (fully lit / no occlusion)
         self.queue.write_texture(
@@ -575,6 +597,7 @@ impl ViewerTerrainScene {
         self.fallback_texture_view =
             Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
         self.fallback_texture = Some(texture);
+        Ok(())
     }
 
     /// Dispatch compute passes for heightfield AO and sun visibility
