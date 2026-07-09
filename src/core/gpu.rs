@@ -60,10 +60,12 @@ pub fn active_backend() -> Option<String> {
 /// NOT include `-C target-feature=+relaxed-simd` (relaxed SIMD is
 /// nondeterministic by design); the determinism CI matrix documents this.
 ///
-/// Software rasterizer adapters (WARP, lavapipe) are REFUSED under
+/// Software rasterizer adapters (WARP, lavapipe) and hypervisor-virtualized
+/// GPUs (Apple Paravirtual, VirtIO, VMware, ...) are REFUSED under
 /// deterministic mode unless `FORGE3D_DETERMINISTIC_ALLOW_SOFTWARE=1` is set
-/// (see [`deterministic_allow_software`]): a software adapter is a different
-/// "vendor" and its hash must never masquerade as a hardware leg's.
+/// (see [`deterministic_allow_software`]): neither is the physical hardware a
+/// determinism leg claims to measure, and their hashes must never masquerade
+/// as a hardware leg's.
 pub fn deterministic_mode() -> bool {
     matches!(
         std::env::var("FORGE3D_DETERMINISTIC")
@@ -74,11 +76,12 @@ pub fn deterministic_mode() -> bool {
     )
 }
 
-/// TERRA-DETERMINATA escape hatch: allow a software rasterizer adapter under
-/// deterministic mode. Off by default because a software adapter is a
-/// different "vendor" whose hash must never masquerade as a hardware leg's;
-/// set `FORGE3D_DETERMINISTIC_ALLOW_SOFTWARE=1` only for an explicitly
-/// software-labelled determinism leg.
+/// TERRA-DETERMINATA escape hatch: allow a software rasterizer or
+/// hypervisor-virtualized GPU adapter under deterministic mode. Off by
+/// default because such adapters are a different "vendor" whose hash must
+/// never masquerade as a hardware leg's; set
+/// `FORGE3D_DETERMINISTIC_ALLOW_SOFTWARE=1` only for an explicitly
+/// software/virtual-labelled determinism leg.
 pub fn deterministic_allow_software() -> bool {
     matches!(
         std::env::var("FORGE3D_DETERMINISTIC_ALLOW_SOFTWARE")
@@ -227,19 +230,31 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
         }
 
         if deterministic_mode() {
-            // A software rasterizer (WARP, lavapipe) is effectively a different
-            // "vendor": accepting one under deterministic mode would silently
-            // change what a CI leg measures (a software hash instead of the
-            // hardware hash the golden pins). Refuse it unless the caller
-            // explicitly opts in for a dedicated software leg.
-            if software_fallback && !deterministic_allow_software() {
+            // A software rasterizer (WARP, lavapipe) or a hypervisor-virtualized
+            // GPU (e.g. the "Apple Paravirtual device" on hosted macOS runners)
+            // is effectively a different "vendor": accepting one under
+            // deterministic mode would silently change what a CI leg measures
+            // (a software/VM hash instead of the hardware hash the golden pins;
+            // measured 2026-07-10: the paravirtual Metal hash is bit-stable but
+            // systematically differs from real-hardware goldens). Refuse both
+            // unless the caller explicitly opts in for a dedicated leg.
+            let lowered_name = adapter_info.name.to_lowercase();
+            let virtualized = ["paravirtual", "virtio", "vmware", "virtualbox", "qxl"]
+                .iter()
+                .any(|marker| lowered_name.contains(marker));
+            if (software_fallback || virtualized) && !deterministic_allow_software() {
+                let kind = if software_fallback {
+                    "software rasterizer"
+                } else {
+                    "hypervisor-virtualized GPU"
+                };
                 return Err(RenderError::device(format!(
-                    "FORGE3D_DETERMINISTIC: only a software rasterizer adapter is available \
-                     ('{}', {:?} backend). A software adapter is a different \"vendor\" and \
+                    "FORGE3D_DETERMINISTIC: only a {kind} adapter is available \
+                     ('{}', {:?} backend). Such an adapter is a different \"vendor\" and \
                      its hash would not be comparable to hardware goldens; refusing to \
-                     render. Run on a host with a hardware GPU for this backend, or set \
-                     FORGE3D_DETERMINISTIC_ALLOW_SOFTWARE=1 to explicitly measure the \
-                     software rasterizer as its own leg.",
+                     render. Run on a host with a physical GPU for this backend, or set \
+                     FORGE3D_DETERMINISTIC_ALLOW_SOFTWARE=1 to explicitly measure this \
+                     adapter as its own leg.",
                     adapter_info.name, adapter_info.backend
                 )));
             }
