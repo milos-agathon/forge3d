@@ -113,7 +113,9 @@ def _try_create_scene():
     """Attempt to create a Scene; return None if GPU/shader init fails."""
     try:
         return _native.Scene(64, 64)
-    except Exception:
+    except BaseException as exc:
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
         return None
 
 

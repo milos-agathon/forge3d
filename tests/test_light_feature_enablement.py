@@ -26,7 +26,9 @@ _HAS_GPU = f3d.has_gpu()
 def _try_create_scene():
     try:
         return _native.Scene(64, 64)
-    except Exception:
+    except BaseException as exc:
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
         return None
 
 
