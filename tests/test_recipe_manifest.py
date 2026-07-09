@@ -135,7 +135,7 @@ def test_dataclass_construction_for_terrain_demo_manifest():
         source_examples=["python/forge3d/terrain_demo.py"],
         source_evidence=[
             rm.SourceEvidence(
-                path="docs/carto-engine/golden-map-recipe-capability-audit.md",
+                path="docs/3d-map-rendering-quality-blender-outmatch-plan.md",
                 line_start=121,
                 line_end=170,
                 note="terrain demo recipe evidence",
@@ -230,7 +230,7 @@ def test_validation_can_emit_every_stable_diagnostic_token(token, mutate):
 def test_missing_source_path_detection_is_local_to_repo():
     data = _base_manifest_dict()
     data["source_evidence"] = [
-        {"path": "docs/carto-engine/golden-map-recipe-capability-audit.md"},
+        {"path": "docs/3d-map-rendering-quality-blender-outmatch-plan.md"},
         {"path": "docs/carto-engine/does-not-exist.md"},
     ]
 
@@ -239,7 +239,7 @@ def test_missing_source_path_detection_is_local_to_repo():
 
 def test_absolute_source_paths_are_rejected_without_existence_probe(monkeypatch):
     data = _base_manifest_dict()
-    source_path = REPO_ROOT / "docs" / "carto-engine" / "golden-map-recipe-capability-audit.md"
+    source_path = REPO_ROOT / "docs" / "3d-map-rendering-quality-blender-outmatch-plan.md"
     data["source_examples"] = [str(source_path)]
     data["source_evidence"] = []
 

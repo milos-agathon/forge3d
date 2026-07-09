@@ -108,7 +108,7 @@
       "line_end": 499,
       "line_start": 486,
       "note": "climate bivariate recipe evidence",
-      "path": "docs/carto-engine/golden-map-recipe-capability-audit.md"
+      "path": "docs/3d-map-rendering-quality-blender-outmatch-plan.md"
     },
     {
       "line_end": 261,
@@ -118,7 +118,7 @@
     }
   ],
   "source_examples": [
-    "docs/carto-engine/golden-map-recipe-capability-audit.md"
+    "docs/3d-map-rendering-quality-blender-outmatch-plan.md"
   ],
   "status": "exists_only_as_example_or_script_logic",
   "styling_defaults": {
