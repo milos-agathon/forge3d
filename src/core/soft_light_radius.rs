@@ -1,8 +1,9 @@
 // B12: Soft Light Radius (Raster) - Core Rust implementation
 // Provides soft light radius control with configurable falloff for raster lighting
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_buffer_init, TrackedBuffer};
 use bytemuck::{Pod, Zeroable};
-use wgpu::util::DeviceExt;
 
 /// Light falloff modes for soft radius control
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,13 +160,13 @@ impl SoftLightPreset {
 pub struct SoftLightRadiusRenderer {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
-    uniforms_buffer: wgpu::Buffer,
+    uniforms_buffer: TrackedBuffer,
     bind_group: Option<wgpu::BindGroup>,
     uniforms: SoftLightRadiusUniforms,
 }
 
 impl SoftLightRadiusRenderer {
-    pub fn new(device: &wgpu::Device) -> Self {
+    pub fn new(device: &wgpu::Device) -> RenderResult<Self> {
         // Load shader
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("soft_light_radius_shader"),
@@ -259,19 +260,22 @@ impl SoftLightRadiusRenderer {
 
         // Create uniforms buffer
         let uniforms = SoftLightRadiusUniforms::default();
-        let uniforms_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("soft_light_radius_uniforms"),
-            contents: bytemuck::cast_slice(&[uniforms]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let uniforms_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("soft_light_radius_uniforms"),
+                contents: bytemuck::cast_slice(&[uniforms]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        )?;
 
-        Self {
+        Ok(Self {
             pipeline,
             bind_group_layout,
             uniforms_buffer,
             bind_group: None,
             uniforms,
-        }
+        })
     }
 
     /// Set light position

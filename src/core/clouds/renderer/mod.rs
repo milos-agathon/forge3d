@@ -1,9 +1,11 @@
 use glam::{Mat4, Vec2, Vec3};
 use std::borrow::Cow;
 use wgpu::{
-    vertex_attr_array, BindGroup, BindGroupLayout, Buffer, BufferAddress, ComputePipeline, Device,
-    Queue, RenderPipeline, Sampler, Texture, TextureFormat, TextureView,
+    vertex_attr_array, BindGroup, BindGroupLayout, BufferAddress, ComputePipeline, Device, Queue,
+    RenderPipeline, Sampler, TextureFormat, TextureView,
 };
+
+use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 
 use super::types::*;
 
@@ -18,11 +20,11 @@ mod textures;
 pub struct CloudRenderer {
     pub uniforms: CloudUniforms,
     pub params: CloudParams,
-    pub uniform_buffer: Buffer,
+    pub uniform_buffer: TrackedBuffer,
     pub cloud_pipeline: RenderPipeline,
     pub compute_pipeline: Option<ComputePipeline>,
-    pub vertex_buffer: Buffer,
-    pub index_buffer: Buffer,
+    pub vertex_buffer: TrackedBuffer,
+    pub index_buffer: TrackedBuffer,
     pub index_count: u32,
     pub bind_group_layout_uniforms: BindGroupLayout,
     pub bind_group_layout_textures: BindGroupLayout,
@@ -30,13 +32,13 @@ pub struct CloudRenderer {
     pub bind_group_uniforms: BindGroup,
     pub bind_group_textures: Option<BindGroup>,
     pub bind_group_ibl: Option<BindGroup>,
-    pub noise_texture: Option<Texture>,
+    pub noise_texture: Option<TrackedTexture>,
     pub noise_view: Option<TextureView>,
-    pub shape_texture: Option<Texture>,
+    pub shape_texture: Option<TrackedTexture>,
     pub shape_view: Option<TextureView>,
-    pub ibl_irradiance_texture: Option<Texture>,
+    pub ibl_irradiance_texture: Option<TrackedTexture>,
     pub ibl_irradiance_view: Option<TextureView>,
-    pub ibl_prefilter_texture: Option<Texture>,
+    pub ibl_prefilter_texture: Option<TrackedTexture>,
     pub ibl_prefilter_view: Option<TextureView>,
     pub cloud_sampler: Sampler,
     pub shape_sampler: Sampler,

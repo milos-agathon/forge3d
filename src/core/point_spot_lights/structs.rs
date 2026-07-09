@@ -1,4 +1,5 @@
 use super::types::{Light, PointSpotLightUniforms};
+use crate::core::resource_tracker::TrackedBuffer;
 use std::collections::HashMap;
 use wgpu;
 
@@ -13,8 +14,8 @@ pub struct PointSpotLightRenderer {
     pub(crate) shadow_bind_group_layout: wgpu::BindGroupLayout,
 
     // Buffers
-    pub(crate) uniforms_buffer: wgpu::Buffer,
-    pub(crate) lights_buffer: wgpu::Buffer,
+    pub(crate) uniforms_buffer: TrackedBuffer,
+    pub(crate) lights_buffer: TrackedBuffer,
 
     // Shadow mapping resources
     pub(crate) _shadow_map_array: Option<wgpu::Texture>,

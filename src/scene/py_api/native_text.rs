@@ -254,7 +254,7 @@ impl Scene {
         // Update text overlay renderer state
         if let Some(ref mut tr) = self.text_overlay_renderer {
             tr.set_atlas(tex, view);
-            tr.recreate_bind_group(&g.device, None);
+            tr.recreate_bind_group(&g.device, None)?;
             if let Some(ch) = channels {
                 tr.set_channels(ch);
             }

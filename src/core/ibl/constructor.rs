@@ -1,7 +1,9 @@
 use super::*;
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::tracked_create_buffer_init;
 
 impl IBLRenderer {
-    pub fn new(device: &wgpu::Device, quality: IBLQuality) -> Self {
+    pub fn new(device: &wgpu::Device, quality: IBLQuality) -> RenderResult<Self> {
         let shader_equirect = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ibl.precompute.shader.equirect"),
             source: wgpu::ShaderSource::Wgsl(
@@ -226,11 +228,14 @@ impl IBLRenderer {
 
         let base_resolution = quality.base_environment_size();
         let uniforms = PrefilterUniforms::new(base_resolution, quality);
-        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("ibl.prefilter.uniforms"),
-            contents: bytemuck::bytes_of(&uniforms),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let uniform_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("ibl.prefilter.uniforms"),
+                contents: bytemuck::bytes_of(&uniforms),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        )?;
 
         let env_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("ibl.runtime.sampler"),
@@ -259,7 +264,7 @@ impl IBLRenderer {
             ..Default::default()
         });
 
-        Self {
+        Ok(Self {
             quality,
             base_resolution,
             equirect_layout,
@@ -289,6 +294,6 @@ impl IBLRenderer {
             cache: None,
             pbr_bind_group: None,
             is_initialized: false,
-        }
+        })
     }
 }

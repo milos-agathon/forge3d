@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 
 mod layouts;
 mod pipelines;
@@ -21,27 +22,27 @@ struct ConstructorPipelines {
 }
 
 struct ConstructorBuffers {
-    settings_buffer: Buffer,
-    camera_buffer: Buffer,
-    composite_uniform: Buffer,
+    settings_buffer: TrackedBuffer,
+    camera_buffer: TrackedBuffer,
+    composite_uniform: TrackedBuffer,
 }
 
 struct ConstructorResources {
-    ssgi_hit: Texture,
+    ssgi_hit: TrackedTexture,
     ssgi_hit_view: TextureView,
-    ssgi_texture: Texture,
+    ssgi_texture: TrackedTexture,
     ssgi_view: TextureView,
-    ssgi_history: Texture,
+    ssgi_history: TrackedTexture,
     ssgi_history_view: TextureView,
-    ssgi_filtered: Texture,
+    ssgi_filtered: TrackedTexture,
     ssgi_filtered_view: TextureView,
-    ssgi_upscaled: Texture,
+    ssgi_upscaled: TrackedTexture,
     ssgi_upscaled_view: TextureView,
-    ssgi_composited: Texture,
+    ssgi_composited: TrackedTexture,
     ssgi_composited_view: TextureView,
-    scene_history: [Texture; 2],
+    scene_history: [TrackedTexture; 2],
     scene_history_views: [TextureView; 2],
-    env_texture: Texture,
+    env_texture: TrackedTexture,
     env_view: TextureView,
     env_sampler: Sampler,
     linear_sampler: Sampler,
@@ -57,10 +58,10 @@ impl SsgiRenderer {
         let mut settings = SsgiSettings::default();
         settings.inv_resolution = [1.0 / width as f32, 1.0 / height as f32];
 
-        let buffers = resources::create_buffers(device);
+        let buffers = resources::create_buffers(device)?;
         let layouts = layouts::create_layouts(device);
         let pipelines = pipelines::create_pipelines(device, &layouts);
-        let textures = resources::create_textures(device, width, height, material_format);
+        let textures = resources::create_textures(device, width, height, material_format)?;
 
         Ok(Self {
             settings,

@@ -4,6 +4,8 @@
 //! samplers, and uniform buffers.
 
 use super::types::{CsmConfig, CsmUniforms};
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 
 /// Create depth views for each cascade
 pub fn create_cascade_depth_views(
@@ -59,11 +61,14 @@ pub fn create_shadow_sampler(device: &wgpu::Device) -> wgpu::Sampler {
 }
 
 /// Create CSM uniform buffer
-pub fn create_uniform_buffer(device: &wgpu::Device) -> wgpu::Buffer {
-    device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("CSM Uniforms"),
-        size: std::mem::size_of::<CsmUniforms>() as u64,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    })
+pub fn create_uniform_buffer(device: &wgpu::Device) -> RenderResult<TrackedBuffer> {
+    tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("CSM Uniforms"),
+            size: std::mem::size_of::<CsmUniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )
 }

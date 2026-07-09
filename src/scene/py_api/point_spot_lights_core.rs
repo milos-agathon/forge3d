@@ -9,7 +9,7 @@ impl Scene {
         let g = crate::core::gpu::try_ctx()?;
         let max_lights = max_lights.unwrap_or(32);
         let renderer =
-            crate::core::point_spot_lights::PointSpotLightRenderer::new(&g.device, max_lights);
+            crate::core::point_spot_lights::PointSpotLightRenderer::new(&g.device, max_lights)?;
 
         self.point_spot_lights_renderer = Some(renderer);
         self.point_spot_lights_enabled = true;

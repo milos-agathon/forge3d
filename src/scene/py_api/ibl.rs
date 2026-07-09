@@ -20,7 +20,7 @@ impl Scene {
             }
         };
 
-        let mut renderer = crate::core::ibl::IBLRenderer::new(&g.device, quality_enum);
+        let mut renderer = crate::core::ibl::IBLRenderer::new(&g.device, quality_enum)?;
 
         // Initialize with default environment
         renderer

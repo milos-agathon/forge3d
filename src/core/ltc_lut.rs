@@ -3,6 +3,7 @@
 // RELEVANT FILES: shaders/ltc_area_lights.wgsl
 
 use super::ltc_types::LTC_LUT_SIZE;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use glam::{Mat3, Vec3};
 
 /// Generate LTC matrix lookup table data
@@ -68,21 +69,25 @@ pub fn compute_ltc_matrix(roughness: f32, theta: f32) -> Mat3 {
 }
 
 /// Create LTC matrix lookup texture
-pub fn create_ltc_matrix_texture(device: &wgpu::Device) -> Result<wgpu::Texture, String> {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("LTC Matrix Texture"),
-        size: wgpu::Extent3d {
-            width: LTC_LUT_SIZE,
-            height: LTC_LUT_SIZE,
-            depth_or_array_layers: 1,
+pub fn create_ltc_matrix_texture(device: &wgpu::Device) -> Result<TrackedTexture, String> {
+    let texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("LTC Matrix Texture"),
+            size: wgpu::Extent3d {
+                width: LTC_LUT_SIZE,
+                height: LTC_LUT_SIZE,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: super::ltc_types::LTC_LUT_FORMAT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: super::ltc_types::LTC_LUT_FORMAT,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    )
+    .map_err(|e| e.to_string())?;
 
     // Generate LTC matrix data
     let _matrix_data = generate_ltc_matrix_data();
@@ -96,21 +101,25 @@ pub fn create_ltc_matrix_texture(device: &wgpu::Device) -> Result<wgpu::Texture,
 }
 
 /// Create LTC scale lookup texture with amplitude and fresnel data
-pub fn create_ltc_scale_texture(device: &wgpu::Device) -> Result<wgpu::Texture, String> {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("LTC Scale Texture"),
-        size: wgpu::Extent3d {
-            width: LTC_LUT_SIZE,
-            height: LTC_LUT_SIZE,
-            depth_or_array_layers: 1,
+pub fn create_ltc_scale_texture(device: &wgpu::Device) -> Result<TrackedTexture, String> {
+    let texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("LTC Scale Texture"),
+            size: wgpu::Extent3d {
+                width: LTC_LUT_SIZE,
+                height: LTC_LUT_SIZE,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rg32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rg32Float,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok(texture)
 }

@@ -1,7 +1,9 @@
 use super::types::{DefragStats, MemoryPoolStats};
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use wgpu::{Buffer, BufferDescriptor, BufferUsages, Device};
+use wgpu::{BufferDescriptor, BufferUsages, Device};
 
 /// A single allocated block from a memory pool
 #[derive(Debug, Clone)]
@@ -64,7 +66,7 @@ impl Drop for PoolBlock {
 /// A single memory pool for a specific size bucket
 struct MemoryPool {
     /// GPU buffer for this pool
-    _buffer: Buffer,
+    _buffer: TrackedBuffer,
     /// Size of each allocation in this pool
     allocation_size: u64,
     /// Total pool size
@@ -78,29 +80,37 @@ struct MemoryPool {
 }
 
 impl MemoryPool {
-    fn new(device: &Device, allocation_size: u64, pool_size: u64, pool_id: u8) -> Self {
+    fn new(
+        device: &Device,
+        allocation_size: u64,
+        pool_size: u64,
+        pool_id: u8,
+    ) -> RenderResult<Self> {
         // Ensure 64-byte alignment
         let aligned_size = ((allocation_size + 63) / 64) * 64;
         let aligned_pool_size = ((pool_size + 63) / 64) * 64;
 
-        let buffer = device.create_buffer(&BufferDescriptor {
-            label: Some(&format!("MemoryPool_{}", pool_id)),
-            size: aligned_pool_size,
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
+        let buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some(&format!("memory_tracker.pool_{}", pool_id)),
+                size: aligned_pool_size,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            },
+        )?;
 
         // Initially, the entire buffer is one free block
         let free_blocks = vec![(0, aligned_pool_size)];
 
-        Self {
+        Ok(Self {
             _buffer: buffer,
             allocation_size: aligned_size,
             total_size: aligned_pool_size,
             free_blocks,
             allocated_blocks: HashMap::new(),
             next_block_id: 1,
-        }
+        })
     }
 
     fn allocate_block(&mut self) -> Option<(u64, u64, Arc<Mutex<u32>>)> {
@@ -199,27 +209,27 @@ pub struct MemoryPoolManager {
 
 impl MemoryPoolManager {
     /// Create a new memory pool manager with power-of-two size buckets
-    pub fn new(device: &Device) -> Self {
+    pub fn new(device: &Device) -> RenderResult<Self> {
         // Create power-of-two buckets from 64B to 8MB
         let size_buckets: Vec<u64> = (6..24).map(|i| 1u64 << i).collect(); // 2^6 to 2^23
 
         let mut pools = Vec::new();
         for (pool_id, &bucket_size) in size_buckets.iter().enumerate() {
             let pool_size = bucket_size * 1024; // 1024 blocks per pool
-            let pool = MemoryPool::new(device, bucket_size, pool_size, pool_id as u8);
+            let pool = MemoryPool::new(device, bucket_size, pool_size, pool_id as u8)?;
             pools.push(pool);
         }
 
         let pool_count = size_buckets.len() as u32;
 
-        Self {
+        Ok(Self {
             pools,
             size_buckets,
             stats: MemoryPoolStats {
                 pool_count,
                 ..Default::default()
             },
-        }
+        })
     }
 
     /// Allocate a block from the appropriate size bucket
@@ -336,10 +346,14 @@ static GLOBAL_POOL_MANAGER: std::sync::OnceLock<Arc<Mutex<MemoryPoolManager>>> =
     std::sync::OnceLock::new();
 
 /// Initialize global memory pool manager
-pub fn init_global_pools(device: &Device) -> Arc<Mutex<MemoryPoolManager>> {
-    GLOBAL_POOL_MANAGER
-        .get_or_init(|| Arc::new(Mutex::new(MemoryPoolManager::new(device))))
-        .clone()
+pub fn init_global_pools(device: &Device) -> RenderResult<Arc<Mutex<MemoryPoolManager>>> {
+    if let Some(existing) = GLOBAL_POOL_MANAGER.get() {
+        return Ok(existing.clone());
+    }
+    // Build the manager fallibly (pool allocations are tracked) before handing
+    // it to the OnceLock, which cannot run a fallible initializer.
+    let manager = Arc::new(Mutex::new(MemoryPoolManager::new(device)?));
+    Ok(GLOBAL_POOL_MANAGER.get_or_init(|| manager).clone())
 }
 
 /// Get reference to global memory pool manager

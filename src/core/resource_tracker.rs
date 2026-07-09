@@ -142,10 +142,16 @@ impl AllocationLedger {
             },
         );
         if host_visible {
-            let cur = self.current_host_visible.fetch_add(bytes, Ordering::Relaxed) + bytes;
+            let cur = self
+                .current_host_visible
+                .fetch_add(bytes, Ordering::Relaxed)
+                + bytes;
             self.peak_host_visible.fetch_max(cur, Ordering::Relaxed);
         } else {
-            let cur = self.current_device_local.fetch_add(bytes, Ordering::Relaxed) + bytes;
+            let cur = self
+                .current_device_local
+                .fetch_add(bytes, Ordering::Relaxed)
+                + bytes;
             self.peak_device_local.fetch_max(cur, Ordering::Relaxed);
         }
         id
@@ -265,6 +271,7 @@ pub fn ledger_top_consumers_string(n: usize) -> String {
 ///
 /// `Deref`s to the inner buffer; dropping removes the ledger entry (the inner
 /// `ResourceHandle` frees the registry accounting via its own `Drop`).
+#[derive(Debug)]
 pub struct TrackedBuffer {
     inner: wgpu::Buffer,
     _registry: ResourceHandle,
@@ -292,6 +299,7 @@ impl Drop for TrackedBuffer {
 }
 
 /// A `wgpu::Texture` whose lifetime is tracked in the global registry + ledger.
+#[derive(Debug)]
 pub struct TrackedTexture {
     inner: wgpu::Texture,
     _registry: ResourceHandle,
@@ -347,7 +355,13 @@ pub fn tracked_create_buffer(
     }
     let buffer = device.create_buffer(desc);
     let registry = register_buffer_explicit(desc.size, host_visible);
-    let ledger_id = ledger().insert(label, desc.size, host_visible, LedgerCategory::Buffer, call_site);
+    let ledger_id = ledger().insert(
+        label,
+        desc.size,
+        host_visible,
+        LedgerCategory::Buffer,
+        call_site,
+    );
     Ok(TrackedBuffer {
         inner: buffer,
         _registry: registry,

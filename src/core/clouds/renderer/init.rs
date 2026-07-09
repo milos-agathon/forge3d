@@ -1,4 +1,6 @@
 use super::*;
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::tracked_create_buffer;
 use wgpu::{
     BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry,
     BindingType, BufferBindingType, BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites,
@@ -9,13 +11,20 @@ use wgpu::{
 };
 
 impl CloudRenderer {
-    pub fn new(device: &Device, color_format: TextureFormat, sample_count: u32) -> Self {
-        let uniform_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("cloud_uniform_buffer"),
-            size: std::mem::size_of::<CloudUniforms>() as wgpu::BufferAddress,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+    pub fn new(
+        device: &Device,
+        color_format: TextureFormat,
+        sample_count: u32,
+    ) -> RenderResult<Self> {
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("cloud_uniform_buffer"),
+                size: std::mem::size_of::<CloudUniforms>() as wgpu::BufferAddress,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         let bind_group_layout_uniforms =
             device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -107,7 +116,7 @@ impl CloudRenderer {
             ],
         });
 
-        let (vertex_buffer, index_buffer, index_count) = Self::create_cloud_quad_geometry(device);
+        let (vertex_buffer, index_buffer, index_count) = Self::create_cloud_quad_geometry(device)?;
 
         let cloud_sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("cloud_density_sampler"),
@@ -252,6 +261,6 @@ impl CloudRenderer {
             enabled: true,
         };
         renderer.update_uniforms();
-        renderer
+        Ok(renderer)
     }
 }

@@ -4,12 +4,14 @@
 //! tone mapping operators for converting HDR to LDR display output.
 
 use crate::core::gpu_timing::GpuTimingManager;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 use wgpu::{
-    BindGroup, BindGroupDescriptor, BindGroupEntry, BindingResource, Buffer, BufferDescriptor,
+    BindGroup, BindGroupDescriptor, BindGroupEntry, BindingResource, BufferDescriptor,
     BufferUsages, CommandEncoder, Device, Extent3d, LoadOp, Operations, Queue, RenderPass,
-    RenderPassColorAttachment, RenderPassDescriptor, StoreOp, Texture, TextureDescriptor,
-    TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
-    TextureViewDimension,
+    RenderPassColorAttachment, RenderPassDescriptor, StoreOp, TextureDescriptor, TextureDimension,
+    TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension,
 };
 
 // Re-export types from split modules
@@ -21,14 +23,14 @@ pub use super::hdr_types::{HdrConfig, ToneMappingOperator, ToneMappingUniforms};
 
 /// HDR off-screen render target
 pub struct HdrRenderTarget {
-    pub hdr_texture: Texture,
+    pub hdr_texture: TrackedTexture,
     pub hdr_view: TextureView,
-    pub ldr_texture: Texture,
+    pub ldr_texture: TrackedTexture,
     pub ldr_view: TextureView,
-    pub depth_texture: Texture,
+    pub depth_texture: TrackedTexture,
     pub depth_view: TextureView,
     pub config: HdrConfig,
-    pub tonemap_uniforms: Buffer,
+    pub tonemap_uniforms: TrackedBuffer,
     pub tonemap_bind_group: BindGroup,
 }
 
@@ -36,22 +38,26 @@ impl HdrRenderTarget {
     /// Create new HDR render target
     pub fn new(device: &Device, config: HdrConfig) -> Result<Self, String> {
         // Create HDR texture (floating-point)
-        let hdr_texture = device.create_texture(&TextureDescriptor {
-            label: Some("hdr_color_texture"),
-            size: Extent3d {
-                width: config.width,
-                height: config.height,
-                depth_or_array_layers: 1,
+        let hdr_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("hdr_color_texture"),
+                size: Extent3d {
+                    width: config.width,
+                    height: config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: config.hdr_format,
+                usage: TextureUsages::RENDER_ATTACHMENT
+                    | TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: config.hdr_format,
-            usage: TextureUsages::RENDER_ATTACHMENT
-                | TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
 
         let hdr_view = hdr_texture.create_view(&TextureViewDescriptor {
             label: Some("hdr_color_view"),
@@ -59,22 +65,26 @@ impl HdrRenderTarget {
         });
 
         // Create LDR output texture
-        let ldr_texture = device.create_texture(&TextureDescriptor {
-            label: Some("ldr_color_texture"),
-            size: Extent3d {
-                width: config.width,
-                height: config.height,
-                depth_or_array_layers: 1,
+        let ldr_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("ldr_color_texture"),
+                size: Extent3d {
+                    width: config.width,
+                    height: config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba8UnormSrgb,
+                usage: TextureUsages::RENDER_ATTACHMENT
+                    | TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8UnormSrgb,
-            usage: TextureUsages::RENDER_ATTACHMENT
-                | TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
 
         let ldr_view = ldr_texture.create_view(&TextureViewDescriptor {
             label: Some("ldr_color_view"),
@@ -82,20 +92,24 @@ impl HdrRenderTarget {
         });
 
         // Create depth texture
-        let depth_texture = device.create_texture(&TextureDescriptor {
-            label: Some("hdr_depth_texture"),
-            size: Extent3d {
-                width: config.width,
-                height: config.height,
-                depth_or_array_layers: 1,
+        let depth_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("hdr_depth_texture"),
+                size: Extent3d {
+                    width: config.width,
+                    height: config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Depth32Float,
+                usage: TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Depth32Float,
-            usage: TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
 
         let depth_view = depth_texture.create_view(&TextureViewDescriptor {
             label: Some("hdr_depth_view"),
@@ -103,12 +117,16 @@ impl HdrRenderTarget {
         });
 
         // Create tone mapping uniforms
-        let tonemap_uniforms = device.create_buffer(&BufferDescriptor {
-            label: Some("tonemap_uniforms"),
-            size: std::mem::size_of::<ToneMappingUniforms>() as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let tonemap_uniforms = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("tonemap_uniforms"),
+                size: std::mem::size_of::<ToneMappingUniforms>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
         // Create bind group layout and bind group for tone mapping
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

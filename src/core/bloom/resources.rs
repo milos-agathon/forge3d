@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use crate::core::error::RenderResult;
 use crate::core::postfx::{PostFxResourceDesc, PostFxResourcePool};
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use wgpu::*;
 
 pub(super) struct BloomLayouts {
@@ -18,9 +19,9 @@ pub(super) struct BloomPipelines {
 }
 
 pub(super) struct BloomUniformBuffers {
-    pub(super) brightpass: Buffer,
-    pub(super) blur: Buffer,
-    pub(super) composite: Buffer,
+    pub(super) brightpass: TrackedBuffer,
+    pub(super) blur: TrackedBuffer,
+    pub(super) composite: TrackedBuffer,
 }
 
 pub(super) fn create_layouts(device: &Device) -> BloomLayouts {
@@ -89,24 +90,24 @@ pub(super) fn create_pipelines(device: &Device, layouts: &BloomLayouts) -> Bloom
     }
 }
 
-pub(super) fn create_uniform_buffers(device: &Device) -> BloomUniformBuffers {
-    BloomUniformBuffers {
+pub(super) fn create_uniform_buffers(device: &Device) -> RenderResult<BloomUniformBuffers> {
+    Ok(BloomUniformBuffers {
         brightpass: create_uniform_buffer(
             device,
             "bloom_brightpass_uniforms",
             std::mem::size_of::<super::config::BloomBrightPassUniforms>() as BufferAddress,
-        ),
+        )?,
         blur: create_uniform_buffer(
             device,
             "bloom_blur_uniforms",
             std::mem::size_of::<super::config::BloomBlurUniforms>() as BufferAddress,
-        ),
+        )?,
         composite: create_uniform_buffer(
             device,
             "bloom_composite_uniforms",
             std::mem::size_of::<super::config::BloomCompositeUniforms>() as BufferAddress,
-        ),
-    }
+        )?,
+    })
 }
 
 pub(super) fn allocate_resource_indices(
@@ -231,11 +232,18 @@ fn create_pipeline(
     })
 }
 
-fn create_uniform_buffer(device: &Device, label: &str, size: BufferAddress) -> Buffer {
-    device.create_buffer(&BufferDescriptor {
-        label: Some(label),
-        size,
-        usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    })
+fn create_uniform_buffer(
+    device: &Device,
+    label: &str,
+    size: BufferAddress,
+) -> RenderResult<TrackedBuffer> {
+    tracked_create_buffer(
+        device,
+        &BufferDescriptor {
+            label: Some(label),
+            size,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )
 }

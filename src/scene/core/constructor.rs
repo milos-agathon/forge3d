@@ -118,7 +118,7 @@ impl Scene {
         let mut reflection_renderer = crate::core::reflections::PlanarReflectionRenderer::new(
             &g.device,
             crate::core::reflections::ReflectionQuality::Low,
-        );
+        )?;
         reflection_renderer.set_enabled(false);
         reflection_renderer.create_bind_group(&g.device, &tp.bgl_reflection);
         reflection_renderer.upload_uniforms(&g.queue);
@@ -127,19 +127,19 @@ impl Scene {
             &g.device,
             TEXTURE_FORMAT,
             height_filterable,
-        );
-        overlay_renderer.recreate_bind_group(&g.device, None, Some(&hview), None, None);
+        )?;
+        overlay_renderer.recreate_bind_group(&g.device, None, Some(&hview), None, None)?;
         overlay_renderer.upload_uniforms(&g.queue);
 
         let mut text_renderer =
-            crate::core::text_overlay::TextOverlayRenderer::new(&g.device, TEXTURE_FORMAT);
+            crate::core::text_overlay::TextOverlayRenderer::new(&g.device, TEXTURE_FORMAT)?;
         text_renderer.set_resolution(width, height);
         text_renderer.set_alpha(1.0);
         text_renderer.set_enabled(false);
         text_renderer.upload_uniforms(&g.queue);
 
         let mut text3d_renderer =
-            crate::core::text_mesh::TextMeshRenderer::new(&g.device, TEXTURE_FORMAT, depth_format);
+            crate::core::text_mesh::TextMeshRenderer::new(&g.device, TEXTURE_FORMAT, depth_format)?;
         text3d_renderer.set_view_proj(scene.view, scene.proj);
         text3d_renderer.set_color(1.0, 1.0, 1.0, 1.0);
         text3d_renderer.set_light_dir([0.5, 1.0, 0.3]);

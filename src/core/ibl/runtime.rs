@@ -53,9 +53,9 @@ impl IBLRenderer {
         Option<&wgpu::Texture>,
     ) {
         (
-            self.irradiance_map.as_ref(),
-            self.specular_map.as_ref(),
-            self.brdf_lut.as_ref(),
+            self.irradiance_map.as_ref().map(|t| t.inner()),
+            self.specular_map.as_ref().map(|t| t.inner()),
+            self.brdf_lut.as_ref().map(|t| t.inner()),
         )
     }
 

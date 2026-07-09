@@ -136,7 +136,7 @@ impl TerrainSpike {
                 &self.device,
                 TEXTURE_FORMAT,
                 self.height_filterable,
-            );
+            )?;
             self.overlay_renderer = Some(ov);
         }
         // Bind overlay view; use height mosaic if available for altitude/contour paths
@@ -149,7 +149,7 @@ impl TerrainSpike {
                 height_view_opt,
                 pt_buf_opt,
                 None,
-            );
+            )?;
             // Enable overlay by default with alpha 1.0
             ov.set_enabled(true);
             ov.set_overlay_alpha(1.0);

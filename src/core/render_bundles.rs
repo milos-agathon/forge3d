@@ -7,7 +7,11 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
+
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{
+    tracked_create_buffer_init, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 
 pub use super::render_bundles_types::{
     BundleBuffer, BundleBufferUsage, BundleDrawCall, BundlePerformanceStats, BundleResourceConfig,
@@ -18,8 +22,8 @@ pub use super::render_bundles_types::{
 pub struct RenderBundleBuilder {
     device: Arc<wgpu::Device>,
     config: RenderBundleConfig,
-    buffers: Vec<wgpu::Buffer>,
-    textures: Vec<wgpu::Texture>,
+    buffers: Vec<TrackedBuffer>,
+    textures: Vec<TrackedTexture>,
     bind_groups: Vec<wgpu::BindGroup>,
 }
 
@@ -34,15 +38,15 @@ impl RenderBundleBuilder {
         }
     }
 
-    pub fn add_vertex_buffer(&mut self, data: &[u8], label: Option<&str>) -> u32 {
+    pub fn add_vertex_buffer(&mut self, data: &[u8], label: Option<&str>) -> RenderResult<u32> {
         self.add_buffer(data, label, wgpu::BufferUsages::VERTEX)
     }
 
-    pub fn add_index_buffer(&mut self, data: &[u8], label: Option<&str>) -> u32 {
+    pub fn add_index_buffer(&mut self, data: &[u8], label: Option<&str>) -> RenderResult<u32> {
         self.add_buffer(data, label, wgpu::BufferUsages::INDEX)
     }
 
-    pub fn add_uniform_buffer(&mut self, data: &[u8], label: Option<&str>) -> u32 {
+    pub fn add_uniform_buffer(&mut self, data: &[u8], label: Option<&str>) -> RenderResult<u32> {
         self.add_buffer(
             data,
             label,
@@ -50,33 +54,42 @@ impl RenderBundleBuilder {
         )
     }
 
-    fn add_buffer(&mut self, data: &[u8], label: Option<&str>, usage: wgpu::BufferUsages) -> u32 {
-        let buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label,
+    fn add_buffer(
+        &mut self,
+        data: &[u8],
+        label: Option<&str>,
+        usage: wgpu::BufferUsages,
+    ) -> RenderResult<u32> {
+        let buffer = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
+                label: label.or(Some("render_bundles.buffer")),
                 contents: data,
                 usage,
-            });
+            },
+        )?;
         let slot = self.buffers.len() as u32;
         self.buffers.push(buffer);
-        slot
+        Ok(slot)
     }
 
-    pub fn add_texture(&mut self, config: BundleTexture) -> u32 {
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: config.label.as_deref(),
-            size: config.size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: config.format,
-            usage: config.usage,
-            view_formats: &[],
-        });
+    pub fn add_texture(&mut self, config: BundleTexture) -> RenderResult<u32> {
+        let texture = tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: config.label.as_deref().or(Some("render_bundles.texture")),
+                size: config.size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: config.format,
+                usage: config.usage,
+                view_formats: &[],
+            },
+        )?;
         let slot = self.textures.len() as u32;
         self.textures.push(texture);
-        slot
+        Ok(slot)
     }
 
     pub fn create_bind_group(

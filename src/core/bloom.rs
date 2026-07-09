@@ -6,6 +6,8 @@ mod resources;
 
 pub use config::BloomConfig;
 
+use crate::core::resource_tracker::TrackedBuffer;
+
 pub struct BloomEffect {
     pub(super) config: crate::core::postfx::PostFxConfig,
     pub(super) bloom_config: BloomConfig,
@@ -16,9 +18,9 @@ pub struct BloomEffect {
     pub(super) brightpass_layout: Option<wgpu::BindGroupLayout>,
     pub(super) blur_layout: Option<wgpu::BindGroupLayout>,
     pub(super) composite_layout: Option<wgpu::BindGroupLayout>,
-    pub(super) brightpass_uniform_buffer: Option<wgpu::Buffer>,
-    pub(super) blur_uniform_buffer: Option<wgpu::Buffer>,
-    pub(super) composite_uniform_buffer: Option<wgpu::Buffer>,
+    pub(super) brightpass_uniform_buffer: Option<TrackedBuffer>,
+    pub(super) blur_uniform_buffer: Option<TrackedBuffer>,
+    pub(super) composite_uniform_buffer: Option<TrackedBuffer>,
     pub(super) brightpass_texture_index: Option<usize>,
     pub(super) blur_temp_texture_index: Option<usize>,
 }

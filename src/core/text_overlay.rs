@@ -4,14 +4,17 @@
 
 use wgpu::{
     vertex_attr_array, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
-    BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, Buffer, BufferAddress,
-    BufferBindingType, BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, Device,
-    FragmentState, PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology, Queue,
-    RenderPipeline, RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor,
+    BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BufferAddress, BufferBindingType,
+    BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, Device, FragmentState,
+    PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology, Queue, RenderPipeline,
+    RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor,
     ShaderModuleDescriptor, ShaderSource, ShaderStages, Texture, TextureDescriptor,
     TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureView,
     TextureViewDescriptor, VertexBufferLayout, VertexState, VertexStepMode,
 };
+
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_texture, TrackedBuffer};
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -77,13 +80,13 @@ impl TextInstance {
 
 pub struct TextOverlayRenderer {
     pub uniforms: TextOverlayUniforms,
-    pub uniform_buffer: Buffer,
+    pub uniform_buffer: TrackedBuffer,
     pub bind_group_layout: BindGroupLayout,
     pub bind_group: BindGroup,
     pub pipeline: RenderPipeline,
 
-    pub quad_vbuf: Buffer,
-    pub instance_buf: Option<Buffer>,
+    pub quad_vbuf: TrackedBuffer,
+    pub instance_buf: Option<TrackedBuffer>,
     pub instance_count: u32,
 
     pub atlas_tex: Option<Texture>,
@@ -92,14 +95,17 @@ pub struct TextOverlayRenderer {
 }
 
 impl TextOverlayRenderer {
-    pub fn new(device: &Device, color_format: TextureFormat) -> Self {
+    pub fn new(device: &Device, color_format: TextureFormat) -> RenderResult<Self> {
         let uniforms = TextOverlayUniforms::default();
-        let uniform_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("text_overlay_uniforms"),
-            size: std::mem::size_of::<TextOverlayUniforms>() as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("text_overlay_uniforms"),
+                size: std::mem::size_of::<TextOverlayUniforms>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("text_overlay_bgl"),
@@ -137,20 +143,23 @@ impl TextOverlayRenderer {
         });
 
         // Fallback 1x1 white atlas for empty text.
-        let dummy_tex = device.create_texture(&TextureDescriptor {
-            label: Some("text_dummy_atlas"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
+        let dummy_tex = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("text_dummy_atlas"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba8Unorm,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8Unorm,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         let dummy_view = dummy_tex.create_view(&TextureViewDescriptor::default());
         let atlas_sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("text_atlas_sampler"),
@@ -246,19 +255,22 @@ impl TextOverlayRenderer {
             [1.0, 1.0],
             [0.0, 1.0],
         ];
-        let quad_vbuf = device.create_buffer(&BufferDescriptor {
-            label: Some("text_overlay_quad"),
-            size: (quad_data.len() * std::mem::size_of::<[f32; 2]>()) as u64,
-            usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-            mapped_at_creation: true,
-        });
+        let quad_vbuf = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("text_overlay_quad"),
+                size: (quad_data.len() * std::mem::size_of::<[f32; 2]>()) as u64,
+                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                mapped_at_creation: true,
+            },
+        )?;
         quad_vbuf
             .slice(..)
             .get_mapped_range_mut()
             .copy_from_slice(bytemuck::cast_slice(&quad_data));
         quad_vbuf.unmap();
 
-        Self {
+        Ok(Self {
             uniforms,
             uniform_buffer,
             bind_group_layout,
@@ -270,7 +282,7 @@ impl TextOverlayRenderer {
             atlas_tex: None,
             atlas_view: None,
             atlas_sampler,
-        }
+        })
     }
 
     pub fn set_enabled(&mut self, enabled: bool) {
@@ -298,42 +310,53 @@ impl TextOverlayRenderer {
         device: &Device,
         _queue: &Queue,
         instances: &[TextInstance],
-    ) {
+    ) -> RenderResult<()> {
         self.instance_count = instances.len() as u32;
         if self.instance_count == 0 {
-            return;
+            return Ok(());
         }
         let size = (instances.len() * std::mem::size_of::<TextInstance>()) as u64;
-        let buf = device.create_buffer(&BufferDescriptor {
-            label: Some("text_overlay_instances"),
-            size,
-            usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-            mapped_at_creation: true,
-        });
+        let buf = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("text_overlay_instances"),
+                size,
+                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                mapped_at_creation: true,
+            },
+        )?;
         buf.slice(..)
             .get_mapped_range_mut()
             .copy_from_slice(bytemuck::cast_slice(instances));
         buf.unmap();
         self.instance_buf = Some(buf);
+        Ok(())
     }
 
-    pub fn recreate_bind_group(&mut self, device: &Device, atlas_view: Option<&TextureView>) {
+    pub fn recreate_bind_group(
+        &mut self,
+        device: &Device,
+        atlas_view: Option<&TextureView>,
+    ) -> RenderResult<()> {
         // Use 1x1 fallback atlas when no view is available.
         let (dummy_tex, dummy_view) = if atlas_view.is_none() && self.atlas_view.is_none() {
-            let t = device.create_texture(&TextureDescriptor {
-                label: Some("text_dummy_atlas_tmp"),
-                size: wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
+            let t = tracked_create_texture(
+                device,
+                &TextureDescriptor {
+                    label: Some("text_dummy_atlas_tmp"),
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: TextureDimension::D2,
+                    format: TextureFormat::Rgba8UnormSrgb,
+                    usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::Rgba8UnormSrgb,
-                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
+            )?;
             let v = t.create_view(&TextureViewDescriptor::default());
             (Some(t), Some(v))
         } else {
@@ -362,6 +385,7 @@ impl TextOverlayRenderer {
             ],
         });
         drop(dummy_tex);
+        Ok(())
     }
 
     pub fn set_atlas(&mut self, atlas_tex: Texture, atlas_view: TextureView) {

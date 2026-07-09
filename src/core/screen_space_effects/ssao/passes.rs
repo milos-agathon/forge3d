@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::tracked_create_buffer_init;
 
 impl SsaoRenderer {
     pub fn encode_ssao(
@@ -12,11 +13,14 @@ impl SsaoRenderer {
         let mut settings_shadow = self.settings;
         settings_shadow.frame_index = self.settings.frame_index.wrapping_add(1);
         settings_shadow.inv_resolution = [1.0 / self.width as f32, 1.0 / self.height as f32];
-        let staging = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("ssao.settings.staging"),
-            contents: bytemuck::bytes_of(&settings_shadow),
-            usage: BufferUsages::COPY_SRC,
-        });
+        let staging = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("ssao.settings.staging"),
+                contents: bytemuck::bytes_of(&settings_shadow),
+                usage: BufferUsages::COPY_SRC,
+            },
+        )?;
         encoder.copy_buffer_to_buffer(
             &staging,
             0,

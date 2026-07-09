@@ -70,7 +70,7 @@ impl TerrainSpike {
                 height_view_opt,
                 pt_buf_opt,
                 None,
-            );
+            )?;
             ov.upload_uniforms(&self.queue);
 
             let mut rp2 = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

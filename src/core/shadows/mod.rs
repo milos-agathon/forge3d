@@ -12,6 +12,9 @@ pub mod types;
 use bytemuck::Zeroable;
 use glam::{Mat4, Vec3};
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedBuffer, TrackedTexture};
+
 pub use frustum::CameraFrustum;
 pub use resources::{
     create_cascade_depth_views, create_shadow_array_view, create_shadow_sampler,
@@ -28,7 +31,7 @@ pub struct CsmShadowMap {
     /// Directional light
     light: DirectionalLight,
     /// Shadow map texture array
-    _shadow_maps: wgpu::Texture,
+    _shadow_maps: TrackedTexture,
     /// Shadow map depth views (one per cascade)
     shadow_depth_views: Vec<wgpu::TextureView>,
     /// Combined shadow map array view for sampling
@@ -36,7 +39,7 @@ pub struct CsmShadowMap {
     /// Shadow sampler with PCF
     shadow_sampler: wgpu::Sampler,
     /// CSM uniform buffer
-    uniform_buffer: wgpu::Buffer,
+    uniform_buffer: TrackedBuffer,
     /// Current cascade data
     cascades: Vec<ShadowCascade>,
     /// Shadow debug mode
@@ -45,30 +48,34 @@ pub struct CsmShadowMap {
 
 impl CsmShadowMap {
     /// Create new CSM shadow map system
-    pub fn new(device: &wgpu::Device, config: CsmConfig) -> Self {
+    pub fn new(device: &wgpu::Device, config: CsmConfig) -> RenderResult<Self> {
         let cascade_count = config.cascade_count as usize;
 
-        let shadow_maps = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("CSM Shadow Maps"),
-            size: wgpu::Extent3d {
-                width: config.shadow_map_size,
-                height: config.shadow_map_size,
-                depth_or_array_layers: config.cascade_count,
+        let shadow_maps = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("CSM Shadow Maps"),
+                size: wgpu::Extent3d {
+                    width: config.shadow_map_size,
+                    height: config.shadow_map_size,
+                    depth_or_array_layers: config.cascade_count,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
 
         let shadow_depth_views = create_cascade_depth_views(&shadow_maps, &config);
         let shadow_array_view = create_shadow_array_view(&shadow_maps, &config);
         let shadow_sampler = create_shadow_sampler(device);
-        let uniform_buffer = create_uniform_buffer(device);
+        let uniform_buffer = create_uniform_buffer(device)?;
 
-        Self {
+        Ok(Self {
             config,
             light: DirectionalLight::default(),
             _shadow_maps: shadow_maps,
@@ -78,7 +85,7 @@ impl CsmShadowMap {
             uniform_buffer,
             cascades: vec![ShadowCascade::zeroed(); cascade_count],
             debug_mode: parse_shadow_debug_env(),
-        }
+        })
     }
 
     /// Set directional light parameters

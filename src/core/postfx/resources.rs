@@ -1,5 +1,6 @@
 use super::config::PostFxResourceDesc;
 use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use std::collections::HashMap;
 use wgpu::*;
 
@@ -7,11 +8,11 @@ use wgpu::*;
 #[derive(Debug)]
 pub struct PostFxResourcePool {
     /// Ping-pong texture pairs
-    ping_pong_textures: Vec<Vec<Texture>>,
+    ping_pong_textures: Vec<Vec<TrackedTexture>>,
     /// Texture views for ping-pong resources
     ping_pong_views: Vec<Vec<TextureView>>,
     /// Temporal textures (for effects that need history)
-    temporal_textures: HashMap<String, Vec<Texture>>,
+    temporal_textures: HashMap<String, Vec<TrackedTexture>>,
     /// Temporal texture views
     temporal_views: HashMap<String, Vec<TextureView>>,
     /// Current ping-pong index
@@ -85,24 +86,27 @@ impl PostFxResourcePool {
 
         // Create pair of textures
         for i in 0..2 {
-            let texture = device.create_texture(&TextureDescriptor {
-                label: Some(&format!(
-                    "postfx_ping_pong_{}_{}",
-                    self.ping_pong_textures.len(),
-                    i
-                )),
-                size: Extent3d {
-                    width: actual_width,
-                    height: actual_height,
-                    depth_or_array_layers: 1,
+            let texture = tracked_create_texture(
+                device,
+                &TextureDescriptor {
+                    label: Some(&format!(
+                        "postfx_ping_pong_{}_{}",
+                        self.ping_pong_textures.len(),
+                        i
+                    )),
+                    size: Extent3d {
+                        width: actual_width,
+                        height: actual_height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: desc.mip_count,
+                    sample_count: desc.sample_count,
+                    dimension: TextureDimension::D2,
+                    format: desc.format,
+                    usage: desc.usage,
+                    view_formats: &[],
                 },
-                mip_level_count: desc.mip_count,
-                sample_count: desc.sample_count,
-                dimension: TextureDimension::D2,
-                format: desc.format,
-                usage: desc.usage,
-                view_formats: &[],
-            });
+            )?;
 
             let view = texture.create_view(&TextureViewDescriptor::default());
 
@@ -140,20 +144,23 @@ impl PostFxResourcePool {
         let mut views = Vec::new();
 
         for i in 0..frame_count {
-            let texture = device.create_texture(&TextureDescriptor {
-                label: Some(&format!("postfx_temporal_{}_{}", name, i)),
-                size: Extent3d {
-                    width: actual_width,
-                    height: actual_height,
-                    depth_or_array_layers: 1,
+            let texture = tracked_create_texture(
+                device,
+                &TextureDescriptor {
+                    label: Some(&format!("postfx_temporal_{}_{}", name, i)),
+                    size: Extent3d {
+                        width: actual_width,
+                        height: actual_height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: desc.mip_count,
+                    sample_count: desc.sample_count,
+                    dimension: TextureDimension::D2,
+                    format: desc.format,
+                    usage: desc.usage,
+                    view_formats: &[],
                 },
-                mip_level_count: desc.mip_count,
-                sample_count: desc.sample_count,
-                dimension: TextureDimension::D2,
-                format: desc.format,
-                usage: desc.usage,
-                view_formats: &[],
-            });
+            )?;
 
             let view = texture.create_view(&TextureViewDescriptor::default());
 

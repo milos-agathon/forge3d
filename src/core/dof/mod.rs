@@ -7,21 +7,25 @@ mod types;
 
 pub use types::{utils, CameraDofParams, DofMethod, DofQuality, DofUniforms};
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 use wgpu::{
-    AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindingResource, Buffer,
-    BufferDescriptor, BufferUsages, CommandEncoder, ComputePipeline, Device, Extent3d, FilterMode,
-    Queue, Sampler, SamplerDescriptor, Texture, TextureDescriptor, TextureDimension, TextureFormat,
-    TextureUsages, TextureView, TextureViewDescriptor,
+    AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindingResource, BufferDescriptor,
+    BufferUsages, CommandEncoder, ComputePipeline, Device, Extent3d, FilterMode, Queue, Sampler,
+    SamplerDescriptor, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+    TextureView, TextureViewDescriptor,
 };
 
 /// Depth of Field renderer.
 pub struct DofRenderer {
     pub uniforms: DofUniforms,
-    pub uniform_buffer: Buffer,
-    pub dof_texture: Texture,
+    pub uniform_buffer: TrackedBuffer,
+    pub dof_texture: TrackedTexture,
     pub dof_view: TextureView,
     pub dof_storage_view: TextureView,
-    pub temp_texture: Option<Texture>,
+    pub temp_texture: Option<TrackedTexture>,
     pub temp_view: Option<TextureView>,
     pub sampler: Sampler,
     pub gather_pipeline: ComputePipeline,
@@ -34,28 +38,39 @@ pub struct DofRenderer {
 
 impl DofRenderer {
     /// Create a new DOF renderer.
-    pub fn new(device: &Device, width: u32, height: u32, quality: DofQuality) -> Self {
-        let uniform_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("dof_uniforms"),
-            size: std::mem::size_of::<DofUniforms>() as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let dof_texture = device.create_texture(&TextureDescriptor {
-            label: Some("dof_output_texture"),
-            size: Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+    pub fn new(
+        device: &Device,
+        width: u32,
+        height: u32,
+        quality: DofQuality,
+    ) -> RenderResult<Self> {
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("dof_uniforms"),
+                size: std::mem::size_of::<DofUniforms>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
+
+        let dof_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("dof_output_texture"),
+                size: Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba16Float,
+                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+        )?;
 
         let dof_view = dof_texture.create_view(&TextureViewDescriptor::default());
         let dof_storage_view = dof_texture.create_view(&TextureViewDescriptor::default());
@@ -82,7 +97,7 @@ impl DofRenderer {
         uniforms.sample_count = quality.sample_count();
         uniforms.max_blur_radius = quality.max_blur_radius();
 
-        Self {
+        Ok(Self {
             uniforms,
             uniform_buffer,
             dof_texture,
@@ -97,7 +112,7 @@ impl DofRenderer {
             bind_group: None,
             quality,
             method: DofMethod::Gather,
-        }
+        })
     }
 
     /// Set camera DOF parameters.
@@ -273,24 +288,27 @@ impl DofRenderer {
     }
 
     /// Resize DOF textures.
-    pub fn resize(&mut self, device: &Device, width: u32, height: u32) {
+    pub fn resize(&mut self, device: &Device, width: u32, height: u32) -> RenderResult<()> {
         self.uniforms.screen_size = [width as f32, height as f32];
         self.uniforms.inv_screen_size = [1.0 / width as f32, 1.0 / height as f32];
 
-        self.dof_texture = device.create_texture(&TextureDescriptor {
-            label: Some("dof_output_texture"),
-            size: Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        self.dof_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("dof_output_texture"),
+                size: Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba16Float,
+                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
 
         self.dof_view = self
             .dof_texture
@@ -299,6 +317,7 @@ impl DofRenderer {
             .dof_texture
             .create_view(&TextureViewDescriptor::default());
         self.bind_group = None;
+        Ok(())
     }
 
     /// Calculate circle of confusion for a given depth.

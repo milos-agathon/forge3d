@@ -23,7 +23,7 @@ impl Scene {
             &g.device,
             wgpu::TextureFormat::Rgba8UnormSrgb,
             1, // clouds render against resolved color buffer
-        );
+        )?;
         renderer.set_quality(quality_enum);
         renderer
             .prepare_frame(&g.device, &g.queue)

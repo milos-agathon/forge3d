@@ -10,7 +10,6 @@ use futures_intrusive::channel::shared::oneshot_channel;
 use pollster::block_on;
 use std::mem::size_of;
 use std::time::Instant;
-use wgpu::util::DeviceExt;
 use wgpu::*;
 
 const SSAO_SHADER_SRC: &str = concat!(
