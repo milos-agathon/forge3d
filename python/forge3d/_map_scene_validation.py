@@ -24,8 +24,15 @@ from .diagnostics import (
 # SUTURA: native-required layer classification (zero silent placeholders)
 # ---------------------------------------------------------------------------
 #
-# Every MapScene layer is native-required: it either renders through a concrete
-# native symbol or the render is blocked with a structured fatal diagnostic.
+# Every MapScene layer either renders through a concrete native symbol or the
+# render is blocked with a structured fatal diagnostic — with two explicitly
+# named deterministic CPU compositor exceptions (NOT placeholders and NOT
+# native-only): raster overlays composite through the Python resample
+# compositor (render metadata ``raster_overlay_backend =
+# "python_resample_composite"``), and dashed/mitered precise vectors route
+# through the Python precise raster path (``vector_backend =
+# "python_precise_raster"``). Both are surfaced in render metadata and
+# support features so nothing can claim "all layers native-only".
 # This mirrors the diagnose-before-render precedent documented in
 # docs/guides/competitive_positioning.md (textured PBR buildings, VT runtime).
 

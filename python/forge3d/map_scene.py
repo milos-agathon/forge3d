@@ -984,7 +984,7 @@ def _mapscene_clipmap_metadata(recipe: "SceneRecipe", heightmap: Any) -> dict[st
         source_bytes = int(arr.size * arr.dtype.itemsize) if arr.size else 0
         max_resident_bytes = int(config.get("max_resident_height_bytes", resident_height_bytes))
         return {
-            "terrain_geometry_backend": "clipmap_bounded_grid_pbr",
+            "terrain_geometry_backend": "clipmap_indexed_pbr",
             "terrain_geometry_mode": "clipmap",
             "clipmap_ring_count": int(mesh.rings_count),
             "clipmap_ring_resolution": ring_resolution,
@@ -2944,6 +2944,21 @@ def _render_native_offscreen_result(
         metadata.update(textured_metadata)
     if native_point_clouds:
         metadata.update(point_tile_metadata)
+    raster_layers = [layer for layer in recipe.layers if isinstance(layer, RasterOverlay)]
+    if raster_layers:
+        # Honest contract: raster overlays are composited by the deterministic
+        # CPU resample compositor, not a native-only path.
+        metadata["raster_overlay_backend"] = "python_resample_composite"
+        metadata["raster_overlay_layer_count"] = len(raster_layers)
+    vector_layers = [layer for layer in recipe.layers if isinstance(layer, VectorOverlay)]
+    if vector_layers and any(
+        _vector_layer_requires_precise_raster(layer) for layer in vector_layers
+    ):
+        # Dashed/mitered precise vectors route through the deterministic CPU
+        # raster path, not native OIT.
+        metadata["vector_backend"] = "python_precise_raster"
+    elif native_vectors:
+        metadata["vector_backend"] = "native_oit"
     return _MapSceneNativeRenderResult(
         rgba=composited,
         aov_frame=result.aov_frame,
@@ -4479,6 +4494,13 @@ class MapScene:
     @classmethod
     def load_bundle(cls, path: str | Path) -> "MapScene":
         bundle_path = Path(path)
+        manifest_path = bundle_path / "manifest.json"
+        if manifest_path.exists():
+            from .bundle import BundleManifest
+
+            # Enforces the bundle version contract: version > BUNDLE_VERSION
+            # raises ValueError instead of silently loading a future schema.
+            BundleManifest.load(manifest_path)
         recipe_path = bundle_path / "scene" / "mapscene_recipe.json"
         if not recipe_path.exists():
             raise FileNotFoundError(f"MapScene bundle recipe not found: {recipe_path}")
@@ -5216,6 +5238,20 @@ class MapScene:
         self.compiled_plan = compiled
         return compiled
 
+    def _compiled_plan_for_current_recipe(self) -> CompiledScenePlan:
+        """Reuse the compiled plan only when it still matches the recipe.
+
+        A compiled plan is a total function of the serialized recipe; after
+        any recipe mutation it is stale and must be recompiled once, or a
+        render/bundle would carry frozen state from a recipe that no longer
+        exists.
+        """
+        current_hash = _stable_hash(self.recipe.to_dict())
+        compiled = self.compiled_plan
+        if compiled is None or compiled.recipe_hash != current_hash:
+            return self.compile_plan()
+        return compiled
+
     def _report_with_feature(self, report: ValidationReport, feature: str, support_level: str) -> ValidationReport:
         payload = report.to_dict()
         supported = dict(payload.get("supported_features") or {})
@@ -5247,9 +5283,7 @@ class MapScene:
         elif provenance_signing_key is not None:
             raise ValueError("provenance_signing_key requires emit_provenance=True")
 
-        compiled = self.compiled_plan
-        if compiled is None:
-            compiled = self.compile_plan()
+        compiled = self._compiled_plan_for_current_recipe()
         report = compiled.validation_report
         self.last_validation_report = report
         if report.render_blocked(self.render_policy):
@@ -5377,6 +5411,9 @@ class MapScene:
             "clipmap_bounded_memory",
             "clipmap_error",
             "material_vt_stats",
+            "raster_overlay_backend",
+            "raster_overlay_layer_count",
+            "vector_backend",
             "point_cloud_backend",
             "point_cloud_edl_backend",
             "tiles3d_backend",
@@ -5412,6 +5449,10 @@ class MapScene:
             report = self._report_with_feature(report, "mapscene.render_png_16bit", "supported")
         if any(isinstance(layer, VectorOverlay) for layer in self.recipe.layers):
             report = self._report_with_feature(report, "mapscene.vector_composite", "supported")
+        if metadata.get("raster_overlay_backend") == "python_resample_composite":
+            report = self._report_with_feature(report, "mapscene.raster_overlay_composite", "supported")
+        if metadata.get("vector_backend") == "python_precise_raster":
+            report = self._report_with_feature(report, "mapscene.vector_precise_raster_composite", "supported")
         if any(isinstance(layer, LabelLayer) for layer in self.recipe.layers):
             report = self._report_with_feature(report, "mapscene.label_composite", "supported")
         if any(isinstance(layer, BuildingLayer) for layer in self.recipe.layers):
@@ -5421,8 +5462,8 @@ class MapScene:
         if metadata.get("gltf_textured_backend") == "mapscene_textured_landmark":
             report = self._report_with_feature(report, "gltf.textured_mapscene_render", "supported")
             report = self._report_with_feature(report, "buildings.textured_pbr", "supported")
-        if metadata.get("terrain_geometry_backend") == "clipmap_bounded_grid_pbr":
-            report = self._report_with_feature(report, "terrain.clipmap_bounded_grid", "supported")
+        if metadata.get("terrain_geometry_backend") == "clipmap_indexed_pbr":
+            report = self._report_with_feature(report, "terrain.clipmap_indexed", "supported")
             report = self._report_with_feature(report, "terrain.clipmap_planner", "supported")
             report = self._report_with_feature(report, "terrain.clipmap_bounded_memory", "supported")
         if metadata.get("point_cloud_backend") == "native_oit_points":
@@ -5518,9 +5559,7 @@ class MapScene:
         return result
 
     def save_bundle(self, path: str | Path) -> ValidationReport:
-        compiled = self.compiled_plan
-        if compiled is None:
-            compiled = self.compile_plan()
+        compiled = self._compiled_plan_for_current_recipe()
         report = self._report_with_feature(compiled.validation_report, "mapscene.save_bundle", "supported")
         bundle_path = self._bundle_path(path)
         bundle_path.mkdir(parents=True, exist_ok=True)

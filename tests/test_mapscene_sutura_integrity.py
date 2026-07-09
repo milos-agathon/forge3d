@@ -212,6 +212,106 @@ def test_bundle_version_v2_read_path_recompiles(tmp_path):
     assert loaded.compiled_plan.manifest.compiled_label_plans
 
 
+def test_stale_compiled_plan_not_saved_after_recipe_mutation(tmp_path):
+    """save_bundle must serialize a plan compiled from the CURRENT recipe."""
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    scene.compile_plan()
+    assert scene.compiled_plan.manifest.compiled_label_plans, "precondition: labels compiled"
+
+    scene.recipe.layers = ()
+    scene.save_bundle(tmp_path / "bundle_mutated")
+    bundle_path = Path(scene.last_bundle_path)
+
+    compiled_payload = json.loads(
+        (bundle_path / "scene" / "compiled_plan.json").read_text(encoding="utf-8")
+    )
+    assert not compiled_payload.get("compiled_label_plans"), (
+        "a stale compiled plan (with label plans from the pre-mutation recipe) "
+        "must not be serialized after the recipe was mutated"
+    )
+    review_payload = json.loads(
+        (bundle_path / "scene" / "mapscene_review.json").read_text(encoding="utf-8")
+    )
+    assert review_payload["compiled_label_plan_ids"] == []
+    assert scene.compiled_plan.recipe_hash == map_scene._stable_hash(scene.recipe.to_dict())
+
+
+def test_render_recompiles_stale_plan_after_recipe_mutation(tmp_path, monkeypatch):
+    """render must pass a plan matching the current recipe into the renderer."""
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    scene.compile_plan()
+    stale_hash = scene.compiled_plan.recipe_hash
+
+    scene.recipe.layers = ()
+    seen: dict[str, object] = {}
+
+    def fake_native(recipe, compiled, **_kwargs):
+        seen["compiled"] = compiled
+        rgba = np.zeros((64, 96, 4), dtype=np.uint8)
+        rgba[..., 3] = 255
+        return map_scene._MapSceneNativeRenderResult(rgba=rgba)
+
+    monkeypatch.setattr(map_scene, "_render_native_offscreen_result", fake_native)
+    scene.render(str(tmp_path / "mutated.png"))
+
+    current_hash = map_scene._stable_hash(scene.recipe.to_dict())
+    compiled = seen["compiled"]
+    assert compiled.recipe_hash == current_hash
+    assert compiled.recipe_hash != stale_hash
+
+
+def test_raster_overlay_metadata_reports_python_compositor(tmp_path, monkeypatch):
+    """Raster overlays are honestly reported as the deterministic CPU compositor."""
+    scene = f3d.MapScene(
+        terrain=f3d.TerrainSource(
+            data=np.zeros((8, 8), dtype=np.float32),
+            crs="EPSG:32610",
+            metadata={"width": 8, "height": 8, "source_id": "flat-dem"},
+        ),
+        camera=f3d.OrbitCamera(),
+        lighting=f3d.LightingPreset(),
+        output=f3d.OutputSpec(width=96, height=64),
+        layers=[
+            f3d.RasterOverlay(
+                layer_id="ortho",
+                crs="EPSG:32610",
+                opacity=0.8,
+                metadata={"width": 8, "height": 8, "source_id": "sutura-overlay"},
+            )
+        ],
+    )
+
+    def fake_terrain(_recipe, _heightmap, **_kwargs):
+        rgba = np.zeros((64, 96, 4), dtype=np.uint8)
+        rgba[..., 3] = 255
+        return map_scene._MapSceneNativeRenderResult(rgba=rgba)
+
+    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result", fake_terrain)
+    report = scene.render(str(tmp_path / "raster.png"))
+
+    assert scene.last_render_metadata["raster_overlay_backend"] == "python_resample_composite"
+    assert scene.last_render_metadata["raster_overlay_layer_count"] == 1
+    assert report.supported_features["mapscene.raster_overlay_composite"] == "supported"
+
+
+def test_load_bundle_rejects_future_bundle_version(tmp_path):
+    from forge3d.bundle import BUNDLE_VERSION
+
+    scene = build_scene("terrain_raster_labels_buildings", tmp_path)
+    scene.save_bundle(tmp_path / "bundle_future")
+    bundle_path = Path(scene.last_bundle_path)
+
+    manifest_path = bundle_path / "manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload["version"] = 999
+    manifest_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match=rf"999 > supported version {BUNDLE_VERSION}"):
+        f3d.MapScene.load_bundle(bundle_path)
+
+
 @pytest.mark.parametrize("recipe_name", RECIPE_NAMES)
 def test_save_load_rerender_ssim(recipe_name, tmp_path):
     """THE MEASURABLE WIN: bundle round-trip reproduces pixels and report."""

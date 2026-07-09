@@ -138,20 +138,26 @@ def test_vector_overlay_stroke_style_serializes_and_reports_support() -> None:
     assert report.supported_features["vector.stroke.width_px"] == "supported"
 
 
-def test_styled_vector_layers_route_to_precise_raster_path(monkeypatch) -> None:
+def test_styled_vector_layers_route_to_precise_raster_path(monkeypatch, tmp_path) -> None:
     def fail_oit(*_args, **_kwargs):
         raise AssertionError("styled vectors must not use the simplified OIT bridge")
 
     monkeypatch.setattr(f3d, "vector_render_oit_py", fail_oit, raising=False)
     base = np.zeros((48, 64, 4), dtype=np.uint8)
     scene = f3d.SceneRecipe(
-        terrain=f3d.TerrainSource(data=np.zeros((4, 4), dtype=np.float32)),
+        terrain=f3d.TerrainSource(
+            data=np.zeros((4, 4), dtype=np.float32),
+            crs="EPSG:32610",
+            metadata={"source_id": "flat-dem"},
+        ),
         camera=f3d.OrbitCamera(),
         lighting=f3d.LightingPreset(),
         output=f3d.OutputSpec(width=64, height=48),
         layers=[
             f3d.VectorOverlay(
                 layer_id="styled",
+                crs="EPSG:32610",
+                metadata={"source_id": "styled-roads"},
                 features=[
                     {
                         "id": "turn",
@@ -177,6 +183,22 @@ def test_styled_vector_layers_route_to_precise_raster_path(monkeypatch) -> None:
 
     assert composited is True
     assert int(np.count_nonzero(rgba[..., 3])) > 0
+
+    # Through public MapScene.render() the precise route must not be hidden as
+    # native OIT: the metadata and support report name the deterministic CPU
+    # precise raster compositor explicitly.
+    def fake_terrain(_recipe, _heightmap, **_kwargs):
+        frame = np.zeros((48, 64, 4), dtype=np.uint8)
+        frame[..., 3] = 255
+        return map_scene._MapSceneNativeRenderResult(rgba=frame)
+
+    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result", fake_terrain)
+    map_scene_obj = f3d.MapScene(recipe=scene)
+    report = map_scene_obj.render(str(tmp_path / "styled.png"))
+
+    assert map_scene_obj.last_render_metadata["vector_backend"] == "python_precise_raster"
+    assert map_scene_obj.last_render_metadata["vector_backend"] != "native_oit"
+    assert report.supported_features["mapscene.vector_precise_raster_composite"] == "supported"
 
 
 def test_style_parser_accepts_line_dash_cap_join() -> None:

@@ -63,9 +63,11 @@ Typed MapScene API
 
 ``forge3d.map_scene`` exposes the typed offline map-production contract. Use
 ``MapScene`` with ``SceneRecipe`` or keyword recipe components to validate
-scene intent, compile deterministic label plans, write GPU-terrain PNG output
-or EXR output for renderable terrain recipes, keep deterministic placeholder
-output behind explicit ``allow_placeholder=True`` debug opt-in, and save
+scene intent, compile deterministic frozen render plans with
+``MapScene.compile_plan()``, write GPU-terrain PNG output or EXR output for
+renderable terrain recipes, raise ``MapSceneNativeUnavailable`` with
+structured diagnostic blocks when native rendering is unavailable (there is
+no CPU placeholder output), and save
 deterministic review bundles. ``OutputSpec`` exposes ``samples``,
 ``denoiser``, ``aovs``, and ``hdr`` fields for offline-quality MapScene output,
 and ``LightingPreset(name="rainier_showcase")`` resolves the self-contained

@@ -55,9 +55,9 @@ manifest = f3d.recipe_manifest(scene)
 ```
 
 `MapScene.render()` uses the GPU-terrain backend for real `.npy` or GeoTIFF
-terrain when the native backend is available. Deterministic placeholder output
-requires `allow_placeholder=True`, so unsupported recipes do not silently turn
-into review images.
+terrain when the native backend is available. When it is not, rendering raises
+`MapSceneNativeUnavailable` with structured diagnostic blocks, so unsupported
+recipes never silently turn into placeholder review images.
 
 ## First viewer session
 

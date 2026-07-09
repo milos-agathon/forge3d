@@ -9,8 +9,9 @@ MapScene + LabelPlan + ValidationReport + Bundle
 Feature `001` establishes the diagnostics contract and support matrices used by
 that workflow. Feature `003` adds deterministic `LabelPlan`, and feature `004`
 adds the public `MapScene` / `SceneRecipe` API for typed validation,
-GPU-terrain PNG/EXR output for renderable terrain recipes, deterministic
-placeholder output only when `allow_placeholder=True` is passed, named
+GPU-terrain PNG/EXR output for renderable terrain recipes, a fatal
+`MapSceneNativeUnavailable` diagnostic block whenever native rendering is
+unavailable (CPU placeholder output no longer exists), named
 MapScene presets, `OutputSpec` samples/denoiser/AOV controls, recipe manifests,
 and deterministic review bundles.
 
@@ -19,7 +20,7 @@ and deterministic review bundles.
 | Structured diagnostics | `supported` | `Diagnostic` and `ValidationReport` are public Python objects. |
 | Typed MapScene recipe | `underdeveloped` | `MapScene`, `SceneRecipe`, terrain, raster, vector, label, point-cloud, building-intent, camera, lighting, output, and map-furniture recipe objects are public. |
 | `MapScene.validate` | `supported` | Returns deterministic structured reports with source-data, CRS, style, glyph, label-plan, memory, support-status, VT, 3D Tiles, and building diagnostics where applicable. |
-| `MapScene.render` PNG/EXR path | `supported` | Fixture-backed `.npy`/GeoTIFF terrain, PNG/GeoTIFF raster, inline vector, label, and scalar building recipes render through the GPU-terrain path when the native backend is available; deterministic placeholder output requires explicit `allow_placeholder=True`. Unsupported layer paths still block with typed diagnostics. |
+| `MapScene.render` PNG/EXR path | `supported` | Fixture-backed `.npy`/GeoTIFF terrain, PNG/GeoTIFF raster, inline vector, label, and scalar building recipes render through the GPU-terrain path when the native backend is available; when it is not, render raises `MapSceneNativeUnavailable` with structured diagnostic blocks. Unsupported layer paths still block with typed diagnostics. |
 | `OutputSpec` offline controls | `supported` | `samples`, `denoiser`, `aovs`, and `hdr` are public MapScene output fields. AOV and EXR writes use the native `numpy_to_exr` writer when requested. |
 | Named MapScene presets | `supported` | `LightingPreset(name="rainier_showcase")` resolves camera, sun, IBL, renderer settings, and reproducibility defaults from `forge3d.presets`. |
 | `recipe_manifest` | `supported` | `forge3d.recipe_manifest(scene)` returns a deterministic JSON-safe recipe manifest for bundles, CI, and review tooling. |
@@ -37,9 +38,10 @@ fallback is not textured PBR support and must remain diagnostic-bearing.
 `MapScene.render("map.png")` performs validation if needed and writes PNG output
 for supported terrain/raster/vector/label recipes; `OutputSpec(format="exr")`
 writes EXR beauty output, and `OutputSpec(aovs=[...])` writes requested AOV EXRs.
-Real `.npy`/GeoTIFF terrain and PNG/GeoTIFF raster assets prefer the
-`gpu_terrain` path; symbolic fixture recipes can use deterministic
-`placeholder` output only with `allow_placeholder=True`.
+Real `.npy`/GeoTIFF terrain and PNG/GeoTIFF raster assets render through the
+`gpu_terrain` path; symbolic fixture recipes without a renderable heightmap
+block with a fatal `MapSceneNativeUnavailable` diagnostic instead of writing
+placeholder pixels.
 `MapScene.save_bundle("map.forge3d")`
 records the recipe, diagnostics, support summaries, label plans, source
 references, camera, lighting, output, render backend, and renderability status
