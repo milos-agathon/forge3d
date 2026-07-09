@@ -2920,8 +2920,13 @@ def _render_native_offscreen_result(
         fallback_shape=heightmap.shape,
     )
 
+    raster_overlay_layers: list["RasterOverlay"] = []
+
     def load_raster_overlay(layer: "RasterOverlay") -> Any | None:
-        return _load_native_raster_overlay(layer, target_grid=target_grid)
+        overlay = _load_native_raster_overlay(layer, target_grid=target_grid)
+        if overlay is not None:
+            raster_overlay_layers.append(layer)
+        return overlay
 
     composited = _composite_recipe_layers(
         base,
@@ -2944,12 +2949,11 @@ def _render_native_offscreen_result(
         metadata.update(textured_metadata)
     if native_point_clouds:
         metadata.update(point_tile_metadata)
-    raster_layers = [layer for layer in recipe.layers if isinstance(layer, RasterOverlay)]
-    if raster_layers:
-        # Honest contract: raster overlays are composited by the deterministic
-        # CPU resample compositor, not a native-only path.
+    if raster_overlay_layers:
+        # Honest contract: loaded raster overlays are composited by the
+        # deterministic CPU resample compositor, not a native-only path.
         metadata["raster_overlay_backend"] = "python_resample_composite"
-        metadata["raster_overlay_layer_count"] = len(raster_layers)
+        metadata["raster_overlay_layer_count"] = len(raster_overlay_layers)
     vector_layers = [layer for layer in recipe.layers if isinstance(layer, VectorOverlay)]
     if vector_layers and any(
         _vector_layer_requires_precise_raster(layer) for layer in vector_layers

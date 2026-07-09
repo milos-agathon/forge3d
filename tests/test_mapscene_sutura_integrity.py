@@ -30,7 +30,7 @@ from forge3d._map_scene_validation import (
     probe_native_capability,
 )
 
-from _sutura_recipes import RECIPE_NAMES, build_scene
+from _sutura_recipes import RECIPE_NAMES, _write_raster_overlay, build_scene
 
 PACKAGE_ROOT = Path(f3d.__file__).resolve().parent
 
@@ -262,7 +262,14 @@ def test_render_recompiles_stale_plan_after_recipe_mutation(tmp_path, monkeypatc
 
 def test_raster_overlay_metadata_reports_python_compositor(tmp_path, monkeypatch):
     """Raster overlays are honestly reported as the deterministic CPU compositor."""
-    scene = f3d.MapScene(
+    def fake_terrain(_recipe, _heightmap, **_kwargs):
+        rgba = np.zeros((64, 96, 4), dtype=np.uint8)
+        rgba[..., 3] = 255
+        return map_scene._MapSceneNativeRenderResult(rgba=rgba)
+
+    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result", fake_terrain)
+
+    missing_overlay_scene = f3d.MapScene(
         terrain=f3d.TerrainSource(
             data=np.zeros((8, 8), dtype=np.float32),
             crs="EPSG:32610",
@@ -280,13 +287,29 @@ def test_raster_overlay_metadata_reports_python_compositor(tmp_path, monkeypatch
             )
         ],
     )
+    missing_report = missing_overlay_scene.render(str(tmp_path / "raster_missing.png"))
+    assert "raster_overlay_backend" not in missing_overlay_scene.last_render_metadata
+    assert "mapscene.raster_overlay_composite" not in missing_report.supported_features
 
-    def fake_terrain(_recipe, _heightmap, **_kwargs):
-        rgba = np.zeros((64, 96, 4), dtype=np.uint8)
-        rgba[..., 3] = 255
-        return map_scene._MapSceneNativeRenderResult(rgba=rgba)
-
-    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result", fake_terrain)
+    scene = f3d.MapScene(
+        terrain=f3d.TerrainSource(
+            data=np.zeros((8, 8), dtype=np.float32),
+            crs="EPSG:32610",
+            metadata={"width": 8, "height": 8, "source_id": "flat-dem"},
+        ),
+        camera=f3d.OrbitCamera(),
+        lighting=f3d.LightingPreset(),
+        output=f3d.OutputSpec(width=96, height=64),
+        layers=[
+            f3d.RasterOverlay(
+                layer_id="ortho",
+                path=str(_write_raster_overlay(tmp_path)),
+                crs="EPSG:32610",
+                opacity=0.8,
+                metadata={"width": 8, "height": 8, "source_id": "sutura-overlay"},
+            )
+        ],
+    )
     report = scene.render(str(tmp_path / "raster.png"))
 
     assert scene.last_render_metadata["raster_overlay_backend"] == "python_resample_composite"
