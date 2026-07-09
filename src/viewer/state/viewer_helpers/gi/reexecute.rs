@@ -238,6 +238,10 @@ impl Viewer {
                             eprintln!("[P5.6] GPU timing readback failed: {e}");
                         }
                     }
+                    // Advance the double buffer now that this frame is submitted:
+                    // next frame writes/resolves the other slot while this one's
+                    // readback stays valid for the following get_results().
+                    timer.finish_frame();
                 }
             }
         }

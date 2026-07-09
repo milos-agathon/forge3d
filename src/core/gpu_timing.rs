@@ -3,11 +3,23 @@
 //! Provides GPU timing utilities for performance profiling and debugging.
 //! Supports RenderDoc, Nsight Graphics, and RGP markers with configurable
 //! timestamp collection for minimal overhead.
+//!
+//! CENSOR Task 4: timestamp queries are double-buffered. Two independent query
+//! sets / resolve buffers / readback buffers are kept, selected by
+//! `frame_parity`. `begin_scope`/`end_scope` write into the current slot,
+//! `resolve_queries` resolves that slot, and `finish_frame` flips parity after
+//! the caller submits. The async `get_results` reads the *other* slot (the
+//! previously submitted frame) so it never stalls the current frame, while
+//! `get_results_blocking` reads the slot just resolved+submitted for offline
+//! single-shot renders.
 
 use super::error::{RenderError, RenderResult};
 use std::collections::HashMap;
 use std::sync::Arc;
 use wgpu::*;
+
+/// Number of frames in flight for the timestamp double buffer.
+const SLOTS: usize = 2;
 
 /// Handle for a GPU timing scope
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -49,6 +61,8 @@ pub struct TimingResult {
     pub gpu_time_ms: f32,
     /// Whether timestamp was successfully measured
     pub timestamp_valid: bool,
+    /// Number of draw calls recorded for the scope (0 when unknown)
+    pub draw_calls: u32,
     /// Pipeline statistics (if available)
     pub pipeline_stats: Option<PipelineStatistics>,
 }
@@ -60,7 +74,7 @@ pub struct PipelineStatistics {
     pub vertex_invocations: u64,
     /// Number of clipping invocations
     pub clipper_invocations: u64,
-    /// Number of fragment invocations  
+    /// Number of fragment invocations
     pub fragment_invocations: u64,
     /// Number of compute invocations
     pub compute_invocations: u64,
@@ -80,7 +94,7 @@ impl<'a> TimingScope<'a> {
             .begin_scope_internal(self.encoder, self.scope_id, label);
     }
 
-    /// End timing scope  
+    /// End timing scope
     pub fn end(self) {
         self.timing_manager
             .end_scope_internal(self.encoder, self.scope_id);
@@ -92,20 +106,24 @@ pub struct GpuTimingManager {
     config: GpuTimingConfig,
     device: Arc<Device>,
 
-    // Timestamp queries
-    timestamp_query_set: Option<QuerySet>,
-    timestamp_buffer: Option<Buffer>,
-    timestamp_readback_buffer: Option<Buffer>,
+    // Timestamp queries (double-buffered: one slot per frame in flight)
+    timestamp_query_set: [Option<QuerySet>; SLOTS],
+    timestamp_buffer: [Option<Buffer>; SLOTS],
+    timestamp_readback_buffer: [Option<Buffer>; SLOTS],
 
-    // Pipeline statistics queries
+    // Pipeline statistics queries (single-buffered; disabled by default)
     pipeline_stats_query_set: Option<QuerySet>,
     pipeline_stats_buffer: Option<Buffer>,
     pipeline_stats_readback_buffer: Option<Buffer>,
 
-    // Timing state
+    // Per-slot timing state so a slot's labels always match its queries.
     active_scopes: HashMap<TimingScopeId, String>,
-    query_index: u32,
-    scope_labels: Vec<String>,
+    query_index: [u32; SLOTS],
+    scope_labels: [Vec<String>; SLOTS],
+    scope_draw_calls: [Vec<u32>; SLOTS],
+
+    /// Which slot the current frame writes/resolves into.
+    frame_parity: usize,
 
     // Feature support
     supports_timestamps: bool,
@@ -117,7 +135,7 @@ impl GpuTimingManager {
     /// Create new GPU timing manager
     pub fn new(
         device: Arc<Device>,
-        _queue: Arc<Queue>,
+        queue: Arc<Queue>,
         config: GpuTimingConfig,
     ) -> RenderResult<Self> {
         let features = device.features();
@@ -128,10 +146,9 @@ impl GpuTimingManager {
         let supports_pipeline_stats =
             config.enable_pipeline_stats && features.contains(Features::PIPELINE_STATISTICS_QUERY);
 
-        // Get timestamp period from device limits (if supported)
+        // wgpu 0.19 exposes the timestamp period (ns per tick) on the Queue.
         let timestamp_period = if supports_timestamps {
-            // wgpu doesn't expose timestamp period directly; assume 1ns.
-            1.0
+            queue.get_timestamp_period() as f64
         } else {
             1.0
         };
@@ -139,15 +156,17 @@ impl GpuTimingManager {
         let mut manager = Self {
             config: config.clone(),
             device: device.clone(),
-            timestamp_query_set: None,
-            timestamp_buffer: None,
-            timestamp_readback_buffer: None,
+            timestamp_query_set: [None, None],
+            timestamp_buffer: [None, None],
+            timestamp_readback_buffer: [None, None],
             pipeline_stats_query_set: None,
             pipeline_stats_buffer: None,
             pipeline_stats_readback_buffer: None,
             active_scopes: HashMap::new(),
-            query_index: 0,
-            scope_labels: Vec::new(),
+            query_index: [0; SLOTS],
+            scope_labels: [Vec::new(), Vec::new()],
+            scope_draw_calls: [Vec::new(), Vec::new()],
+            frame_parity: 0,
             supports_timestamps,
             supports_pipeline_stats,
             timestamp_period,
@@ -162,33 +181,34 @@ impl GpuTimingManager {
     fn initialize_queries(&mut self) -> RenderResult<()> {
         let query_count = self.config.max_queries_per_frame * 2; // Begin + End for each scope
 
-        // Initialize timestamp queries
+        // Initialize timestamp queries (one independent slot per frame in flight)
         if self.supports_timestamps {
-            let query_set = self.device.create_query_set(&QuerySetDescriptor {
-                label: Some("gpu_timing_timestamps"),
-                ty: QueryType::Timestamp,
-                count: query_count,
-            });
-
             let buffer_size = (query_count as u64) * std::mem::size_of::<u64>() as u64;
+            for slot in 0..SLOTS {
+                let query_set = self.device.create_query_set(&QuerySetDescriptor {
+                    label: Some("gpu_timing_timestamps"),
+                    ty: QueryType::Timestamp,
+                    count: query_count,
+                });
 
-            let timestamp_buffer = self.device.create_buffer(&BufferDescriptor {
-                label: Some("gpu_timing_timestamp_buffer"),
-                size: buffer_size,
-                usage: BufferUsages::QUERY_RESOLVE | BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            });
+                let timestamp_buffer = self.device.create_buffer(&BufferDescriptor {
+                    label: Some("gpu_timing_timestamp_buffer"),
+                    size: buffer_size,
+                    usage: BufferUsages::QUERY_RESOLVE | BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                });
 
-            let timestamp_readback = self.device.create_buffer(&BufferDescriptor {
-                label: Some("gpu_timing_timestamp_readback"),
-                size: buffer_size,
-                usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            });
+                let timestamp_readback = self.device.create_buffer(&BufferDescriptor {
+                    label: Some("gpu_timing_timestamp_readback"),
+                    size: buffer_size,
+                    usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                });
 
-            self.timestamp_query_set = Some(query_set);
-            self.timestamp_buffer = Some(timestamp_buffer);
-            self.timestamp_readback_buffer = Some(timestamp_readback);
+                self.timestamp_query_set[slot] = Some(query_set);
+                self.timestamp_buffer[slot] = Some(timestamp_buffer);
+                self.timestamp_readback_buffer[slot] = Some(timestamp_readback);
+            }
         }
 
         // Initialize pipeline statistics queries
@@ -234,8 +254,10 @@ impl GpuTimingManager {
         encoder: &'a mut CommandEncoder,
         label: &str,
     ) -> TimingScopeId {
-        let scope_id = TimingScopeId(self.scope_labels.len());
-        self.scope_labels.push(label.to_string());
+        let slot = self.frame_parity;
+        let scope_id = TimingScopeId(self.scope_labels[slot].len());
+        self.scope_labels[slot].push(label.to_string());
+        self.scope_draw_calls[slot].push(0);
         self.active_scopes.insert(scope_id, label.to_string());
 
         self.begin_scope_internal(encoder, scope_id, label);
@@ -255,23 +277,14 @@ impl GpuTimingManager {
             encoder.push_debug_group(&full_label);
         }
 
-        // Insert timestamp query
-        if let Some(ref query_set) = self.timestamp_query_set {
-            if self.query_index < self.config.max_queries_per_frame * 2 {
-                encoder.write_timestamp(query_set, self.query_index);
-                self.query_index += 1;
+        // Insert timestamp query into the current slot.
+        let slot = self.frame_parity;
+        if let Some(ref query_set) = self.timestamp_query_set[slot] {
+            if self.query_index[slot] < self.config.max_queries_per_frame * 2 {
+                encoder.write_timestamp(query_set, self.query_index[slot]);
+                self.query_index[slot] += 1;
             }
         }
-
-        // Insert pipeline statistics query (begin)
-        // Note: pipeline statistics queries not available in current wgpu version
-        /*
-        if let Some(ref query_set) = self.pipeline_stats_query_set {
-            if self.query_index < self.config.max_queries_per_frame * 2 {
-                encoder.begin_pipeline_statistics_query(query_set, self.query_index);
-            }
-        }
-        */
     }
 
     /// End timing scope
@@ -279,20 +292,27 @@ impl GpuTimingManager {
         self.end_scope_internal(encoder, scope_id);
     }
 
-    fn end_scope_internal(&mut self, encoder: &mut CommandEncoder, scope_id: TimingScopeId) {
-        // End pipeline statistics query
-        // Note: pipeline statistics queries not available in current wgpu version
-        /*
-        if let Some(ref query_set) = self.pipeline_stats_query_set {
-            encoder.end_pipeline_statistics_query();
+    /// End timing scope, recording the number of draw calls issued inside it.
+    pub fn end_scope_with_draws(
+        &mut self,
+        encoder: &mut CommandEncoder,
+        scope_id: TimingScopeId,
+        draw_calls: u32,
+    ) {
+        let slot = self.frame_parity;
+        if let Some(entry) = self.scope_draw_calls[slot].get_mut(scope_id.0) {
+            *entry = draw_calls;
         }
-        */
+        self.end_scope_internal(encoder, scope_id);
+    }
 
-        // Insert end timestamp
-        if let Some(ref query_set) = self.timestamp_query_set {
-            if self.query_index < self.config.max_queries_per_frame * 2 {
-                encoder.write_timestamp(query_set, self.query_index);
-                self.query_index += 1;
+    fn end_scope_internal(&mut self, encoder: &mut CommandEncoder, scope_id: TimingScopeId) {
+        // Insert end timestamp into the current slot.
+        let slot = self.frame_parity;
+        if let Some(ref query_set) = self.timestamp_query_set[slot] {
+            if self.query_index[slot] < self.config.max_queries_per_frame * 2 {
+                encoder.write_timestamp(query_set, self.query_index[slot]);
+                self.query_index[slot] += 1;
             }
         }
 
@@ -304,56 +324,96 @@ impl GpuTimingManager {
         self.active_scopes.remove(&scope_id);
     }
 
-    /// Resolve timing queries and prepare for readback
+    /// Resolve timing queries and prepare for readback.
+    ///
+    /// Resolves the current slot (`frame_parity`) into its own readback buffer.
+    /// Per-slot query counts and scope labels are retained so a later
+    /// `get_results` / `get_results_blocking` can map them back to names.
     pub fn resolve_queries(&mut self, encoder: &mut CommandEncoder) {
-        if self.query_index == 0 {
+        let slot = self.frame_parity;
+        if self.query_index[slot] == 0 {
             return; // No queries to resolve
         }
 
-        // Resolve timestamp queries
-        if let (Some(ref query_set), Some(ref buffer)) =
-            (&self.timestamp_query_set, &self.timestamp_buffer)
-        {
-            encoder.resolve_query_set(query_set, 0..self.query_index, buffer, 0);
+        // Resolve timestamp queries for this slot.
+        if let (Some(ref query_set), Some(ref buffer)) = (
+            &self.timestamp_query_set[slot],
+            &self.timestamp_buffer[slot],
+        ) {
+            encoder.resolve_query_set(query_set, 0..self.query_index[slot], buffer, 0);
 
-            if let Some(ref readback_buffer) = &self.timestamp_readback_buffer {
-                let size = (self.query_index as u64) * std::mem::size_of::<u64>() as u64;
+            if let Some(ref readback_buffer) = &self.timestamp_readback_buffer[slot] {
+                let size = (self.query_index[slot] as u64) * std::mem::size_of::<u64>() as u64;
                 encoder.copy_buffer_to_buffer(buffer, 0, readback_buffer, 0, size);
             }
         }
 
-        // Resolve pipeline statistics queries
+        // Resolve pipeline statistics queries (single-buffered).
         if let (Some(ref query_set), Some(ref buffer)) =
             (&self.pipeline_stats_query_set, &self.pipeline_stats_buffer)
         {
-            encoder.resolve_query_set(query_set, 0..self.query_index, buffer, 0);
+            encoder.resolve_query_set(query_set, 0..self.query_index[slot], buffer, 0);
 
             if let Some(ref readback_buffer) = &self.pipeline_stats_readback_buffer {
-                let size = (self.query_index as u64) * std::mem::size_of::<u64>() as u64 * 4;
+                let size = (self.query_index[slot] as u64) * std::mem::size_of::<u64>() as u64 * 4;
                 encoder.copy_buffer_to_buffer(buffer, 0, readback_buffer, 0, size);
             }
         }
     }
 
-    /// Get timing results (async, may not be available immediately)
+    /// Advance the double buffer. Call AFTER submitting the encoder that
+    /// `resolve_queries` wrote into. Flips parity and clears the slot the next
+    /// frame will write into (it was drained one frame earlier).
+    pub fn finish_frame(&mut self) {
+        self.frame_parity = (self.frame_parity + 1) % SLOTS;
+        let slot = self.frame_parity;
+        self.query_index[slot] = 0;
+        self.scope_labels[slot].clear();
+        self.scope_draw_calls[slot].clear();
+    }
+
+    /// Get timing results for the previously submitted frame (async, viewer path).
+    ///
+    /// Reads the slot NOT currently being written (submitted last frame), so
+    /// waiting on it does not stall the frame in flight. If that slot has no
+    /// pending queries (e.g. the very first frame), falls back to the current
+    /// slot — safe when the caller has already submitted and polled it.
     pub async fn get_results(&mut self) -> RenderResult<Vec<TimingResult>> {
+        // Prefer the previously submitted slot; fall back to the current one.
+        let other = (self.frame_parity + 1) % SLOTS;
+        let read_slot = if self.query_index[other] >= 2 {
+            other
+        } else {
+            self.frame_parity
+        };
+
+        self.read_results_from_slot(read_slot).await
+    }
+
+    /// Get timing results for the slot just resolved + submitted (offline single-shot).
+    ///
+    /// Reads the current slot (`frame_parity`) and blocks on device work with an
+    /// explicit `Maintain::Wait`. Intended for single-submit offline renders.
+    pub fn get_results_blocking(&mut self) -> RenderResult<Vec<TimingResult>> {
+        pollster::block_on(self.read_results_from_slot(self.frame_parity))
+    }
+
+    async fn read_results_from_slot(&mut self, slot: usize) -> RenderResult<Vec<TimingResult>> {
         let mut results = Vec::new();
 
-        if self.query_index < 2 {
-            self.scope_labels.clear();
-            self.query_index = 0;
-            return Ok(results); // Need at least begin/end pair
+        if self.query_index[slot] < 2 {
+            return Ok(results); // Need at least one begin/end pair
         }
 
-        // Read timestamp results
-        let timestamps = if let Some(ref readback_buffer) = &self.timestamp_readback_buffer {
-            self.read_timestamp_buffer(readback_buffer).await?
+        let count = self.query_index[slot];
+        let timestamps = if let Some(ref readback_buffer) = &self.timestamp_readback_buffer[slot] {
+            self.read_timestamp_buffer(readback_buffer, count).await?
         } else {
             Vec::new()
         };
 
-        // Process timestamp pairs into timing results
-        let scope_count = timestamps.len().saturating_sub(1) / 2;
+        // Process timestamp pairs into timing results.
+        let scope_count = timestamps.len() / 2;
         for scope_index in 0..scope_count {
             let begin_idx = scope_index * 2;
             let end_idx = begin_idx + 1;
@@ -361,29 +421,29 @@ impl GpuTimingManager {
             let end_ns = timestamps[end_idx] as f64 * self.timestamp_period;
             let duration_ms = (end_ns - begin_ns) / 1_000_000.0; // Convert ns to ms
 
-            let name = self
-                .scope_labels
+            let name = self.scope_labels[slot]
                 .get(scope_index)
                 .cloned()
                 .unwrap_or_else(|| format!("scope_{}", scope_index));
+            let draw_calls = self.scope_draw_calls[slot]
+                .get(scope_index)
+                .copied()
+                .unwrap_or(0);
 
             results.push(TimingResult {
                 name,
                 gpu_time_ms: duration_ms as f32,
                 timestamp_valid: true,
+                draw_calls,
                 pipeline_stats: None, // Pipeline stats are not collected yet.
             });
         }
 
-        // Reset for next frame
-        self.query_index = 0;
-        self.scope_labels.clear();
-
         Ok(results)
     }
 
-    async fn read_timestamp_buffer(&self, buffer: &Buffer) -> RenderResult<Vec<u64>> {
-        let size = (self.query_index as u64) * std::mem::size_of::<u64>() as u64;
+    async fn read_timestamp_buffer(&self, buffer: &Buffer, count: u32) -> RenderResult<Vec<u64>> {
+        let size = (count as u64) * std::mem::size_of::<u64>() as u64;
         let slice = buffer.slice(0..size);
 
         let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
@@ -455,5 +515,96 @@ pub fn create_default_config(device: &Device) -> GpuTimingConfig {
         enable_debug_markers: true,
         label_prefix: "forge3d".to_string(),
         max_queries_per_frame: 32,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// CENSOR Task 4: end-to-end timestamp measurement over a real GPU submit.
+    ///
+    /// Times a buffer-to-buffer copy inside a begin/end scope, resolves, submits,
+    /// and reads back with `get_results_blocking`. Skips cleanly when no adapter
+    /// is available or TIMESTAMP_QUERY was not granted.
+    #[test]
+    fn gpu_timing_double_buffered_measures_copy() {
+        let Some((device, queue)) = crate::core::gpu::create_device_and_queue_for_test() else {
+            eprintln!("[gpu_timing test] no GPU adapter available; skipping");
+            return;
+        };
+        let device = Arc::new(device);
+        let queue = Arc::new(queue);
+
+        let config = create_default_config(&device);
+        if !config.enable_timestamps {
+            eprintln!("[gpu_timing test] TIMESTAMP_QUERY not granted; skipping");
+            return;
+        }
+
+        let mut manager = GpuTimingManager::new(device.clone(), queue.clone(), config)
+            .expect("create timing manager");
+        assert!(
+            manager.is_supported(),
+            "timing must be supported once TIMESTAMP_QUERY is granted"
+        );
+
+        // Two small buffers to copy between; the copy is what we time.
+        let src = device.create_buffer(&BufferDescriptor {
+            label: Some("gpu_timing_test_src"),
+            size: 4096,
+            usage: BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let dst = device.create_buffer(&BufferDescriptor {
+            label: Some("gpu_timing_test_dst"),
+            size: 4096,
+            usage: BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
+            label: Some("gpu_timing"),
+        });
+
+        let scope = manager.begin_scope(&mut encoder, "test_copy");
+        // Loop the copy so the timed interval is not sub-tick on fast adapters.
+        for _ in 0..100 {
+            encoder.copy_buffer_to_buffer(&src, 0, &dst, 0, 4096);
+        }
+        manager.end_scope_with_draws(&mut encoder, scope, 100);
+
+        manager.resolve_queries(&mut encoder);
+        queue.submit(std::iter::once(encoder.finish()));
+        device.poll(Maintain::Wait);
+
+        let results = manager.get_results_blocking().expect("get results");
+        assert_eq!(results.len(), 1, "expected exactly one timed scope");
+        let r = &results[0];
+        assert_eq!(r.name, "test_copy");
+        assert!(r.timestamp_valid, "timestamp must be valid");
+        assert_eq!(r.draw_calls, 100, "draw_calls must round-trip");
+        // Timestamps are monotonic; a real interval is >= 0. The 100x copy makes
+        // it typically > 0, but we assert >= 0.0 to stay robust across adapters
+        // whose period rounds a tiny copy to zero.
+        assert!(
+            r.gpu_time_ms >= 0.0,
+            "gpu_time_ms must be non-negative, got {}",
+            r.gpu_time_ms
+        );
+
+        // Teardown: drop GPU resources explicitly and poll so the backend
+        // processes destruction work, then deliberately leak the device/queue.
+        // On this driver stack (wgpu 0.19 / Windows), dropping a device that
+        // owned timestamp query sets hangs inside the backend even after a
+        // final poll; the process is exiting anyway, so leaking is safe and
+        // keeps the test harness from deadlocking.
+        drop(results);
+        drop(manager);
+        drop(src);
+        drop(dst);
+        device.poll(Maintain::Wait);
+        std::mem::forget(device);
+        std::mem::forget(queue);
     }
 }
