@@ -32,6 +32,14 @@ pub fn poison_context(reason: String) {
     let _ = POISONED.set(reason);
 }
 
+/// The already-initialized GPU context, if one exists, WITHOUT forcing lazy
+/// initialization. Certificate assembly and other observers use this to read
+/// adapter/capability state only when a render has already brought the context
+/// up — they must never spin up a GPU as a side effect.
+pub fn ctx_if_initialized() -> Option<&'static GpuContext> {
+    CTX.get()
+}
+
 /// Backend name of the already-initialized GPU context, if one exists.
 ///
 /// Returns `None` when no context has been created yet (peeks `CTX` without

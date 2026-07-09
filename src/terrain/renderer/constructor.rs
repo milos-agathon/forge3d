@@ -591,6 +591,7 @@ impl TerrainScene {
             viewer_heightmap: None,
             geometry_provider: None,
             height_streaming: None,
+            gpu_timing: Mutex::new(None),
             _tracked_scene_textures: tracked_scene_textures,
         })
     }

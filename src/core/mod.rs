@@ -19,6 +19,9 @@ pub mod capabilities;
 // CENSOR: WGSL shader-hash registry + validation error scopes
 pub mod shader_registry;
 
+// CENSOR Task 9: RenderCertificate execution report (per-render pass timings)
+pub mod certificate;
+
 pub mod framegraph; // Legacy compatibility layer
 pub mod gpu_types;
 pub mod memory_tracker;

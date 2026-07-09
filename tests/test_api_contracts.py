@@ -235,6 +235,8 @@ class TestNativeModuleSymbols:
         "clear_native_degradations",
         # CENSOR: negotiated GPU capability report
         "capabilities",
+        # CENSOR: last-render execution certificate JSON
+        "render_execution_report",
         # CENSOR: budget-enforce test helper
         "request_host_visible_allocation_for_test",
     ]

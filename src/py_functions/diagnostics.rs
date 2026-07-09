@@ -369,6 +369,19 @@ pub(crate) fn clear_native_degradations() {
 }
 
 // ---------------------------------------------------------
+// CENSOR Task 9: RenderCertificate execution report
+// ---------------------------------------------------------
+/// Serialized JSON execution report for the LAST completed native render:
+/// engine revision + WGSL hashes, adapter/capabilities, live per-pass GPU
+/// timings, peak allocation ledger, and recorded degradations. Raises when no
+/// render has completed in this process yet.
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn render_execution_report() -> PyResult<String> {
+    Ok(crate::core::certificate::execution_report_json()?)
+}
+
+// ---------------------------------------------------------
 // CENSOR: negotiated GPU capability report
 // ---------------------------------------------------------
 #[cfg(feature = "extension-module")]

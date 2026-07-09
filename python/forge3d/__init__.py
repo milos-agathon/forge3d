@@ -112,6 +112,7 @@ _NATIVE_ONLY_EXPORTS = (
         "native_degradations",  # CENSOR: global degradation sink snapshot
         "clear_native_degradations",  # CENSOR: global degradation sink reset
         "capabilities",  # CENSOR: negotiated GPU capability report
+        "render_execution_report",  # CENSOR: last-render execution certificate JSON
         "request_host_visible_allocation_for_test",  # CENSOR: budget-enforce test helper
 )
 
@@ -607,6 +608,8 @@ __all__ = [
     "clear_native_degradations",
     # CENSOR: negotiated GPU capability report
     "capabilities",
+    # CENSOR: last-render execution certificate JSON
+    "render_execution_report",
     # CENSOR: budget-enforce test helper
     "request_host_visible_allocation_for_test",
     # CENSOR: typed GPU-error exceptions

@@ -137,6 +137,11 @@ pub struct TerrainScene {
     pub(super) viewer_heightmap: Option<ViewerTerrainData>,
     pub(super) geometry_provider: Option<TerrainGeometryProvider>,
     pub(super) height_streaming: Option<super::streaming::HeightStreamingState>,
+    /// CENSOR Task 9: owned per-render GPU timing manager, lazily constructed on
+    /// the first render when the device granted `TIMESTAMP_QUERY`. Stored behind
+    /// a `Mutex<Option<..>>` because the draw methods borrow `&self`; a render
+    /// takes it out, scopes each pass, then puts it back.
+    pub(super) gpu_timing: Mutex<Option<crate::core::gpu_timing::GpuTimingManager>>,
     pub(super) _tracked_scene_textures: Vec<crate::core::resource_tracker::ResourceHandle>,
 }
 
@@ -312,6 +317,110 @@ impl TerrainScene {
             return 6 * (grid_size - 1) * (grid_size - 1);
         }
         3
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CENSOR Task 9: per-render GPU-pass timing helpers.
+// ---------------------------------------------------------------------------
+
+/// Open a timing scope around a GPU pass when timing is active. The returned
+/// id is threaded to [`ts_end`]; `None` when timing is unavailable.
+pub(super) fn ts_begin(
+    timing: &mut Option<crate::core::gpu_timing::GpuTimingManager>,
+    encoder: &mut wgpu::CommandEncoder,
+    label: &str,
+) -> Option<crate::core::gpu_timing::TimingScopeId> {
+    timing.as_mut().map(|t| t.begin_scope(encoder, label))
+}
+
+/// Close a timing scope opened by [`ts_begin`], recording its draw-call count.
+pub(super) fn ts_end(
+    timing: &mut Option<crate::core::gpu_timing::GpuTimingManager>,
+    encoder: &mut wgpu::CommandEncoder,
+    scope: Option<crate::core::gpu_timing::TimingScopeId>,
+    draw_calls: u32,
+) {
+    if let (Some(t), Some(id)) = (timing.as_mut(), scope) {
+        t.end_scope_with_draws(encoder, id, draw_calls);
+    }
+}
+
+impl TerrainScene {
+    /// Take the render-timing manager out of the scene, lazily constructing it
+    /// the first time when the device granted `TIMESTAMP_QUERY`. Returns `None`
+    /// when timestamps are unavailable (the certificate then reports the passes
+    /// with `gpu_ms == 0`). The caller returns it via [`store_render_timing`].
+    pub(super) fn take_render_timing(&self) -> Option<crate::core::gpu_timing::GpuTimingManager> {
+        let mut guard = self.gpu_timing.lock().ok()?;
+        if guard.is_none() {
+            if !self
+                .device
+                .features()
+                .contains(wgpu::Features::TIMESTAMP_QUERY)
+            {
+                return None;
+            }
+            // Timestamps only: this path never issues pipeline-statistics
+            // queries, so enabling that query set would make `resolve_queries`
+            // resolve a never-written statistics range and lose the device on
+            // adapters that also advertise PIPELINE_STATISTICS_QUERY.
+            let config = crate::core::gpu_timing::GpuTimingConfig {
+                enable_timestamps: true,
+                enable_pipeline_stats: true, // TEMP bisect experiment — REVERT
+                enable_debug_markers: false,
+                label_prefix: "forge3d".to_string(),
+                max_queries_per_frame: 32,
+            };
+            match crate::core::gpu_timing::GpuTimingManager::new(
+                self.device.clone(),
+                self.queue.clone(),
+                config,
+            ) {
+                Ok(manager) => return Some(manager),
+                Err(e) => {
+                    log::warn!("failed to create GPU timing manager: {e}");
+                    return None;
+                }
+            }
+        }
+        guard.take()
+    }
+
+    /// Return a timing manager taken by [`take_render_timing`] to the scene.
+    pub(super) fn store_render_timing(
+        &self,
+        manager: Option<crate::core::gpu_timing::GpuTimingManager>,
+    ) {
+        if let Some(manager) = manager {
+            if let Ok(mut guard) = self.gpu_timing.lock() {
+                *guard = Some(manager);
+            }
+        }
+    }
+
+    /// Finalize a render's timing: resolve+read the timestamps and record each
+    /// timed pass into the global certificate capture. Consumes the manager's
+    /// current slot (offline single-shot pattern). Must be called AFTER the
+    /// render encoder was submitted (with `resolve_queries` recorded into it).
+    pub(super) fn record_render_timings(
+        &self,
+        timing: &mut Option<crate::core::gpu_timing::GpuTimingManager>,
+    ) {
+        if let Some(manager) = timing.as_mut() {
+            match manager.get_results_blocking() {
+                Ok(results) => {
+                    for result in results {
+                        crate::core::certificate::record_pass(
+                            &result.name,
+                            result.gpu_time_ms as f64,
+                            result.draw_calls,
+                        );
+                    }
+                }
+                Err(e) => log::warn!("GPU timing readback failed: {e}"),
+            }
+        }
     }
 }
 

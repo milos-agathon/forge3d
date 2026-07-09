@@ -473,6 +473,8 @@ impl TerrainScene {
         water_mask: Option<numpy::PyReadonlyArray2<'_, f32>>,
         time_seconds: f32,
     ) -> Result<(crate::Frame, crate::AovFrame)> {
+        crate::core::certificate::begin_render_capture("terrain.render_internal_with_aov");
+        let mut timing = self.take_render_timing();
         let decoded = params.decoded();
         self.prepare_frame_lighting(decoded)?;
 
@@ -577,6 +579,7 @@ impl TerrainScene {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("terrain.encoder.aov"),
             });
+        let vt_scope = ts_begin(&mut timing, &mut encoder, "terrain.material_vt");
         let material_vt_ready = self.prepare_material_vt_frame(
             &mut encoder,
             params,
@@ -585,7 +588,9 @@ impl TerrainScene {
             render_targets.internal_width,
             render_targets.internal_height,
         )?;
+        ts_end(&mut timing, &mut encoder, vt_scope, 0);
 
+        let ao_scope = ts_begin(&mut timing, &mut encoder, "terrain.height_ao");
         let height_ao_computed = self.compute_height_ao_pass(
             &mut encoder,
             &height_inputs.heightmap_view,
@@ -596,6 +601,9 @@ impl TerrainScene {
             params,
             decoded,
         )?;
+        ts_end(&mut timing, &mut encoder, ao_scope, 0);
+
+        let sun_vis_scope = ts_begin(&mut timing, &mut encoder, "terrain.sun_visibility");
         let sun_vis_computed = self.compute_sun_visibility_pass(
             &mut encoder,
             &height_inputs.heightmap_view,
@@ -606,7 +614,9 @@ impl TerrainScene {
             params,
             decoded,
         )?;
+        ts_end(&mut timing, &mut encoder, sun_vis_scope, 0);
 
+        let shadow_scope = ts_begin(&mut timing, &mut encoder, "terrain.shadow");
         let shadow_setup = self.prepare_shadow_setup(
             &mut encoder,
             params,
@@ -615,10 +625,12 @@ impl TerrainScene {
             height_inputs.width,
             height_inputs.height,
         )?;
+        ts_end(&mut timing, &mut encoder, shadow_scope, 0);
         let shadow_bind_group = shadow_setup
             .shadow_bind_group
             .as_ref()
             .unwrap_or(&self.noop_shadow.bind_group);
+        let sky_scope = ts_begin(&mut timing, &mut encoder, "terrain.sky");
         let sky_texture = self.render_sky_texture(
             &mut encoder,
             decoded,
@@ -628,6 +640,7 @@ impl TerrainScene {
             render_targets.internal_width,
             render_targets.internal_height,
         )?;
+        ts_end(&mut timing, &mut encoder, sky_scope, 0);
         let sky_view = sky_texture
             .as_ref()
             .map(|(_, view)| view)
@@ -691,9 +704,12 @@ impl TerrainScene {
         )?;
 
         if let Some((_, background_view)) = sky_texture.as_ref() {
+            let bg_scope = ts_begin(&mut timing, &mut encoder, "terrain.background");
             self.blit_background_texture(&mut encoder, &render_targets, background_view)?;
+            ts_end(&mut timing, &mut encoder, bg_scope, 1);
         }
 
+        let main_scope = ts_begin(&mut timing, &mut encoder, "terrain.main");
         self.run_main_pass_with_aov(
             &mut encoder,
             params,
@@ -707,6 +723,7 @@ impl TerrainScene {
             &pass_bind_groups.material_layer,
             sky_texture.is_some(),
         )?;
+        ts_end(&mut timing, &mut encoder, main_scope, 1);
 
         #[cfg(feature = "enable-gpu-instancing")]
         {
@@ -730,6 +747,7 @@ impl TerrainScene {
         }
 
         let needs_scaling = render_targets.needs_scaling;
+        let resolve_scope = ts_begin(&mut timing, &mut encoder, "terrain.resolve");
         let (final_texture, final_width, final_height) =
             self.resolve_output(&mut encoder, params, decoded, render_targets)?;
 
@@ -766,9 +784,17 @@ impl TerrainScene {
             false,
             "terrain.aov.depth.resolved",
         )?;
+        ts_end(&mut timing, &mut encoder, resolve_scope, 4);
         self.stage_material_vt_feedback_readback(&mut encoder)?;
+        if let Some(t) = timing.as_mut() {
+            t.resolve_queries(&mut encoder);
+        }
         self.queue.submit(Some(encoder.finish()));
         self.finish_material_vt_frame()?;
+
+        self.record_render_timings(&mut timing);
+        self.store_render_timing(timing);
+        crate::core::certificate::finish_render_capture();
 
         let aov_config = &decoded.aov;
         let aov_frame = crate::AovFrame::new(

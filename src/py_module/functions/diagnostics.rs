@@ -6,7 +6,10 @@ pub(super) fn register_diagnostics_py_functions(m: &Bound<'_, PyModule>) -> PyRe
     m.add_function(wrap_pyfunction!(global_memory_metrics, m)?)?;
     m.add_function(wrap_pyfunction!(set_memory_budget_policy, m)?)?;
     m.add_function(wrap_pyfunction!(get_memory_budget_policy, m)?)?;
-    m.add_function(wrap_pyfunction!(request_host_visible_allocation_for_test, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        request_host_visible_allocation_for_test,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(render_debug_pattern_frame, m)?)?;
     m.add_function(wrap_pyfunction!(numpy_to_exr, m)?)?;
 
@@ -18,5 +21,6 @@ pub(super) fn register_diagnostics_py_functions(m: &Bound<'_, PyModule>) -> PyRe
     m.add_function(wrap_pyfunction!(native_degradations, m)?)?;
     m.add_function(wrap_pyfunction!(clear_native_degradations, m)?)?;
     m.add_function(wrap_pyfunction!(capabilities, m)?)?;
+    m.add_function(wrap_pyfunction!(render_execution_report, m)?)?;
     Ok(())
 }
