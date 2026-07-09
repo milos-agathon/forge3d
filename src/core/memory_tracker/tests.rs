@@ -37,8 +37,8 @@ fn budget_checking() {
 fn budget_policy_controls_over_budget_checks() {
     let registry = ResourceRegistry::new();
 
-    assert_eq!(registry.get_budget_policy(), "warn");
-    assert!(registry.check_budget(600 * 1024 * 1024).is_ok());
+    assert_eq!(registry.get_budget_policy(), "enforce");
+    assert!(registry.check_budget(600 * 1024 * 1024).is_err());
 
     assert_eq!(registry.set_budget_policy("warn").unwrap(), "warn");
     assert_eq!(registry.get_metrics().budget_policy, "warn");
