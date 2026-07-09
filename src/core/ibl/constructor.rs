@@ -4,22 +4,21 @@ use crate::core::resource_tracker::tracked_create_buffer_init;
 
 impl IBLRenderer {
     pub fn new(device: &wgpu::Device, quality: IBLQuality) -> RenderResult<Self> {
-        let shader_equirect = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("ibl.precompute.shader.equirect"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/ibl_equirect.wgsl").into(),
-            ),
-        });
-        let shader_prefilter = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("ibl.precompute.shader.prefilter"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/ibl_prefilter.wgsl").into(),
-            ),
-        });
-        let shader_brdf = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("ibl.precompute.shader.brdf"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/ibl_brdf.wgsl").into()),
-        });
+        let shader_equirect = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "ibl.precompute.shader.equirect",
+            include_str!("../../shaders/ibl_equirect.wgsl"),
+        );
+        let shader_prefilter = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "ibl.precompute.shader.prefilter",
+            include_str!("../../shaders/ibl_prefilter.wgsl"),
+        );
+        let shader_brdf = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "ibl.precompute.shader.brdf",
+            include_str!("../../shaders/ibl_brdf.wgsl"),
+        );
 
         let equirect_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ibl.precompute.equirect.layout"),

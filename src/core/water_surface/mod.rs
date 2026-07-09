@@ -3,7 +3,6 @@
 // Supports water tint toggling, transparency, and basic wave animation
 
 use glam::{Mat4, Vec2, Vec3};
-use std::borrow::Cow;
 use wgpu::{
     vertex_attr_array, AddressMode, BindGroup, BindGroupLayout, BlendComponent, BlendFactor,
     BlendOperation, BlendState, BufferAddress, Device, Queue, RenderPipeline, Sampler,

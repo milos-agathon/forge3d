@@ -81,10 +81,11 @@ pub(super) fn create_atmosphere_init_resources(
             }],
         });
 
-    let sky_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("terrain.sky.shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/sky.wgsl").into()),
-    });
+    let sky_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "terrain.sky.shader",
+        include_str!("../../shaders/sky.wgsl"),
+    );
 
     let sky_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("terrain.sky.pipeline_layout"),

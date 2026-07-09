@@ -12,18 +12,16 @@ impl DualSourceOITRenderer {
         let dual_source_supported = Self::detect_dual_source_support(device);
         let max_dual_source_targets = if dual_source_supported { 2 } else { 0 };
 
-        let dual_source_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("DualSourceOIT.Shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/oit_dual_source.wgsl").into(),
-            ),
-        });
-        let compose_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("DualSourceOIT.Compose"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/oit_dual_source_compose.wgsl").into(),
-            ),
-        });
+        let dual_source_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "DualSourceOIT.Shader",
+            include_str!("../../shaders/oit_dual_source.wgsl"),
+        );
+        let compose_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "DualSourceOIT.Compose",
+            include_str!("../../shaders/oit_dual_source_compose.wgsl"),
+        );
 
         let uniforms = DualSourceOITUniforms::default();
         let uniforms_buffer = tracked_create_buffer_init(

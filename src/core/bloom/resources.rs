@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use crate::core::error::RenderResult;
 use crate::core::postfx::{PostFxResourceDesc, PostFxResourcePool};
 use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
@@ -33,30 +31,26 @@ pub(super) fn create_layouts(device: &Device) -> BloomLayouts {
 }
 
 pub(super) fn create_pipelines(device: &Device, layouts: &BloomLayouts) -> BloomPipelines {
-    let brightpass_shader = device.create_shader_module(ShaderModuleDescriptor {
-        label: Some("bloom_brightpass_shader"),
-        source: ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../shaders/bloom_brightpass.wgsl"
-        ))),
-    });
-    let blur_h_shader = device.create_shader_module(ShaderModuleDescriptor {
-        label: Some("bloom_blur_h_shader"),
-        source: ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../shaders/bloom_blur_h.wgsl"
-        ))),
-    });
-    let blur_v_shader = device.create_shader_module(ShaderModuleDescriptor {
-        label: Some("bloom_blur_v_shader"),
-        source: ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../shaders/bloom_blur_v.wgsl"
-        ))),
-    });
-    let composite_shader = device.create_shader_module(ShaderModuleDescriptor {
-        label: Some("bloom_composite_shader"),
-        source: ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-            "../../shaders/bloom_composite.wgsl"
-        ))),
-    });
+    let brightpass_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "bloom_brightpass_shader",
+        include_str!("../../shaders/bloom_brightpass.wgsl"),
+    );
+    let blur_h_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "bloom_blur_h_shader",
+        include_str!("../../shaders/bloom_blur_h.wgsl"),
+    );
+    let blur_v_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "bloom_blur_v_shader",
+        include_str!("../../shaders/bloom_blur_v.wgsl"),
+    );
+    let composite_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "bloom_composite_shader",
+        include_str!("../../shaders/bloom_composite.wgsl"),
+    );
 
     BloomPipelines {
         brightpass: create_pipeline(

@@ -11,12 +11,11 @@ impl PointSpotLightRenderer {
         let max_lights = max_lights.min(64); // Cap at reasonable limit
 
         // Load shader
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("point_spot_lights_shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/point_spot_lights.wgsl").into(),
-            ),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "point_spot_lights_shader",
+            include_str!("../../shaders/point_spot_lights.wgsl"),
+        );
 
         // Create bind group layouts
         let main_bind_group_layout =

@@ -192,10 +192,11 @@ pub fn create_fog_resources(
         ],
     });
 
-    let fog_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("viewer.fog.shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/volumetric.wgsl").into()),
-    });
+    let fog_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "viewer.fog.shader",
+        include_str!("../../shaders/volumetric.wgsl"),
+    );
 
     let fog_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("viewer.fog.pl"),
@@ -203,26 +204,35 @@ pub fn create_fog_resources(
         push_constant_ranges: &[],
     });
 
-    let fog_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("viewer.fog.pipeline"),
-        layout: Some(&fog_pl),
-        module: &fog_shader,
-        entry_point: "cs_volumetric",
-    });
+    let fog_pipeline =
+        crate::core::shader_registry::with_error_scope(device, "viewer.fog.pipeline", || {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("viewer.fog.pipeline"),
+                layout: Some(&fog_pl),
+                module: &fog_shader,
+                entry_point: "cs_volumetric",
+            })
+        });
 
-    let froxel_build_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("viewer.fog.froxel.build"),
-        layout: Some(&fog_pl),
-        module: &fog_shader,
-        entry_point: "cs_build_froxels",
-    });
+    let froxel_build_pipeline =
+        crate::core::shader_registry::with_error_scope(device, "viewer.fog.froxel.build", || {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("viewer.fog.froxel.build"),
+                layout: Some(&fog_pl),
+                module: &fog_shader,
+                entry_point: "cs_build_froxels",
+            })
+        });
 
-    let froxel_apply_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("viewer.fog.froxel.apply"),
-        layout: Some(&fog_pl),
-        module: &fog_shader,
-        entry_point: "cs_apply_froxels",
-    });
+    let froxel_apply_pipeline =
+        crate::core::shader_registry::with_error_scope(device, "viewer.fog.froxel.apply", || {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("viewer.fog.froxel.apply"),
+                layout: Some(&fog_pl),
+                module: &fog_shader,
+                entry_point: "cs_apply_froxels",
+            })
+        });
 
     // Fog params buffer
     let fog_params_data: [u8; 80] = [0; 80];
@@ -489,10 +499,11 @@ pub fn create_fog_resources(
         ],
     });
 
-    let fog_upsample_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("viewer.fog.upsample.shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/fog_upsample.wgsl").into()),
-    });
+    let fog_upsample_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "viewer.fog.upsample.shader",
+        include_str!("../../shaders/fog_upsample.wgsl"),
+    );
 
     let fog_upsample_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("viewer.fog.upsample.pl"),
@@ -500,12 +511,18 @@ pub fn create_fog_resources(
         push_constant_ranges: &[],
     });
 
-    let fog_upsample_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("viewer.fog.upsample.pipeline"),
-        layout: Some(&fog_upsample_pl),
-        module: &fog_upsample_shader,
-        entry_point: "cs_main",
-    });
+    let fog_upsample_pipeline = crate::core::shader_registry::with_error_scope(
+        device,
+        "viewer.fog.upsample.pipeline",
+        || {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("viewer.fog.upsample.pipeline"),
+                layout: Some(&fog_upsample_pl),
+                module: &fog_upsample_shader,
+                entry_point: "cs_main",
+            })
+        },
+    );
 
     let fog_upsample_params = tracked_create_buffer_init(
         device,

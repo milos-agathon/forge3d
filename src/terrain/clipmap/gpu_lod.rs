@@ -195,12 +195,11 @@ pub struct GpuLodSelector {
 impl GpuLodSelector {
     /// Create a new GPU LOD selector.
     pub fn new(device: &wgpu::Device, config: GpuLodConfig) -> Self {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("clipmap_lod_select"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/clipmap_lod_select.wgsl").into(),
-            ),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "clipmap_lod_select",
+            include_str!("../../shaders/clipmap_lod_select.wgsl"),
+        );
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("lod_select_bind_group_layout"),

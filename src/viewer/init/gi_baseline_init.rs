@@ -97,10 +97,11 @@ pub fn create_gi_baseline_resources(
         ],
     });
 
-    let gi_baseline_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("viewer.gi.baseline.shader"),
-        source: wgpu::ShaderSource::Wgsl(GI_BASELINE_SHADER.into()),
-    });
+    let gi_baseline_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "viewer.gi.baseline.shader",
+        GI_BASELINE_SHADER,
+    );
 
     let gi_baseline_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("viewer.gi.baseline.pl"),
@@ -108,12 +109,18 @@ pub fn create_gi_baseline_resources(
         push_constant_ranges: &[],
     });
 
-    let gi_baseline_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("viewer.gi.baseline.pipeline"),
-        layout: Some(&gi_baseline_pl),
-        module: &gi_baseline_shader,
-        entry_point: "cs_main",
-    });
+    let gi_baseline_pipeline = crate::core::shader_registry::with_error_scope(
+        device,
+        "viewer.gi.baseline.pipeline",
+        || {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("viewer.gi.baseline.pipeline"),
+                layout: Some(&gi_baseline_pl),
+                module: &gi_baseline_shader,
+                entry_point: "cs_main",
+            })
+        },
+    );
 
     // GI split bind group layout
     let gi_split_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -172,10 +179,11 @@ pub fn create_gi_baseline_resources(
         ],
     });
 
-    let gi_split_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("viewer.gi.split.shader"),
-        source: wgpu::ShaderSource::Wgsl(GI_SPLIT_SHADER.into()),
-    });
+    let gi_split_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "viewer.gi.split.shader",
+        GI_SPLIT_SHADER,
+    );
 
     let gi_split_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("viewer.gi.split.pl"),
@@ -183,12 +191,15 @@ pub fn create_gi_baseline_resources(
         push_constant_ranges: &[],
     });
 
-    let gi_split_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("viewer.gi.split.pipeline"),
-        layout: Some(&gi_split_pl),
-        module: &gi_split_shader,
-        entry_point: "cs_main",
-    });
+    let gi_split_pipeline =
+        crate::core::shader_registry::with_error_scope(device, "viewer.gi.split.pipeline", || {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("viewer.gi.split.pipeline"),
+                layout: Some(&gi_split_pl),
+                module: &gi_split_shader,
+                entry_point: "cs_main",
+            })
+        });
 
     // Create HDR textures
     let gi_baseline_hdr = tracked_create_texture(

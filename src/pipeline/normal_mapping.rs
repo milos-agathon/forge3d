@@ -14,9 +14,8 @@ use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BufferAddress, BufferBinding,
     BufferDescriptor, BufferUsages, Device, Queue, RenderPass, RenderPipeline,
-    RenderPipelineDescriptor, SamplerBindingType, ShaderModuleDescriptor, ShaderSource, Texture,
-    TextureFormat, TextureSampleType, TextureViewDimension, VertexAttribute, VertexBufferLayout,
-    VertexFormat, VertexStepMode,
+    RenderPipelineDescriptor, SamplerBindingType, Texture, TextureFormat, TextureSampleType,
+    TextureViewDimension, VertexAttribute, VertexBufferLayout, VertexFormat, VertexStepMode,
 };
 
 /// Uniforms for normal mapping pipeline
@@ -61,12 +60,11 @@ impl NormalMappingPipeline {
     /// Create a new normal mapping pipeline
     pub fn new(device: &Device, surface_format: TextureFormat) -> RenderResult<Self> {
         // Create shader module
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("normal_mapping_shader"),
-            source: ShaderSource::Wgsl(
-                include_str!("../shaders/normal_mapping_vertex.wgsl").into(),
-            ),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "normal_mapping_shader",
+            include_str!("../shaders/normal_mapping_vertex.wgsl"),
+        );
 
         // Create bind group layouts
         let uniforms_bind_group_layout =

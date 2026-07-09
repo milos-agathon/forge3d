@@ -44,10 +44,11 @@ impl HybridPathTracer {
     pub fn new() -> Result<Self, RenderError> {
         let device = &try_ctx()?.device;
         let shader_src = load_hybrid_kernel_src();
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("hybrid-pt-kernel"),
-            source: wgpu::ShaderSource::Wgsl(shader_src.into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "hybrid-pt-kernel",
+            &shader_src,
+        );
 
         let layouts = HybridBindGroupLayouts {
             uniforms: Self::create_uniforms_layout(device),
@@ -104,12 +105,11 @@ impl HybridPathTracer {
 
         // Canonical ReSTIR reuse passes, compiled from the same WGSL the
         // wavefront scheduler uses so the reservoir layout stays one contract.
-        let temporal_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("hybrid-pt-restir-temporal"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/pt_restir_temporal.wgsl").into(),
-            ),
-        });
+        let temporal_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "hybrid-pt-restir-temporal",
+            include_str!("../../shaders/pt_restir_temporal.wgsl"),
+        );
         let temporal_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("hybrid-pt-restir-temporal-layout"),
             bind_group_layouts: &[&layouts.uniforms, &layouts.empty, &layouts.restir_temporal],
@@ -123,12 +123,11 @@ impl HybridPathTracer {
                 entry_point: "main",
             });
 
-        let spatial_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("hybrid-pt-restir-spatial"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/pt_restir_spatial.wgsl").into(),
-            ),
-        });
+        let spatial_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "hybrid-pt-restir-spatial",
+            include_str!("../../shaders/pt_restir_spatial.wgsl"),
+        );
         let spatial_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("hybrid-pt-restir-spatial-layout"),
             bind_group_layouts: &[

@@ -91,12 +91,11 @@ impl CloudShadowRenderer {
         });
 
         // Load shader and create pipeline
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("cloud_shadow_compute_shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/cloud_shadows.wgsl").into(),
-            ),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "cloud_shadow_compute_shader",
+            include_str!("../../shaders/cloud_shadows.wgsl"),
+        );
 
         // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

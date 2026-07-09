@@ -4,12 +4,11 @@ use crate::core::resource_tracker::{tracked_create_buffer_init, TrackedBuffer};
 pub(super) fn create_height_ao_pipeline_resources(
     device: &wgpu::Device,
 ) -> Result<(wgpu::ComputePipeline, wgpu::BindGroupLayout, TrackedBuffer)> {
-    let height_ao_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("heightfield_ao.wgsl"),
-        source: wgpu::ShaderSource::Wgsl(
-            include_str!("../../../shaders/heightfield_ao.wgsl").into(),
-        ),
-    });
+    let height_ao_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "heightfield_ao.wgsl",
+        include_str!("../../../shaders/heightfield_ao.wgsl"),
+    );
     let height_ao_bind_group_layout =
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("height_ao.bind_group_layout"),
@@ -88,12 +87,11 @@ pub(super) fn create_height_ao_pipeline_resources(
 pub(super) fn create_sun_vis_pipeline_resources(
     device: &wgpu::Device,
 ) -> Result<(wgpu::ComputePipeline, wgpu::BindGroupLayout, TrackedBuffer)> {
-    let sun_vis_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("heightfield_sun_vis.wgsl"),
-        source: wgpu::ShaderSource::Wgsl(
-            include_str!("../../../shaders/heightfield_sun_vis.wgsl").into(),
-        ),
-    });
+    let sun_vis_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "heightfield_sun_vis.wgsl",
+        include_str!("../../../shaders/heightfield_sun_vis.wgsl"),
+    );
     let sun_vis_bind_group_layout =
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("sun_vis.bind_group_layout"),

@@ -171,14 +171,11 @@ impl ViewerTerrainScene {
                     ],
                 });
 
-        let shader = self
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("terrain_viewer_pbr.shader"),
-                source: wgpu::ShaderSource::Wgsl(
-                    crate::viewer::terrain::shader_pbr::TERRAIN_PBR_SHADER.into(),
-                ),
-            });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            &self.device,
+            "terrain_viewer_pbr.shader",
+            crate::viewer::terrain::shader_pbr::TERRAIN_PBR_SHADER,
+        );
 
         let pipeline_layout = self
             .device
@@ -356,14 +353,11 @@ impl ViewerTerrainScene {
                         ],
                     });
 
-            let ao_shader = self
-                .device
-                .create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some("terrain_viewer.height_ao_shader"),
-                    source: wgpu::ShaderSource::Wgsl(
-                        include_str!("../../../shaders/heightfield_ao.wgsl").into(),
-                    ),
-                });
+            let ao_shader = crate::core::shader_registry::create_labeled_shader_module(
+                &self.device,
+                "terrain_viewer.height_ao_shader",
+                include_str!("../../../shaders/heightfield_ao.wgsl"),
+            );
 
             let ao_pipeline_layout =
                 self.device
@@ -477,14 +471,11 @@ impl ViewerTerrainScene {
                         ],
                     });
 
-            let sv_shader = self
-                .device
-                .create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some("terrain_viewer.sun_vis_shader"),
-                    source: wgpu::ShaderSource::Wgsl(
-                        include_str!("../../../shaders/heightfield_sun_vis.wgsl").into(),
-                    ),
-                });
+            let sv_shader = crate::core::shader_registry::create_labeled_shader_module(
+                &self.device,
+                "terrain_viewer.sun_vis_shader",
+                include_str!("../../../shaders/heightfield_sun_vis.wgsl"),
+            );
 
             let sv_pipeline_layout =
                 self.device

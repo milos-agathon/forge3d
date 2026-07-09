@@ -3,7 +3,6 @@ use super::types::GpuExtrusionOutput;
 use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_buffer_init};
 use crate::vector::extrusion::{tessellate_polygon, TessellatedPolygon};
 use glam::Vec2;
-use std::borrow::Cow;
 
 pub struct GpuExtrusion {
     pipeline: wgpu::ComputePipeline,
@@ -12,12 +11,11 @@ pub struct GpuExtrusion {
 
 impl GpuExtrusion {
     pub fn new(device: &wgpu::Device) -> Self {
-        let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("vf.Vector.Extrusion.Shader"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                "../../shaders/extrusion.wgsl"
-            ))),
-        });
+        let shader_module = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "vf.Vector.Extrusion.Shader",
+            include_str!("../../shaders/extrusion.wgsl"),
+        );
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vf.Vector.Extrusion.BindGroupLayout"),

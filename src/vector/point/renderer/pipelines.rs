@@ -29,12 +29,11 @@ const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 5] = [
 ];
 
 pub(super) fn create_shader(device: &wgpu::Device) -> wgpu::ShaderModule {
-    device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("point_instanced.wgsl"),
-        source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-            "../../../shaders/point_instanced.wgsl"
-        ))),
-    })
+    crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "point_instanced.wgsl",
+        include_str!("../../../shaders/point_instanced.wgsl"),
+    )
 }
 
 pub(super) fn instance_layout() -> wgpu::VertexBufferLayout<'static> {

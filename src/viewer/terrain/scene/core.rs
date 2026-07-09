@@ -40,10 +40,11 @@ impl ViewerTerrainScene {
             ],
         });
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("terrain_viewer.shader"),
-            source: wgpu::ShaderSource::Wgsl(TERRAIN_SHADER.into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            &device,
+            "terrain_viewer.shader",
+            TERRAIN_SHADER,
+        );
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("terrain_viewer.pipeline_layout"),

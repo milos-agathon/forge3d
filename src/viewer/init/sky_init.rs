@@ -70,10 +70,11 @@ pub fn create_sky_resources(
         }],
     });
 
-    let sky_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("viewer.sky.shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/sky.wgsl").into()),
-    });
+    let sky_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "viewer.sky.shader",
+        include_str!("../../shaders/sky.wgsl"),
+    );
 
     let sky_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("viewer.sky.pl"),
@@ -81,12 +82,15 @@ pub fn create_sky_resources(
         push_constant_ranges: &[],
     });
 
-    let sky_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("viewer.sky.pipeline"),
-        layout: Some(&sky_pl),
-        module: &sky_shader,
-        entry_point: "cs_render_sky",
-    });
+    let sky_pipeline =
+        crate::core::shader_registry::with_error_scope(device, "viewer.sky.pipeline", || {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("viewer.sky.pipeline"),
+                layout: Some(&sky_pl),
+                module: &sky_shader,
+                entry_point: "cs_render_sky",
+            })
+        });
 
     let sky_params_data = SkyUniforms::new([0.3, 0.8, -0.5], 2.0, 0.3, 1.0, 5.0, 1.0, 0);
     let sky_params = tracked_create_buffer_init(

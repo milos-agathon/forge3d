@@ -13,9 +13,8 @@ use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindingType, Buffer, BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, Device,
     FragmentState, IndexFormat, PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology, Queue,
-    RenderPass, RenderPipeline, RenderPipelineDescriptor, ShaderModuleDescriptor, ShaderSource,
-    ShaderStages, TextureFormat, VertexAttribute, VertexBufferLayout, VertexFormat, VertexState,
-    VertexStepMode,
+    RenderPass, RenderPipeline, RenderPipelineDescriptor, ShaderStages, TextureFormat,
+    VertexAttribute, VertexBufferLayout, VertexFormat, VertexState, VertexStepMode,
 };
 
 const DRAW_BATCH_UNIFORM_SLOT_COUNT: usize = 512;
@@ -159,10 +158,11 @@ impl MeshInstancedRenderer {
         depth_write_enabled: bool,
         shadow_bind_group_layout: Option<&BindGroupLayout>,
     ) -> RenderResult<Self> {
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("mesh_instanced_shader"),
-            source: ShaderSource::Wgsl(include_str!("../shaders/mesh_instanced.wgsl").into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "mesh_instanced_shader",
+            include_str!("../shaders/mesh_instanced.wgsl"),
+        );
 
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("mesh_instanced_bgl"),

@@ -69,10 +69,11 @@ impl MotionBlurAccumulator {
             push_constant_ranges: &[],
         });
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("motion_blur.shader"),
-            source: wgpu::ShaderSource::Wgsl(MOTION_BLUR_SHADER.into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            &device,
+            "motion_blur.shader",
+            MOTION_BLUR_SHADER,
+        );
 
         let resolve_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("motion_blur.resolve_pipeline"),

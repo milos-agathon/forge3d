@@ -8,9 +8,9 @@ use wgpu::{
     BindGroupLayoutEntry, BindingType, Buffer, BufferBindingType, BufferDescriptor, BufferUsages,
     ColorTargetState, ColorWrites, Device, FragmentState, PipelineLayoutDescriptor, PrimitiveState,
     PrimitiveTopology, Queue, RenderPipeline, RenderPipelineDescriptor, Sampler,
-    SamplerBindingType, SamplerDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages,
-    TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
-    TextureView, TextureViewDescriptor, TextureViewDimension, VertexState,
+    SamplerBindingType, SamplerDescriptor, ShaderStages, TextureDescriptor, TextureDimension,
+    TextureFormat, TextureSampleType, TextureUsages, TextureView, TextureViewDescriptor,
+    TextureViewDimension, VertexState,
 };
 
 use crate::core::error::RenderResult;
@@ -277,10 +277,11 @@ impl OverlayRenderer {
             ],
         });
 
-        let module = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("overlays_shader"),
-            source: ShaderSource::Wgsl(include_str!("../shaders/overlays.wgsl").into()),
-        });
+        let module = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "overlays_shader",
+            include_str!("../shaders/overlays.wgsl"),
+        );
 
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("overlays_pl"),

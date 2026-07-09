@@ -31,10 +31,11 @@ impl PointCloudState {
         target_format: wgpu::TextureFormat,
         _depth_format: wgpu::TextureFormat,
     ) -> RenderResult<Self> {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("pointcloud.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(POINTCLOUD_SHADER)),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "pointcloud.wgsl",
+            POINTCLOUD_SHADER,
+        );
 
         let uniform_buffer = tracked_create_buffer(
             device,

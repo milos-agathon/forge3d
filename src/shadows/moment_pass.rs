@@ -7,8 +7,8 @@ use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BufferBindingType, BufferDescriptor,
     BufferUsages, ComputePipeline, ComputePipelineDescriptor, Device, PipelineLayoutDescriptor,
-    Queue, ShaderModuleDescriptor, ShaderSource, ShaderStages, StorageTextureAccess, Texture,
-    TextureFormat, TextureSampleType, TextureView, TextureViewDimension,
+    Queue, ShaderStages, StorageTextureAccess, Texture, TextureFormat, TextureSampleType,
+    TextureView, TextureViewDimension,
 };
 
 use crate::core::error::RenderResult;
@@ -44,10 +44,11 @@ impl MomentGenerationPass {
     /// Create a new moment generation pass
     pub fn new(device: &Device) -> RenderResult<Self> {
         // Load shader
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("moment_generation_shader"),
-            source: ShaderSource::Wgsl(include_str!("../shaders/moment_generation.wgsl").into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "moment_generation_shader",
+            include_str!("../shaders/moment_generation.wgsl"),
+        );
 
         // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {

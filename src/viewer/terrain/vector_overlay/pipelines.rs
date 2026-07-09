@@ -54,12 +54,11 @@ impl VectorOverlayStack {
         )?;
 
         // Compile shader
-        let shader = self
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("vector_overlay_shader"),
-                source: wgpu::ShaderSource::Wgsl(VECTOR_OVERLAY_SHADER.into()),
-            });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            &self.device,
+            "vector_overlay_shader",
+            VECTOR_OVERLAY_SHADER,
+        );
 
         // Create pipeline layout
         let pipeline_layout = self

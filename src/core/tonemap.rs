@@ -150,10 +150,11 @@ impl TonemapProcessor {
             include_str!("../shaders/includes/tonemap_common.wgsl"),
             include_str!("../shaders/postprocess_tonemap.wgsl")
         );
-        let shader_module = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("tonemap_shader"),
-            source: ShaderSource::Wgsl(shader_source.into()),
-        });
+        let shader_module = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "tonemap_shader",
+            &shader_source,
+        );
 
         // Create render pipeline
         let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {

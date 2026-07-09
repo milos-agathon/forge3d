@@ -108,10 +108,11 @@ impl TaaRenderer {
         });
 
         // Create shader module
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("taa.shader"),
-            source: ShaderSource::Wgsl(TAA_SHADER_SRC.into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "taa.shader",
+            TAA_SHADER_SRC,
+        );
 
         // Bind group layout:
         // 0: current color (texture)

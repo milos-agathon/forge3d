@@ -216,10 +216,11 @@ fn fs() -> @location(0) vec4<f32> {
             return;
         };
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("forward-harness-test-shader"),
-            source: wgpu::ShaderSource::Wgsl(FLAT_TRIANGLE_WGSL.into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            &device,
+            "forward-harness-test-shader",
+            FLAT_TRIANGLE_WGSL,
+        );
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("forward-harness-test-layout"),
             bind_group_layouts: &[],

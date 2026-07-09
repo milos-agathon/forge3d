@@ -34,12 +34,11 @@ pub struct DenoisePass {
 
 impl DenoisePass {
     pub fn new(device: Arc<wgpu::Device>) -> Self {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("denoise_shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/denoise_atrous.wgsl").into(),
-            ),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            &device,
+            "denoise_shader",
+            include_str!("../../shaders/denoise_atrous.wgsl"),
+        );
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("denoise_bgl"),

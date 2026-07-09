@@ -36,12 +36,11 @@ impl PolygonRenderer {
         target_format: wgpu::TextureFormat,
     ) -> Result<Self, RenderError> {
         // Load and compile shader
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("polygon_fill.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../shaders/polygon_fill.wgsl"
-            ))),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "polygon_fill.wgsl",
+            include_str!("../shaders/polygon_fill.wgsl"),
+        );
 
         // Create uniform buffer
         let uniform_buffer = tracked_create_buffer(

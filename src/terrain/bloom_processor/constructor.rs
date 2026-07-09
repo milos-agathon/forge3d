@@ -2,7 +2,6 @@ use super::uniforms::{BloomBlurUniforms, BloomBrightPassUniforms, BloomComposite
 use super::TerrainBloomProcessor;
 use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_texture};
 use anyhow::Result;
-use std::borrow::Cow;
 
 impl TerrainBloomProcessor {
     /// Create a new bloom processor
@@ -125,30 +124,26 @@ impl TerrainBloomProcessor {
             ],
         });
 
-        let brightpass_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("terrain.bloom.brightpass_shader"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                "../../shaders/bloom_brightpass.wgsl"
-            ))),
-        });
-        let blur_h_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("terrain.bloom.blur_h_shader"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                "../../shaders/bloom_blur_h.wgsl"
-            ))),
-        });
-        let blur_v_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("terrain.bloom.blur_v_shader"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                "../../shaders/bloom_blur_v.wgsl"
-            ))),
-        });
-        let composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("terrain.bloom.composite_shader"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                "../../shaders/bloom_composite.wgsl"
-            ))),
-        });
+        let brightpass_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "terrain.bloom.brightpass_shader",
+            include_str!("../../shaders/bloom_brightpass.wgsl"),
+        );
+        let blur_h_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "terrain.bloom.blur_h_shader",
+            include_str!("../../shaders/bloom_blur_h.wgsl"),
+        );
+        let blur_v_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "terrain.bloom.blur_v_shader",
+            include_str!("../../shaders/bloom_blur_v.wgsl"),
+        );
+        let composite_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "terrain.bloom.composite_shader",
+            include_str!("../../shaders/bloom_composite.wgsl"),
+        );
 
         let brightpass_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

@@ -3,27 +3,29 @@ use super::*;
 impl GpuBvhBuilder {
     pub fn new(device: Arc<Device>, queue: Arc<Queue>) -> Result<Self> {
         // Load and compile WGSL shaders
-        let morton_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("LBVH Morton"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/lbvh_morton.wgsl").into()),
-        });
+        let morton_shader = crate::core::shader_registry::create_labeled_shader_module(
+            &device,
+            "LBVH Morton",
+            include_str!("../../shaders/lbvh_morton.wgsl"),
+        );
 
-        let sort_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Radix Sort"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/radix_sort_pairs.wgsl").into(),
-            ),
-        });
+        let sort_shader = crate::core::shader_registry::create_labeled_shader_module(
+            &device,
+            "Radix Sort",
+            include_str!("../../shaders/radix_sort_pairs.wgsl"),
+        );
 
-        let link_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("LBVH Link"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/lbvh_link.wgsl").into()),
-        });
+        let link_shader = crate::core::shader_registry::create_labeled_shader_module(
+            &device,
+            "LBVH Link",
+            include_str!("../../shaders/lbvh_link.wgsl"),
+        );
 
-        let refit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("BVH Refit"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/bvh_refit.wgsl").into()),
-        });
+        let refit_shader = crate::core::shader_registry::create_labeled_shader_module(
+            &device,
+            "BVH Refit",
+            include_str!("../../shaders/bvh_refit.wgsl"),
+        );
 
         // Create compute pipelines
         let morton_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {

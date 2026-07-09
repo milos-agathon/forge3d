@@ -1,5 +1,4 @@
 use super::TerrainPipeline;
-use std::borrow::Cow;
 use wgpu::*;
 
 /// Create the terrain pipeline. Does **not** record commands or create bind groups.
@@ -252,17 +251,17 @@ pub fn create_terrain_pipeline(
     // ---- Shader module ------------------------------------------------------
     // Choose shader variant: minimal (<=4 bind groups) or full
     let shader = if use_minimal_layout {
-        device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("vf.Terrain.shader.minimal"),
-            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                "../../shaders/terrain_minimal.wgsl"
-            ))),
-        })
+        crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "vf.Terrain.shader.minimal",
+            include_str!("../../shaders/terrain_minimal.wgsl"),
+        )
     } else {
-        device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("vf.Terrain.shader.full"),
-            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("../../shaders/terrain.wgsl"))),
-        })
+        crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "vf.Terrain.shader.full",
+            include_str!("../../shaders/terrain.wgsl"),
+        )
     };
 
     // ---- Vertex buffer layout ----------------------------------------------

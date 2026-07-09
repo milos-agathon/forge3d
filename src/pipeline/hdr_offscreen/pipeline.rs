@@ -10,10 +10,9 @@ use wgpu::{
     Extent3d, FilterMode, FragmentState, ImageCopyTexture, ImageDataLayout, LoadOp,
     MultisampleState, Operations, Origin3d, PipelineLayoutDescriptor, PrimitiveState, Queue,
     RenderPass, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline,
-    RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor,
-    ShaderModuleDescriptor, ShaderSource, ShaderStages, StoreOp, TextureAspect, TextureDescriptor,
-    TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureView,
-    TextureViewDescriptor, TextureViewDimension, VertexState,
+    RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages,
+    StoreOp, TextureAspect, TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType,
+    TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension, VertexState,
 };
 
 /// HDR off-screen rendering pipeline
@@ -178,10 +177,11 @@ impl HdrOffscreenPipeline {
             include_str!("../../shaders/includes/tonemap_common.wgsl"),
             include_str!("../../shaders/postprocess_tonemap.wgsl")
         );
-        let tonemap_shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("tonemap_shader"),
-            source: ShaderSource::Wgsl(tonemap_shader_source.into()),
-        });
+        let tonemap_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "hdr_offscreen.tonemap_shader",
+            &tonemap_shader_source,
+        );
 
         // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {

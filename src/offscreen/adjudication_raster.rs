@@ -137,12 +137,11 @@ pub fn render_raster_reference(
     let aspect = width as f32 / height as f32;
 
     // --- Shader + pipelines ---
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("adjudication-raster-shader"),
-        source: wgpu::ShaderSource::Wgsl(
-            include_str!("../shaders/adjudication_raster.wgsl").into(),
-        ),
-    });
+    let shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "adjudication-raster-shader",
+        include_str!("../shaders/adjudication_raster.wgsl"),
+    );
     let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("adjudication-raster-bgl"),
         entries: &[

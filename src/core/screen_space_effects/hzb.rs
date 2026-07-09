@@ -41,10 +41,11 @@ impl HzbPyramid {
             },
         )?;
 
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("p5.hzb.build.shader"),
-            source: ShaderSource::Wgsl(include_str!("../../shaders/hzb_build.wgsl").into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "p5.hzb.build.shader",
+            include_str!("../../shaders/hzb_build.wgsl"),
+        );
 
         // Group 0: depth copy (depth texture -> r32f storage). We use textureLoad on depth (no sampler).
         let bgl_copy = device.create_bind_group_layout(&BindGroupLayoutDescriptor {

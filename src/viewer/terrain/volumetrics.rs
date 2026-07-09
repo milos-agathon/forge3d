@@ -57,10 +57,11 @@ impl VolumetricsPass {
     ) -> anyhow::Result<Self> {
         // Create shader module
         let shader_source = include_str!("../../shaders/viewer_volumetrics.wgsl");
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("viewer_volumetrics.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(shader_source.into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            &device,
+            "viewer_volumetrics.wgsl",
+            shader_source,
+        );
 
         // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

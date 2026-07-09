@@ -193,10 +193,11 @@ pub fn create_lit_resources(
         ],
     });
 
-    let lit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("viewer.lit.compute.shader"),
-        source: wgpu::ShaderSource::Wgsl(LIT_SHADER.into()),
-    });
+    let lit_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "viewer.lit.compute.shader",
+        LIT_SHADER,
+    );
 
     let lit_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("viewer.lit.pl"),
@@ -204,12 +205,15 @@ pub fn create_lit_resources(
         push_constant_ranges: &[],
     });
 
-    let lit_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("viewer.lit.pipeline"),
-        layout: Some(&lit_pl),
-        module: &lit_shader,
-        entry_point: "cs_main",
-    });
+    let lit_pipeline =
+        crate::core::shader_registry::with_error_scope(device, "viewer.lit.pipeline", || {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("viewer.lit.pipeline"),
+                layout: Some(&lit_pl),
+                module: &lit_shader,
+                entry_point: "cs_main",
+            })
+        });
 
     println!(
         "[viewer] lit compute WGSL version {} compiled",

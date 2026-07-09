@@ -58,10 +58,11 @@ impl DofPass {
             push_constant_ranges: &[],
         });
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("dof.shader"),
-            source: wgpu::ShaderSource::Wgsl(DOF_SHADER.into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            &device,
+            "dof.shader",
+            DOF_SHADER,
+        );
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("dof.pipeline"),

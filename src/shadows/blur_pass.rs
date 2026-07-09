@@ -11,9 +11,9 @@ use wgpu::{
     BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, BufferBindingType, BufferDescriptor,
     BufferUsages, ComputePipeline, ComputePipelineDescriptor, Device, Extent3d,
-    PipelineLayoutDescriptor, Queue, ShaderModuleDescriptor, ShaderSource, ShaderStages,
-    StorageTextureAccess, TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType,
-    TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension,
+    PipelineLayoutDescriptor, Queue, ShaderStages, StorageTextureAccess, TextureDescriptor,
+    TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureView,
+    TextureViewDescriptor, TextureViewDimension,
 };
 
 /// Parameters for shadow blur pass
@@ -42,10 +42,11 @@ pub struct ShadowBlurPass {
 impl ShadowBlurPass {
     /// Create a new shadow blur pass
     pub fn new(device: &Device) -> RenderResult<Self> {
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("shadow_blur_shader"),
-            source: ShaderSource::Wgsl(include_str!("../shaders/shadow_blur.wgsl").into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "shadow_blur_shader",
+            include_str!("../shaders/shadow_blur.wgsl"),
+        );
 
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("shadow_blur_bind_group_layout"),

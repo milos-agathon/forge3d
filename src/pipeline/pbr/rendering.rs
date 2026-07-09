@@ -205,10 +205,11 @@ impl PbrPipelineWithShadows {
             include_str!("../../shaders/pbr.wgsl")
         );
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("pbr_shader_module"),
-            source: wgpu::ShaderSource::Wgsl(shader_source.into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "pbr_shader_module",
+            &shader_source,
+        );
 
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("pbr_render_pipeline"),

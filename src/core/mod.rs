@@ -16,6 +16,9 @@ pub mod degradation;
 // CENSOR: negotiated GPU capability set (replaces Features::empty())
 pub mod capabilities;
 
+// CENSOR: WGSL shader-hash registry + validation error scopes
+pub mod shader_registry;
+
 pub mod framegraph; // Legacy compatibility layer
 pub mod gpu_types;
 pub mod memory_tracker;

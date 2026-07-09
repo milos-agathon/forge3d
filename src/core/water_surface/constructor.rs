@@ -5,9 +5,9 @@ use wgpu::{
     BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry,
     BindingType, BufferBindingType, BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites,
     Extent3d, FilterMode, FragmentState, PipelineLayoutDescriptor, PrimitiveState,
-    PrimitiveTopology, SamplerBindingType, SamplerDescriptor, ShaderModuleDescriptor, ShaderSource,
-    ShaderStages, TextureDescriptor, TextureDimension, TextureSampleType, TextureUsages,
-    TextureViewDescriptor, TextureViewDimension, VertexBufferLayout, VertexState, VertexStepMode,
+    PrimitiveTopology, SamplerBindingType, SamplerDescriptor, ShaderStages, TextureDescriptor,
+    TextureDimension, TextureSampleType, TextureUsages, TextureViewDescriptor,
+    TextureViewDimension, VertexBufferLayout, VertexState, VertexStepMode,
 };
 
 impl WaterSurfaceRenderer {
@@ -118,12 +118,11 @@ impl WaterSurfaceRenderer {
             ],
         });
 
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("water_surface_shader"),
-            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                "../../shaders/water_surface.wgsl"
-            ))),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "water_surface_shader",
+            include_str!("../../shaders/water_surface.wgsl"),
+        );
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("water_surface_pipeline_layout"),
             bind_group_layouts: &[&bind_group_layout, &mask_bind_group_layout],

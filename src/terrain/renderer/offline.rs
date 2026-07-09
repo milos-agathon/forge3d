@@ -7,7 +7,7 @@ use crate::terrain::accumulation::apply_jitter_to_projection;
 use crate::PyValueError;
 use half::f16;
 use numpy::{PyReadonlyArray2, PyReadonlyArray3, PyUntypedArrayMethods};
-use std::{borrow::Cow, time::Instant};
+use std::time::Instant;
 
 const OFFLINE_HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const OFFLINE_ACCUM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
@@ -88,10 +88,11 @@ impl TerrainScene {
             shader_source: &str,
             entry_point: &str,
         ) -> wgpu::ComputePipeline {
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some(label),
-                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(shader_source)),
-            });
+            let shader = crate::core::shader_registry::create_labeled_shader_module(
+                device,
+                label,
+                shader_source,
+            );
             let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(&format!("{label}.layout")),
                 bind_group_layouts: &[bind_group_layout],

@@ -168,12 +168,11 @@ pub struct SoftLightRadiusRenderer {
 impl SoftLightRadiusRenderer {
     pub fn new(device: &wgpu::Device) -> RenderResult<Self> {
         // Load shader
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("soft_light_radius_shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../shaders/soft_light_radius.wgsl").into(),
-            ),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "soft_light_radius_shader",
+            include_str!("../shaders/soft_light_radius.wgsl"),
+        );
 
         // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

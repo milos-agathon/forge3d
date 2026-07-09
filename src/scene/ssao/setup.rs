@@ -27,10 +27,11 @@ struct SsaoDepthResources {
 }
 
 fn create_ssao_shader(device: &wgpu::Device) -> wgpu::ShaderModule {
-    device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("ssao-compute"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/ssao.wgsl").into()),
-    })
+    crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "ssao-compute",
+        include_str!("../../shaders/ssao.wgsl"),
+    )
 }
 
 fn create_ssao_layouts(device: &wgpu::Device) -> SsaoLayouts {
@@ -89,44 +90,53 @@ fn create_ssao_pipelines(
     device: &wgpu::Device,
     shader: &wgpu::ShaderModule,
     layouts: &SsaoLayouts) -> SsaoPipelines {
-    let ssao_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("ssao-pipeline"),
-        layout: Some(
-            &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("ssao-pipeline-layout"),
-                bind_group_layouts: &[&layouts.ssao_bind_group_layout],
-                push_constant_ranges: &[],
-            }),
-        ),
-        module: shader,
-        entry_point: "cs_ssao",
-    });
+    let ssao_pipeline =
+        crate::core::shader_registry::with_error_scope(device, "ssao-pipeline", || {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("ssao-pipeline"),
+                layout: Some(
+                    &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("ssao-pipeline-layout"),
+                        bind_group_layouts: &[&layouts.ssao_bind_group_layout],
+                        push_constant_ranges: &[],
+                    }),
+                ),
+                module: shader,
+                entry_point: "cs_ssao",
+            })
+        });
 
-    let blur_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("ssao-blur-pipeline"),
-        layout: Some(
-            &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("ssao-blur-pipeline-layout"),
-                bind_group_layouts: &[&layouts.ssao_bind_group_layout],
-                push_constant_ranges: &[],
-            }),
-        ),
-        module: shader,
-        entry_point: "cs_ssao",
-    });
+    let blur_pipeline =
+        crate::core::shader_registry::with_error_scope(device, "ssao-blur-pipeline", || {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("ssao-blur-pipeline"),
+                layout: Some(
+                    &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("ssao-blur-pipeline-layout"),
+                        bind_group_layouts: &[&layouts.ssao_bind_group_layout],
+                        push_constant_ranges: &[],
+                    }),
+                ),
+                module: shader,
+                entry_point: "cs_ssao",
+            })
+        });
 
-    let composite_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("ssao-composite-pipeline"),
-        layout: Some(
-            &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("ssao-composite-pipeline-layout"),
-                bind_group_layouts: &[&layouts.composite_bind_group_layout],
-                push_constant_ranges: &[],
-            }),
-        ),
-        module: shader,
-        entry_point: "cs_ssao_composite",
-    });
+    let composite_pipeline =
+        crate::core::shader_registry::with_error_scope(device, "ssao-composite-pipeline", || {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("ssao-composite-pipeline"),
+                layout: Some(
+                    &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("ssao-composite-pipeline-layout"),
+                        bind_group_layouts: &[&layouts.composite_bind_group_layout],
+                        push_constant_ranges: &[],
+                    }),
+                ),
+                module: shader,
+                entry_point: "cs_ssao_composite",
+            })
+        });
 
     SsaoPipelines {
         ssao_pipeline,

@@ -143,10 +143,11 @@ impl IdBufferPass {
             }],
         });
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("id_buffer_shader"),
-            source: wgpu::ShaderSource::Wgsl(ID_BUFFER_SHADER.into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "id_buffer_shader",
+            ID_BUFFER_SHADER,
+        );
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("id_buffer_pipeline_layout"),

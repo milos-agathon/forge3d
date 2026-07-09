@@ -4,9 +4,8 @@ use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindingType, Buffer, BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, Device,
     FragmentState, IndexFormat, PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology, Queue,
-    RenderPass, RenderPipeline, RenderPipelineDescriptor, ShaderModuleDescriptor, ShaderSource,
-    ShaderStages, TextureFormat, VertexAttribute, VertexBufferLayout, VertexFormat, VertexState,
-    VertexStepMode,
+    RenderPass, RenderPipeline, RenderPipelineDescriptor, ShaderStages, TextureFormat,
+    VertexAttribute, VertexBufferLayout, VertexFormat, VertexState, VertexStepMode,
 };
 
 use crate::core::error::RenderResult;
@@ -29,10 +28,11 @@ impl TextMeshRenderer {
         color_format: TextureFormat,
         depth_format: Option<TextureFormat>,
     ) -> RenderResult<Self> {
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("mesh_basic_shader"),
-            source: ShaderSource::Wgsl(include_str!("../../shaders/mesh_basic.wgsl").into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "mesh_basic_shader",
+            include_str!("../../shaders/mesh_basic.wgsl"),
+        );
 
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("text_mesh_bgl"),

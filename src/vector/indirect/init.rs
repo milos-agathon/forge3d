@@ -61,12 +61,11 @@ impl IndirectRenderer {
             },
         )?;
 
-        let culling_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("vf.Vector.Indirect.CullingCompute"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../../shaders/culling_compute.wgsl"
-            ))),
-        });
+        let culling_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "vf.Vector.Indirect.CullingCompute",
+            include_str!("../../shaders/culling_compute.wgsl"),
+        );
 
         let culling_bind_group_layout = wgpu::BindGroupLayoutDescriptor {
             label: Some("vf.Vector.Indirect.CullingBindGroupLayout"),

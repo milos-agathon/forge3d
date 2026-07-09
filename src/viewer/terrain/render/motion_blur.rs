@@ -283,12 +283,11 @@ impl ViewerTerrainScene {
     ) {
         // Create a simple additive blit pipeline if needed
         // Use a simple additive pass until a dedicated accumulation pipeline is wired.
-        let shader = self
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("motion_blur.accumulate_shader"),
-                source: wgpu::ShaderSource::Wgsl(ACCUMULATE_SHADER.into()),
-            });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            &self.device,
+            "motion_blur.accumulate_shader",
+            ACCUMULATE_SHADER,
+        );
 
         let bind_group_layout =
             self.device

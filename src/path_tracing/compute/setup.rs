@@ -7,10 +7,11 @@ pub(super) fn create_dispatch_resources(
     uniforms: Uniforms,
 ) -> crate::core::error::RenderResult<DispatchResources> {
     let g = try_ctx()?;
-    let shader = g.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("pt_kernel"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/pt_kernel.wgsl").into()),
-    });
+    let shader = crate::core::shader_registry::create_labeled_shader_module(
+        &g.device,
+        "pt_kernel",
+        include_str!("../../shaders/pt_kernel.wgsl"),
+    );
 
     let bgl0 = g
         .device

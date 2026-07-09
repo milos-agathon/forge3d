@@ -77,12 +77,11 @@ pub fn create_compose_pipeline(
     color_view: &wgpu::TextureView,
     reveal_view: &wgpu::TextureView,
 ) -> (wgpu::RenderPipeline, wgpu::BindGroup) {
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("vf.Vector.OIT.Compose"),
-        source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-            "../../shaders/oit_compose.wgsl"
-        ))),
-    });
+    let shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "vf.Vector.OIT.Compose",
+        include_str!("../../shaders/oit_compose.wgsl"),
+    );
 
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("vf.Vector.OIT.ComposeBindGroupLayout"),
@@ -197,12 +196,11 @@ pub fn create_edl_pipeline(
     strength: f32,
     radius_px: f32,
 ) -> Result<(wgpu::RenderPipeline, wgpu::BindGroup), RenderError> {
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("vf.Vector.PointEDL"),
-        source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-            "../../shaders/point_edl.wgsl"
-        ))),
-    });
+    let shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "vf.Vector.PointEDL",
+        include_str!("../../shaders/point_edl.wgsl"),
+    );
 
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("vf.Vector.PointEDL.BindGroupLayout"),

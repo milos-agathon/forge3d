@@ -5,9 +5,8 @@ use wgpu::{
     BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry,
     BindingType, BufferBindingType, BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites,
     FragmentState, FrontFace, MultisampleState, PipelineLayoutDescriptor, PolygonMode,
-    PrimitiveState, PrimitiveTopology, SamplerBindingType, SamplerDescriptor,
-    ShaderModuleDescriptor, ShaderSource, ShaderStages, TextureSampleType, TextureViewDimension,
-    VertexBufferLayout, VertexState, VertexStepMode,
+    PrimitiveState, PrimitiveTopology, SamplerBindingType, SamplerDescriptor, ShaderStages,
+    TextureSampleType, TextureViewDimension, VertexBufferLayout, VertexState, VertexStepMode,
 };
 
 impl CloudRenderer {
@@ -157,10 +156,11 @@ impl CloudRenderer {
                 resource: uniform_buffer.as_entire_binding(),
             }],
         });
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("cloud_shader"),
-            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("../../../shaders/clouds.wgsl"))),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "cloud_shader",
+            include_str!("../../../shaders/clouds.wgsl"),
+        );
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("cloud_pipeline_layout"),
             bind_group_layouts: &[

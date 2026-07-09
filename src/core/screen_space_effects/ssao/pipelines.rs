@@ -77,30 +77,31 @@ pub(super) fn create_pipelines(
     temporal_bind_group_layout: &BindGroupLayout,
     composite_bind_group_layout: &BindGroupLayout,
 ) -> SsaoPipelines {
-    let ssao_module = device.create_shader_module(ShaderModuleDescriptor {
-        label: Some("ssao_kernel_shader"),
-        source: ShaderSource::Wgsl(SSAO_SHADER_SRC.into()),
-    });
-    let gtao_module = device.create_shader_module(ShaderModuleDescriptor {
-        label: Some("gtao_kernel_shader"),
-        source: ShaderSource::Wgsl(GTAO_SHADER_SRC.into()),
-    });
-    let filter_shader = device.create_shader_module(ShaderModuleDescriptor {
-        label: Some("ssao_filter_shader"),
-        source: ShaderSource::Wgsl(
-            include_str!("../../../shaders/filters/bilateral_separable.wgsl").into(),
-        ),
-    });
-    let temporal_shader = device.create_shader_module(ShaderModuleDescriptor {
-        label: Some("ssao_temporal_shader"),
-        source: ShaderSource::Wgsl(
-            include_str!("../../../shaders/temporal/resolve_ao.wgsl").into(),
-        ),
-    });
-    let composite_shader = device.create_shader_module(ShaderModuleDescriptor {
-        label: Some("ssao_composite_shader"),
-        source: ShaderSource::Wgsl(SSAO_COMPOSITE_SHADER_SRC.into()),
-    });
+    let ssao_module = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "ssao_kernel_shader",
+        SSAO_SHADER_SRC,
+    );
+    let gtao_module = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "gtao_kernel_shader",
+        GTAO_SHADER_SRC,
+    );
+    let filter_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "ssao_filter_shader",
+        include_str!("../../../shaders/filters/bilateral_separable.wgsl"),
+    );
+    let temporal_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "ssao_temporal_shader",
+        include_str!("../../../shaders/temporal/resolve_ao.wgsl"),
+    );
+    let composite_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "ssao_composite_shader",
+        SSAO_COMPOSITE_SHADER_SRC,
+    );
 
     let ssao_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
         label: Some("ssao_pipeline_layout"),

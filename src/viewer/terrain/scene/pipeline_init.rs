@@ -59,12 +59,11 @@ impl ViewerTerrainScene {
         }
 
         // Create compose pipeline
-        let shader = self
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("terrain_viewer.wboit.compose_shader"),
-                source: wgpu::ShaderSource::Wgsl(WBOIT_COMPOSE_SHADER.into()),
-            });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            &self.device,
+            "terrain_viewer.wboit.compose_shader",
+            WBOIT_COMPOSE_SHADER,
+        );
 
         let pipeline_layout = self
             .device
@@ -269,14 +268,11 @@ impl ViewerTerrainScene {
                 });
 
         // Create shader module
-        let shader = self
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("terrain_viewer.shadow_depth.shader"),
-                source: wgpu::ShaderSource::Wgsl(
-                    include_str!("../../../shaders/terrain_shadow_depth.wgsl").into(),
-                ),
-            });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            &self.device,
+            "terrain_viewer.shadow_depth.shader",
+            include_str!("../../../shaders/terrain_shadow_depth.wgsl"),
+        );
 
         // Create pipeline layout
         let pipeline_layout = self

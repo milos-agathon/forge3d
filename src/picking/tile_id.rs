@@ -143,10 +143,11 @@ impl TileIdPass {
 
         let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("tile_id_shader"),
-            source: wgpu::ShaderSource::Wgsl(TILE_ID_SHADER.into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "tile_id_shader",
+            TILE_ID_SHADER,
+        );
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("tile_id_bind_group_layout"),

@@ -133,10 +133,11 @@ impl BrdfTilePipeline {
             .unwrap_or_else(|| "unknown".to_string());
         log::info!("BRDF_SHADER_VERSION = {}", shader_version);
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("brdf_tile.shader"),
-            source: wgpu::ShaderSource::Wgsl(shader_src.into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "brdf_tile.shader",
+            shader_src,
+        );
 
         // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

@@ -5,7 +5,6 @@
 
 use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use anyhow::{ensure, Result};
-use std::borrow::Cow;
 
 const DEBUG_PATTERN_WGSL: &str = r#"
 struct VertexOutput {
@@ -46,10 +45,11 @@ pub fn render_debug_pattern(
 ) -> Result<TrackedTexture> {
     ensure!(width > 0 && height > 0, "pattern size must be positive");
 
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("forge3d.debug-pattern.shader"),
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(DEBUG_PATTERN_WGSL)),
-    });
+    let shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "forge3d.debug-pattern.shader",
+        DEBUG_PATTERN_WGSL,
+    );
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("forge3d.debug-pattern.pipeline-layout"),

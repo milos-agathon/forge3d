@@ -80,10 +80,11 @@ impl PostProcessPass {
         });
 
         // Create shader module
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("post_process.shader"),
-            source: wgpu::ShaderSource::Wgsl(POST_PROCESS_SHADER.into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            &device,
+            "post_process.shader",
+            POST_PROCESS_SHADER,
+        );
 
         // Create render pipeline
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {

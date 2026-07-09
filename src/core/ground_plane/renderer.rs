@@ -1,14 +1,13 @@
 use super::types::{GroundPlaneMode, GroundPlaneParams, GroundPlaneUniforms};
 use glam::{Mat4, Vec3};
-use std::borrow::Cow;
 use wgpu::{
     vertex_attr_array, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
     BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BufferAddress, BufferBindingType,
     BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, CompareFunction, DepthBiasState,
     DepthStencilState, Device, Face, FragmentState, FrontFace, MultisampleState,
     PipelineLayoutDescriptor, PolygonMode, PrimitiveState, PrimitiveTopology, Queue,
-    RenderPipeline, RenderPipelineDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages,
-    StencilState, TextureFormat, VertexBufferLayout, VertexState, VertexStepMode,
+    RenderPipeline, RenderPipelineDescriptor, ShaderStages, StencilState, TextureFormat,
+    VertexBufferLayout, VertexState, VertexStepMode,
 };
 
 use crate::core::error::RenderResult;
@@ -84,12 +83,11 @@ impl GroundPlaneRenderer {
         });
 
         // Create shader
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("ground_plane_shader"),
-            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                "../../shaders/ground_plane.wgsl"
-            ))),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "ground_plane_shader",
+            include_str!("../../shaders/ground_plane.wgsl"),
+        );
 
         // Create pipeline layout
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {

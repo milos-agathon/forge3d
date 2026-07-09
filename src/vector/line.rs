@@ -47,12 +47,11 @@ impl LineRenderer {
         target_format: wgpu::TextureFormat,
     ) -> Result<Self, RenderError> {
         // Load shader
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("line_aa.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../shaders/line_aa.wgsl"
-            ))),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "line_aa.wgsl",
+            include_str!("../shaders/line_aa.wgsl"),
+        );
 
         // Create uniform buffer
         let uniform_buffer = tracked_create_buffer(

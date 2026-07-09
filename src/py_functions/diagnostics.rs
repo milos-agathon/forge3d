@@ -178,10 +178,11 @@ pub(crate) fn c7_async_compute_demo(py: Python<'_>) -> PyResult<Py<PyDict>> {
 
     // Minimal compute shader and pipeline
     let shader_src = "@compute @workgroup_size(1) fn main() {}";
-    let module = device.create_shader_module(ShaderModuleDescriptor {
-        label: Some("c7_trivial_compute"),
-        source: ShaderSource::Wgsl(shader_src.into()),
-    });
+    let module = crate::core::shader_registry::create_labeled_shader_module(
+        &device,
+        "c7_trivial_compute",
+        shader_src,
+    );
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("c7_compute_layout"),
         bind_group_layouts: &[],

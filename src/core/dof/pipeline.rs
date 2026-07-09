@@ -69,10 +69,11 @@ pub fn create_bind_group_layout(device: &Device) -> BindGroupLayout {
 ///
 /// Returns (gather_pipeline, separable_h_pipeline, separable_v_pipeline).
 pub fn create_pipelines(device: &Device) -> (ComputePipeline, ComputePipeline, ComputePipeline) {
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("dof_compute_shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/dof.wgsl").into()),
-    });
+    let shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "dof_compute_shader",
+        include_str!("../../shaders/dof.wgsl"),
+    );
 
     let bind_group_layout = create_bind_group_layout(device);
 
