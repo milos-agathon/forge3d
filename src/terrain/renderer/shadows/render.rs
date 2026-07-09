@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_buffer_init};
 
 impl TerrainScene {
     pub(super) fn render_shadow_depth_passes(
@@ -159,12 +160,15 @@ impl TerrainScene {
             let identity_packed =
                 crate::terrain::scatter::pack_hlod_identity_instance(render_from_contract);
             let hlod_inst_bytes = (std::mem::size_of::<f32>() * 16) as u64;
-            let hlod_instbuf = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("terrain.shadow.scatter.hlod.instance_buffer"),
-                size: hlod_inst_bytes,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+            let hlod_instbuf = tracked_create_buffer(
+                self.device.as_ref(),
+                &wgpu::BufferDescriptor {
+                    label: Some("terrain.shadow.scatter.hlod.instance_buffer"),
+                    size: hlod_inst_bytes,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                },
+            )?;
             self.queue
                 .write_buffer(&hlod_instbuf, 0, bytemuck::cast_slice(&identity_packed));
             self.scatter_renderer.reset_shadow_draw_batch_uniforms();
@@ -181,13 +185,14 @@ impl TerrainScene {
                 height_curve,
             };
 
-            let shadow_uniform_buffer =
-                self.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("terrain.shadow.cascade_{}.uniforms", cascade_idx)),
-                        contents: bytemuck::bytes_of(&shadow_uniforms),
-                        usage: wgpu::BufferUsages::UNIFORM,
-                    });
+            let shadow_uniform_buffer = tracked_create_buffer_init(
+                self.device.as_ref(),
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("terrain.shadow.cascade_{}.uniforms", cascade_idx)),
+                    contents: bytemuck::bytes_of(&shadow_uniforms),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                },
+            )?;
 
             let shadow_depth_bind_group =
                 self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -286,6 +291,6 @@ impl TerrainScene {
             }
         }
 
-        Ok(self.create_shadow_bind_group())
+        self.create_shadow_bind_group()
     }
 }

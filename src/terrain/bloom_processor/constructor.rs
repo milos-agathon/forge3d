@@ -1,5 +1,6 @@
 use super::uniforms::{BloomBlurUniforms, BloomBrightPassUniforms, BloomCompositeUniforms};
 use super::TerrainBloomProcessor;
+use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_texture};
 use anyhow::Result;
 use std::borrow::Cow;
 
@@ -193,24 +194,33 @@ impl TerrainBloomProcessor {
             entry_point: "main",
         });
 
-        let brightpass_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("terrain.bloom.brightpass_uniforms"),
-            size: std::mem::size_of::<BloomBrightPassUniforms>() as wgpu::BufferAddress,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let blur_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("terrain.bloom.blur_uniforms"),
-            size: std::mem::size_of::<BloomBlurUniforms>() as wgpu::BufferAddress,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let composite_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("terrain.bloom.composite_uniforms"),
-            size: std::mem::size_of::<BloomCompositeUniforms>() as wgpu::BufferAddress,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let brightpass_uniform_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("terrain.bloom.brightpass_uniforms"),
+                size: std::mem::size_of::<BloomBrightPassUniforms>() as wgpu::BufferAddress,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
+        let blur_uniform_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("terrain.bloom.blur_uniforms"),
+                size: std::mem::size_of::<BloomBlurUniforms>() as wgpu::BufferAddress,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
+        let composite_uniform_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("terrain.bloom.composite_uniforms"),
+                size: std::mem::size_of::<BloomCompositeUniforms>() as wgpu::BufferAddress,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         Ok(Self {
             brightpass_pipeline,
@@ -234,9 +244,14 @@ impl TerrainBloomProcessor {
     }
 
     /// Ensure intermediate textures match the required size
-    pub(super) fn ensure_textures(&mut self, device: &wgpu::Device, width: u32, height: u32) {
+    pub(super) fn ensure_textures(
+        &mut self,
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+    ) -> Result<()> {
         if self.current_size == (width, height) && self.bright_texture.is_some() {
-            return;
+            return Ok(());
         }
 
         log::info!(
@@ -246,52 +261,61 @@ impl TerrainBloomProcessor {
             height
         );
 
-        let bright_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.bloom.bright_texture"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let bright_texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.bloom.bright_texture"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
         let bright_view = bright_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let blur_temp_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.bloom.blur_temp_texture"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let blur_temp_texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.bloom.blur_temp_texture"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
         let blur_temp_view = blur_temp_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let blur_result_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.bloom.blur_result_texture"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let blur_result_texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.bloom.blur_result_texture"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
         let blur_result_view =
             blur_result_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -302,5 +326,6 @@ impl TerrainBloomProcessor {
         self.blur_result_texture = Some(blur_result_texture);
         self.blur_result_view = Some(blur_result_view);
         self.current_size = (width, height);
+        Ok(())
     }
 }

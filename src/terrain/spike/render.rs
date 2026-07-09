@@ -63,7 +63,7 @@ impl TerrainSpike {
             let overlay_view_opt = self.overlay_mosaic.as_ref().map(|m| &m.view);
             // Prefer height mosaic view if present, else None (renderer will use dummy)
             let height_view_opt = self.height_mosaic.as_ref().map(|m| &m.view);
-            let pt_buf_opt = self.page_table.as_ref().map(|pt| &pt.buffer);
+            let pt_buf_opt = self.page_table.as_ref().map(|pt| pt.buffer.inner());
             ov.recreate_bind_group(
                 &self.device,
                 overlay_view_opt,

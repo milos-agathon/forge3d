@@ -12,6 +12,7 @@
 //! offline accumulation passes all consume this provider.
 
 use super::*;
+use crate::core::resource_tracker::{tracked_create_buffer_init, TrackedBuffer};
 use crate::terrain::clipmap::ClipmapConfig;
 
 /// Cache key for the generated clipmap mesh. Regeneration only happens when
@@ -52,8 +53,8 @@ pub(in crate::terrain::renderer) enum TerrainGeometryProvider {
     Grid { vertex_count: u32 },
     /// Indexed clipmap ring/skirt mesh drawn through `vs_clipmap_main`.
     Clipmap {
-        vertex_buffer: wgpu::Buffer,
-        index_buffer: wgpu::Buffer,
+        vertex_buffer: TrackedBuffer,
+        index_buffer: TrackedBuffer,
         index_count: u32,
         cache_key: ClipmapGeometryKey,
     },
@@ -116,20 +117,22 @@ impl TerrainScene {
         }
 
         let mesh = crate::terrain::clipmap::level::clipmap_generate(&config, center, terrain_span);
-        let vertex_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let vertex_buffer = tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.clipmap.vertex_buffer"),
                 contents: bytemuck::cast_slice(&mesh.vertices),
                 usage: wgpu::BufferUsages::VERTEX,
-            });
-        let index_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            },
+        )?;
+        let index_buffer = tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.clipmap.index_buffer"),
                 contents: bytemuck::cast_slice(&mesh.indices),
                 usage: wgpu::BufferUsages::INDEX,
-            });
+            },
+        )?;
         self.geometry_provider = Some(TerrainGeometryProvider::Clipmap {
             vertex_buffer,
             index_buffer,

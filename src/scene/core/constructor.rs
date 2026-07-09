@@ -111,7 +111,7 @@ impl Scene {
             None,
             &tile_slot_ubo,
             &mosaic_params_ubo,
-        );
+        )?;
 
         let bg4_dummy_cloud_shadows = create_dummy_cloud_shadow_bind_group(&tp, &g.device);
 

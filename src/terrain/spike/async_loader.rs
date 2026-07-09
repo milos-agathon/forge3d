@@ -128,7 +128,7 @@ impl TerrainSpike {
             fixed_lod: None,
         };
         let mosaic =
-            crate::terrain::stream::ColorMosaic::new(&self.device, cfg, srgb, filter_linear);
+            crate::terrain::stream::ColorMosaic::new(&self.device, cfg, srgb, filter_linear)?;
 
         // Lazy-create overlay renderer if needed
         if self.overlay_renderer.is_none() {
@@ -142,7 +142,7 @@ impl TerrainSpike {
         // Bind overlay view; use height mosaic if available for altitude/contour paths
         if let Some(ref mut ov) = self.overlay_renderer {
             let height_view_opt = self.height_mosaic.as_ref().map(|m| &m.view);
-            let pt_buf_opt = self.page_table.as_ref().map(|pt| &pt.buffer);
+            let pt_buf_opt = self.page_table.as_ref().map(|pt| pt.buffer.inner());
             ov.recreate_bind_group(
                 &self.device,
                 Some(&mosaic.view),

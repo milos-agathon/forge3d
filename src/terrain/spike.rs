@@ -1,5 +1,8 @@
 use super::helpers::{build_grid_xyuv, build_view_matrices};
 use super::*;
+use crate::core::resource_tracker::{
+    tracked_create_buffer_init, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 // ---------- Render spike object used by tests ----------
 
 const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -20,20 +23,20 @@ pub struct TerrainSpike {
     bg1_height: wgpu::BindGroup,
     bg2_lut: wgpu::BindGroup,
     // T33-END:tp-and-bgs
-    vbuf: wgpu::Buffer,
-    ibuf: wgpu::Buffer,
+    vbuf: TrackedBuffer,
+    ibuf: TrackedBuffer,
     nidx: u32,
 
-    ubo: wgpu::Buffer,
-    tile_ubo: wgpu::Buffer,          // E2: per-tile uniforms buffer
-    tile_slot_ubo: wgpu::Buffer,     // E1b: per-draw tile slot buffer
-    mosaic_params_ubo: wgpu::Buffer, // E1b: mosaic params buffer
+    ubo: TrackedBuffer,
+    tile_ubo: TrackedBuffer,          // E2: per-tile uniforms buffer
+    tile_slot_ubo: TrackedBuffer,     // E1b: per-draw tile slot buffer
+    mosaic_params_ubo: TrackedBuffer, // E1b: mosaic params buffer
     colormap_lut: ColormapLUT,
     lut_format: &'static str,
 
-    color: wgpu::Texture,
+    color: TrackedTexture,
     color_view: wgpu::TextureView,
-    _normal: wgpu::Texture,
+    _normal: TrackedTexture,
     normal_view: wgpu::TextureView,
 
     globals: Globals,

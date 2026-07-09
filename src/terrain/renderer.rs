@@ -21,7 +21,6 @@ use numpy::PyReadonlyArray2;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use std::sync::{Arc, Mutex};
-use wgpu::util::DeviceExt;
 use wgpu::TextureFormatFeatureFlags;
 
 use super::render_params::{AddressModeNative, FilterModeNative};

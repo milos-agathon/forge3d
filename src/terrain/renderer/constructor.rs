@@ -1,6 +1,9 @@
 #[cfg(feature = "enable-gpu-instancing")]
 use super::core::TERRAIN_DEPTH_FORMAT;
 use super::*;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_buffer_init, tracked_create_texture,
+};
 
 impl TerrainScene {
     /// Internal constructor used by Python and (later) the viewer.
@@ -18,7 +21,7 @@ impl TerrainScene {
         let sampler_linear = base_resources.sampler_linear;
         let height_curve_lut_sampler = base_resources.height_curve_lut_sampler;
         let atmosphere_resources =
-            create_atmosphere_init_resources(device.as_ref(), queue.as_ref());
+            create_atmosphere_init_resources(device.as_ref(), queue.as_ref())?;
         let sky_bind_group_layout0 = atmosphere_resources.sky_bind_group_layout0;
         let sky_bind_group_layout1 = atmosphere_resources.sky_bind_group_layout1;
         let sky_pipeline = atmosphere_resources.sky_pipeline;
@@ -32,7 +35,7 @@ impl TerrainScene {
         let detail_normal_sampler = base_resources.detail_normal_sampler;
 
         let heightfield_resources =
-            create_heightfield_init_resources(device.as_ref(), queue.as_ref());
+            create_heightfield_init_resources(device.as_ref(), queue.as_ref())?;
         let ao_debug_sampler = heightfield_resources.ao_debug_sampler;
         let ao_debug_fallback_texture = heightfield_resources.ao_debug_fallback_texture;
         let ao_debug_fallback_view = heightfield_resources.ao_debug_fallback_view;
@@ -54,16 +57,19 @@ impl TerrainScene {
         let shadow_bind_group_layout = Self::create_shadow_bind_group_layout(device.as_ref());
 
         let fog_bind_group_layout = Self::create_fog_bind_group_layout(device.as_ref());
-        let fog_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("terrain.fog.uniform_buffer"),
-            contents: bytemuck::bytes_of(&FogUniforms::disabled()),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let fog_uniform_buffer = tracked_create_buffer_init(
+            &device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.fog.uniform_buffer"),
+                contents: bytemuck::bytes_of(&FogUniforms::disabled()),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        )?;
 
         let water_reflection_bind_group_layout =
             Self::create_water_reflection_bind_group_layout(device.as_ref());
         let water_reflection_resources =
-            create_water_reflection_init_resources(device.as_ref(), queue.as_ref(), color_format);
+            create_water_reflection_init_resources(device.as_ref(), queue.as_ref(), color_format)?;
         let water_reflection_uniform_buffer =
             water_reflection_resources.water_reflection_uniform_buffer;
         let water_reflection_texture = water_reflection_resources.water_reflection_texture;
@@ -78,28 +84,33 @@ impl TerrainScene {
 
         let material_layer_bind_group_layout =
             Self::create_material_layer_bind_group_layout(device.as_ref());
-        let material_layer_uniform_buffer =
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let material_layer_uniform_buffer = tracked_create_buffer_init(
+            &device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.material_layer.uniform_buffer"),
                 contents: bytemuck::bytes_of(&MaterialLayerUniforms::disabled()),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
+            },
+        )?;
 
         // VT fallback resources
-        let vt_atlas_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("vt_atlas_fallback"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
+        let vt_atlas_fallback_texture = tracked_create_texture(
+            &device,
+            &wgpu::TextureDescriptor {
+                label: Some("vt_atlas_fallback"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
 
         let vt_atlas_fallback_view =
             vt_atlas_fallback_texture.create_view(&wgpu::TextureViewDescriptor {
@@ -129,20 +140,23 @@ impl TerrainScene {
             },
         );
 
-        let vt_page_table_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("vt_page_table_fallback"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: super::core::MATERIAL_LAYER_CAPACITY as u32,
+        let vt_page_table_fallback_texture = tracked_create_texture(
+            &device,
+            &wgpu::TextureDescriptor {
+                label: Some("vt_page_table_fallback"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: super::core::MATERIAL_LAYER_CAPACITY as u32,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
 
         let vt_page_table_fallback_view =
             vt_page_table_fallback_texture.create_view(&wgpu::TextureViewDescriptor {
@@ -177,28 +191,36 @@ impl TerrainScene {
             },
         );
 
-        let vt_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vt_uniforms"),
-            // Must cover TerrainVTUniformsGpu (3x vec4<u32> config + 3x
-            // vec4<u32> per-family info = 96 bytes).
-            size: 96,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let vt_uniform_buffer = tracked_create_buffer(
+            &device,
+            &wgpu::BufferDescriptor {
+                label: Some("vt_uniforms"),
+                // Must cover TerrainVTUniformsGpu (3x vec4<u32> config + 3x
+                // vec4<u32> per-family info = 96 bytes).
+                size: 96,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
-        let vt_fallback_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vt_fallback_colors"),
-            size: 256,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let vt_fallback_uniform_buffer = tracked_create_buffer(
+            &device,
+            &wgpu::BufferDescriptor {
+                label: Some("vt_fallback_colors"),
+                size: 256,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
-        let vt_feedback_fallback_buffer =
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let vt_feedback_fallback_buffer = tracked_create_buffer_init(
+            &device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("vt_feedback_fallback"),
                 contents: bytemuck::cast_slice(&[0u32; 4]),
                 usage: wgpu::BufferUsages::STORAGE,
-            });
+            },
+        )?;
 
         let vt_atlas_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("vt_atlas_sampler"),
@@ -210,32 +232,39 @@ impl TerrainScene {
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
-        let probe_grid_uniform_buffer =
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let probe_grid_uniform_buffer = tracked_create_buffer_init(
+            &device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.probes.grid_uniform_buffer"),
                 contents: bytemuck::bytes_of(
                     &crate::terrain::probes::ProbeGridUniformsGpu::disabled(),
                 ),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
+            },
+        )?;
         let probe_ssbo_init = [crate::terrain::probes::GpuProbeData::zeroed()];
-        let probe_ssbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("terrain.probes.ssbo"),
-            contents: bytemuck::cast_slice(&probe_ssbo_init),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
+        let probe_ssbo = tracked_create_buffer_init(
+            &device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.probes.ssbo"),
+                contents: bytemuck::cast_slice(&probe_ssbo_init),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            },
+        )?;
         let probe_grid_uniform_alloc_bytes =
             std::mem::size_of::<crate::terrain::probes::ProbeGridUniformsGpu>() as u64;
         let probe_ssbo_alloc_bytes =
             std::mem::size_of::<crate::terrain::probes::GpuProbeData>() as u64;
-        let reflection_probe_grid_uniform_buffer =
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let reflection_probe_grid_uniform_buffer = tracked_create_buffer_init(
+            &device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.reflection_probes.grid_uniform_buffer"),
                 contents: bytemuck::bytes_of(
                     &crate::terrain::probes::ReflectionProbeGridUniformsGpu::disabled(),
                 ),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
+            },
+        )?;
         let reflection_probe_grid_uniform_alloc_bytes =
             std::mem::size_of::<crate::terrain::probes::ReflectionProbeGridUniformsGpu>() as u64;
         let reflection_probe_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -248,20 +277,23 @@ impl TerrainScene {
             mipmap_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        let reflection_probe_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.reflection_probes.fallback_texture"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 6,
+        let reflection_probe_fallback_texture = tracked_create_texture(
+            &device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.reflection_probes.fallback_texture"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 6,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         let reflection_probe_fallback_zeroes = [0u16; 4 * 6];
         queue.write_texture(
             wgpu::ImageCopyTexture {

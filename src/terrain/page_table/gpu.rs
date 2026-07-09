@@ -1,6 +1,8 @@
 use bytemuck::{Pod, Zeroable};
-use wgpu::{Buffer, BufferDescriptor, BufferUsages, Queue};
+use wgpu::{BufferDescriptor, BufferUsages, Queue};
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use crate::terrain::stream::HeightMosaic;
 
 #[repr(C)]
@@ -19,21 +21,24 @@ pub struct PageTableEntry {
 }
 
 pub struct PageTable {
-    pub buffer: Buffer,
+    pub buffer: TrackedBuffer,
     pub capacity: usize,
 }
 
 impl PageTable {
-    pub fn new(device: &wgpu::Device, capacity: usize) -> Self {
+    pub fn new(device: &wgpu::Device, capacity: usize) -> RenderResult<Self> {
         let entry_size = std::mem::size_of::<PageTableEntry>() as u64;
         let size = (capacity as u64).saturating_mul(entry_size).max(entry_size);
-        let buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("terrain-page-table"),
-            size,
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        Self { buffer, capacity }
+        let buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("terrain-page-table"),
+                size,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
+        Ok(Self { buffer, capacity })
     }
 
     pub fn sync_from_mosaic(&mut self, queue: &Queue, mosaic: &HeightMosaic) {

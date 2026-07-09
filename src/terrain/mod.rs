@@ -97,7 +97,6 @@ use numpy::IntoPyArray;
 use pyo3::prelude::*;
 use std::collections::HashSet;
 use std::num::NonZeroU32;
-use wgpu::util::DeviceExt;
 
 // T33-BEGIN:colormap-imports
 use crate::colormap::{

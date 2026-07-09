@@ -7,6 +7,8 @@ use super::*;
 
 #[cfg(feature = "extension-module")]
 use crate::core::feedback_buffer::FeedbackBuffer;
+#[cfg(feature = "extension-module")]
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 #[cfg(feature = "enable-staging-rings")]
 use crate::core::staging_rings::StagingRing;
 #[cfg(feature = "extension-module")]
@@ -126,11 +128,11 @@ struct TerrainMaterialVTRuntime {
     max_mip_levels: u32,
     pages_x0: u32,
     pages_y0: u32,
-    atlas_texture: wgpu::Texture,
+    atlas_texture: TrackedTexture,
     atlas_view: wgpu::TextureView,
     #[cfg(feature = "enable-staging-rings")]
     staging_ring: StagingRing,
-    page_table_texture: wgpu::Texture,
+    page_table_texture: TrackedTexture,
     page_table_view: wgpu::TextureView,
     page_tables: Vec<Vec<PageTableEntry>>,
     dirty_page_table_layers: HashSet<usize>,
@@ -764,20 +766,24 @@ impl TerrainMaterialVTRuntime {
             .min(Self::page_table_mip_levels(pages_x0, pages_y0))
             .max(1);
 
-        let atlas_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.material_vt.atlas"),
-            size: wgpu::Extent3d {
-                width: atlas_size,
-                height: atlas_size,
-                depth_or_array_layers: 1,
+        let atlas_texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.material_vt.atlas"),
+                size: wgpu::Extent3d {
+                    width: atlas_size,
+                    height: atlas_size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
         let atlas_view = atlas_texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("terrain.material_vt.atlas.view"),
             format: Some(wgpu::TextureFormat::Rgba8UnormSrgb),
@@ -793,20 +799,26 @@ impl TerrainMaterialVTRuntime {
                 .map_err(|e| e.to_string())?
         };
 
-        let page_table_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.material_vt.page_table"),
-            size: wgpu::Extent3d {
-                width: pages_x0,
-                height: pages_y0,
-                depth_or_array_layers: TERRAIN_VT_FAMILY_COUNT * material_count * max_mip_levels,
+        let page_table_texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.material_vt.page_table"),
+                size: wgpu::Extent3d {
+                    width: pages_x0,
+                    height: pages_y0,
+                    depth_or_array_layers: TERRAIN_VT_FAMILY_COUNT
+                        * material_count
+                        * max_mip_levels,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
         let page_table_view = page_table_texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("terrain.material_vt.page_table.view"),
             format: Some(wgpu::TextureFormat::Rgba32Float),

@@ -1,5 +1,6 @@
 use super::uniforms::{compute_mirrored_view_matrix, mul_mat4, WaterReflectionUniforms};
 use super::*;
+use crate::core::resource_tracker::tracked_create_buffer_init;
 
 impl TerrainScene {
     #[allow(clippy::too_many_arguments)]
@@ -42,13 +43,14 @@ impl TerrainScene {
 
             let reflection_uniforms =
                 Self::build_uniforms_with_matrices(params, decoded, mirrored_view, proj_matrix);
-            let reflection_uniform_buffer =
-                self.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("terrain.reflection.uniform_buffer"),
-                        contents: bytemuck::cast_slice(&reflection_uniforms),
-                        usage: wgpu::BufferUsages::UNIFORM,
-                    });
+            let reflection_uniform_buffer = tracked_create_buffer_init(
+                &self.device,
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("terrain.reflection.uniform_buffer"),
+                    contents: bytemuck::cast_slice(&reflection_uniforms),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                },
+            )?;
 
             let reflection_bind_group = self.create_terrain_main_bind_group(
                 "terrain.reflection.bind_group",
@@ -69,13 +71,14 @@ impl TerrainScene {
             let reflection_pass_water_uniforms = WaterReflectionUniforms::for_reflection_pass(
                 reflection_settings.water_plane_height,
             );
-            let reflection_pass_water_uniform_buffer =
-                self.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("terrain.reflection_pass.water_uniform_buffer"),
-                        contents: bytemuck::bytes_of(&reflection_pass_water_uniforms),
-                        usage: wgpu::BufferUsages::UNIFORM,
-                    });
+            let reflection_pass_water_uniform_buffer = tracked_create_buffer_init(
+                &self.device,
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("terrain.reflection_pass.water_uniform_buffer"),
+                    contents: bytemuck::bytes_of(&reflection_pass_water_uniforms),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                },
+            )?;
 
             let reflection_view_guard = self
                 .water_reflection_view

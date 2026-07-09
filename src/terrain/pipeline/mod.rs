@@ -59,7 +59,7 @@ impl TerrainPipeline {
         page_table: Option<&Buffer>,
         tile_slot_ubo: &Buffer,
         mosaic_params_ubo: &Buffer,
-    ) -> BindGroup {
+    ) -> crate::core::error::RenderResult<BindGroup> {
         bind_groups::make_bg_tile(
             self,
             device,

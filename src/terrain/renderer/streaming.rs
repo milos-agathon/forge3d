@@ -219,7 +219,7 @@ impl HeightStreamingState {
                 fixed_lod: Some(lod),
             },
             false,
-        );
+        )?;
         let loader = AsyncTileLoader::new_with_reader(
             root_bounds.clone(),
             tile_world_size,

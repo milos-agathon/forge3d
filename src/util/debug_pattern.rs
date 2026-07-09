@@ -3,6 +3,7 @@
 // Exists to isolate row-padding bugs without touching terrain shaders
 // RELEVANT FILES: src/renderer/readback.rs, src/util/image_write.rs, tests/readback_depad.rs
 
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use anyhow::{ensure, Result};
 use std::borrow::Cow;
 
@@ -42,7 +43,7 @@ pub fn render_debug_pattern(
     queue: &wgpu::Queue,
     width: u32,
     height: u32,
-) -> Result<wgpu::Texture> {
+) -> Result<TrackedTexture> {
     ensure!(width > 0 && height > 0, "pattern size must be positive");
 
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -79,22 +80,25 @@ pub fn render_debug_pattern(
         multiview: None,
     });
 
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("forge3d.debug-pattern.texture"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+    let texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("forge3d.debug-pattern.texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-            | wgpu::TextureUsages::COPY_SRC
-            | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
+    )?;
 
     let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 

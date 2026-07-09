@@ -1,5 +1,6 @@
 use super::setup::RenderTargets;
 use super::*;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 
 impl TerrainScene {
     pub(in crate::terrain::renderer) fn blit_background_texture(
@@ -184,7 +185,7 @@ impl TerrainScene {
         params: &crate::terrain::render_params::TerrainRenderParams,
         decoded: &crate::terrain::render_params::DecodedTerrainSettings,
         render_targets: RenderTargets,
-    ) -> Result<(wgpu::Texture, u32, u32)> {
+    ) -> Result<(TrackedTexture, u32, u32)> {
         if !render_targets.needs_scaling {
             return Ok((
                 render_targets.internal_texture,
@@ -193,22 +194,25 @@ impl TerrainScene {
             ));
         }
 
-        let output_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.output.resolved"),
-            size: wgpu::Extent3d {
-                width: render_targets.out_width,
-                height: render_targets.out_height,
-                depth_or_array_layers: 1,
+        let output_texture = tracked_create_texture(
+            self.device.as_ref(),
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.output.resolved"),
+                size: wgpu::Extent3d {
+                    width: render_targets.out_width,
+                    height: render_targets.out_height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.color_format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: self.color_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
         let output_view = output_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampling = &decoded.sampling;
         let blit_sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {

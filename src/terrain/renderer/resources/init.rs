@@ -1,11 +1,12 @@
 use super::*;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 
 pub(in crate::terrain::renderer) struct BaseInitResources {
     pub(in crate::terrain::renderer) sampler_linear: wgpu::Sampler,
     pub(in crate::terrain::renderer) height_curve_lut_sampler: wgpu::Sampler,
-    pub(in crate::terrain::renderer) height_curve_identity_texture: wgpu::Texture,
+    pub(in crate::terrain::renderer) height_curve_identity_texture: TrackedTexture,
     pub(in crate::terrain::renderer) height_curve_identity_view: wgpu::TextureView,
-    pub(in crate::terrain::renderer) water_mask_fallback_texture: wgpu::Texture,
+    pub(in crate::terrain::renderer) water_mask_fallback_texture: TrackedTexture,
     pub(in crate::terrain::renderer) water_mask_fallback_view: wgpu::TextureView,
     pub(in crate::terrain::renderer) detail_normal_fallback_view: wgpu::TextureView,
     pub(in crate::terrain::renderer) detail_normal_sampler: wgpu::Sampler,
@@ -41,20 +42,23 @@ pub(in crate::terrain::renderer) fn create_base_init_resources(
     let (height_curve_identity_texture, height_curve_identity_view) =
         TerrainScene::upload_height_curve_lut_internal(device, queue, &identity_lut_data)?;
 
-    let water_mask_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("terrain.water_mask_fallback"),
-        size: wgpu::Extent3d {
-            width: 1,
-            height: 1,
-            depth_or_array_layers: 1,
+    let water_mask_fallback_texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("terrain.water_mask_fallback"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R8Unorm,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    )?;
     queue.write_texture(
         wgpu::ImageCopyTexture {
             texture: &water_mask_fallback_texture,
@@ -77,20 +81,23 @@ pub(in crate::terrain::renderer) fn create_base_init_resources(
     let water_mask_fallback_view =
         water_mask_fallback_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-    let detail_normal_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("terrain.detail_normal_fallback"),
-        size: wgpu::Extent3d {
-            width: 1,
-            height: 1,
-            depth_or_array_layers: 1,
+    let detail_normal_fallback_texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("terrain.detail_normal_fallback"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    )?;
     queue.write_texture(
         wgpu::ImageCopyTexture {
             texture: &detail_normal_fallback_texture,

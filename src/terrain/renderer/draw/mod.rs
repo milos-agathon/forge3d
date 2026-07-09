@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::tracked_create_buffer_init;
 
 mod execute;
 mod setup;
@@ -38,7 +39,7 @@ impl TerrainScene {
             (height_inputs.width, height_inputs.height),
             params.z_scale,
             height_inputs.terrain_data_hash,
-        );
+        )?;
         super::probes::prepare_reflection_probes(
             self,
             &decoded.reflection_probes,
@@ -51,7 +52,7 @@ impl TerrainScene {
             (height_inputs.width, height_inputs.height),
             params.z_scale,
             height_inputs.terrain_data_hash,
-        );
+        )?;
         let materials = self.prepare_material_context(material_set, params, decoded)?;
 
         let uniforms = self.build_uniforms(
@@ -60,13 +61,14 @@ impl TerrainScene {
             height_inputs.width as f32,
             height_inputs.height as f32,
         )?;
-        let uniform_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let uniform_buffer = tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.uniform_buffer"),
                 contents: bytemuck::cast_slice(&uniforms),
                 usage: wgpu::BufferUsages::UNIFORM,
-            });
+            },
+        )?;
 
         let ibl_bind_group = self.prepare_ibl_bind_group(env_maps)?;
         let lut_texture_uploaded = if params.height_curve_mode.as_str() == "lut" {

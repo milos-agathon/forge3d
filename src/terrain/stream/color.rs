@@ -1,17 +1,19 @@
 use super::config::MosaicConfig;
 use super::util::{copy_rows_with_padding, padded_bytes_per_row};
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::terrain::tiling::TileId;
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use wgpu::{
     Extent3d, ImageCopyTexture, ImageDataLayout, Origin3d, Queue, Sampler, SamplerDescriptor,
-    Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
+    TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
 };
 
 // E3: Color mosaic for RGBA8 overlays/basemaps
 #[derive(Debug)]
 pub struct ColorMosaic {
-    pub texture: Texture,
+    pub texture: TrackedTexture,
     pub view: TextureView,
     pub sampler: Sampler,
     pub config: MosaicConfig,
@@ -25,27 +27,30 @@ impl ColorMosaic {
         config: MosaicConfig,
         srgb: bool,
         filter_linear: bool,
-    ) -> Self {
+    ) -> RenderResult<Self> {
         let (w, h) = config.texture_size();
         let format = if srgb {
             TextureFormat::Rgba8UnormSrgb
         } else {
             TextureFormat::Rgba8Unorm
         };
-        let texture = device.create_texture(&TextureDescriptor {
-            label: Some("terrain-color-mosaic-rgba8"),
-            size: Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
+        let texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("terrain-color-mosaic-rgba8"),
+                size: Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("terrain-color-mosaic-sampler"),
@@ -65,14 +70,14 @@ impl ColorMosaic {
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
-        Self {
+        Ok(Self {
             texture,
             view,
             sampler,
             config,
             slot_map: HashMap::new(),
             lru: VecDeque::new(),
-        }
+        })
     }
 
     pub fn upload_tile(

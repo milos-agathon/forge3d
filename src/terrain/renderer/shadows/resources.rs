@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::{tracked_create_buffer_init, tracked_create_texture};
 
 impl TerrainScene {
     pub(in crate::terrain::renderer) fn create_noop_shadow(
@@ -45,26 +46,33 @@ impl TerrainScene {
             cascade_blend_range: 0.0,
             _padding2: [0.0; 27],
         };
-        let csm_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("terrain.noop_shadow.csm_uniforms"),
-            contents: bytemuck::bytes_of(&csm_uniforms),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-
-        let shadow_maps_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.noop_shadow.maps"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
+        let csm_uniform_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.noop_shadow.csm_uniforms"),
+                contents: bytemuck::bytes_of(&csm_uniforms),
+                usage: wgpu::BufferUsages::STORAGE,
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        )?;
+
+        let shadow_maps_texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.noop_shadow.maps"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            },
+        )?;
         let shadow_clear_view = shadow_maps_texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("terrain.noop_shadow.maps.clear_view"),
             format: Some(wgpu::TextureFormat::Depth32Float),
@@ -121,20 +129,23 @@ impl TerrainScene {
         });
 
         let moment_maps_format = wgpu::TextureFormat::Rgba16Float;
-        let moment_maps_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.noop_shadow.moments"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
+        let moment_maps_texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.noop_shadow.moments"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: moment_maps_format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: moment_maps_format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
         debug_assert_eq!(moment_maps_format, wgpu::TextureFormat::Rgba16Float);
         let moment_maps_view = moment_maps_texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("terrain.noop_shadow.moments.view"),

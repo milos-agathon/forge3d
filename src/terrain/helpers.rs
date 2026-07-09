@@ -1,10 +1,15 @@
 use super::*;
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_buffer_init, TrackedBuffer};
 
 // ---------- Geometry (analytic spike) ----------
 
 // T33-BEGIN:build-grid-xyuv
 /// Minimal grid that matches T3.1/T3.3 vertex layout: interleaved [x, z, u, v] (Float32x4) => 16-byte stride.
-pub(super) fn build_grid_xyuv(device: &wgpu::Device, n: u32) -> (wgpu::Buffer, wgpu::Buffer, u32) {
+pub(super) fn build_grid_xyuv(
+    device: &wgpu::Device,
+    n: u32,
+) -> RenderResult<(TrackedBuffer, TrackedBuffer, u32)> {
     let n = n.max(2) as usize;
     let (w, h) = (n, n); // base grid resolution (without skirts)
 
@@ -61,19 +66,24 @@ pub(super) fn build_grid_xyuv(device: &wgpu::Device, n: u32) -> (wgpu::Buffer, w
         }
     }
 
-    use wgpu::util::DeviceExt;
     let v_usage = wgpu::BufferUsages::VERTEX;
-    let vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("terrain-xyuv-vbuf"),
-        contents: bytemuck::cast_slice(&verts),
-        usage: v_usage,
-    });
+    let vbuf = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("terrain-xyuv-vbuf"),
+            contents: bytemuck::cast_slice(&verts),
+            usage: v_usage,
+        },
+    )?;
     let i_usage = wgpu::BufferUsages::INDEX;
-    let ibuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("terrain-xyuv-ibuf"),
-        contents: bytemuck::cast_slice(&idx),
-        usage: i_usage,
-    });
+    let ibuf = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("terrain-xyuv-ibuf"),
+            contents: bytemuck::cast_slice(&idx),
+            usage: i_usage,
+        },
+    )?;
 
     // B15: Track buffer allocations (not host-visible)
     let tracker = global_tracker();
@@ -81,7 +91,7 @@ pub(super) fn build_grid_xyuv(device: &wgpu::Device, n: u32) -> (wgpu::Buffer, w
     let ibuf_size = (idx.len() * std::mem::size_of::<u32>()) as u64;
     tracker.track_buffer_allocation(vbuf_size, is_host_visible_usage(v_usage));
     tracker.track_buffer_allocation(ibuf_size, is_host_visible_usage(i_usage));
-    (vbuf, ibuf, idx.len() as u32)
+    Ok((vbuf, ibuf, idx.len() as u32))
 }
 // T33-END:build-grid-xyuv
 

@@ -1,5 +1,7 @@
 use super::TerrainPipeline;
+use crate::core::error::RenderResult;
 use crate::core::reflections::PlanarReflectionRenderer;
+use crate::core::resource_tracker::tracked_create_buffer;
 use wgpu::*;
 
 pub fn make_bg_globals(pipeline: &TerrainPipeline, device: &Device, ubo: &Buffer) -> BindGroup {
@@ -21,19 +23,22 @@ pub fn make_bg_tile(
     page_table: Option<&Buffer>,
     tile_slot_ubo: &Buffer,
     mosaic_params_ubo: &Buffer,
-) -> BindGroup {
-    let pt_dummy = device.create_buffer(&BufferDescriptor {
-        label: Some("vf.Terrain.page_table.dummy"),
-        // Must be at least the size of one PageTableEntry (8 u32 = 32 bytes)
-        size: 32,
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+) -> RenderResult<BindGroup> {
+    let pt_dummy = tracked_create_buffer(
+        device,
+        &BufferDescriptor {
+            label: Some("vf.Terrain.page_table.dummy"),
+            // Must be at least the size of one PageTableEntry (8 u32 = 32 bytes)
+            size: 32,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )?;
     let pt_binding = page_table
         .map(|b| b.as_entire_binding())
         .unwrap_or_else(|| pt_dummy.as_entire_binding());
 
-    device.create_bind_group(&BindGroupDescriptor {
+    Ok(device.create_bind_group(&BindGroupDescriptor {
         label: Some("vf.Terrain.bg.tile"),
         layout: &pipeline.bgl_tile,
         entries: &[
@@ -54,7 +59,7 @@ pub fn make_bg_tile(
                 resource: mosaic_params_ubo.as_entire_binding(),
             },
         ],
-    })
+    }))
 }
 
 /// Bind group for height texture/sampler

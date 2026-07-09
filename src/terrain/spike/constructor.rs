@@ -54,35 +54,42 @@ impl TerrainSpike {
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
         // Offscreen color + depth
-        let color = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain-color"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let color = tracked_create_texture(
+            &device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain-color"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: TEXTURE_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: TEXTURE_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        )?;
         let color_view = color.create_view(&Default::default());
-        let normal = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain-normal"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let normal = tracked_create_texture(
+            &device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain-normal"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: NORMAL_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: NORMAL_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
         let normal_view = normal.create_view(&Default::default());
 
         // Shader + pipeline - using T33 shared pipeline
@@ -107,7 +114,7 @@ impl TerrainSpike {
         // T33-END:terrainspike-use-t33
 
         // Mesh + uniforms
-        let (vbuf, ibuf, nidx) = build_grid_xyuv(&device, grid);
+        let (vbuf, ibuf, nidx) = build_grid_xyuv(&device, grid)?;
         let (view, proj, light) = build_view_matrices(width, height);
 
         let mut globals = Globals::default();
@@ -126,21 +133,27 @@ impl TerrainSpike {
             uniform_size, 176
         );
 
-        let ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("terrain-ubo"),
-            contents: bytemuck::cast_slice(&[uniforms]),
-            usage: ubo_usage,
-        });
+        let ubo = tracked_create_buffer_init(
+            &device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("terrain-ubo"),
+                contents: bytemuck::cast_slice(&[uniforms]),
+                usage: ubo_usage,
+            },
+        )?;
 
         // E2: Create a default tile uniforms buffer
         let tile_init = TileUniformsCPU {
             world_remap: [globals.spacing, globals.spacing, 0.0, 0.0],
         };
-        let tile_ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("terrain-tile-ubo"),
-            contents: bytemuck::bytes_of(&tile_init),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let tile_ubo = tracked_create_buffer_init(
+            &device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("terrain-tile-ubo"),
+                contents: bytemuck::bytes_of(&tile_init),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        )?;
 
         // E1b: Create default tile slot and mosaic params UBOs
         let tile_slot_init = TileSlotCPU {
@@ -149,22 +162,28 @@ impl TerrainSpike {
             y: 0,
             slot: 0,
         };
-        let tile_slot_ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("terrain-tile-slot-ubo"),
-            contents: bytemuck::bytes_of(&tile_slot_init),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let tile_slot_ubo = tracked_create_buffer_init(
+            &device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("terrain-tile-slot-ubo"),
+                contents: bytemuck::bytes_of(&tile_slot_init),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        )?;
         let mosaic_params_init = MosaicParamsCPU {
             inv_tiles_x: 1.0,
             inv_tiles_y: 1.0,
             tiles_x: 1,
             tiles_y: 1,
         };
-        let mosaic_params_ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("terrain-mosaic-params-ubo"),
-            contents: bytemuck::bytes_of(&mosaic_params_init),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let mosaic_params_ubo = tracked_create_buffer_init(
+            &device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("terrain-mosaic-params-ubo"),
+                contents: bytemuck::bytes_of(&mosaic_params_init),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        )?;
 
         // B15: Track UBO allocation (not host-visible)
         let tracker = global_tracker();
@@ -176,20 +195,23 @@ impl TerrainSpike {
         // T33-BEGIN:bg1-height-dummy
         // Provide a tiny dummy height if the spike has none yet (keeps validation clean)
         let (hview, hsamp) = {
-            let tex = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("dummy-height-r32f"),
-                size: wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
+            let tex = tracked_create_texture(
+                &device,
+                &wgpu::TextureDescriptor {
+                    label: Some("dummy-height-r32f"),
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::R32Float,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R32Float,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
+            )?;
             queue.write_texture(
                 wgpu::ImageCopyTexture {
                     texture: &tex,
@@ -237,7 +259,7 @@ impl TerrainSpike {
         let bg1_height = tp.make_bg_height(&device, &hview, &hsamp);
         let bg2_lut = tp.make_bg_lut(&device, &lut.view, &lut.sampler);
         let bg5_tile =
-            tp.make_bg_tile(&device, &tile_ubo, None, &tile_slot_ubo, &mosaic_params_ubo);
+            tp.make_bg_tile(&device, &tile_ubo, None, &tile_slot_ubo, &mosaic_params_ubo)?;
 
         return Ok(Self {
             width,

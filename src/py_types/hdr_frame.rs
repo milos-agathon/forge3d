@@ -5,7 +5,7 @@ use super::super::*;
 pub struct HdrFrame {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
-    texture: wgpu::Texture,
+    texture: crate::core::resource_tracker::TrackedTexture,
     width: u32,
     height: u32,
 }
@@ -15,7 +15,7 @@ impl HdrFrame {
     pub(crate) fn new(
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
-        texture: wgpu::Texture,
+        texture: crate::core::resource_tracker::TrackedTexture,
         width: u32,
         height: u32,
     ) -> Self {
