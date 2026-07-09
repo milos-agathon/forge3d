@@ -21,18 +21,50 @@ pub enum RenderError {
     #[error("Readback error: {0}")]
     Readback(String),
 
+    #[error("Memory budget exceeded: {0}")]
+    Budget(String),
+
+    #[error("Degraded capability: {0}")]
+    DegradedCapability(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
 
+#[cfg(feature = "extension-module")]
+pyo3::create_exception!(
+    _forge3d,
+    MemoryBudgetExceeded,
+    pyo3::exceptions::PyRuntimeError
+);
+#[cfg(feature = "extension-module")]
+pyo3::create_exception!(
+    _forge3d,
+    DegradedCapability,
+    pyo3::exceptions::PyRuntimeError
+);
+
 impl RenderError {
     /// Convert RenderError to PyErr with categorized prefixes
     pub fn to_py_err(self) -> PyErr {
+        // Typed exception mappings for the memory-budget and degraded-capability
+        // paths so Python callers can catch them precisely.
+        #[cfg(feature = "extension-module")]
+        match &self {
+            RenderError::Budget(msg) => return MemoryBudgetExceeded::new_err(msg.clone()),
+            RenderError::DegradedCapability(msg) => {
+                return DegradedCapability::new_err(msg.clone())
+            }
+            _ => {}
+        }
+
         let category = match &self {
             RenderError::Device(_) => "Device",
             RenderError::Upload(_) => "Upload",
             RenderError::Render(_) => "Render",
             RenderError::Readback(_) => "Readback",
+            RenderError::Budget(_) => "Budget",
+            RenderError::DegradedCapability(_) => "DegradedCapability",
             RenderError::Io(_) => "IO",
         };
 
@@ -54,6 +86,14 @@ impl RenderError {
 
     pub fn readback<T: ToString>(msg: T) -> Self {
         RenderError::Readback(msg.to_string())
+    }
+
+    pub fn budget<T: ToString>(msg: T) -> Self {
+        RenderError::Budget(msg.to_string())
+    }
+
+    pub fn degraded_capability<T: ToString>(msg: T) -> Self {
+        RenderError::DegradedCapability(msg.to_string())
     }
 
     pub fn io<T: ToString>(msg: T) -> Self {

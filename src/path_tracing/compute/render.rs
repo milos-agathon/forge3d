@@ -9,8 +9,8 @@ impl PathTracerGPU {
     ) -> Result<Vec<u8>, RenderError> {
         // Fallible first GPU touch: later ctx() calls cannot fail once this succeeds.
         crate::core::gpu::try_ctx()?;
-        let resources = setup::create_dispatch_resources(width, height, spheres, uniforms);
-        dispatch::dispatch(&resources, width, height);
+        let resources = setup::create_dispatch_resources(width, height, spheres, uniforms)?;
+        dispatch::dispatch(&resources, width, height)?;
         readback::read_output_rgba8(&resources.out_tex, width, height)
     }
 
@@ -23,8 +23,8 @@ impl PathTracerGPU {
     ) -> Result<std::collections::HashMap<AovKind, Vec<u8>>, RenderError> {
         uniforms.aov_flags = aov_mask;
         crate::core::gpu::try_ctx()?;
-        let resources = setup::create_dispatch_resources(width, height, spheres, uniforms);
-        dispatch::dispatch(&resources, width, height);
+        let resources = setup::create_dispatch_resources(width, height, spheres, uniforms)?;
+        dispatch::dispatch(&resources, width, height)?;
 
         let mut out = std::collections::HashMap::new();
         for &kind in &[

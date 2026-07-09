@@ -11,7 +11,7 @@ impl Scene {
         self.text_overlay_enabled = true;
         if let Some(ref mut tr) = self.text_overlay_renderer {
             tr.set_enabled(true);
-            let g = crate::core::gpu::ctx();
+            let g = crate::core::gpu::try_ctx()?;
             tr.upload_uniforms(&g.queue);
         }
         Ok(())
@@ -22,7 +22,7 @@ impl Scene {
         self.text_overlay_enabled = false;
         if let Some(ref mut tr) = self.text_overlay_renderer {
             tr.set_enabled(false);
-            let g = crate::core::gpu::ctx();
+            let g = crate::core::gpu::try_ctx()?;
             tr.upload_uniforms(&g.queue);
         }
         Ok(())
@@ -33,7 +33,7 @@ impl Scene {
         self.text_overlay_alpha = alpha.clamp(0.0, 1.0);
         if let Some(ref mut tr) = self.text_overlay_renderer {
             tr.set_alpha(self.text_overlay_alpha);
-            let g = crate::core::gpu::ctx();
+            let g = crate::core::gpu::try_ctx()?;
             tr.upload_uniforms(&g.queue);
         }
         Ok(())
@@ -185,7 +185,7 @@ impl Scene {
                 "Expected numpy uint8 array HxWxC",
             ));
         };
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         // Convert to RGBA8
         let mut rgba: Vec<u8> = Vec::with_capacity((h * w * 4) as usize);
         if c == 4 {

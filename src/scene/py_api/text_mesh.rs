@@ -86,7 +86,7 @@ impl Scene {
                 })?;
 
         // Upload to GPU
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         let vsize = (verts.len() * std::mem::size_of::<crate::core::text_mesh::VertexPN>()) as u64;
         let isize = (inds.len() * std::mem::size_of::<u32>()) as u64;
         let vbuf = g.device.create_buffer(&wgpu::BufferDescriptor {

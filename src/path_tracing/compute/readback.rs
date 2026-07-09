@@ -88,7 +88,7 @@ fn read_texture_bytes(
     height: u32,
     bytes_per_pixel: u32,
 ) -> Result<Vec<u8>, RenderError> {
-    let g = ctx();
+    let g = try_ctx()?;
     let row_bytes = width * bytes_per_pixel;
     let padded_bpr = align_copy_bpr(row_bytes);
     let read_buf = g.device.create_buffer(&wgpu::BufferDescriptor {

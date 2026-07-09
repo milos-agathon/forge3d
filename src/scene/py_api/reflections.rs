@@ -19,7 +19,7 @@ impl Scene {
             }
         };
 
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         let mut renderer =
             crate::core::reflections::PlanarReflectionRenderer::new(&g.device, quality_enum);
 
@@ -46,13 +46,14 @@ impl Scene {
     }
 
     #[pyo3(text_signature = "()")]
-    pub fn disable_reflections(&mut self) {
+    pub fn disable_reflections(&mut self) -> PyResult<()> {
         self.reflections_enabled = false;
         if let Some(ref mut renderer) = self.reflection_renderer {
             renderer.set_enabled(false);
-            let g = crate::core::gpu::ctx();
+            let g = crate::core::gpu::try_ctx()?;
             renderer.upload_uniforms(&g.queue);
         }
+        Ok(())
     }
 
     #[pyo3(text_signature = "($self, normal, point, size)")]
@@ -76,7 +77,7 @@ impl Scene {
         let point_v = glam::Vec3::new(point.0, point.1, point.2);
         let size_v = glam::Vec3::new(size.0, size.1, size.2);
         renderer.set_reflection_plane(normal_v, point_v, size_v);
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         renderer.upload_uniforms(&g.queue);
         Ok(())
     }
@@ -94,7 +95,7 @@ impl Scene {
             ));
         };
         renderer.set_intensity(intensity);
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         renderer.upload_uniforms(&g.queue);
         Ok(())
     }
@@ -117,7 +118,7 @@ impl Scene {
             ));
         };
         renderer.set_fresnel_power(power);
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         renderer.upload_uniforms(&g.queue);
         Ok(())
     }
@@ -140,7 +141,7 @@ impl Scene {
             ));
         };
         renderer.set_distance_fade(start, end);
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         renderer.upload_uniforms(&g.queue);
         Ok(())
     }
@@ -163,7 +164,7 @@ impl Scene {
             ));
         };
         renderer.set_debug_mode(mode);
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         renderer.upload_uniforms(&g.queue);
         Ok(())
     }

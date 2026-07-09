@@ -15,7 +15,7 @@ impl Scene {
         };
         self.overlay_enabled = true;
         ov.set_enabled(true);
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         ov.upload_uniforms(&g.queue);
         Ok(())
     }
@@ -29,7 +29,7 @@ impl Scene {
         };
         self.overlay_enabled = false;
         ov.set_enabled(false);
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         ov.upload_uniforms(&g.queue);
         Ok(())
     }
@@ -42,7 +42,7 @@ impl Scene {
             ));
         };
         ov.set_overlay_alpha(alpha);
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         ov.upload_uniforms(&g.queue);
         Ok(())
     }
@@ -57,10 +57,10 @@ impl Scene {
         ov.set_altitude_enabled(enabled);
         // Ensure height view is bound
         if let Some(ref hv) = self.height_view {
-            let g = crate::core::gpu::ctx();
+            let g = crate::core::gpu::try_ctx()?;
             ov.recreate_bind_group(&g.device, None, Some(hv), None, None);
         }
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         ov.upload_uniforms(&g.queue);
         Ok(())
     }
@@ -95,7 +95,7 @@ impl Scene {
                 "Overlay renderer not available",
             ));
         };
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         // Prepare RGBA data with row padding to COPY_BYTES_PER_ROW_ALIGNMENT
         let mut rgba: Vec<u8>;
         if c == 3 {

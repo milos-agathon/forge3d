@@ -3,7 +3,7 @@ impl Scene {
         &mut self,
         py: pyo3::Python<'py>,
     ) -> PyResult<Bound<'py, numpy::PyArray3<u8>>> {
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         let mut encoder = g
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -21,7 +21,7 @@ impl Scene {
     }
 
     fn encode_rgba_frame(&mut self, encoder: &mut wgpu::CommandEncoder) -> PyResult<()> {
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         if self.fast_softlight_only() {
             let (target_view, resolve_target) = if self.sample_count > 1 {
                 (
@@ -208,7 +208,7 @@ impl Scene {
                 rp.set_bind_group(1, &self.bg1_height, &[]);
                 rp.set_bind_group(2, &self.bg2_lut, &[]);
                 rp.set_bind_group(3, &self.bg3_tile, &[]);
-                let max_groups = crate::core::gpu::ctx().device.limits().max_bind_groups;
+                let max_groups = crate::core::gpu::try_ctx()?.device.limits().max_bind_groups;
                 if max_groups >= 6 {
                     let cloud_bg = self
                         .bg3_cloud_shadows
@@ -311,7 +311,7 @@ impl Scene {
 
             if self.text3d_enabled {
                 if let Some(ref mut tm) = self.text3d_renderer {
-                    let g = crate::core::gpu::ctx();
+                    let g = crate::core::gpu::try_ctx()?;
                     tm.set_view_proj(self.scene.view, self.scene.proj);
                     tm.upload_uniforms(&g.queue);
                     for inst in &self.text3d_instances {
@@ -354,7 +354,7 @@ impl Scene {
 
             if self.text_overlay_enabled {
                 if let Some(ref mut tr) = self.text_overlay_renderer {
-                    let g = crate::core::gpu::ctx();
+                    let g = crate::core::gpu::try_ctx()?;
                     tr.set_resolution(self.width, self.height);
                     tr.set_alpha(self.text_overlay_alpha);
                     tr.set_enabled(true);

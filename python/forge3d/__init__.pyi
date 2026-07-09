@@ -144,6 +144,11 @@ PathLikeStr = os.PathLike[str] | str
 __version__: str
 version: str
 
+# CENSOR: typed GPU-error exceptions (native when the extension is present,
+# pure-Python RuntimeError subclasses otherwise).
+class MemoryBudgetExceeded(RuntimeError): ...
+class DegradedCapability(RuntimeError): ...
+
 class RendererConfig:
     lighting: Dict[str, Any]
     shading: Dict[str, Any]

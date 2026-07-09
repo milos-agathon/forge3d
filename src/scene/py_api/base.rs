@@ -36,7 +36,7 @@ impl Scene {
             .scene
             .globals
             .to_uniforms(self.scene.view, self.scene.proj);
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         g.queue
             .write_buffer(&self.ubo, 0, bytemuck::bytes_of(&uniforms));
         self.last_uniforms = uniforms;
@@ -66,7 +66,7 @@ impl Scene {
 
     #[pyo3(text_signature = "(, radius, intensity, bias=0.025)")]
     pub fn set_ssao_parameters(&mut self, radius: f32, intensity: f32, bias: f32) -> PyResult<()> {
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         self.ssao.set_params(radius, intensity, bias, &g.queue);
         Ok(())
     }

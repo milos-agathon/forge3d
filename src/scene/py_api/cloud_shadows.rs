@@ -19,7 +19,7 @@ impl Scene {
             }
         };
 
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         let renderer =
             crate::core::cloud_shadows::CloudShadowRenderer::new(&g.device, quality_enum);
 
@@ -60,7 +60,7 @@ impl Scene {
         }
         if let Some(ref mut renderer) = self.cloud_renderer {
             renderer.set_scale(scale);
-            renderer.upload_uniforms(&crate::core::gpu::ctx().queue);
+            renderer.upload_uniforms(&crate::core::gpu::try_ctx()?.queue);
             updated = true;
         }
         if updated {
@@ -81,7 +81,7 @@ impl Scene {
         }
         if let Some(ref mut renderer) = self.cloud_renderer {
             renderer.set_density(density);
-            renderer.upload_uniforms(&crate::core::gpu::ctx().queue);
+            renderer.upload_uniforms(&crate::core::gpu::try_ctx()?.queue);
             updated = true;
         }
         if updated {
@@ -102,7 +102,7 @@ impl Scene {
         }
         if let Some(ref mut renderer) = self.cloud_renderer {
             renderer.set_coverage(coverage);
-            renderer.upload_uniforms(&crate::core::gpu::ctx().queue);
+            renderer.upload_uniforms(&crate::core::gpu::try_ctx()?.queue);
             updated = true;
         }
         if updated {
@@ -148,7 +148,7 @@ impl Scene {
         if let Some(ref mut renderer) = self.cloud_renderer {
             let dir_vec = glam::Vec2::new(direction.cos(), direction.sin());
             renderer.set_wind(dir_vec, strength);
-            renderer.upload_uniforms(&crate::core::gpu::ctx().queue);
+            renderer.upload_uniforms(&crate::core::gpu::try_ctx()?.queue);
             updated = true;
         }
         if updated {
@@ -171,7 +171,7 @@ impl Scene {
         if let Some(ref mut renderer) = self.cloud_renderer {
             let wind_vec = glam::Vec2::new(x, y);
             renderer.set_wind(wind_vec, strength);
-            renderer.upload_uniforms(&crate::core::gpu::ctx().queue);
+            renderer.upload_uniforms(&crate::core::gpu::try_ctx()?.queue);
             updated = true;
         }
         if updated {
@@ -225,7 +225,7 @@ impl Scene {
                 }
             };
             renderer.set_animation_preset(preset_enum);
-            renderer.upload_uniforms(&crate::core::gpu::ctx().queue);
+            renderer.upload_uniforms(&crate::core::gpu::try_ctx()?.queue);
             updated = true;
         }
         if updated {
@@ -246,7 +246,7 @@ impl Scene {
         }
         if let Some(ref mut renderer) = self.cloud_renderer {
             renderer.update(delta_time);
-            renderer.upload_uniforms(&crate::core::gpu::ctx().queue);
+            renderer.upload_uniforms(&crate::core::gpu::try_ctx()?.queue);
             updated = true;
         }
         if updated {

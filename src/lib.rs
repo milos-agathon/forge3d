@@ -219,6 +219,16 @@ pub use shadows::{
 fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__doc__", "forge3d native module")?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    // Typed GPU-error exceptions so Python callers can catch budget/degradation
+    // failures precisely (see src/core/error.rs and to_py_err mapping).
+    m.add(
+        "MemoryBudgetExceeded",
+        _py.get_type_bound::<crate::core::error::MemoryBudgetExceeded>(),
+    )?;
+    m.add(
+        "DegradedCapability",
+        _py.get_type_bound::<crate::core::error::DegradedCapability>(),
+    )?;
     py_module::register_py_functions(m)?;
     py_module::register_py_classes(m)?;
     Ok(())

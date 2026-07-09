@@ -21,11 +21,32 @@ pub struct GpuContext {
 
 static CTX: OnceCell<GpuContext> = OnceCell::new();
 
+/// Set once the GPU context becomes unusable (device lost). Every subsequent
+/// [`try_ctx`] call fails loudly with this reason rather than handing back a
+/// dead device and letting callers hit undefined behavior.
+static POISONED: OnceCell<String> = OnceCell::new();
+
+/// Mark the global GPU context as poisoned. Called from the device-lost
+/// callback; idempotent (first reason wins).
+pub fn poison_context(reason: String) {
+    let _ = POISONED.set(reason);
+}
+
+/// Backend name of the already-initialized GPU context, if one exists.
+///
+/// Returns `None` when no context has been created yet (peeks `CTX` without
+/// forcing initialization), so callers can decide whether a backend pin can
+/// still be honored via `WGPU_BACKENDS`.
+pub fn active_backend() -> Option<String> {
+    CTX.get()
+        .map(|c| format!("{:?}", c.adapter.get_info().backend).to_lowercase())
+}
+
 /// TERRA-DETERMINATA: deterministic rendering mode.
 ///
 /// When `FORGE3D_DETERMINISTIC` is set (1/true/yes), the process must pin a
 /// SINGLE backend via `WGPU_BACKENDS`/`WGPU_BACKEND` before any GPU context
-/// creation, and `ctx()` asserts the acquired adapter actually runs on that
+/// creation, and `try_ctx()` asserts the acquired adapter actually runs on that
 /// backend before the device/queue exist (i.e. before any queue submission).
 /// Determinism failures are loud: missing or ambiguous configuration panics.
 ///
@@ -50,36 +71,43 @@ pub fn deterministic_mode() -> bool {
 
 /// Parse `WGPU_BACKENDS`/`WGPU_BACKEND` into a single requested backend, if set.
 /// Returns (raw env value, backend mask for instance creation, expected adapter backend).
-fn requested_backend_from_env() -> Option<(String, wgpu::Backends, wgpu::Backend)> {
+///
+/// When the variable is set but names no recognized backend, this returns an
+/// error rather than silently falling through to the platform default — a bad
+/// pin must surface as a catchable Python exception, never be ignored.
+fn requested_backend_from_env() -> RenderResult<Option<(String, wgpu::Backends, wgpu::Backend)>> {
     use std::env;
-    let s = env::var("WGPU_BACKENDS")
-        .or_else(|_| env::var("WGPU_BACKEND"))
-        .ok()?;
+    let s = match env::var("WGPU_BACKENDS").or_else(|_| env::var("WGPU_BACKEND")) {
+        Ok(s) => s,
+        Err(_) => return Ok(None),
+    };
     let s_l = s.to_lowercase();
     if s_l.contains("metal") {
-        return Some((s, wgpu::Backends::METAL, wgpu::Backend::Metal));
+        return Ok(Some((s, wgpu::Backends::METAL, wgpu::Backend::Metal)));
     }
     if s_l.contains("vulkan") {
-        return Some((s, wgpu::Backends::VULKAN, wgpu::Backend::Vulkan));
+        return Ok(Some((s, wgpu::Backends::VULKAN, wgpu::Backend::Vulkan)));
     }
     if s_l.contains("dx12") {
-        return Some((s, wgpu::Backends::DX12, wgpu::Backend::Dx12));
+        return Ok(Some((s, wgpu::Backends::DX12, wgpu::Backend::Dx12)));
     }
     if s_l.contains("gl") {
-        return Some((s, wgpu::Backends::GL, wgpu::Backend::Gl));
+        return Ok(Some((s, wgpu::Backends::GL, wgpu::Backend::Gl)));
     }
     if s_l.contains("webgpu") {
-        return Some((
+        return Ok(Some((
             s,
             wgpu::Backends::BROWSER_WEBGPU,
             wgpu::Backend::BrowserWebGpu,
-        ));
+        )));
     }
-    None
+    Err(RenderError::device(format!(
+        "Unrecognized WGPU_BACKENDS value '{s}'. Valid: vulkan|dx12|metal|gl|webgpu"
+    )))
 }
 
 fn backends_from_env() -> RenderResult<wgpu::Backends> {
-    if let Some((_, mask, _)) = requested_backend_from_env() {
+    if let Some((_, mask, _)) = requested_backend_from_env()? {
         return Ok(mask);
     }
     if deterministic_mode() {
@@ -116,6 +144,11 @@ fn backend_env_description() -> String {
 /// with remediation guidance — it never panics. Python-reachable entry points
 /// must use this (`?` converts to a catchable `RuntimeError`), not `ctx()`.
 pub fn try_ctx() -> RenderResult<&'static GpuContext> {
+    if let Some(reason) = POISONED.get() {
+        return Err(RenderError::device(format!(
+            "GPU context poisoned: {reason}"
+        )));
+    }
     CTX.get_or_try_init(|| {
         let backends = backends_from_env()?;
         let mut instance_desc = wgpu::InstanceDescriptor {
@@ -174,7 +207,7 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
         }
 
         if deterministic_mode() {
-            let (raw, _, expected) = requested_backend_from_env().ok_or_else(|| {
+            let (raw, _, expected) = requested_backend_from_env()?.ok_or_else(|| {
                 RenderError::device(
                     "FORGE3D_DETERMINISTIC requires WGPU_BACKENDS/WGPU_BACKEND to pin one backend",
                 )
@@ -246,6 +279,27 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
             }
         };
 
+        // Surface GPU errors that escape error scopes as recorded degradations
+        // instead of wgpu's default (which logs then panics on the poll thread).
+        device.on_uncaptured_error(Box::new(|e| {
+            crate::core::degradation::record_degradation(
+                "uncaptured_gpu_error",
+                "wgpu",
+                &format!("{e}"),
+            );
+            log::error!("wgpu uncaptured error: {e}");
+        }));
+        // On device loss, poison the context so later try_ctx() calls fail
+        // loudly rather than returning a dead device.
+        device.set_device_lost_callback(|reason, msg| {
+            crate::core::degradation::record_degradation(
+                "device_lost",
+                &format!("{reason:?}"),
+                &msg,
+            );
+            poison_context(format!("device lost ({reason:?}): {msg}"));
+        });
+
         Ok(GpuContext {
             instance,
             device: Arc::new(device),
@@ -255,17 +309,6 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
             capabilities,
         })
     })
-}
-
-/// Infallible GPU context accessor for internal callers that predate
-/// [`try_ctx`]. Panics with the structured device-error message when
-/// acquisition fails; Python-reachable code must call [`try_ctx`] instead so
-/// users get a catchable `RuntimeError` rather than a `PanicException`.
-pub fn ctx() -> &'static GpuContext {
-    match try_ctx() {
-        Ok(ctx) => ctx,
-        Err(err) => panic!("{err}"),
-    }
 }
 
 /// Align to WebGPU's required bytes-per-row for copies.

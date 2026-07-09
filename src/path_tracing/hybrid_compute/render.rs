@@ -17,8 +17,8 @@ impl HybridPathTracer {
         terrain: Option<&super::terrain_heightfield::TerrainPtScene>,
         params: HybridTracerParams,
     ) -> Result<Vec<u8>, RenderError> {
-        let device = &ctx().device;
-        let queue = &ctx().queue;
+        let device = &try_ctx()?.device;
+        let queue = &try_ctx()?.queue;
 
         let hybrid_uniforms = HybridUniforms {
             sdf_primitive_count: hybrid_scene.sdf_scene.primitive_count() as u32,
@@ -133,7 +133,7 @@ impl HybridPathTracer {
         ];
         bg1_entries.extend(
             hybrid_scene
-                .get_mesh_bind_entries()
+                .get_mesh_bind_entries()?
                 .into_iter()
                 .enumerate()
                 .map(|(i, mut entry)| {

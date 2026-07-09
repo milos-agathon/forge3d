@@ -5,8 +5,8 @@
 use once_cell::sync::OnceCell;
 
 use crate::accel::BvhHandle;
-use crate::core::error::RenderError;
-use crate::core::gpu::ctx;
+use crate::core::error::{RenderError, RenderResult};
+use crate::core::gpu::try_ctx;
 use crate::sdf::SdfScene;
 
 // Re-export types from hybrid_types
@@ -35,15 +35,15 @@ pub struct HybridScene {
 /// Sized to hold one element of the largest runtime-sized array it stands in
 /// for (WGSL `BvhNode`, 48 bytes) — wgpu validates that a bound buffer covers
 /// at least one array element.
-fn dummy_storage_buffer() -> &'static wgpu::Buffer {
+fn dummy_storage_buffer() -> RenderResult<&'static wgpu::Buffer> {
     static DUMMY: OnceCell<wgpu::Buffer> = OnceCell::new();
-    DUMMY.get_or_init(|| {
-        ctx().device.create_buffer(&wgpu::BufferDescriptor {
+    DUMMY.get_or_try_init(|| {
+        Ok(try_ctx()?.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("hybrid-dummy-storage"),
             size: 64,
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
-        })
+        }))
     })
 }
 
@@ -228,7 +228,7 @@ impl HybridScene {
             return Ok(());
         }
 
-        let device = &ctx().device;
+        let device = &try_ctx()?.device;
 
         // Convert SDF data to GPU-compatible format
         // Note: primitives may not be Pod; defer actual upload and create minimal buffers.
@@ -252,12 +252,12 @@ impl HybridScene {
 
         // Upload data if not empty
         if !primitives_data.is_empty() {
-            ctx()
+            try_ctx()?
                 .queue
                 .write_buffer(&primitives_buffer, 0, &primitives_data);
         }
         if !nodes_data.is_empty() {
-            ctx().queue.write_buffer(&nodes_buffer, 0, &nodes_data);
+            try_ctx()?.queue.write_buffer(&nodes_buffer, 0, &nodes_data);
         }
 
         self.sdf_buffers = Some(SdfBuffers {
@@ -276,7 +276,7 @@ impl HybridScene {
             return Ok(());
         }
 
-        let device = &ctx().device;
+        let device = &try_ctx()?.device;
 
         // Convert vertices to bytes
         let vertices_data = bytemuck::cast_slice(&self.vertices);
@@ -325,9 +325,13 @@ impl HybridScene {
         });
 
         // Upload data
-        ctx().queue.write_buffer(&vertices_buffer, 0, vertices_data);
-        ctx().queue.write_buffer(&indices_buffer, 0, indices_data);
-        ctx().queue.write_buffer(&bvh_buffer, 0, bvh_data);
+        try_ctx()?
+            .queue
+            .write_buffer(&vertices_buffer, 0, vertices_data);
+        try_ctx()?
+            .queue
+            .write_buffer(&indices_buffer, 0, indices_data);
+        try_ctx()?.queue.write_buffer(&bvh_buffer, 0, bvh_data);
 
         self.mesh_buffers = Some(MeshBuffers {
             vertices_buffer,
@@ -349,9 +353,9 @@ impl HybridScene {
     }
 
     /// Get bind group entries for SDF buffers
-    pub fn get_sdf_bind_entries(&self) -> Vec<wgpu::BindGroupEntry<'_>> {
+    pub fn get_sdf_bind_entries(&self) -> RenderResult<Vec<wgpu::BindGroupEntry<'_>>> {
         if let Some(sdf_buffers) = &self.sdf_buffers {
-            vec![
+            Ok(vec![
                 wgpu::BindGroupEntry {
                     binding: 0, // SDF primitives
                     resource: sdf_buffers.primitives_buffer.as_entire_binding(),
@@ -360,10 +364,10 @@ impl HybridScene {
                     binding: 1, // SDF nodes
                     resource: sdf_buffers.nodes_buffer.as_entire_binding(),
                 },
-            ]
+            ])
         } else {
-            let dummy = dummy_storage_buffer();
-            vec![
+            let dummy = dummy_storage_buffer()?;
+            Ok(vec![
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: dummy.as_entire_binding(),
@@ -372,14 +376,14 @@ impl HybridScene {
                     binding: 1,
                     resource: dummy.as_entire_binding(),
                 },
-            ]
+            ])
         }
     }
 
     /// Get bind group entries for mesh buffers
-    pub fn get_mesh_bind_entries(&self) -> Vec<wgpu::BindGroupEntry<'_>> {
+    pub fn get_mesh_bind_entries(&self) -> RenderResult<Vec<wgpu::BindGroupEntry<'_>>> {
         if let Some(mesh_buffers) = &self.mesh_buffers {
-            vec![
+            Ok(vec![
                 wgpu::BindGroupEntry {
                     binding: 0, // Mesh vertices
                     resource: mesh_buffers.vertices_buffer.as_entire_binding(),
@@ -392,10 +396,10 @@ impl HybridScene {
                     binding: 2, // BVH nodes
                     resource: mesh_buffers.bvh_buffer.as_entire_binding(),
                 },
-            ]
+            ])
         } else {
-            let dummy = dummy_storage_buffer();
-            vec![
+            let dummy = dummy_storage_buffer()?;
+            Ok(vec![
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: dummy.as_entire_binding(),
@@ -408,7 +412,7 @@ impl HybridScene {
                     binding: 2,
                     resource: dummy.as_entire_binding(),
                 },
-            ]
+            ])
         }
     }
 }

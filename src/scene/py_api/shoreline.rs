@@ -74,7 +74,7 @@ impl Scene {
             };
 
         if let Some(ref mut renderer) = self.water_surface_renderer {
-            let g = crate::core::gpu::ctx();
+            let g = crate::core::gpu::try_ctx()?;
             renderer.upload_water_mask(&g.device, &g.queue, &data_vec_u8, width, height);
             Ok(())
         } else {

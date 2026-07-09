@@ -39,7 +39,7 @@ impl Scene {
             ));
         }
 
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
 
         // Build vertices (position, normal)
         #[cfg(feature = "enable-gpu-instancing")]
@@ -167,7 +167,7 @@ impl Scene {
                 "transforms must have shape (K,16) row-major 4x4",
             ));
         }
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         let ni = trs.shape()[0];
         let mut packed: Vec<f32> = Vec::with_capacity(ni * 16);
         for i in 0..ni {

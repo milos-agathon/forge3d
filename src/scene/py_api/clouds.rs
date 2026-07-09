@@ -18,7 +18,7 @@ impl Scene {
             }
         };
 
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         let mut renderer = crate::core::clouds::CloudRenderer::new(
             &g.device,
             wgpu::TextureFormat::Rgba8UnormSrgb,

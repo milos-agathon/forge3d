@@ -3,7 +3,7 @@
 // Exists to expose a simple GPU session object to Python callers
 // RELEVANT FILES: src/gpu.rs, python/forge3d/__init__.py, tests/test_session.py, python/forge3d/terrain_params.py
 #[cfg(feature = "extension-module")]
-use pyo3::exceptions::PyNotImplementedError;
+use pyo3::exceptions::{PyNotImplementedError, PyRuntimeError};
 #[cfg(feature = "extension-module")]
 use pyo3::prelude::*;
 #[cfg(feature = "extension-module")]
@@ -28,20 +28,32 @@ impl Session {
     #[new]
     #[pyo3(signature = (window=false, backend=None))]
     pub fn new(window: bool, backend: Option<&str>) -> PyResult<Self> {
-        let ctx = super::gpu::try_ctx()?;
-
         if window {
             return Err(PyNotImplementedError::new_err(
                 "Windowed sessions not yet supported. Use window=False for offscreen rendering.",
             ));
         }
 
+        // Honor an explicit backend request, or raise if it conflicts with the
+        // already-locked global context. The backend is chosen from
+        // WGPU_BACKENDS at first GPU touch and cannot change afterward, so we
+        // set the env var (consumed by the strict parser in try_ctx) only when
+        // no context exists yet.
         if let Some(name) = backend {
-            log::warn!(
-                "Backend selection ({}) not yet implemented; using global context backend",
-                name
-            );
+            let requested = name.to_ascii_lowercase();
+            match super::gpu::active_backend() {
+                Some(active) if !active.eq_ignore_ascii_case(&requested) => {
+                    return Err(PyRuntimeError::new_err(format!(
+                        "Session(backend='{name}') conflicts with the already-initialized \
+                         '{active}' GPU context. Set WGPU_BACKENDS before first use instead."
+                    )));
+                }
+                Some(_) => {}
+                None => std::env::set_var("WGPU_BACKENDS", &requested),
+            }
         }
+
+        let ctx = super::gpu::try_ctx()?;
 
         Ok(Self {
             adapter: Arc::clone(&ctx.adapter),

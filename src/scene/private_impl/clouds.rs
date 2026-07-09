@@ -17,7 +17,7 @@ impl Scene {
             return Ok(());
         };
 
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx().map_err(|e| e.to_string())?;
         renderer.prepare_frame(&g.device, &g.queue)?;
         renderer.set_camera(view_proj, camera_pos);
         renderer.set_sky_params(sky_color, sun_dir, sun_intensity);

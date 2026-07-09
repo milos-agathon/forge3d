@@ -1,7 +1,11 @@
 use super::*;
 
-pub(super) fn dispatch(resources: &DispatchResources, width: u32, height: u32) {
-    let g = ctx();
+pub(super) fn dispatch(
+    resources: &DispatchResources,
+    width: u32,
+    height: u32,
+) -> crate::core::error::RenderResult<()> {
+    let g = try_ctx()?;
     let mut enc = g
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -24,4 +28,5 @@ pub(super) fn dispatch(resources: &DispatchResources, width: u32, height: u32) {
 
     g.queue.submit([enc.finish()]);
     g.device.poll(wgpu::Maintain::Wait);
+    Ok(())
 }

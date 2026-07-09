@@ -332,8 +332,8 @@ impl HybridPathTracer {
         &self,
         desc: &TerrainReferenceDesc,
     ) -> Result<TerrainReferenceOutput, RenderError> {
-        let device = &ctx().device;
-        let queue = &ctx().queue;
+        let device = &try_ctx()?.device;
+        let queue = &try_ctx()?.queue;
         let (width, height) = (desc.width, desc.height);
         validate_desc(desc)?;
         let mut tracked = TrackedGpu::new();
@@ -631,7 +631,7 @@ impl HybridPathTracer {
         ];
         bg1_entries.extend(
             hybrid_scene
-                .get_mesh_bind_entries()
+                .get_mesh_bind_entries()?
                 .into_iter()
                 .enumerate()
                 .map(|(i, mut entry)| {

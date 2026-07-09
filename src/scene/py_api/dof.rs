@@ -19,7 +19,7 @@ impl Scene {
             }
         };
 
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         let renderer =
             crate::core::dof::DofRenderer::new(&g.device, self.width, self.height, quality_enum);
 

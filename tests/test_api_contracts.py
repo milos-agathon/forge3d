@@ -93,6 +93,9 @@ class TestNativeModuleSymbols:
         "CrsTransform",
         # CARTOGRAPHER-PRIME: grounded optimal-declutter rationale
         "LabelRationale",
+        # CENSOR: typed GPU-error exceptions
+        "MemoryBudgetExceeded",
+        "DegradedCapability",
     ]
 
     @pytest.mark.parametrize("cls_name", EXPECTED_CLASSES)

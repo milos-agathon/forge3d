@@ -11,7 +11,7 @@ impl Scene {
         mode: Option<&str>,
         quality: Option<&str>,
     ) -> PyResult<()> {
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
 
         // Parse mode
         let oit_mode = match mode {
@@ -162,7 +162,7 @@ impl Scene {
             Ok(renderer.is_dual_source_supported())
         } else {
             // Check hardware support without creating renderer
-            let g = crate::core::gpu::ctx();
+            let g = crate::core::gpu::try_ctx()?;
             let test_renderer = crate::core::dual_source_oit::DualSourceOITRenderer::new(
                 &g.device,
                 256,

@@ -1,6 +1,6 @@
 impl Scene {
     pub(super) fn rebuild_msaa_state(&mut self) -> Result<(), String> {
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx().map_err(|e| e.to_string())?;
         let depth_format = if self.sample_count > 1 {
             Some(wgpu::TextureFormat::Depth32Float)
         } else {

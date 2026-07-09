@@ -50,7 +50,7 @@ impl Scene {
         }
 
         // Create GPU texture and upload
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         let tex = g.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("scene-overlay-rgba8"),
             size: wgpu::Extent3d {
@@ -123,7 +123,7 @@ impl Scene {
     pub fn disable_overlay(&mut self) -> PyResult<()> {
         if let Some(ref mut ov) = self.overlay_renderer {
             ov.set_enabled(false);
-            let g = crate::core::gpu::ctx();
+            let g = crate::core::gpu::try_ctx()?;
             ov.upload_uniforms(&g.queue);
         }
         self.overlay_enabled = false;
@@ -135,7 +135,7 @@ impl Scene {
         if let Some(ref mut ov) = self.overlay_renderer {
             ov.set_overlay_alpha(alpha);
             ov.set_enabled(true);
-            let g = crate::core::gpu::ctx();
+            let g = crate::core::gpu::try_ctx()?;
             ov.upload_uniforms(&g.queue);
         }
         self.overlay_enabled = true;
@@ -149,7 +149,7 @@ impl Scene {
             if let Some(a) = alpha {
                 ov.set_altitude_alpha(a);
             }
-            let g = crate::core::gpu::ctx();
+            let g = crate::core::gpu::try_ctx()?;
             ov.upload_uniforms(&g.queue);
         }
         Ok(())
@@ -159,7 +159,7 @@ impl Scene {
     pub fn disable_altitude_overlay(&mut self) -> PyResult<()> {
         if let Some(ref mut ov) = self.overlay_renderer {
             ov.set_altitude_enabled(false);
-            let g = crate::core::gpu::ctx();
+            let g = crate::core::gpu::try_ctx()?;
             ov.upload_uniforms(&g.queue);
         }
         Ok(())
@@ -181,7 +181,7 @@ impl Scene {
     pub fn set_altitude_overlay_alpha(&mut self, alpha: f32) -> PyResult<()> {
         if let Some(ref mut ov) = self.overlay_renderer {
             ov.set_altitude_alpha(alpha);
-            let g = crate::core::gpu::ctx();
+            let g = crate::core::gpu::try_ctx()?;
             ov.upload_uniforms(&g.queue);
         }
         Ok(())
@@ -207,7 +207,7 @@ impl Scene {
             let cb = b.unwrap_or(0.0);
             let ca = a.unwrap_or(0.75);
             ov.set_contour_color(cr, cg, cb, ca);
-            let gctx = crate::core::gpu::ctx();
+            let gctx = crate::core::gpu::try_ctx()?;
             ov.upload_uniforms(&gctx.queue);
         }
         Ok(())
@@ -217,7 +217,7 @@ impl Scene {
     pub fn disable_gpu_contours(&mut self) -> PyResult<()> {
         if let Some(ref mut ov) = self.overlay_renderer {
             ov.set_contours_enabled(false);
-            let g = crate::core::gpu::ctx();
+            let g = crate::core::gpu::try_ctx()?;
             ov.upload_uniforms(&g.queue);
         }
         Ok(())

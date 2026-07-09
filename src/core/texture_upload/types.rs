@@ -70,15 +70,18 @@ impl HdrTexture {
         self.pixel_count() * self.format.bytes_per_pixel()
     }
 
-    pub fn create_sampler(&self, linear_filtering: bool) -> wgpu::Sampler {
-        let g = crate::core::gpu::ctx();
+    pub fn create_sampler(
+        &self,
+        linear_filtering: bool,
+    ) -> crate::core::error::RenderResult<wgpu::Sampler> {
+        let g = crate::core::gpu::try_ctx()?;
         let filter = if linear_filtering {
             wgpu::FilterMode::Linear
         } else {
             wgpu::FilterMode::Nearest
         };
 
-        g.device.create_sampler(&wgpu::SamplerDescriptor {
+        Ok(g.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("hdr-texture-sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -91,6 +94,6 @@ impl HdrTexture {
             compare: None,
             anisotropy_clamp: 1,
             border_color: None,
-        })
+        }))
     }
 }

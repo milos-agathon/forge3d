@@ -12,7 +12,7 @@ impl Scene {
             return Ok(());
         };
 
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx().map_err(|e| e.to_string())?;
 
         if !self.reflections_enabled {
             renderer.set_enabled(false);
@@ -54,7 +54,7 @@ impl Scene {
             rp.set_bind_group(1, &self.bg1_height, &[]);
             rp.set_bind_group(2, &self.bg2_lut, &[]);
             rp.set_bind_group(3, &self.bg3_tile, &[]);
-            let max_groups = crate::core::gpu::ctx().device.limits().max_bind_groups;
+            let max_groups = crate::core::gpu::try_ctx().map_err(|e| e.to_string())?.device.limits().max_bind_groups;
             if max_groups >= 6 {
                 // Use actual cloud shadow bind group if available, otherwise use dummy
                 let cloud_bg = self
@@ -92,7 +92,7 @@ impl Scene {
         };
 
         // Create bind group with color and depth textures
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx().map_err(|e| e.to_string())?;
 
         // Ensure we have depth texture for DOF calculations
         let Some(ref depth_view) = self.depth_view else {
@@ -142,7 +142,7 @@ impl Scene {
             return Ok(()); // Early return if no cloud shadow renderer
         };
 
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx().map_err(|e| e.to_string())?;
 
         // Create bind group for cloud shadow generation if needed
         if cloud_renderer.bind_group.is_none() {

@@ -5,7 +5,7 @@
 use std::fmt;
 
 use super::error::RenderResult;
-pub use super::gpu::{ctx, try_ctx, GpuContext};
+pub use super::gpu::{try_ctx, GpuContext};
 
 /// High-level engine/adapter information collected from the active GPU context.
 #[derive(Debug, Clone)]

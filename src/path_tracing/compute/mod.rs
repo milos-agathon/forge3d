@@ -9,7 +9,7 @@ use half::f16;
 use wgpu::util::DeviceExt;
 
 use crate::core::error::RenderError;
-use crate::core::gpu::{align_copy_bpr, ctx};
+use crate::core::gpu::{align_copy_bpr, try_ctx};
 use crate::path_tracing::aov::{AovFrames, AovKind};
 use crate::path_tracing::mesh::create_empty_mesh_buffers;
 

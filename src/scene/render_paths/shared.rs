@@ -16,7 +16,7 @@ impl Scene {
     }
 
     fn readback_color_pixels(&self, readback_label: &str, copy_label: &str) -> PyResult<Vec<u8>> {
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         let bpp = 4u32;
         let unpadded = self.width * bpp;
         let padded = crate::core::gpu::align_copy_bpr(unpadded);

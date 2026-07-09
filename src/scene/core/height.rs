@@ -6,7 +6,7 @@ impl Scene {
             pyo3::exceptions::PyRuntimeError::new_err("height must be C-contiguous float32[H,W]")
         })?;
 
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
         let tex = g.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("scene-height-r32f"),
             size: wgpu::Extent3d {

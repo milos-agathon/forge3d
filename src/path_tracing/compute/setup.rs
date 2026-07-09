@@ -5,8 +5,8 @@ pub(super) fn create_dispatch_resources(
     height: u32,
     spheres: &[Sphere],
     uniforms: Uniforms,
-) -> DispatchResources {
-    let g = ctx();
+) -> crate::core::error::RenderResult<DispatchResources> {
+    let g = try_ctx()?;
     let shader = g.device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("pt_kernel"),
         source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/pt_kernel.wgsl").into()),
@@ -189,7 +189,7 @@ pub(super) fn create_dispatch_resources(
         ],
     });
 
-    DispatchResources {
+    Ok(DispatchResources {
         pipeline,
         bg0,
         bg1,
@@ -198,7 +198,7 @@ pub(super) fn create_dispatch_resources(
         bg4,
         out_tex,
         aov_frames,
-    }
+    })
 }
 
 fn uniform_buffer_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {

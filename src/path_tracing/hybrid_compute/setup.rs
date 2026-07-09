@@ -42,7 +42,7 @@ fn load_hybrid_kernel_src() -> String {
 
 impl HybridPathTracer {
     pub fn new() -> Result<Self, RenderError> {
-        let device = &ctx().device;
+        let device = &try_ctx()?.device;
         let shader_src = load_hybrid_kernel_src();
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("hybrid-pt-kernel"),

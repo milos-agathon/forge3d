@@ -4,7 +4,7 @@
 //! of address modes, filters, and mipmap filters.
 
 use super::error::{RenderError, RenderResult};
-use super::gpu::ctx;
+use super::gpu::try_ctx;
 use std::collections::HashMap;
 
 /// Address mode options for texture sampling
@@ -167,9 +167,9 @@ impl SamplerConfig {
     }
 
     /// Create wgpu sampler
-    pub fn create_sampler(&self) -> wgpu::Sampler {
-        let g = ctx();
-        g.device.create_sampler(&self.to_wgpu_descriptor())
+    pub fn create_sampler(&self) -> RenderResult<wgpu::Sampler> {
+        let g = try_ctx()?;
+        Ok(g.device.create_sampler(&self.to_wgpu_descriptor()))
     }
 
     /// Generate a descriptive name for this configuration
@@ -277,7 +277,7 @@ impl SamplerModeMatrix {
     pub fn create_all_samplers(&self) -> RenderResult<Vec<wgpu::Sampler>> {
         self.configs
             .iter()
-            .map(|config| Ok(config.create_sampler()))
+            .map(|config| config.create_sampler())
             .collect()
     }
 }

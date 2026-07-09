@@ -6,7 +6,7 @@ impl Scene {
     // B15: Image-Based Lighting (IBL) Polish API
     #[pyo3(text_signature = "($self, quality='medium')")]
     pub fn enable_ibl(&mut self, quality: Option<&str>) -> PyResult<()> {
-        let g = crate::core::gpu::ctx();
+        let g = crate::core::gpu::try_ctx()?;
 
         let quality_enum = match quality.unwrap_or("medium") {
             "low" => crate::core::ibl::IBLQuality::Low,
@@ -62,7 +62,7 @@ impl Scene {
             renderer.set_quality(quality_enum);
 
             // Regenerate IBL textures with new quality
-            let g = crate::core::gpu::ctx();
+            let g = crate::core::gpu::try_ctx()?;
             renderer
                 .initialize(&g.device, &g.queue)
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
@@ -83,7 +83,7 @@ impl Scene {
         height: u32,
     ) -> PyResult<()> {
         if let Some(ref mut renderer) = self.ibl_renderer {
-            let g = crate::core::gpu::ctx();
+            let g = crate::core::gpu::try_ctx()?;
             renderer
                 .load_environment_map(&g.device, &g.queue, &hdr_data, width, height)
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
@@ -104,7 +104,7 @@ impl Scene {
     #[pyo3(text_signature = "($self)")]
     pub fn generate_ibl_textures(&mut self) -> PyResult<()> {
         if let Some(ref mut renderer) = self.ibl_renderer {
-            let g = crate::core::gpu::ctx();
+            let g = crate::core::gpu::try_ctx()?;
 
             // Regenerate irradiance map
             renderer

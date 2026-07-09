@@ -120,6 +120,26 @@ if _NATIVE_MODULE is not None:
             globals()[_name] = getattr(_NATIVE_MODULE, _name)
 
 
+# -----------------------------------------------------------------------------
+# CENSOR: typed GPU-error exceptions
+# -----------------------------------------------------------------------------
+# Prefer the native exception classes so ``except forge3d.MemoryBudgetExceeded``
+# catches errors raised across the PyO3 boundary. When the extension is absent
+# (pure-Python / certificate-only installs), fall back to RuntimeError
+# subclasses so the names still import and ``except`` clauses stay valid.
+if _NATIVE_MODULE is not None and hasattr(_NATIVE_MODULE, "MemoryBudgetExceeded"):
+    MemoryBudgetExceeded = _NATIVE_MODULE.MemoryBudgetExceeded
+else:
+    class MemoryBudgetExceeded(RuntimeError):
+        """Raised when an operation would exceed the host-visible memory budget."""
+
+if _NATIVE_MODULE is not None and hasattr(_NATIVE_MODULE, "DegradedCapability"):
+    DegradedCapability = _NATIVE_MODULE.DegradedCapability
+else:
+    class DegradedCapability(RuntimeError):
+        """Raised when a required GPU capability is unavailable or degraded."""
+
+
 class _NativeSymbolMissing(AttributeError):
     """Raised when a native-only forge3d symbol is accessed but unavailable.
 
@@ -586,6 +606,9 @@ __all__ = [
     "clear_native_degradations",
     # CENSOR: negotiated GPU capability report
     "capabilities",
+    # CENSOR: typed GPU-error exceptions
+    "MemoryBudgetExceeded",
+    "DegradedCapability",
     # Configuration
     "RendererConfig",
     "TerrainRenderParamsConfig",
