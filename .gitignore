@@ -75,6 +75,13 @@ codex-gis-g002*-review.zip
 g-002*-review-*.zip
 logs/*-audit.json
 logs/mcp-puppeteer-*.log.gz
+specs/
+output/
+logs/
+docs/*audit*.md
+docs/*prompt*.md
+docs/**/*audit*.md
+docs/**/*prompt*.md
 *.pdb
 
 # Generated agent docs and review packs
