@@ -986,11 +986,29 @@ def _emit_or_verify_certificate(spec: RecipeGolden) -> None:
         "Investigate the fallback before regenerating."
     )
 
-    fresh_hashes = (cert.get("engine") or {}).get("wgsl_module_hashes")
-    committed_hashes = (committed.get("engine") or {}).get("wgsl_module_hashes")
-    assert fresh_hashes == committed_hashes, (
+    fresh_hashes = (cert.get("engine") or {}).get("wgsl_module_hashes") or {}
+    committed_hashes = (committed.get("engine") or {}).get("wgsl_module_hashes") or {}
+    # The shader-hash registry is process-lifetime: other GPU tests running
+    # earlier in the same pytest process may register EXTRA modules (e.g. the
+    # minimal terrain pipeline). The tamper gate therefore checks that every
+    # module recorded in the committed certificate still exists with an
+    # identical hash — extra fresh entries are fine, changed or missing ones
+    # are not.
+    missing = sorted(set(committed_hashes) - set(fresh_hashes))
+    assert not missing, (
+        f"WGSL modules {missing} named in the committed certificate were never "
+        "compiled by this render; regenerate with FORGE3D_UPDATE_RECIPE_GOLDENS=1 "
+        "after verifying the pixel goldens"
+    )
+    changed = {
+        label: (committed_hashes[label], fresh_hashes[label])
+        for label in committed_hashes
+        if fresh_hashes[label] != committed_hashes[label]
+    }
+    assert not changed, (
         "WGSL source changed since golden certificates were generated; regenerate "
-        "with FORGE3D_UPDATE_RECIPE_GOLDENS=1 after verifying the pixel goldens"
+        "with FORGE3D_UPDATE_RECIPE_GOLDENS=1 after verifying the pixel goldens: "
+        f"{changed}"
     )
 
 

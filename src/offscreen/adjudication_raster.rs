@@ -433,10 +433,12 @@ mod tests {
             );
         }
         // The forward harness itself must keep using the established core
-        // readback + memory-tracker accounting.
+        // readback path and route its own allocations through the tracked
+        // wrappers (CENSOR: read_hdr_texture's wrapper accounts the staging
+        // buffer, so forward.rs no longer duplicates that accounting manually).
         let harness = include_str!("forward.rs");
         assert!(harness.contains("read_hdr_texture"));
-        assert!(harness.contains("global_tracker()"));
+        assert!(harness.contains("tracked_create_texture"));
         // The shared tonemap is applied to BOTH paths by the capture API.
         let capture = include_str!("../py_functions/adjudication.rs");
         assert!(
