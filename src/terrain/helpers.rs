@@ -1,4 +1,3 @@
-use super::*;
 use crate::core::error::RenderResult;
 use crate::core::resource_tracker::{tracked_create_buffer_init, TrackedBuffer};
 
@@ -85,12 +84,8 @@ pub(super) fn build_grid_xyuv(
         },
     )?;
 
-    // B15: Track buffer allocations (not host-visible)
-    let tracker = global_tracker();
-    let vbuf_size = (verts.len() * std::mem::size_of::<f32>()) as u64;
-    let ibuf_size = (idx.len() * std::mem::size_of::<u32>()) as u64;
-    tracker.track_buffer_allocation(vbuf_size, is_host_visible_usage(v_usage));
-    tracker.track_buffer_allocation(ibuf_size, is_host_visible_usage(i_usage));
+    // tracked_create_buffer_init already accounts for these allocations; no
+    // manual track_buffer_allocation here (it would double-count).
     Ok((vbuf, ibuf, idx.len() as u32))
 }
 // T33-END:build-grid-xyuv
@@ -113,6 +108,7 @@ pub(super) fn build_view_matrices(width: u32, height: u32) -> (glam::Mat4, glam:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terrain::TerrainUniforms;
     use std::mem::{align_of, size_of};
 
     #[test]

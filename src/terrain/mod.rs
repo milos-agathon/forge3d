@@ -105,7 +105,7 @@ use crate::colormap::{
 // T33-END:colormap-imports
 
 // B15-BEGIN:memory-integration
-use crate::core::memory_tracker::{global_tracker, is_host_visible_usage};
+use crate::core::memory_tracker::global_tracker;
 // B15-END:memory-integration
 mod colormap_lut;
 mod globals;

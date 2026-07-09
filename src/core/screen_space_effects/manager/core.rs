@@ -89,8 +89,19 @@ impl ScreenSpaceEffectsManager {
             let t0 = Instant::now();
             // HZB is best-effort; its only allocation is a device-local reversed-z
             // uniform that cannot trip the host-visible budget, so a failure here
-            // is not fatal to the frame. Preserve the prior infallible behavior.
-            let _ = hzb.build(device, encoder, src_depth, reversed_z);
+            // is not fatal to the frame. Surface it as a degradation rather than
+            // silently swallowing it.
+            match hzb.build(device, encoder, src_depth, reversed_z) {
+                Ok(()) => {}
+                Err(e) => {
+                    log::error!(target: "ssr.hzb", "HZB pyramid rebuild failed: {e}");
+                    crate::core::degradation::record_degradation(
+                        "allocation_fallback",
+                        "ssr.hzb",
+                        "HZB pyramid not rebuilt; SSR may sample stale occlusion",
+                    );
+                }
+            }
             self.last_hzb_ms = t0.elapsed().as_secs_f32() * 1000.0;
         }
     }

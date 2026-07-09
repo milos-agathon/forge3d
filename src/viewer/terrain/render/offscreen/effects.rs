@@ -33,6 +33,11 @@ impl ViewerTerrainScene {
                 Ok(v) => Some(v),
                 Err(e) => {
                     eprintln!("[terrain] failed to allocate volumetrics target: {e}");
+                    crate::core::degradation::record_degradation(
+                        "allocation_fallback",
+                        "viewer.volumetrics",
+                        "volumetric lighting skipped; snapshot rendered without volumetrics",
+                    );
                     None
                 }
             };
@@ -92,6 +97,11 @@ impl ViewerTerrainScene {
                 Ok(v) => Some(v),
                 Err(e) => {
                     eprintln!("[terrain] failed to allocate DoF target: {e}");
+                    crate::core::degradation::record_degradation(
+                        "allocation_fallback",
+                        "viewer.dof",
+                        "depth-of-field skipped; snapshot rendered fully in focus",
+                    );
                     None
                 }
             };
@@ -154,6 +164,11 @@ impl ViewerTerrainScene {
                 Ok(v) => Some(v),
                 Err(e) => {
                     eprintln!("[terrain] failed to allocate lens target: {e}");
+                    crate::core::degradation::record_degradation(
+                        "allocation_fallback",
+                        "viewer.lens",
+                        "lens post-process skipped; snapshot missing distortion/vignette",
+                    );
                     None
                 }
             };

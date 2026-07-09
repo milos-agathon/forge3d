@@ -159,6 +159,11 @@ impl ViewerTerrainScene {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("[terrain_scene] failed to create CSM renderer: {e}");
+                crate::core::degradation::record_degradation(
+                    "allocation_fallback",
+                    "viewer.csm",
+                    "cascaded shadow maps disabled; terrain renders without dynamic shadows",
+                );
                 self.csm_renderer = None;
                 return;
             }
@@ -183,6 +188,11 @@ impl ViewerTerrainScene {
             Ok(b) => b,
             Err(e) => {
                 eprintln!("[terrain_scene] failed to allocate CSM uniform buffer: {e}");
+                crate::core::degradation::record_degradation(
+                    "allocation_fallback",
+                    "viewer.csm_uniform",
+                    "CSM uniform buffer unavailable; terrain shadows disabled",
+                );
                 self.csm_renderer = None;
                 return;
             }
@@ -194,6 +204,11 @@ impl ViewerTerrainScene {
             Ok(p) => Some(p),
             Err(e) => {
                 eprintln!("[terrain_scene] failed to create moment generation pass: {e}");
+                crate::core::degradation::record_degradation(
+                    "allocation_fallback",
+                    "viewer.csm_moment",
+                    "VSM/EVSM/MSM moment maps unavailable; shadows fall back to hard PCF",
+                );
                 None
             }
         };
@@ -330,6 +345,11 @@ impl ViewerTerrainScene {
                 Ok(b) => b,
                 Err(e) => {
                     eprintln!("[terrain_scene] failed to allocate shadow uniform buffer: {e}");
+                    crate::core::degradation::record_degradation(
+                        "allocation_fallback",
+                        "viewer.shadow_uniform",
+                        "shadow depth pass disabled; terrain renders without cast shadows",
+                    );
                     self.shadow_uniform_buffers.clear();
                     self.shadow_pipeline = None;
                     return;
@@ -506,6 +526,11 @@ impl ViewerTerrainScene {
             Ok(t) => t,
             Err(e) => {
                 eprintln!("[terrain_scene] failed to allocate WBOIT color texture: {e}");
+                crate::core::degradation::record_degradation(
+                    "allocation_fallback",
+                    "viewer.wboit",
+                    "weighted OIT disabled; transparent overlays may composite incorrectly",
+                );
                 return;
             }
         };
@@ -529,6 +554,11 @@ impl ViewerTerrainScene {
             Ok(t) => t,
             Err(e) => {
                 eprintln!("[terrain_scene] failed to allocate WBOIT reveal texture: {e}");
+                crate::core::degradation::record_degradation(
+                    "allocation_fallback",
+                    "viewer.wboit",
+                    "weighted OIT disabled; transparent overlays may composite incorrectly",
+                );
                 return;
             }
         };

@@ -8,7 +8,6 @@
 // RELEVANT FILES: src/offscreen/adjudication_raster.rs, src/core/hdr_readback.rs
 
 use crate::core::error::RenderError;
-use crate::core::memory_tracker::global_tracker;
 use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use std::ops::Range;
 use wgpu::{BindGroup, Buffer, CommandEncoder, Device, Queue, RenderPipeline, TextureView};
@@ -147,9 +146,8 @@ pub fn encode_forward_pass(
 
 /// Render `draws` into `targets` and read the HDR color target back as
 /// tightly-packed f32 RGBA (row-major, `width * height * 4` values) through
-/// the established `core::hdr_readback::read_hdr_texture` path. The transient
-/// host-visible staging allocation is accounted through the global memory
-/// tracker for the duration of the readback.
+/// the established `core::hdr_readback::read_hdr_texture` path, whose wrapper
+/// already accounts the transient host-visible staging allocation.
 pub fn render_forward_hdr(
     device: &Device,
     queue: &Queue,
@@ -157,26 +155,23 @@ pub fn render_forward_hdr(
     clear: wgpu::Color,
     draws: &[ForwardDraw],
 ) -> Result<Vec<f32>, RenderError> {
-    let bpp: u32 = match targets.color_format {
-        wgpu::TextureFormat::Rgba32Float => 16,
-        wgpu::TextureFormat::Rgba16Float => 8,
+    match targets.color_format {
+        wgpu::TextureFormat::Rgba32Float | wgpu::TextureFormat::Rgba16Float => {}
         other => {
             return Err(RenderError::Render(format!(
                 "offscreen forward HDR readback: unsupported color format {other:?}"
             )))
         }
-    };
+    }
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("offscreen-forward-encoder"),
     });
     encode_forward_pass(&mut encoder, targets, clear, draws);
     queue.submit(std::iter::once(encoder.finish()));
 
-    // Mirror read_hdr_texture's staging-buffer footprint in the tracker.
-    let padded = crate::core::gpu::align_copy_bpr(targets.width * bpp);
-    let staging_size = (padded as u64) * (targets.height as u64);
-    global_tracker().track_buffer_allocation(staging_size, true);
-    let result = crate::core::hdr::read_hdr_texture(
+    // read_hdr_texture's wrapper already accounts the staging-buffer footprint;
+    // no manual mirror here (it would double-count host-visible bytes).
+    crate::core::hdr::read_hdr_texture(
         device,
         queue,
         &targets.color,
@@ -184,9 +179,7 @@ pub fn render_forward_hdr(
         targets.height,
         targets.color_format,
     )
-    .map_err(RenderError::Readback);
-    global_tracker().free_buffer_allocation(staging_size, true);
-    result
+    .map_err(RenderError::Readback)
 }
 
 #[cfg(test)]

@@ -27,6 +27,11 @@ impl PbrPipelineWithShadows {
             Ok(manager) => manager,
             Err(e) => {
                 log::error!(target: "pbr.shadow", "failed to rebuild shadow resources: {e}");
+                crate::core::degradation::record_degradation(
+                    "allocation_fallback",
+                    "pbr.shadow_resources",
+                    "shadow resources not rebuilt; PBR pipeline renders without shadows",
+                );
                 return;
             }
         };

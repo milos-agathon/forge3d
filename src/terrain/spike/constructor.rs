@@ -185,9 +185,8 @@ impl TerrainSpike {
             },
         )?;
 
-        // B15: Track UBO allocation (not host-visible)
-        let tracker = global_tracker();
-        tracker.track_buffer_allocation(uniform_size, is_host_visible_usage(ubo_usage));
+        // tracked_create_buffer_init already accounts for the UBO allocation;
+        // no manual track_buffer_allocation here (it would double-count).
 
         let (lut, lut_format) = ColormapLUT::new(&device, &queue, &adapter, which)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;

@@ -61,6 +61,11 @@ impl ViewerTerrainScene {
             Ok(t) => t,
             Err(e) => {
                 eprintln!("[terrain] failed to allocate motion blur accum texture: {e}");
+                crate::core::degradation::record_degradation(
+                    "allocation_fallback",
+                    "viewer.motion_blur",
+                    "motion blur disabled; snapshot rendered without motion streaks",
+                );
                 return None;
             }
         };
@@ -172,6 +177,11 @@ impl ViewerTerrainScene {
             Ok(t) => t,
             Err(e) => {
                 eprintln!("[terrain] failed to allocate motion blur output texture: {e}");
+                crate::core::degradation::record_degradation(
+                    "allocation_fallback",
+                    "viewer.motion_blur",
+                    "motion blur disabled; snapshot rendered without motion streaks",
+                );
                 return None;
             }
         };
@@ -227,6 +237,11 @@ impl ViewerTerrainScene {
                         Ok(t) => t,
                         Err(e) => {
                             eprintln!("[terrain] failed to allocate motion blur lens output: {e}");
+                            crate::core::degradation::record_degradation(
+                                "allocation_fallback",
+                                "viewer.motion_blur",
+                                "motion blur lens post-process skipped; output missing lens effects",
+                            );
                             self.queue.submit(std::iter::once(encoder.finish()));
                             return Some(final_tex);
                         }

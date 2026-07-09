@@ -13,6 +13,9 @@ TRACKER = ROOT / "src" / "core" / "resource_tracker.rs"
 # `create_buffer_init(` that is immediately preceded by `tracked_`, so raw
 # `device.create_buffer_init(` still trips the gate while
 # `tracked_create_buffer_init(` does not.
+# NOTE: `create_texture_with_data` (wgpu DeviceExt) is deliberately uncovered
+# because it is unused in-tree; if it is ever introduced it must be added to
+# this regex so its host-visible staging upload stays on the ledger.
 RAW = re.compile(r"\.create_buffer\(|\.create_texture\(|(?<!tracked_)create_buffer_init\(")
 
 

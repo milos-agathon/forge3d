@@ -172,6 +172,11 @@ impl Viewer {
                 Ok(t) => t,
                 Err(e) => {
                     eprintln!("[viewer] failed to allocate fallback albedo texture: {e}");
+                    crate::core::degradation::record_degradation(
+                        "allocation_fallback",
+                        "viewer.geometry_albedo",
+                        "geometry bind group missing fallback albedo; geometry pass skipped this frame",
+                    );
                     return;
                 }
             };
