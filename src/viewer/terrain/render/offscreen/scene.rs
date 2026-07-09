@@ -257,6 +257,11 @@ impl ViewerTerrainScene {
             Ok(t) => t,
             Err(e) => {
                 eprintln!("[terrain] failed to allocate snapshot OIT color texture: {e}");
+                crate::core::degradation::record_degradation(
+                    "allocation_fallback",
+                    "viewer.snapshot_wboit",
+                    "snapshot OIT targets unavailable; transparent overlays may composite incorrectly",
+                );
                 return;
             }
         };
@@ -283,6 +288,11 @@ impl ViewerTerrainScene {
             Ok(t) => t,
             Err(e) => {
                 eprintln!("[terrain] failed to allocate snapshot OIT reveal texture: {e}");
+                crate::core::degradation::record_degradation(
+                    "allocation_fallback",
+                    "viewer.snapshot_wboit",
+                    "snapshot OIT targets unavailable; transparent overlays may composite incorrectly",
+                );
                 return;
             }
         };
