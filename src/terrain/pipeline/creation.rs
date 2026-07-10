@@ -250,16 +250,21 @@ pub fn create_terrain_pipeline(
 
     // ---- Shader module ------------------------------------------------------
     // Choose shader variant: minimal (<=4 bind groups) or full
+    let shader_label = if use_minimal_layout {
+        "vf.Terrain.shader.minimal"
+    } else {
+        "vf.Terrain.shader.full"
+    };
     let shader = if use_minimal_layout {
         crate::core::shader_registry::create_labeled_shader_module(
             device,
-            "vf.Terrain.shader.minimal",
+            shader_label,
             include_str!("../../shaders/terrain_minimal.wgsl"),
         )
     } else {
         crate::core::shader_registry::create_labeled_shader_module(
             device,
-            "vf.Terrain.shader.full",
+            shader_label,
             include_str!("../../shaders/terrain.wgsl"),
         )
     };
@@ -339,5 +344,6 @@ pub fn create_terrain_pipeline(
         sample_count,
         depth_format,
         normal_format,
+        shader_label,
     }
 }

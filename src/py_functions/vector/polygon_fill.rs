@@ -140,7 +140,7 @@ fn extract_optional_rgba_list(obj: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<[f
 }
 
 #[cfg(feature = "extension-module")]
-#[pyfunction(signature = (width, height, exteriors, holes=None, fill_rgba=None, stroke_rgba=None, stroke_width=None, fill_rgba_list=None, coordinates_are_ndc=None))]
+#[pyfunction(signature = (width, height, exteriors, holes=None, fill_rgba=None, stroke_rgba=None, stroke_width=None, fill_rgba_list=None, coordinates_are_ndc=None, certificate=None))]
 pub(crate) fn vector_render_polygons_fill_py(
     py: Python<'_>,
     width: u32,
@@ -152,7 +152,10 @@ pub(crate) fn vector_render_polygons_fill_py(
     stroke_width: Option<f32>,
     fill_rgba_list: Option<&Bound<'_, PyAny>>,
     coordinates_are_ndc: Option<bool>,
+    certificate: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
+    let certificate_capture =
+        crate::core::certificate::begin_render_capture("vector_render_polygons_fill_py");
     let normalize = !coordinates_are_ndc.unwrap_or(false);
     let mut polys = parse_and_normalize_polygons(exteriors, holes, normalize)?;
     let fill = fill_rgba.unwrap_or((0.2, 0.4, 0.8, 1.0));
@@ -224,7 +227,7 @@ pub(crate) fn vector_render_polygons_fill_py(
 
     queue.submit(Some(encoder.finish()));
     device.poll(wgpu::Maintain::Wait);
-    read_rgba_texture_to_py(
+    let rgba = read_rgba_texture_to_py(
         py,
         &device,
         &queue,
@@ -234,5 +237,9 @@ pub(crate) fn vector_render_polygons_fill_py(
         "vf.Vector.PolygonFill.Copy",
         "vf.Vector.PolygonFill.Read",
         "map_async cancelled",
-    )
+    )?;
+    crate::core::certificate::record_pass("vector.polygon_fill", 0.0, packed.len() as u32);
+    certificate_capture.finish();
+    crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
+    Ok(rgba)
 }

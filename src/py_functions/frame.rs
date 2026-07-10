@@ -2,11 +2,15 @@ use super::super::*;
 use crate::py_types::frame::Frame;
 #[cfg(feature = "extension-module")]
 #[pyfunction]
+#[pyo3(signature = (width, height, certificate=None))]
 pub(crate) fn render_debug_pattern_frame(
     py: Python<'_>,
     width: u32,
     height: u32,
+    certificate: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<Frame>> {
+    let certificate_capture =
+        crate::core::certificate::begin_render_capture("render_debug_pattern_frame");
     let ctx = crate::core::gpu::try_ctx()?;
     let texture = crate::util::debug_pattern::render_debug_pattern(
         ctx.device.as_ref(),
@@ -25,7 +29,11 @@ pub(crate) fn render_debug_pattern_frame(
         wgpu::TextureFormat::Rgba8UnormSrgb,
     );
 
-    Py::new(py, frame)
+    let frame = Py::new(py, frame)?;
+    crate::core::certificate::record_pass("debug_pattern", 0.0, 1);
+    certificate_capture.finish();
+    crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
+    Ok(frame)
 }
 
 #[cfg(feature = "extension-module")]

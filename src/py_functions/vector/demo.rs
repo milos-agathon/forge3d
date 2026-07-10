@@ -4,14 +4,18 @@ use crate::vector::api::{PointDef, PolylineDef, VectorStyle};
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
+#[pyo3(signature = (width, height, certificate=None))]
 pub(crate) fn vector_oit_and_pick_demo(
     py: Python<'_>,
     width: u32,
     height: u32,
+    certificate: Option<Bound<'_, PyAny>>,
 ) -> PyResult<(Py<PyAny>, u32)> {
+    let _certificate_capture =
+        crate::core::certificate::begin_render_capture("vector_oit_and_pick_demo");
     #[cfg(not(feature = "weighted-oit"))]
     {
-        let _ = (py, width, height);
+        let _ = (py, width, height, certificate);
         Err(weighted_oit_not_enabled_err())
     }
     #[cfg(feature = "weighted-oit")]
@@ -136,6 +140,11 @@ pub(crate) fn vector_oit_and_pick_demo(
             "vf.Vector.Demo.PickRead",
             "pick map cancelled",
         )?;
+        crate::core::certificate::record_pass("vector.demo.oit", 0.0, 2);
+        crate::core::certificate::record_pass("vector.demo.compose", 0.0, 1);
+        crate::core::certificate::record_pass("vector.demo.pick", 0.0, 2);
+        _certificate_capture.finish();
+        crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
         Ok((rgba, pick_id))
     }
 }

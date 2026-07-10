@@ -24,6 +24,7 @@ pub struct TerrainPipeline {
     pub sample_count: u32,
     pub depth_format: Option<TextureFormat>,
     pub normal_format: TextureFormat,
+    pub shader_label: &'static str,
 }
 
 impl TerrainPipeline {

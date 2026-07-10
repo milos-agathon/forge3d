@@ -110,6 +110,7 @@ pub fn render_debug_pattern(
     });
 
     {
+        crate::core::shader_registry::record_shader_use("forge3d.debug-pattern.shader");
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("forge3d.debug-pattern.pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {

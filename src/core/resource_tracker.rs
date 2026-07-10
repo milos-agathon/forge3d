@@ -134,7 +134,8 @@ struct LedgerCapture {
     current_device_local: u64,
     peak_host_visible: u64,
     peak_device_local: u64,
-    by_label: BTreeMap<String, u64>,
+    current_by_label: BTreeMap<String, u64>,
+    peak_by_label: BTreeMap<String, u64>,
 }
 
 impl LedgerCapture {
@@ -146,7 +147,8 @@ impl LedgerCapture {
             current_device_local: 0,
             peak_host_visible: 0,
             peak_device_local: 0,
-            by_label: BTreeMap::new(),
+            current_by_label: BTreeMap::new(),
+            peak_by_label: BTreeMap::new(),
         };
         for (&id, entry) in entries {
             if entry.owner_id.is_some_and(|owner| owners.contains(&owner)) {
@@ -160,7 +162,13 @@ impl LedgerCapture {
         if !self.ids.insert(id) {
             return;
         }
-        *self.by_label.entry(entry.label.clone()).or_insert(0) += entry.bytes;
+        let current = self
+            .current_by_label
+            .entry(entry.label.clone())
+            .or_insert(0);
+        *current += entry.bytes;
+        let peak = self.peak_by_label.entry(entry.label.clone()).or_insert(0);
+        *peak = (*peak).max(*current);
         if entry.host_visible {
             self.current_host_visible += entry.bytes;
             self.peak_host_visible = self.peak_host_visible.max(self.current_host_visible);
@@ -174,10 +182,10 @@ impl LedgerCapture {
         if !self.ids.remove(&id) {
             return;
         }
-        if let Some(bytes) = self.by_label.get_mut(&entry.label) {
+        if let Some(bytes) = self.current_by_label.get_mut(&entry.label) {
             *bytes = bytes.saturating_sub(entry.bytes);
             if *bytes == 0 {
-                self.by_label.remove(&entry.label);
+                self.current_by_label.remove(&entry.label);
             }
         }
         if entry.host_visible {
@@ -193,7 +201,7 @@ impl LedgerCapture {
             peak_device_local_bytes: self.peak_device_local,
             current_host_visible_bytes: self.current_host_visible,
             current_device_local_bytes: self.current_device_local,
-            by_label: self.by_label,
+            by_label: self.peak_by_label,
         }
     }
 }
@@ -275,6 +283,23 @@ impl AllocationLedger {
         let entries = self.entries.lock().unwrap_or_else(|p| p.into_inner());
         *self.capture.lock().unwrap_or_else(|p| p.into_inner()) =
             Some(LedgerCapture::new(&entries, owner_ids));
+    }
+
+    fn extend_capture(&self, owner_ids: &[u64]) {
+        if owner_ids.is_empty() {
+            return;
+        }
+        let owners: HashSet<u64> = owner_ids.iter().copied().collect();
+        let entries = self.entries.lock().unwrap_or_else(|p| p.into_inner());
+        let mut capture = self.capture.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(capture) = capture.as_mut() else {
+            return;
+        };
+        for (&id, entry) in entries.iter() {
+            if entry.owner_id.is_some_and(|owner| owners.contains(&owner)) {
+                capture.add(id, entry);
+            }
+        }
     }
 
     fn finish_capture(&self) -> LedgerReport {
@@ -397,6 +422,11 @@ pub fn ledger_snapshot() -> LedgerReport {
 /// Start render-local peak accounting from the allocations currently alive.
 pub fn begin_ledger_capture(owner_ids: &[u64]) {
     ledger().begin_capture(owner_ids);
+}
+
+/// Add renderer owners discovered by a nested render to the active capture.
+pub fn extend_ledger_capture(owner_ids: &[u64]) {
+    ledger().extend_capture(owner_ids);
 }
 
 /// Finish render-local peak accounting and return the captured ledger report.
@@ -998,5 +1028,64 @@ mod tests {
 
         ledger.remove(allocation_a);
         ledger.remove(allocation_b);
+    }
+
+    #[test]
+    fn nested_owner_extension_adds_persistent_renderer_allocations() {
+        let ledger = AllocationLedger::new();
+        let outer_owner = AllocationOwner::new();
+        let nested_owner = AllocationOwner::new();
+
+        let outer_allocation = {
+            let _scope = outer_owner.activate();
+            ledger.insert(
+                "outer-owner".to_string(),
+                1024,
+                true,
+                LedgerCategory::Buffer,
+                "test:outer".to_string(),
+            )
+        };
+        let nested_allocation = {
+            let _scope = nested_owner.activate();
+            ledger.insert(
+                "nested-owner".to_string(),
+                4096,
+                false,
+                LedgerCategory::Texture,
+                "test:nested".to_string(),
+            )
+        };
+
+        ledger.begin_capture(&[outer_owner.id()]);
+        ledger.extend_capture(&[nested_owner.id()]);
+        let report = ledger.finish_capture();
+
+        assert_eq!(report.peak_host_visible_bytes, 1024);
+        assert_eq!(report.peak_device_local_bytes, 4096);
+        assert_eq!(report.by_label.get("outer-owner"), Some(&1024));
+        assert_eq!(report.by_label.get("nested-owner"), Some(&4096));
+
+        ledger.remove(outer_allocation);
+        ledger.remove(nested_allocation);
+    }
+
+    #[test]
+    fn capture_retains_peak_by_label_after_temporary_allocation_drops() {
+        let ledger = AllocationLedger::new();
+        ledger.begin_capture(&[]);
+        let allocation = ledger.insert(
+            "temporary-readback".to_string(),
+            8192,
+            true,
+            LedgerCategory::Buffer,
+            "test:temporary".to_string(),
+        );
+        ledger.remove(allocation);
+
+        let report = ledger.finish_capture();
+        assert_eq!(report.current_host_visible_bytes, 0);
+        assert_eq!(report.peak_host_visible_bytes, 8192);
+        assert_eq!(report.by_label.get("temporary-readback"), Some(&8192));
     }
 }

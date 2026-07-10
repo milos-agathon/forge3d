@@ -5273,6 +5273,29 @@ class MapScene:
         provenance_signing_key: bytes | None = None,
         certificate: "bool | str | os.PathLike[str]" = False,
     ) -> ValidationReport:
+        from . import certificate as _certificate
+
+        with _certificate._render_capture(
+            "python.map_scene.render", "mapscene.finalize", draw_calls=1
+        ):
+            report = self._render_impl(
+                path,
+                emit_provenance=emit_provenance,
+                provenance_signing_key=provenance_signing_key,
+            )
+        if certificate:
+            sha = _certificate.emit_render_certificate(certificate)
+            if sha is not None:
+                self.last_render_metadata["certificate_payload_sha256"] = sha
+        return report
+
+    def _render_impl(
+        self,
+        path: str | None = None,
+        *,
+        emit_provenance: bool = False,
+        provenance_signing_key: bytes | None = None,
+    ) -> ValidationReport:
         output = self.recipe.output
         target = path or (output.path if output is not None else None)
         if not target:
@@ -5439,16 +5462,6 @@ class MapScene:
         ):
             if key in native_metadata:
                 metadata[key] = native_metadata[key]
-        if certificate:
-            # CENSOR: emit a signed RenderCertificate for this native render.
-            # When a path is given the signed JSON is written next to the
-            # output; the deterministic payload SHA256 is always stashed into
-            # the render metadata (pop-safe: absent unless requested).
-            from . import certificate as _certificate
-
-            sha = _certificate.emit_render_certificate(certificate)
-            if sha is not None:
-                metadata["certificate_payload_sha256"] = sha
         self.last_render_metadata = metadata
         report = self._report_with_feature(report, "mapscene.render_backend", "supported")
         water_settings = _mapscene_water_settings(self.recipe)

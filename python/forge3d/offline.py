@@ -100,6 +100,39 @@ def render_offline(
     metadata under ``certificate_payload_sha256``.
     """
 
+    from . import certificate as _certificate
+
+    with _certificate._render_capture(
+        "python.offline.render", "terrain.offline.finalize", draw_calls=1
+    ):
+        result = _render_offline_impl(
+            renderer,
+            material_set,
+            env_maps,
+            params,
+            heightmap,
+            settings=settings,
+            progress_callback=progress_callback,
+            water_mask=water_mask,
+        )
+    if certificate:
+        sha = _certificate.emit_render_certificate(certificate)
+        if sha is not None:
+            result.metadata["certificate_payload_sha256"] = sha
+    return result
+
+
+def _render_offline_impl(
+    renderer: Any,
+    material_set: Any,
+    env_maps: Any,
+    params: Any,
+    heightmap: np.ndarray,
+    *,
+    settings: OfflineQualitySettings,
+    progress_callback: Optional[Callable[[OfflineProgress], None]] = None,
+    water_mask: Optional[np.ndarray] = None,
+) -> OfflineResult:
     if not settings.enabled:
         raise ValueError("render_offline requires OfflineQualitySettings(enabled=True)")
 
@@ -228,13 +261,6 @@ def render_offline(
         "target_samples": target_samples,
         "adaptive": bool(settings.adaptive),
     }
-    if certificate:
-        from . import certificate as _certificate
-
-        sha = _certificate.emit_render_certificate(certificate)
-        if sha is not None:
-            metadata["certificate_payload_sha256"] = sha
-
     return OfflineResult(
         frame=frame,
         hdr_frame=hdr_frame,

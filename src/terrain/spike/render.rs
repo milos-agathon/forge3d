@@ -2,8 +2,15 @@ use super::*;
 
 #[pymethods]
 impl TerrainSpike {
-    #[pyo3(text_signature = "($self, path)")]
-    pub fn render_png(&mut self, path: String) -> PyResult<()> {
+    #[pyo3(signature = (path, certificate=None), text_signature = "($self, path, certificate=None)")]
+    pub fn render_png(
+        &mut self,
+        py: pyo3::Python<'_>,
+        path: String,
+        certificate: Option<pyo3::Bound<'_, pyo3::PyAny>>,
+    ) -> PyResult<()> {
+        let certificate_capture =
+            crate::core::certificate::begin_render_capture("terrain_spike.render_png");
         // Encode pass
         let mut encoder = self
             .device
@@ -11,6 +18,7 @@ impl TerrainSpike {
                 label: Some("terrain-encoder"),
             });
         {
+            crate::core::shader_registry::record_shader_use(self.tp.shader_label);
             let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain-rp"),
                 color_attachments: &[
@@ -163,6 +171,12 @@ impl TerrainSpike {
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Invalid image buffer"))?;
         img.save(path)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        crate::core::certificate::record_pass("terrain_spike.main", 0.0, 1);
+        if self.overlay_renderer.is_some() {
+            crate::core::certificate::record_pass("terrain_spike.overlay", 0.0, 1);
+        }
+        certificate_capture.finish();
+        crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
         Ok(())
     }
 }

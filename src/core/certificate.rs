@@ -15,11 +15,11 @@
 use crate::core::degradation::{begin_degradation_capture, finish_degradation_capture};
 use crate::core::error::RenderError;
 use crate::core::resource_tracker::{
-    abort_ledger_capture, begin_ledger_capture, finish_ledger_capture,
+    abort_ledger_capture, begin_ledger_capture, extend_ledger_capture, finish_ledger_capture,
 };
 use crate::core::shader_registry::{begin_shader_render_capture, finish_shader_render_capture};
 use serde::Serialize;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -65,24 +65,36 @@ static CAPTURE_USES_GPU: AtomicBool = AtomicBool::new(true);
 
 thread_local! {
     static EXTERNAL_CAPTURE: RefCell<Option<RenderCaptureGuard>> = const { RefCell::new(None) };
+    static CAPTURE_DEPTH: Cell<usize> = const { Cell::new(0) };
 }
 
 #[must_use = "a render capture must be finished or retained until the render exits"]
 pub struct RenderCaptureGuard {
     active: bool,
+    root: bool,
 }
 
 impl RenderCaptureGuard {
     pub fn finish(mut self) {
         self.active = false;
-        finish_render_capture();
+        if self.root {
+            finish_render_capture();
+            CAPTURE_DEPTH.with(|depth| depth.set(0));
+        } else {
+            CAPTURE_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+        }
     }
 }
 
 impl Drop for RenderCaptureGuard {
     fn drop(&mut self) {
         if self.active {
-            abort_render_capture();
+            if self.root {
+                abort_render_capture();
+                CAPTURE_DEPTH.with(|depth| depth.set(0));
+            } else {
+                CAPTURE_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+            }
         }
     }
 }
@@ -118,8 +130,19 @@ fn notify_python_degradation_capture(_method: &str) {}
 /// Start a render capture: clears the per-render pass list. `entry_point` names
 /// the render entry for logging/debugging (not part of the serialized schema).
 pub fn begin_render_capture(entry_point: &str) -> RenderCaptureGuard {
-    CAPTURE_USES_GPU.store(true, Ordering::Relaxed);
     begin_render_capture_with_resources(entry_point, &[])
+}
+
+/// Start a render capture for a native CPU renderer. The certificate uses the
+/// explicit CPU adapter identity and does not inherit capabilities from an
+/// unrelated, already-initialized GPU context.
+pub fn begin_cpu_render_capture(entry_point: &str) -> RenderCaptureGuard {
+    let root = CAPTURE_DEPTH.with(|depth| depth.get() == 0);
+    let capture = begin_render_capture_with_resources(entry_point, &[]);
+    if root {
+        CAPTURE_USES_GPU.store(false, Ordering::Relaxed);
+    }
+    capture
 }
 
 /// Start a render capture seeded with the modules owned by its renderer.
@@ -128,6 +151,21 @@ pub fn begin_render_capture_with_resources(
     entry_point: &str,
     allocation_owner_ids: &[u64],
 ) -> RenderCaptureGuard {
+    CAPTURE_USES_GPU.store(true, Ordering::Relaxed);
+    let root = CAPTURE_DEPTH.with(|depth| {
+        let current = depth.get();
+        depth.set(current + 1);
+        current == 0
+    });
+    if !root {
+        extend_ledger_capture(allocation_owner_ids);
+        log::debug!("nested render capture join: {entry_point}");
+        return RenderCaptureGuard {
+            active: true,
+            root: false,
+        };
+    }
+
     begin_ledger_capture(allocation_owner_ids);
     begin_shader_render_capture(&BTreeMap::new());
     begin_degradation_capture();
@@ -135,7 +173,10 @@ pub fn begin_render_capture_with_resources(
     let mut cur = lock_current();
     cur.clear();
     log::debug!("render capture begin: {entry_point}");
-    RenderCaptureGuard { active: true }
+    RenderCaptureGuard {
+        active: true,
+        root: true,
+    }
 }
 
 /// Record one timed GPU pass for the in-flight render, in call order.
@@ -567,5 +608,29 @@ mod tests {
         .expect("report parses");
         assert_eq!(report["passes"].as_array().map(Vec::len), Some(1));
         assert_eq!(report["passes"][0]["label"], "successful.pass");
+    }
+
+    #[test]
+    fn nested_captures_join_the_outer_render_transaction() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+        let outer = begin_cpu_render_capture("test.outer");
+        record_pass("outer.before", 0.0, 1);
+        let inner = begin_render_capture("test.inner_gpu");
+        record_pass("inner.gpu", 3.0, 2);
+        inner.finish();
+        record_pass("outer.after", 0.0, 1);
+        outer.finish();
+
+        let report: serde_json::Value =
+            serde_json::from_str(&execution_report_json().expect("nested capture must assemble"))
+                .expect("report parses");
+        let labels: Vec<&str> = report["passes"]
+            .as_array()
+            .expect("passes array")
+            .iter()
+            .map(|pass| pass["label"].as_str().expect("pass label"))
+            .collect();
+        assert_eq!(labels, ["outer.before", "inner.gpu", "outer.after"]);
     }
 }

@@ -40,6 +40,7 @@ import json
 import os
 import threading
 from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, Mapping, Union
 
@@ -102,6 +103,24 @@ def _render_capture(entry_point: str, pass_label: str, draw_calls: int = 1):
         native.finish_render_execution_capture(pass_label, int(draw_calls))
     finally:
         _CAPTURE_STATE.depth = 0
+
+
+def _captured_cpu_render(entry_point: str, pass_label: str, draw_calls: int = 1):
+    """Decorate a keyword-certified CPU renderer with exception-safe capture."""
+
+    def decorate(function):
+        @wraps(function)
+        def wrapped(*args, **kwargs):
+            certificate = kwargs.pop("certificate", False)
+            with _render_capture(entry_point, pass_label, draw_calls=draw_calls):
+                result = function(*args, **kwargs)
+            if certificate:
+                emit_render_certificate(certificate)
+            return result
+
+        return wrapped
+
+    return decorate
 
 
 def _dev_signing_seed() -> bytes:

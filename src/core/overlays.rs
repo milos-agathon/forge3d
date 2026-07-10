@@ -512,6 +512,7 @@ impl OverlayRenderer {
         if !overlay_en && !altitude_en && !contours_en {
             return;
         }
+        crate::core::shader_registry::record_shader_use("overlays_shader");
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.draw(0..3, 0..1);

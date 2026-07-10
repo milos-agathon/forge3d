@@ -327,6 +327,7 @@ impl PolygonRenderer {
     ) -> Result<(), RenderError> {
         if let (Some(vertex_buffer), Some(index_buffer)) = (&self.vertex_buffer, &self.index_buffer)
         {
+            crate::core::shader_registry::record_shader_use("polygon_fill.wgsl");
             // Update uniforms
             let uniform = PolygonUniform {
                 transform: *transform,

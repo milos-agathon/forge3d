@@ -536,7 +536,8 @@ impl PySmokeDomain {
         up=(0.0, 1.0, 0.0),
         fovy_deg=45.0,
         sun_direction=(0.4, 0.8, -0.2),
-        settings=None
+        settings=None,
+        certificate=None
     ))]
     fn render_rgba<'py>(
         &self,
@@ -549,7 +550,10 @@ impl PySmokeDomain {
         fovy_deg: f32,
         sun_direction: (f32, f32, f32),
         settings: Option<PyRef<'_, PySmokeRenderSettings>>,
+        certificate: Option<Bound<'_, PyAny>>,
     ) -> PyResult<&'py PyArray3<u8>> {
+        let certificate_capture =
+            crate::core::certificate::begin_cpu_render_capture("smoke.render_rgba");
         let native_settings = settings
             .as_ref()
             .map(|settings| settings.inner.clone())
@@ -569,7 +573,11 @@ impl PySmokeDomain {
             .map_err(PyRuntimeError::new_err)?;
         let arr = Array3::from_shape_vec((height as usize, width as usize, 4), rgba)
             .map_err(|_| PyRuntimeError::new_err("failed to reshape rendered RGBA"))?;
-        Ok(arr.into_pyarray_bound(py).into_gil_ref())
+        let arr = arr.into_pyarray_bound(py);
+        crate::core::certificate::record_pass("smoke.cpu_raymarch", 0.0, 1);
+        certificate_capture.finish();
+        crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
+        Ok(arr.into_gil_ref())
     }
 
     #[pyo3(signature = (
@@ -577,7 +585,8 @@ impl PySmokeDomain {
         height,
         view_direction=(0.0, -1.0, 0.0),
         sun_direction=(0.4, 0.8, -0.2),
-        settings=None
+        settings=None,
+        certificate=None
     ))]
     fn render_projection_rgba<'py>(
         &self,
@@ -587,7 +596,10 @@ impl PySmokeDomain {
         view_direction: (f32, f32, f32),
         sun_direction: (f32, f32, f32),
         settings: Option<PyRef<'_, PySmokeRenderSettings>>,
+        certificate: Option<Bound<'_, PyAny>>,
     ) -> PyResult<&'py PyArray3<u8>> {
+        let certificate_capture =
+            crate::core::certificate::begin_cpu_render_capture("smoke.render_projection_rgba");
         let native_settings = settings
             .as_ref()
             .map(|settings| settings.inner.clone())
@@ -604,7 +616,11 @@ impl PySmokeDomain {
             .map_err(PyRuntimeError::new_err)?;
         let arr = Array3::from_shape_vec((height as usize, width as usize, 4), rgba)
             .map_err(|_| PyRuntimeError::new_err("failed to reshape rendered RGBA"))?;
-        Ok(arr.into_pyarray_bound(py).into_gil_ref())
+        let arr = arr.into_pyarray_bound(py);
+        crate::core::certificate::record_pass("smoke.cpu_projection", 0.0, 1);
+        certificate_capture.finish();
+        crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
+        Ok(arr.into_gil_ref())
     }
 
     fn __repr__(&self) -> String {

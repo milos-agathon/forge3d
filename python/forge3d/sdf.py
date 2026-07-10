@@ -270,10 +270,45 @@ class SdfScene:
             elif op['operation'] == CsgOperation.INTERSECTION:
                 result_dist = max(left_dist, right_dist)
                 result_mat = left_mat if left_dist > right_dist else right_mat
+            elif op['operation'] == CsgOperation.SMOOTH_UNION:
+                smoothing = float(op['smoothing'])
+                if smoothing <= 0.0:
+                    result_dist = min(left_dist, right_dist)
+                    result_mat = left_mat if left_dist < right_dist else right_mat
+                else:
+                    blend = float(np.clip(
+                        0.5 + 0.5 * (right_dist - left_dist) / smoothing,
+                        0.0,
+                        1.0,
+                    ))
+                    result_dist = (
+                        right_dist * (1.0 - blend)
+                        + left_dist * blend
+                        - smoothing * blend * (1.0 - blend)
+                    )
+                    result_mat = left_mat if blend >= 0.5 else right_mat
+            elif op['operation'] in {
+                CsgOperation.SMOOTH_INTERSECTION,
+                CsgOperation.SMOOTH_SUBTRACTION,
+            }:
+                smoothing = float(op['smoothing'])
+                rhs = -right_dist if op['operation'] == CsgOperation.SMOOTH_SUBTRACTION else right_dist
+                if smoothing <= 0.0:
+                    result_dist = max(left_dist, rhs)
+                else:
+                    blend = float(np.clip(
+                        0.5 - 0.5 * (rhs - left_dist) / smoothing,
+                        0.0,
+                        1.0,
+                    ))
+                    result_dist = (
+                        rhs * (1.0 - blend)
+                        + left_dist * blend
+                        + smoothing * blend * (1.0 - blend)
+                    )
+                result_mat = left_mat if result_dist == left_dist else op['material_id']
             else:
-                # Default to union for unsupported operations
-                result_dist = min(left_dist, right_dist)
-                result_mat = left_mat if left_dist < right_dist else right_mat
+                raise ValueError(f"unsupported CSG operation: {op['operation']!r}")
 
             results[op_id] = (result_dist, result_mat)
 
@@ -429,21 +464,27 @@ class HybridRenderer:
         Returns:
             RGBA8 image as numpy array with shape (height, width, 4)
         """
+        from . import _degradation
+        from . import certificate as _certificate
+
         if USE_NATIVE_SDF and NATIVE_AVAILABLE and hasattr(forge3d_native, 'hybrid_render'):
-            # Use native implementation if available
             try:
-                return self._render_native(scene, spheres or [])
+                with _certificate._render_capture(
+                    "python.sdf.render", "sdf.native_cpu", draw_calls=1
+                ):
+                    image = self._render_native(scene, spheres or [])
             except Exception as e:
                 warnings.warn(f"Native rendering failed: {e}, falling back to CPU")
+            else:
+                if certificate:
+                    _certificate.emit_render_certificate(certificate)
+                return image
 
         # CPU fallback implementation. Capture at the point the fallback is
         # actually selected so imports and unused renderer objects cannot leak
         # a degradation into an unrelated certificate.
-        from . import _degradation
-        from . import certificate as _certificate
-
         with _certificate._render_capture(
-            "python.sdf.render", "python.sdf.render", draw_calls=1
+            "python.sdf.render", "sdf.python_cpu", draw_calls=1
         ):
             _degradation.record(
                 "cpu_fallback",
@@ -457,11 +498,94 @@ class HybridRenderer:
 
     def _render_native(self, scene: SdfScene, spheres: List) -> np.ndarray:
         """Render using native Rust implementation"""
-        del scene, spheres
-        # Call into the native placeholder implementation provided by the Rust module
-        # The function returns an (H, W, 4) uint8 numpy array
+        del spheres
+        builder = forge3d_native.SdfSceneBuilder()
+        node_handles: Dict[int, int] = {}
+
+        for index, primitive in enumerate(scene.primitives):
+            center = tuple(float(value) for value in primitive.center)
+            material_id = int(primitive.material_id)
+            if primitive.primitive_type == SdfPrimitiveType.SPHERE:
+                node = builder.add_sphere(center, float(primitive.params['radius']), material_id)
+            elif primitive.primitive_type == SdfPrimitiveType.BOX:
+                node = builder.add_box(
+                    center,
+                    tuple(float(value) for value in primitive.params['extents']),
+                    material_id,
+                )
+            elif primitive.primitive_type == SdfPrimitiveType.CYLINDER:
+                node = builder.add_cylinder(
+                    center,
+                    float(primitive.params['radius']),
+                    float(primitive.params['height']),
+                    material_id,
+                )
+            elif primitive.primitive_type == SdfPrimitiveType.PLANE:
+                node = builder.add_plane(
+                    tuple(float(value) for value in primitive.params['normal']),
+                    float(primitive.params['distance']),
+                    material_id,
+                )
+            elif primitive.primitive_type == SdfPrimitiveType.TORUS:
+                node = builder.add_torus(
+                    center,
+                    float(primitive.params['major_radius']),
+                    float(primitive.params['minor_radius']),
+                    material_id,
+                )
+            elif primitive.primitive_type == SdfPrimitiveType.CAPSULE:
+                node = builder.add_capsule(
+                    tuple(float(value) for value in primitive.params['point_a']),
+                    tuple(float(value) for value in primitive.params['point_b']),
+                    float(primitive.params['radius']),
+                    material_id,
+                )
+            else:
+                raise ValueError(f"unsupported SDF primitive: {primitive.primitive_type!r}")
+            node_handles[index] = int(node)
+
+        primitive_count = len(scene.primitives)
+        for index, operation in enumerate(scene.operations):
+            try:
+                left = node_handles[int(operation['left'])]
+                right = node_handles[int(operation['right'])]
+            except KeyError as exc:
+                raise ValueError(f"CSG operation references unknown node {exc.args[0]}") from exc
+            material_id = int(operation['material_id'])
+            kind = operation['operation']
+            if kind == CsgOperation.UNION:
+                node = builder.union(left, right, material_id)
+            elif kind == CsgOperation.INTERSECTION:
+                node = builder.intersect(left, right, material_id)
+            elif kind == CsgOperation.SUBTRACTION:
+                node = builder.subtract(left, right, material_id)
+            elif kind == CsgOperation.SMOOTH_UNION:
+                node = builder.smooth_union(
+                    left, right, float(operation['smoothing']), material_id
+                )
+            elif kind == CsgOperation.SMOOTH_INTERSECTION:
+                node = builder.smooth_intersection(
+                    left, right, float(operation['smoothing']), material_id
+                )
+            elif kind == CsgOperation.SMOOTH_SUBTRACTION:
+                node = builder.smooth_subtraction(
+                    left, right, float(operation['smoothing']), material_id
+                )
+            else:
+                raise ValueError(f"unsupported CSG operation: {kind!r}")
+            node_handles[primitive_count + index] = int(node)
+
+        native_scene = builder.build()
+        camera = {
+            "origin": tuple(float(value) for value in self.camera_origin),
+            "target": tuple(float(value) for value in self.camera_target),
+            "up": tuple(float(value) for value in self.camera_up),
+            "fov_degrees": float(self.fov_degrees),
+        }
         try:
-            return forge3d_native.hybrid_render(int(self.width), int(self.height), None, None)  # type: ignore[attr-defined]
+            return forge3d_native.hybrid_render(  # type: ignore[attr-defined]
+                int(self.width), int(self.height), native_scene, camera
+            )
         except Exception as e:
             # Surface a clear error so the caller can fall back to CPU path
             raise RuntimeError(f"native hybrid_render failed: {e}")

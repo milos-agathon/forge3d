@@ -46,6 +46,11 @@ def test_certificate_has_live_passes_and_empty_degradations(tmp_path):
 
     cert = render_certificate()
     assert cert["schema"] == "forge3d.render_certificate/1"
+    labels = [entry["label"] for entry in cert["passes"]]
+    assert labels[-1] == "mapscene.finalize"
+    assert any(label.startswith("terrain.") for label in labels), labels
+    assert cert["allocations"]["peak_device_local_bytes"] > 0
+    assert cert["allocations"]["by_label"], cert["allocations"]
 
     granted = set(cert["capabilities"]["granted"])
     timed = [p for p in cert["passes"] if p["gpu_ms"] > 0]

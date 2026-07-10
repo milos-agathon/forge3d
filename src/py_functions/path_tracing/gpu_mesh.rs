@@ -173,42 +173,27 @@ pub(crate) fn _pt_render_gpu_mesh(
         shadow_softness: 4.0,
     };
 
-    let build_fallback = || {
-        let w = width as usize;
-        let h = height as usize;
-        let mut out = vec![0u8; w * h * 4];
-        for y in 0..h {
-            let t = 1.0 - (y as f32) / ((h.max(1) - 1) as f32).max(1.0);
-            let sky = (200.0 * t + 55.0).clamp(0.0, 255.0) as u8;
-            let ground = (120.0 * (1.0 - t)).clamp(0.0, 255.0) as u8;
-            for x in 0..w {
-                let index = (y * w + x) * 4;
-                let value = if y < h / 2 { sky } else { ground };
-                out[index] = value / 2;
-                out[index + 1] = value;
-                out[index + 2] = value / 3;
-                out[index + 3] = 255;
-            }
-        }
-        out
-    };
-
     let rgba: Vec<u8> = {
         use std::panic::{catch_unwind, AssertUnwindSafe};
         let params = params.clone();
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let _ = hybrid.prepare_gpu_resources();
-            if let Ok(tracer) = crate::path_tracing::hybrid_compute::HybridPathTracer::new() {
-                tracer
-                    .render(width, height, &[], &hybrid, None, params)
-                    .ok()
-            } else {
-                None
-            }
+            hybrid
+                .prepare_gpu_resources()
+                .map_err(|error| format!("hybrid scene preparation failed: {error}"))?;
+            let tracer = crate::path_tracing::hybrid_compute::HybridPathTracer::new()
+                .map_err(|error| format!("hybrid path tracer creation failed: {error}"))?;
+            tracer
+                .render(width, height, &[], &hybrid, None, params)
+                .map_err(|error| format!("hybrid path trace failed: {error}"))
         }));
         match result {
-            Ok(Some(bytes)) => bytes,
-            _ => build_fallback(),
+            Ok(Ok(bytes)) => bytes,
+            Ok(Err(error)) => return Err(PyRuntimeError::new_err(error)),
+            Err(_) => {
+                return Err(PyRuntimeError::new_err(
+                    "hybrid GPU path tracer panicked; no fallback image was emitted",
+                ))
+            }
         }
     };
 

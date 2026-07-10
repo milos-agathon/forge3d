@@ -132,7 +132,11 @@ def _canonical_params_config():
 
 
 def _render_reference_inprocess(
-    scene_spec: str, width: int, height: int, out_png: Union[str, Path]
+    scene_spec: str,
+    width: int,
+    height: int,
+    out_png: Union[str, Path],
+    certificate: Union[bool, str, Path] = False,
 ) -> str:
     """Render the canonical scene in THIS process and return the PNG SHA-256.
 
@@ -165,6 +169,7 @@ def _render_reference_inprocess(
         params=params,
         heightmap=heightmap,
         target=None,
+        certificate=certificate,
     )
 
     out_png = Path(out_png)
@@ -180,6 +185,7 @@ def render_reference(
     height: int = 512,
     backend: Optional[str] = None,
     out_png: Union[str, Path],
+    certificate: Union[bool, str, Path] = False,
 ) -> str:
     """Render the canonical deterministic scene and return the PNG's SHA-256.
 
@@ -191,6 +197,10 @@ def render_reference(
             exported ``WGPU_BACKENDS``/``WGPU_BACKEND``; one of the two must
             name a backend or the native layer refuses to run (loudly).
         out_png: destination PNG path.
+        certificate: ``False`` disables certificate output, a path writes the
+            signed certificate there, and ``True`` writes
+            ``<out_png stem>.certificate.json`` because the GPU render occurs
+            in a child process.
 
     The render runs in a fresh Python subprocess with
     ``FORGE3D_DETERMINISTIC=1`` and the backend env var exported BEFORE any
@@ -233,6 +243,13 @@ def render_reference(
         "--out-png",
         str(out_png),
     ]
+    if certificate:
+        certificate_path = (
+            Path(certificate)
+            if not isinstance(certificate, bool)
+            else Path(out_png).with_suffix(".certificate.json")
+        )
+        cmd.extend(["--certificate", str(certificate_path)])
     proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(
@@ -255,9 +272,16 @@ def _main(argv: Optional[list] = None) -> int:
     parser.add_argument("--width", type=int, default=512)
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--out-png", required=True)
+    parser.add_argument("--certificate")
     args = parser.parse_args(argv)
 
-    sha = _render_reference_inprocess(args.scene, args.width, args.height, args.out_png)
+    sha = _render_reference_inprocess(
+        args.scene,
+        args.width,
+        args.height,
+        args.out_png,
+        certificate=args.certificate or False,
+    )
     print(
         json.dumps(
             {

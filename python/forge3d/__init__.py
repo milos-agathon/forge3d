@@ -263,6 +263,7 @@ from . import terrain_scatter
 # -----------------------------------------------------------------------------
 from pathlib import Path
 from typing import Any, Mapping
+from .certificate import _captured_cpu_render
 
 
 class Renderer:
@@ -304,8 +305,20 @@ class Renderer:
         if overrides:
             self._config = load_renderer_config(self._config, overrides)
 
-    def render_triangle_rgba(self) -> np.ndarray:
+    @_captured_cpu_render(
+        "python.renderer.render_triangle_rgba", "renderer.cpu_triangle", draw_calls=1
+    )
+    def render_triangle_rgba(
+        self, *, certificate: bool | str | Path = False
+    ) -> np.ndarray:
         """Render a basic triangle pattern (fallback test method)."""
+        from . import _degradation
+
+        _degradation.record(
+            "cpu_fallback",
+            "renderer.triangle",
+            "fallback Renderer uses the deterministic CPU triangle implementation",
+        )
         img = np.zeros((self.height, self.width, 4), dtype=np.uint8)
         cx, cy = self.width // 2, self.height // 2
         size = min(self.width, self.height) // 4
@@ -318,9 +331,11 @@ class Renderer:
                     img[y, x] = [16, 16, 24, 255]
         return img
 
-    def render_triangle_png(self, path) -> None:
+    def render_triangle_png(
+        self, path, *, certificate: bool | str | Path = False
+    ) -> None:
         """Render triangle to PNG file."""
-        numpy_to_png(path, self.render_triangle_rgba())
+        numpy_to_png(path, self.render_triangle_rgba(certificate=certificate))
 
 
 # -----------------------------------------------------------------------------
