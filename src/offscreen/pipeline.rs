@@ -123,13 +123,7 @@ impl BrdfTilePipeline {
                     .filter(|c| c.is_ascii_digit())
                     .collect::<String>()
             })
-            .and_then(|digits| {
-                if digits.is_empty() {
-                    None
-                } else {
-                    Some(digits)
-                }
-            })
+            .filter(|digits| !digits.is_empty())
             .unwrap_or_else(|| "unknown".to_string());
         log::info!("BRDF_SHADER_VERSION = {}", shader_version);
 

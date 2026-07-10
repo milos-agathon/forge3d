@@ -69,14 +69,18 @@ def set_exposure_stops(stops: float) -> float:
     stops_f = float(stops)
     _EXPOSURE_STOPS = stops_f
     _EXPOSURE_SCALE = float(math.pow(2.0, stops_f))
-    if _forge3d is not None:
-        setter = getattr(_forge3d, "set_exposure_scale", None)
-        if setter is not None:
-            try:
-                setter(_EXPOSURE_SCALE)
-            except Exception as exc:  # pragma: no cover - optional binding
-                warnings.warn(f"forge3d.set_exposure_scale failed: {exc}")
-                _record_native_setter_unavailable("set_exposure_scale")
+    setter = getattr(_forge3d, "set_exposure_scale", None) if _forge3d is not None else None
+    if setter is None:
+        # No native binding: the module-global scale is bookkeeping only and
+        # does not reach the renderer. Record the degradation instead of
+        # reporting silent success.
+        _record_native_setter_unavailable("set_exposure_scale")
+    else:
+        try:
+            setter(_EXPOSURE_SCALE)
+        except Exception as exc:  # pragma: no cover - optional binding
+            warnings.warn(f"forge3d.set_exposure_scale failed: {exc}")
+            _record_native_setter_unavailable("set_exposure_scale")
     return _EXPOSURE_SCALE
 
 

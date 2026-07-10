@@ -96,6 +96,27 @@ pub fn finish_render_capture() {
         .into_iter()
         .map(|d| (d.kind, d.name, d.consequence))
         .collect();
+
+    // Re-derive capability_absent entries from the live context so a cleared
+    // degradation sink cannot certify a capability gap away: the negotiated
+    // CapabilitySet is the source of truth for what this device lacks.
+    if let Some(ctx) = crate::core::gpu::ctx_if_initialized() {
+        for (name, feature, consequence) in crate::core::capabilities::WANTED {
+            let absent = ctx.capabilities.wanted.contains(*feature)
+                && !ctx.capabilities.granted.contains(*feature);
+            if absent
+                && !degradations
+                    .iter()
+                    .any(|(k, n, _)| k == "capability_absent" && n == name)
+            {
+                degradations.push((
+                    "capability_absent".to_string(),
+                    (*name).to_string(),
+                    (*consequence).to_string(),
+                ));
+            }
+        }
+    }
     degradations.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
 
     let wgsl_module_hashes = shader_hashes_snapshot();
