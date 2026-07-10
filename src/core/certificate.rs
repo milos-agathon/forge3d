@@ -14,7 +14,9 @@
 
 use crate::core::degradation::{begin_degradation_capture, finish_degradation_capture};
 use crate::core::error::RenderError;
-use crate::core::resource_tracker::{begin_ledger_capture, finish_ledger_capture};
+use crate::core::resource_tracker::{
+    abort_ledger_capture, begin_ledger_capture, finish_ledger_capture,
+};
 use crate::core::shader_registry::{begin_shader_render_capture, finish_shader_render_capture};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -58,6 +60,26 @@ static CURRENT: Mutex<Vec<PassRecord>> = Mutex::new(Vec::new());
 /// The last completed capture, serialized by `execution_report_json`.
 static LAST: Mutex<Option<FinishedCapture>> = Mutex::new(None);
 
+#[must_use = "a render capture must be finished or retained until the render exits"]
+pub struct RenderCaptureGuard {
+    active: bool,
+}
+
+impl RenderCaptureGuard {
+    pub fn finish(mut self) {
+        self.active = false;
+        finish_render_capture();
+    }
+}
+
+impl Drop for RenderCaptureGuard {
+    fn drop(&mut self) {
+        if self.active {
+            abort_render_capture();
+        }
+    }
+}
+
 fn lock_current() -> std::sync::MutexGuard<'static, Vec<PassRecord>> {
     CURRENT.lock().unwrap_or_else(|p| p.into_inner())
 }
@@ -70,6 +92,9 @@ fn lock_last() -> std::sync::MutexGuard<'static, Option<FinishedCapture>> {
 fn notify_python_degradation_capture(method: &str) {
     use pyo3::prelude::PyAnyMethods;
 
+    if unsafe { pyo3::ffi::Py_IsInitialized() } == 0 {
+        return;
+    }
     pyo3::Python::with_gil(|py| match py.import_bound("forge3d._degradation") {
         Ok(module) => {
             if let Err(error) = module.call_method0(method) {
@@ -85,31 +110,24 @@ fn notify_python_degradation_capture(_method: &str) {}
 
 /// Start a render capture: clears the per-render pass list. `entry_point` names
 /// the render entry for logging/debugging (not part of the serialized schema).
-pub fn begin_render_capture(entry_point: &str) {
-    begin_render_capture_with_resources(entry_point, &BTreeMap::new(), &[]);
+pub fn begin_render_capture(entry_point: &str) -> RenderCaptureGuard {
+    begin_render_capture_with_resources(entry_point, &[])
 }
 
 /// Start a render capture seeded with the modules owned by its renderer.
-pub fn begin_render_capture_with_shaders(
-    entry_point: &str,
-    shader_hashes: &BTreeMap<String, String>,
-) {
-    begin_render_capture_with_resources(entry_point, shader_hashes, &[]);
-}
-
 /// Start a render capture with renderer-owned shader and allocation state.
 pub fn begin_render_capture_with_resources(
     entry_point: &str,
-    shader_hashes: &BTreeMap<String, String>,
     allocation_owner_ids: &[u64],
-) {
+) -> RenderCaptureGuard {
     begin_ledger_capture(allocation_owner_ids);
-    begin_shader_render_capture(shader_hashes);
+    begin_shader_render_capture(&BTreeMap::new());
     begin_degradation_capture();
     notify_python_degradation_capture("begin_capture");
     let mut cur = lock_current();
     cur.clear();
     log::debug!("render capture begin: {entry_point}");
+    RenderCaptureGuard { active: true }
 }
 
 /// Record one timed GPU pass for the in-flight render, in call order.
@@ -126,7 +144,7 @@ pub fn record_pass(label: &str, gpu_ms: f64, draw_calls: u32) {
 /// completed report. Adapter/capability info is read from the process GPU
 /// context when one already exists; certificate assembly never forces GPU
 /// initialization.
-pub fn finish_render_capture() -> BTreeMap<String, String> {
+fn finish_render_capture() {
     let passes = lock_current().clone();
     let ledger = finish_ledger_capture();
 
@@ -159,8 +177,6 @@ pub fn finish_render_capture() -> BTreeMap<String, String> {
     degradations.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
 
     let wgsl_module_hashes = finish_shader_render_capture();
-    let captured_shader_hashes = wgsl_module_hashes.clone();
-
     let (adapter, requested, granted, limits) = match crate::core::gpu::ctx_if_initialized() {
         Some(ctx) => {
             let info = ctx.adapter.get_info();
@@ -226,7 +242,14 @@ pub fn finish_render_capture() -> BTreeMap<String, String> {
     };
 
     *lock_last() = Some(finished);
-    captured_shader_hashes
+}
+
+pub fn abort_render_capture() {
+    abort_ledger_capture();
+    crate::core::shader_registry::abort_shader_render_capture();
+    crate::core::degradation::abort_degradation_capture();
+    notify_python_degradation_capture("abort_capture");
+    lock_current().clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -431,17 +454,17 @@ mod tests {
     fn canonical_payload_is_byte_stable_modulo_gpu_ms() {
         let _guard = TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
-        begin_render_capture("test.render");
+        let first_capture = begin_render_capture("test.render");
         record_pass("terrain.main", 1.5, 3);
         record_pass("terrain.sky", 0.25, 1);
-        finish_render_capture();
+        first_capture.finish();
         let a = execution_report_json().expect("first report must assemble");
 
         // Rebuild from identical state with DIFFERENT live timings.
-        begin_render_capture("test.render");
+        let second_capture = begin_render_capture("test.render");
         record_pass("terrain.main", 42.0, 3);
         record_pass("terrain.sky", 99.0, 1);
-        finish_render_capture();
+        second_capture.finish();
         let b = execution_report_json().expect("second report must assemble");
 
         // Both are valid JSON.
@@ -470,5 +493,25 @@ mod tests {
         // (if any prior state exists) must still be serializable.
         finish_render_capture();
         let _ = execution_report_json();
+    }
+
+    #[test]
+    fn dropped_capture_guard_discards_failed_render_state() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+        let failed = begin_render_capture("test.failed");
+        record_pass("failed.pass", 1.0, 1);
+        drop(failed);
+
+        let successful = begin_render_capture("test.successful");
+        record_pass("successful.pass", 2.0, 1);
+        successful.finish();
+
+        let report: serde_json::Value = serde_json::from_str(
+            &execution_report_json().expect("successful capture must assemble"),
+        )
+        .expect("report parses");
+        assert_eq!(report["passes"].as_array().map(Vec::len), Some(1));
+        assert_eq!(report["passes"][0]["label"], "successful.pass");
     }
 }

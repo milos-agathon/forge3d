@@ -18,7 +18,8 @@ impl TerrainScene {
         water_mask: Option<PyReadonlyArray2<f32>>,
         time_seconds: f32,
     ) -> Result<crate::Frame> {
-        let _allocation_scope = self.begin_certificate_capture("terrain.render_internal");
+        let (certificate_capture, _allocation_scope) =
+            self.begin_certificate_capture("terrain.render_internal");
         let mut timing = self.take_render_timing();
         let decoded = params.decoded();
         self.prepare_frame_lighting(decoded)?;
@@ -290,7 +291,7 @@ impl TerrainScene {
         // timestamps, record each pass, and freeze the render capture.
         self.record_render_timings(&mut timing);
         self.store_render_timing(timing);
-        self.finish_certificate_capture();
+        self.finish_certificate_capture(certificate_capture);
 
         Ok(crate::Frame::new(
             self.device.clone(),

@@ -9,30 +9,37 @@
 // produced it.
 
 impl Scene {
+    pub(super) fn record_terrain_shader_use() {
+        let label = if crate::core::gpu::ctx_if_initialized()
+            .is_some_and(|ctx| ctx.device.limits().max_bind_groups >= 6)
+        {
+            "vf.Terrain.shader.full"
+        } else {
+            "vf.Terrain.shader.minimal"
+        };
+        crate::core::shader_registry::record_shader_use(label);
+    }
+
     pub(super) fn begin_certificate_capture(
         &self,
         entry_point: &str,
-    ) -> crate::core::resource_tracker::AllocationOwnerGuard {
+    ) -> (
+        crate::core::certificate::RenderCaptureGuard,
+        crate::core::resource_tracker::AllocationOwnerGuard,
+    ) {
         let allocation_scope = self.allocation_owner.activate();
-        let owned = self
-            .shader_hashes
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone();
-        crate::core::certificate::begin_render_capture_with_resources(
+        let render_capture = crate::core::certificate::begin_render_capture_with_resources(
             entry_point,
-            &owned,
             &[self.allocation_owner.id()],
         );
-        allocation_scope
+        (render_capture, allocation_scope)
     }
 
-    pub(super) fn finish_certificate_capture(&self) {
-        let captured = crate::core::certificate::finish_render_capture();
-        self.shader_hashes
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .extend(captured);
+    pub(super) fn finish_certificate_capture(
+        &self,
+        capture: crate::core::certificate::RenderCaptureGuard,
+    ) {
+        capture.finish();
     }
 
     /// Take the render-timing manager out of the scene, lazily constructing it

@@ -286,6 +286,13 @@ impl AllocationLedger {
             .unwrap_or_default()
     }
 
+    fn abort_capture(&self) {
+        self.capture
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take();
+    }
+
     fn remove(&self, id: u64) {
         let mut map = self.entries.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(entry) = map.remove(&id) {
@@ -395,6 +402,10 @@ pub fn begin_ledger_capture(owner_ids: &[u64]) {
 /// Finish render-local peak accounting and return the captured ledger report.
 pub fn finish_ledger_capture() -> LedgerReport {
     ledger().finish_capture()
+}
+
+pub fn abort_ledger_capture() {
+    ledger().abort_capture();
 }
 
 /// Render the top-`n` ledger consumers as a `"label=bytes, ..."` string for

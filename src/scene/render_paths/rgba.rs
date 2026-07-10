@@ -3,7 +3,8 @@ impl Scene {
         &mut self,
         py: pyo3::Python<'py>,
     ) -> PyResult<Bound<'py, numpy::PyArray3<u8>>> {
-        let _allocation_scope = self.begin_certificate_capture("scene.render_rgba");
+        let (certificate_capture, _allocation_scope) =
+            self.begin_certificate_capture("scene.render_rgba");
         let mut timing = self.take_render_timing();
 
         let g = crate::core::gpu::try_ctx()?;
@@ -22,7 +23,7 @@ impl Scene {
         // and freeze this render's capture (one render = one capture).
         self.record_render_timings(&mut timing);
         self.store_render_timing(timing);
-        self.finish_certificate_capture();
+        self.finish_certificate_capture(certificate_capture);
 
         self.apply_runtime_postfx_cpu(&mut pixels);
 
@@ -202,6 +203,7 @@ impl Scene {
 
             if self.ground_plane_enabled {
                 if let Some(ref mut ground_renderer) = self.ground_plane_renderer {
+                    crate::core::shader_registry::record_shader_use("ground_plane_shader");
                     let view_proj = self.scene.proj * self.scene.view;
                     ground_renderer.set_camera(view_proj);
                     ground_renderer.upload_uniforms(&g.queue);
@@ -211,6 +213,7 @@ impl Scene {
 
             if self.water_surface_enabled {
                 if let Some(ref mut water_renderer) = self.water_surface_renderer {
+                    crate::core::shader_registry::record_shader_use("water_surface_shader");
                     let view_proj = self.scene.proj * self.scene.view;
                     water_renderer.set_camera(view_proj);
                     water_renderer.upload_uniforms(&g.queue);
@@ -220,6 +223,7 @@ impl Scene {
 
             if self.soft_light_radius_enabled {
                 if let Some(ref soft_light_renderer) = self.soft_light_radius_renderer {
+                    crate::core::shader_registry::record_shader_use("soft_light_radius_shader");
                     soft_light_renderer.update_uniforms(&g.queue);
                     soft_light_renderer.render(&mut rp, false);
                 }
@@ -227,6 +231,7 @@ impl Scene {
 
             if self.point_spot_lights_enabled {
                 if let Some(ref mut lights_renderer) = self.point_spot_lights_renderer {
+                    crate::core::shader_registry::record_shader_use("point_spot_lights_shader");
                     lights_renderer.set_camera(self.scene.view, self.scene.proj);
                     lights_renderer.update_buffers(&g.queue);
                     lights_renderer.render_deferred(&mut rp);
@@ -234,6 +239,7 @@ impl Scene {
             }
 
             if self.terrain_enabled {
+                Self::record_terrain_shader_use();
                 rp.set_pipeline(&self.tp.pipeline);
                 rp.set_bind_group(0, &self.bg0_globals, &[]);
                 rp.set_bind_group(1, &self.bg1_height, &[]);
@@ -310,6 +316,7 @@ impl Scene {
             #[cfg(feature = "enable-gpu-instancing")]
             {
                 if has_instanced_batches {
+                    crate::core::shader_registry::record_shader_use("mesh_instanced_shader");
                     let view = self.scene.view;
                     let proj = self.scene.proj;
                     if let Some(renderer) = self.mesh_instanced_renderer.as_mut() {
@@ -343,6 +350,7 @@ impl Scene {
 
             if self.text3d_enabled {
                 if let Some(ref mut tm) = self.text3d_renderer {
+                    crate::core::shader_registry::record_shader_use("mesh_basic_shader");
                     let g = crate::core::gpu::try_ctx()?;
                     tm.set_view_proj(self.scene.view, self.scene.proj);
                     tm.upload_uniforms(&g.queue);
@@ -381,11 +389,13 @@ impl Scene {
             });
 
             if let Some(ref ov) = self.overlay_renderer {
+                crate::core::shader_registry::record_shader_use("overlays_shader");
                 ov.render(&mut rp);
             }
 
             if self.text_overlay_enabled {
                 if let Some(ref mut tr) = self.text_overlay_renderer {
+                    crate::core::shader_registry::record_shader_use("text_overlay_shader");
                     let g = crate::core::gpu::try_ctx()?;
                     tr.set_resolution(self.width, self.height);
                     tr.set_alpha(self.text_overlay_alpha);
@@ -401,6 +411,7 @@ impl Scene {
         }
 
         if self.ssao_enabled {
+            crate::core::shader_registry::record_shader_use("ssao-compute");
             let ssao_scope = scene_ts_begin(timing, encoder, "scene.ssao");
             self.ssao
                 .dispatch(

@@ -76,6 +76,11 @@ impl TerrainScene {
                 occlusion_query_set: None,
             });
 
+            crate::core::shader_registry::record_shader_use(if render_targets.sample_count > 1 {
+                "terrain.blit.depth.shader"
+            } else {
+                "terrain.blit.shader"
+            });
             pass.set_pipeline(blit_pipeline);
             pass.set_bind_group(0, &blit_bind_group, &[]);
             pass.draw(0..3, 0..1);
@@ -158,6 +163,11 @@ impl TerrainScene {
             });
 
             let geometry = self.geometry_provider()?;
+            crate::core::shader_registry::record_shader_use(if geometry.is_clipmap() {
+                "terrain_pbr_pom.clipmap.shader"
+            } else {
+                "terrain_pbr_pom.shader"
+            });
             pass.set_pipeline(if geometry.is_clipmap() {
                 pipeline_cache.clipmap_pipeline.as_ref().ok_or_else(|| {
                     anyhow!("clipmap pipeline not initialized for clipmap geometry")
@@ -257,6 +267,7 @@ impl TerrainScene {
                 occlusion_query_set: None,
             });
 
+            crate::core::shader_registry::record_shader_use("terrain.blit.shader");
             blit_pass.set_pipeline(&self.blit_pipeline);
             blit_pass.set_bind_group(0, &blit_bind_group, &[]);
             blit_pass.draw(0..3, 0..1);

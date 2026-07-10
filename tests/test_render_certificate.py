@@ -157,6 +157,22 @@ def test_scene_allocations_include_lazily_enabled_feature():
     assert labels.get("cloud_uniform_buffer", 0) > 0, labels
 
 
+def test_scene_shader_hashes_follow_lazy_feature_use():
+    _skip_without_terrain()
+    _clear_sinks()
+
+    scene = f3d.Scene(32, 32)
+    scene.enable_clouds("low")
+    scene.render_rgba()
+    enabled = render_certificate(sign=False)["engine"]["wgsl_module_hashes"]
+    assert "cloud_shader" in enabled, enabled
+
+    scene.disable_clouds()
+    scene.render_rgba()
+    disabled = render_certificate(sign=False)["engine"]["wgsl_module_hashes"]
+    assert "cloud_shader" not in disabled, disabled
+
+
 def test_certificate_kwarg_writes_signed_file(tmp_path):
     _skip_without_terrain()
     _clear_sinks()

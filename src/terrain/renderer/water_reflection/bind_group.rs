@@ -148,6 +148,7 @@ impl TerrainScene {
                     occlusion_query_set: None,
                 });
 
+                crate::core::shader_registry::record_shader_use("terrain_pbr_pom.shader");
                 pass.set_pipeline(&self.water_reflection_pipeline);
                 pass.set_bind_group(0, &reflection_bind_group, &[]);
                 pass.set_bind_group(1, light_bind_group, &[]);

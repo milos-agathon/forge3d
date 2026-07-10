@@ -36,9 +36,9 @@ impl Scene {
             depth_stencil_attachment: None,
             ..Default::default()
         });
+        crate::core::shader_registry::record_shader_use("cloud_shader");
         renderer.draw(&mut pass);
 
         Ok(())
     }
 }
-

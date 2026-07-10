@@ -49,6 +49,13 @@ impl Scene {
 
         {
             let mut rp = renderer.begin_reflection_pass(encoder);
+            crate::core::shader_registry::record_shader_use(if g.device.limits().max_bind_groups
+                >= 6
+            {
+                "vf.Terrain.shader.full"
+            } else {
+                "vf.Terrain.shader.minimal"
+            });
             rp.set_pipeline(&self.tp.pipeline);
             rp.set_bind_group(0, &self.bg0_globals, &[]);
             rp.set_bind_group(1, &self.bg1_height, &[]);
@@ -124,6 +131,7 @@ impl Scene {
         dof_renderer.upload_uniforms(&g.queue);
 
         // Dispatch DOF computation
+        crate::core::shader_registry::record_shader_use("dof_compute_shader");
         dof_renderer.dispatch(encoder);
 
         Ok(())
@@ -153,6 +161,7 @@ impl Scene {
         cloud_renderer.upload_uniforms(&g.queue);
 
         // Generate cloud shadow texture
+        crate::core::shader_registry::record_shader_use("cloud_shadow_compute_shader");
         cloud_renderer.generate_shadows(encoder);
 
         // Create terrain bind group for cloud shadows if needed
@@ -188,4 +197,3 @@ impl Scene {
         camera_pos + forward // Target is camera position + forward direction
     }
 }
-

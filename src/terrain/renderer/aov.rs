@@ -354,6 +354,7 @@ impl TerrainScene {
                 occlusion_query_set: None,
             });
 
+            crate::core::shader_registry::record_shader_use("terrain_pbr_pom.aov.shader");
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, bind_group, &[]);
             pass.set_bind_group(1, light_bind_group, &[]);
@@ -454,6 +455,11 @@ impl TerrainScene {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
+            crate::core::shader_registry::record_shader_use(if renormalize_normals {
+                "terrain.blit.normal.shader"
+            } else {
+                "terrain.blit.shader"
+            });
             blit_pass.set_pipeline(blit_pipeline);
             blit_pass.set_bind_group(0, &blit_bind_group, &[]);
             blit_pass.draw(0..3, 0..1);
@@ -473,7 +479,8 @@ impl TerrainScene {
         water_mask: Option<numpy::PyReadonlyArray2<'_, f32>>,
         time_seconds: f32,
     ) -> Result<(crate::Frame, crate::AovFrame)> {
-        let _allocation_scope = self.begin_certificate_capture("terrain.render_internal_with_aov");
+        let (certificate_capture, _allocation_scope) =
+            self.begin_certificate_capture("terrain.render_internal_with_aov");
         let mut timing = self.take_render_timing();
         let decoded = params.decoded();
         self.prepare_frame_lighting(decoded)?;
@@ -794,7 +801,7 @@ impl TerrainScene {
 
         self.record_render_timings(&mut timing);
         self.store_render_timing(timing);
-        self.finish_certificate_capture();
+        self.finish_certificate_capture(certificate_capture);
 
         let aov_config = &decoded.aov;
         let aov_frame = crate::AovFrame::new(

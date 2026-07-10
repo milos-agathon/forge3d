@@ -865,6 +865,7 @@ impl TerrainScene {
             label: Some("terrain.offline.accumulate.pass"),
             timestamp_writes: None,
         });
+        crate::core::shader_registry::record_shader_use("terrain.offline.accumulate.pipeline");
         pass.set_pipeline(&self.offline_compute.accumulate_pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
         pass.dispatch_workgroups(
@@ -938,6 +939,7 @@ impl TerrainScene {
             occlusion_query_set: None,
         });
 
+        crate::core::shader_registry::record_shader_use("terrain.blit.depth.shader");
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &blit_bind_group, &[]);
         pass.draw(0..3, 0..1);
@@ -1072,6 +1074,7 @@ impl TerrainScene {
             occlusion_query_set: None,
         });
 
+        crate::core::shader_registry::record_shader_use("terrain_pbr_pom.aov.shader");
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, bind_group, &[]);
         pass.set_bind_group(1, light_bind_group, &[]);
@@ -1185,6 +1188,7 @@ impl TerrainScene {
             label: Some("terrain.offline.resolve.pass"),
             timestamp_writes: None,
         });
+        crate::core::shader_registry::record_shader_use("terrain.offline.resolve.pipeline");
         pass.set_pipeline(&self.offline_compute.resolve_pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
         pass.dispatch_workgroups(
@@ -1242,6 +1246,7 @@ impl TerrainScene {
             label: Some(&format!("{label_prefix}.pass")),
             timestamp_writes: None,
         });
+        crate::core::shader_registry::record_shader_use(&format!("{label_prefix}.pipeline"));
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
         pass.dispatch_workgroups((width + 7) / 8, (height + 7) / 8, 1);
@@ -1332,6 +1337,7 @@ impl TerrainScene {
             label: Some("terrain.offline.luminance.pass"),
             timestamp_writes: None,
         });
+        crate::core::shader_registry::record_shader_use("terrain.offline.luminance.pipeline");
         pass.set_pipeline(&self.offline_compute.luminance_pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
         pass.dispatch_workgroups(
@@ -1393,6 +1399,7 @@ impl TerrainScene {
             label: Some("terrain.offline.tonemap.pass"),
             timestamp_writes: None,
         });
+        crate::core::shader_registry::record_shader_use("terrain.offline.tonemap.pipeline");
         pass.set_pipeline(&self.offline_compute.tonemap_pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
         pass.dispatch_workgroups((width + 7) / 8, (height + 7) / 8, 1);

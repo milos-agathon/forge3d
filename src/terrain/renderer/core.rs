@@ -10,7 +10,6 @@ pub struct TerrainScene {
     pub(super) device: Arc<wgpu::Device>,
     pub(super) queue: Arc<wgpu::Queue>,
     pub(super) adapter: Arc<wgpu::Adapter>,
-    pub(super) shader_hashes: Mutex<std::collections::BTreeMap<String, String>>,
     pub(super) allocation_owner: crate::core::resource_tracker::AllocationOwner,
     pub(super) pipeline: Mutex<PipelineCache>,
     pub(super) bind_group_layout: wgpu::BindGroupLayout,
@@ -300,27 +299,23 @@ impl TerrainScene {
     pub(super) fn begin_certificate_capture(
         &self,
         entry_point: &str,
-    ) -> crate::core::resource_tracker::AllocationOwnerGuard {
+    ) -> (
+        crate::core::certificate::RenderCaptureGuard,
+        crate::core::resource_tracker::AllocationOwnerGuard,
+    ) {
         let allocation_scope = self.allocation_owner.activate();
-        let shaders = self
-            .shader_hashes
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone();
-        crate::core::certificate::begin_render_capture_with_resources(
+        let render_capture = crate::core::certificate::begin_render_capture_with_resources(
             entry_point,
-            &shaders,
             &[self.allocation_owner.id()],
         );
-        allocation_scope
+        (render_capture, allocation_scope)
     }
 
-    pub(super) fn finish_certificate_capture(&self) {
-        let captured_shaders = crate::core::certificate::finish_render_capture();
-        self.shader_hashes
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .extend(captured_shaders);
+    pub(super) fn finish_certificate_capture(
+        &self,
+        capture: crate::core::certificate::RenderCaptureGuard,
+    ) {
+        capture.finish();
     }
 }
 

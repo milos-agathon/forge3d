@@ -267,6 +267,7 @@ impl TerrainScene {
                 label: Some("terrain.sky.compute"),
                 timestamp_writes: None,
             });
+            crate::core::shader_registry::record_shader_use("terrain.sky.shader");
             cpass.set_pipeline(&self.sky_pipeline);
             cpass.set_bind_group(0, &sky_bg0, &[]);
             cpass.set_bind_group(1, &sky_bg1, &[]);

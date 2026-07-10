@@ -7,8 +7,6 @@ impl Scene {
     ) -> PyResult<Self> {
         let allocation_owner = crate::core::resource_tracker::AllocationOwner::new();
         let _allocation_scope = allocation_owner.activate();
-        let shader_capture =
-            crate::core::shader_registry::begin_shader_construction_capture();
         let grid = grid.unwrap_or(128).max(2);
         let g = crate::core::gpu::try_ctx()?;
 
@@ -230,7 +228,6 @@ impl Scene {
             text3d_enabled: false,
             text3d_instances: Vec::new(),
             render_timing: std::sync::Mutex::new(None),
-            shader_hashes: std::sync::Mutex::new(shader_capture.finish()),
             allocation_owner,
             #[cfg(feature = "enable-gpu-instancing")]
             mesh_instanced_renderer: Some(
