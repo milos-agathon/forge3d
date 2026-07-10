@@ -114,6 +114,11 @@ jobs:
 
   # ============================================================================
   # Interactive Viewer E2E (macOS only; optional)
+  #
+  # INFORMATIONAL ONLY: this job is `continue-on-error: true` on its test step
+  # and is deliberately NOT in `ci-success` needs. Its result never gates the
+  # build. The interactive lane's test files are accounted for by the
+  # `interactive_viewer` marker in the UNRUN/(e)-gate bookkeeping, not here.
   # ============================================================================
   test-interactive-viewer-macos:
     name: Interactive Viewer (macOS)
@@ -288,6 +293,10 @@ jobs:
     needs: [build-wheels, terrain-golden-paths]
     runs-on: windows-latest
     if: github.event_name == 'workflow_dispatch' || needs.terrain-golden-paths.outputs.terrain_goldens == 'true'
+    # Expose which lane actually executed so ci-success can print an honest
+    # `ran|absent` distinction instead of treating both as opaque success.
+    outputs:
+      lane: ${{ steps.golden-absent.outputs.golden_lane || steps.golden-ran.outputs.golden_lane || 'unknown' }}
     env:
       # The terrain shader path is not GL-safe on hosted runners; pin a stable backend.
       WGPU_BACKEND: dx12
@@ -331,9 +340,28 @@ jobs:
           FORGE3D_ADJUDICATION_ARTIFACT_DIR: tests/artifacts/adjudication
         run: pytest tests/test_terrain_visual_goldens.py tests/test_terrain_tv10_goldens.py tests/test_terrain_vt_pbr_families.py tests/test_recipe_goldens.py tests/test_adjudication_gate.py tests/test_hybrid_terrain_pt.py tests/test_provenance_veritas.py -v --tb=short
 
-      - name: Skip unsupported terrain golden lane
+      - name: Record golden lane RAN
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outcome == 'success'
+        id: golden-ran
+        shell: bash
+        run: echo "golden_lane=ran" >> "$GITHUB_OUTPUT"
+
+      - name: Record golden lane ABSENT
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outcome != 'success'
-        run: echo "Skipping visual golden tests on unsupported hosted-runner adapter."
+        id: golden-absent
+        shell: bash
+        run: |
+          mkdir -p golden-out
+          echo "golden lane ABSENT: no usable hardware adapter on this hosted runner" | tee golden-out/goldens.ABSENT
+          echo "golden_lane=absent" >> "$GITHUB_OUTPUT"
+
+      - name: Upload golden lane marker
+        if: steps.golden-absent.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-lane-marker
+          path: golden-out/
+          if-no-files-found: error
 
       - name: Run software-allowed recipe goldens
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS == '1'
@@ -399,6 +427,15 @@ jobs:
     steps:
       - name: Check all jobs succeeded
         run: |
+          # Golden lane honesty: `test-golden-images` is gated by the
+          # `terrain-golden-paths` paths filter via its job-level `if:`. When no
+          # golden-relevant path changed the job is `skipped` — that is the ONLY
+          # reason `skipped` is acceptable here. Whenever the paths filter DID
+          # run the job, a golden pytest mismatch fails the job (no
+          # continue-on-error shields the pytest step) and therefore fails this
+          # aggregator. `absent` (no usable adapter) still reports as job
+          # `success` and is surfaced by the lane line below, not swallowed.
+          echo "golden lane: ${{ needs.test-golden-images.outputs.lane || 'skipped(paths)' }}"
           if [ "${{ needs.terrain-golden-paths.result }}" != "success" ] || \
              [ "${{ needs.test-rust.result }}" != "success" ] || \
              [ "${{ needs.build-wheels.result }}" != "success" ] || \
