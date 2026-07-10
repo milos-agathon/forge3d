@@ -699,10 +699,23 @@ def render_sunrise_to_noon_sequence(
     output_dir: Path,
     size: tuple[int, int] = (320, 180),
     steps: int = 4,
+    certificate: bool | str | Path = False,
 ) -> list[Path]:
     """Render a short sunrise-to-noon sequence using RendererConfig."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    if isinstance(certificate, (str, Path)):
+        Path(certificate).mkdir(parents=True, exist_ok=True)
+
+    use_native = bool(f3d.has_gpu()) and all(
+        hasattr(f3d, name)
+        for name in ("Session", "TerrainRenderer", "MaterialSet", "IBL", "TerrainRenderParams")
+    )
+    if not use_native:
+        raise RuntimeError(
+            "render_sunrise_to_noon_sequence requires the native terrain renderer; "
+            "the fallback triangle placeholder has been removed"
+        )
 
     dem = _load_dem(dem_path)
     heightmap_array = getattr(dem, "data", None)
@@ -731,11 +744,6 @@ def render_sunrise_to_noon_sequence(
             "max_steps": 48,
         },
     }
-
-    use_native = bool(f3d.has_gpu()) and all(
-        hasattr(f3d, name)
-        for name in ("Session", "TerrainRenderer", "MaterialSet", "IBL", "TerrainRenderParams")
-    )
 
     sess = None
     renderer_native = None
@@ -777,7 +785,8 @@ def render_sunrise_to_noon_sequence(
 
         cfg = load_renderer_config(None, overrides)
 
-        if use_native and sess is not None and renderer_native is not None and materials is not None and ibl is not None:
+        out_path = output_dir / f"terrain_sunrise_{idx:02d}.png"
+        if sess is not None and renderer_native is not None and materials is not None and ibl is not None:
             ibl_enabled = "ibl" in cfg.gi.modes
             clip_far = max(6000.0, terrain_span * 1.5)
             params = _build_params(
@@ -806,13 +815,18 @@ def render_sunrise_to_noon_sequence(
                 params=params,
                 heightmap=heightmap_array,
                 target=None,
+                certificate=(
+                    Path(certificate) / f"terrain_sunrise_{idx:02d}.certificate.json"
+                    if isinstance(certificate, (str, Path))
+                    else out_path.with_suffix(".certificate.json")
+                    if certificate
+                    else False
+                ),
             )
             rgba = frame.to_numpy()
         else:
-            renderer_fallback = f3d.Renderer(width, height, config=cfg)
-            rgba = renderer_fallback.render_triangle_rgba()
+            raise RuntimeError("native terrain renderer initialization was incomplete")
 
-        out_path = output_dir / f"terrain_sunrise_{idx:02d}.png"
         _save_image(rgba, out_path)
         outputs.append(out_path)
 

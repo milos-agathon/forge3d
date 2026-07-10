@@ -5,10 +5,11 @@ import inspect
 import numpy as np
 
 import forge3d as f3d
-from forge3d import determinism, path_tracing
+from forge3d import determinism, geometry, path_tracing, terrain_demo
 from forge3d.helpers.offscreen import render_offscreen_rgba
 from forge3d import sdf
 from forge3d.legend import Legend
+from forge3d.lighting import RestirDI
 from forge3d.map_scene import MapScene
 from forge3d.north_arrow import NorthArrow
 from forge3d.offline import render_offline
@@ -40,6 +41,8 @@ def test_public_render_entrypoints_expose_certificate_keyword() -> None:
         "Legend.render": Legend.render,
         "NorthArrow.render": NorthArrow.render,
         "ScaleBar.render": ScaleBar.render,
+        "RestirDI.render_frame": RestirDI.render_frame,
+        "geometry.instance_mesh_gpu_render": geometry.instance_mesh_gpu_render,
         "SmokeDomain.render_rgba": SmokeDomain.render_rgba,
         "SmokeDomain.render_projection_rgba": SmokeDomain.render_projection_rgba,
         "VectorScene.render_oit": VectorScene.render_oit,
@@ -160,3 +163,46 @@ def test_fallback_renderer_discloses_cpu_degradation():
     assert {(entry["kind"], entry["name"]) for entry in cert["degradations"]} == {
         ("cpu_fallback", "renderer.triangle")
     }
+
+
+def test_instanced_mesh_certificate_names_only_the_instancing_shader():
+    if not f3d.has_gpu() or not geometry.gpu_instancing_available():
+        import pytest
+
+        pytest.skip("GPU instancing path unavailable")
+
+    from forge3d.diagnostics import render_certificate
+
+    mesh = geometry.MeshBuffers(
+        positions=np.asarray(
+            [[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.0, 0.5, 0.0]],
+            dtype=np.float32,
+        ),
+        normals=np.asarray([[0.0, 0.0, 1.0]] * 3, dtype=np.float32),
+        uvs=np.asarray([[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]], dtype=np.float32),
+        indices=np.asarray([[0, 1, 2]], dtype=np.uint32),
+    )
+    transforms = np.eye(4, dtype=np.float32).reshape(1, 16)
+
+    rgba = geometry.instance_mesh_gpu_render(
+        mesh, transforms, 16, 16, certificate=True
+    )
+    cert = render_certificate(sign=False)
+
+    assert rgba.shape == (16, 16, 4)
+    assert [entry["label"] for entry in cert["passes"]] == [
+        "geometry.instanced_mesh"
+    ]
+    assert set(cert["engine"]["wgsl_module_hashes"]) == {"mesh_instanced_shader"}
+
+
+def test_terrain_sequence_never_substitutes_triangle_placeholder(monkeypatch, tmp_path):
+    import pytest
+
+    monkeypatch.setattr(terrain_demo.f3d, "has_gpu", lambda: False)
+    with pytest.raises(RuntimeError, match="fallback triangle placeholder has been removed"):
+        terrain_demo.render_sunrise_to_noon_sequence(
+            dem_path=tmp_path / "missing-dem.tif",
+            hdr_path=tmp_path / "missing-env.hdr",
+            output_dir=tmp_path / "frames",
+        )

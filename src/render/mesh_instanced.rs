@@ -812,6 +812,7 @@ impl MeshInstancedRenderer {
         let Some(inst) = &self.instbuf else {
             return;
         };
+        crate::core::shader_registry::record_shader_use("mesh_instanced_shader");
         // Update uniforms
         queue.write_buffer(&self.uniforms_buf, 0, bytemuck::bytes_of(&self.uniforms));
 

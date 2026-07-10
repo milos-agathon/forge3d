@@ -362,7 +362,9 @@ class RestirDI:
                      height: int,
                      camera_params: dict,
                      g_buffer: dict,
-                     output_format: str = "rgba") -> np.ndarray:
+                     output_format: str = "rgba",
+                     *,
+                     certificate: bool | str = False) -> np.ndarray:
         """Render a frame using ReSTIR DI.
 
         Args:
@@ -391,13 +393,21 @@ class RestirDI:
             elif buffer_name in ["normal", "world_pos"] and buffer_data.shape != (*expected_shape, 3):
                 raise ValueError(f"{buffer_name} buffer shape {buffer_data.shape} != expected {(*expected_shape, 3)}")
 
-        return _forge3d.restir_render_frame(
-            self._native_restir,
-            width, height,
-            camera_params,
-            g_buffer,
-            output_format
-        )
+        from . import certificate as _certificate
+
+        with _certificate._render_capture(
+            "python.lighting.restir_render_frame", "lighting.restir", draw_calls=1
+        ):
+            result = _forge3d.restir_render_frame(
+                self._native_restir,
+                width, height,
+                camera_params,
+                g_buffer,
+                output_format
+            )
+        if certificate:
+            _certificate.emit_render_certificate(certificate)
+        return result
 
     def calculate_variance_reduction(self,
                                    reference_image: np.ndarray,

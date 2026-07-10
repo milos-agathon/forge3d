@@ -310,6 +310,8 @@ def instance_mesh_gpu_render(
     transforms: np.ndarray,
     width: int = 512,
     height: int = 512,
+    *,
+    certificate: bool | str = False,
 ) -> np.ndarray:
     """Render an instanced mesh via the native GPU instancing path, returning an RGBA8 image.
 
@@ -344,7 +346,7 @@ def instance_mesh_gpu_render(
     if arr.ndim != 2 or arr.shape[1] != 16:
         raise ValueError("transforms must have shape (N,16) row-major 4x4")
     payload = _mesh_to_py(mesh)
-    return fn(int(width), int(height), payload, arr)
+    return fn(int(width), int(height), payload, arr, certificate=certificate)
 
 
 def generate_thick_polyline(

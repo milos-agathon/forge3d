@@ -122,13 +122,17 @@ pub fn geometry_instance_mesh_gpu_py(
 /// Render an instanced mesh to RGBA8 using GPU instancing (feature-gated).
 #[cfg(all(feature = "extension-module", feature = "enable-gpu-instancing"))]
 #[pyfunction]
+#[pyo3(signature = (width, height, mesh, transforms, certificate=None))]
 pub fn geometry_instance_mesh_gpu_render_py(
     py: Python<'_>,
     width: u32,
     height: u32,
     mesh: &Bound<'_, PyDict>,
     transforms: PyReadonlyArray2<'_, f32>, // (N,16) row-major
+    certificate: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
+    let certificate_capture =
+        crate::core::certificate::begin_render_capture("geometry_instance_mesh_gpu_render_py");
     if width == 0 || height == 0 {
         return Err(PyValueError::new_err("image dimensions must be positive"));
     }
@@ -341,5 +345,8 @@ pub fn geometry_instance_mesh_gpu_render_py(
     // Return numpy array (H,W,4)
     let arr1 = PyArray1::<u8>::from_vec_bound(py, rgba);
     let out = arr1.reshape([height as usize, width as usize, 4])?;
+    crate::core::certificate::record_pass("geometry.instanced_mesh", 0.0, 1);
+    certificate_capture.finish();
+    crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
     Ok(out.into_py(py))
 }
