@@ -307,6 +307,9 @@ jobs:
     env:
       # Pin the hardware backend before the native module initializes.
       WGPU_BACKEND: metal
+      # Permit the real-metal golden job through the test helper's conservative
+      # hosted-macOS guard only after this job's terrain probe has succeeded.
+      FORGE3D_ALLOW_HOSTED_MACOS_TERRAIN: '1'
       # Explicit opt-in for non-GPU environments that may only run recipe-level CPU goldens.
       FORGE3D_ALLOW_SOFTWARE_GOLDENS: ${{ vars.FORGE3D_ALLOW_SOFTWARE_GOLDENS }}
 

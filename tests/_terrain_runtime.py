@@ -74,9 +74,13 @@ def _build_overlay():
 
 
 def _running_on_unsupported_hosted_macos_ci() -> bool:
-    # Hosted macOS runners can pass a minimal terrain probe yet still fail
-    # the broader terrain image tests nondeterministically across Python versions.
-    return os.environ.get("GITHUB_ACTIONS") == "true" and platform.system() == "Darwin"
+    # The dedicated Metal golden lane enables this explicitly after its terrain
+    # probe succeeds. Other hosted macOS jobs retain the conservative skip.
+    return (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        and platform.system() == "Darwin"
+        and os.environ.get("FORGE3D_ALLOW_HOSTED_MACOS_TERRAIN") != "1"
+    )
 
 
 def _running_on_unsupported_hosted_windows_ci() -> bool:
