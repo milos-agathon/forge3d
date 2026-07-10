@@ -10,6 +10,7 @@ pub struct TerrainScene {
     pub(super) device: Arc<wgpu::Device>,
     pub(super) queue: Arc<wgpu::Queue>,
     pub(super) adapter: Arc<wgpu::Adapter>,
+    pub(super) shader_hashes: Mutex<std::collections::BTreeMap<String, String>>,
     pub(super) pipeline: Mutex<PipelineCache>,
     pub(super) bind_group_layout: wgpu::BindGroupLayout,
     pub(super) ibl_bind_group_layout: wgpu::BindGroupLayout,

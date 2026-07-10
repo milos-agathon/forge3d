@@ -81,6 +81,39 @@ def test_signed_payload_deterministic_across_two_renders(tmp_path):
     )
 
 
+def test_certificate_excludes_shaders_owned_by_another_renderer(tmp_path):
+    _skip_without_terrain()
+    _clear_sinks()
+
+    # Compile Scene-owned pipelines first. A terrain certificate must not copy
+    # these labels merely because they exist in the same process-wide cache.
+    f3d.Scene(2, 2)
+    _build_and_render(tmp_path)
+
+    hashes = render_certificate(sign=False)["engine"]["wgsl_module_hashes"]
+    assert hashes, "terrain render must report its renderer-owned WGSL modules"
+    unrelated = {
+        "mesh_basic_shader",
+        "overlays_shader",
+        "ssao-compute",
+        "text_overlay_shader",
+    }
+    assert unrelated.isdisjoint(hashes), hashes
+
+
+def test_scene_certificate_reports_only_scene_owned_shaders(tmp_path):
+    _skip_without_terrain()
+    _clear_sinks()
+
+    _build_and_render(tmp_path)
+    scene = f3d.Scene(2, 2)
+    scene.render_rgba()
+
+    hashes = render_certificate(sign=False)["engine"]["wgsl_module_hashes"]
+    assert hashes, "Scene render must report its renderer-owned WGSL modules"
+    assert "terrain_pbr_pom.shader" not in hashes, hashes
+
+
 def test_certificate_kwarg_writes_signed_file(tmp_path):
     _skip_without_terrain()
     _clear_sinks()

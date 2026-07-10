@@ -9,6 +9,23 @@
 // produced it.
 
 impl Scene {
+    pub(super) fn begin_certificate_capture(&self, entry_point: &str) {
+        let owned = self
+            .shader_hashes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        crate::core::certificate::begin_render_capture_with_shaders(entry_point, &owned);
+    }
+
+    pub(super) fn finish_certificate_capture(&self) {
+        let captured = crate::core::certificate::finish_render_capture();
+        self.shader_hashes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .extend(captured);
+    }
+
     /// Take the render-timing manager out of the scene, lazily constructing it
     /// the first time when the device granted `TIMESTAMP_QUERY`. Returns `None`
     /// when timestamps are unavailable (the certificate then reports the passes

@@ -3,8 +3,8 @@
 //! Every WGSL module the engine hands to naga is created through
 //! [`create_labeled_shader_module`], which records the SHA256 of the EXACT
 //! (already preprocessed) source keyed by a stable label. The signed
-//! RenderCertificate (Task 9) reads [`shader_hashes_snapshot`] so a tampered or
-//! swapped shader is detectable after the fact.
+//! Renderer construction and render captures retain only their own registered
+//! hashes, so a RenderCertificate cannot inherit modules from earlier renders.
 //!
 //! Hashing is deliberately separated from module creation: [`register_shader_source`]
 //! is a total function over `(label, source)` that needs no GPU device, so the
@@ -14,11 +14,72 @@
 
 use crate::core::degradation::record_degradation;
 use crate::core::provenance::{sha256, to_hex};
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 /// Global label -> hex-sha256(preprocessed WGSL) registry.
 static REGISTRY: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new());
+
+thread_local! {
+    static CONSTRUCTION_CAPTURE: RefCell<Option<BTreeMap<String, String>>> = const { RefCell::new(None) };
+    static RENDER_CAPTURE: RefCell<Option<BTreeMap<String, String>>> = const { RefCell::new(None) };
+}
+
+/// RAII capture of shader modules created while one renderer is constructed.
+pub struct ShaderConstructionCapture {
+    active: bool,
+}
+
+impl ShaderConstructionCapture {
+    pub fn finish(mut self) -> BTreeMap<String, String> {
+        self.active = false;
+        CONSTRUCTION_CAPTURE.with(|capture| capture.borrow_mut().take().unwrap_or_default())
+    }
+}
+
+impl Drop for ShaderConstructionCapture {
+    fn drop(&mut self) {
+        if self.active {
+            CONSTRUCTION_CAPTURE.with(|capture| {
+                capture.borrow_mut().take();
+            });
+        }
+    }
+}
+
+/// Start recording the exact modules created by the current renderer constructor.
+pub fn begin_shader_construction_capture() -> ShaderConstructionCapture {
+    CONSTRUCTION_CAPTURE.with(|capture| {
+        *capture.borrow_mut() = Some(BTreeMap::new());
+    });
+    ShaderConstructionCapture { active: true }
+}
+
+/// Seed the shader set for one render from its renderer-owned modules.
+pub fn begin_shader_render_capture(seed: &BTreeMap<String, String>) {
+    RENDER_CAPTURE.with(|capture| {
+        *capture.borrow_mut() = Some(seed.clone());
+    });
+}
+
+/// Finish and return the exact shader set associated with the current render.
+pub fn finish_shader_render_capture() -> BTreeMap<String, String> {
+    RENDER_CAPTURE.with(|capture| capture.borrow_mut().take().unwrap_or_default())
+}
+
+fn record_captured_shader(label: &str, hash: &str) {
+    CONSTRUCTION_CAPTURE.with(|capture| {
+        if let Some(captured) = capture.borrow_mut().as_mut() {
+            captured.insert(label.to_string(), hash.to_string());
+        }
+    });
+    RENDER_CAPTURE.with(|capture| {
+        if let Some(captured) = capture.borrow_mut().as_mut() {
+            captured.insert(label.to_string(), hash.to_string());
+        }
+    });
+}
 
 /// Pure hash-insert step, factored out so it is testable without a GPU device
 /// or global state. Inserts `hash` under `label`; on a same-label/different-hash
@@ -72,6 +133,7 @@ pub fn register_shader_source(label: &str, source: &str) -> String {
             "two distinct WGSL sources share a label; certificate keys may be ambiguous",
         );
     }
+    record_captured_shader(&final_label, &hash);
     final_label
 }
 
@@ -90,7 +152,7 @@ pub fn create_labeled_shader_module(
     })
 }
 
-/// Snapshot of every registered shader hash: `label -> hex sha256`.
+/// Snapshot of the process-wide collision cache, used only for diagnostics/tests.
 pub fn shader_hashes_snapshot() -> BTreeMap<String, String> {
     REGISTRY.lock().unwrap_or_else(|p| p.into_inner()).clone()
 }
@@ -175,5 +237,20 @@ mod tests {
             Some(&hash("collision-source-one"))
         );
         crate::core::degradation::clear_degradations();
+    }
+
+    #[test]
+    fn construction_capture_excludes_prior_process_shaders() {
+        register_shader_source("test.unrelated.shader", "unrelated");
+
+        let capture = begin_shader_construction_capture();
+        register_shader_source("test.renderer.alpha", "alpha");
+        register_shader_source("test.renderer.beta", "beta");
+        let captured = capture.finish();
+
+        assert_eq!(captured.len(), 2);
+        assert!(captured.contains_key("test.renderer.alpha"));
+        assert!(captured.contains_key("test.renderer.beta"));
+        assert!(!captured.contains_key("test.unrelated.shader"));
     }
 }

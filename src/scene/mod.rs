@@ -159,6 +159,7 @@ pub struct Scene {
     // Lazily constructed on first render when TIMESTAMP_QUERY is granted;
     // take/store between renders so each render owns one certificate capture.
     render_timing: std::sync::Mutex<Option<crate::core::gpu_timing::GpuTimingManager>>,
+    shader_hashes: std::sync::Mutex<std::collections::BTreeMap<String, String>>,
 
     // F16: GPU Instancing (feature-gated)
     #[cfg(feature = "enable-gpu-instancing")]

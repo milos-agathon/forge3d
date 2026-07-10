@@ -5,6 +5,8 @@ impl Scene {
         grid: Option<u32>,
         colormap: Option<String>,
     ) -> PyResult<Self> {
+        let shader_capture =
+            crate::core::shader_registry::begin_shader_construction_capture();
         let grid = grid.unwrap_or(128).max(2);
         let g = crate::core::gpu::try_ctx()?;
 
@@ -226,6 +228,7 @@ impl Scene {
             text3d_enabled: false,
             text3d_instances: Vec::new(),
             render_timing: std::sync::Mutex::new(None),
+            shader_hashes: std::sync::Mutex::new(shader_capture.finish()),
             #[cfg(feature = "enable-gpu-instancing")]
             mesh_instanced_renderer: Some(
                 crate::render::mesh_instanced::MeshInstancedRenderer::new(

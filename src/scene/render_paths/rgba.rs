@@ -3,7 +3,7 @@ impl Scene {
         &mut self,
         py: pyo3::Python<'py>,
     ) -> PyResult<Bound<'py, numpy::PyArray3<u8>>> {
-        crate::core::certificate::begin_render_capture("scene.render_rgba");
+        self.begin_certificate_capture("scene.render_rgba");
         let mut timing = self.take_render_timing();
 
         let g = crate::core::gpu::try_ctx()?;
@@ -22,7 +22,7 @@ impl Scene {
         // and freeze this render's capture (one render = one capture).
         self.record_render_timings(&mut timing);
         self.store_render_timing(timing);
-        crate::core::certificate::finish_render_capture();
+        self.finish_certificate_capture();
 
         self.apply_runtime_postfx_cpu(&mut pixels);
 
