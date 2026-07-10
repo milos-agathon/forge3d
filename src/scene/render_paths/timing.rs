@@ -46,9 +46,7 @@ impl Scene {
     /// the first time when the device granted `TIMESTAMP_QUERY`. Returns `None`
     /// when timestamps are unavailable (the certificate then reports the passes
     /// with `gpu_ms == 0`). Returned via [`Scene::store_render_timing`].
-    pub(super) fn take_render_timing(
-        &self,
-    ) -> Option<crate::core::gpu_timing::GpuTimingManager> {
+    pub(super) fn take_render_timing(&self) -> Option<crate::core::gpu_timing::GpuTimingManager> {
         let mut guard = self.render_timing.lock().ok()?;
         if guard.is_none() {
             let g = crate::core::gpu::ctx_if_initialized()?;
@@ -109,9 +107,11 @@ impl Scene {
             match manager.get_results_blocking() {
                 Ok(results) => {
                     for result in results {
+                        // Invalid timestamps are recorded as 0.0, never as a
+                        // garbage delta (CENSOR audit F-04).
                         crate::core::certificate::record_pass(
                             &result.name,
-                            result.gpu_time_ms as f64,
+                            result.certificate_gpu_ms(),
                             result.draw_calls,
                         );
                     }

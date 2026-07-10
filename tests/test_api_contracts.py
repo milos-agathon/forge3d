@@ -244,6 +244,9 @@ class TestNativeModuleSymbols:
         "sign_render_certificate_digest",
         # CENSOR: budget-enforce test helper
         "request_host_visible_allocation_for_test",
+        # CENSOR: certified BRDF pixel renders
+        "render_brdf_tile",
+        "render_brdf_tile_overrides",
     ]
 
     LATER_GIS_FUNCTIONS = []
@@ -744,6 +747,9 @@ class TestPackageLevelApiContracts:
         "begin_render_execution_capture",
         "finish_render_execution_capture",
         "abort_render_execution_capture",
+        # CENSOR: certified BRDF pixel renders
+        "render_brdf_tile",
+        "render_brdf_tile_overrides",
     ]
 
     @pytest.mark.parametrize("attr_name", EXPECTED_PACKAGE_ATTRS)

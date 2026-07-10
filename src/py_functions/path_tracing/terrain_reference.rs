@@ -197,10 +197,8 @@ pub(crate) fn hybrid_render_terrain_reference(
     d.set_item("peak_host_visible_bytes", out.peak_host_visible_bytes)?;
     d.set_item("minmax_pyramid_bytes", out.minmax_pyramid_bytes)?;
     d.set_item("gpu_resource_bytes", out.gpu_resource_bytes)?;
-    crate::core::certificate::record_pass("hybrid_pt.terrain_gbuffer", 0.0, 1);
-    crate::core::certificate::record_pass("hybrid_pt.terrain", 0.0, out.frames);
-    crate::core::certificate::record_pass("hybrid_pt.restir_temporal", 0.0, out.frames);
-    crate::core::certificate::record_pass("hybrid_pt.restir_spatial", 0.0, out.frames);
+    // The hybrid_pt.* passes (live gpu_ms when timestamps are granted) are
+    // recorded inside HybridPathTracer::render_terrain_reference.
     certificate_capture.finish();
     crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
     Ok(d.into_py(py))

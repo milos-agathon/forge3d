@@ -824,10 +824,18 @@ impl HybridPathTracer {
         let wg_x = width.div_ceil(8);
         let wg_y = height.div_ceil(8);
         let px_workgroups = ((px_count as u32) + 255) / 256;
+        // CENSOR F-04: live per-pass timing for the certificate. The gbuffer
+        // pass and frame 0's terrain/temporal/spatial dispatches are each
+        // bracketed on the encoder that executes them (one scope per label —
+        // timing every accumulation frame would multiply the pass list);
+        // when timestamp queries are unavailable the fallback below records
+        // the same labels in the same order with 0.0.
+        let mut timing = crate::core::gpu_timing::OneShotTiming::for_current_device();
         {
             let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("hybrid-pt-terrain-gbuffer-enc"),
             });
+            let gbuffer_scope = timing.begin(&mut enc, "hybrid_pt.terrain_gbuffer");
             {
                 let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("hybrid-pt-terrain-gbuffer-cpass"),
@@ -840,6 +848,7 @@ impl HybridPathTracer {
                 cpass.set_bind_group(2, &bg_gbuffer, &[]);
                 cpass.dispatch_workgroups(wg_x, wg_y, 1);
             }
+            timing.end(&mut enc, gbuffer_scope, 1);
             queue.submit([enc.finish()]);
         }
 
@@ -854,6 +863,15 @@ impl HybridPathTracer {
             let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("hybrid-pt-terrain-frame"),
             });
+            // Only frame 0 carries timing scopes (one certificate pass per
+            // label); each scope brackets exactly one dispatch of its
+            // pipeline on the encoder that executes it.
+            let time_this_frame = frames == 0;
+            let terrain_scope = if time_this_frame {
+                timing.begin(&mut enc, "hybrid_pt.terrain")
+            } else {
+                None
+            };
             {
                 let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("hybrid-pt-terrain-cpass"),
@@ -867,6 +885,14 @@ impl HybridPathTracer {
                 cpass.set_bind_group(3, &bg3, &[]);
                 cpass.dispatch_workgroups(wg_x, wg_y, 1);
             }
+            if time_this_frame {
+                timing.end(&mut enc, terrain_scope, 1);
+            }
+            let temporal_scope = if time_this_frame {
+                timing.begin(&mut enc, "hybrid_pt.restir_temporal")
+            } else {
+                None
+            };
             {
                 let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("hybrid-pt-restir-temporal-cpass"),
@@ -879,6 +905,14 @@ impl HybridPathTracer {
                 cpass.set_bind_group(2, &bg_temporal, &[]);
                 cpass.dispatch_workgroups(px_workgroups, 1, 1);
             }
+            if time_this_frame {
+                timing.end(&mut enc, temporal_scope, 1);
+            }
+            let spatial_scope = if time_this_frame {
+                timing.begin(&mut enc, "hybrid_pt.restir_spatial")
+            } else {
+                None
+            };
             {
                 let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("hybrid-pt-restir-spatial-cpass"),
@@ -890,6 +924,13 @@ impl HybridPathTracer {
                 cpass.set_bind_group(1, &bg_spatial_scene, &[]);
                 cpass.set_bind_group(2, &bg_spatial_reuse, &[]);
                 cpass.dispatch_workgroups(px_workgroups, 1, 1);
+            }
+            if time_this_frame {
+                timing.end(&mut enc, spatial_scope, 1);
+                // Resolve on frame 0's encoder: the gbuffer scope's stamps
+                // were written on the already-submitted gbuffer encoder, so
+                // the resolved range is complete once this submit lands.
+                timing.resolve(&mut enc);
             }
             queue.submit([enc.finish()]);
             frames += 1;
@@ -1006,6 +1047,17 @@ impl HybridPathTracer {
                 "terrain PT exceeded the host-visible budget: peak {peak} > limit {}",
                 metrics.limit_bytes
             )));
+        }
+
+        // CENSOR F-04: record the timed scopes (gbuffer + frame 0's terrain/
+        // temporal/spatial dispatches, draw_calls = 1 dispatch each); when
+        // timestamps were unavailable, record the same labels in the same
+        // order with 0.0 (draw_calls = accumulated frames, as before).
+        if !timing.record_into_certificate() {
+            crate::core::certificate::record_pass("hybrid_pt.terrain_gbuffer", 0.0, 1);
+            crate::core::certificate::record_pass("hybrid_pt.terrain", 0.0, frames);
+            crate::core::certificate::record_pass("hybrid_pt.restir_temporal", 0.0, frames);
+            crate::core::certificate::record_pass("hybrid_pt.restir_spatial", 0.0, frames);
         }
 
         Ok(TerrainReferenceOutput {

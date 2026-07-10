@@ -105,6 +105,8 @@ _NATIVE_ONLY_EXPORTS = (
         "copc_read_node_points",  # P2.3: native COPC node decode
         "render_adjudication_pair",  # AEQUITAS: PT-vs-raster adjudication pair
         "hybrid_render_terrain_reference",  # PROMETHEUS: terrain PT reference
+        "render_brdf_tile",  # CENSOR: certified BRDF pixel render
+        "render_brdf_tile_overrides",  # CENSOR: certified BRDF pixel render
         "seal_provenance",  # VERITAS: Merkle+Ed25519 seal over VT provenance
         "verify_provenance",  # VERITAS: native manifest verification
         "declutter_optimal",  # CARTOGRAPHER-PRIME: bounded-optimal label solve
@@ -342,7 +344,11 @@ class Renderer:
 # Image I/O utilities
 # -----------------------------------------------------------------------------
 def numpy_to_png(path, array: np.ndarray) -> None:
-    """Save numpy array as PNG file."""
+    """Save an existing numpy array as PNG.
+
+    Outside CENSOR's render-certificate scope: array-to-PNG I/O executes no
+    render.
+    """
     path_str = str(path)
     if not path_str.lower().endswith('.png'):
         raise ValueError(f"File must have .png extension, got {path_str}")
@@ -355,7 +361,11 @@ def numpy_to_png(path, array: np.ndarray) -> None:
 
 
 def png_to_numpy(path) -> np.ndarray:
-    """Load PNG file as numpy array."""
+    """Load an existing PNG into a numpy array.
+
+    Outside CENSOR's render-certificate scope: PNG-to-array I/O executes no
+    render.
+    """
     return _load_png_rgba(path)
 
 
@@ -616,6 +626,9 @@ __all__ = [
     "render_adjudication_pair",
     # PROMETHEUS: GPU terrain path-traced reference
     "hybrid_render_terrain_reference",
+    # CENSOR: certified BRDF pixel renders
+    "render_brdf_tile",
+    "render_brdf_tile_overrides",
     # VERITAS: per-pixel cryptographic provenance
     "seal_provenance",
     "verify_provenance",

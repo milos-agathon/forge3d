@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 
 import numpy as np
 
@@ -11,16 +12,67 @@ from forge3d import sdf
 from forge3d.legend import Legend
 from forge3d.lighting import RestirDI
 from forge3d.map_scene import MapScene
+from forge3d.map_plate import MapPlate
 from forge3d.north_arrow import NorthArrow
 from forge3d.offline import render_offline
 from forge3d.scale_bar import ScaleBar
 from forge3d.sdf import HybridRenderer, SdfPrimitive, SdfScene
 from forge3d.smoke import SmokeDomain
 from forge3d.vector import VectorScene
+import forge3d._forge3d as _native
+from forge3d.denoise import atrous_denoise
+from forge3d.denoise_oidn import oidn_denoise
+from forge3d.bench import run_benchmark
+from forge3d.export import export_pdf, export_svg
+from forge3d.viewer import ViewerHandle
+from forge3d.widgets import ViewerWidget
+
+
+# Public callables matching `render_*` (or documented pixel producers) that are
+# deliberately OUTSIDE CENSOR's render definition ("every render: offscreen,
+# golden, MapScene, PT reference" — 14-censor.md). Each entry carries the reason
+# it does not take certificate=. Additions require the same justification.
+DOCUMENTED_EXCLUSIONS = {
+    # Pure I/O of an existing array — no rendering executes.
+    "numpy_to_png": "array-to-PNG conversion, no render",
+    "png_to_numpy": "PNG-to-array conversion, no render",
+    # Image-space filters over an already-rendered image.
+    "oidn_denoise": "post-hoc denoise filter over an existing image",
+    "atrous_denoise": "post-hoc denoise filter over an existing image",
+    # Composition of images that were themselves rendered under certificates.
+    "MapPlate.compose": "composites pre-rendered certified images",
+    "MapPlate.export_png": "writes a composed image, no render",
+    "MapPlate.export_jpeg": "writes a composed image, no render",
+    # Interactive viewer subprocess: CENSOR certifies offscreen renders.
+    "ViewerHandle.snapshot": "interactive viewer subprocess, outside offscreen scope",
+    "ViewerHandle.render_animation": "interactive viewer subprocess, outside offscreen scope",
+    "ViewerWidget.snapshot": "interactive viewer/widget snapshot, outside offscreen scope",
+    # Vector (non-pixel) exports.
+    "export_svg": "vector output, not a pixel render",
+    "export_pdf": "vector output, not a pixel render",
+    # Benchmark harness (never a product image).
+    "run_benchmark": "benchmark timing harness",
+    # Certificate-report getter: returns the last render's execution report,
+    # renders nothing itself.
+    "render_execution_report": "execution-report getter, produces no pixels",
+}
+
+
+def test_brdf_certificate_contract_is_in_public_stub() -> None:
+    stub = (Path(f3d.__file__).with_name("__init__.pyi")).read_text(encoding="utf-8")
+    for name in ("render_brdf_tile", "render_brdf_tile_overrides"):
+        declaration = stub.split(f"def {name}(", 1)
+        assert len(declaration) == 2, f"{name} missing from __init__.pyi"
+        assert "certificate:" in declaration[1].split(") ->", 1)[0]
 
 
 def test_public_render_entrypoints_expose_certificate_keyword() -> None:
     entrypoints = {
+        "Scene.render_rgba": f3d.Scene.render_rgba,
+        "Scene.render_png": f3d.Scene.render_png,
+        "render_debug_pattern_frame": _native.render_debug_pattern_frame,
+        "render_brdf_tile": _native.render_brdf_tile,
+        "render_brdf_tile_overrides": _native.render_brdf_tile_overrides,
         "TerrainRenderer.render_terrain_pbr_pom": f3d.TerrainRenderer.render_terrain_pbr_pom,
         "TerrainRenderer.render_with_aov": f3d.TerrainRenderer.render_with_aov,
         "render_adjudication_pair": f3d.render_adjudication_pair,
@@ -61,6 +113,73 @@ def test_public_render_entrypoints_expose_certificate_keyword() -> None:
         if "certificate" not in inspect.signature(entrypoint).parameters
     ]
     assert not missing, f"render entrypoints missing certificate= contract: {missing}"
+
+
+def test_brdf_tile_emits_a_live_certified_pass() -> None:
+    from forge3d.diagnostics import render_certificate
+
+    rgba = f3d.render_brdf_tile("lambert", 0.4, 32, 32, certificate=True)
+    certificate = render_certificate(sign=False)
+
+    assert rgba.shape == (32, 32, 4)
+    assert [entry["label"] for entry in certificate["passes"]] == ["brdf.tile"]
+    assert certificate["passes"][0]["gpu_ms"] > 0.0
+    assert set(certificate["engine"]["wgsl_module_hashes"]) == {"brdf_tile.shader"}
+
+
+def test_render_surface_sweep_has_no_uncertified_entrypoints() -> None:
+    """Auto-discovery guard (CENSOR audit F-05): the hardcoded enumeration above
+    cannot notice a NEWLY ADDED public render entrypoint. Sweep every public
+    callable named `render_*` on `forge3d` and `forge3d._forge3d`: each must
+    either accept `certificate=` or carry a documented exclusion."""
+    candidates: dict[str, object] = {}
+    for module in (f3d, _native):
+        for name in dir(module):
+            if name.startswith("render_"):
+                obj = getattr(module, name)
+                if callable(obj):
+                    candidates.setdefault(name, obj)
+
+    offenders = []
+    for name, obj in sorted(candidates.items()):
+        if name in DOCUMENTED_EXCLUSIONS:
+            continue
+        try:
+            params = inspect.signature(obj).parameters
+        except (TypeError, ValueError):
+            offenders.append(f"{name} (signature not introspectable)")
+            continue
+        if "certificate" not in params:
+            offenders.append(name)
+    assert offenders == [], (
+        "public render_* callables lack both a certificate= contract and a "
+        f"documented exclusion: {offenders}"
+    )
+
+
+def test_documented_exclusions_explain_their_certificate_scope() -> None:
+    exclusions = {
+        "MapPlate.compose": MapPlate.compose,
+        "MapPlate.export_png": MapPlate.export_png,
+        "MapPlate.export_jpeg": MapPlate.export_jpeg,
+        "oidn_denoise": oidn_denoise,
+        "atrous_denoise": atrous_denoise,
+        "numpy_to_png": f3d.numpy_to_png,
+        "png_to_numpy": f3d.png_to_numpy,
+        "ViewerHandle.snapshot": ViewerHandle.snapshot,
+        "ViewerWidget.snapshot": ViewerWidget.snapshot,
+        "export_svg": export_svg,
+        "export_pdf": export_pdf,
+        "run_benchmark": run_benchmark,
+    }
+    for name, entrypoint in exclusions.items():
+        assert name in DOCUMENTED_EXCLUSIONS
+        assert "Outside CENSOR's render-certificate scope" in (entrypoint.__doc__ or ""), name
+
+    native_diagnostics = (
+        Path(__file__).resolve().parents[1] / "src" / "py_functions" / "diagnostics.rs"
+    ).read_text(encoding="utf-8")
+    assert "Outside CENSOR's render-certificate scope" in native_diagnostics
 
 
 def test_vector_render_certificate_is_fresh_and_exact():

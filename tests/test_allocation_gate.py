@@ -13,10 +13,23 @@ TRACKER = ROOT / "src" / "core" / "resource_tracker.rs"
 # `create_buffer_init(` that is immediately preceded by `tracked_`, so raw
 # `device.create_buffer_init(` still trips the gate while
 # `tracked_create_buffer_init(` does not.
-# NOTE: `create_texture_with_data` (wgpu DeviceExt) is deliberately uncovered
-# because it is unused in-tree; if it is ever introduced it must be added to
-# this regex so its host-visible staging upload stays on the ledger.
-RAW = re.compile(r"\.create_buffer\(|\.create_texture\(|(?<!tracked_)create_buffer_init\(")
+# Hardened (CENSOR audit F-09): the gate also catches UFCS calls
+# (`Device::create_buffer(...)`), `create_texture_with_data` (wgpu DeviceExt —
+# previously deliberately uncovered because unused in-tree), and calls split
+# across lines (`device.\n    create_buffer(`) via the whitespace-collapsed
+# sweep below. `tracked_*` wrapper calls stay excluded by the lookbehinds.
+RAW = re.compile(
+    r"\.create_buffer\(|\.create_texture\(|(?<!tracked_)create_buffer_init\("
+    # UFCS evasion must name the wgpu type (`wgpu::Device::create_buffer(&dev,`).
+    # Plain `Self::create_texture(`/`Foo::create_texture(` helpers that route
+    # through the tracked wrappers are legitimate and stay unmatched.
+    r"|Device::create_buffer\(|Device::create_texture\("
+    r"|(?<!tracked_)create_texture_with_data\("
+)
+
+
+def _strip_line_comments(text: str) -> str:
+    return "\n".join(line.split("//")[0] for line in text.splitlines())
 
 
 def _raw_sites():
@@ -30,11 +43,33 @@ def _raw_sites():
     return sites
 
 
+def _line_split_evasions():
+    """Catch allocation calls that a line-based regex misses because the
+    receiver and the method name are separated by a newline."""
+    hits = []
+    for path in (ROOT / "src").rglob("*.rs"):
+        if path == TRACKER:
+            continue
+        flat = re.sub(r"\s+", "", _strip_line_comments(path.read_text(encoding="utf-8")))
+        if RAW.search(flat):
+            hits.append(path.relative_to(ROOT).as_posix())
+    return hits
+
+
 def test_zero_raw_allocation_sites_outside_tracker():
     allow = load_toml(ROOT / "tests" / "allocation_allowlist.toml")["entries"]
     allowed = {e["site"].rsplit(":", 1)[0] for e in allow}
     stray = [s for s in _raw_sites() if s.rsplit(":", 1)[0] not in allowed]
     assert stray == [], f"raw wgpu allocation sites bypass the ledger: {stray}"
+
+
+def test_zero_line_split_allocation_evasions():
+    allow = load_toml(ROOT / "tests" / "allocation_allowlist.toml")["entries"]
+    allowed = {e["site"].rsplit(":", 1)[0] for e in allow}
+    stray = [f for f in _line_split_evasions() if f not in allowed]
+    assert stray == [], (
+        f"allocation calls split across lines evade the per-line gate: {stray}"
+    )
 
 
 def test_allowlist_entries_not_expired_and_not_stale():
@@ -57,6 +92,15 @@ def test_gate_regex_excludes_tracked_wrapper():
     # Sanity: the other two raw-allocation patterns are unaffected.
     assert RAW.search("let b = device.create_buffer(&desc);")
     assert RAW.search("let t = device.create_texture(&desc);")
+    # Hardening (F-09): UFCS, DeviceExt::create_texture_with_data, and
+    # line-split calls are all caught; tracked wrappers still are not.
+    assert RAW.search("let b = wgpu::Device::create_buffer(&device, &desc);")
+    assert RAW.search("let t = wgpu::Device::create_texture(&device, &desc);")
+    assert RAW.search("let t = queue_ext.create_texture_with_data(&queue, &desc, data);")
+    assert not RAW.search("let t = tracked_create_texture_with_data(&device, &queue, &desc, data);")
+    assert not RAW.search("let t = tracked_create_texture(&device, &desc);")
+    split = re.sub(r"\s+", "", "device.\n    create_buffer(&desc)")
+    assert RAW.search(split)
 
 
 def test_toml_fallback_parser_handles_empty_entries():

@@ -12,7 +12,8 @@ use super::*;
     debug_angle_sweep=false, debug_angle_component=2,
     debug_no_srgb=false, output_mode=1, metallic_override=0.0,
     mode=None, wi3_debug_mode=0, wi3_debug_roughness=0.0,
-    sphere_sectors=64, sphere_stacks=32
+    sphere_sectors=64, sphere_stacks=32,
+    certificate=None
 ))]
 pub(crate) fn render_brdf_tile<'py>(
     py: Python<'py>,
@@ -49,6 +50,7 @@ pub(crate) fn render_brdf_tile<'py>(
     wi3_debug_roughness: f32,
     sphere_sectors: u32,
     sphere_stacks: u32,
+    certificate: Option<Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyArray3<u8>>> {
     render_brdf_tile_impl(
         py,
@@ -87,6 +89,7 @@ pub(crate) fn render_brdf_tile<'py>(
         sphere_stacks,
         None,
         0,
+        certificate.as_ref(),
     )
 }
 
@@ -103,7 +106,8 @@ pub(crate) fn render_brdf_tile<'py>(
     debug_no_srgb=false, output_mode=1, metallic_override=0.0,
     mode=None, wi3_debug_mode=0, wi3_debug_roughness=0.0,
     sphere_sectors=64, sphere_stacks=32,
-    light_dir=None, debug_kind=0
+    light_dir=None, debug_kind=0,
+    certificate=None
 ))]
 pub(crate) fn render_brdf_tile_overrides<'py>(
     py: Python<'py>,
@@ -142,6 +146,7 @@ pub(crate) fn render_brdf_tile_overrides<'py>(
     sphere_stacks: u32,
     light_dir: Option<(f32, f32, f32)>,
     debug_kind: u32,
+    certificate: Option<Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyArray3<u8>>> {
     render_brdf_tile_impl(
         py,
@@ -180,5 +185,6 @@ pub(crate) fn render_brdf_tile_overrides<'py>(
         sphere_stacks,
         light_dir,
         debug_kind,
+        certificate.as_ref(),
     )
 }

@@ -26,6 +26,10 @@ pub(crate) fn vector_render_pick_map_py(
             label: Some("vf.Vector.RenderPick.Encoder"),
         });
 
+    // CENSOR F-04: live per-pass timing for the certificate; falls back to a
+    // 0.0 pass record when TIMESTAMP_QUERY is not granted.
+    let mut timing = crate::core::gpu_timing::OneShotTiming::for_current_device();
+    let pick_scope = timing.begin(&mut encoder, "vector.pick");
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("vf.Vector.RenderPick.Pass"),
@@ -54,6 +58,8 @@ pub(crate) fn vector_render_pick_map_py(
             base_pick_id.unwrap_or(1),
         )?;
     }
+    timing.end(&mut encoder, pick_scope, 1);
+    timing.resolve(&mut encoder);
 
     scene.queue.submit(Some(encoder.finish()));
     scene.device.poll(wgpu::Maintain::Wait);
@@ -68,7 +74,9 @@ pub(crate) fn vector_render_pick_map_py(
         "vf.Vector.RenderPick.Read",
         "map_async cancelled",
     )?;
-    crate::core::certificate::record_pass("vector.pick", 0.0, 1);
+    if !timing.record_into_certificate() {
+        crate::core::certificate::record_pass("vector.pick", 0.0, 1);
+    }
     _certificate_capture.finish();
     crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
     Ok(result)
@@ -138,10 +146,16 @@ pub(crate) fn vector_render_oit_and_pick_py(
                 label: Some("vf.Vector.Combine.Encoder"),
             });
 
+        // CENSOR F-04: live per-pass timing for the certificate; falls back to
+        // 0.0 pass records when TIMESTAMP_QUERY is not granted.
+        let mut timing = crate::core::gpu_timing::OneShotTiming::for_current_device();
+        let oit_scope = timing.begin(&mut encoder, "vector.oit");
         {
             let mut pass = oit.begin_accumulation(&mut encoder);
             render_oit_scene(&mut scene, &mut pass, width, height)?;
         }
+        timing.end(&mut encoder, oit_scope, 1);
+        let compose_scope = timing.begin(&mut encoder, "vector.oit.compose");
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("vf.Vector.Combine.Compose"),
@@ -159,6 +173,8 @@ pub(crate) fn vector_render_oit_and_pick_py(
             });
             oit.compose(&mut pass);
         }
+        timing.end(&mut encoder, compose_scope, 1);
+        let pick_scope = timing.begin(&mut encoder, "vector.pick");
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("vf.Vector.Combine.PickPass"),
@@ -187,6 +203,8 @@ pub(crate) fn vector_render_oit_and_pick_py(
                 base_pick_id.unwrap_or(1),
             )?;
         }
+        timing.end(&mut encoder, pick_scope, 1);
+        timing.resolve(&mut encoder);
 
         scene.queue.submit(Some(encoder.finish()));
         scene.device.poll(wgpu::Maintain::Wait);
@@ -213,9 +231,11 @@ pub(crate) fn vector_render_oit_and_pick_py(
             "vf.Vector.Combine.PickRead",
             "pick map cancelled",
         )?;
-        crate::core::certificate::record_pass("vector.oit", 0.0, 1);
-        crate::core::certificate::record_pass("vector.oit.compose", 0.0, 1);
-        crate::core::certificate::record_pass("vector.pick", 0.0, 1);
+        if !timing.record_into_certificate() {
+            crate::core::certificate::record_pass("vector.oit", 0.0, 1);
+            crate::core::certificate::record_pass("vector.oit.compose", 0.0, 1);
+            crate::core::certificate::record_pass("vector.pick", 0.0, 1);
+        }
         _certificate_capture.finish();
         crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
         Ok((rgba, ids))

@@ -10,8 +10,15 @@ use wgpu::{BufferDescriptor, BufferUsages, TextureDescriptor, TextureFormat};
 /// Resource handle that automatically unregisters on drop
 #[derive(Debug)]
 pub enum ResourceHandle {
-    Buffer { size: u64, is_host_visible: bool },
-    Texture { size: u64 },
+    Buffer {
+        size: u64,
+        is_host_visible: bool,
+        ledger_id: u64,
+    },
+    Texture {
+        size: u64,
+        ledger_id: u64,
+    },
 }
 
 impl Drop for ResourceHandle {
@@ -21,46 +28,84 @@ impl Drop for ResourceHandle {
             ResourceHandle::Buffer {
                 size,
                 is_host_visible,
+                ledger_id,
             } => {
+                ledger().remove(*ledger_id);
+                tracker.free_ledger_allocation(*size, *is_host_visible);
                 tracker.free_buffer_allocation(*size, *is_host_visible);
             }
-            ResourceHandle::Texture { size } => {
+            ResourceHandle::Texture { size, ledger_id } => {
+                ledger().remove(*ledger_id);
+                tracker.free_ledger_allocation(*size, false);
                 tracker.free_texture_allocation_bytes(*size);
             }
         }
     }
 }
 
-/// Register a buffer allocation and return a handle that will unregister on drop
-pub fn register_buffer(size: u64, usage: BufferUsages) -> ResourceHandle {
-    let is_host_visible = is_host_visible_usage(usage);
+#[track_caller]
+fn caller_label() -> String {
+    let loc = std::panic::Location::caller();
+    format!("{}:{}", loc.file().replace('\\', "/"), loc.line())
+}
+
+fn register_buffer_with_ledger(
+    size: u64,
+    is_host_visible: bool,
+    label: String,
+    call_site: String,
+) -> ResourceHandle {
     let tracker = global_tracker();
     tracker.track_buffer_allocation(size, is_host_visible);
+    tracker.track_ledger_allocation(size, is_host_visible);
+    let ledger_id = ledger().insert(
+        label,
+        size,
+        is_host_visible,
+        LedgerCategory::Buffer,
+        call_site,
+    );
     ResourceHandle::Buffer {
         size,
         is_host_visible,
+        ledger_id,
     }
 }
 
+fn register_texture_with_ledger(size: u64, label: String, call_site: String) -> ResourceHandle {
+    let tracker = global_tracker();
+    tracker.track_texture_allocation_bytes(size);
+    tracker.track_ledger_allocation(size, false);
+    let ledger_id = ledger().insert(label, size, false, LedgerCategory::Texture, call_site);
+    ResourceHandle::Texture { size, ledger_id }
+}
+
+/// Register a buffer allocation and return a handle that will unregister on drop
+#[track_caller]
+pub fn register_buffer(size: u64, usage: BufferUsages) -> ResourceHandle {
+    let is_host_visible = is_host_visible_usage(usage);
+    let call_site = caller_label();
+    register_buffer_with_ledger(size, is_host_visible, call_site.clone(), call_site)
+}
+
 /// Register a texture allocation and return a handle that will unregister on drop
+#[track_caller]
 pub fn register_texture(width: u32, height: u32, format: TextureFormat) -> ResourceHandle {
     register_texture_bytes(calculate_texture_size(width, height, format))
 }
 
 /// Register an exactly sized texture allocation.
+#[track_caller]
 pub fn register_texture_bytes(size: u64) -> ResourceHandle {
-    global_tracker().track_texture_allocation_bytes(size);
-    ResourceHandle::Texture { size }
+    let call_site = caller_label();
+    register_texture_with_ledger(size, call_site.clone(), call_site)
 }
 
 /// Register a buffer allocation with explicit host-visible flag
+#[track_caller]
 pub fn register_buffer_explicit(size: u64, is_host_visible: bool) -> ResourceHandle {
-    let tracker = global_tracker();
-    tracker.track_buffer_allocation(size, is_host_visible);
-    ResourceHandle::Buffer {
-        size,
-        is_host_visible,
-    }
+    let call_site = caller_label();
+    register_buffer_with_ledger(size, is_host_visible, call_site.clone(), call_site)
 }
 
 // ---------------------------------------------------------------------------
@@ -429,8 +474,39 @@ pub fn extend_ledger_capture(owner_ids: &[u64]) {
     ledger().extend_capture(owner_ids);
 }
 
+/// CENSOR audit F-07: cross-channel accounting invariant.
+///
+/// Every `ResourceHandle` updates both the ledger and the registry's exact
+/// wrapper subset as one lifetime-owned allocation, so both axes must match.
+pub fn ledger_registry_cross_check() -> Result<(), String> {
+    let snap = ledger().snapshot();
+    let (registry_host_visible, registry_device_local) = global_tracker().ledger_totals();
+    if snap.current_host_visible_bytes != registry_host_visible {
+        return Err(format!(
+            "ledger host-visible total ({}) differs from the registry counter ({})",
+            snap.current_host_visible_bytes, registry_host_visible
+        ));
+    }
+    if snap.current_device_local_bytes != registry_device_local {
+        return Err(format!(
+            "ledger device-local total ({}) differs from the registry counter ({registry_device_local})",
+            snap.current_device_local_bytes
+        ));
+    }
+    Ok(())
+}
+
 /// Finish render-local peak accounting and return the captured ledger report.
+///
+/// Debug builds assert the ledger/registry cross-invariant here — once per
+/// render capture, not merely on the budget-error path — and `snapshot()`
+/// inside the check also re-runs the ledger's own sum-of-entries == counters
+/// assertion at the same cadence.
 pub fn finish_ledger_capture() -> LedgerReport {
+    #[cfg(debug_assertions)]
+    if let Err(violation) = ledger_registry_cross_check() {
+        panic!("allocation accounting invariant violated at render-capture finish: {violation}");
+    }
     ledger().finish_capture()
 }
 
@@ -463,7 +539,6 @@ pub fn ledger_top_consumers_string(n: usize) -> String {
 pub struct TrackedBuffer {
     inner: wgpu::Buffer,
     _registry: ResourceHandle,
-    ledger_id: u64,
 }
 
 impl TrackedBuffer {
@@ -480,18 +555,11 @@ impl std::ops::Deref for TrackedBuffer {
     }
 }
 
-impl Drop for TrackedBuffer {
-    fn drop(&mut self) {
-        ledger().remove(self.ledger_id);
-    }
-}
-
 /// A `wgpu::Texture` whose lifetime is tracked in the global registry + ledger.
 #[derive(Debug)]
 pub struct TrackedTexture {
     inner: wgpu::Texture,
     _registry: ResourceHandle,
-    ledger_id: u64,
 }
 
 impl TrackedTexture {
@@ -505,12 +573,6 @@ impl std::ops::Deref for TrackedTexture {
     type Target = wgpu::Texture;
     fn deref(&self) -> &Self::Target {
         &self.inner
-    }
-}
-
-impl Drop for TrackedTexture {
-    fn drop(&mut self) {
-        ledger().remove(self.ledger_id);
     }
 }
 
@@ -542,18 +604,10 @@ pub fn tracked_create_buffer(
         global_tracker().check_budget_labeled(desc.size, &label)?;
     }
     let buffer = device.create_buffer(desc);
-    let registry = register_buffer_explicit(desc.size, host_visible);
-    let ledger_id = ledger().insert(
-        label,
-        desc.size,
-        host_visible,
-        LedgerCategory::Buffer,
-        call_site,
-    );
+    let registry = register_buffer_with_ledger(desc.size, host_visible, label, call_site);
     Ok(TrackedBuffer {
         inner: buffer,
         _registry: registry,
-        ledger_id,
     })
 }
 
@@ -578,12 +632,10 @@ pub fn tracked_create_buffer_init(
         global_tracker().check_budget_labeled(size, &label)?;
     }
     let buffer = device.create_buffer_init(desc);
-    let registry = register_buffer_explicit(size, host_visible);
-    let ledger_id = ledger().insert(label, size, host_visible, LedgerCategory::Buffer, call_site);
+    let registry = register_buffer_with_ledger(size, host_visible, label, call_site);
     Ok(TrackedBuffer {
         inner: buffer,
         _registry: registry,
-        ledger_id,
     })
 }
 
@@ -603,12 +655,10 @@ pub fn tracked_create_texture(
         .unwrap_or_else(|| call_site.clone());
     let size = calculate_texture_descriptor_size(desc);
     let texture = device.create_texture(desc);
-    let registry = register_texture_bytes(size);
-    let ledger_id = ledger().insert(label, size, false, LedgerCategory::Texture, call_site);
+    let registry = register_texture_with_ledger(size, label, call_site);
     Ok(TrackedTexture {
         inner: texture,
         _registry: registry,
-        ledger_id,
     })
 }
 
@@ -651,9 +701,18 @@ mod tests {
 
         // Test buffer handle
         {
+            global_tracker().track_buffer_allocation(1024, true);
+            global_tracker().track_ledger_allocation(1024, true);
             let handle = ResourceHandle::Buffer {
                 size: 1024,
                 is_host_visible: true,
+                ledger_id: ledger().insert(
+                    "test-resource-handle".to_string(),
+                    1024,
+                    true,
+                    LedgerCategory::Buffer,
+                    "test".to_string(),
+                ),
             };
 
             // Manually track allocation to simulate what register_buffer does
@@ -1087,5 +1146,69 @@ mod tests {
         assert_eq!(report.current_host_visible_bytes, 0);
         assert_eq!(report.peak_host_visible_bytes, 8192);
         assert_eq!(report.by_label.get("temporary-readback"), Some(&8192));
+    }
+
+    #[test]
+    fn capture_includes_mid_capture_ownerless_allocations() {
+        // Allocations made while a capture is active are counted even when no
+        // AllocationOwner is active (owner_id == None): a mid-render ownerless
+        // allocation must show up in the certificate evidence rather than
+        // silently under-counting (CENSOR audit F-07). Only PRE-EXISTING
+        // ownerless entries (ambient process state) stay excluded.
+        let ledger = AllocationLedger::new();
+        let ambient = ledger.insert(
+            "ambient-ownerless".to_string(),
+            1024,
+            true,
+            LedgerCategory::Buffer,
+            "test:ambient".to_string(),
+        );
+        ledger.begin_capture(&[]);
+        let mid_render = ledger.insert(
+            "mid-render-ownerless".to_string(),
+            4096,
+            true,
+            LedgerCategory::Buffer,
+            "test:mid".to_string(),
+        );
+        let report = ledger.finish_capture();
+
+        assert_eq!(report.peak_host_visible_bytes, 4096);
+        assert_eq!(report.by_label.get("mid-render-ownerless"), Some(&4096));
+        assert!(!report.by_label.contains_key("ambient-ownerless"));
+
+        ledger.remove(ambient);
+        ledger.remove(mid_render);
+    }
+
+    #[test]
+    fn global_ledger_registry_cross_check_matches_both_axes() {
+        let before_ledger = ledger_snapshot();
+        let before_registry = global_tracker().ledger_totals();
+        let _handle = register_buffer_explicit(4096, true);
+        let ledger = ledger_snapshot();
+        let registry = global_tracker().ledger_totals();
+        assert_eq!(ledger.current_host_visible_bytes, registry.0);
+        assert_eq!(ledger.current_device_local_bytes, registry.1);
+        assert_eq!(
+            ledger.current_host_visible_bytes,
+            before_ledger.current_host_visible_bytes + 4096
+        );
+        assert_eq!(registry.0, before_registry.0 + 4096);
+        assert!(ledger_registry_cross_check().is_ok());
+    }
+
+    #[test]
+    fn global_ledger_registry_cross_check_rejects_an_unpaired_entry() {
+        let id = ledger().insert(
+            "unpaired-ledger-entry".to_string(),
+            1,
+            false,
+            LedgerCategory::Buffer,
+            "test:cross".to_string(),
+        );
+        assert!(ledger_registry_cross_check().is_err());
+        ledger().remove(id);
+        assert!(ledger_registry_cross_check().is_ok());
     }
 }

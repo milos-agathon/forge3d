@@ -609,10 +609,21 @@ impl TerrainScene {
         })
     }
 
+    /// Render one offline accumulation sample.
+    ///
+    /// `batch_scope_draws` (CENSOR F-04): when `Some(draws)`, this sample's
+    /// encoder is bracketed in a "terrain.offline.accumulate_batch" timing
+    /// scope (recorded with `draws` = the batch's sample count) and the
+    /// queries are resolved before this sample's submit. `accumulate_batch`
+    /// passes it for the FIRST sample of a batch only, so the certificate
+    /// keeps exactly one pass per batch; the timed region is that one
+    /// representative sample.
     fn render_offline_sample(
         &mut self,
         state: &mut super::core::OfflineAccumulationState,
         jitter: (f32, f32),
+        timing: &mut Option<crate::core::gpu_timing::GpuTimingManager>,
+        batch_scope_draws: Option<u32>,
     ) -> Result<()> {
         // Re-prepare per sample: interleaved non-offline renders may have
         // switched the geometry provider; the clipmap mesh cache makes this
@@ -642,6 +653,12 @@ impl TerrainScene {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("terrain.offline.encoder"),
             });
+
+        let batch_scope = if batch_scope_draws.is_some() {
+            ts_begin(timing, &mut encoder, "terrain.offline.accumulate_batch")
+        } else {
+            None
+        };
 
         let material_vt_ready = self.prepare_material_vt_frame(
             &mut encoder,
@@ -815,6 +832,12 @@ impl TerrainScene {
         )?;
 
         self.stage_material_vt_feedback_readback(&mut encoder)?;
+        if let Some(draws) = batch_scope_draws {
+            ts_end(timing, &mut encoder, batch_scope, draws);
+            if let Some(manager) = timing.as_mut() {
+                manager.resolve_queries(&mut encoder);
+            }
+        }
         self.queue.submit(Some(encoder.finish()));
         self.finish_material_vt_frame()?;
         state.total_samples += 1;
@@ -1526,6 +1549,10 @@ impl TerrainRenderer {
         let (certificate_capture, _allocation_scope) = self
             .scene
             .begin_certificate_capture("terrain.accumulate_batch");
+        // CENSOR F-04: live GPU timing through the scene's per-render timing
+        // manager. The first sample of the batch carries the one
+        // "terrain.offline.accumulate_batch" scope (see render_offline_sample).
+        let mut timing = self.scene.take_render_timing();
 
         let start = Instant::now();
         let mut state = {
@@ -1540,10 +1567,15 @@ impl TerrainRenderer {
         };
 
         let work_result = (|| -> PyResult<()> {
-            for _ in 0..sample_count {
+            for sample_index in 0..sample_count {
                 let jitter = state.jitter_sequence.next();
+                let batch_scope_draws = if sample_index == 0 {
+                    Some(sample_count)
+                } else {
+                    None
+                };
                 self.scene
-                    .render_offline_sample(&mut state, jitter)
+                    .render_offline_sample(&mut state, jitter, &mut timing, batch_scope_draws)
                     .map_err(|e| {
                         PyRuntimeError::new_err(format!("Offline sample render failed: {e:#}"))
                     })?;
@@ -1558,12 +1590,49 @@ impl TerrainRenderer {
             .lock()
             .map_err(|_| PyRuntimeError::new_err("offline_state mutex poisoned"))?;
         *guard = Some(state);
-        work_result?;
-        crate::core::certificate::record_pass(
-            "terrain.offline.accumulate_batch",
-            0.0,
-            sample_count,
-        );
+        if let Err(err) = work_result {
+            // Drop the manager rather than storing it: the batch scope may
+            // hold unresolved/undrained queries that would otherwise leak
+            // into the NEXT render's certificate. take_render_timing lazily
+            // rebuilds one.
+            drop(timing);
+            return Err(err);
+        }
+        // Record the batch pass: live timestamps when they read back, else the
+        // honest 0.0 record with the same label so certificate pass lists stay
+        // identical across adapters.
+        let mut recorded_live = false;
+        let mut drained = true;
+        if let Some(manager) = timing.as_mut() {
+            match manager.get_results_blocking() {
+                Ok(results) => {
+                    for result in &results {
+                        // Invalid timestamps are recorded as 0.0, never as a
+                        // garbage delta (CENSOR audit F-04).
+                        crate::core::certificate::record_pass(
+                            &result.name,
+                            result.certificate_gpu_ms(),
+                            result.draw_calls,
+                        );
+                        recorded_live = true;
+                    }
+                }
+                Err(e) => {
+                    drained = false;
+                    log::warn!("GPU timing readback failed: {e}");
+                }
+            }
+        }
+        if !recorded_live {
+            crate::core::certificate::record_pass(
+                "terrain.offline.accumulate_batch",
+                0.0,
+                sample_count,
+            );
+        }
+        if drained {
+            self.scene.store_render_timing(timing);
+        }
         self.scene.finish_certificate_capture(certificate_capture);
         Py::new(
             py,

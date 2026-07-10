@@ -109,6 +109,11 @@ pub fn render_debug_pattern(
         label: Some("forge3d.debug-pattern.encoder"),
     });
 
+    // CENSOR F-04: live per-pass timing for the certificate; falls back to a
+    // 0.0 pass record when TIMESTAMP_QUERY is not granted.
+    let mut timing = crate::core::gpu_timing::OneShotTiming::for_current_device();
+    let scope = timing.begin(&mut encoder, "debug_pattern");
+
     {
         crate::core::shader_registry::record_shader_use("forge3d.debug-pattern.shader");
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -129,8 +134,15 @@ pub fn render_debug_pattern(
         pass.draw(0..3, 0..1);
     }
 
+    timing.end(&mut encoder, scope, 1);
+    timing.resolve(&mut encoder);
+
     queue.submit(std::iter::once(encoder.finish()));
     device.poll(wgpu::Maintain::Wait);
+
+    if !timing.record_into_certificate() {
+        crate::core::certificate::record_pass("debug_pattern", 0.0, 1);
+    }
 
     Ok(texture)
 }

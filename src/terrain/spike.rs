@@ -14,8 +14,11 @@ pub struct TerrainSpike {
     height: u32,
     _grid: u32,
 
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    // Arc so per-render helpers that need shared device ownership (e.g. the
+    // certificate timing manager) can clone handles to this spike's own
+    // device (it is NOT the global-context device).
+    device: std::sync::Arc<wgpu::Device>,
+    queue: std::sync::Arc<wgpu::Queue>,
 
     // T33-BEGIN:tp-and-bgs
     tp: crate::terrain::pipeline::TerrainPipeline,

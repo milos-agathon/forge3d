@@ -68,6 +68,17 @@ pub struct TimingResult {
     pub pipeline_stats: Option<PipelineStatistics>,
 }
 
+impl TimingResult {
+    /// Certificate-safe duration: invalid/absent timestamps are always zero.
+    pub fn certificate_gpu_ms(&self) -> f64 {
+        if self.timestamp_valid {
+            self.gpu_time_ms as f64
+        } else {
+            0.0
+        }
+    }
+}
+
 /// Pipeline statistics from GPU
 #[derive(Debug, Clone, Default)]
 pub struct PipelineStatistics {
@@ -520,10 +531,17 @@ impl GpuTimingManager {
                 .copied()
                 .unwrap_or(0);
 
+            // Honest validity (CENSOR audit F-04): a zero begin stamp means the
+            // query was never written (driver skipped it), and end < begin is
+            // wraparound/garbage. Consumers must report such scopes as 0.0
+            // rather than presenting a garbage delta as a live timing.
+            let timestamp_valid =
+                timestamps[begin_idx] != 0 && timestamps[end_idx] >= timestamps[begin_idx];
+
             results.push(TimingResult {
                 name,
                 gpu_time_ms: duration_ms as f32,
-                timestamp_valid: true,
+                timestamp_valid,
                 draw_calls,
                 pipeline_stats: None, // Pipeline stats are not collected yet.
             });
@@ -605,6 +623,118 @@ pub fn create_default_config(device: &Device) -> GpuTimingConfig {
         enable_debug_markers: true,
         label_prefix: "forge3d".to_string(),
         max_queries_per_frame: 32,
+    }
+}
+
+/// One-shot per-render GPU timing for certified offscreen render paths
+/// (CENSOR audit F-04).
+///
+/// Wraps an optional [`GpuTimingManager`]: present when the initialized global
+/// device granted `TIMESTAMP_QUERY`, absent otherwise. Callers wrap each GPU
+/// pass in `begin`/`end`, call `resolve` on the encoder BEFORE submitting it,
+/// and after submission call [`OneShotTiming::record_into_certificate`], which
+/// blocking-reads the timestamps and records one certificate pass per scope
+/// with its live `gpu_ms`. When timing is unavailable the caller must fall
+/// back to recording the same pass labels (same order) with `gpu_ms == 0.0`
+/// so certificate pass lists stay identical across adapters — 0.0 is the
+/// honest "no timestamps" value, never a fabricated timing.
+pub struct OneShotTiming(Option<GpuTimingManager>);
+
+impl OneShotTiming {
+    /// Build a timing manager from the already-initialized global GPU context.
+    /// Returns an inert instance when no context exists, `TIMESTAMP_QUERY` was
+    /// not granted, or manager construction fails (each pass then records 0.0
+    /// and the `capability_absent` degradation already explains why).
+    pub fn for_current_device() -> Self {
+        let Some(ctx) = crate::core::gpu::ctx_if_initialized() else {
+            return Self(None);
+        };
+        Self::for_device(ctx.device.clone(), ctx.queue.clone())
+    }
+
+    /// Build a timing manager for an explicit device/queue pair — for render
+    /// paths that own their device instead of using the global context (e.g.
+    /// `TerrainSpike`). Returns an inert instance when `TIMESTAMP_QUERY` was
+    /// not granted or manager construction fails (each pass then records 0.0).
+    pub fn for_device(device: Arc<Device>, queue: Arc<Queue>) -> Self {
+        if !device.features().contains(Features::TIMESTAMP_QUERY) {
+            return Self(None);
+        }
+        let config = GpuTimingConfig {
+            enable_timestamps: true,
+            // Timestamps only: enabling statistics here would resolve a
+            // never-written statistics range (see Scene::take_render_timing).
+            enable_pipeline_stats: false,
+            enable_debug_markers: false,
+            label_prefix: "forge3d".to_string(),
+            max_queries_per_frame: 32,
+        };
+        match GpuTimingManager::new(device, queue, config) {
+            Ok(manager) => Self(Some(manager)),
+            Err(e) => {
+                log::warn!("one-shot GPU timing unavailable: {e}");
+                Self(None)
+            }
+        }
+    }
+
+    /// True when live timestamps will be recorded (used by callers to decide
+    /// whether the 0.0 fallback pass records are needed).
+    pub fn is_live(&self) -> bool {
+        self.0.is_some()
+    }
+
+    /// Open a timing scope around a GPU pass. Must be called with the encoder
+    /// outside any active render/compute pass.
+    pub fn begin(&mut self, encoder: &mut CommandEncoder, label: &str) -> Option<TimingScopeId> {
+        self.0.as_mut().map(|t| t.begin_scope(encoder, label))
+    }
+
+    /// Close a scope opened by [`OneShotTiming::begin`], recording draw count.
+    pub fn end(
+        &mut self,
+        encoder: &mut CommandEncoder,
+        scope: Option<TimingScopeId>,
+        draw_calls: u32,
+    ) {
+        if let (Some(t), Some(id)) = (self.0.as_mut(), scope) {
+            t.end_scope_with_draws(encoder, id, draw_calls);
+        }
+    }
+
+    /// Resolve the query set into its readback buffer. Must be recorded on an
+    /// encoder that is submitted before [`OneShotTiming::record_into_certificate`].
+    pub fn resolve(&mut self, encoder: &mut CommandEncoder) {
+        if let Some(t) = self.0.as_mut() {
+            t.resolve_queries(encoder);
+        }
+    }
+
+    /// Blocking-read the resolved timestamps and record every VALID scope into
+    /// the active certificate capture with its live timing. Returns `true`
+    /// when live passes were recorded; on `false` the caller records its 0.0
+    /// fallback passes instead.
+    pub fn record_into_certificate(mut self) -> bool {
+        let Some(manager) = self.0.as_mut() else {
+            return false;
+        };
+        match manager.get_results_blocking() {
+            Ok(results) if !results.is_empty() => {
+                for result in &results {
+                    crate::core::certificate::record_pass(
+                        &result.name,
+                        result.certificate_gpu_ms(),
+                        result.draw_calls,
+                    );
+                }
+                true
+            }
+            Ok(_) => false,
+            Err(e) => {
+                log::warn!("one-shot GPU timing readback failed: {e}");
+                false
+            }
+        }
     }
 }
 
@@ -731,5 +861,27 @@ mod tests {
         device.poll(Maintain::Wait);
         std::mem::forget(device);
         std::mem::forget(queue);
+    }
+
+    #[test]
+    fn certificate_gpu_ms_zeros_invalid_timestamps() {
+        assert_eq!(
+            TimingResult {
+                gpu_time_ms: 3.25,
+                timestamp_valid: false,
+                ..Default::default()
+            }
+            .certificate_gpu_ms(),
+            0.0
+        );
+        assert_eq!(
+            TimingResult {
+                gpu_time_ms: 3.25,
+                timestamp_valid: true,
+                ..Default::default()
+            }
+            .certificate_gpu_ms(),
+            3.25
+        );
     }
 }

@@ -68,4 +68,36 @@ impl TimestampResources {
             encoder.copy_buffer_to_buffer(buffer, 0, readback, 0, 16);
         }
     }
+
+    /// Read the resolved begin/end pass timestamps and return the GPU duration
+    /// in milliseconds. `None` when `TIMESTAMP_QUERY` is not granted, mapping
+    /// fails, or the values are implausible (zero/backwards) — callers then
+    /// record the pass with `gpu_ms == 0` rather than fabricating a timing.
+    /// Must be called after the encoder carrying `resolve` was submitted.
+    pub(crate) fn read_gpu_ms(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Option<f64> {
+        let readback = self.readback.as_ref()?;
+        let slice = readback.slice(0..16);
+        let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            sender.send(result).ok();
+        });
+        device.poll(wgpu::Maintain::Wait);
+        match pollster::block_on(receiver.receive()) {
+            Some(Ok(())) => {}
+            _ => return None,
+        }
+        let (begin, end) = {
+            let data = slice.get_mapped_range();
+            (
+                u64::from_le_bytes(data[0..8].try_into().ok()?),
+                u64::from_le_bytes(data[8..16].try_into().ok()?),
+            )
+        };
+        readback.unmap();
+        if begin == 0 || end < begin {
+            return None;
+        }
+        let period = queue.get_timestamp_period() as f64;
+        Some(((end - begin) as f64 * period) / 1_000_000.0)
+    }
 }

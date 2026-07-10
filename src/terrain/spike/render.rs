@@ -17,6 +17,14 @@ impl TerrainSpike {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("terrain-encoder"),
             });
+        // CENSOR F-04: live per-pass timing for the certificate; falls back to
+        // 0.0 pass records when TIMESTAMP_QUERY is not granted. Built on this
+        // spike's OWN device (not the global context).
+        let mut timing = crate::core::gpu_timing::OneShotTiming::for_device(
+            self.device.clone(),
+            self.queue.clone(),
+        );
+        let main_scope = timing.begin(&mut encoder, "terrain_spike.main");
         {
             crate::core::shader_registry::record_shader_use(self.tp.shader_label);
             let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -64,6 +72,7 @@ impl TerrainSpike {
             rp.set_index_buffer(self.ibuf.slice(..), wgpu::IndexFormat::Uint32);
             rp.draw_indexed(0..self.nidx, 0, 0..1);
         }
+        timing.end(&mut encoder, main_scope, 1);
 
         // E3: Overlay compositor pass (optional)
         if let Some(ref mut ov) = self.overlay_renderer {
@@ -81,21 +90,26 @@ impl TerrainSpike {
             )?;
             ov.upload_uniforms(&self.queue);
 
-            let mut rp2 = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("overlay-rp"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.color_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                ..Default::default()
-            });
-            ov.render(&mut rp2);
+            let overlay_scope = timing.begin(&mut encoder, "terrain_spike.overlay");
+            {
+                let mut rp2 = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("overlay-rp"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.color_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    ..Default::default()
+                });
+                ov.render(&mut rp2);
+            }
+            timing.end(&mut encoder, overlay_scope, 1);
         }
+        timing.resolve(&mut encoder);
         self.queue.submit(Some(encoder.finish()));
 
         // Readback → PNG
@@ -171,9 +185,11 @@ impl TerrainSpike {
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Invalid image buffer"))?;
         img.save(path)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        crate::core::certificate::record_pass("terrain_spike.main", 0.0, 1);
-        if self.overlay_renderer.is_some() {
-            crate::core::certificate::record_pass("terrain_spike.overlay", 0.0, 1);
+        if !timing.record_into_certificate() {
+            crate::core::certificate::record_pass("terrain_spike.main", 0.0, 1);
+            if self.overlay_renderer.is_some() {
+                crate::core::certificate::record_pass("terrain_spike.overlay", 0.0, 1);
+            }
         }
         certificate_capture.finish();
         crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;

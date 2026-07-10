@@ -1116,7 +1116,11 @@ class ViewerHandle:
         width: Optional[int] = None,
         height: Optional[int] = None,
     ) -> None:
-        """Take a snapshot and save to file. Optionally override resolution."""
+        """Take an interactive-viewer snapshot and save it to file.
+
+        Outside CENSOR's render-certificate scope: the interactive viewer is
+        controlled through its subprocess; CENSOR certifies offscreen renders.
+        """
         output_path = Path(path)
         previous_mtime_ns: Optional[int]
         try:
@@ -1146,6 +1150,9 @@ class ViewerHandle:
         progress_callback: Optional[callable] = None,
     ) -> None:
         """Render animation frames to disk.
+
+        Outside CENSOR's render-certificate scope: this is the interactive
+        viewer subprocess path, while CENSOR certifies offscreen renders.
         
         Iterates through the animation, setting camera state for each frame,
         rendering, and saving to PNG files.

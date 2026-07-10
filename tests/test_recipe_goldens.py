@@ -21,7 +21,16 @@ ROOT = Path(__file__).resolve().parents[1]
 GOLDEN_DIR = ROOT / "tests" / "golden" / "recipes"
 CERT_DIR = ROOT / "tests" / "golden" / "certificates"
 SIGNING_PUB_PATH = CERT_DIR / "signing.pub"
-UPDATE_GOLDENS = os.environ.get("FORGE3D_UPDATE_RECIPE_GOLDENS") == "1"
+def _update_goldens_enabled() -> bool:
+    """Read baseline-update mode from the environment at CALL time.
+
+    This must never be an import-time constant: the negative control
+    (test_recipe_golden_gate_rejects_pixel_regression) disables update mode via
+    monkeypatch.delenv, which can only work if every consumer re-reads the
+    environment when it runs. An import-time constant silently turned the
+    rejecting gate into a copy-over-the-golden write during baseline refreshes.
+    """
+    return os.environ.get("FORGE3D_UPDATE_RECIPE_GOLDENS") == "1"
 ARTIFACT_DIR = (
     Path(os.environ["FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR"])
     if os.environ.get("FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR")
@@ -901,7 +910,7 @@ def _write_failure_artifacts(spec: RecipeGolden, actual: np.ndarray, expected: n
 
 
 def _assert_matches_golden(spec: RecipeGolden, actual_path: Path) -> None:
-    if UPDATE_GOLDENS:
+    if _update_goldens_enabled():
         spec.golden_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(actual_path, spec.golden_path)
         return
@@ -963,7 +972,7 @@ def _emit_or_verify_certificate(spec: RecipeGolden) -> None:
     cert = render_certificate()  # signed; reflects the last completed render
     cert_path = _committed_cert_path(spec)
 
-    if UPDATE_GOLDENS:
+    if _update_goldens_enabled():
         CERT_DIR.mkdir(parents=True, exist_ok=True)
         _certificate.write_certificate(cert, cert_path)
         pubkey_hex = cert["signature"]["pubkey"]
@@ -1033,14 +1042,29 @@ def test_recipe_golden_catalog_links_docs_gallery() -> None:
         assert spec.command in gallery
 
 
+def test_update_mode_is_read_at_call_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Baseline-update mode must be a call-time decision, not an import-time
+    constant, or the negative control's delenv guard is dead code."""
+    monkeypatch.setenv("FORGE3D_UPDATE_RECIPE_GOLDENS", "1")
+    assert _update_goldens_enabled() is True
+    monkeypatch.delenv("FORGE3D_UPDATE_RECIPE_GOLDENS")
+    assert _update_goldens_enabled() is False
+
+
 def test_recipe_golden_gate_rejects_pixel_regression(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # This negative control must remain a rejecting gate even during an
-    # intentional baseline-refresh run.
+    # intentional baseline-refresh run: simulate a refresh run by setting the
+    # env first, then prove the control's delenv actually disables update mode
+    # (call-time read) so the corrupted image is compared, not copied over the
+    # committed golden.
+    monkeypatch.setenv("FORGE3D_UPDATE_RECIPE_GOLDENS", "1")
     monkeypatch.delenv("FORGE3D_UPDATE_RECIPE_GOLDENS", raising=False)
+    assert _update_goldens_enabled() is False
     spec = RECIPE_GOLDENS[0]
     assert spec.golden_path.exists()
+    golden_bytes_before = spec.golden_path.read_bytes()
     corrupted = f3d.png_to_numpy(spec.golden_path).copy()
     corrupted[: corrupted.shape[0] // 2, : corrupted.shape[1] // 2, :3] = 255 - corrupted[
         : corrupted.shape[0] // 2,
@@ -1052,6 +1076,10 @@ def test_recipe_golden_gate_rejects_pixel_regression(
 
     with pytest.raises(AssertionError):
         _assert_matches_golden(spec, actual_path)
+
+    assert spec.golden_path.read_bytes() == golden_bytes_before, (
+        "negative control must never write over the committed golden"
+    )
 
 
 @pytest.mark.parametrize("spec", RECIPE_GOLDENS, ids=lambda item: item.scene_id)

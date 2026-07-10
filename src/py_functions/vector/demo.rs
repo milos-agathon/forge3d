@@ -72,10 +72,16 @@ pub(crate) fn vector_oit_and_pick_demo(
                 label: Some("vf.Vector.Demo.Encoder"),
             });
 
+        // CENSOR F-04: live per-pass timing for the certificate; falls back to
+        // 0.0 pass records when TIMESTAMP_QUERY is not granted.
+        let mut timing = crate::core::gpu_timing::OneShotTiming::for_current_device();
+        let oit_scope = timing.begin(&mut encoder, "vector.demo.oit");
         {
             let mut pass = oit.begin_accumulation(&mut encoder);
             render_oit_scene(&mut scene, &mut pass, width, height)?;
         }
+        timing.end(&mut encoder, oit_scope, 2);
+        let compose_scope = timing.begin(&mut encoder, "vector.demo.compose");
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("vf.Vector.Demo.Compose"),
@@ -93,6 +99,8 @@ pub(crate) fn vector_oit_and_pick_demo(
             });
             oit.compose(&mut pass);
         }
+        timing.end(&mut encoder, compose_scope, 1);
+        let pick_scope = timing.begin(&mut encoder, "vector.demo.pick");
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("vf.Vector.Demo.PickPass"),
@@ -115,6 +123,8 @@ pub(crate) fn vector_oit_and_pick_demo(
             });
             render_pick_scene(&mut scene, &mut pass, width, height, 1)?;
         }
+        timing.end(&mut encoder, pick_scope, 2);
+        timing.resolve(&mut encoder);
 
         scene.queue.submit(Some(encoder.finish()));
         scene.device.poll(wgpu::Maintain::Wait);
@@ -140,9 +150,11 @@ pub(crate) fn vector_oit_and_pick_demo(
             "vf.Vector.Demo.PickRead",
             "pick map cancelled",
         )?;
-        crate::core::certificate::record_pass("vector.demo.oit", 0.0, 2);
-        crate::core::certificate::record_pass("vector.demo.compose", 0.0, 1);
-        crate::core::certificate::record_pass("vector.demo.pick", 0.0, 2);
+        if !timing.record_into_certificate() {
+            crate::core::certificate::record_pass("vector.demo.oit", 0.0, 2);
+            crate::core::certificate::record_pass("vector.demo.compose", 0.0, 1);
+            crate::core::certificate::record_pass("vector.demo.pick", 0.0, 2);
+        }
         _certificate_capture.finish();
         crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
         Ok((rgba, pick_id))

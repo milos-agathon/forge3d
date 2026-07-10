@@ -188,6 +188,10 @@ pub(crate) fn vector_render_polygons_fill_py(
         label: Some("vf.Vector.PolygonFill.Encoder"),
     });
 
+    // CENSOR F-04: live per-pass timing for the certificate; falls back to a
+    // 0.0 pass record when TIMESTAMP_QUERY is not granted.
+    let mut timing = crate::core::gpu_timing::OneShotTiming::for_current_device();
+    let fill_scope = timing.begin(&mut encoder, "vector.polygon_fill");
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("vf.Vector.PolygonFill.Render"),
@@ -224,6 +228,8 @@ pub(crate) fn vector_render_polygons_fill_py(
             )
             .map_err(vector_runtime_err)?;
     }
+    timing.end(&mut encoder, fill_scope, packed.len() as u32);
+    timing.resolve(&mut encoder);
 
     queue.submit(Some(encoder.finish()));
     device.poll(wgpu::Maintain::Wait);
@@ -238,7 +244,9 @@ pub(crate) fn vector_render_polygons_fill_py(
         "vf.Vector.PolygonFill.Read",
         "map_async cancelled",
     )?;
-    crate::core::certificate::record_pass("vector.polygon_fill", 0.0, packed.len() as u32);
+    if !timing.record_into_certificate() {
+        crate::core::certificate::record_pass("vector.polygon_fill", 0.0, packed.len() as u32);
+    }
     certificate_capture.finish();
     crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
     Ok(rgba)

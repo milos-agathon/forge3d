@@ -60,10 +60,16 @@ pub(crate) fn vector_render_oit_py(
                 label: Some("vf.Vector.RenderOIT.Encoder"),
             });
 
+        // CENSOR F-04: live per-pass timing for the certificate; falls back to
+        // 0.0 pass records when TIMESTAMP_QUERY is not granted.
+        let mut timing = crate::core::gpu_timing::OneShotTiming::for_current_device();
+        let oit_scope = timing.begin(&mut encoder, "vector.oit");
         {
             let mut pass = oit.begin_accumulation(&mut encoder);
             render_oit_scene(&mut scene, &mut pass, width, height)?;
         }
+        timing.end(&mut encoder, oit_scope, 1);
+        let compose_scope = timing.begin(&mut encoder, "vector.oit.compose");
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("vf.Vector.RenderOIT.Compose"),
@@ -81,6 +87,8 @@ pub(crate) fn vector_render_oit_py(
             });
             oit.compose(&mut pass);
         }
+        timing.end(&mut encoder, compose_scope, 1);
+        timing.resolve(&mut encoder);
 
         scene.queue.submit(Some(encoder.finish()));
         scene.device.poll(wgpu::Maintain::Wait);
@@ -95,8 +103,10 @@ pub(crate) fn vector_render_oit_py(
             "vf.Vector.RenderOIT.Read",
             "map_async cancelled",
         )?;
-        crate::core::certificate::record_pass("vector.oit", 0.0, 1);
-        crate::core::certificate::record_pass("vector.oit.compose", 0.0, 1);
+        if !timing.record_into_certificate() {
+            crate::core::certificate::record_pass("vector.oit", 0.0, 1);
+            crate::core::certificate::record_pass("vector.oit.compose", 0.0, 1);
+        }
         _certificate_capture.finish();
         crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
         Ok(result)
@@ -173,10 +183,16 @@ pub(crate) fn vector_render_oit_edl_py(
                 label: Some("vf.Vector.RenderOITEDL.Encoder"),
             });
 
+        // CENSOR F-04: live per-pass timing for the certificate; falls back to
+        // 0.0 pass records when TIMESTAMP_QUERY is not granted.
+        let mut timing = crate::core::gpu_timing::OneShotTiming::for_current_device();
+        let oit_scope = timing.begin(&mut encoder, "vector.oit");
         {
             let mut pass = oit.begin_accumulation(&mut encoder);
             render_oit_scene(&mut scene, &mut pass, width, height)?;
         }
+        timing.end(&mut encoder, oit_scope, 1);
+        let compose_scope = timing.begin(&mut encoder, "vector.oit.compose");
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("vf.Vector.RenderOITEDL.Compose"),
@@ -194,6 +210,7 @@ pub(crate) fn vector_render_oit_edl_py(
             });
             oit.compose(&mut pass);
         }
+        timing.end(&mut encoder, compose_scope, 1);
 
         let (edl_pipeline, edl_bind_group) = oit
             .create_edl_pipeline(
@@ -203,6 +220,7 @@ pub(crate) fn vector_render_oit_edl_py(
                 edl_radius_px.max(1.0),
             )
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        let edl_scope = timing.begin(&mut encoder, "vector.edl");
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("vf.Vector.RenderOITEDL.Pass"),
@@ -223,6 +241,8 @@ pub(crate) fn vector_render_oit_edl_py(
             pass.set_bind_group(0, &edl_bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
+        timing.end(&mut encoder, edl_scope, 1);
+        timing.resolve(&mut encoder);
 
         scene.queue.submit(Some(encoder.finish()));
         scene.device.poll(wgpu::Maintain::Wait);
@@ -238,9 +258,11 @@ pub(crate) fn vector_render_oit_edl_py(
             "vf.Vector.RenderOITEDL.Read",
             "map_async cancelled",
         )?;
-        crate::core::certificate::record_pass("vector.oit", 0.0, 1);
-        crate::core::certificate::record_pass("vector.oit.compose", 0.0, 1);
-        crate::core::certificate::record_pass("vector.edl", 0.0, 1);
+        if !timing.record_into_certificate() {
+            crate::core::certificate::record_pass("vector.oit", 0.0, 1);
+            crate::core::certificate::record_pass("vector.oit.compose", 0.0, 1);
+            crate::core::certificate::record_pass("vector.edl", 0.0, 1);
+        }
         _certificate_capture.finish();
         crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
         Ok(result)

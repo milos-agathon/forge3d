@@ -148,12 +148,19 @@ pub fn encode_forward_pass(
 /// tightly-packed f32 RGBA (row-major, `width * height * 4` values) through
 /// the established `core::hdr_readback::read_hdr_texture` path, whose wrapper
 /// already accounts the transient host-visible staging allocation.
+///
+/// `timing` (CENSOR F-04): when supplied as `(one_shot, label)`, the forward
+/// pass is bracketed in a certificate timing scope on the encoder that
+/// executes it and the queries are resolved before this submit. The
+/// `OneShotTiming` MUST live on the same wgpu device as `device`; pass `None`
+/// when driving a standalone device (tests).
 pub fn render_forward_hdr(
     device: &Device,
     queue: &Queue,
     targets: &ForwardTargets,
     clear: wgpu::Color,
     draws: &[ForwardDraw],
+    mut timing: Option<(&mut crate::core::gpu_timing::OneShotTiming, &str)>,
 ) -> Result<Vec<f32>, RenderError> {
     match targets.color_format {
         wgpu::TextureFormat::Rgba32Float | wgpu::TextureFormat::Rgba16Float => {}
@@ -166,7 +173,14 @@ pub fn render_forward_hdr(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("offscreen-forward-encoder"),
     });
+    let timing_scope = timing
+        .as_mut()
+        .and_then(|(t, label)| t.begin(&mut encoder, label));
     encode_forward_pass(&mut encoder, targets, clear, draws);
+    if let Some((t, _)) = timing.as_mut() {
+        t.end(&mut encoder, timing_scope, draws.len() as u32);
+        t.resolve(&mut encoder);
+    }
     queue.submit(std::iter::once(encoder.finish()));
 
     // read_hdr_texture's wrapper already accounts the staging-buffer footprint;
@@ -268,8 +282,11 @@ fn fs() -> @location(0) vec4<f32> {
             index_count: 0,
             vertices: 0..3,
         }];
-        let pixels = render_forward_hdr(&device, &queue, &targets, wgpu::Color::BLACK, &draws)
-            .expect("forward render + readback");
+        // timing = None: this test drives a standalone device, and a timing
+        // manager from the global context would live on a different device.
+        let pixels =
+            render_forward_hdr(&device, &queue, &targets, wgpu::Color::BLACK, &draws, None)
+                .expect("forward render + readback");
 
         assert_eq!(pixels.len(), 8 * 4 * 4);
         for px in pixels.chunks_exact(4) {

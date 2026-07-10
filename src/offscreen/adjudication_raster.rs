@@ -120,12 +120,18 @@ fn uniform_buffer(
 
 /// Render the linear-HDR raster reference at (width, height).
 /// Returns RGBA f32, row-major, `width * height * 4` values, alpha = 1.
+///
+/// `timing` (CENSOR F-04): when supplied, the forward raster pass is timed
+/// under the "adjudication.raster" certificate label inside the shared
+/// `offscreen::forward` harness. Must live on the same wgpu device as
+/// `device`; pass `None` when driving a standalone device.
 pub fn render_raster_reference(
     device: &Device,
     queue: &Queue,
     desc: &ReferenceSceneDesc,
     width: u32,
     height: u32,
+    timing: Option<&mut crate::core::gpu_timing::OneShotTiming>,
 ) -> Result<Vec<f32>, RenderError> {
     if width == 0 || height == 0 {
         return Err(RenderError::Render(
@@ -367,6 +373,7 @@ pub fn render_raster_reference(
         &targets,
         wgpu::Color::BLACK,
         &draws,
+        timing.map(|t| (t, "adjudication.raster")),
     )?;
 
     // --- Tent-weighted downsample SSAA x SSAA -> (width, height) ---

@@ -257,6 +257,10 @@ pub fn geometry_instance_mesh_gpu_render_py(
         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("instanced_encoder"),
         });
+    // CENSOR F-04: live per-pass timing for the certificate; falls back to a
+    // 0.0 pass record when TIMESTAMP_QUERY is not granted.
+    let mut timing = crate::core::gpu_timing::OneShotTiming::for_current_device();
+    let timing_scope = timing.begin(&mut encoder, "geometry.instanced_mesh");
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("instanced_pass"),
@@ -281,6 +285,7 @@ pub fn geometry_instance_mesh_gpu_render_py(
         });
         renderer.render(&mut pass, &g.queue, n as u32);
     }
+    timing.end(&mut encoder, timing_scope, 1);
 
     // Readback
     let row_bytes = (width * 4) as u32;
@@ -316,6 +321,7 @@ pub fn geometry_instance_mesh_gpu_render_py(
             depth_or_array_layers: 1,
         },
     );
+    timing.resolve(&mut encoder);
     g.queue.submit(Some(encoder.finish()));
 
     // Map and pack rows without padding
@@ -345,7 +351,9 @@ pub fn geometry_instance_mesh_gpu_render_py(
     // Return numpy array (H,W,4)
     let arr1 = PyArray1::<u8>::from_vec_bound(py, rgba);
     let out = arr1.reshape([height as usize, width as usize, 4])?;
-    crate::core::certificate::record_pass("geometry.instanced_mesh", 0.0, 1);
+    if !timing.record_into_certificate() {
+        crate::core::certificate::record_pass("geometry.instanced_mesh", 0.0, 1);
+    }
     certificate_capture.finish();
     crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
     Ok(out.into_py(py))

@@ -23,17 +23,12 @@ pub fn extrude_polygon_gpu_py<'py>(
         ));
     }
 
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
-    let adapter =
-        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
-            .ok_or_else(|| {
-                pyo3::exceptions::PyRuntimeError::new_err("Failed to find an appropriate adapter")
-            })?;
-    let (device, queue) =
-        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
-            .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to create device: {}", e))
-            })?;
+    // CENSOR: route through the negotiated, tracked global context instead of
+    // a private `DeviceDescriptor::default()` device that bypassed capability
+    // negotiation and the allocation ledger's budget accounting.
+    let ctx = crate::core::gpu::try_ctx()?;
+    let device = ctx.device.as_ref();
+    let queue = ctx.queue.as_ref();
 
     let polygons_vec: Vec<Vec<Vec2>> = polygons
         .iter()
@@ -46,9 +41,9 @@ pub fn extrude_polygon_gpu_py<'py>(
         })
         .collect();
 
-    let gpu_extrusion = GpuExtrusion::new(&device);
+    let gpu_extrusion = GpuExtrusion::new(device);
     let output = gpu_extrusion
-        .extrude(&device, &queue, &polygons_vec, height)
+        .extrude(device, queue, &polygons_vec, height)
         .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
 
     let vertex_count = output.vertex_count as usize;

@@ -329,16 +329,34 @@ jobs:
           python scripts/install_compatible_wheel.py dist
           pip install pytest numpy pyproj
 
+      # Probe contract (CENSOR F-10): exit 0 = probe positive, exit 2 = no
+      # CI-safe adapter (honest ABSENT), exit 3 = adapter present but the smoke
+      # render crashed — a renderer defect that must FAIL this job rather than
+      # masquerade as hardware absence. No continue-on-error: only the ABSENT
+      # case maps to a zero exit with probe=absent.
       - name: Probe terrain golden backend
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1'
         id: terrain-goldens-probe
-        continue-on-error: true
+        shell: bash
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
-        run: python scripts/terrain_ci_probe.py --mode terrain
+        run: |
+          set +e
+          python scripts/terrain_ci_probe.py --mode terrain
+          code=$?
+          set -e
+          if [ "$code" = "0" ]; then
+            echo "probe=positive" >> "$GITHUB_OUTPUT"
+          elif [ "$code" = "2" ]; then
+            echo "probe=absent" >> "$GITHUB_OUTPUT"
+          else
+            echo "probe=crash" >> "$GITHUB_OUTPUT"
+            echo "::error::terrain probe crashed on a CI-safe adapter (exit $code); failing the golden job instead of recording ABSENT"
+            exit "$code"
+          fi
 
       - name: Run visual golden tests
-        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outcome == 'success'
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'positive'
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
           FORGE3D_RUN_TERRAIN_GOLDENS: '1'
@@ -348,13 +366,13 @@ jobs:
         run: pytest tests/test_terrain_visual_goldens.py tests/test_terrain_tv10_goldens.py tests/test_terrain_vt_pbr_families.py tests/test_recipe_goldens.py tests/test_adjudication_gate.py tests/test_hybrid_terrain_pt.py tests/test_provenance_veritas.py -v --tb=short
 
       - name: Record golden lane RAN
-        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outcome == 'success'
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'positive'
         id: golden-ran
         shell: bash
         run: echo "golden_lane=ran" >> "$GITHUB_OUTPUT"
 
       - name: Record golden lane ABSENT
-        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outcome != 'success'
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'absent'
         id: golden-absent
         shell: bash
         run: |

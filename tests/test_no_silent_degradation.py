@@ -338,9 +338,17 @@ def test_f_probe_positive_golden_mismatch_fails_ci_and_probe_negative_is_absent(
     assert "WGPU_BACKEND: metal" in golden_job
     assert "name: wheels-macos" in golden_job, "golden lane must install its runner-compatible wheel"
     assert "name: wheels-windows" not in golden_job
-    assert "continue-on-error: true" in probe_step, "hardware probe must remain non-fatal"
+    # F-10: the probe must distinguish "no adapter" (ABSENT, exit 2) from
+    # "renderer crashed on a real adapter" (exit 3, fails the job). That means
+    # NO continue-on-error on the probe — only the ABSENT branch exits zero.
+    assert "continue-on-error" not in probe_step, (
+        "probe must fail the job on a crash; only ABSENT (exit 2) may pass"
+    )
+    assert 'probe=absent' in probe_step and 'probe=crash' in probe_step
+    assert 'exit "$code"' in probe_step, "probe crash must propagate a nonzero exit"
     assert "continue-on-error" not in pytest_step, "golden pytest mismatch is incorrectly non-fatal"
-    assert "terrain-goldens-probe.outcome == 'success'" in pytest_step
+    assert "terrain-goldens-probe.outputs.probe == 'positive'" in pytest_step
     assert "goldens.ABSENT" in golden_job and "golden-lane-marker" in golden_job
+    assert "terrain-goldens-probe.outputs.probe == 'absent'" in golden_job
     assert 'needs.test-golden-images.result }}" != "success"' in aggregate
     assert 'needs.test-golden-images.result }}" != "skipped"' in aggregate

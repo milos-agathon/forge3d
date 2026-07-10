@@ -436,9 +436,11 @@ impl TerrainScene {
             match manager.get_results_blocking() {
                 Ok(results) => {
                     for result in results {
+                        // Invalid timestamps are recorded as 0.0, never as a
+                        // garbage delta (CENSOR audit F-04).
                         crate::core::certificate::record_pass(
                             &result.name,
-                            result.gpu_time_ms as f64,
+                            result.certificate_gpu_ms(),
                             result.draw_calls,
                         );
                     }

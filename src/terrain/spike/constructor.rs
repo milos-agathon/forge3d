@@ -69,6 +69,8 @@ impl TerrainSpike {
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
             }
         };
+        let device = std::sync::Arc::new(device);
+        let queue = std::sync::Arc::new(queue);
 
         // Offscreen color + depth
         let color = tracked_create_texture(

@@ -36,6 +36,31 @@ def test_production_device_paths_do_not_request_empty_features():
         assert "required_features: wgpu::Features::empty()" not in source, relative
 
 
+def test_no_default_device_descriptor_requests_in_production_code():
+    """`request_device(&wgpu::DeviceDescriptor::default(), ...)` is
+    `Features::empty()` in disguise: a device created that way bypasses
+    capability negotiation entirely (audit finding F-08, extrude_polygon_gpu_py).
+    Test modules are exempt (heuristic: a hit after the file's first
+    `#[cfg(test)]` marker, or a `tests.rs` file, is test code)."""
+    hits = []
+    for path in (ROOT / "src").rglob("*.rs"):
+        if path.name == "tests.rs" or path.parent.name == "tests":
+            continue
+        text = path.read_text(encoding="utf-8")
+        cfg_test = text.find("#[cfg(test)]")
+        for i, line in enumerate(text.splitlines(), 1):
+            if "request_device(&wgpu::DeviceDescriptor::default()" in line:
+                offset = sum(
+                    len(l) + 1 for l in text.splitlines()[: i - 1]
+                )
+                if cfg_test != -1 and offset > cfg_test:
+                    continue  # inside the trailing test module
+                hits.append(f"{path.relative_to(ROOT).as_posix()}:{i}")
+    assert hits == [], (
+        f"un-negotiated DeviceDescriptor::default() device requests: {hits}"
+    )
+
+
 def test_viewer_gpu_timing_readback_is_non_blocking():
     source = (
         ROOT / "src/viewer/state/viewer_helpers/gi/reexecute.rs"

@@ -39,6 +39,13 @@ pub(super) fn render_brdf_tile(
     queue.submit(Some(encoder.finish()));
     device.poll(wgpu::Maintain::Wait);
 
+    // CENSOR: certify what actually executed — the shader module bound by this
+    // render and the pass's live GPU duration (0.0 only when TIMESTAMP_QUERY is
+    // absent or the readback is implausible; never fabricated).
+    crate::core::shader_registry::record_shader_use("brdf_tile.shader");
+    let gpu_ms = timestamps.read_gpu_ms(device, queue).unwrap_or(0.0);
+    crate::core::certificate::record_pass("brdf.tile", gpu_ms, 1);
+
     let buffer = crate::renderer::readback::read_texture_tight(
         device,
         queue,

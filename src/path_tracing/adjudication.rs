@@ -67,6 +67,12 @@ fn storage_buffer(
 /// proxy. Each frame must execute at least two wavefront iterations
 /// (primary wave + at least one bounce wave) or rendering fails.
 /// Returns RGBA f32, row-major, `width * height * 4` values, alpha = 1.
+///
+/// `timing` (CENSOR F-04): when supplied, the first frame's primary wavefront
+/// wave is timed under the "adjudication.path_trace" certificate label (see
+/// `render_frame_simple` — a whole frame cannot be bracketed on one encoder).
+/// The `OneShotTiming` MUST live on the same wgpu device as `device`; pass
+/// `None` when driving a standalone device (tests).
 pub fn render_pt_reference(
     device: &Arc<Device>,
     queue: &Arc<Queue>,
@@ -74,6 +80,7 @@ pub fn render_pt_reference(
     width: u32,
     height: u32,
     spp_frames: u32,
+    mut timing: Option<&mut crate::core::gpu_timing::OneShotTiming>,
 ) -> Result<Vec<f32>, RenderError> {
     if width == 0 || height == 0 || spp_frames == 0 {
         return Err(RenderError::Render(
@@ -228,8 +235,22 @@ pub fn render_pt_reference(
         uniforms.seed_hi = splitmix32(desc.seed_hi ^ frame);
         uniforms.seed_lo = splitmix32(desc.seed_lo ^ frame.wrapping_mul(0x0000_9E3D));
         queue.write_buffer(&uniforms_buffer, 0, bytemuck::bytes_of(&uniforms));
+        // Only frame 0 carries the timing scope so the certificate records the
+        // "adjudication.path_trace" pass exactly once.
+        let frame_timing = if frame == 0 {
+            timing
+                .as_mut()
+                .map(|t| (&mut **t, "adjudication.path_trace", spp_frames))
+        } else {
+            None
+        };
         let iterations = scheduler
-            .render_frame_simple(&uniforms_buffer, &scene_bind_group, &accum_bind_group)
+            .render_frame_simple(
+                &uniforms_buffer,
+                &scene_bind_group,
+                &accum_bind_group,
+                frame_timing,
+            )
             .map_err(|e| RenderError::Render(format!("wavefront frame {frame}: {e}")))?;
         // Multi-bounce contract: a path-traced reference frame of this scene
         // always consumes the primary wave AND at least one bounce wave. One
@@ -333,7 +354,9 @@ mod tests {
         };
         let (device, queue) = (std::sync::Arc::new(device), std::sync::Arc::new(queue));
         let desc = crate::path_tracing::reference_scene::adjudication_scene();
-        let hdr = super::render_pt_reference(&device, &queue, &desc, 32, 32, 2)
+        // timing = None: this test drives a standalone device, and a timing
+        // manager from the global context would live on a different device.
+        let hdr = super::render_pt_reference(&device, &queue, &desc, 32, 32, 2, None)
             .expect("multi-bounce PT reference render");
         assert_eq!(hdr.len(), 32 * 32 * 4);
         assert!(hdr.iter().any(|&v| v > 0.0), "PT reference is all black");

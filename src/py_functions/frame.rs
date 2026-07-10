@@ -30,7 +30,8 @@ pub(crate) fn render_debug_pattern_frame(
     );
 
     let frame = Py::new(py, frame)?;
-    crate::core::certificate::record_pass("debug_pattern", 0.0, 1);
+    // The `debug_pattern` pass (live gpu_ms when timestamps are granted) is
+    // recorded inside `util::debug_pattern::render_debug_pattern`.
     certificate_capture.finish();
     crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
     Ok(frame)
