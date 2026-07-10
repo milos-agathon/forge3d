@@ -222,31 +222,34 @@ impl TextOverlayRenderer {
             ],
         };
 
-        let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some("text_overlay_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[quad_layout, inst_layout],
+        let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &RenderPipelineDescriptor {
+                label: Some("text_overlay_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[quad_layout, inst_layout],
+                },
+                primitive: PrimitiveState {
+                    topology: PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(ColorTargetState {
+                        format: color_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: ColorWrites::ALL,
+                    })],
+                }),
+                multiview: None,
             },
-            primitive: PrimitiveState {
-                topology: PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(ColorTargetState {
-                    format: color_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: ColorWrites::ALL,
-                })],
-            }),
-            multiview: None,
-        });
+        );
 
         // Unit quad (0,0)-(1,1)
         let quad_data: [[f32; 2]; 6] = [

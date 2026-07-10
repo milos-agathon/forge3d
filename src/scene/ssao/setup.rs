@@ -92,7 +92,7 @@ fn create_ssao_pipelines(
     layouts: &SsaoLayouts) -> SsaoPipelines {
     let ssao_pipeline =
         crate::core::shader_registry::with_error_scope(device, "ssao-pipeline", || {
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            crate::core::shader_registry::create_compute_pipeline_scoped(device, &wgpu::ComputePipelineDescriptor {
                 label: Some("ssao-pipeline"),
                 layout: Some(
                     &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -108,7 +108,7 @@ fn create_ssao_pipelines(
 
     let blur_pipeline =
         crate::core::shader_registry::with_error_scope(device, "ssao-blur-pipeline", || {
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            crate::core::shader_registry::create_compute_pipeline_scoped(device, &wgpu::ComputePipelineDescriptor {
                 label: Some("ssao-blur-pipeline"),
                 layout: Some(
                     &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -124,7 +124,7 @@ fn create_ssao_pipelines(
 
     let composite_pipeline =
         crate::core::shader_registry::with_error_scope(device, "ssao-composite-pipeline", || {
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            crate::core::shader_registry::create_compute_pipeline_scoped(device, &wgpu::ComputePipelineDescriptor {
                 label: Some("ssao-composite-pipeline"),
                 layout: Some(
                     &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

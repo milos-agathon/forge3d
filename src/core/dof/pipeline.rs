@@ -83,26 +83,35 @@ pub fn create_pipelines(device: &Device) -> (ComputePipeline, ComputePipeline, C
         push_constant_ranges: &[],
     });
 
-    let gather_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: Some("dof_gather_pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &shader,
-        entry_point: "cs_dof",
-    });
+    let gather_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+        device,
+        &ComputePipelineDescriptor {
+            label: Some("dof_gather_pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: "cs_dof",
+        },
+    );
 
-    let separable_h_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: Some("dof_separable_h_pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &shader,
-        entry_point: "cs_dof_separable_h",
-    });
+    let separable_h_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+        device,
+        &ComputePipelineDescriptor {
+            label: Some("dof_separable_h_pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: "cs_dof_separable_h",
+        },
+    );
 
-    let separable_v_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: Some("dof_separable_v_pipeline"),
-        layout: Some(&pipeline_layout),
-        module: &shader,
-        entry_point: "cs_dof_separable_v",
-    });
+    let separable_v_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+        device,
+        &ComputePipelineDescriptor {
+            label: Some("dof_separable_v_pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: "cs_dof_separable_v",
+        },
+    );
 
     (gather_pipeline, separable_h_pipeline, separable_v_pipeline)
 }

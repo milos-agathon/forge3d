@@ -43,15 +43,32 @@ impl TerrainSpike {
         }))
         .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("No suitable GPU adapter"))?;
 
-        let (device, queue) = pollster::block_on(adapter.request_device(
+        let mut capabilities =
+            crate::core::capabilities::CapabilitySet::negotiate(adapter.features());
+        let requested_limits = wgpu::Limits::downlevel_defaults();
+        let first_request = pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("terrain-device"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::downlevel_defaults(),
+                required_features: capabilities.granted,
+                required_limits: requested_limits.clone(),
             },
             None,
-        ))
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        ));
+        let (device, queue) = match first_request {
+            Ok(pair) => pair,
+            Err(error) => {
+                capabilities.downgrade_after_request_failure(&error.to_string());
+                pollster::block_on(adapter.request_device(
+                    &wgpu::DeviceDescriptor {
+                        label: Some("terrain-device"),
+                        required_features: capabilities.granted,
+                        required_limits: requested_limits,
+                    },
+                    None,
+                ))
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?
+            }
+        };
 
         // Offscreen color + depth
         let color = tracked_create_texture(

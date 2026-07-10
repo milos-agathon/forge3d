@@ -64,14 +64,15 @@ pub(super) fn create_dispatch_resources(
             bind_group_layouts: &[&bgl0, &bgl1, &bgl2, &bgl3, &bgl4],
             push_constant_ranges: &[],
         });
-    let pipeline = g
-        .device
-        .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+    let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+        &g.device,
+        &wgpu::ComputePipelineDescriptor {
             label: Some("pt-compute"),
             layout: Some(&pipeline_layout),
             module: &shader,
             entry_point: "main",
-        });
+        },
+    );
 
     let ubo = tracked_create_buffer_init(
         &g.device,

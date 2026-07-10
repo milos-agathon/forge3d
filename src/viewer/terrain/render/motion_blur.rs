@@ -321,9 +321,9 @@ impl ViewerTerrainScene {
                 push_constant_ranges: &[],
             });
 
-        let pipeline = self
-            .device
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            &self.device,
+            &wgpu::RenderPipelineDescriptor {
                 label: Some("motion_blur.accumulate_pipeline"),
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
@@ -358,7 +358,8 @@ impl ViewerTerrainScene {
                 depth_stencil: None,
                 multisample: wgpu::MultisampleState::default(),
                 multiview: None,
-            });
+            },
+        );
 
         let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("motion_blur.accumulate_sampler"),

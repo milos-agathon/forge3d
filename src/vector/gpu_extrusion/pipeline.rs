@@ -128,12 +128,15 @@ impl GpuExtrusion {
             push_constant_ranges: &[],
         });
 
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("vf.Vector.Extrusion.Pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader_module,
-            entry_point: "main",
-        });
+        let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("vf.Vector.Extrusion.Pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader_module,
+                entry_point: "main",
+            },
+        );
 
         Self {
             pipeline,

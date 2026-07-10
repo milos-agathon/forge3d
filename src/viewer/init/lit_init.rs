@@ -207,12 +207,15 @@ pub fn create_lit_resources(
 
     let lit_pipeline =
         crate::core::shader_registry::with_error_scope(device, "viewer.lit.pipeline", || {
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("viewer.lit.pipeline"),
-                layout: Some(&lit_pl),
-                module: &lit_shader,
-                entry_point: "cs_main",
-            })
+            crate::core::shader_registry::create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("viewer.lit.pipeline"),
+                    layout: Some(&lit_pl),
+                    module: &lit_shader,
+                    entry_point: "cs_main",
+                },
+            )
         });
 
     println!(

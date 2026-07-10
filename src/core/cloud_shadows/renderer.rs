@@ -132,12 +132,15 @@ impl CloudShadowRenderer {
         });
 
         // Create compute pipeline
-        let compute_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("cloud_shadow_pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: "cs_generate_cloud_shadows",
-        });
+        let compute_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &ComputePipelineDescriptor {
+                label: Some("cloud_shadow_pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: "cs_generate_cloud_shadows",
+            },
+        );
 
         let mut uniforms = CloudShadowUniforms::default();
         uniforms.texture_size = [texture_size as f32, texture_size as f32];

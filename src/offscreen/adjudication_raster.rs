@@ -179,65 +179,71 @@ pub fn render_raster_reference(
         blend: None,
         write_mask: wgpu::ColorWrites::ALL,
     })];
-    let sky_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("adjudication-sky-pipeline"),
-        layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: "vs_sky",
-            buffers: &[],
+    let sky_pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+        device,
+        &wgpu::RenderPipelineDescriptor {
+            label: Some("adjudication-sky-pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_sky",
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: depth_format,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_sky",
+                targets: &color_target,
+            }),
+            multiview: None,
         },
-        primitive: wgpu::PrimitiveState::default(),
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: depth_format,
-            depth_write_enabled: false,
-            depth_compare: wgpu::CompareFunction::Always,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }),
-        multisample: wgpu::MultisampleState::default(),
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: "fs_sky",
-            targets: &color_target,
-        }),
-        multiview: None,
-    });
-    let mesh_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("adjudication-mesh-pipeline"),
-        layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: "vs_mesh",
-            buffers: &[wgpu::VertexBufferLayout {
-                array_stride: 12,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &[wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x3,
-                    offset: 0,
-                    shader_location: 0,
+    );
+    let mesh_pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+        device,
+        &wgpu::RenderPipelineDescriptor {
+            label: Some("adjudication-mesh-pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_mesh",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: 12,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32x3,
+                        offset: 0,
+                        shader_location: 0,
+                    }],
                 }],
-            }],
+            },
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: depth_format,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_mesh",
+                targets: &color_target,
+            }),
+            multiview: None,
         },
-        primitive: wgpu::PrimitiveState {
-            cull_mode: None,
-            ..Default::default()
-        },
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: depth_format,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::LessEqual,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }),
-        multisample: wgpu::MultisampleState::default(),
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: "fs_mesh",
-            targets: &color_target,
-        }),
-        multiview: None,
-    });
+    );
 
     // --- Geometry: shared unit sphere + plane quad ---
     let (sphere_verts, sphere_indices) = crate::offscreen::sphere::generate_uv_sphere(192, 96, 1.0);

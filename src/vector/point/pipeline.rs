@@ -63,7 +63,7 @@ impl PointPipelines {
         });
 
         // Create render pipeline
-        let render = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let render = crate::core::shader_registry::create_render_pipeline_scoped(device, &wgpu::RenderPipelineDescriptor {
             label: Some("vf.Vector.Point.Pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
@@ -139,7 +139,7 @@ impl PointPipelines {
             push_constant_ranges: &[],
         });
         
-        let oit = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let oit = crate::core::shader_registry::create_render_pipeline_scoped(device, &wgpu::RenderPipelineDescriptor {
             label: Some("vf.Vector.Point.OITPipeline"),
             layout: Some(&oit_pipeline_layout),
             vertex: wgpu::VertexState {
@@ -270,7 +270,7 @@ impl PointPipelines {
             push_constant_ranges: &[],
         });
 
-        let pick = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let pick = crate::core::shader_registry::create_render_pipeline_scoped(device, &wgpu::RenderPipelineDescriptor {
             label: Some("vf.Vector.Point.PickPipeline"),
             layout: Some(&pick_pipeline_layout),
             vertex: wgpu::VertexState {

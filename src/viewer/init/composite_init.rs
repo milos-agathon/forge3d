@@ -128,30 +128,33 @@ pub fn create_composite_pipeline(
     });
 
     crate::core::shader_registry::with_error_scope(device, "viewer.comp.pipeline", || {
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("viewer.comp.pipeline"),
-            layout: Some(&comp_pl_layout),
-            vertex: wgpu::VertexState {
-                module: &comp_shader,
-                entry_point: "vs_main",
-                buffers: &[],
+        crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("viewer.comp.pipeline"),
+                layout: Some(&comp_pl_layout),
+                vertex: wgpu::VertexState {
+                    module: &comp_shader,
+                    entry_point: "vs_main",
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &comp_shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &comp_shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        })
+        )
     })
 }

@@ -185,9 +185,9 @@ impl ViewerTerrainScene {
                 push_constant_ranges: &[],
             });
 
-        let pbr_pipeline = self
-            .device
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let pbr_pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            &self.device,
+            &wgpu::RenderPipelineDescriptor {
                 label: Some("terrain_viewer_pbr.pipeline"),
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
@@ -237,7 +237,8 @@ impl ViewerTerrainScene {
                 }),
                 multisample: wgpu::MultisampleState::default(),
                 multiview: None,
-            });
+            },
+        );
 
         self.pbr_pipeline = Some(pbr_pipeline);
         self.pbr_bind_group_layout = Some(pbr_bind_group_layout);
@@ -367,14 +368,17 @@ impl ViewerTerrainScene {
                         push_constant_ranges: &[],
                     });
 
-            self.height_ao_pipeline = Some(self.device.create_compute_pipeline(
-                &wgpu::ComputePipelineDescriptor {
-                    label: Some("terrain_viewer.height_ao_pipeline"),
-                    layout: Some(&ao_pipeline_layout),
-                    module: &ao_shader,
-                    entry_point: "main",
-                },
-            ));
+            self.height_ao_pipeline = Some(
+                crate::core::shader_registry::create_compute_pipeline_scoped(
+                    &self.device,
+                    &wgpu::ComputePipelineDescriptor {
+                        label: Some("terrain_viewer.height_ao_pipeline"),
+                        layout: Some(&ao_pipeline_layout),
+                        module: &ao_shader,
+                        entry_point: "main",
+                    },
+                ),
+            );
             self.height_ao_bind_group_layout = Some(ao_bind_group_layout);
             println!(
                 "[terrain] Height AO compute pipeline initialized ({}x{})",
@@ -485,14 +489,17 @@ impl ViewerTerrainScene {
                         push_constant_ranges: &[],
                     });
 
-            self.sun_vis_pipeline = Some(self.device.create_compute_pipeline(
-                &wgpu::ComputePipelineDescriptor {
-                    label: Some("terrain_viewer.sun_vis_pipeline"),
-                    layout: Some(&sv_pipeline_layout),
-                    module: &sv_shader,
-                    entry_point: "main",
-                },
-            ));
+            self.sun_vis_pipeline = Some(
+                crate::core::shader_registry::create_compute_pipeline_scoped(
+                    &self.device,
+                    &wgpu::ComputePipelineDescriptor {
+                        label: Some("terrain_viewer.sun_vis_pipeline"),
+                        layout: Some(&sv_pipeline_layout),
+                        module: &sv_shader,
+                        entry_point: "main",
+                    },
+                ),
+            );
             self.sun_vis_bind_group_layout = Some(sv_bind_group_layout);
             println!(
                 "[terrain] Sun visibility compute pipeline initialized ({}x{})",

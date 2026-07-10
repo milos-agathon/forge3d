@@ -188,12 +188,15 @@ pub(crate) fn c7_async_compute_demo(py: Python<'_>) -> PyResult<Py<PyDict>> {
         bind_group_layouts: &[],
         push_constant_ranges: &[],
     });
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("c7_compute_pipeline"),
-        layout: Some(&layout),
-        module: &module,
-        entry_point: "main",
-    });
+    let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+        &device,
+        &wgpu::ComputePipelineDescriptor {
+            label: Some("c7_compute_pipeline"),
+            layout: Some(&layout),
+            module: &module,
+            entry_point: "main",
+        },
+    );
 
     let desc = AcPassDesc {
         label: "trivial".to_string(),

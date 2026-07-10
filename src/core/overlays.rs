@@ -289,31 +289,34 @@ impl OverlayRenderer {
             push_constant_ranges: &[],
         });
 
-        let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some("overlays_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: VertexState {
-                module: &module,
-                entry_point: "vs_fullscreen",
-                buffers: &[],
+        let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &RenderPipelineDescriptor {
+                label: Some("overlays_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: VertexState {
+                    module: &module,
+                    entry_point: "vs_fullscreen",
+                    buffers: &[],
+                },
+                primitive: PrimitiveState {
+                    topology: PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(FragmentState {
+                    module: &module,
+                    entry_point: "fs_overlay",
+                    targets: &[Some(ColorTargetState {
+                        format: color_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: ColorWrites::ALL,
+                    })],
+                }),
+                multiview: None,
             },
-            primitive: PrimitiveState {
-                topology: PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(FragmentState {
-                module: &module,
-                entry_point: "fs_overlay",
-                targets: &[Some(ColorTargetState {
-                    format: color_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: ColorWrites::ALL,
-                })],
-            }),
-            multiview: None,
-        });
+        );
 
         Ok(Self {
             uniforms,

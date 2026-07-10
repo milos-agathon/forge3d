@@ -113,12 +113,15 @@ pub fn create_gi_baseline_resources(
         device,
         "viewer.gi.baseline.pipeline",
         || {
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("viewer.gi.baseline.pipeline"),
-                layout: Some(&gi_baseline_pl),
-                module: &gi_baseline_shader,
-                entry_point: "cs_main",
-            })
+            crate::core::shader_registry::create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("viewer.gi.baseline.pipeline"),
+                    layout: Some(&gi_baseline_pl),
+                    module: &gi_baseline_shader,
+                    entry_point: "cs_main",
+                },
+            )
         },
     );
 
@@ -193,12 +196,15 @@ pub fn create_gi_baseline_resources(
 
     let gi_split_pipeline =
         crate::core::shader_registry::with_error_scope(device, "viewer.gi.split.pipeline", || {
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("viewer.gi.split.pipeline"),
-                layout: Some(&gi_split_pl),
-                module: &gi_split_shader,
-                entry_point: "cs_main",
-            })
+            crate::core::shader_registry::create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("viewer.gi.split.pipeline"),
+                    layout: Some(&gi_split_pl),
+                    module: &gi_split_shader,
+                    entry_point: "cs_main",
+                },
+            )
         });
 
     // Create HDR textures

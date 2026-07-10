@@ -120,12 +120,15 @@ impl IndirectRenderer {
             push_constant_ranges: &[],
         });
 
-        let culling_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("vf.Vector.Indirect.CullingPipeline"),
-            layout: Some(&pipeline_layout),
-            module: &culling_shader,
-            entry_point: "cs_main",
-        });
+        let culling_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("vf.Vector.Indirect.CullingPipeline"),
+                layout: Some(&pipeline_layout),
+                module: &culling_shader,
+                entry_point: "cs_main",
+            },
+        );
 
         Ok(Self {
             draw_commands_buffer,

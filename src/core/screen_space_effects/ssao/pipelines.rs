@@ -225,10 +225,13 @@ fn create_compute_pipeline(
     module: &ShaderModule,
     entry_point: &str,
 ) -> ComputePipeline {
-    device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: Some(label),
-        layout: Some(layout),
-        module,
-        entry_point,
-    })
+    crate::core::shader_registry::create_compute_pipeline_scoped(
+        device,
+        &ComputePipelineDescriptor {
+            label: Some(label),
+            layout: Some(layout),
+            module,
+            entry_point,
+        },
+    )
 }

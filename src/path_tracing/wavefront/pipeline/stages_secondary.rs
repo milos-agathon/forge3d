@@ -18,12 +18,15 @@ impl WavefrontPipelines {
             push_constant_ranges: &[],
         });
         Ok(
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("shadow-pipeline"),
-                layout: Some(&pipeline_layout),
-                module: shader,
-                entry_point: "main",
-            }),
+            crate::core::shader_registry::create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("shadow-pipeline"),
+                    layout: Some(&pipeline_layout),
+                    module: shader,
+                    entry_point: "main",
+                },
+            ),
         )
     }
 
@@ -51,12 +54,15 @@ impl WavefrontPipelines {
             push_constant_ranges: &[],
         });
         Ok(
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("scatter-pipeline"),
-                layout: Some(&pipeline_layout),
-                module: shader,
-                entry_point: "main",
-            }),
+            crate::core::shader_registry::create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("scatter-pipeline"),
+                    layout: Some(&pipeline_layout),
+                    module: shader,
+                    entry_point: "main",
+                },
+            ),
         )
     }
 }

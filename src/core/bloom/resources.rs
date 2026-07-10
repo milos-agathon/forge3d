@@ -218,12 +218,15 @@ fn create_pipeline(
         push_constant_ranges: &[],
     });
 
-    device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: Some(pipeline_label),
-        layout: Some(&pipeline_layout),
-        module: shader,
-        entry_point: "main",
-    })
+    crate::core::shader_registry::create_compute_pipeline_scoped(
+        device,
+        &ComputePipelineDescriptor {
+            label: Some(pipeline_label),
+            layout: Some(&pipeline_layout),
+            module: shader,
+            entry_point: "main",
+        },
+    )
 }
 
 fn create_uniform_buffer(

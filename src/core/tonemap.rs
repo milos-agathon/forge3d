@@ -157,40 +157,43 @@ impl TonemapProcessor {
         );
 
         // Create render pipeline
-        let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some("tonemap_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: VertexState {
-                module: &shader_module,
-                entry_point: "vs_main",
-                buffers: &[], // Full-screen triangle needs no vertex buffer
+        let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &RenderPipelineDescriptor {
+                label: Some("tonemap_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: VertexState {
+                    module: &shader_module,
+                    entry_point: "vs_main",
+                    buffers: &[], // Full-screen triangle needs no vertex buffer
+                },
+                fragment: Some(FragmentState {
+                    module: &shader_module,
+                    entry_point: "fs_main",
+                    targets: &[Some(ColorTargetState {
+                        format: output_format,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    })],
+                }),
+                primitive: PrimitiveState {
+                    topology: PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: FrontFace::Ccw,
+                    cull_mode: None, // Don't cull for full-screen triangle
+                    unclipped_depth: false,
+                    polygon_mode: PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
             },
-            fragment: Some(FragmentState {
-                module: &shader_module,
-                entry_point: "fs_main",
-                targets: &[Some(ColorTargetState {
-                    format: output_format,
-                    blend: None,
-                    write_mask: ColorWrites::ALL,
-                })],
-            }),
-            primitive: PrimitiveState {
-                topology: PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: FrontFace::Ccw,
-                cull_mode: None, // Don't cull for full-screen triangle
-                unclipped_depth: false,
-                polygon_mode: PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-        });
+        );
 
         // Create sampler
         let sampler = device.create_sampler(&SamplerDescriptor {

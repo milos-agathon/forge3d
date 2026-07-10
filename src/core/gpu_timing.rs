@@ -424,6 +424,48 @@ impl GpuTimingManager {
         self.read_results_from_slot(read_slot).await
     }
 
+    /// Try to read the previously submitted frame without waiting for GPU
+    /// progress. If its mapping is not ready after a non-blocking poll, discard
+    /// that timing sample so the slot can be reused next frame.
+    pub fn try_get_results(&mut self) -> RenderResult<Vec<TimingResult>> {
+        let slot = (self.frame_parity + 1) % SLOTS;
+        if self.query_index[slot] < 2 {
+            return Ok(Vec::new());
+        }
+
+        let count = self.query_index[slot];
+        let Some(readback_buffer) = self.timestamp_readback_buffer[slot].as_ref() else {
+            return Ok(Vec::new());
+        };
+        let size = (count as u64) * std::mem::size_of::<u64>() as u64;
+        let slice = readback_buffer.slice(0..size);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        slice.map_async(MapMode::Read, move |result| {
+            let _ = sender.send(result);
+        });
+        self.device.poll(Maintain::Poll);
+
+        match receiver.try_recv() {
+            Ok(Ok(())) => {
+                let data = slice.get_mapped_range();
+                let timestamps = bytemuck::cast_slice::<u8, u64>(&data).to_vec();
+                drop(data);
+                readback_buffer.unmap();
+                Ok(self.timing_results_from_timestamps(slot, &timestamps))
+            }
+            Ok(Err(error)) => Err(RenderError::Readback(format!(
+                "Failed to map timestamp buffer: {error}"
+            ))),
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                readback_buffer.unmap();
+                Ok(Vec::new())
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(RenderError::Readback(
+                "Timestamp buffer mapping was cancelled".to_string(),
+            )),
+        }
+    }
+
     /// Get timing results for the slot just resolved + submitted (offline single-shot).
     ///
     /// Reads the current slot (`frame_parity`) and blocks on device work with an
@@ -445,10 +487,8 @@ impl GpuTimingManager {
     }
 
     async fn read_results_from_slot(&mut self, slot: usize) -> RenderResult<Vec<TimingResult>> {
-        let mut results = Vec::new();
-
         if self.query_index[slot] < 2 {
-            return Ok(results); // Need at least one begin/end pair
+            return Ok(Vec::new()); // Need at least one begin/end pair
         }
 
         let count = self.query_index[slot];
@@ -458,7 +498,11 @@ impl GpuTimingManager {
             Vec::new()
         };
 
-        // Process timestamp pairs into timing results.
+        Ok(self.timing_results_from_timestamps(slot, &timestamps))
+    }
+
+    fn timing_results_from_timestamps(&self, slot: usize, timestamps: &[u64]) -> Vec<TimingResult> {
+        let mut results = Vec::new();
         let scope_count = timestamps.len() / 2;
         for scope_index in 0..scope_count {
             let begin_idx = scope_index * 2;
@@ -485,7 +529,7 @@ impl GpuTimingManager {
             });
         }
 
-        Ok(results)
+        results
     }
 
     async fn read_timestamp_buffer(&self, buffer: &Buffer, count: u32) -> RenderResult<Vec<u64>> {

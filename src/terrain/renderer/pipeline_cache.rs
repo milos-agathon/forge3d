@@ -25,31 +25,34 @@ impl TerrainScene {
         });
 
         crate::core::shader_registry::with_error_scope(device, pipeline_label, || {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(pipeline_label),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: "vs_main",
-                    buffers: &[],
+            crate::core::shader_registry::create_render_pipeline_scoped(
+                device,
+                &wgpu::RenderPipelineDescriptor {
+                    label: Some(pipeline_label),
+                    layout: Some(&pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &shader,
+                        entry_point: "vs_main",
+                        buffers: &[],
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &shader,
+                        entry_point: "fs_main",
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: color_format,
+                            blend: None,
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                    }),
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil,
+                    multisample: wgpu::MultisampleState {
+                        count: sample_count,
+                        ..Default::default()
+                    },
+                    multiview: None,
                 },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: "fs_main",
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: color_format,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil,
-                multisample: wgpu::MultisampleState {
-                    count: sample_count,
-                    ..Default::default()
-                },
-                multiview: None,
-            })
+            )
         })
     }
 
@@ -162,37 +165,40 @@ impl TerrainScene {
         });
 
         crate::core::shader_registry::with_error_scope(device, "terrain_pbr_pom.pipeline", || {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("terrain_pbr_pom.pipeline"),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: "vs_main",
-                    buffers: &[],
+            crate::core::shader_registry::create_render_pipeline_scoped(
+                device,
+                &wgpu::RenderPipelineDescriptor {
+                    label: Some("terrain_pbr_pom.pipeline"),
+                    layout: Some(&pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &shader,
+                        entry_point: "vs_main",
+                        buffers: &[],
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &shader,
+                        entry_point: "fs_main",
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: color_format,
+                            blend: None,
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                    }),
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: TERRAIN_DEPTH_FORMAT,
+                        depth_write_enabled: true,
+                        depth_compare: wgpu::CompareFunction::Less,
+                        stencil: wgpu::StencilState::default(),
+                        bias: wgpu::DepthBiasState::default(),
+                    }),
+                    multisample: wgpu::MultisampleState {
+                        count: sample_count,
+                        ..Default::default()
+                    },
+                    multiview: None,
                 },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: "fs_main",
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: color_format,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: TERRAIN_DEPTH_FORMAT,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    count: sample_count,
-                    ..Default::default()
-                },
-                multiview: None,
-            })
+            )
         })
     }
 
@@ -236,37 +242,40 @@ impl TerrainScene {
             device,
             "terrain_pbr_pom.clipmap.pipeline",
             || {
-                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("terrain_pbr_pom.clipmap.pipeline"),
-                    layout: Some(&pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &shader,
-                        entry_point: "vs_clipmap_main",
-                        buffers: &[crate::terrain::clipmap::ClipmapVertex::desc()],
+                crate::core::shader_registry::create_render_pipeline_scoped(
+                    device,
+                    &wgpu::RenderPipelineDescriptor {
+                        label: Some("terrain_pbr_pom.clipmap.pipeline"),
+                        layout: Some(&pipeline_layout),
+                        vertex: wgpu::VertexState {
+                            module: &shader,
+                            entry_point: "vs_clipmap_main",
+                            buffers: &[crate::terrain::clipmap::ClipmapVertex::desc()],
+                        },
+                        fragment: Some(wgpu::FragmentState {
+                            module: &shader,
+                            entry_point: "fs_main",
+                            targets: &[Some(wgpu::ColorTargetState {
+                                format: color_format,
+                                blend: None,
+                                write_mask: wgpu::ColorWrites::ALL,
+                            })],
+                        }),
+                        primitive: wgpu::PrimitiveState::default(),
+                        depth_stencil: Some(wgpu::DepthStencilState {
+                            format: TERRAIN_DEPTH_FORMAT,
+                            depth_write_enabled: true,
+                            depth_compare: wgpu::CompareFunction::Less,
+                            stencil: wgpu::StencilState::default(),
+                            bias: wgpu::DepthBiasState::default(),
+                        }),
+                        multisample: wgpu::MultisampleState {
+                            count: sample_count,
+                            ..Default::default()
+                        },
+                        multiview: None,
                     },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &shader,
-                        entry_point: "fs_main",
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: color_format,
-                            blend: None,
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: wgpu::PrimitiveState::default(),
-                    depth_stencil: Some(wgpu::DepthStencilState {
-                        format: TERRAIN_DEPTH_FORMAT,
-                        depth_write_enabled: true,
-                        depth_compare: wgpu::CompareFunction::Less,
-                        stencil: wgpu::StencilState::default(),
-                        bias: wgpu::DepthBiasState::default(),
-                    }),
-                    multisample: wgpu::MultisampleState {
-                        count: sample_count,
-                        ..Default::default()
-                    },
-                    multiview: None,
-                })
+                )
             },
         )
     }
@@ -426,33 +435,36 @@ impl TerrainScene {
             "terrain_pbr_pom.aov.pipeline"
         };
         crate::core::shader_registry::with_error_scope(device, pipeline_label, || {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(pipeline_label),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: vertex_entry,
-                    buffers: vertex_buffers,
+            crate::core::shader_registry::create_render_pipeline_scoped(
+                device,
+                &wgpu::RenderPipelineDescriptor {
+                    label: Some(pipeline_label),
+                    layout: Some(&pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &shader,
+                        entry_point: vertex_entry,
+                        buffers: vertex_buffers,
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &shader,
+                        entry_point: "fs_main",
+                        targets: &targets,
+                    }),
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: TERRAIN_DEPTH_FORMAT,
+                        depth_write_enabled: true,
+                        depth_compare: wgpu::CompareFunction::Less,
+                        stencil: wgpu::StencilState::default(),
+                        bias: wgpu::DepthBiasState::default(),
+                    }),
+                    multisample: wgpu::MultisampleState {
+                        count: sample_count,
+                        ..Default::default()
+                    },
+                    multiview: None,
                 },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: "fs_main",
-                    targets: &targets,
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: TERRAIN_DEPTH_FORMAT,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    count: sample_count,
-                    ..Default::default()
-                },
-                multiview: None,
-            })
+            )
         })
     }
 }

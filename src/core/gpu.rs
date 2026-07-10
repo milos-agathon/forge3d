@@ -258,16 +258,7 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
         )) {
             Ok(pair) => pair,
             Err(first_err) => {
-                crate::core::degradation::record_degradation(
-                    "capability_request_failed",
-                    "negotiated_features",
-                    &first_err.to_string(),
-                );
-                capabilities = crate::core::capabilities::CapabilitySet {
-                    wanted: capabilities.wanted,
-                    required: wgpu::Features::empty(),
-                    granted: wgpu::Features::empty(),
-                };
+                capabilities.downgrade_after_request_failure(&first_err.to_string());
                 pollster::block_on(adapter.request_device(
                     &wgpu::DeviceDescriptor {
                         required_features: wgpu::Features::empty(),

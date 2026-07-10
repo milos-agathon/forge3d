@@ -84,12 +84,15 @@ pub fn create_sky_resources(
 
     let sky_pipeline =
         crate::core::shader_registry::with_error_scope(device, "viewer.sky.pipeline", || {
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("viewer.sky.pipeline"),
-                layout: Some(&sky_pl),
-                module: &sky_shader,
-                entry_point: "cs_render_sky",
-            })
+            crate::core::shader_registry::create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("viewer.sky.pipeline"),
+                    layout: Some(&sky_pl),
+                    module: &sky_shader,
+                    entry_point: "cs_render_sky",
+                },
+            )
         });
 
     let sky_params_data = SkyUniforms::new([0.3, 0.8, -0.5], 2.0, 0.3, 1.0, 5.0, 1.0, 0);

@@ -57,13 +57,15 @@ pub(super) fn create_height_ao_pipeline_resources(
             bind_group_layouts: &[&height_ao_bind_group_layout],
             push_constant_ranges: &[],
         });
-    let height_ao_compute_pipeline =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+    let height_ao_compute_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+        device,
+        &wgpu::ComputePipelineDescriptor {
             label: Some("height_ao.compute_pipeline"),
             layout: Some(&height_ao_pipeline_layout),
             module: &height_ao_shader,
             entry_point: "main",
-        });
+        },
+    );
     let height_ao_uniform_buffer = tracked_create_buffer_init(
         device,
         &wgpu::util::BufferInitDescriptor {
@@ -139,13 +141,15 @@ pub(super) fn create_sun_vis_pipeline_resources(
         bind_group_layouts: &[&sun_vis_bind_group_layout],
         push_constant_ranges: &[],
     });
-    let sun_vis_compute_pipeline =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+    let sun_vis_compute_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+        device,
+        &wgpu::ComputePipelineDescriptor {
             label: Some("sun_vis.compute_pipeline"),
             layout: Some(&sun_vis_pipeline_layout),
             module: &sun_vis_shader,
             entry_point: "main",
-        });
+        },
+    );
     let sun_vis_uniform_buffer = tracked_create_buffer_init(
         device,
         &wgpu::util::BufferInitDescriptor {

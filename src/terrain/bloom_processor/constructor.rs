@@ -163,31 +163,42 @@ impl TerrainBloomProcessor {
                 push_constant_ranges: &[],
             });
 
-        let brightpass_pipeline =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        let brightpass_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
                 label: Some("terrain.bloom.brightpass_pipeline"),
                 layout: Some(&brightpass_pipeline_layout),
                 module: &brightpass_shader,
                 entry_point: "main",
-            });
-        let blur_h_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("terrain.bloom.blur_h_pipeline"),
-            layout: Some(&blur_pipeline_layout),
-            module: &blur_h_shader,
-            entry_point: "main",
-        });
-        let blur_v_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("terrain.bloom.blur_v_pipeline"),
-            layout: Some(&blur_pipeline_layout),
-            module: &blur_v_shader,
-            entry_point: "main",
-        });
-        let composite_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("terrain.bloom.composite_pipeline"),
-            layout: Some(&composite_pipeline_layout),
-            module: &composite_shader,
-            entry_point: "main",
-        });
+            },
+        );
+        let blur_h_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("terrain.bloom.blur_h_pipeline"),
+                layout: Some(&blur_pipeline_layout),
+                module: &blur_h_shader,
+                entry_point: "main",
+            },
+        );
+        let blur_v_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("terrain.bloom.blur_v_pipeline"),
+                layout: Some(&blur_pipeline_layout),
+                module: &blur_v_shader,
+                entry_point: "main",
+            },
+        );
+        let composite_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("terrain.bloom.composite_pipeline"),
+                layout: Some(&composite_pipeline_layout),
+                module: &composite_shader,
+                entry_point: "main",
+            },
+        );
 
         let brightpass_uniform_buffer = tracked_create_buffer(
             device,

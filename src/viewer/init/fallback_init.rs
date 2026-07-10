@@ -30,27 +30,30 @@ pub fn create_fallback_pipeline(
     );
 
     crate::core::shader_registry::with_error_scope(device, "viewer.fallback.pipeline", || {
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("viewer.fallback.pipeline"),
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &fb_shader,
-                entry_point: "vs_fb",
-                buffers: &[],
+        crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("viewer.fallback.pipeline"),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &fb_shader,
+                    entry_point: "vs_fb",
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &fb_shader,
+                    entry_point: "fs_fb",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview: None,
             },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &fb_shader,
-                entry_point: "fs_fb",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview: None,
-        })
+        )
     })
 }

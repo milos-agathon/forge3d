@@ -158,12 +158,15 @@ impl WavefrontPipelines {
             bind_group_layouts: &[&ao_bind_group_layout],
             push_constant_ranges: &[],
         });
-        let ao_compute = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("ao-from-aovs-pipeline"),
-            layout: Some(&ao_pipeline_layout),
-            module: &ao_shader,
-            entry_point: "main",
-        });
+        let ao_compute = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("ao-from-aovs-pipeline"),
+                layout: Some(&ao_pipeline_layout),
+                module: &ao_shader,
+                entry_point: "main",
+            },
+        );
 
         Ok(Self {
             raygen,

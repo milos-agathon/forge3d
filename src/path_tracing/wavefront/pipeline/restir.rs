@@ -28,12 +28,15 @@ impl WavefrontPipelines {
             push_constant_ranges: &[],
         });
         Ok(
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("restir-temporal-pipeline"),
-                layout: Some(&pipeline_layout),
-                module: shader,
-                entry_point: "main",
-            }),
+            crate::core::shader_registry::create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("restir-temporal-pipeline"),
+                    layout: Some(&pipeline_layout),
+                    module: shader,
+                    entry_point: "main",
+                },
+            ),
         )
     }
 
@@ -64,12 +67,15 @@ impl WavefrontPipelines {
             push_constant_ranges: &[],
         });
         Ok(
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("restir-spatial-pipeline"),
-                layout: Some(&pipeline_layout),
-                module: shader,
-                entry_point: "main",
-            }),
+            crate::core::shader_registry::create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("restir-spatial-pipeline"),
+                    layout: Some(&pipeline_layout),
+                    module: shader,
+                    entry_point: "main",
+                },
+            ),
         )
     }
 
@@ -86,12 +92,15 @@ impl WavefrontPipelines {
             push_constant_ranges: &[],
         });
         Ok(
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("restir-init-pipeline"),
-                layout: Some(&pipeline_layout),
-                module: shader,
-                entry_point: "main",
-            }),
+            crate::core::shader_registry::create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("restir-init-pipeline"),
+                    layout: Some(&pipeline_layout),
+                    module: shader,
+                    entry_point: "main",
+                },
+            ),
         )
     }
 

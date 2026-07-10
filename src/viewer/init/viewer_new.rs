@@ -406,51 +406,54 @@ fn create_csm_depth_resources(
 
     let pipeline =
         crate::core::shader_registry::with_error_scope(device, "viewer.csm.depth.pipeline", || {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("viewer.csm.depth.pipeline"),
-                layout: Some(&csm_depth_pl),
-                vertex: wgpu::VertexState {
-                    module: &csm_depth_shader,
-                    entry_point: "vs_main",
-                    buffers: &[wgpu::VertexBufferLayout {
-                        array_stride: 40,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[
-                            wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x3,
-                                offset: 0,
-                                shader_location: 0,
-                            },
-                            wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x3,
-                                offset: 12,
-                                shader_location: 1,
-                            },
-                            wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 24,
-                                shader_location: 2,
-                            },
-                            wgpu::VertexAttribute {
-                                format: wgpu::VertexFormat::Float32x2,
-                                offset: 32,
-                                shader_location: 3,
-                            },
-                        ],
-                    }],
+            crate::core::shader_registry::create_render_pipeline_scoped(
+                device,
+                &wgpu::RenderPipelineDescriptor {
+                    label: Some("viewer.csm.depth.pipeline"),
+                    layout: Some(&csm_depth_pl),
+                    vertex: wgpu::VertexState {
+                        module: &csm_depth_shader,
+                        entry_point: "vs_main",
+                        buffers: &[wgpu::VertexBufferLayout {
+                            array_stride: 40,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &[
+                                wgpu::VertexAttribute {
+                                    format: wgpu::VertexFormat::Float32x3,
+                                    offset: 0,
+                                    shader_location: 0,
+                                },
+                                wgpu::VertexAttribute {
+                                    format: wgpu::VertexFormat::Float32x3,
+                                    offset: 12,
+                                    shader_location: 1,
+                                },
+                                wgpu::VertexAttribute {
+                                    format: wgpu::VertexFormat::Float32x2,
+                                    offset: 24,
+                                    shader_location: 2,
+                                },
+                                wgpu::VertexAttribute {
+                                    format: wgpu::VertexFormat::Float32x2,
+                                    offset: 32,
+                                    shader_location: 3,
+                                },
+                            ],
+                        }],
+                    },
+                    fragment: None,
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: wgpu::TextureFormat::Depth32Float,
+                        depth_write_enabled: true,
+                        depth_compare: wgpu::CompareFunction::LessEqual,
+                        stencil: wgpu::StencilState::default(),
+                        bias: wgpu::DepthBiasState::default(),
+                    }),
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview: None,
                 },
-                fragment: None,
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Depth32Float,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::LessEqual,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState::default(),
-                multiview: None,
-            })
+            )
         });
 
     let camera = tracked_create_buffer(

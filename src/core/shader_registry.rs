@@ -157,6 +157,30 @@ pub fn with_error_scope<T>(device: &wgpu::Device, label: &str, f: impl FnOnce() 
     result
 }
 
+/// Create a render pipeline under a validation error scope. Pipeline labels
+/// are mandatory because they identify both degradations and certificate
+/// provenance.
+pub fn create_render_pipeline_scoped(
+    device: &wgpu::Device,
+    descriptor: &wgpu::RenderPipelineDescriptor<'_>,
+) -> wgpu::RenderPipeline {
+    let label = descriptor
+        .label
+        .expect("render pipelines require a stable label");
+    with_error_scope(device, label, || device.create_render_pipeline(descriptor))
+}
+
+/// Create a compute pipeline under a validation error scope.
+pub fn create_compute_pipeline_scoped(
+    device: &wgpu::Device,
+    descriptor: &wgpu::ComputePipelineDescriptor<'_>,
+) -> wgpu::ComputePipeline {
+    let label = descriptor
+        .label
+        .expect("compute pipelines require a stable label");
+    with_error_scope(device, label, || device.create_compute_pipeline(descriptor))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

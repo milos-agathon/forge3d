@@ -93,12 +93,15 @@ impl ShadowBlurPass {
             push_constant_ranges: &[],
         });
 
-        let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("shadow_blur_pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: "cs_blur",
-        });
+        let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &ComputePipelineDescriptor {
+                label: Some("shadow_blur_pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: "cs_blur",
+            },
+        );
 
         let params_buffer = tracked_create_buffer(
             device,

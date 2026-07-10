@@ -172,21 +172,25 @@ impl IBLRenderer {
             ],
         });
 
-        let equirect_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("ibl.precompute.pipeline.equirect"),
-            layout: Some(
-                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("ibl.precompute.layout.equirect"),
-                    bind_group_layouts: &[&equirect_layout],
-                    push_constant_ranges: &[],
-                }),
-            ),
-            module: &shader_equirect,
-            entry_point: "cs_equirect_to_cubemap",
-        });
+        let equirect_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("ibl.precompute.pipeline.equirect"),
+                layout: Some(
+                    &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("ibl.precompute.layout.equirect"),
+                        bind_group_layouts: &[&equirect_layout],
+                        push_constant_ranges: &[],
+                    }),
+                ),
+                module: &shader_equirect,
+                entry_point: "cs_equirect_to_cubemap",
+            },
+        );
 
-        let irradiance_pipeline =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        let irradiance_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
                 label: Some("ibl.precompute.pipeline.irradiance"),
                 layout: Some(
                     &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -197,33 +201,40 @@ impl IBLRenderer {
                 ),
                 module: &shader_prefilter,
                 entry_point: "cs_irradiance_convolve",
-            });
+            },
+        );
 
-        let specular_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("ibl.precompute.pipeline.specular"),
-            layout: Some(
-                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("ibl.precompute.layout.specular"),
-                    bind_group_layouts: &[&convolve_layout],
-                    push_constant_ranges: &[],
-                }),
-            ),
-            module: &shader_prefilter,
-            entry_point: "cs_specular_prefilter",
-        });
+        let specular_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("ibl.precompute.pipeline.specular"),
+                layout: Some(
+                    &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("ibl.precompute.layout.specular"),
+                        bind_group_layouts: &[&convolve_layout],
+                        push_constant_ranges: &[],
+                    }),
+                ),
+                module: &shader_prefilter,
+                entry_point: "cs_specular_prefilter",
+            },
+        );
 
-        let brdf_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("ibl.precompute.pipeline.brdf"),
-            layout: Some(
-                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("ibl.precompute.layout.brdf"),
-                    bind_group_layouts: &[&brdf_layout],
-                    push_constant_ranges: &[],
-                }),
-            ),
-            module: &shader_brdf,
-            entry_point: "cs_brdf_lut",
-        });
+        let brdf_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("ibl.precompute.pipeline.brdf"),
+                layout: Some(
+                    &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("ibl.precompute.layout.brdf"),
+                        bind_group_layouts: &[&brdf_layout],
+                        push_constant_ranges: &[],
+                    }),
+                ),
+                module: &shader_brdf,
+                entry_point: "cs_brdf_lut",
+            },
+        );
 
         let base_resolution = quality.base_environment_size();
         let uniforms = PrefilterUniforms::new(base_resolution, quality);

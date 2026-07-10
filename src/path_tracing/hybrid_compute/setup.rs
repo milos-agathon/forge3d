@@ -74,18 +74,24 @@ impl HybridPathTracer {
             ],
             push_constant_ranges: &[],
         });
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("hybrid-pt-compute"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: "main",
-        });
-        let pipeline_terrain = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("hybrid-pt-terrain-compute"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: "main_terrain",
-        });
+        let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("hybrid-pt-compute"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: "main",
+            },
+        );
+        let pipeline_terrain = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("hybrid-pt-terrain-compute"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: "main_terrain",
+            },
+        );
 
         // ReSTIR G-buffer entry: its group-2 variant carries the G-buffer
         // storage bindings so the main kernels stay within 8 storage buffers
@@ -95,13 +101,15 @@ impl HybridPathTracer {
             bind_group_layouts: &[&layouts.uniforms, &layouts.scene, &layouts.terrain_gbuffer],
             push_constant_ranges: &[],
         });
-        let pipeline_terrain_gbuffer =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        let pipeline_terrain_gbuffer = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
                 label: Some("hybrid-pt-terrain-gbuffer-compute"),
                 layout: Some(&gbuffer_layout),
                 module: &shader,
                 entry_point: "main_terrain_gbuffer",
-            });
+            },
+        );
 
         // Canonical ReSTIR reuse passes, compiled from the same WGSL the
         // wavefront scheduler uses so the reservoir layout stays one contract.
@@ -115,13 +123,15 @@ impl HybridPathTracer {
             bind_group_layouts: &[&layouts.uniforms, &layouts.empty, &layouts.restir_temporal],
             push_constant_ranges: &[],
         });
-        let pipeline_restir_temporal =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        let pipeline_restir_temporal = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
                 label: Some("hybrid-pt-restir-temporal-compute"),
                 layout: Some(&temporal_layout),
                 module: &temporal_shader,
                 entry_point: "main",
-            });
+            },
+        );
 
         let spatial_shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
@@ -137,13 +147,15 @@ impl HybridPathTracer {
             ],
             push_constant_ranges: &[],
         });
-        let pipeline_restir_spatial =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        let pipeline_restir_spatial = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
                 label: Some("hybrid-pt-restir-spatial-compute"),
                 layout: Some(&spatial_layout),
                 module: &spatial_shader,
                 entry_point: "main",
-            });
+            },
+        );
 
         Ok(Self {
             layouts,

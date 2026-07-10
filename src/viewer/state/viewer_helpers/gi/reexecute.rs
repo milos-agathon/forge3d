@@ -209,11 +209,10 @@ impl Viewer {
             }
 
             self.queue.submit(std::iter::once(enc.finish()));
-            self.device.poll(wgpu::Maintain::Wait);
 
             if let Some(timer) = self.gi_timing.as_mut() {
                 if timer.is_supported() {
-                    match pollster::block_on(timer.get_results()) {
+                    match timer.try_get_results() {
                         Ok(results) => {
                             self.gi_gpu_hzb_ms = 0.0;
                             self.gi_gpu_ssao_ms = 0.0;

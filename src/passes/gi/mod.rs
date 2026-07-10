@@ -239,16 +239,19 @@ fn create_compute_pipeline(
         "debug" => "cs_gi_debug",
         _ => "cs_gi_composite",
     };
-    device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: Some(&format!("p5.gi.{}.pipeline", kind)),
-        layout: Some(
-            &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(&format!("p5.gi.{}.layout", kind)),
-                bind_group_layouts: &[bind_group_layout],
-                push_constant_ranges: &[],
-            }),
-        ),
-        module: shader,
-        entry_point,
-    })
+    crate::core::shader_registry::create_compute_pipeline_scoped(
+        device,
+        &ComputePipelineDescriptor {
+            label: Some(&format!("p5.gi.{}.pipeline", kind)),
+            layout: Some(
+                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some(&format!("p5.gi.{}.layout", kind)),
+                    bind_group_layouts: &[bind_group_layout],
+                    push_constant_ranges: &[],
+                }),
+            ),
+            module: shader,
+            entry_point,
+        },
+    )
 }

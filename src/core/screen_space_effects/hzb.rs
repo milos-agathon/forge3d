@@ -122,18 +122,24 @@ impl HzbPyramid {
             bind_group_layouts: &[&bgl_down],
             push_constant_ranges: &[],
         });
-        let pipe_copy = device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("p5.hzb.pipe.copy"),
-            layout: Some(&pl_copy),
-            module: &shader,
-            entry_point: "cs_copy",
-        });
-        let pipe_down = device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("p5.hzb.pipe.down"),
-            layout: Some(&pl_down),
-            module: &shader,
-            entry_point: "cs_downsample",
-        });
+        let pipe_copy = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &ComputePipelineDescriptor {
+                label: Some("p5.hzb.pipe.copy"),
+                layout: Some(&pl_copy),
+                module: &shader,
+                entry_point: "cs_copy",
+            },
+        );
+        let pipe_down = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &ComputePipelineDescriptor {
+                label: Some("p5.hzb.pipe.down"),
+                layout: Some(&pl_down),
+                module: &shader,
+                entry_point: "cs_downsample",
+            },
+        );
 
         Ok(Self {
             tex,

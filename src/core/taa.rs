@@ -209,12 +209,15 @@ impl TaaRenderer {
             push_constant_ranges: &[],
         });
 
-        let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("taa.pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: "taa_resolve",
-        });
+        let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &ComputePipelineDescriptor {
+                label: Some("taa.pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: "taa_resolve",
+            },
+        );
 
         Ok(Self {
             settings,

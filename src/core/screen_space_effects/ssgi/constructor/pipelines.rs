@@ -99,14 +99,17 @@ fn compute_pipeline(
     module: &ShaderModule,
     bind_group_layout: &BindGroupLayout,
 ) -> ComputePipeline {
-    device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: Some(label),
-        layout: Some(&device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: Some(&format!("{label}.layout")),
-            bind_group_layouts: &[bind_group_layout],
-            push_constant_ranges: &[],
-        })),
-        module,
-        entry_point,
-    })
+    crate::core::shader_registry::create_compute_pipeline_scoped(
+        device,
+        &ComputePipelineDescriptor {
+            label: Some(label),
+            layout: Some(&device.create_pipeline_layout(&PipelineLayoutDescriptor {
+                label: Some(&format!("{label}.layout")),
+                bind_group_layouts: &[bind_group_layout],
+                push_constant_ranges: &[],
+            })),
+            module,
+            entry_point,
+        },
+    )
 }

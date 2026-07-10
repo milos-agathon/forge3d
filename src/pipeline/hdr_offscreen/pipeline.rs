@@ -238,28 +238,31 @@ impl HdrOffscreenPipeline {
             push_constant_ranges: &[],
         });
 
-        let tonemap_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some("tonemap_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: VertexState {
-                module: &tonemap_shader,
-                entry_point: "vs_main",
-                buffers: &[],
+        let tonemap_pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &RenderPipelineDescriptor {
+                label: Some("tonemap_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: VertexState {
+                    module: &tonemap_shader,
+                    entry_point: "vs_main",
+                    buffers: &[],
+                },
+                fragment: Some(FragmentState {
+                    module: &tonemap_shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(ColorTargetState {
+                        format: config.ldr_format,
+                        blend: Some(BlendState::REPLACE),
+                        write_mask: ColorWrites::ALL,
+                    })],
+                }),
+                primitive: PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: MultisampleState::default(),
+                multiview: None,
             },
-            fragment: Some(FragmentState {
-                module: &tonemap_shader,
-                entry_point: "fs_main",
-                targets: &[Some(ColorTargetState {
-                    format: config.ldr_format,
-                    blend: Some(BlendState::REPLACE),
-                    write_mask: ColorWrites::ALL,
-                })],
-            }),
-            primitive: PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: MultisampleState::default(),
-            multiview: None,
-        });
+        );
 
         // Create sampler for HDR texture
         let sampler = device.create_sampler(&SamplerDescriptor {

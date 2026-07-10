@@ -274,53 +274,56 @@ pub fn create_terrain_pipeline(
     }];
 
     // ---- Render pipeline ----------------------------------------------------
-    let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-        label: Some("vf.Terrain.pipeline"),
-        layout: Some(&layout),
-        vertex: VertexState {
-            module: &shader,
-            entry_point: "vs_main", // must match T3.1
-            buffers: &vertex_buffers,
+    let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+        device,
+        &RenderPipelineDescriptor {
+            label: Some("vf.Terrain.pipeline"),
+            layout: Some(&layout),
+            vertex: VertexState {
+                module: &shader,
+                entry_point: "vs_main", // must match T3.1
+                buffers: &vertex_buffers,
+            },
+            fragment: Some(FragmentState {
+                module: &shader,
+                entry_point: "fs_main", // must match T3.2
+                targets: &[
+                    Some(ColorTargetState {
+                        format: color_format, // Rgba8UnormSrgb recommended
+                        blend: None, // straight alpha by default; no blending for opaque terrain
+                        write_mask: ColorWrites::ALL,
+                    }),
+                    Some(ColorTargetState {
+                        format: normal_format,
+                        blend: None,
+                        write_mask: ColorWrites::ALL,
+                    }),
+                ],
+            }),
+            primitive: PrimitiveState {
+                topology: PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: FrontFace::Ccw,
+                cull_mode: Some(Face::Back),
+                unclipped_depth: false,
+                polygon_mode: PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: depth_format.map(|format| DepthStencilState {
+                format,
+                depth_write_enabled: true,
+                depth_compare: CompareFunction::LessEqual,
+                stencil: StencilState::default(),
+                bias: DepthBiasState::default(),
+            }),
+            multisample: MultisampleState {
+                count: sample_count,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
         },
-        fragment: Some(FragmentState {
-            module: &shader,
-            entry_point: "fs_main", // must match T3.2
-            targets: &[
-                Some(ColorTargetState {
-                    format: color_format, // Rgba8UnormSrgb recommended
-                    blend: None, // straight alpha by default; no blending for opaque terrain
-                    write_mask: ColorWrites::ALL,
-                }),
-                Some(ColorTargetState {
-                    format: normal_format,
-                    blend: None,
-                    write_mask: ColorWrites::ALL,
-                }),
-            ],
-        }),
-        primitive: PrimitiveState {
-            topology: PrimitiveTopology::TriangleList,
-            strip_index_format: None,
-            front_face: FrontFace::Ccw,
-            cull_mode: Some(Face::Back),
-            unclipped_depth: false,
-            polygon_mode: PolygonMode::Fill,
-            conservative: false,
-        },
-        depth_stencil: depth_format.map(|format| DepthStencilState {
-            format,
-            depth_write_enabled: true,
-            depth_compare: CompareFunction::LessEqual,
-            stencil: StencilState::default(),
-            bias: DepthBiasState::default(),
-        }),
-        multisample: MultisampleState {
-            count: sample_count,
-            mask: !0,
-            alpha_to_coverage_enabled: false,
-        },
-        multiview: None,
-    });
+    );
 
     TerrainPipeline {
         layout,

@@ -98,12 +98,15 @@ impl MomentGenerationPass {
         });
 
         // Create compute pipeline
-        let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("moment_gen_pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: "main",
-        });
+        let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &ComputePipelineDescriptor {
+                label: Some("moment_gen_pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: "main",
+            },
+        );
 
         // Create params buffer
         let params_buffer = tracked_create_buffer(

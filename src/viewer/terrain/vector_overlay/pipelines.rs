@@ -85,41 +85,44 @@ impl VectorOverlayStack {
         });
 
         // Triangle pipeline
-        self.pipeline_triangles = Some(self.device.create_render_pipeline(
-            &wgpu::RenderPipelineDescriptor {
-                label: Some("vector_overlay_triangles_pipeline"),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: "vs_main",
-                    buffers: &[VectorVertex::desc()],
+        self.pipeline_triangles =
+            Some(crate::core::shader_registry::create_render_pipeline_scoped(
+                &self.device,
+                &wgpu::RenderPipelineDescriptor {
+                    label: Some("vector_overlay_triangles_pipeline"),
+                    layout: Some(&pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &shader,
+                        entry_point: "vs_main",
+                        buffers: &[VectorVertex::desc()],
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &shader,
+                        entry_point: "fs_main",
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: surface_format,
+                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::TriangleList,
+                        strip_index_format: None,
+                        front_face: wgpu::FrontFace::Ccw,
+                        cull_mode: None, // Draw both sides
+                        polygon_mode: wgpu::PolygonMode::Fill,
+                        unclipped_depth: false,
+                        conservative: false,
+                    },
+                    depth_stencil: depth_stencil.clone(),
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview: None,
                 },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: "fs_main",
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: surface_format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None, // Draw both sides
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil: depth_stencil.clone(),
-                multisample: wgpu::MultisampleState::default(),
-                multiview: None,
-            },
-        ));
+            ));
 
         // Lines pipeline
-        self.pipeline_lines = Some(self.device.create_render_pipeline(
+        self.pipeline_lines = Some(crate::core::shader_registry::create_render_pipeline_scoped(
+            &self.device,
             &wgpu::RenderPipelineDescriptor {
                 label: Some("vector_overlay_lines_pipeline"),
                 layout: Some(&pipeline_layout),
@@ -153,7 +156,8 @@ impl VectorOverlayStack {
         ));
 
         // Points pipeline
-        self.pipeline_points = Some(self.device.create_render_pipeline(
+        self.pipeline_points = Some(crate::core::shader_registry::create_render_pipeline_scoped(
+            &self.device,
             &wgpu::RenderPipelineDescriptor {
                 label: Some("vector_overlay_points_pipeline"),
                 layout: Some(&pipeline_layout),
@@ -242,127 +246,133 @@ impl VectorOverlayStack {
         });
 
         // OIT Triangle pipeline (MRT: color accum + reveal)
-        self.oit_pipeline_triangles = Some(self.device.create_render_pipeline(
-            &wgpu::RenderPipelineDescriptor {
-                label: Some("vector_overlay_oit_triangles_pipeline"),
-                layout: Some(pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: shader,
-                    entry_point: "vs_main",
-                    buffers: &[VectorVertex::desc()],
+        self.oit_pipeline_triangles =
+            Some(crate::core::shader_registry::create_render_pipeline_scoped(
+                &self.device,
+                &wgpu::RenderPipelineDescriptor {
+                    label: Some("vector_overlay_oit_triangles_pipeline"),
+                    layout: Some(pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: shader,
+                        entry_point: "vs_main",
+                        buffers: &[VectorVertex::desc()],
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: shader,
+                        entry_point: "fs_main_oit",
+                        targets: &[
+                            Some(wgpu::ColorTargetState {
+                                format: wgpu::TextureFormat::Rgba16Float,
+                                blend: Some(accum_blend),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            }),
+                            Some(wgpu::ColorTargetState {
+                                format: wgpu::TextureFormat::R16Float,
+                                blend: Some(reveal_blend),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            }),
+                        ],
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::TriangleList,
+                        strip_index_format: None,
+                        front_face: wgpu::FrontFace::Ccw,
+                        cull_mode: None,
+                        polygon_mode: wgpu::PolygonMode::Fill,
+                        unclipped_depth: false,
+                        conservative: false,
+                    },
+                    depth_stencil: depth_stencil.clone(),
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview: None,
                 },
-                fragment: Some(wgpu::FragmentState {
-                    module: shader,
-                    entry_point: "fs_main_oit",
-                    targets: &[
-                        Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::Rgba16Float,
-                            blend: Some(accum_blend),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        }),
-                        Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::R16Float,
-                            blend: Some(reveal_blend),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        }),
-                    ],
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil: depth_stencil.clone(),
-                multisample: wgpu::MultisampleState::default(),
-                multiview: None,
-            },
-        ));
+            ));
 
         // OIT Lines pipeline
-        self.oit_pipeline_lines = Some(self.device.create_render_pipeline(
-            &wgpu::RenderPipelineDescriptor {
-                label: Some("vector_overlay_oit_lines_pipeline"),
-                layout: Some(pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: shader,
-                    entry_point: "vs_main",
-                    buffers: &[VectorVertex::desc()],
+        self.oit_pipeline_lines =
+            Some(crate::core::shader_registry::create_render_pipeline_scoped(
+                &self.device,
+                &wgpu::RenderPipelineDescriptor {
+                    label: Some("vector_overlay_oit_lines_pipeline"),
+                    layout: Some(pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: shader,
+                        entry_point: "vs_main",
+                        buffers: &[VectorVertex::desc()],
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: shader,
+                        entry_point: "fs_main_oit",
+                        targets: &[
+                            Some(wgpu::ColorTargetState {
+                                format: wgpu::TextureFormat::Rgba16Float,
+                                blend: Some(accum_blend),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            }),
+                            Some(wgpu::ColorTargetState {
+                                format: wgpu::TextureFormat::R16Float,
+                                blend: Some(reveal_blend),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            }),
+                        ],
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::LineList,
+                        strip_index_format: None,
+                        front_face: wgpu::FrontFace::Ccw,
+                        cull_mode: None,
+                        polygon_mode: wgpu::PolygonMode::Fill,
+                        unclipped_depth: false,
+                        conservative: false,
+                    },
+                    depth_stencil: depth_stencil.clone(),
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview: None,
                 },
-                fragment: Some(wgpu::FragmentState {
-                    module: shader,
-                    entry_point: "fs_main_oit",
-                    targets: &[
-                        Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::Rgba16Float,
-                            blend: Some(accum_blend),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        }),
-                        Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::R16Float,
-                            blend: Some(reveal_blend),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        }),
-                    ],
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::LineList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil: depth_stencil.clone(),
-                multisample: wgpu::MultisampleState::default(),
-                multiview: None,
-            },
-        ));
+            ));
 
         // OIT Points pipeline
-        self.oit_pipeline_points = Some(self.device.create_render_pipeline(
-            &wgpu::RenderPipelineDescriptor {
-                label: Some("vector_overlay_oit_points_pipeline"),
-                layout: Some(pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: shader,
-                    entry_point: "vs_main",
-                    buffers: &[VectorVertex::desc()],
+        self.oit_pipeline_points =
+            Some(crate::core::shader_registry::create_render_pipeline_scoped(
+                &self.device,
+                &wgpu::RenderPipelineDescriptor {
+                    label: Some("vector_overlay_oit_points_pipeline"),
+                    layout: Some(pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: shader,
+                        entry_point: "vs_main",
+                        buffers: &[VectorVertex::desc()],
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: shader,
+                        entry_point: "fs_main_oit",
+                        targets: &[
+                            Some(wgpu::ColorTargetState {
+                                format: wgpu::TextureFormat::Rgba16Float,
+                                blend: Some(accum_blend),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            }),
+                            Some(wgpu::ColorTargetState {
+                                format: wgpu::TextureFormat::R16Float,
+                                blend: Some(reveal_blend),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            }),
+                        ],
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::PointList,
+                        strip_index_format: None,
+                        front_face: wgpu::FrontFace::Ccw,
+                        cull_mode: None,
+                        polygon_mode: wgpu::PolygonMode::Fill,
+                        unclipped_depth: false,
+                        conservative: false,
+                    },
+                    depth_stencil,
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview: None,
                 },
-                fragment: Some(wgpu::FragmentState {
-                    module: shader,
-                    entry_point: "fs_main_oit",
-                    targets: &[
-                        Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::Rgba16Float,
-                            blend: Some(accum_blend),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        }),
-                        Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::R16Float,
-                            blend: Some(reveal_blend),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        }),
-                    ],
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::PointList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil,
-                multisample: wgpu::MultisampleState::default(),
-                multiview: None,
-            },
-        ));
+            ));
 
         println!("[vector_overlay] OIT pipelines initialized");
     }

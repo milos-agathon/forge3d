@@ -277,64 +277,70 @@ impl MeshInstancedRenderer {
             ],
         };
 
-        let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some("mesh_instanced_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[vertex_layout.clone(), instance_layout.clone()],
-            },
-            primitive: PrimitiveState {
-                topology: PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: depth_format.map(|df| wgpu::DepthStencilState {
-                format: df,
-                depth_write_enabled,
-                depth_compare,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: sample_count.max(1),
-                ..Default::default()
-            },
-            fragment: Some(FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(ColorTargetState {
-                    format: color_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: ColorWrites::ALL,
-                })],
-            }),
-            multiview: None,
-        });
-        let shadow_pipeline = depth_format.map(|df| {
-            device.create_render_pipeline(&RenderPipelineDescriptor {
-                label: Some("mesh_instanced_shadow_pipeline"),
-                layout: Some(&shadow_pipeline_layout),
+        let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &RenderPipelineDescriptor {
+                label: Some("mesh_instanced_pipeline"),
+                layout: Some(&pipeline_layout),
                 vertex: VertexState {
                     module: &shader,
-                    entry_point: "vs_shadow",
-                    buffers: &[vertex_layout, instance_layout],
+                    entry_point: "vs_main",
+                    buffers: &[vertex_layout.clone(), instance_layout.clone()],
                 },
                 primitive: PrimitiveState {
                     topology: PrimitiveTopology::TriangleList,
                     ..Default::default()
                 },
-                depth_stencil: Some(wgpu::DepthStencilState {
+                depth_stencil: depth_format.map(|df| wgpu::DepthStencilState {
                     format: df,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    depth_write_enabled,
+                    depth_compare,
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 }),
-                multisample: wgpu::MultisampleState::default(),
-                fragment: None,
+                multisample: wgpu::MultisampleState {
+                    count: sample_count.max(1),
+                    ..Default::default()
+                },
+                fragment: Some(FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(ColorTargetState {
+                        format: color_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: ColorWrites::ALL,
+                    })],
+                }),
                 multiview: None,
-            })
+            },
+        );
+        let shadow_pipeline = depth_format.map(|df| {
+            crate::core::shader_registry::create_render_pipeline_scoped(
+                device,
+                &RenderPipelineDescriptor {
+                    label: Some("mesh_instanced_shadow_pipeline"),
+                    layout: Some(&shadow_pipeline_layout),
+                    vertex: VertexState {
+                        module: &shader,
+                        entry_point: "vs_shadow",
+                        buffers: &[vertex_layout, instance_layout],
+                    },
+                    primitive: PrimitiveState {
+                        topology: PrimitiveTopology::TriangleList,
+                        ..Default::default()
+                    },
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: df,
+                        depth_write_enabled: true,
+                        depth_compare: wgpu::CompareFunction::LessEqual,
+                        stencil: wgpu::StencilState::default(),
+                        bias: wgpu::DepthBiasState::default(),
+                    }),
+                    multisample: wgpu::MultisampleState::default(),
+                    fragment: None,
+                    multiview: None,
+                },
+            )
         });
 
         let uniforms = ScatterBatchUniforms::default();

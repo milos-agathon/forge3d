@@ -93,12 +93,15 @@ pub(super) fn create_atmosphere_init_resources(
         push_constant_ranges: &[],
     });
 
-    let sky_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("terrain.sky.pipeline"),
-        layout: Some(&sky_pipeline_layout),
-        module: &sky_shader,
-        entry_point: "cs_render_sky",
-    });
+    let sky_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+        device,
+        &wgpu::ComputePipelineDescriptor {
+            label: Some("terrain.sky.pipeline"),
+            layout: Some(&sky_pipeline_layout),
+            module: &sky_shader,
+            entry_point: "cs_render_sky",
+        },
+    );
 
     let sky_fallback_texture = tracked_create_texture(
         device,
