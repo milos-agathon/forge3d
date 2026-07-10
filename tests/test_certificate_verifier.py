@@ -11,6 +11,8 @@ import sys
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from forge3d import certificate
 
 FIXTURE = {
@@ -49,6 +51,19 @@ def test_payload_bytes_are_deterministic():
     a = certificate.canonical_payload_bytes(copy.deepcopy(FIXTURE))
     b = certificate.canonical_payload_bytes(json.loads(json.dumps(FIXTURE)))
     assert a == b
+
+
+def test_payload_normalizes_negative_zero():
+    fixture = copy.deepcopy(FIXTURE)
+    fixture["value"] = -0.0
+    assert b'"value":0.0' in certificate.canonical_payload_bytes(fixture)
+
+
+def test_payload_rejects_non_finite_float():
+    fixture = copy.deepcopy(FIXTURE)
+    fixture["value"] = float("nan")
+    with pytest.raises(ValueError):
+        certificate.canonical_payload_bytes(fixture)
 
 
 def test_signing_is_deterministic():

@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Union
 
 from . import _ed25519
+from ._canonical_json import canonical_json_bytes
 
 __all__ = [
     "SIGN_CONTEXT",
@@ -123,13 +124,7 @@ def canonical_payload_bytes(cert: Mapping[str, Any]) -> bytes:
         for element in passes:
             if isinstance(element, dict):
                 element.pop("gpu_ms", None)
-    return json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        allow_nan=False,
-    ).encode("utf-8")
+    return canonical_json_bytes(payload, error_context="RenderCertificate serialization")
 
 
 def _payload_digest(cert: Mapping[str, Any]) -> bytes:
