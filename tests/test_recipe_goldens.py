@@ -948,7 +948,9 @@ def _assert_matches_golden(spec: RecipeGolden, actual_path: Path) -> None:
 
 
 def _committed_cert_path(spec: RecipeGolden) -> Path:
-    return CERT_DIR / f"{spec.scene_id}.json"
+    variant = _recipe_golden_variant()
+    suffix = f".{variant}" if variant is not None else ""
+    return CERT_DIR / f"{spec.scene_id}{suffix}.json"
 
 
 def _clear_degradation_sinks() -> None:
@@ -1074,8 +1076,11 @@ def test_recipe_golden_variant_uses_an_explicit_backend_baseline(
     spec = RECIPE_GOLDENS[0]
     monkeypatch.delenv("FORGE3D_RECIPE_GOLDEN_VARIANT", raising=False)
     assert spec.golden_path == spec.canonical_golden_path
+    assert _committed_cert_path(spec) == CERT_DIR / "mapscene_terrain_raster.json"
     monkeypatch.setenv("FORGE3D_RECIPE_GOLDEN_VARIANT", "metal")
     assert spec.golden_path == GOLDEN_DIR / "mapscene_terrain_raster.metal.png"
+    assert _committed_cert_path(spec) == CERT_DIR / "mapscene_terrain_raster.metal.json"
+    assert _committed_cert_path(spec).exists()
 
 
 def test_recipe_golden_gate_rejects_pixel_regression(
