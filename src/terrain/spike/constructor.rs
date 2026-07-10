@@ -45,7 +45,7 @@ impl TerrainSpike {
 
         let mut capabilities =
             crate::core::capabilities::CapabilitySet::negotiate(adapter.features());
-        let requested_limits = wgpu::Limits::downlevel_defaults();
+        let requested_limits = adapter.limits();
         let first_request = pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("terrain-device"),

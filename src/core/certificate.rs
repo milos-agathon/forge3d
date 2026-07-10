@@ -19,7 +19,9 @@ use crate::core::resource_tracker::{
 };
 use crate::core::shader_registry::{begin_shader_render_capture, finish_shader_render_capture};
 use serde::Serialize;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 /// One timed GPU pass in the execution report.
@@ -59,6 +61,11 @@ struct FinishedCapture {
 static CURRENT: Mutex<Vec<PassRecord>> = Mutex::new(Vec::new());
 /// The last completed capture, serialized by `execution_report_json`.
 static LAST: Mutex<Option<FinishedCapture>> = Mutex::new(None);
+static CAPTURE_USES_GPU: AtomicBool = AtomicBool::new(true);
+
+thread_local! {
+    static EXTERNAL_CAPTURE: RefCell<Option<RenderCaptureGuard>> = const { RefCell::new(None) };
+}
 
 #[must_use = "a render capture must be finished or retained until the render exits"]
 pub struct RenderCaptureGuard {
@@ -111,6 +118,7 @@ fn notify_python_degradation_capture(_method: &str) {}
 /// Start a render capture: clears the per-render pass list. `entry_point` names
 /// the render entry for logging/debugging (not part of the serialized schema).
 pub fn begin_render_capture(entry_point: &str) -> RenderCaptureGuard {
+    CAPTURE_USES_GPU.store(true, Ordering::Relaxed);
     begin_render_capture_with_resources(entry_point, &[])
 }
 
@@ -145,6 +153,7 @@ pub fn record_pass(label: &str, gpu_ms: f64, draw_calls: u32) {
 /// context when one already exists; certificate assembly never forces GPU
 /// initialization.
 fn finish_render_capture() {
+    let uses_gpu = CAPTURE_USES_GPU.load(Ordering::Relaxed);
     let passes = lock_current().clone();
     let ledger = finish_ledger_capture();
 
@@ -157,75 +166,91 @@ fn finish_render_capture() {
     // Re-derive capability_absent entries from the live context so a cleared
     // degradation sink cannot certify a capability gap away: the negotiated
     // CapabilitySet is the source of truth for what this device lacks.
-    if let Some(ctx) = crate::core::gpu::ctx_if_initialized() {
-        for (name, feature, consequence) in crate::core::capabilities::WANTED {
-            let absent = ctx.capabilities.wanted.contains(*feature)
-                && !ctx.capabilities.granted.contains(*feature);
-            if absent
-                && !degradations
-                    .iter()
-                    .any(|(k, n, _)| k == "capability_absent" && n == name)
-            {
-                degradations.push((
-                    "capability_absent".to_string(),
-                    (*name).to_string(),
-                    (*consequence).to_string(),
-                ));
+    if uses_gpu {
+        if let Some(ctx) = crate::core::gpu::ctx_if_initialized() {
+            for (name, feature, consequence) in crate::core::capabilities::WANTED {
+                let absent = ctx.capabilities.wanted.contains(*feature)
+                    && !ctx.capabilities.granted.contains(*feature);
+                if absent
+                    && !degradations
+                        .iter()
+                        .any(|(k, n, _)| k == "capability_absent" && n == name)
+                {
+                    degradations.push((
+                        "capability_absent".to_string(),
+                        (*name).to_string(),
+                        (*consequence).to_string(),
+                    ));
+                }
             }
         }
     }
     degradations.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
 
     let wgsl_module_hashes = finish_shader_render_capture();
-    let (adapter, requested, granted, limits) = match crate::core::gpu::ctx_if_initialized() {
-        Some(ctx) => {
-            let info = ctx.adapter.get_info();
-            let adapter = AdapterSnapshot {
-                vendor: info.vendor.to_string(),
-                device: info.name.clone(),
-                backend: format!("{:?}", info.backend).to_lowercase(),
-                driver_info: info.driver_info.clone(),
-            };
-            let requested = ctx
-                .capabilities
-                .wanted_names()
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
-            let granted = ctx
-                .capabilities
-                .granted_names()
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
-            let l = ctx.device.limits();
-            let mut limits = BTreeMap::new();
-            limits.insert(
-                "max_texture_dimension_2d".to_string(),
-                l.max_texture_dimension_2d as u64,
-            );
-            limits.insert("max_buffer_size".to_string(), l.max_buffer_size);
-            limits.insert("max_bind_groups".to_string(), l.max_bind_groups as u64);
-            limits.insert(
-                "max_storage_buffers_per_shader_stage".to_string(),
-                l.max_storage_buffers_per_shader_stage as u64,
-            );
-            limits.insert(
-                "min_uniform_buffer_offset_alignment".to_string(),
-                l.min_uniform_buffer_offset_alignment as u64,
-            );
-            limits.insert(
-                "min_storage_buffer_offset_alignment".to_string(),
-                l.min_storage_buffer_offset_alignment as u64,
-            );
-            (adapter, requested, granted, limits)
-        }
-        None => (
-            AdapterSnapshot::default(),
+    let (adapter, requested, granted, limits) = if !uses_gpu {
+        (
+            AdapterSnapshot {
+                vendor: "cpu".to_string(),
+                device: "python".to_string(),
+                backend: "cpu".to_string(),
+                driver_info: String::new(),
+            },
             Vec::new(),
             Vec::new(),
             BTreeMap::new(),
-        ),
+        )
+    } else {
+        match crate::core::gpu::ctx_if_initialized() {
+            Some(ctx) => {
+                let info = ctx.adapter.get_info();
+                let adapter = AdapterSnapshot {
+                    vendor: info.vendor.to_string(),
+                    device: info.name.clone(),
+                    backend: format!("{:?}", info.backend).to_lowercase(),
+                    driver_info: info.driver_info.clone(),
+                };
+                let requested = ctx
+                    .capabilities
+                    .wanted_names()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                let granted = ctx
+                    .capabilities
+                    .granted_names()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                let l = ctx.device.limits();
+                let mut limits = BTreeMap::new();
+                limits.insert(
+                    "max_texture_dimension_2d".to_string(),
+                    l.max_texture_dimension_2d as u64,
+                );
+                limits.insert("max_buffer_size".to_string(), l.max_buffer_size);
+                limits.insert("max_bind_groups".to_string(), l.max_bind_groups as u64);
+                limits.insert(
+                    "max_storage_buffers_per_shader_stage".to_string(),
+                    l.max_storage_buffers_per_shader_stage as u64,
+                );
+                limits.insert(
+                    "min_uniform_buffer_offset_alignment".to_string(),
+                    l.min_uniform_buffer_offset_alignment as u64,
+                );
+                limits.insert(
+                    "min_storage_buffer_offset_alignment".to_string(),
+                    l.min_storage_buffer_offset_alignment as u64,
+                );
+                (adapter, requested, granted, limits)
+            }
+            None => (
+                AdapterSnapshot::default(),
+                Vec::new(),
+                Vec::new(),
+                BTreeMap::new(),
+            ),
+        }
     };
 
     let finished = FinishedCapture {
@@ -250,6 +275,35 @@ pub fn abort_render_capture() {
     crate::core::degradation::abort_degradation_capture();
     notify_python_degradation_capture("abort_capture");
     lock_current().clear();
+}
+
+/// Start a render-local capture owned by a Python renderer.
+pub fn begin_external_render_capture(entry_point: &str) {
+    EXTERNAL_CAPTURE.with(|slot| {
+        slot.borrow_mut().take();
+        *slot.borrow_mut() = Some(begin_render_capture(entry_point));
+        CAPTURE_USES_GPU.store(false, Ordering::Relaxed);
+    });
+}
+
+/// Finish the active Python-owned render capture with one CPU/synthetic pass.
+pub fn finish_external_render_capture(
+    pass_label: &str,
+    draw_calls: u32,
+) -> Result<(), RenderError> {
+    let capture = EXTERNAL_CAPTURE
+        .with(|slot| slot.borrow_mut().take())
+        .ok_or_else(|| RenderError::render("no Python render capture is active"))?;
+    record_pass(pass_label, 0.0, draw_calls);
+    capture.finish();
+    Ok(())
+}
+
+/// Abort the active Python-owned capture after an exception.
+pub fn abort_external_render_capture() {
+    EXTERNAL_CAPTURE.with(|slot| {
+        slot.borrow_mut().take();
+    });
 }
 
 // ---------------------------------------------------------------------------

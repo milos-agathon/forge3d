@@ -237,6 +237,9 @@ class TestNativeModuleSymbols:
         "capabilities",
         # CENSOR: last-render execution certificate JSON
         "render_execution_report",
+        "begin_render_execution_capture",
+        "finish_render_execution_capture",
+        "abort_render_execution_capture",
         # CENSOR: Ed25519 certificate signing through the Rust implementation
         "sign_render_certificate_digest",
         # CENSOR: budget-enforce test helper
@@ -738,6 +741,9 @@ class TestPackageLevelApiContracts:
         "LabelRationale",
         # CENSOR: native Ed25519 certificate signer
         "sign_render_certificate_digest",
+        "begin_render_execution_capture",
+        "finish_render_execution_capture",
+        "abort_render_execution_capture",
     ]
 
     @pytest.mark.parametrize("attr_name", EXPECTED_PACKAGE_ATTRS)

@@ -384,6 +384,27 @@ pub(crate) fn render_execution_report() -> PyResult<String> {
     Ok(crate::core::certificate::execution_report_json()?)
 }
 
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn begin_render_execution_capture(entry_point: &str) {
+    crate::core::certificate::begin_external_render_capture(entry_point);
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (pass_label, draw_calls = 1))]
+pub(crate) fn finish_render_execution_capture(pass_label: &str, draw_calls: u32) -> PyResult<()> {
+    Ok(crate::core::certificate::finish_external_render_capture(
+        pass_label, draw_calls,
+    )?)
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn abort_render_execution_capture() {
+    crate::core::certificate::abort_external_render_capture();
+}
+
 /// Sign a canonical RenderCertificate SHA256 digest with `ed25519-dalek`.
 #[cfg(feature = "extension-module")]
 #[pyfunction]

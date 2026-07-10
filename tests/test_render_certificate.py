@@ -173,6 +173,49 @@ def test_scene_shader_hashes_follow_lazy_feature_use():
     assert "cloud_shader" not in disabled, disabled
 
 
+def test_python_synthetic_render_replaces_stale_gpu_certificate():
+    _skip_without_terrain()
+    _clear_sinks()
+
+    f3d.Scene(16, 16).render_rgba()
+
+    from forge3d.path_tracing import render_aovs
+
+    render_aovs(
+        8,
+        8,
+        scene=None,
+        synthetic_ok=True,
+        certificate=True,
+    )
+    cert = render_certificate(sign=False)
+
+    assert cert["engine"]["wgsl_module_hashes"] == {}
+    assert cert["adapter"]["backend"] == "cpu"
+    assert [entry["label"] for entry in cert["passes"]] == [
+        "python.path_tracing.render_aovs"
+    ]
+    assert any(
+        entry["kind"] == "synthetic_output"
+        and entry["name"] == "path_tracing.render_aovs"
+        for entry in cert["degradations"]
+    )
+
+
+def test_progressive_python_render_accepts_certificate_contract():
+    _clear_sinks()
+
+    from forge3d.path_tracing import PathTracer
+
+    image = PathTracer(8, 8).render_progressive(
+        synthetic_ok=True,
+        certificate=True,
+    )
+    assert image.shape == (8, 8, 4)
+    cert = render_certificate(sign=False)
+    assert cert["passes"][0]["label"] == "python.path_tracing.render_progressive"
+
+
 def test_certificate_kwarg_writes_signed_file(tmp_path):
     _skip_without_terrain()
     _clear_sinks()

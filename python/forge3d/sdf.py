@@ -412,7 +412,13 @@ class HybridRenderer:
         self.camera_right = right
         self.camera_up = up
 
-    def render_sdf_scene(self, scene: SdfScene, spheres: Optional[List] = None) -> np.ndarray:
+    def render_sdf_scene(
+        self,
+        scene: SdfScene,
+        spheres: Optional[List] = None,
+        *,
+        certificate: bool | str | os.PathLike[str] = False,
+    ) -> np.ndarray:
         """
         Render an SDF scene to RGBA8 image
 
@@ -430,8 +436,24 @@ class HybridRenderer:
             except Exception as e:
                 warnings.warn(f"Native rendering failed: {e}, falling back to CPU")
 
-        # CPU fallback implementation
-        return self._render_cpu_fallback(scene, spheres or [])
+        # CPU fallback implementation. Capture at the point the fallback is
+        # actually selected so imports and unused renderer objects cannot leak
+        # a degradation into an unrelated certificate.
+        from . import _degradation
+        from . import certificate as _certificate
+
+        with _certificate._render_capture(
+            "python.sdf.render", "python.sdf.render", draw_calls=1
+        ):
+            _degradation.record(
+                "cpu_fallback",
+                "sdf.render",
+                "native SDF rendering unavailable or failed; pure-Python raymarching used",
+            )
+            image = self._render_cpu_fallback(scene, spheres or [])
+        if certificate:
+            _certificate.emit_render_certificate(certificate)
+        return image
 
     def _render_native(self, scene: SdfScene, spheres: List) -> np.ndarray:
         """Render using native Rust implementation"""
@@ -542,11 +564,16 @@ def create_simple_scene() -> SdfScene:
     return builder.build()
 
 
-def render_simple_scene(width: int = 512, height: int = 512) -> np.ndarray:
+def render_simple_scene(
+    width: int = 512,
+    height: int = 512,
+    *,
+    certificate: bool | str | os.PathLike[str] = False,
+) -> np.ndarray:
     """Render a simple test scene"""
     scene = create_simple_scene()
     renderer = HybridRenderer(width, height)
-    return renderer.render_sdf_scene(scene)
+    return renderer.render_sdf_scene(scene, certificate=certificate)
 
 
 # Example usage

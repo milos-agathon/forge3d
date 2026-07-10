@@ -38,6 +38,8 @@ import copy
 import hashlib
 import json
 import os
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Mapping, Union
 
@@ -65,6 +67,41 @@ SCHEMA = "forge3d.render_certificate/1"
 # Environment variable that overrides the dev signing seed with a 64-char hex
 # (32-byte) Ed25519 private seed.
 _SIGNING_KEY_ENV = "FORGE3D_CERT_SIGNING_KEY"
+_CAPTURE_STATE = threading.local()
+
+
+@contextmanager
+def _render_capture(entry_point: str, pass_label: str, draw_calls: int = 1):
+    """Capture one pure-Python render without overwriting an outer capture."""
+    depth = int(getattr(_CAPTURE_STATE, "depth", 0))
+    _CAPTURE_STATE.depth = depth + 1
+    if depth:
+        try:
+            yield
+        finally:
+            _CAPTURE_STATE.depth = depth
+        return
+
+    from ._native import get_native_module
+
+    native = get_native_module()
+    if native is None or not hasattr(native, "begin_render_execution_capture"):
+        try:
+            yield
+        finally:
+            _CAPTURE_STATE.depth = 0
+        return
+
+    native.begin_render_execution_capture(entry_point)
+    try:
+        yield
+    except BaseException:
+        native.abort_render_execution_capture()
+        raise
+    else:
+        native.finish_render_execution_capture(pass_label, int(draw_calls))
+    finally:
+        _CAPTURE_STATE.depth = 0
 
 
 def _dev_signing_seed() -> bytes:

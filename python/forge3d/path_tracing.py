@@ -13,6 +13,7 @@ must pass ``synthetic_ok=True`` to receive synthetic pixels.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import wraps
 from typing import Any, Dict, Optional, Tuple, Iterable, Mapping, Callable
 
 import numpy as np
@@ -37,6 +38,32 @@ def _require_synthetic_ok(synthetic_ok: bool, api_name: str) -> None:
             f"{api_name} produces deterministic synthetic output, not a real path-traced render; "
             "pass synthetic_ok=True to opt in."
         )
+
+
+def _captured_synthetic_render(name: str):
+    def decorate(function):
+        @wraps(function)
+        def wrapped(*args, **kwargs):
+            certificate = kwargs.pop("certificate", False)
+            from . import _degradation
+            from . import certificate as _certificate
+
+            with _certificate._render_capture(
+                f"python.{name}", f"python.{name}", draw_calls=1
+            ):
+                _degradation.record(
+                    "synthetic_output",
+                    name,
+                    "deterministic synthetic CPU data, not a GPU render",
+                )
+                result = function(*args, **kwargs)
+            if certificate:
+                _certificate.emit_render_certificate(certificate)
+            return result
+
+        return wrapped
+
+    return decorate
 
 
 # --- A19: Scene cache for HQ path tracing (Python fallback) ---
@@ -213,6 +240,7 @@ class PathTracer:
             self._mat_bias = np.array([0.0, 0.0, 0.0], dtype=np.float32)
         return None
 
+    @_captured_synthetic_render("path_tracing.PathTracer.render_rgba")
     def render_rgba(self, *args, spp: int = 1, **kwargs) -> np.ndarray:
         """Produce a deterministic synthetic RGBA image.
 
@@ -223,13 +251,7 @@ class PathTracer:
         """
         synthetic_ok = bool(kwargs.pop("synthetic_ok", False))
         _require_synthetic_ok(synthetic_ok, "PathTracer.render_rgba")
-        certificate = kwargs.pop("certificate", False)
-
         def _finish(arr: np.ndarray) -> np.ndarray:
-            if certificate:
-                from . import certificate as _certificate
-
-                _certificate.emit_render_certificate(certificate)
             return arr
 
         # New-style call with explicit (w,h, ...)
@@ -387,6 +409,7 @@ class PathTracer:
         except Exception:
             return f"a19:{repr(payload)}"
 
+    @_captured_synthetic_render("path_tracing.render_progressive")
     def render_progressive(
         self,
         *,
@@ -395,6 +418,7 @@ class PathTracer:
         min_updates_per_sec: float = 2.0,
         time_source: Callable[[], float] = _time.perf_counter,
         spp: int = 1,
+        synthetic_ok: bool = False,
     ) -> np.ndarray:
         """Render progressively in tiles, invoking callback on cadence.
 
@@ -408,6 +432,7 @@ class PathTracer:
 
         If the callback returns True, rendering stops early.
         """
+        _require_synthetic_ok(synthetic_ok, "PathTracer.render_progressive")
         width, height = self._width, self._height
         spp = int(spp)
         out = np.empty((height, width, 4), dtype=np.uint8)
@@ -462,16 +487,6 @@ def _synthetic_basis(width: int, height: int, *, seed: int) -> tuple[np.ndarray,
     Uses a gradient and a seeded random field to keep determinism.
 
     """
-    try:
-        from . import _degradation
-
-        _degradation.record(
-            "synthetic_output",
-            "path_tracing.aov_basis",
-            "AOV basis is synthetic CPU data, not a GPU render",
-        )
-    except Exception:
-        pass
     rng = np.random.default_rng(int(seed))
     y = np.linspace(0.0, 1.0, int(height), dtype=np.float32)[:, None]
     x = np.linspace(0.0, 1.0, int(width), dtype=np.float32)[None, :]
@@ -482,6 +497,7 @@ def _synthetic_basis(width: int, height: int, *, seed: int) -> tuple[np.ndarray,
     return base, noise
 
 
+@_captured_synthetic_render("path_tracing.render_aovs")
 def render_aovs(
     width: int,
     height: int,
@@ -689,9 +705,9 @@ def save_aovs(
 
 # Additional functions needed by tests
 
+@_captured_synthetic_render("path_tracing.render_rgba")
 def render_rgba(*args, **kwargs) -> np.ndarray:
     """Render RGBA image (fallback implementation)."""
-    certificate = kwargs.pop("certificate", False)
     # Handle positional arguments for width/height
     if len(args) >= 2 and isinstance(args[0], (int, np.integer)) and isinstance(args[1], (int, np.integer)):
         width = int(args[0])
@@ -710,10 +726,6 @@ def render_rgba(*args, **kwargs) -> np.ndarray:
                 128,
                 255
             ]
-    if certificate:
-        from . import certificate as _certificate
-
-        _certificate.emit_render_certificate(certificate)
     return img
 
 # Note: render_aovs() full implementation is defined above. Avoid redefining it here

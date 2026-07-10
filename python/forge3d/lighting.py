@@ -778,9 +778,11 @@ class CsmController:
     def _sync_native_state(self) -> None:
         """Push the current configuration to the native module when available."""
         if _forge3d is None:
+            _record_native_setter_unavailable("configure_csm")
             return
         sync = getattr(_forge3d, "configure_csm", None)
         if sync is None:
+            _record_native_setter_unavailable("configure_csm")
             return
         try:
             sync(
@@ -814,6 +816,10 @@ class CsmController:
                 except Exception as exc:  # pragma: no cover
                     warnings.warn(f"forge3d.set_csm_enabled failed: {exc}")
                     _record_native_setter_unavailable("set_csm_enabled")
+            else:
+                _record_native_setter_unavailable("set_csm_enabled")
+        else:
+            _record_native_setter_unavailable("set_csm_enabled")
         self._sync_native_state()
 
     def set_light_direction(self, direction: Tuple[float, float, float]) -> None:
@@ -829,6 +835,10 @@ class CsmController:
                 except Exception as exc:  # pragma: no cover
                     warnings.warn(f"forge3d.set_csm_light_direction failed: {exc}")
                     _record_native_setter_unavailable("set_csm_light_direction")
+            else:
+                _record_native_setter_unavailable("set_csm_light_direction")
+        else:
+            _record_native_setter_unavailable("set_csm_light_direction")
 
     def configure_pcf(self, kernel_size: int) -> None:
         """Configure PCF filtering quality."""
@@ -844,6 +854,10 @@ class CsmController:
                 except Exception as exc:  # pragma: no cover
                     warnings.warn(f"forge3d.set_csm_pcf_kernel failed: {exc}")
                     _record_native_setter_unavailable("set_csm_pcf_kernel")
+            else:
+                _record_native_setter_unavailable("set_csm_pcf_kernel")
+        else:
+            _record_native_setter_unavailable("set_csm_pcf_kernel")
         self._sync_native_state()
 
     def set_bias_parameters(self, depth_bias: float, slope_bias: float, peter_panning_offset: float) -> None:
@@ -860,6 +874,10 @@ class CsmController:
                 except Exception as exc:  # pragma: no cover
                     warnings.warn(f"forge3d.set_csm_bias_params failed: {exc}")
                     _record_native_setter_unavailable("set_csm_bias_params")
+            else:
+                _record_native_setter_unavailable("set_csm_bias_params")
+        else:
+            _record_native_setter_unavailable("set_csm_bias_params")
         self._sync_native_state()
 
     def set_debug_mode(self, mode: int) -> None:
@@ -880,6 +898,10 @@ class CsmController:
                 except Exception as exc:  # pragma: no cover
                     warnings.warn(f"forge3d.set_csm_debug_mode failed: {exc}")
                     _record_native_setter_unavailable("set_csm_debug_mode")
+            else:
+                _record_native_setter_unavailable("set_csm_debug_mode")
+        else:
+            _record_native_setter_unavailable("set_csm_debug_mode")
         self._sync_native_state()
 
     def get_cascade_info(self) -> List[Tuple[float, float, float]]:
