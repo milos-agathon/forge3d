@@ -98,7 +98,13 @@
       "indirect_first_instance"
     ]
   },
-  "degradations": [],
+  "degradations": [
+    {
+      "consequence": "scratch-branch proof that the honesty gate fails CI",
+      "kind": "deliberate_corruption",
+      "name": "censor.red_proof"
+    }
+  ],
   "engine": {
     "git_sha": "bb0c91941eda",
     "version": "1.31.0",
