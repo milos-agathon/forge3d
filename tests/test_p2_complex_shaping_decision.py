@@ -11,9 +11,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _arabic_font_path() -> Path:
     candidates = [
+        # Windows
         Path("C:/Windows/Fonts/arial.ttf"),
         Path("C:/Windows/Fonts/tahoma.ttf"),
         Path("C:/Windows/Fonts/segoeui.ttf"),
+        # Linux (GitHub-hosted runners ship DejaVu/Noto/Liberation)
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        Path("/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf"),
+        Path("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
+        # macOS
+        Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
+        Path("/System/Library/Fonts/Supplemental/Tahoma.ttf"),
     ]
     for path in candidates:
         if path.exists():

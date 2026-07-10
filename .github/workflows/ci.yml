@@ -226,6 +226,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # COG/mapscene fixtures under assets/ and tests/data are Git LFS
+          # objects; without lfs the lane reads pointer files and fails with
+          # InvalidTiffHeader (found by the first exhaustive-lane CI run).
+          lfs: true
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
@@ -315,6 +320,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # COG/mapscene fixtures under assets/ and tests/data are Git LFS
+          # objects; without lfs the lane reads pointer files and fails with
+          # InvalidTiffHeader (found by the first exhaustive-lane CI run).
+          lfs: true
 
       - name: Set up Python
         uses: actions/setup-python@v4
