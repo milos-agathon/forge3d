@@ -7,6 +7,7 @@
 import copy
 import json
 import os
+import shutil
 import sys
 import subprocess
 from pathlib import Path
@@ -23,6 +24,24 @@ FIXTURE = {
     "passes": [{"label": "terrain.main", "gpu_ms": 1.25, "draw_calls": 7}],
     "allocations": {"peak_host_visible_bytes": 1, "peak_device_local_bytes": 2, "by_label": {"x": 1}},
     "degradations": [],
+}
+
+SIGNED_FIXTURE = {
+    **copy.deepcopy(FIXTURE),
+    "signature": {
+        "alg": "ed25519",
+        "pubkey": "92f33f5957bd8532b7e878f34b95aabe077f8ab962cea2c4b06acf2c91491917",
+        "sig": "74e25234b4c64840fe5fe94468fa2ce5cfedb69284bdb18442f9cba14743e8d8c2ac2950e377a162a8b1ef07a18c096334a25d3d6a1d39313a9306fed7545607",
+        "signed_fields": [
+            "adapter",
+            "allocations",
+            "capabilities",
+            "degradations",
+            "engine",
+            "passes (gpu_ms excluded)",
+            "schema",
+        ],
+    },
 }
 
 
@@ -106,3 +125,37 @@ def test_cli_verify(tmp_path):
     r = subprocess.run([sys.executable, "-m", "forge3d.certificate", "verify", str(p), "--pubkey", str(k)],
                        capture_output=True, text=True, env=env)
     assert r.returncode == 0 and "VALID" in r.stdout, r.stderr
+
+
+def test_cli_verify_without_native_module(tmp_path):
+    package = tmp_path / "forge3d"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    source_dir = Path(certificate.__file__).resolve().parent
+    for name in ("certificate.py", "_canonical_json.py", "_ed25519.py"):
+        shutil.copy2(source_dir / name, package / name)
+
+    cert_path = tmp_path / "cert.json"
+    cert_path.write_text(json.dumps(SIGNED_FIXTURE), encoding="utf-8")
+    key_path = tmp_path / "key.pub"
+    key_path.write_text(SIGNED_FIXTURE["signature"]["pubkey"], encoding="ascii")
+
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(tmp_path)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "forge3d.certificate",
+            "verify",
+            str(cert_path),
+            "--pubkey",
+            str(key_path),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env=env,
+    )
+    assert not (package / "_forge3d.pyd").exists()
+    assert result.returncode == 0 and "VALID" in result.stdout, result.stderr

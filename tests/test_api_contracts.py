@@ -736,6 +736,8 @@ class TestPackageLevelApiContracts:
         # CARTOGRAPHER-PRIME: bounded-optimal label solve + rationale
         "declutter_optimal",
         "LabelRationale",
+        # CENSOR: native Ed25519 certificate signer
+        "sign_render_certificate_digest",
     ]
 
     @pytest.mark.parametrize("attr_name", EXPECTED_PACKAGE_ATTRS)
