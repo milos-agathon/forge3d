@@ -12,7 +12,7 @@
 //! state serialize byte-for-byte identically except for the live `gpu_ms`
 //! timing values.
 
-use crate::core::degradation::degradations_snapshot;
+use crate::core::degradation::{begin_degradation_capture, finish_degradation_capture};
 use crate::core::error::RenderError;
 use crate::core::resource_tracker::{begin_ledger_capture, finish_ledger_capture};
 use crate::core::shader_registry::{begin_shader_render_capture, finish_shader_render_capture};
@@ -66,6 +66,23 @@ fn lock_last() -> std::sync::MutexGuard<'static, Option<FinishedCapture>> {
     LAST.lock().unwrap_or_else(|p| p.into_inner())
 }
 
+#[cfg(feature = "extension-module")]
+fn notify_python_degradation_capture(method: &str) {
+    use pyo3::prelude::PyAnyMethods;
+
+    pyo3::Python::with_gil(|py| match py.import_bound("forge3d._degradation") {
+        Ok(module) => {
+            if let Err(error) = module.call_method0(method) {
+                log::warn!("Python degradation capture {method} failed: {error}");
+            }
+        }
+        Err(error) => log::debug!("Python degradation sink unavailable: {error}"),
+    });
+}
+
+#[cfg(not(feature = "extension-module"))]
+fn notify_python_degradation_capture(_method: &str) {}
+
 /// Start a render capture: clears the per-render pass list. `entry_point` names
 /// the render entry for logging/debugging (not part of the serialized schema).
 pub fn begin_render_capture(entry_point: &str) {
@@ -79,6 +96,8 @@ pub fn begin_render_capture_with_shaders(
 ) {
     begin_ledger_capture();
     begin_shader_render_capture(shader_hashes);
+    begin_degradation_capture();
+    notify_python_degradation_capture("begin_capture");
     let mut cur = lock_current();
     cur.clear();
     log::debug!("render capture begin: {entry_point}");
@@ -102,10 +121,11 @@ pub fn finish_render_capture() -> BTreeMap<String, String> {
     let passes = lock_current().clone();
     let ledger = finish_ledger_capture();
 
-    let mut degradations: Vec<(String, String, String)> = degradations_snapshot()
+    let mut degradations: Vec<(String, String, String)> = finish_degradation_capture()
         .into_iter()
         .map(|d| (d.kind, d.name, d.consequence))
         .collect();
+    notify_python_degradation_capture("finish_capture");
 
     // Re-derive capability_absent entries from the live context so a cleared
     // degradation sink cannot certify a capability gap away: the negotiated

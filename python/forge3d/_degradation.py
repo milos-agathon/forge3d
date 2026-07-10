@@ -24,6 +24,8 @@ from typing import Dict, List, Tuple
 # the recorded consequence is stable regardless of how many times a per-frame
 # fallback fires.
 _SINK: Dict[Tuple[str, str], str] = {}
+_ACTIVE_CAPTURE: Dict[Tuple[str, str], str] | None = None
+_LAST_CAPTURE: Dict[Tuple[str, str], str] = {}
 _LOCK = threading.Lock()
 
 
@@ -34,9 +36,12 @@ def record(kind: str, name: str, consequence: str) -> None:
     later calls with the same key are ignored (mirrors the Rust sink).
     """
     key = (str(kind), str(name))
+    global _ACTIVE_CAPTURE
     with _LOCK:
         if key not in _SINK:
             _SINK[key] = str(consequence)
+        if _ACTIVE_CAPTURE is not None and key not in _ACTIVE_CAPTURE:
+            _ACTIVE_CAPTURE[key] = str(consequence)
 
 
 def snapshot() -> List[Dict[str, str]]:
@@ -49,7 +54,42 @@ def snapshot() -> List[Dict[str, str]]:
     ]
 
 
+def begin_capture() -> None:
+    """Start a fresh render-local capture."""
+    global _ACTIVE_CAPTURE
+    with _LOCK:
+        _ACTIVE_CAPTURE = {}
+
+
+def finish_capture() -> None:
+    """Freeze the active render-local capture for certificate assembly."""
+    global _ACTIVE_CAPTURE, _LAST_CAPTURE
+    with _LOCK:
+        _LAST_CAPTURE = dict(_ACTIVE_CAPTURE or {})
+        _ACTIVE_CAPTURE = None
+
+
+def capture_snapshot() -> List[Dict[str, str]]:
+    """Return the last completed render's Python degradations."""
+    with _LOCK:
+        items = sorted(_LAST_CAPTURE.items())
+    return [
+        {"kind": kind, "name": name, "consequence": consequence}
+        for (kind, name), consequence in items
+    ]
+
+
+def abort_capture() -> None:
+    """Discard an incomplete render-local capture."""
+    global _ACTIVE_CAPTURE
+    with _LOCK:
+        _ACTIVE_CAPTURE = None
+
+
 def clear() -> None:
     """Reset the sink. Exposed so tests and callers can isolate renders."""
+    global _ACTIVE_CAPTURE, _LAST_CAPTURE
     with _LOCK:
         _SINK.clear()
+        _ACTIVE_CAPTURE = None
+        _LAST_CAPTURE = {}

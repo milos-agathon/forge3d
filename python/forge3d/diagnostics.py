@@ -512,7 +512,7 @@ def render_certificate(sign: bool = True) -> dict[str, Any]:
 
     degradations = [dict(entry) for entry in (cert.get("degradations") or [])]
     present = {(entry.get("kind"), entry.get("name")) for entry in degradations}
-    for entry in _degradation.snapshot():
+    for entry in _degradation.capture_snapshot():
         key = (entry.get("kind"), entry.get("name"))
         if key not in present:
             degradations.append(dict(entry))

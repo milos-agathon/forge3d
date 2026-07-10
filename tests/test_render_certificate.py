@@ -61,6 +61,21 @@ def test_certificate_has_live_passes_and_empty_degradations(tmp_path):
     assert cert["signature"]["alg"] == "ed25519"
 
 
+def test_pre_render_python_degradation_does_not_leak(tmp_path):
+    _skip_without_terrain()
+    _clear_sinks()
+
+    from forge3d import _degradation
+
+    _degradation.record("pre_render_test", "must_not_leak", "recorded before render")
+    _build_and_render(tmp_path)
+
+    assert not any(
+        entry["name"] == "must_not_leak"
+        for entry in render_certificate(sign=False)["degradations"]
+    )
+
+
 def test_signed_payload_deterministic_across_two_renders(tmp_path):
     _skip_without_terrain()
     _clear_sinks()
