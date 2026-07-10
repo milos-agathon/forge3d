@@ -104,7 +104,10 @@ def terrain_rendering_available() -> bool:
     env = os.environ.copy()
     env["FORGE3D_TERRAIN_PROBE_CHILD"] = "1"
     repo = Path(__file__).resolve().parents[1]
-    path_entries = [str(repo / "tests"), str(repo / "python")]
+    # The golden lane validates the installed wheel.  Do not prepend the source
+    # package here: it shadows that wheel but does not contain the platform
+    # native extension, making the child falsely report that terrain is absent.
+    path_entries = [str(repo / "tests")]
     if env.get("PYTHONPATH"):
         path_entries.append(env["PYTHONPATH"])
     env["PYTHONPATH"] = os.pathsep.join(path_entries)

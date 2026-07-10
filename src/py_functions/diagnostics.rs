@@ -374,7 +374,9 @@ pub(crate) fn clear_native_degradations() {
 // ---------------------------------------------------------
 // CENSOR Task 9: RenderCertificate execution report
 // ---------------------------------------------------------
-/// Serialized JSON execution report for the LAST completed native render:
+/// Outside CENSOR's render-certificate scope: serialized JSON execution report
+/// for the LAST completed native render; this is a getter and renders nothing.
+/// The report includes
 /// engine revision + WGSL hashes, adapter/capabilities, live per-pass GPU
 /// timings, peak allocation ledger, and recorded degradations. Raises when no
 /// render has completed in this process yet.

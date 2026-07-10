@@ -233,6 +233,9 @@ def run_benchmark(
     """
     Run a timing benchmark for a given operation.
 
+    Outside CENSOR's render-certificate scope: this is a benchmark harness,
+    not one deliverable render.
+
     Parameters
     ----------
     op : {'renderer_rgba','renderer_png','scene_rgba','numpy_to_png','png_to_numpy',

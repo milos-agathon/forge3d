@@ -43,9 +43,19 @@ def test_terrain_rendering_available_uses_child_probe(monkeypatch) -> None:
     class Result:
         returncode = 1
 
-    monkeypatch.setattr(terrain_runtime.subprocess, "run", lambda *_, **__: Result())
+    child_call = {}
+
+    def run_child(*_, **kwargs):
+        child_call.update(kwargs)
+        return Result()
+
+    monkeypatch.setattr(terrain_runtime.subprocess, "run", run_child)
 
     try:
         assert terrain_runtime.terrain_rendering_available() is False
+        child_pythonpath = child_call["env"]["PYTHONPATH"].split(terrain_runtime.os.pathsep)
+        repo = terrain_runtime.Path(terrain_runtime.__file__).resolve().parents[1]
+        assert child_pythonpath[0] == str(repo / "tests")
+        assert str(repo / "python") not in child_pythonpath
     finally:
         terrain_runtime.terrain_rendering_available.cache_clear()
