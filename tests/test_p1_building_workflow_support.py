@@ -65,7 +65,7 @@ def test_cityjson_and_geojson_building_render_prep_stays_diagnostic_bearing(tmp_
         report = _scene_with_layer(layer).validate()
         codes = [diagnostic.code for diagnostic in report.diagnostics]
         assert "placeholder_fallback" in codes
-        assert report.unsupported_features["buildings.mapscene_render"] == "placeholder/fallback"
+        assert report.unsupported_features["buildings.placeholder_fallback"] == "placeholder/fallback"
 
 
 def test_building_summary_includes_geometry_count_bounds_and_material_status(tmp_path):

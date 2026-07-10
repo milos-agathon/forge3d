@@ -99,10 +99,9 @@ def test_tonemap_common_locks_operator_ids() -> None:
     assert "fn linear_to_srgb" in source
 
 
-def test_tonemap_shaders_use_common_source() -> None:
+def test_gpu_tonemap_loaders_use_common_source() -> None:
     common = "includes/tonemap_common.wgsl"
     loaders = {
-        ROOT / "src" / "core" / "tonemap.rs": common,
         ROOT / "src" / "pipeline" / "hdr_offscreen" / "pipeline.rs": common,
         ROOT / "src" / "terrain" / "renderer" / "offline.rs": common,
         ROOT / "src" / "terrain" / "renderer" / "pipeline_cache.rs": common,
@@ -111,6 +110,16 @@ def test_tonemap_shaders_use_common_source() -> None:
     }
     for path, needle in loaders.items():
         assert needle in _read(path), f"{path} does not load shared tonemap WGSL"
+
+
+def test_cpu_adjudication_resolver_has_an_explicit_matching_contract() -> None:
+    source = _read(ROOT / "src" / "core" / "tonemap.rs")
+
+    assert "includes/tonemap_common.wgsl" not in source
+    assert "resolve_reference_hdr_to_rgba8" in source
+    assert "let t = x / (1.0 + x);" in source
+    assert "12.92 * c" in source
+    assert "1.055 * c.powf(1.0 / 2.4) - 0.055" in source
 
 
 def test_duplicate_tonemap_bodies_were_removed() -> None:

@@ -669,7 +669,13 @@ def _furniture(tmp_path: Path) -> f3d.MapScene:
         legend={"items": [{"label": "Forest", "color": "#2f855a"}, {"label": "Snow", "color": "#f8fafc"}]},
         scale_bar={"length_m": 1000, "units": "km", "location": "lower_left", "geodesic": True},
         north_arrow={"location": "upper_right", "size": 34},
-        graticule={"bounds": (-122.5, 46.6, -121.9, 47.0), "interval_deg": 0.2, "include_labels": True},
+        graticule={
+            "bounds": (-122.5, 46.6, -121.9, 47.0),
+            "projected_bounds": (-122.5, 46.6, -121.9, 47.0),
+            "target_crs": "EPSG:4326",
+            "interval_deg": 0.2,
+            "include_labels": True,
+        },
     )
     return _base_scene(tmp_path, "mapscene_furniture_graticule", map_furniture=furniture, width=128, height=88)
 
@@ -1027,7 +1033,12 @@ def test_recipe_golden_catalog_links_docs_gallery() -> None:
         assert spec.command in gallery
 
 
-def test_recipe_golden_gate_rejects_pixel_regression(tmp_path: Path) -> None:
+def test_recipe_golden_gate_rejects_pixel_regression(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # This negative control must remain a rejecting gate even during an
+    # intentional baseline-refresh run.
+    monkeypatch.delenv("FORGE3D_UPDATE_RECIPE_GOLDENS", raising=False)
     spec = RECIPE_GOLDENS[0]
     assert spec.golden_path.exists()
     corrupted = f3d.png_to_numpy(spec.golden_path).copy()

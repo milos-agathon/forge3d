@@ -77,6 +77,11 @@ g-002*-review-*.zip
 logs/*-audit.json
 logs/mcp-puppeteer-*.log.gz
 specs/
+!specs/
+specs/*
+!specs/001-diagnostics-support-matrices/
+specs/001-diagnostics-support-matrices/*
+!specs/001-diagnostics-support-matrices/tasks.md
 output/
 logs/
 docs/*audit*.md

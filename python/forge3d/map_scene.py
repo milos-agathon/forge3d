@@ -3649,11 +3649,21 @@ class BuildingLayer:
         metadata = _metadata(options.pop("metadata", None))
         metadata.update(_metadata(options))
         metadata.setdefault("source_format", "cityjson")
+        geometry_count = metadata.pop("geometry_count", None)
+        path_obj = Path(path)
+        if geometry_count is None and path_obj.exists():
+            try:
+                payload = json.loads(path_obj.read_text(encoding="utf-8"))
+                city_objects = payload.get("CityObjects") if isinstance(payload, Mapping) else None
+                if isinstance(city_objects, Mapping):
+                    geometry_count = len(city_objects)
+            except Exception:
+                geometry_count = None
         return cls(
-            layer_id=str(metadata.pop("layer_id", None) or Path(path).stem or "buildings"),
+            layer_id=str(metadata.pop("layer_id", None) or path_obj.stem or "buildings"),
             source={"path": str(path), "source_format": "cityjson"},
             support_level=str(metadata.pop("support_level", "underdeveloped")),
-            geometry_count=metadata.pop("geometry_count", None),
+            geometry_count=geometry_count,
             bounds=metadata.pop("bounds", None),
             material_status=str(metadata.pop("material_status", "scalar_pbr_underdeveloped")),
             features=metadata.pop("features", None),

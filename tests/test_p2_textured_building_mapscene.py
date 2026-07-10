@@ -15,7 +15,7 @@ def _scene(layer: f3d.MapSceneBuildingLayer) -> f3d.MapScene:
     )
 
 
-def test_textured_building_fixture_is_explicitly_diagnostic_only(tmp_path):
+def test_textured_building_fixture_reports_supported_native_material_path(tmp_path):
     texture = tmp_path / "facade.png"
     texture.write_bytes(b"\x89PNG\r\n\x1a\n")
     layer = f3d.MapSceneBuildingLayer.from_geojson(
@@ -40,18 +40,15 @@ def test_textured_building_fixture_is_explicitly_diagnostic_only(tmp_path):
 
     report = _scene(layer).validate()
 
-    assert report.status == "error"
-    diagnostic = next(d for d in report.diagnostics if d.code == "unsupported_feature")
-    assert diagnostic.layer_id == "buildings.textured.fixture"
-    assert diagnostic.object_id == "building-1"
-    assert diagnostic.details["feature"] == "building textured PBR render path"
+    assert report.status == "ok"
+    assert not report.diagnostics
+    assert report.supported_features["buildings.textured_pbr"] == "supported"
     summary = next(s for s in report.layer_summaries if s.layer_id == "buildings.textured.fixture")
-    assert summary.support_level == "unsupported"
-    assert summary.details["textured_material_status"] == "unsupported"
+    assert summary.details["textured_material_status"] == "supported"
     assert summary.details["textured_materials"][0]["uv_available"] is True
 
 
-def test_textured_building_render_is_blocked_without_silent_scalar_success(tmp_path):
+def test_textured_building_render_never_writes_output_when_terrain_backend_is_unavailable(tmp_path):
     texture = tmp_path / "facade.png"
     texture.write_bytes(b"\x89PNG\r\n\x1a\n")
     layer = f3d.MapSceneBuildingLayer.from_geojson(
@@ -74,7 +71,9 @@ def test_textured_building_render_is_blocked_without_silent_scalar_success(tmp_p
     )
     output = tmp_path / "textured-building.png"
 
-    with pytest.raises(RuntimeError, match="blocking diagnostics"):
-        _scene(layer).render(str(output))
+    scene = _scene(layer)
+    assert scene.validate().supported_features["buildings.textured_pbr"] == "supported"
+    with pytest.raises(f3d.MapSceneNativeUnavailable, match="native rendering unavailable"):
+        scene.render(str(output))
 
     assert not output.exists()

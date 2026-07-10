@@ -87,6 +87,30 @@ def test_vector_render_certificate_is_fresh_and_exact():
     }
 
 
+def test_cloud_render_keeps_following_vector_allocation_usable():
+    if not f3d.has_gpu() or not f3d.is_weighted_oit_available():
+        import pytest
+
+        pytest.skip("cloud/vector GPU path unavailable")
+
+    baseline = f3d.Scene(32, 32).render_rgba()
+    scene = f3d.Scene(32, 32)
+    scene.enable_clouds("low")
+    scene.set_realtime_cloud_density(1.0)
+    scene.set_realtime_cloud_coverage(1.0)
+    scene.set_cloud_render_mode("volumetric")
+    cloud_rgba = scene.render_rgba()
+
+    changed = np.any(cloud_rgba[:, :, :3] != baseline[:, :, :3], axis=2)
+    assert np.count_nonzero(changed) >= 100
+
+    vector = VectorScene()
+    vector.add_point(0.0, 0.0)
+    rgba = vector.render_oit(16, 16)
+
+    assert rgba.shape == (16, 16, 4)
+
+
 def test_native_sdf_render_uses_the_supplied_scene_and_emits_certificate(monkeypatch):
     if not sdf.NATIVE_AVAILABLE or not hasattr(sdf.forge3d_native, "hybrid_render"):
         import pytest

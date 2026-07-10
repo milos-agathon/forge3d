@@ -22,7 +22,7 @@ impl Scene {
         let g = crate::core::gpu::try_ctx()?;
         let mut renderer = crate::core::clouds::CloudRenderer::new(
             &g.device,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
+            TEXTURE_FORMAT,
             1, // clouds render against resolved color buffer
         )?;
         renderer.set_quality(quality_enum);

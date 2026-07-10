@@ -46,8 +46,12 @@ def test_p2_quickstart_vt_textured_building_and_large_scene_diagnostics(tmp_path
     report = scene.validate()
     codes = {diagnostic.code for diagnostic in report.diagnostics}
 
-    assert {"unsupported_feature", "estimated_gpu_memory"}.issubset(codes)
+    assert codes == {"estimated_gpu_memory"}
     assert "vt_unsupported_family" not in codes
+    assert report.supported_features["vt.albedo"] == "supported"
+    assert report.supported_features["vt.normal"] == "supported"
+    assert report.supported_features["vt.mask"] == "supported"
+    assert report.supported_features["buildings.textured_pbr"] == "supported"
     assert next(s for s in report.layer_summaries if s.layer_id == "large_scene.resources")
 
 
