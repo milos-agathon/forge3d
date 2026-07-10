@@ -1,7 +1,7 @@
 use crate::core::error::RenderError;
 use crate::core::memory_tracker::{calculate_texture_size, global_tracker, is_host_visible_usage};
 use std::collections::{BTreeMap, HashMap};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use wgpu::util::DeviceExt;
 use wgpu::{BufferDescriptor, BufferUsages, TextureDescriptor, TextureFormat};
@@ -107,6 +107,9 @@ pub struct AllocationLedger {
     current_device_local: AtomicU64,
     peak_host_visible: AtomicU64,
     peak_device_local: AtomicU64,
+    capture_active: AtomicBool,
+    capture_peak_host_visible: AtomicU64,
+    capture_peak_device_local: AtomicU64,
 }
 
 impl AllocationLedger {
@@ -118,6 +121,9 @@ impl AllocationLedger {
             current_device_local: AtomicU64::new(0),
             peak_host_visible: AtomicU64::new(0),
             peak_device_local: AtomicU64::new(0),
+            capture_active: AtomicBool::new(false),
+            capture_peak_host_visible: AtomicU64::new(0),
+            capture_peak_device_local: AtomicU64::new(0),
         }
     }
 
@@ -147,14 +153,47 @@ impl AllocationLedger {
                 .fetch_add(bytes, Ordering::Relaxed)
                 + bytes;
             self.peak_host_visible.fetch_max(cur, Ordering::Relaxed);
+            if self.capture_active.load(Ordering::Relaxed) {
+                self.capture_peak_host_visible
+                    .fetch_max(cur, Ordering::Relaxed);
+            }
         } else {
             let cur = self
                 .current_device_local
                 .fetch_add(bytes, Ordering::Relaxed)
                 + bytes;
             self.peak_device_local.fetch_max(cur, Ordering::Relaxed);
+            if self.capture_active.load(Ordering::Relaxed) {
+                self.capture_peak_device_local
+                    .fetch_max(cur, Ordering::Relaxed);
+            }
         }
         id
+    }
+
+    fn begin_capture(&self) {
+        // ponytail: render capture is process-global and serialized; use capture
+        // IDs only if concurrent renders become a supported public contract.
+        let _entries = self.entries.lock().unwrap_or_else(|p| p.into_inner());
+        self.capture_peak_host_visible.store(
+            self.current_host_visible.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+        self.capture_peak_device_local.store(
+            self.current_device_local.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+        self.capture_active.store(true, Ordering::Release);
+    }
+
+    fn finish_capture(&self) -> LedgerReport {
+        let was_active = self.capture_active.swap(false, Ordering::AcqRel);
+        let mut report = self.snapshot();
+        if was_active {
+            report.peak_host_visible_bytes = self.capture_peak_host_visible.load(Ordering::Relaxed);
+            report.peak_device_local_bytes = self.capture_peak_device_local.load(Ordering::Relaxed);
+        }
+        report
     }
 
     fn remove(&self, id: u64) {
@@ -248,6 +287,16 @@ pub fn ledger() -> &'static AllocationLedger {
 /// Snapshot the global allocation ledger.
 pub fn ledger_snapshot() -> LedgerReport {
     ledger().snapshot()
+}
+
+/// Start render-local peak accounting from the allocations currently alive.
+pub fn begin_ledger_capture() {
+    ledger().begin_capture();
+}
+
+/// Finish render-local peak accounting and return the captured ledger report.
+pub fn finish_ledger_capture() -> LedgerReport {
+    ledger().finish_capture()
 }
 
 /// Render the top-`n` ledger consumers as a `"label=bytes, ..."` string for
@@ -685,5 +734,39 @@ mod tests {
         drop(buf);
         device.poll(wgpu::Maintain::Wait);
         std::mem::forget(device);
+    }
+
+    #[test]
+    fn capture_peak_starts_at_live_allocation_total() {
+        let ledger = AllocationLedger::new();
+        let persistent = ledger.insert(
+            "persistent".to_string(),
+            1024,
+            true,
+            LedgerCategory::Buffer,
+            "test:1".to_string(),
+        );
+
+        ledger.begin_capture();
+        let lazy = ledger.insert(
+            "lazy".to_string(),
+            32 * 1024,
+            true,
+            LedgerCategory::Buffer,
+            "test:2".to_string(),
+        );
+        let first = ledger.finish_capture();
+
+        ledger.begin_capture();
+        let second = ledger.finish_capture();
+
+        assert_eq!(first.peak_host_visible_bytes, 33 * 1024);
+        assert_eq!(
+            second.peak_host_visible_bytes,
+            first.peak_host_visible_bytes
+        );
+
+        ledger.remove(lazy);
+        ledger.remove(persistent);
     }
 }

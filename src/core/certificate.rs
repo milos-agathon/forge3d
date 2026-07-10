@@ -14,7 +14,7 @@
 
 use crate::core::degradation::degradations_snapshot;
 use crate::core::error::RenderError;
-use crate::core::resource_tracker::ledger_snapshot;
+use crate::core::resource_tracker::{begin_ledger_capture, finish_ledger_capture};
 use crate::core::shader_registry::shader_hashes_snapshot;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -69,6 +69,7 @@ fn lock_last() -> std::sync::MutexGuard<'static, Option<FinishedCapture>> {
 /// Start a render capture: clears the per-render pass list. `entry_point` names
 /// the render entry for logging/debugging (not part of the serialized schema).
 pub fn begin_render_capture(entry_point: &str) {
+    begin_ledger_capture();
     let mut cur = lock_current();
     cur.clear();
     log::debug!("render capture begin: {entry_point}");
@@ -90,7 +91,7 @@ pub fn record_pass(label: &str, gpu_ms: f64, draw_calls: u32) {
 /// initialization.
 pub fn finish_render_capture() {
     let passes = lock_current().clone();
-    let ledger = ledger_snapshot();
+    let ledger = finish_ledger_capture();
 
     let mut degradations: Vec<(String, String, String)> = degradations_snapshot()
         .into_iter()
