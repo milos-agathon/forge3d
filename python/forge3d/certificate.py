@@ -1,19 +1,19 @@
 # python/forge3d/certificate.py
-# CENSOR Task 10: pure-Python signing, offline verification, and CLI for the
+# CENSOR Task 10: native signing, pure-Python offline verification, and CLI for the
 # forge3d RenderCertificate. The unsigned execution report is assembled by the
 # native runtime (src/core/certificate.rs, exposed as
-# forge3d._forge3d.render_execution_report); this module adds the Ed25519 seal
-# and a third-party verifier that needs neither the native extension nor numpy.
+# forge3d._forge3d.render_execution_report); this module requests the Ed25519
+# seal from Rust and provides a verifier that needs neither native code nor numpy.
 # RELEVANT FILES: python/forge3d/_ed25519.py, python/forge3d/diagnostics.py,
 # python/forge3d/provenance.py, src/core/certificate.rs
 
 """Sign and verify forge3d RenderCertificates (schema
 ``forge3d.render_certificate/1``).
 
-This module is intentionally pure Python and depends ONLY on the standard
-library plus the RFC 8032 Ed25519 fallback in :mod:`forge3d._ed25519`. It
-imports neither the compiled ``_forge3d`` extension nor numpy, so a third party
-can re-verify a signed certificate offline with a stock CPython interpreter::
+Verification is intentionally pure Python and depends only on the standard
+library plus the RFC 8032 Ed25519 verifier in :mod:`forge3d._ed25519`. It needs
+neither the compiled ``_forge3d`` extension nor numpy, so a third party can
+re-verify a signed certificate offline with a stock CPython interpreter::
 
     python -m forge3d.certificate verify cert.json --pubkey key.pub
 
@@ -158,14 +158,22 @@ def sign_certificate(
     signed = copy.deepcopy(dict(cert))
     signed.pop("signature", None)
 
-    message = SIGN_CONTEXT + hashlib.sha256(canonical_payload_bytes(signed)).digest()
-    signature = _ed25519.sign(private_key, message)
-    public_key = _ed25519.public_key_from_private(private_key)
+    from ._native import get_native_module
+
+    native = get_native_module()
+    if native is None or not hasattr(native, "sign_render_certificate_digest"):
+        raise RuntimeError(
+            "certificate signing requires the compiled forge3d native module "
+            "with ed25519-dalek support"
+        )
+    signature, public_key = native.sign_render_certificate_digest(
+        private_key, hashlib.sha256(canonical_payload_bytes(signed)).digest()
+    )
 
     signed["signature"] = {
         "alg": "ed25519",
-        "pubkey": public_key.hex(),
-        "sig": signature.hex(),
+        "pubkey": public_key,
+        "sig": signature,
         "signed_fields": _signed_fields(signed),
     }
     return signed

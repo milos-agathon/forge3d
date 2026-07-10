@@ -237,6 +237,8 @@ class TestNativeModuleSymbols:
         "capabilities",
         # CENSOR: last-render execution certificate JSON
         "render_execution_report",
+        # CENSOR: Ed25519 certificate signing through the Rust implementation
+        "sign_render_certificate_digest",
         # CENSOR: budget-enforce test helper
         "request_host_visible_allocation_for_test",
     ]

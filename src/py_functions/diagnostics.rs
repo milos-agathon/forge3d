@@ -381,6 +381,18 @@ pub(crate) fn render_execution_report() -> PyResult<String> {
     Ok(crate::core::certificate::execution_report_json()?)
 }
 
+/// Sign a canonical RenderCertificate SHA256 digest with `ed25519-dalek`.
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn sign_render_certificate_digest(
+    seed: Vec<u8>,
+    digest: Vec<u8>,
+) -> PyResult<(String, String)> {
+    Ok(crate::core::certificate::sign_payload_digest(
+        &seed, &digest,
+    )?)
+}
+
 // ---------------------------------------------------------
 // CENSOR: negotiated GPU capability report
 // ---------------------------------------------------------

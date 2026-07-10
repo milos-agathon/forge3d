@@ -75,6 +75,21 @@ def test_signing_is_deterministic():
     assert first["signature"]["sig"] == second["signature"]["sig"]
 
 
+def test_signing_uses_native_ed25519_dalek(monkeypatch, tmp_path):
+    def reject_python_signing(*_args, **_kwargs):
+        raise AssertionError("certificate signing must use native ed25519-dalek")
+
+    monkeypatch.setattr(certificate._ed25519, "sign", reject_python_signing)
+    monkeypatch.setattr(
+        certificate._ed25519, "public_key_from_private", reject_python_signing
+    )
+
+    signed = certificate.sign_certificate(copy.deepcopy(FIXTURE))
+    path = tmp_path / "native-signed.json"
+    certificate.write_certificate(signed, path)
+    assert certificate.verify(path, signed["signature"]["pubkey"])
+
+
 def test_cli_verify(tmp_path):
     cert = certificate.sign_certificate(copy.deepcopy(FIXTURE))
     p = tmp_path / "cert.json"; certificate.write_certificate(cert, p)

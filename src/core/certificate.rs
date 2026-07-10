@@ -306,6 +306,33 @@ pub fn execution_report_json() -> Result<String, RenderError> {
         .map_err(|e| RenderError::render(format!("certificate serialization failed: {e}")))
 }
 
+/// Sign the canonical RenderCertificate payload digest with Ed25519.
+///
+/// Canonicalization and SHA256 happen at the Python boundary so the offline
+/// verifier can reproduce them without the native module. Signing itself stays
+/// here so it uses the crate's pinned `ed25519-dalek` implementation.
+pub fn sign_payload_digest(seed: &[u8], digest: &[u8]) -> Result<(String, String), RenderError> {
+    use ed25519_dalek::{Signer, SigningKey};
+
+    let seed: [u8; 32] = seed.try_into().map_err(|_| {
+        RenderError::render("certificate signing seed must contain exactly 32 bytes")
+    })?;
+    let digest: [u8; 32] = digest.try_into().map_err(|_| {
+        RenderError::render("certificate payload digest must contain exactly 32 bytes")
+    })?;
+
+    let signing_key = SigningKey::from_bytes(&seed);
+    let mut message = Vec::with_capacity(28 + digest.len());
+    message.extend_from_slice(b"forge3d.render_certificate.v1");
+    message.extend_from_slice(&digest);
+    let signature = signing_key.sign(&message).to_bytes();
+    let public_key = signing_key.verifying_key().to_bytes();
+    Ok((
+        crate::core::provenance::to_hex(&signature),
+        crate::core::provenance::to_hex(&public_key),
+    ))
+}
+
 /// Honor a `certificate=` render kwarg from the Python boundary for the LAST
 /// completed native render.
 ///
