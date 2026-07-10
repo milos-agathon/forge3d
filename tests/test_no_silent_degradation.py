@@ -107,8 +107,27 @@ def _cargo_features() -> set[str]:
     return names
 
 
+def _cargo_feature_table() -> dict[str, list[str]]:
+    """Parse Cargo.toml's [features] table with a regex.
+
+    Deliberately NOT load_toml: on Python 3.10 the tiny _toml_compat fallback
+    parser only understands the UNRUN/allowlist schema and returns a dict with
+    no "features" key, which made this gate error (not fail honestly) on every
+    3.10 CI leg — unseen until the exhaustive lane first ran there.
+    """
+    text = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
+    section = re.search(r"\[features\](.*?)(?:\n\[)", text, re.DOTALL)
+    assert section, "could not locate [features] in Cargo.toml"
+    table: dict[str, list[str]] = {}
+    for m in re.finditer(
+        r"^([A-Za-z0-9_\-]+)\s*=\s*\[([^\]]*)\]", section.group(1), re.MULTILINE
+    ):
+        table[m.group(1)] = re.findall(r'"([^"]+)"', m.group(2))
+    return table
+
+
 def _feature_closure(features: set[str]) -> set[str]:
-    table = load_toml(ROOT / "Cargo.toml")["features"]
+    table = _cargo_feature_table()
     closure = set(features)
     pending = list(features)
     while pending:

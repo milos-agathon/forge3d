@@ -132,10 +132,18 @@ pub fn create_labeled_shader_module(
     label: &str,
     source: &str,
 ) -> wgpu::ShaderModule {
-    let final_label = register_shader_source(label, source);
+    // Normalize line endings BEFORE hashing and compiling: `include_str!`
+    // embeds whatever the checkout produced, so a CRLF (Windows autocrlf)
+    // build and an LF (CI) build of the byte-identical repository otherwise
+    // hash the "same" shader differently, and committed certificates only
+    // verify on the platform that generated them (found by the first
+    // cross-platform run of the certificate WGSL gate). The normalized text
+    // is also what naga compiles, keeping hash == compiled bytes.
+    let normalized = source.replace("\r\n", "\n");
+    let final_label = register_shader_source(label, &normalized);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(&final_label),
-        source: wgpu::ShaderSource::Wgsl(source.to_string().into()),
+        source: wgpu::ShaderSource::Wgsl(normalized.into()),
     })
 }
 
