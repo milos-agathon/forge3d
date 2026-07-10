@@ -295,15 +295,18 @@ jobs:
   test-golden-images:
     name: Visual Goldens
     needs: [build-wheels, terrain-golden-paths]
-    runs-on: windows-latest
+    # macos-14 is the repository's gated real-GPU lane (Metal). Hosted
+    # Windows runners only expose WARP here, which made this job perpetually
+    # report ABSENT and prevented an actual image mismatch from failing CI.
+    runs-on: macos-14
     if: github.event_name == 'workflow_dispatch' || needs.terrain-golden-paths.outputs.terrain_goldens == 'true'
     # Expose which lane actually executed so ci-success can print an honest
     # `ran|absent` distinction instead of treating both as opaque success.
     outputs:
       lane: ${{ steps.golden-absent.outputs.golden_lane || steps.golden-ran.outputs.golden_lane || 'unknown' }}
     env:
-      # The terrain shader path is not GL-safe on hosted runners; pin a stable backend.
-      WGPU_BACKEND: dx12
+      # Pin the hardware backend before the native module initializes.
+      WGPU_BACKEND: metal
       # Explicit opt-in for non-GPU environments that may only run recipe-level CPU goldens.
       FORGE3D_ALLOW_SOFTWARE_GOLDENS: ${{ vars.FORGE3D_ALLOW_SOFTWARE_GOLDENS }}
 
@@ -318,7 +321,7 @@ jobs:
       - name: Download wheel artifact
         uses: actions/download-artifact@v4
         with:
-          name: wheels-windows
+          name: wheels-macos
           path: dist/
 
       - name: Install wheel and test dependencies

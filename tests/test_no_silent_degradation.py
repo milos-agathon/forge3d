@@ -334,6 +334,10 @@ def test_f_probe_positive_golden_mismatch_fails_ci_and_probe_negative_is_absent(
     probe_step = golden_job.split("- name: Probe terrain golden backend", 1)[1].split("\n      - name:", 1)[0]
     aggregate = ci_yml.split("  ci-success:", 1)[1]
 
+    assert "runs-on: macos-14" in golden_job, "golden lane must use the gated Metal runner"
+    assert "WGPU_BACKEND: metal" in golden_job
+    assert "name: wheels-macos" in golden_job, "golden lane must install its runner-compatible wheel"
+    assert "name: wheels-windows" not in golden_job
     assert "continue-on-error: true" in probe_step, "hardware probe must remain non-fatal"
     assert "continue-on-error" not in pytest_step, "golden pytest mismatch is incorrectly non-fatal"
     assert "terrain-goldens-probe.outcome == 'success'" in pytest_step
