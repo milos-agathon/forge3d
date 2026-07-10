@@ -120,6 +120,20 @@ def transform_coords(
         except Exception:
             # Fall through to pyproj
             pass
+    else:
+        # CENSOR gate (d): native PROJ reprojection was compiled out of this
+        # wheel. Reaching a non-native backend is a capability degradation --
+        # record it on the certificate sink instead of substituting silently.
+        try:
+            from . import _degradation
+
+            _degradation.record(
+                "feature_not_compiled",
+                "proj",
+                "native PROJ reprojection unavailable; using pyproj fallback",
+            )
+        except Exception:
+            pass
 
     # Fallback to pyproj (modern API: pyproj >= 2.0)
     if HAS_PYPROJ:

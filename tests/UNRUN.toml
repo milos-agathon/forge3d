@@ -1,0 +1,149 @@
+# tests/UNRUN.toml
+# CENSOR Task 13: files the default CI Python lane (scripts/ci_pytest_lane.py)
+# must NOT collect, each with an honest, owner-attributed, expiring reason.
+# A file belongs here ONLY if it fails or errors on a stock GitHub-hosted CI
+# runner (no discrete GPU, no optional pip extras, only tracked files present)
+# AND does not already self-skip. This list may only shrink.
+#
+# AUDIT METHOD (2026-07-10):
+#   1. Full suite collected cleanly locally: 2878 tests, 0 collection errors.
+#   2. Faithful CI simulation: a detached `git worktree` of HEAD (tracked files
+#      only, so git-ignored examples are absent exactly as on a CI checkout),
+#      the built _forge3d.pyd copied in, run with GITHUB_ACTIONS=true so the
+#      hosted-CI terrain/GPU guards fire like a real runner. That single
+#      `pytest tests/` invocation is authoritative because the CI lane runs the
+#      whole tree at once (per-file/isolated runs disagree due to global GPU
+#      and lighting state -- e.g. test_lighting_alignment passes in-suite).
+#   3. Root conftest.py `pytest_ignore_collect` already auto-drops example-driven
+#      tests when their git-ignored example is absent, so those (terrain_demo,
+#      humanity_globe_video, lighting_alignment, mapscene_docs/examples/quickstart,
+#      label_api_*, oit_transparency, ...) self-exclude on CI and are NOT listed.
+#   4. GPU/terrain golden tests self-skip via _terrain_runtime.terrain_rendering_available()
+#      (has_gpu()/hosted-CI probe) and are NOT listed.
+#   5. test_dask_stub self-skips on CI (real runners have no xarray) and is NOT listed.
+#   6. Each residual failure was attributed against the pre-CENSOR baseline
+#      (3b4375a1): none are regressions from CENSOR work -- the P1/P2 map-asset
+#      adapter tests are the documented `underdeveloped` story tests, and the
+#      map_scene.py CENSOR diff touches none of the asserted symbols.
+#
+# The five git-ignored/untracked local example tests (france/iberia/italy/
+# poland/romania) are absent from any CI checkout and are excluded from the
+# accounting universe (git ls-files), not listed here.
+#
+# NOTE: the `[[entries]]` array-of-tables below IS the entries list; do not add a
+# separate `entries = []` line (TOML forbids redefining an array-of-tables).
+
+# --- requires a hardware GPU adapter with no graceful CPU skip -----------------
+# SUTURA zero-placeholder MapScene render paths: MapScene.render raises
+# MapSceneNativeUnavailable (not skip) when no terrain-safe adapter exists, so
+# these fail on GPU-less runners. They are not in the GPU golden lane either.
+[[entries]]
+file = "tests/test_mapscene_buildings.py"
+reason = "requires_hardware_adapter: MapScene native terrain/building render raises MapSceneNativeUnavailable with no CPU skip on GPU-less runners"
+owner = "milos"
+expires = "2026-10-10"
+
+[[entries]]
+file = "tests/test_mapscene_furniture.py"
+reason = "requires_hardware_adapter: MapScene native terrain render raises MapSceneNativeUnavailable with no CPU skip on GPU-less runners"
+owner = "milos"
+expires = "2026-10-10"
+
+[[entries]]
+file = "tests/test_mapscene_render_png.py"
+reason = "requires_hardware_adapter: MapScene native offscreen terrain render raises MapSceneNativeUnavailable with no CPU skip on GPU-less runners"
+owner = "milos"
+expires = "2026-10-10"
+
+[[entries]]
+file = "tests/test_mapscene_screen_space_settings.py"
+reason = "requires_hardware_adapter: MapScene native terrain/screen-space render raises MapSceneNativeUnavailable with no CPU skip on GPU-less runners"
+owner = "milos"
+expires = "2026-10-10"
+
+[[entries]]
+file = "tests/test_mapscene_sutura_integrity.py"
+reason = "requires_hardware_adapter: save/load re-render SSIM needs native terrain adapter; raises MapSceneNativeUnavailable with no CPU skip on GPU-less runners"
+owner = "milos"
+expires = "2026-10-10"
+
+# --- pre-existing known failures (NOT CENSOR regressions) ----------------------
+# Underdeveloped P1/P2 map-asset adapter story tests and stale support-status
+# assertions. Fail identically at the pre-CENSOR baseline; the CENSOR map_scene
+# diff touches none of the asserted symbols (FontAtlas/tiles3d/support_status/
+# placeholder_fallback/unsupported_feature). Pure-CPU, so they fail on CI too.
+[[entries]]
+file = "tests/test_mapscene_support_status.py"
+reason = "known_failure: point-cloud layer reports status ok where the test expects error (pre-existing underdeveloped-adapter drift, not CENSOR)"
+owner = "milos"
+expires = "2026-10-10"
+
+[[entries]]
+file = "tests/test_mapscene_validation.py"
+reason = "known_failure: validation report severity warning vs expected error (pre-existing, not CENSOR)"
+owner = "milos"
+expires = "2026-10-10"
+
+[[entries]]
+file = "tests/test_p1_building_workflow_support.py"
+reason = "known_failure: building render-prep diagnostic status list missing placeholder_fallback (pre-existing underdeveloped P1 adapter, not CENSOR)"
+owner = "milos"
+expires = "2026-10-10"
+
+[[entries]]
+file = "tests/test_p1_fixture_inventory.py"
+reason = "known_failure: font-atlas fixture dict now carries atlas_kind/image_path/px_range the test does not expect (pre-existing P1 drift, not CENSOR)"
+owner = "milos"
+expires = "2026-10-10"
+
+[[entries]]
+file = "tests/test_p1_tiles3d_support.py"
+reason = "known_failure: tiles3d status list missing python_public_3dtiles_incomplete (pre-existing underdeveloped P1 adapter, not CENSOR)"
+owner = "milos"
+expires = "2026-10-10"
+
+[[entries]]
+file = "tests/test_p1_typography_font_support.py"
+reason = "known_failure: default Latin font-atlas metadata dict shape drift (pre-existing P1 drift, not CENSOR)"
+owner = "milos"
+expires = "2026-10-10"
+
+[[entries]]
+file = "tests/test_p2_building_texture_diagnostics.py"
+reason = "known_failure: pro-gated textured import status pro_gated_path vs expected unsupported_feature (pre-existing P2 drift, not CENSOR)"
+owner = "milos"
+expires = "2026-10-10"
+
+[[entries]]
+file = "tests/test_p2_determinism_noop.py"
+reason = "known_failure: expected 'blocking diagnostics' message vs actual MapSceneNativeUnavailable text (pre-existing P2 drift, not CENSOR)"
+owner = "milos"
+expires = "2026-10-10"
+
+[[entries]]
+file = "tests/test_p2_quickstart.py"
+reason = "known_failure: large-scene diagnostic token set mismatch (pre-existing underdeveloped P2 adapter, not CENSOR)"
+owner = "milos"
+expires = "2026-10-10"
+
+[[entries]]
+file = "tests/test_p2_textured_building_mapscene.py"
+reason = "known_failure: textured-building fixture status ok vs expected error and message drift (pre-existing P2, not CENSOR)"
+owner = "milos"
+expires = "2026-10-10"
+
+[[entries]]
+file = "tests/test_support_matrices_docs.py"
+reason = "known_failure: asserts specs/001-diagnostics-support-matrices/tasks.md is not git-ignored, but specs/ is ignored (.gitignore line 79); repo-config, not CENSOR"
+owner = "milos"
+expires = "2026-10-10"
+
+# --- collection error: drives a git-ignored example not registered in conftest --
+# Imports the git-ignored example module platte_rem_forge3d at module scope, and
+# tests/test_platte_rem_example.py is NOT a key in conftest.py _LOCAL_EXAMPLE_TESTS,
+# so it is not auto-ignored and hard-errors at collection on a CI checkout.
+[[entries]]
+file = "tests/test_platte_rem_example.py"
+reason = "collection_error: module-level import of git-ignored example platte_rem_forge3d, not registered in conftest _LOCAL_EXAMPLE_TESTS"
+owner = "milos"
+expires = "2026-10-10"

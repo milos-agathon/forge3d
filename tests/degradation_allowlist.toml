@@ -1,0 +1,10 @@
+# tests/degradation_allowlist.toml
+# CENSOR Task 13: temporary exemptions for RenderCertificate degradations.
+# A committed certificate under tests/golden/certificates/*.json is expected to
+# carry `degradations == []`. If a certificate must ship with a known, accepted
+# degradation, list it here so test_no_silent_degradation.py gate (a) tolerates
+# exactly that (kind, name) until `expires` -- expired entries FAIL the gate.
+# Every entry needs: kind, name, reason, owner, expires (YYYY-MM-DD).
+# All 22 committed certificates are currently clean, so this list is empty.
+# This list may only shrink toward empty.
+entries = []
