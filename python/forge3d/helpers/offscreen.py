@@ -39,6 +39,7 @@ def render_offscreen_rgba(
     seed: int = 1,
     frames: int = 1,
     denoiser: str = "off",
+    certificate: bool | str = False,
 ) -> np.ndarray:
     """Render an RGBA image offscreen and return a numpy array.
 
@@ -59,7 +60,7 @@ def render_offscreen_rgba(
     # --- Native path: Scene.render_rgba() is an instance method. ---
     if _is_native_scene(scene):
         try:
-            return scene.render_rgba()
+            return scene.render_rgba(certificate=certificate)
         except (RuntimeError, OSError) as exc:
             print(
                 f"[forge3d] native render_rgba failed, using CPU fallback: {exc}",
@@ -67,7 +68,16 @@ def render_offscreen_rgba(
             )
 
     # --- Fallback: deterministic CPU path tracer. ---
-    return _fallback_render_rgba(w, h, scene=scene, camera=camera, seed=int(seed), frames=int(frames), denoiser=str(denoiser))
+    return _fallback_render_rgba(
+        w,
+        h,
+        scene=scene,
+        camera=camera,
+        seed=int(seed),
+        frames=int(frames),
+        denoiser=str(denoiser),
+        certificate=certificate,
+    )
 
 
 def _png_array_for_bit_depth(rgba: np.ndarray, bit_depth: int) -> np.ndarray:

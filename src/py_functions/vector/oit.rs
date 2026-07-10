@@ -2,6 +2,7 @@ use super::*;
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
+#[pyo3(signature = (width, height, points_xy=None, point_rgba=None, point_size=None, polylines=None, polyline_rgba=None, stroke_width=None, certificate=None))]
 pub(crate) fn vector_render_oit_py(
     py: Python<'_>,
     width: u32,
@@ -12,7 +13,10 @@ pub(crate) fn vector_render_oit_py(
     polylines: Option<&Bound<'_, PyAny>>,
     polyline_rgba: Option<&Bound<'_, PyAny>>,
     stroke_width: Option<&Bound<'_, PyAny>>,
+    certificate: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
+    let _certificate_capture =
+        crate::core::certificate::begin_render_capture("vector_render_oit_py");
     #[cfg(not(feature = "weighted-oit"))]
     {
         let _ = (
@@ -25,6 +29,7 @@ pub(crate) fn vector_render_oit_py(
             polylines,
             polyline_rgba,
             stroke_width,
+            certificate,
         );
         Err(weighted_oit_not_enabled_err())
     }
@@ -79,7 +84,7 @@ pub(crate) fn vector_render_oit_py(
 
         scene.queue.submit(Some(encoder.finish()));
         scene.device.poll(wgpu::Maintain::Wait);
-        read_rgba_texture_to_py(
+        let result = read_rgba_texture_to_py(
             py,
             &scene.device,
             &scene.queue,
@@ -89,13 +94,18 @@ pub(crate) fn vector_render_oit_py(
             "vf.Vector.RenderOIT.Copy",
             "vf.Vector.RenderOIT.Read",
             "map_async cancelled",
-        )
+        )?;
+        crate::core::certificate::record_pass("vector.oit", 0.0, 1);
+        crate::core::certificate::record_pass("vector.oit.compose", 0.0, 1);
+        _certificate_capture.finish();
+        crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
+        Ok(result)
     }
 }
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-#[pyo3(signature = (width, height, points_xy=None, point_rgba=None, point_size=None, polylines=None, polyline_rgba=None, stroke_width=None, edl_strength=1.5, edl_radius_px=1.0))]
+#[pyo3(signature = (width, height, points_xy=None, point_rgba=None, point_size=None, polylines=None, polyline_rgba=None, stroke_width=None, edl_strength=1.5, edl_radius_px=1.0, certificate=None))]
 pub(crate) fn vector_render_oit_edl_py(
     py: Python<'_>,
     width: u32,
@@ -108,7 +118,10 @@ pub(crate) fn vector_render_oit_edl_py(
     stroke_width: Option<&Bound<'_, PyAny>>,
     edl_strength: f32,
     edl_radius_px: f32,
+    certificate: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
+    let _certificate_capture =
+        crate::core::certificate::begin_render_capture("vector_render_oit_edl_py");
     #[cfg(not(feature = "weighted-oit"))]
     {
         let _ = (
@@ -123,6 +136,7 @@ pub(crate) fn vector_render_oit_edl_py(
             stroke_width,
             edl_strength,
             edl_radius_px,
+            certificate,
         );
         Err(weighted_oit_not_enabled_err())
     }
@@ -204,6 +218,7 @@ pub(crate) fn vector_render_oit_edl_py(
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
+            crate::core::shader_registry::record_shader_use("vf.Vector.PointEDL");
             pass.set_pipeline(&edl_pipeline);
             pass.set_bind_group(0, &edl_bind_group, &[]);
             pass.draw(0..3, 0..1);
@@ -212,7 +227,7 @@ pub(crate) fn vector_render_oit_edl_py(
         scene.queue.submit(Some(encoder.finish()));
         scene.device.poll(wgpu::Maintain::Wait);
         drop(final_tex);
-        read_rgba_texture_to_py(
+        let result = read_rgba_texture_to_py(
             py,
             &scene.device,
             &scene.queue,
@@ -222,6 +237,12 @@ pub(crate) fn vector_render_oit_edl_py(
             "vf.Vector.RenderOITEDL.Copy",
             "vf.Vector.RenderOITEDL.Read",
             "map_async cancelled",
-        )
+        )?;
+        crate::core::certificate::record_pass("vector.oit", 0.0, 1);
+        crate::core::certificate::record_pass("vector.oit.compose", 0.0, 1);
+        crate::core::certificate::record_pass("vector.edl", 0.0, 1);
+        _certificate_capture.finish();
+        crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
+        Ok(result)
     }
 }

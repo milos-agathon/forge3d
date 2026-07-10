@@ -1523,6 +1523,10 @@ impl TerrainRenderer {
             return Err(PyValueError::new_err("sample_count must be >= 1"));
         }
 
+        let (certificate_capture, _allocation_scope) = self
+            .scene
+            .begin_certificate_capture("terrain.accumulate_batch");
+
         let start = Instant::now();
         let mut state = {
             let mut guard = self
@@ -1555,6 +1559,12 @@ impl TerrainRenderer {
             .map_err(|_| PyRuntimeError::new_err("offline_state mutex poisoned"))?;
         *guard = Some(state);
         work_result?;
+        crate::core::certificate::record_pass(
+            "terrain.offline.accumulate_batch",
+            0.0,
+            sample_count,
+        );
+        self.scene.finish_certificate_capture(certificate_capture);
         Py::new(
             py,
             crate::OfflineBatchResult::new(total_samples, start.elapsed().as_secs_f64() * 1000.0),

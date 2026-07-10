@@ -241,7 +241,9 @@ class PathTracer:
         return None
 
     @_captured_synthetic_render("path_tracing.PathTracer.render_rgba")
-    def render_rgba(self, *args, spp: int = 1, **kwargs) -> np.ndarray:
+    def render_rgba(
+        self, *args, spp: int = 1, certificate: bool | str = False, **kwargs
+    ) -> np.ndarray:
         """Produce a deterministic synthetic RGBA image.
 
         Overloads:
@@ -419,6 +421,7 @@ class PathTracer:
         time_source: Callable[[], float] = _time.perf_counter,
         spp: int = 1,
         synthetic_ok: bool = False,
+        certificate: bool | str = False,
     ) -> np.ndarray:
         """Render progressively in tiles, invoking callback on cadence.
 
@@ -510,6 +513,7 @@ def render_aovs(
     use_gpu: bool = True,
     mesh: Any | None = None,
     synthetic_ok: bool = False,
+    certificate: bool | str = False,
 ) -> Dict[str, np.ndarray]:
     """Render a deterministic synthetic set of AOVs for tests and demos.
 
@@ -706,7 +710,7 @@ def save_aovs(
 # Additional functions needed by tests
 
 @_captured_synthetic_render("path_tracing.render_rgba")
-def render_rgba(*args, **kwargs) -> np.ndarray:
+def render_rgba(*args, certificate: bool | str = False, **kwargs) -> np.ndarray:
     """Render RGBA image (fallback implementation)."""
     # Handle positional arguments for width/height
     if len(args) >= 2 and isinstance(args[0], (int, np.integer)) and isinstance(args[1], (int, np.integer)):
@@ -891,6 +895,7 @@ def hybrid_render_terrain_reference(
     min_frames: int = 32,
     variance_threshold: float = 1e-3,
     seed: int = 7,
+    certificate: bool | str = False,
 ) -> dict:
     """Converged GPU path-traced reference of a real DEM under sun + IBL.
 
@@ -973,4 +978,5 @@ def hybrid_render_terrain_reference(
         min_frames=int(min_frames),
         variance_threshold=float(variance_threshold),
         seed=int(seed),
+        certificate=certificate,
     )

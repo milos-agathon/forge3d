@@ -833,6 +833,7 @@ impl HybridPathTracer {
                     label: Some("hybrid-pt-terrain-gbuffer-cpass"),
                     ..Default::default()
                 });
+                crate::core::shader_registry::record_shader_use("hybrid-pt-kernel");
                 cpass.set_pipeline(&self.pipeline_terrain_gbuffer);
                 cpass.set_bind_group(0, &bg0, &[]);
                 cpass.set_bind_group(1, &bg1, &[]);
@@ -858,6 +859,7 @@ impl HybridPathTracer {
                     label: Some("hybrid-pt-terrain-cpass"),
                     ..Default::default()
                 });
+                crate::core::shader_registry::record_shader_use("hybrid-pt-kernel");
                 cpass.set_pipeline(&self.pipeline_terrain);
                 cpass.set_bind_group(0, &bg0, &[]);
                 cpass.set_bind_group(1, &bg1, &[]);
@@ -870,6 +872,7 @@ impl HybridPathTracer {
                     label: Some("hybrid-pt-restir-temporal-cpass"),
                     ..Default::default()
                 });
+                crate::core::shader_registry::record_shader_use("hybrid-pt-restir-temporal");
                 cpass.set_pipeline(&self.pipeline_restir_temporal);
                 cpass.set_bind_group(0, &bg0, &[]);
                 cpass.set_bind_group(1, &bg_empty, &[]);
@@ -881,6 +884,7 @@ impl HybridPathTracer {
                     label: Some("hybrid-pt-restir-spatial-cpass"),
                     ..Default::default()
                 });
+                crate::core::shader_registry::record_shader_use("hybrid-pt-restir-spatial");
                 cpass.set_pipeline(&self.pipeline_restir_spatial);
                 cpass.set_bind_group(0, &bg0, &[]);
                 cpass.set_bind_group(1, &bg_spatial_scene, &[]);

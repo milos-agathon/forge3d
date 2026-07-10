@@ -708,6 +708,7 @@ class TerrainRenderer:
         target: Optional[Any] = ...,
         water_mask: Optional[np.ndarray] = ...,
         time_seconds: float = ...,
+        certificate: bool | str | PathLikeStr | None = ...,
     ) -> Frame: ...
     def render_with_aov(
         self,
@@ -717,6 +718,7 @@ class TerrainRenderer:
         heightmap: np.ndarray,
         water_mask: Optional[np.ndarray] = ...,
         time_seconds: float = ...,
+        certificate: bool | str | PathLikeStr | None = ...,
     ) -> Tuple[Frame, AovFrame]: ...
     def begin_offline_accumulation(
         self,
@@ -884,6 +886,7 @@ def vector_render_oit_py(
     polylines: Optional[Sequence[Sequence[Tuple[float, float]]]] = ...,
     polyline_rgba: Optional[Sequence[Tuple[float, float, float, float]]] = ...,
     stroke_width: Optional[Sequence[float]] = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
 ) -> np.ndarray: ...  # (H,W,4) uint8
 
 def vector_render_oit_edl_py(
@@ -898,6 +901,7 @@ def vector_render_oit_edl_py(
     stroke_width: Optional[Sequence[float]] = ...,
     edl_strength: float = ...,
     edl_radius_px: float = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
 ) -> np.ndarray: ...  # (H,W,4) uint8
 
 def vector_render_pick_map_py(
@@ -907,6 +911,7 @@ def vector_render_pick_map_py(
     points_xy: Optional[Sequence[Tuple[float, float]]] = ...,
     polylines: Optional[Sequence[Sequence[Tuple[float, float]]]] = ...,
     base_pick_id: Optional[int] = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
 ) -> np.ndarray: ...  # (H,W) uint32
 
 def vector_render_oit_and_pick_py(
@@ -920,6 +925,7 @@ def vector_render_oit_and_pick_py(
     polyline_rgba: Optional[Sequence[Tuple[float, float, float, float]]] = ...,
     stroke_width: Optional[Sequence[float]] = ...,
     base_pick_id: Optional[int] = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
 ) -> Tuple[np.ndarray, np.ndarray]: ...  # (H,W,4) uint8, (H,W) uint32
 
 def composite_rgba_over(bottom: np.ndarray, top: np.ndarray, *, premultiplied: bool = ...) -> np.ndarray: ...  # (H,W,4) uint8
@@ -1032,9 +1038,9 @@ class VectorScene:
     def clear(self) -> None: ...
     def add_point(self, x: float, y: float, rgba: Tuple[float, float, float, float] | None = ..., size: float | None = ...) -> None: ...
     def add_polyline(self, path: Sequence[Tuple[float, float]], rgba: Tuple[float, float, float, float] | None = ..., width: float | None = ...) -> None: ...
-    def render_oit(self, width: int, height: int) -> np.ndarray: ...  # (H,W,4) uint8
-    def render_pick_map(self, width: int, height: int, base_pick_id: int = ...) -> np.ndarray: ...  # (H,W) uint32
-    def render_oit_and_pick(self, width: int, height: int, base_pick_id: int = ...) -> Tuple[np.ndarray, np.ndarray]: ...  # (H,W,4) uint8, (H,W) uint32
+    def render_oit(self, width: int, height: int, *, certificate: bool | str | PathLikeStr = ...) -> np.ndarray: ...  # (H,W,4) uint8
+    def render_pick_map(self, width: int, height: int, base_pick_id: int = ..., *, certificate: bool | str | PathLikeStr = ...) -> np.ndarray: ...  # (H,W) uint32
+    def render_oit_and_pick(self, width: int, height: int, base_pick_id: int = ..., *, certificate: bool | str | PathLikeStr = ...) -> Tuple[np.ndarray, np.ndarray]: ...  # (H,W,4) uint8, (H,W) uint32
 
 # P5: Screen-space effects classes
 class SSAOSettings:
@@ -1250,6 +1256,7 @@ def render_adjudication_pair(
     width: int,
     height: int,
     spp: int,
+    certificate: bool | str | PathLikeStr | None = ...,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Dict[str, float]]]: ...
 
 # PROMETHEUS: converged GPU path-traced terrain reference (sun + IBL)
@@ -1273,7 +1280,20 @@ def hybrid_render_terrain_reference(
     min_frames: int = ...,
     variance_threshold: float = ...,
     seed: int = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
 ) -> Dict[str, Any]: ...
+
+def render_offscreen_rgba(
+    width: int,
+    height: int,
+    *,
+    scene: Any | None = ...,
+    camera: Optional[Mapping[str, Any]] = ...,
+    seed: int = ...,
+    frames: int = ...,
+    denoiser: str = ...,
+    certificate: bool | str | PathLikeStr = ...,
+) -> np.ndarray: ...
 
 # P2.3: Label style bindings
 class LabelFlags:

@@ -1,6 +1,7 @@
 use super::*;
 
 #[pyfunction]
+#[pyo3(signature = (width, height, points_xy=None, polylines=None, base_pick_id=None, certificate=None))]
 pub(crate) fn vector_render_pick_map_py(
     py: Python<'_>,
     width: u32,
@@ -8,7 +9,10 @@ pub(crate) fn vector_render_pick_map_py(
     points_xy: Option<&Bound<'_, PyAny>>,
     polylines: Option<&Bound<'_, PyAny>>,
     base_pick_id: Option<u32>,
+    certificate: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
+    let _certificate_capture =
+        crate::core::certificate::begin_render_capture("vector_render_pick_map_py");
     let points = extract_xy_list(points_xy)?;
     let lines = extract_polylines(polylines)?;
     let point_defs = build_point_defs(&points, &[], &[]);
@@ -53,7 +57,7 @@ pub(crate) fn vector_render_pick_map_py(
 
     scene.queue.submit(Some(encoder.finish()));
     scene.device.poll(wgpu::Maintain::Wait);
-    read_u32_texture_to_py(
+    let result = read_u32_texture_to_py(
         py,
         &scene.device,
         &scene.queue,
@@ -63,11 +67,16 @@ pub(crate) fn vector_render_pick_map_py(
         "vf.Vector.RenderPick.Copy",
         "vf.Vector.RenderPick.Read",
         "map_async cancelled",
-    )
+    )?;
+    crate::core::certificate::record_pass("vector.pick", 0.0, 1);
+    _certificate_capture.finish();
+    crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
+    Ok(result)
 }
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
+#[pyo3(signature = (width, height, points_xy=None, point_rgba=None, point_size=None, polylines=None, polyline_rgba=None, stroke_width=None, base_pick_id=None, certificate=None))]
 pub(crate) fn vector_render_oit_and_pick_py(
     py: Python<'_>,
     width: u32,
@@ -79,7 +88,10 @@ pub(crate) fn vector_render_oit_and_pick_py(
     polyline_rgba: Option<&Bound<'_, PyAny>>,
     stroke_width: Option<&Bound<'_, PyAny>>,
     base_pick_id: Option<u32>,
+    certificate: Option<Bound<'_, PyAny>>,
 ) -> PyResult<(Py<PyAny>, Py<PyAny>)> {
+    let _certificate_capture =
+        crate::core::certificate::begin_render_capture("vector_render_oit_and_pick_py");
     #[cfg(not(feature = "weighted-oit"))]
     {
         let _ = (
@@ -93,6 +105,7 @@ pub(crate) fn vector_render_oit_and_pick_py(
             polyline_rgba,
             stroke_width,
             base_pick_id,
+            certificate,
         );
         Err(weighted_oit_not_enabled_err())
     }
@@ -200,6 +213,11 @@ pub(crate) fn vector_render_oit_and_pick_py(
             "vf.Vector.Combine.PickRead",
             "pick map cancelled",
         )?;
+        crate::core::certificate::record_pass("vector.oit", 0.0, 1);
+        crate::core::certificate::record_pass("vector.oit.compose", 0.0, 1);
+        crate::core::certificate::record_pass("vector.pick", 0.0, 1);
+        _certificate_capture.finish();
+        crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
         Ok((rgba, ids))
     }
 }

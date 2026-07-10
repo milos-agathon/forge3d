@@ -14,6 +14,7 @@ impl WavefrontScheduler {
             label: Some("shadow-pass"),
             timestamp_writes: None,
         });
+        crate::core::shader_registry::record_shader_use("pt-shadow-shader");
         pass.set_pipeline(&self.pipelines.shadow);
         pass.set_bind_group(0, &uniforms_bind_group, &[]);
         pass.set_bind_group(1, scene_bind_group, &[]);
@@ -38,6 +39,7 @@ impl WavefrontScheduler {
             label: Some("raygen-pass"),
             timestamp_writes: None,
         });
+        crate::core::shader_registry::record_shader_use("pt-raygen-shader");
         pass.set_pipeline(&self.pipelines.raygen);
         pass.set_bind_group(0, &uniforms_bind_group, &[]);
         pass.set_bind_group(1, scene_bind_group, &[]);
@@ -63,6 +65,7 @@ impl WavefrontScheduler {
             label: Some("intersect-pass"),
             timestamp_writes: None,
         });
+        crate::core::shader_registry::record_shader_use("pt-intersect-shader");
         pass.set_pipeline(&self.pipelines.intersect);
         pass.set_bind_group(0, &uniforms_bind_group, &[]);
         pass.set_bind_group(1, scene_bind_group, &[]);
@@ -86,6 +89,7 @@ impl WavefrontScheduler {
             label: Some("shade-pass"),
             timestamp_writes: None,
         });
+        crate::core::shader_registry::record_shader_use("pt-shade-shader");
         pass.set_pipeline(&self.pipelines.shade);
         pass.set_bind_group(0, &uniforms_bind_group, &[]);
         pass.set_bind_group(1, scene_bind_group, &[]);
@@ -110,6 +114,7 @@ impl WavefrontScheduler {
             label: Some("scatter-pass"),
             timestamp_writes: None,
         });
+        crate::core::shader_registry::record_shader_use("pt-scatter-shader");
         pass.set_pipeline(&self.pipelines.scatter);
         pass.set_bind_group(0, &uniforms_bind_group, &[]);
         pass.set_bind_group(1, scene_bind_group, &[]);

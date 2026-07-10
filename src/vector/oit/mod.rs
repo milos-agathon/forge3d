@@ -112,6 +112,7 @@ impl WeightedOIT {
 
     /// Compose final image from accumulation buffers.
     pub fn compose<'pass>(&'pass self, render_pass: &mut wgpu::RenderPass<'pass>) {
+        crate::core::shader_registry::record_shader_use("vf.Vector.OIT.Compose");
         render_pass.set_pipeline(&self.compose_pipeline);
         render_pass.set_bind_group(0, &self.compose_bind_group, &[]);
         render_pass.draw(0..3, 0..1);

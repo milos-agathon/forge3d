@@ -332,6 +332,7 @@ pub fn render_raster_reference(
     // offscreen forward-raster path (see ADJUDICATION_RASTER_ROUTING_STATUS).
     // Draw order matters: sky (depth Always), then plane, then spheres. ---
     let targets = crate::offscreen::forward::ForwardTargets::new(device, rw, rh, color_format)?;
+    crate::core::shader_registry::record_shader_use("adjudication-raster-shader");
     let mut draws = vec![
         crate::offscreen::forward::ForwardDraw {
             pipeline: &sky_pipeline,

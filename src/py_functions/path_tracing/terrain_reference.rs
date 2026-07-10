@@ -41,6 +41,7 @@ use super::super::super::*;
     min_frames = 32,
     variance_threshold = 1e-3,
     seed = 7u32,
+    certificate = None,
 ))]
 pub(crate) fn hybrid_render_terrain_reference(
     py: Python<'_>,
@@ -63,10 +64,13 @@ pub(crate) fn hybrid_render_terrain_reference(
     min_frames: u32,
     variance_threshold: f32,
     seed: u32,
+    certificate: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
     use crate::path_tracing::hybrid_compute::{HybridPathTracer, TerrainReferenceDesc};
     use numpy::PyArray1;
 
+    let certificate_capture =
+        crate::core::certificate::begin_render_capture("hybrid_render_terrain_reference");
     // Fallible first GPU touch: later ctx() calls cannot fail once this succeeds.
     crate::core::gpu::try_ctx()?;
 
@@ -193,5 +197,11 @@ pub(crate) fn hybrid_render_terrain_reference(
     d.set_item("peak_host_visible_bytes", out.peak_host_visible_bytes)?;
     d.set_item("minmax_pyramid_bytes", out.minmax_pyramid_bytes)?;
     d.set_item("gpu_resource_bytes", out.gpu_resource_bytes)?;
+    crate::core::certificate::record_pass("hybrid_pt.terrain_gbuffer", 0.0, 1);
+    crate::core::certificate::record_pass("hybrid_pt.terrain", 0.0, out.frames);
+    crate::core::certificate::record_pass("hybrid_pt.restir_temporal", 0.0, out.frames);
+    crate::core::certificate::record_pass("hybrid_pt.restir_spatial", 0.0, out.frames);
+    certificate_capture.finish();
+    crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
     Ok(d.into_py(py))
 }
