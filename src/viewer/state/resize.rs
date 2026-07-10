@@ -23,6 +23,8 @@ impl Viewer {
     /// Resize all internal render targets (G-Buffer, GI, etc.) to the given dimensions.
     /// This is separate from window resize to support high-res offscreen snapshots.
     pub fn resize_render_targets(&mut self, width: u32, height: u32) -> RenderResult<()> {
+        self.lit_bind_group_cache.borrow_mut().take();
+        self.comp_bind_group_cache.borrow_mut().clear();
         if let Some(ref mut gi) = self.gi {
             gi.gbuffer_mut().resize(&self.device, width, height).ok();
             gi.set_ssr_params(&self.queue, &self.ssr_params);

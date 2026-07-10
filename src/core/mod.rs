@@ -22,7 +22,6 @@ pub mod shader_registry;
 // CENSOR Task 9: RenderCertificate execution report (per-render pass timings)
 pub mod certificate;
 
-pub mod framegraph; // Legacy compatibility layer
 pub mod gpu_types;
 pub mod memory_tracker;
 pub mod resource_tracker;
@@ -31,7 +30,6 @@ pub mod resource_tracker;
 pub mod gpu_timing;
 
 // Q1: Post-processing compute pipeline
-pub mod postfx;
 
 // Q5: Bloom post-processing effect
 pub mod bloom;

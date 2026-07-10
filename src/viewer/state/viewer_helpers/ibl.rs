@@ -61,6 +61,7 @@ impl Viewer {
                 });
                 self.ibl_env_view = Some(cube_view);
                 self.ibl_sampler = Some(env_sampler);
+                self.lit_bind_group_cache.borrow_mut().take();
             }
         }
 

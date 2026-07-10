@@ -2,7 +2,8 @@
 // Viewer struct definition with pub(crate) fields to allow method extraction
 // RELEVANT FILES: src/viewer/mod.rs
 
-use std::collections::{HashSet, VecDeque};
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 #[cfg(feature = "extension-module")]
 use wgpu::Adapter;
@@ -91,12 +92,14 @@ pub struct Viewer {
     pub(crate) comp_bind_group_layout: Option<BindGroupLayout>,
     pub(crate) comp_pipeline: Option<RenderPipeline>,
     pub(crate) comp_uniform: Option<TrackedBuffer>,
+    pub(crate) comp_bind_group_cache: RefCell<HashMap<[usize; 5], BindGroup>>,
     // Lit viz compute pipeline (albedo+normal shading)
     pub(crate) lit_bind_group_layout: BindGroupLayout,
     pub(crate) lit_pipeline: ComputePipeline,
     pub(crate) lit_uniform: TrackedBuffer,
     pub(crate) lit_output: TrackedTexture,
     pub(crate) lit_output_view: TextureView,
+    pub(crate) lit_bind_group_cache: RefCell<Option<BindGroup>>,
     pub(crate) gi_baseline_hdr: TrackedTexture,
     pub(crate) gi_baseline_hdr_view: TextureView,
     pub(crate) gi_baseline_diffuse_hdr: TrackedTexture,

@@ -1,9 +1,9 @@
 """P1.2 Bloom Execute Behavior -- behavioral tests.
 
-Proves bloom settings affect runtime state:
+Proves bloom settings affect the live Scene runtime state:
 - BloomSettings Python-level validation (disabled passthrough semantics).
 - Scene enable/disable/set/get round-trip (GPU-gated).
-- No remaining no-op marker text in bloom execute path.
+- No remaining no-op marker text in the retained bloom config surface.
 
 Canonical BloomSettings validation tests live in
 ``tests/test_api_contracts.py::TestBloomSettingsWiring``.
@@ -107,7 +107,7 @@ class TestBloomValidation:
 # No-op marker absence
 # ---------------------------------------------------------------------------
 class TestBloomNoOpMarkerAbsent:
-    """Verify no remaining no-op marker text in bloom execute path.
+    """Verify no remaining no-op marker text in the retained bloom module.
 
     The checklist requires: ``rg -n "Bloom is a no-op" src/core/bloom.rs``
     returns exit code 1 (no matches).  We verify from Python by scanning

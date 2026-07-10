@@ -314,9 +314,8 @@ class TestBloomSceneMethods:
     def test_bloom_enabled_passthrough_semantics(self):
         """When bloom.enabled is False, the effect is a no-op passthrough.
 
-        This verifies the contract at the config level: the Rust
-        BloomEffect::execute() checks self.bloom_config.enabled and
-        returns Ok(()) immediately when false.
+        This verifies the contract at the config level used by Scene's live
+        CPU postfx path; the orphan standalone GPU effect was removed.
         """
         bloom_off = BloomSettings(enabled=False)
         bloom_on = BloomSettings(enabled=True)

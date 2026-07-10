@@ -169,12 +169,14 @@ impl Viewer {
             comp_bind_group_layout: gbuf.comp_bind_group_layout,
             comp_pipeline: gbuf.comp_pipeline,
             comp_uniform: None,
+            comp_bind_group_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             // Lit resources
             lit_bind_group_layout: lit.lit_bind_group_layout,
             lit_pipeline: lit.lit_pipeline,
             lit_uniform: lit.lit_uniform,
             lit_output: lit.lit_output,
             lit_output_view: lit.lit_output_view,
+            lit_bind_group_cache: std::cell::RefCell::new(None),
             // GI baseline resources
             gi_baseline_hdr: gi_base.gi_baseline_hdr,
             gi_baseline_hdr_view: gi_base.gi_baseline_hdr_view,
