@@ -20,6 +20,7 @@ impl Scene {
         light_dir: Option<(f32, f32, f32)>,
         light_intensity: Option<f32>,
     ) -> PyResult<usize> {
+        let _allocation_scope = self.allocation_owner.activate();
         let pos = positions.as_array();
         if pos.ndim() != 2 || pos.shape()[1] != 3 {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -167,6 +168,7 @@ impl Scene {
         batch_index: usize,
         transforms: PyReadonlyArray2<'_, f32>,
     ) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         if batch_index >= self.instanced_batches.len() {
             return Err(pyo3::exceptions::PyIndexError::new_err(
                 "instanced batch index out of range",

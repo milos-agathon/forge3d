@@ -6,6 +6,7 @@ impl Scene {
     // B10: Ground Plane (Raster) API
     #[pyo3(text_signature = "($self)")]
     pub fn enable_ground_plane(&mut self) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         let g = crate::core::gpu::try_ctx()?;
         let renderer = crate::core::ground_plane::GroundPlaneRenderer::new(
             &g.device,

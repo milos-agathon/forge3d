@@ -129,6 +129,34 @@ def test_scene_certificate_reports_only_scene_owned_shaders(tmp_path):
     assert "terrain_pbr_pom.shader" not in hashes, hashes
 
 
+def test_scene_allocations_ignore_unrelated_live_scene():
+    _skip_without_terrain()
+    _clear_sinks()
+
+    scene = f3d.Scene(8, 8)
+    scene.render_rgba()
+    baseline = render_certificate(sign=False)["allocations"]
+
+    unrelated = f3d.Scene(8, 8)
+    scene.render_rgba()
+    with_unrelated = render_certificate(sign=False)["allocations"]
+
+    assert with_unrelated == baseline
+    assert unrelated is not None
+
+
+def test_scene_allocations_include_lazily_enabled_feature():
+    _skip_without_terrain()
+    _clear_sinks()
+
+    scene = f3d.Scene(32, 32)
+    scene.enable_clouds("low")
+    scene.render_rgba()
+
+    labels = render_certificate(sign=False)["allocations"]["by_label"]
+    assert labels.get("cloud_uniform_buffer", 0) > 0, labels
+
+
 def test_certificate_kwarg_writes_signed_file(tmp_path):
     _skip_without_terrain()
     _clear_sinks()

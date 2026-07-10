@@ -6,6 +6,7 @@ impl Scene {
     // B13: Point & Spot Lights (Realtime) API
     #[pyo3(text_signature = "($self, max_lights=32)")]
     pub fn enable_point_spot_lights(&mut self, max_lights: Option<usize>) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         let g = crate::core::gpu::try_ctx()?;
         let max_lights = max_lights.unwrap_or(32);
         let renderer =

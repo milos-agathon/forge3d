@@ -47,6 +47,7 @@ impl Scene {
         bevel_strength: Option<f32>,
         bevel_segments: Option<u32>,
     ) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         // Extract font bytes
         let font_bytes: Vec<u8> = if let Ok(b) = font.extract::<&PyBytes>() {
             b.as_bytes().to_vec()

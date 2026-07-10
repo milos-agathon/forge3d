@@ -473,15 +473,7 @@ impl TerrainScene {
         water_mask: Option<numpy::PyReadonlyArray2<'_, f32>>,
         time_seconds: f32,
     ) -> Result<(crate::Frame, crate::AovFrame)> {
-        let owned_shader_hashes = self
-            .shader_hashes
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone();
-        crate::core::certificate::begin_render_capture_with_shaders(
-            "terrain.render_internal_with_aov",
-            &owned_shader_hashes,
-        );
+        let _allocation_scope = self.begin_certificate_capture("terrain.render_internal_with_aov");
         let mut timing = self.take_render_timing();
         let decoded = params.decoded();
         self.prepare_frame_lighting(decoded)?;
@@ -802,11 +794,7 @@ impl TerrainScene {
 
         self.record_render_timings(&mut timing);
         self.store_render_timing(timing);
-        let captured_shader_hashes = crate::core::certificate::finish_render_capture();
-        self.shader_hashes
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .extend(captured_shader_hashes);
+        self.finish_certificate_capture();
 
         let aov_config = &decoded.aov;
         let aov_frame = crate::AovFrame::new(

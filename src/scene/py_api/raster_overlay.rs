@@ -10,6 +10,7 @@ impl Scene {
         offset_xy: Option<(i32, i32)>,
         scale: Option<f32>,
     ) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         // Validate input array (HxWx3 or HxWx4, uint8)
         let (h, w, c, data) = if let Ok(arr) = image.extract::<numpy::PyReadonlyArray3<u8>>() {
             let shape = arr.shape();

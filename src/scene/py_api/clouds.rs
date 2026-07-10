@@ -6,6 +6,7 @@ impl Scene {
     // B8: Realtime Clouds API
     #[pyo3(text_signature = "($self, quality='medium')")]
     pub fn enable_clouds(&mut self, quality: Option<&str>) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         let quality_enum = match quality.unwrap_or("medium") {
             "low" => crate::core::clouds::CloudQuality::Low,
             "medium" => crate::core::clouds::CloudQuality::Medium,

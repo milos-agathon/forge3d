@@ -12,6 +12,8 @@ impl TerrainScene {
         queue: Arc<wgpu::Queue>,
         adapter: Arc<wgpu::Adapter>,
     ) -> Result<Self> {
+        let allocation_owner = crate::core::resource_tracker::AllocationOwner::new();
+        let _allocation_scope = allocation_owner.activate();
         let shader_capture = crate::core::shader_registry::begin_shader_construction_capture();
         let base_layouts = create_base_bind_group_layouts(device.as_ref());
         let bind_group_layout = base_layouts.bind_group_layout;
@@ -470,6 +472,7 @@ impl TerrainScene {
             queue,
             adapter,
             shader_hashes: Mutex::new(shader_capture.finish()),
+            allocation_owner,
             pipeline: Mutex::new(pipeline_cache),
             bind_group_layout,
             ibl_bind_group_layout,

@@ -5,6 +5,8 @@ impl Scene {
         grid: Option<u32>,
         colormap: Option<String>,
     ) -> PyResult<Self> {
+        let allocation_owner = crate::core::resource_tracker::AllocationOwner::new();
+        let _allocation_scope = allocation_owner.activate();
         let shader_capture =
             crate::core::shader_registry::begin_shader_construction_capture();
         let grid = grid.unwrap_or(128).max(2);
@@ -229,6 +231,7 @@ impl Scene {
             text3d_instances: Vec::new(),
             render_timing: std::sync::Mutex::new(None),
             shader_hashes: std::sync::Mutex::new(shader_capture.finish()),
+            allocation_owner,
             #[cfg(feature = "enable-gpu-instancing")]
             mesh_instanced_renderer: Some(
                 crate::render::mesh_instanced::MeshInstancedRenderer::new(

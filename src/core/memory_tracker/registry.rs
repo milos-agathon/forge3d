@@ -109,6 +109,10 @@ impl ResourceRegistry {
 
     pub fn track_texture_allocation(&self, width: u32, height: u32, format: TextureFormat) {
         let size = calculate_texture_size(width, height, format);
+        self.track_texture_allocation_bytes(size);
+    }
+
+    pub fn track_texture_allocation_bytes(&self, size: u64) {
         self.texture_count.fetch_add(1, Ordering::Relaxed);
         let texture_bytes = self.texture_bytes.fetch_add(size, Ordering::Relaxed) + size;
         let buffer_bytes = self.buffer_bytes.load(Ordering::Relaxed);
@@ -117,7 +121,10 @@ impl ResourceRegistry {
 
     pub fn free_texture_allocation(&self, width: u32, height: u32, format: TextureFormat) {
         let size = calculate_texture_size(width, height, format);
+        self.free_texture_allocation_bytes(size);
+    }
 
+    pub fn free_texture_allocation_bytes(&self, size: u64) {
         let _ = self
             .texture_count
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {

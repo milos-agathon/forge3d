@@ -164,6 +164,7 @@ impl Scene {
         channels: Option<u32>,
         smoothing: Option<f32>,
     ) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         let (h, w, c, data) = if let Ok(arr) = atlas.extract::<PyReadonlyArray3<u8>>() {
             let shape = arr.shape();
             if shape.len() != 3 {

@@ -3,7 +3,7 @@ impl Scene {
         &mut self,
         py: pyo3::Python<'py>,
     ) -> PyResult<Bound<'py, numpy::PyArray3<u8>>> {
-        self.begin_certificate_capture("scene.render_rgba");
+        let _allocation_scope = self.begin_certificate_capture("scene.render_rgba");
         let mut timing = self.take_render_timing();
 
         let g = crate::core::gpu::try_ctx()?;

@@ -11,6 +11,7 @@ impl Scene {
         mode: Option<&str>,
         quality: Option<&str>,
     ) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         let g = crate::core::gpu::try_ctx()?;
 
         // Parse mode

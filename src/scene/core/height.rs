@@ -1,5 +1,6 @@
 impl Scene {
     pub(super) fn set_height_from_r32f_impl(&mut self, height_r32f: &PyAny) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         let arr: PyReadonlyArray2<f32> = height_r32f.extract()?;
         let (h, w) = (arr.shape()[0] as u32, arr.shape()[1] as u32);
         let data = arr.as_slice().map_err(|_| {

@@ -1,6 +1,6 @@
 impl Scene {
     pub(super) fn render_png_impl(&mut self, path: &PathBuf) -> PyResult<()> {
-        self.begin_certificate_capture("scene.render_png");
+        let _allocation_scope = self.begin_certificate_capture("scene.render_png");
         let mut timing = self.take_render_timing();
 
         let g = crate::core::gpu::try_ctx()?;

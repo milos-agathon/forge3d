@@ -160,6 +160,7 @@ pub struct Scene {
     // take/store between renders so each render owns one certificate capture.
     render_timing: std::sync::Mutex<Option<crate::core::gpu_timing::GpuTimingManager>>,
     shader_hashes: std::sync::Mutex<std::collections::BTreeMap<String, String>>,
+    allocation_owner: crate::core::resource_tracker::AllocationOwner,
 
     // F16: GPU Instancing (feature-gated)
     #[cfg(feature = "enable-gpu-instancing")]

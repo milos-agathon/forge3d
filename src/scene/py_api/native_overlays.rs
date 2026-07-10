@@ -67,6 +67,7 @@ impl Scene {
 
     #[pyo3(text_signature = "($self, image)")]
     pub fn set_native_overlay_texture(&mut self, image: &pyo3::PyAny) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         // Accept HxWx3 or HxWx4 uint8
         let (h, w, c, data) = if let Ok(arr) = image.extract::<PyReadonlyArray3<u8>>() {
             let shape = arr.shape();

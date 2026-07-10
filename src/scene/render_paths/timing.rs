@@ -9,13 +9,22 @@
 // produced it.
 
 impl Scene {
-    pub(super) fn begin_certificate_capture(&self, entry_point: &str) {
+    pub(super) fn begin_certificate_capture(
+        &self,
+        entry_point: &str,
+    ) -> crate::core::resource_tracker::AllocationOwnerGuard {
+        let allocation_scope = self.allocation_owner.activate();
         let owned = self
             .shader_hashes
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .clone();
-        crate::core::certificate::begin_render_capture_with_shaders(entry_point, &owned);
+        crate::core::certificate::begin_render_capture_with_resources(
+            entry_point,
+            &owned,
+            &[self.allocation_owner.id()],
+        );
+        allocation_scope
     }
 
     pub(super) fn finish_certificate_capture(&self) {

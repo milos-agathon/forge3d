@@ -1,7 +1,8 @@
 use crate::core::error::RenderError;
 use crate::core::memory_tracker::{calculate_texture_size, global_tracker, is_host_visible_usage};
-use std::collections::{BTreeMap, HashMap};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::cell::Cell;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use wgpu::util::DeviceExt;
 use wgpu::{BufferDescriptor, BufferUsages, TextureDescriptor, TextureFormat};
@@ -9,15 +10,8 @@ use wgpu::{BufferDescriptor, BufferUsages, TextureDescriptor, TextureFormat};
 /// Resource handle that automatically unregisters on drop
 #[derive(Debug)]
 pub enum ResourceHandle {
-    Buffer {
-        size: u64,
-        is_host_visible: bool,
-    },
-    Texture {
-        width: u32,
-        height: u32,
-        format: TextureFormat,
-    },
+    Buffer { size: u64, is_host_visible: bool },
+    Texture { size: u64 },
 }
 
 impl Drop for ResourceHandle {
@@ -30,12 +24,8 @@ impl Drop for ResourceHandle {
             } => {
                 tracker.free_buffer_allocation(*size, *is_host_visible);
             }
-            ResourceHandle::Texture {
-                width,
-                height,
-                format,
-            } => {
-                tracker.free_texture_allocation(*width, *height, *format);
+            ResourceHandle::Texture { size } => {
+                tracker.free_texture_allocation_bytes(*size);
             }
         }
     }
@@ -54,13 +44,13 @@ pub fn register_buffer(size: u64, usage: BufferUsages) -> ResourceHandle {
 
 /// Register a texture allocation and return a handle that will unregister on drop
 pub fn register_texture(width: u32, height: u32, format: TextureFormat) -> ResourceHandle {
-    let tracker = global_tracker();
-    tracker.track_texture_allocation(width, height, format);
-    ResourceHandle::Texture {
-        width,
-        height,
-        format,
-    }
+    register_texture_bytes(calculate_texture_size(width, height, format))
+}
+
+/// Register an exactly sized texture allocation.
+pub fn register_texture_bytes(size: u64) -> ResourceHandle {
+    global_tracker().track_texture_allocation_bytes(size);
+    ResourceHandle::Texture { size }
 }
 
 /// Register a buffer allocation with explicit host-visible flag
@@ -84,6 +74,48 @@ pub enum LedgerCategory {
     Texture,
 }
 
+static NEXT_ALLOCATION_OWNER_ID: AtomicU64 = AtomicU64::new(1);
+
+thread_local! {
+    static ACTIVE_ALLOCATION_OWNER: Cell<Option<u64>> = const { Cell::new(None) };
+}
+
+#[derive(Clone, Debug)]
+pub struct AllocationOwner {
+    id: u64,
+}
+
+impl AllocationOwner {
+    pub fn new() -> Self {
+        Self {
+            id: NEXT_ALLOCATION_OWNER_ID.fetch_add(1, Ordering::Relaxed),
+        }
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub fn activate(&self) -> AllocationOwnerGuard {
+        let previous = ACTIVE_ALLOCATION_OWNER.with(|owner| owner.replace(Some(self.id)));
+        AllocationOwnerGuard { previous }
+    }
+}
+
+pub struct AllocationOwnerGuard {
+    previous: Option<u64>,
+}
+
+impl Drop for AllocationOwnerGuard {
+    fn drop(&mut self) {
+        ACTIVE_ALLOCATION_OWNER.with(|owner| owner.set(self.previous));
+    }
+}
+
+fn active_allocation_owner() -> Option<u64> {
+    ACTIVE_ALLOCATION_OWNER.with(Cell::get)
+}
+
 #[derive(Clone, Debug)]
 struct LedgerEntry {
     label: String,
@@ -93,6 +125,77 @@ struct LedgerEntry {
     category: LedgerCategory,
     #[allow(dead_code)]
     call_site: String,
+    owner_id: Option<u64>,
+}
+
+struct LedgerCapture {
+    ids: HashSet<u64>,
+    current_host_visible: u64,
+    current_device_local: u64,
+    peak_host_visible: u64,
+    peak_device_local: u64,
+    by_label: BTreeMap<String, u64>,
+}
+
+impl LedgerCapture {
+    fn new(entries: &HashMap<u64, LedgerEntry>, owner_ids: &[u64]) -> Self {
+        let owners: HashSet<u64> = owner_ids.iter().copied().collect();
+        let mut capture = Self {
+            ids: HashSet::new(),
+            current_host_visible: 0,
+            current_device_local: 0,
+            peak_host_visible: 0,
+            peak_device_local: 0,
+            by_label: BTreeMap::new(),
+        };
+        for (&id, entry) in entries {
+            if entry.owner_id.is_some_and(|owner| owners.contains(&owner)) {
+                capture.add(id, entry);
+            }
+        }
+        capture
+    }
+
+    fn add(&mut self, id: u64, entry: &LedgerEntry) {
+        if !self.ids.insert(id) {
+            return;
+        }
+        *self.by_label.entry(entry.label.clone()).or_insert(0) += entry.bytes;
+        if entry.host_visible {
+            self.current_host_visible += entry.bytes;
+            self.peak_host_visible = self.peak_host_visible.max(self.current_host_visible);
+        } else {
+            self.current_device_local += entry.bytes;
+            self.peak_device_local = self.peak_device_local.max(self.current_device_local);
+        }
+    }
+
+    fn remove(&mut self, id: u64, entry: &LedgerEntry) {
+        if !self.ids.remove(&id) {
+            return;
+        }
+        if let Some(bytes) = self.by_label.get_mut(&entry.label) {
+            *bytes = bytes.saturating_sub(entry.bytes);
+            if *bytes == 0 {
+                self.by_label.remove(&entry.label);
+            }
+        }
+        if entry.host_visible {
+            self.current_host_visible = self.current_host_visible.saturating_sub(entry.bytes);
+        } else {
+            self.current_device_local = self.current_device_local.saturating_sub(entry.bytes);
+        }
+    }
+
+    fn report(self) -> LedgerReport {
+        LedgerReport {
+            peak_host_visible_bytes: self.peak_host_visible,
+            peak_device_local_bytes: self.peak_device_local,
+            current_host_visible_bytes: self.current_host_visible,
+            current_device_local_bytes: self.current_device_local,
+            by_label: self.by_label,
+        }
+    }
 }
 
 /// Global ledger recording every live tracked allocation.
@@ -107,9 +210,7 @@ pub struct AllocationLedger {
     current_device_local: AtomicU64,
     peak_host_visible: AtomicU64,
     peak_device_local: AtomicU64,
-    capture_active: AtomicBool,
-    capture_peak_host_visible: AtomicU64,
-    capture_peak_device_local: AtomicU64,
+    capture: Mutex<Option<LedgerCapture>>,
 }
 
 impl AllocationLedger {
@@ -121,9 +222,7 @@ impl AllocationLedger {
             current_device_local: AtomicU64::new(0),
             peak_host_visible: AtomicU64::new(0),
             peak_device_local: AtomicU64::new(0),
-            capture_active: AtomicBool::new(false),
-            capture_peak_host_visible: AtomicU64::new(0),
-            capture_peak_device_local: AtomicU64::new(0),
+            capture: Mutex::new(None),
         }
     }
 
@@ -137,63 +236,54 @@ impl AllocationLedger {
     ) -> u64 {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut map = self.entries.lock().unwrap_or_else(|p| p.into_inner());
-        map.insert(
-            id,
-            LedgerEntry {
-                label,
-                bytes,
-                host_visible,
-                category,
-                call_site,
-            },
-        );
+        let entry = LedgerEntry {
+            label,
+            bytes,
+            host_visible,
+            category,
+            call_site,
+            owner_id: active_allocation_owner(),
+        };
+        map.insert(id, entry.clone());
         if host_visible {
             let cur = self
                 .current_host_visible
                 .fetch_add(bytes, Ordering::Relaxed)
                 + bytes;
             self.peak_host_visible.fetch_max(cur, Ordering::Relaxed);
-            if self.capture_active.load(Ordering::Relaxed) {
-                self.capture_peak_host_visible
-                    .fetch_max(cur, Ordering::Relaxed);
-            }
         } else {
             let cur = self
                 .current_device_local
                 .fetch_add(bytes, Ordering::Relaxed)
                 + bytes;
             self.peak_device_local.fetch_max(cur, Ordering::Relaxed);
-            if self.capture_active.load(Ordering::Relaxed) {
-                self.capture_peak_device_local
-                    .fetch_max(cur, Ordering::Relaxed);
-            }
+        }
+        if let Some(capture) = self
+            .capture
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_mut()
+        {
+            capture.add(id, &entry);
         }
         id
     }
 
-    fn begin_capture(&self) {
+    fn begin_capture(&self, owner_ids: &[u64]) {
         // ponytail: render capture is process-global and serialized; use capture
         // IDs only if concurrent renders become a supported public contract.
-        let _entries = self.entries.lock().unwrap_or_else(|p| p.into_inner());
-        self.capture_peak_host_visible.store(
-            self.current_host_visible.load(Ordering::Relaxed),
-            Ordering::Relaxed,
-        );
-        self.capture_peak_device_local.store(
-            self.current_device_local.load(Ordering::Relaxed),
-            Ordering::Relaxed,
-        );
-        self.capture_active.store(true, Ordering::Release);
+        let entries = self.entries.lock().unwrap_or_else(|p| p.into_inner());
+        *self.capture.lock().unwrap_or_else(|p| p.into_inner()) =
+            Some(LedgerCapture::new(&entries, owner_ids));
     }
 
     fn finish_capture(&self) -> LedgerReport {
-        let was_active = self.capture_active.swap(false, Ordering::AcqRel);
-        let mut report = self.snapshot();
-        if was_active {
-            report.peak_host_visible_bytes = self.capture_peak_host_visible.load(Ordering::Relaxed);
-            report.peak_device_local_bytes = self.capture_peak_device_local.load(Ordering::Relaxed);
-        }
-        report
+        self.capture
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+            .map(LedgerCapture::report)
+            .unwrap_or_default()
     }
 
     fn remove(&self, id: u64) {
@@ -211,6 +301,14 @@ impl AllocationLedger {
                     Ordering::Relaxed,
                     |current| Some(current.saturating_sub(entry.bytes)),
                 );
+            }
+            if let Some(capture) = self
+                .capture
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .as_mut()
+            {
+                capture.remove(id, &entry);
             }
         }
     }
@@ -253,7 +351,7 @@ impl AllocationLedger {
 }
 
 /// Immutable snapshot of the [`AllocationLedger`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct LedgerReport {
     pub peak_host_visible_bytes: u64,
     pub peak_device_local_bytes: u64,
@@ -290,8 +388,8 @@ pub fn ledger_snapshot() -> LedgerReport {
 }
 
 /// Start render-local peak accounting from the allocations currently alive.
-pub fn begin_ledger_capture() {
-    ledger().begin_capture();
+pub fn begin_ledger_capture(owner_ids: &[u64]) {
+    ledger().begin_capture(owner_ids);
 }
 
 /// Finish render-local peak accounting and return the captured ledger report.
@@ -462,15 +560,42 @@ pub fn tracked_create_texture(
         .label
         .map(|s| s.to_string())
         .unwrap_or_else(|| call_site.clone());
-    let size = calculate_texture_size(desc.size.width, desc.size.height, desc.format);
+    let size = calculate_texture_descriptor_size(desc);
     let texture = device.create_texture(desc);
-    let registry = register_texture(desc.size.width, desc.size.height, desc.format);
+    let registry = register_texture_bytes(size);
     let ledger_id = ledger().insert(label, size, false, LedgerCategory::Texture, call_site);
     Ok(TrackedTexture {
         inner: texture,
         _registry: registry,
         ledger_id,
     })
+}
+
+/// Exact byte size of every subresource described by a texture descriptor.
+pub fn calculate_texture_descriptor_size(desc: &TextureDescriptor<'_>) -> u64 {
+    let (block_width, block_height) = desc.format.block_dimensions();
+    let bytes_per_block = desc
+        .format
+        .block_copy_size(None)
+        .map(u64::from)
+        .unwrap_or_else(|| calculate_texture_size(block_width, block_height, desc.format));
+    let mut total = 0u64;
+    for mip in 0..desc.mip_level_count {
+        let width = (desc.size.width >> mip).max(1);
+        let height = match desc.dimension {
+            wgpu::TextureDimension::D1 => 1,
+            _ => (desc.size.height >> mip).max(1),
+        };
+        let layers_or_depth = match desc.dimension {
+            wgpu::TextureDimension::D3 => (desc.size.depth_or_array_layers >> mip).max(1),
+            _ => desc.size.depth_or_array_layers,
+        };
+        let blocks = u64::from(width.div_ceil(block_width))
+            .saturating_mul(u64::from(height.div_ceil(block_height)))
+            .saturating_mul(u64::from(layers_or_depth));
+        total = total.saturating_add(blocks.saturating_mul(bytes_per_block));
+    }
+    total.saturating_mul(u64::from(desc.sample_count))
 }
 
 #[cfg(test)]
@@ -739,6 +864,8 @@ mod tests {
     #[test]
     fn capture_peak_starts_at_live_allocation_total() {
         let ledger = AllocationLedger::new();
+        let owner = AllocationOwner::new();
+        let _scope = owner.activate();
         let persistent = ledger.insert(
             "persistent".to_string(),
             1024,
@@ -747,7 +874,7 @@ mod tests {
             "test:1".to_string(),
         );
 
-        ledger.begin_capture();
+        ledger.begin_capture(&[owner.id()]);
         let lazy = ledger.insert(
             "lazy".to_string(),
             32 * 1024,
@@ -757,7 +884,7 @@ mod tests {
         );
         let first = ledger.finish_capture();
 
-        ledger.begin_capture();
+        ledger.begin_capture(&[owner.id()]);
         let second = ledger.finish_capture();
 
         assert_eq!(first.peak_host_visible_bytes, 33 * 1024);
@@ -768,5 +895,97 @@ mod tests {
 
         ledger.remove(lazy);
         ledger.remove(persistent);
+    }
+
+    #[test]
+    fn texture_descriptor_size_counts_mips_layers_and_samples() {
+        let desc = TextureDescriptor {
+            label: Some("sized-texture"),
+            size: wgpu::Extent3d {
+                width: 8,
+                height: 8,
+                depth_or_array_layers: 2,
+            },
+            mip_level_count: 3,
+            sample_count: 4,
+            dimension: wgpu::TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        };
+
+        assert_eq!(calculate_texture_descriptor_size(&desc), 2688);
+    }
+
+    #[test]
+    fn texture_descriptor_size_uses_format_blocks_and_3d_mips() {
+        let compressed = TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: 7,
+                height: 5,
+                depth_or_array_layers: 3,
+            },
+            mip_level_count: 2,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: TextureFormat::Bc1RgbaUnorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        };
+        assert_eq!(calculate_texture_descriptor_size(&compressed), 120);
+
+        let volume = TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: 4,
+                height: 4,
+                depth_or_array_layers: 4,
+            },
+            mip_level_count: 3,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D3,
+            format: TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        };
+        assert_eq!(calculate_texture_descriptor_size(&volume), 73);
+    }
+
+    #[test]
+    fn capture_excludes_unrelated_allocation_owner() {
+        let ledger = AllocationLedger::new();
+        let owner_a = AllocationOwner::new();
+        let owner_b = AllocationOwner::new();
+
+        let allocation_a = {
+            let _scope = owner_a.activate();
+            ledger.insert(
+                "owner-a".to_string(),
+                1024,
+                true,
+                LedgerCategory::Buffer,
+                "test:a".to_string(),
+            )
+        };
+        let allocation_b = {
+            let _scope = owner_b.activate();
+            ledger.insert(
+                "owner-b".to_string(),
+                2048,
+                true,
+                LedgerCategory::Buffer,
+                "test:b".to_string(),
+            )
+        };
+
+        ledger.begin_capture(&[owner_a.id()]);
+        let report = ledger.finish_capture();
+        assert_eq!(report.peak_host_visible_bytes, 1024);
+        assert_eq!(report.by_label.get("owner-a"), Some(&1024));
+        assert!(!report.by_label.contains_key("owner-b"));
+
+        ledger.remove(allocation_a);
+        ledger.remove(allocation_b);
     }
 }

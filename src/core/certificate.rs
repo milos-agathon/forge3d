@@ -86,7 +86,7 @@ fn notify_python_degradation_capture(_method: &str) {}
 /// Start a render capture: clears the per-render pass list. `entry_point` names
 /// the render entry for logging/debugging (not part of the serialized schema).
 pub fn begin_render_capture(entry_point: &str) {
-    begin_render_capture_with_shaders(entry_point, &BTreeMap::new());
+    begin_render_capture_with_resources(entry_point, &BTreeMap::new(), &[]);
 }
 
 /// Start a render capture seeded with the modules owned by its renderer.
@@ -94,7 +94,16 @@ pub fn begin_render_capture_with_shaders(
     entry_point: &str,
     shader_hashes: &BTreeMap<String, String>,
 ) {
-    begin_ledger_capture();
+    begin_render_capture_with_resources(entry_point, shader_hashes, &[]);
+}
+
+/// Start a render capture with renderer-owned shader and allocation state.
+pub fn begin_render_capture_with_resources(
+    entry_point: &str,
+    shader_hashes: &BTreeMap<String, String>,
+    allocation_owner_ids: &[u64],
+) {
+    begin_ledger_capture(allocation_owner_ids);
     begin_shader_render_capture(shader_hashes);
     begin_degradation_capture();
     notify_python_degradation_capture("begin_capture");
