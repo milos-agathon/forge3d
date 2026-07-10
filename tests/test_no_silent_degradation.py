@@ -279,8 +279,20 @@ def test_e_unrun_accounting_is_exhaustive_and_honest():
     both = sorted(unrun & explicit)
     assert both == [], f"files are both UNRUN and run by an explicit lane: {both}"
 
-    # The default lane collects everything not UNRUN; the accounting must be total.
+    # The default lane collects everything not UNRUN; the accounting must be
+    # total. Exercise the lane SCRIPT's own selection (not a re-derivation of
+    # the same set) so a filtering regression in ci_pytest_lane.py fails here.
+    script_lane = {Path(f).name for f in ci_pytest_lane.default_lane_files()}
     default_lane = universe - unrun
+    unrun_names = {Path(f).name for f in unrun}
+    default_lane_names = {Path(f).name for f in default_lane}
+    assert script_lane & unrun_names == set(), (
+        f"lane script selects quarantined files: {sorted(script_lane & unrun_names)}"
+    )
+    assert script_lane >= default_lane_names, (
+        "lane script drops in-universe files: "
+        f"{sorted(default_lane_names - script_lane)}"
+    )
     assert (default_lane | explicit | unrun) == universe, (
         "accounting is not exhaustive: "
         f"{sorted(universe - (default_lane | explicit | unrun))}"
