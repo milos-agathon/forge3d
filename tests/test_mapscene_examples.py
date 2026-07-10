@@ -53,7 +53,7 @@ def test_terrain_raster_example_validates_renders_and_bundles(tmp_path, monkeypa
     payload = module.run_example(tmp_path)
 
     assert payload["validation_status"] == "ok"
-    assert payload["render_status"] == "ok"
+    assert payload["render_status"] == "ok", payload.get("diagnostics") or payload
     assert payload["render_backend"] == "gpu_terrain"
     assert payload["bundle_status"] == "ok"
     assert Path(payload["png_path"]).exists()
@@ -76,7 +76,7 @@ def test_vector_labels_example_compiles_label_plan_and_bundles(tmp_path):
     payload = module.run_example(tmp_path)
 
     assert payload["validation_status"] == "warning"
-    assert payload["render_status"] == "warning"
+    assert payload["render_status"] == "warning", payload.get("diagnostics") or payload
     _supported_render_backend(payload)
     assert payload["bundle_status"] == "warning"
     assert payload["accepted_label_ids"] == ["city", "park"]
@@ -91,7 +91,7 @@ def test_fuji_labels_demo_uses_public_mapscene_gpu_label_path(tmp_path):
     payload = module.run_example(tmp_path)
 
     assert payload["validation_status"] == "ok"
-    assert payload["render_status"] == "ok"
+    assert payload["render_status"] == "ok", payload.get("diagnostics") or payload
     assert payload["render_backend"] == "gpu_terrain"
     assert payload["accepted_label_ids"]
     assert Path(payload["png_path"]).exists()
@@ -103,7 +103,7 @@ def test_offline_quality_example_uses_native_accumulation_and_aovs(tmp_path):
     payload = module.run_example(tmp_path)
 
     assert payload["validation_status"] == "ok"
-    assert payload["render_status"] == "ok"
+    assert payload["render_status"] == "ok", payload.get("diagnostics") or payload
     assert payload["render_backend"] == "gpu_terrain"
     assert payload["bundle_status"] == "ok"
     assert payload["samples_used"] == 4
@@ -123,7 +123,7 @@ def test_buildings_labels_example_renders_native_gpu_buildings(tmp_path):
     payload = module.run_example(tmp_path)
 
     assert payload["validation_status"] == "ok"
-    assert payload["render_status"] == "ok"
+    assert payload["render_status"] == "ok", payload.get("diagnostics") or payload
     assert payload["render_backend"] == "gpu_terrain"
     assert payload["bundle_status"] == "ok"
     assert "pro_gated_path" not in payload["diagnostic_codes"]
@@ -147,7 +147,7 @@ def test_bundled_datasets_showcase_covers_specs_001_to_004(tmp_path):
     payload = module.run_example(tmp_path)
 
     assert payload["validation_status"] == "warning"
-    assert payload["render_status"] == "warning"
+    assert payload["render_status"] == "warning", payload.get("diagnostics") or payload
     assert payload["bundle_status"] == "warning"
     assert payload["dataset_names"] == ["mini_dem", "sample_boundaries"]
     assert payload["accepted_label_ids"] == [

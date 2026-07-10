@@ -57,10 +57,34 @@ TARGET_CRS = "EPSG:3035"
 TARGET_RES_METERS = 1000.0
 
 # -- Fonts -----------------------------------------------------------------
-FONT_DIR = Path("C:/Windows/Fonts")
-FONT_BOLD = str(FONT_DIR / "segoeuib.ttf")
-FONT_LIGHT = str(FONT_DIR / "segoeuil.ttf")
-FONT_REGULAR = str(FONT_DIR / "segoeui.ttf")
+# Resolve per-OS: Segoe on Windows, DejaVu on Linux, Arial on macOS. Hosted CI
+# runners have no C:/Windows/Fonts, which made every legend helper raise
+# OSError (found by the first exhaustive-lane CI run).
+def _first_existing_font(*candidates: str) -> str:
+    for candidate in candidates:
+        if Path(candidate).exists():
+            return candidate
+    return candidates[-1]
+
+
+FONT_BOLD = _first_existing_font(
+    "C:/Windows/Fonts/segoeuib.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+)
+FONT_LIGHT = _first_existing_font(
+    "C:/Windows/Fonts/segoeuil.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+)
+FONT_REGULAR = _first_existing_font(
+    "C:/Windows/Fonts/segoeui.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+)
 
 
 # =====================================================================

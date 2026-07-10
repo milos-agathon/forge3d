@@ -248,6 +248,12 @@ jobs:
           python scripts/install_compatible_wheel.py dist
           pip install pytest numpy pillow mypy
 
+      - name: Install system fonts (Linux)
+        if: runner.os == 'Linux'
+        # Legend/label helpers resolve DejaVu on Linux; hosted images ship no
+        # fonts by default (found by the first exhaustive-lane CI run).
+        run: sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
+
       - name: Run install smoke tests
         env:
           FORGE3D_NO_BOOTSTRAP: '1'

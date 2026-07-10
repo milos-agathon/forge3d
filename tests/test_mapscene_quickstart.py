@@ -197,7 +197,7 @@ def test_quickstart_building_scenario_renders_native_gpu_buildings(tmp_path):
     payload = module.run_example(tmp_path)
 
     assert payload["validation_status"] == "ok"
-    assert payload["render_status"] == "ok"
+    assert payload["render_status"] == "ok", payload.get("diagnostics") or payload
     assert payload["render_backend"] == "gpu_terrain"
     assert payload["bundle_status"] == "ok"
     assert payload["building_backend"] == "terrain_scatter_instanced_mesh"
