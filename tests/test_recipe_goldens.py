@@ -40,6 +40,16 @@ SSIM_MIN = 0.995
 MEAN_ABS_MAX = 2.0
 
 
+def _recipe_golden_variant() -> str | None:
+    """Return the explicitly selected backend baseline variant, if any."""
+    variant = os.environ.get("FORGE3D_RECIPE_GOLDEN_VARIANT")
+    if variant is None:
+        return None
+    if variant != "metal":
+        raise ValueError(f"Unknown recipe golden variant: {variant!r}")
+    return variant
+
+
 @dataclass(frozen=True)
 class RecipeGolden:
     scene_id: str
@@ -51,8 +61,15 @@ class RecipeGolden:
     mean_abs_max: float = MEAN_ABS_MAX
 
     @property
-    def golden_path(self) -> Path:
+    def canonical_golden_path(self) -> Path:
         return GOLDEN_DIR / f"{self.scene_id}.png"
+
+    @property
+    def golden_path(self) -> Path:
+        variant = _recipe_golden_variant()
+        if variant is None:
+            return self.canonical_golden_path
+        return GOLDEN_DIR / f"{self.scene_id}.{variant}.png"
 
     @property
     def command(self) -> str:
@@ -1038,7 +1055,7 @@ def test_recipe_golden_catalog_links_docs_gallery() -> None:
     gallery = (ROOT / "docs" / "gallery" / "index.md").read_text(encoding="utf-8")
     for spec in RECIPE_GOLDENS:
         assert spec.scene_id in gallery
-        assert str(spec.golden_path.relative_to(ROOT)).replace("\\", "/") in gallery
+        assert str(spec.canonical_golden_path.relative_to(ROOT)).replace("\\", "/") in gallery
         assert spec.command in gallery
 
 
@@ -1049,6 +1066,16 @@ def test_update_mode_is_read_at_call_time(monkeypatch: pytest.MonkeyPatch) -> No
     assert _update_goldens_enabled() is True
     monkeypatch.delenv("FORGE3D_UPDATE_RECIPE_GOLDENS")
     assert _update_goldens_enabled() is False
+
+
+def test_recipe_golden_variant_uses_an_explicit_backend_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = RECIPE_GOLDENS[0]
+    monkeypatch.delenv("FORGE3D_RECIPE_GOLDEN_VARIANT", raising=False)
+    assert spec.golden_path == spec.canonical_golden_path
+    monkeypatch.setenv("FORGE3D_RECIPE_GOLDEN_VARIANT", "metal")
+    assert spec.golden_path == GOLDEN_DIR / "mapscene_terrain_raster.metal.png"
 
 
 def test_recipe_golden_gate_rejects_pixel_regression(
