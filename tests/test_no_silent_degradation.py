@@ -72,12 +72,15 @@ def test_b_zero_raw_allocation_sites():
 # (c) feature gate
 # ---------------------------------------------------------------------------
 # The single source of truth for what CI's `cargo check`/`cargo test`/`cargo doc`
-# compile. Every exclusion from this list (vs the full Cargo.toml [features])
-# carries an in-test reason below.
-CI_CARGO_FEATURES = {
+# compile on every Rust CI platform. Platform-bound and wheel-only features are
+# exercised by separate commands/jobs and verified below.
+PORTABLE_CI_CARGO_FEATURES = {
     "default",  # baseline: images + enable-gpu-instancing + enable-staging-rings
     "async_readback",
     "copc_laz",
+    "cog_streaming",
+    "gis-remote",
+    "geos-topology",
     "weighted-oit",
     "wsI_bigbuf",
     "wsI_double_buf",
@@ -88,16 +91,7 @@ CI_CARGO_FEATURES = {
     "enable-renderer-config",
     "enable-staging-rings",
 }
-# Declared-but-excluded from the CI feature list, with the reason each is off:
-CI_EXCLUDED_FEATURES = {
-    "extension-module": "links the PyO3 cdylib extension; cannot link under cargo test/check",
-    "images": "already pulled in transitively by `default`",
-    "enable-gpu-instancing": "already pulled in transitively by `default`",
-    "cog_streaming": "pulls the reqwest/tokio network stack",
-    "gis-remote": "pulls the reqwest/tokio network stack",
-    "proj": "needs the system PROJ library",
-    "geos-topology": "needs the system GEOS/geo topology backend",
-}
+DEDICATED_SYSTEM_FEATURES = {"proj"}
 
 
 def _cargo_features() -> set[str]:
@@ -111,6 +105,19 @@ def _cargo_features() -> set[str]:
         if m:
             names.add(m.group(1))
     return names
+
+
+def _feature_closure(features: set[str]) -> set[str]:
+    table = load_toml(ROOT / "Cargo.toml")["features"]
+    closure = set(features)
+    pending = list(features)
+    while pending:
+        feature = pending.pop()
+        for dependency in table.get(feature, []):
+            if dependency in table and dependency not in closure:
+                closure.add(dependency)
+                pending.append(dependency)
+    return closure
 
 
 def _feature_referenced(feat: str) -> bool:
@@ -135,31 +142,46 @@ def test_c_every_feature_referenced_and_ci_list_curated():
     unreferenced = sorted(f for f in declared if f != "default" and not _feature_referenced(f))
     assert unreferenced == [], f"declared Cargo features with no `feature = \"..\"` reference (dead advertising): {unreferenced}"
 
-    # The curated CI list and its exclusions must partition the declared set.
-    assert CI_CARGO_FEATURES <= declared, f"CI feature set names undeclared features: {CI_CARGO_FEATURES - declared}"
-    assert set(CI_EXCLUDED_FEATURES) <= declared, f"exclusion list names undeclared features: {set(CI_EXCLUDED_FEATURES) - declared}"
-    assert CI_CARGO_FEATURES.isdisjoint(CI_EXCLUDED_FEATURES), "a feature is both curated-in and excluded"
-    assert CI_CARGO_FEATURES | set(CI_EXCLUDED_FEATURES) == declared, (
-        "curated + excluded features must exactly cover Cargo.toml [features]; "
-        f"unaccounted: {declared - CI_CARGO_FEATURES - set(CI_EXCLUDED_FEATURES)}"
+    assert PORTABLE_CI_CARGO_FEATURES <= declared, (
+        f"CI feature set names undeclared features: {PORTABLE_CI_CARGO_FEATURES - declared}"
     )
+    assert DEDICATED_SYSTEM_FEATURES <= declared
 
-    # Every `--features` list in ci.yml must equal the curated set (no dead
-    # advertising, no drift between cargo check/test/doc).
+    # Portable check/test/doc commands must agree exactly, while PROJ has a
+    # dedicated Ubuntu check with its system dependencies installed.
     ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     lists = re.findall(r"--features\s+([A-Za-z0-9_,\-]+)", ci_yml)
     assert lists, "no cargo --features lists found in ci.yml"
-    for raw in lists:
+    portable_lists = [raw for raw in lists if "default" in raw.split(",") and len(raw.split(",")) > 1]
+    assert len(portable_lists) >= 3, "expected portable cargo check/test/doc feature lists"
+    for raw in portable_lists:
         got = set(raw.split(","))
-        assert got == CI_CARGO_FEATURES, f"ci.yml --features {sorted(got)} != curated {sorted(CI_CARGO_FEATURES)}"
+        assert got == PORTABLE_CI_CARGO_FEATURES, (
+            f"ci.yml --features {sorted(got)} != portable set {sorted(PORTABLE_CI_CARGO_FEATURES)}"
+        )
         assert got <= declared, f"ci.yml advertises undeclared features: {got - declared}"
+    assert any(set(raw.split(",")) == DEDICATED_SYSTEM_FEATURES for raw in lists), (
+        "ci.yml lacks a dedicated native-PROJ compile check"
+    )
+    for package in ("libproj-dev", "libsqlite3-dev", "sqlite3", "pkg-config"):
+        assert package in ci_yml, f"PROJ CI check does not install {package}"
 
-    # The forge3d-clippy alias feature set must be a subset of declared features.
+    # The wheel's maturin list is the extension-module compile lane. Together,
+    # portable/default closure + system lane + wheel lane must cover everything.
+    maturin = _maturin_features()
+    assert "PyO3/maturin-action" in ci_yml, "CI has no wheel build exercising maturin features"
+    covered = _feature_closure(PORTABLE_CI_CARGO_FEATURES) | DEDICATED_SYSTEM_FEATURES | maturin
+    assert covered == declared, f"declared features not compiled by any CI lane: {sorted(declared - covered)}"
+
+    # Clippy covers the portable surface plus extension-module without PROJ's
+    # system dependency.
     alias_text = (ROOT / ".cargo" / "config.toml").read_text(encoding="utf-8")
     m = re.search(r'"([A-Za-z0-9_\-]*extension-module[A-Za-z0-9_,\-]*)"', alias_text)
     assert m, "could not locate forge3d-clippy feature list in .cargo/config.toml"
     alias_features = set(m.group(1).split(","))
-    assert alias_features <= declared, f"forge3d-clippy alias names undeclared features: {alias_features - declared}"
+    assert alias_features == PORTABLE_CI_CARGO_FEATURES | {"extension-module"}, (
+        f"forge3d-clippy feature drift: {sorted(alias_features)}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -234,14 +256,15 @@ def test_d_wheel_features_superset_and_proj_geos_are_diagnostic_bearing():
 # (e) UNRUN accounting
 # ---------------------------------------------------------------------------
 def _tracked_test_files() -> set[str]:
-    # CI only ever checks out git-tracked files; untracked local example tests
-    # (france/iberia/italy/poland/romania) never exist on a runner, so the
-    # accounting universe is the tracked set, not the working-tree glob.
+    working = {path.relative_to(ROOT).as_posix() for path in TESTS.glob("test_*.py")}
     out = subprocess.run(
         ["git", "-C", str(ROOT), "ls-files", "tests/test_*.py"],
         capture_output=True, text=True, check=True,
     ).stdout
-    return {line.strip() for line in out.splitlines() if line.strip()}
+    tracked = {line.strip() for line in out.splitlines() if line.strip()}
+    untracked = sorted(working - tracked)
+    assert untracked == [], f"test files exist locally but would disappear from CI: {untracked}"
+    return working
 
 
 def _explicit_lane_files() -> set[str]:
@@ -289,11 +312,31 @@ def test_e_unrun_accounting_is_exhaustive_and_honest():
     assert script_lane & unrun_names == set(), (
         f"lane script selects quarantined files: {sorted(script_lane & unrun_names)}"
     )
-    assert script_lane >= default_lane_names, (
-        "lane script drops in-universe files: "
-        f"{sorted(default_lane_names - script_lane)}"
+    assert script_lane == default_lane_names, (
+        "lane script and tracked default-lane accounting differ: "
+        f"missing={sorted(default_lane_names - script_lane)}, extra={sorted(script_lane - default_lane_names)}"
     )
+    conftest = (ROOT / "conftest.py").read_text(encoding="utf-8")
+    assert "pytest_ignore_collect" not in conftest, "root conftest silently bypasses test collection"
     assert (default_lane | explicit | unrun) == universe, (
         "accounting is not exhaustive: "
         f"{sorted(universe - (default_lane | explicit | unrun))}"
     )
+
+
+# ---------------------------------------------------------------------------
+# (f) visual-golden lane honesty
+# ---------------------------------------------------------------------------
+def test_f_probe_positive_golden_mismatch_fails_ci_and_probe_negative_is_absent():
+    ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    golden_job = ci_yml.split("  test-golden-images:", 1)[1].split("\n  build-docs:", 1)[0]
+    pytest_step = golden_job.split("- name: Run visual golden tests", 1)[1].split("\n      - name:", 1)[0]
+    probe_step = golden_job.split("- name: Probe terrain golden backend", 1)[1].split("\n      - name:", 1)[0]
+    aggregate = ci_yml.split("  ci-success:", 1)[1]
+
+    assert "continue-on-error: true" in probe_step, "hardware probe must remain non-fatal"
+    assert "continue-on-error" not in pytest_step, "golden pytest mismatch is incorrectly non-fatal"
+    assert "terrain-goldens-probe.outcome == 'success'" in pytest_step
+    assert "goldens.ABSENT" in golden_job and "golden-lane-marker" in golden_job
+    assert 'needs.test-golden-images.result }}" != "success"' in aggregate
+    assert 'needs.test-golden-images.result }}" != "skipped"' in aggregate

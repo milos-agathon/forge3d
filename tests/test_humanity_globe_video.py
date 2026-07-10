@@ -25,7 +25,10 @@ def load_module():
 
     forge3d_stub.numpy_to_png = numpy_to_png
     examples_dir = str(EXAMPLE_PATH.parent)
-    had_examples_dir = examples_dir in sys.path
+    added_examples_dir = False
+    if examples_dir not in sys.path:
+        sys.path.insert(0, examples_dir)
+        added_examples_dir = True
     previous_forge3d = sys.modules.get("forge3d")
     sys.modules["forge3d"] = forge3d_stub
     try:
@@ -36,7 +39,7 @@ def load_module():
             sys.modules.pop("forge3d", None)
         else:
             sys.modules["forge3d"] = previous_forge3d
-        if not had_examples_dir and examples_dir in sys.path:
+        if added_examples_dir and examples_dir in sys.path:
             sys.path.remove(examples_dir)
     return module
 

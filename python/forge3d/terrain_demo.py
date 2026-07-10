@@ -106,7 +106,21 @@ def _builtin_ibl_path(name: Any) -> Path | None:
         candidate = root / relative
         if candidate.exists():
             return candidate
-    return None
+
+    # The named source is a real built-in, not an optional local asset. Keep a
+    # tiny deterministic Radiance environment available in clean installations.
+    import tempfile
+
+    generated = Path(tempfile.gettempdir()) / "forge3d-clear-sky-v1.hdr"
+    expected = (
+        b"#?RADIANCE\n"
+        b"FORMAT=32-bit_rle_rgbe\n\n"
+        b"-Y 2 +X 2\n"
+        + bytes([180, 190, 205, 128]) * 4
+    )
+    if not generated.exists() or generated.read_bytes() != expected:
+        generated.write_bytes(expected)
+    return generated
 
 
 def check_camera_sun_alignment(

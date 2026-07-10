@@ -7,17 +7,14 @@
 #
 # AUDIT METHOD (2026-07-10):
 #   1. Full suite collected cleanly locally: 2878 tests, 0 collection errors.
-#   2. Faithful CI simulation: a detached `git worktree` of HEAD (tracked files
-#      only, so git-ignored examples are absent exactly as on a CI checkout),
-#      the built _forge3d.pyd copied in, run with GITHUB_ACTIONS=true so the
+#   2. Faithful CI simulation: a detached `git worktree` of HEAD, the built
+#      _forge3d.pyd copied in, run with GITHUB_ACTIONS=true so the
 #      hosted-CI terrain/GPU guards fire like a real runner. That single
 #      `pytest tests/` invocation is authoritative because the CI lane runs the
 #      whole tree at once (per-file/isolated runs disagree due to global GPU
 #      and lighting state -- e.g. test_lighting_alignment passes in-suite).
-#   3. Root conftest.py `pytest_ignore_collect` already auto-drops example-driven
-#      tests when their git-ignored example is absent, so those (terrain_demo,
-#      humanity_globe_video, lighting_alignment, mapscene_docs/examples/quickstart,
-#      label_api_*, oit_transparency, ...) self-exclude on CI and are NOT listed.
+#   3. Every paired example used by a collected test is committed; the root
+#      conftest has no collection bypass for absent local files.
 #   4. GPU/terrain golden tests self-skip via _terrain_runtime.terrain_rendering_available()
 #      (has_gpu()/hosted-CI probe) and are NOT listed.
 #   5. test_dask_stub self-skips on CI (real runners have no xarray) and is NOT listed.
@@ -25,10 +22,6 @@
 #      (3b4375a1): none are regressions from CENSOR work -- the P1/P2 map-asset
 #      adapter tests are the documented `underdeveloped` story tests, and the
 #      map_scene.py CENSOR diff touches none of the asserted symbols.
-#
-# The five git-ignored/untracked local example tests (france/iberia/italy/
-# poland/romania) are absent from any CI checkout and are excluded from the
-# accounting universe (git ls-files), not listed here.
 #
 # NOTE: the `[[entries]]` array-of-tables below IS the entries list; do not add a
 # separate `entries = []` line (TOML forbids redefining an array-of-tables).

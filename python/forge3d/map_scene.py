@@ -3983,7 +3983,7 @@ def _lighting_from_preset(current: LightingPreset, preset_data: Mapping[str, Any
     renderer_config = {
         key: copy.deepcopy(value)
         for key, value in preset_data.items()
-        if key in {"lighting", "shading", "shadows", "gi", "atmosphere", "brdf_override"}
+        if key in {"lighting", "shading", "shadows", "gi", "atmosphere", "ibl", "brdf_override"}
     }
     settings = _deep_merge_mapping(
         {

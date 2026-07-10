@@ -25,6 +25,8 @@ def test_premium_presets_are_self_contained_renderer_configs() -> None:
         assert cfg.shadows.enabled
         assert cfg.shadows.cascades >= 3
         assert cfg.atmosphere.enabled
+        assert "ibl" in cfg.gi.modes
+        assert cfg.ibl["builtin"] == "clear_sky"
         assert cfg_dict["camera"] == preset["camera"]
         assert cfg_dict["sun"] == preset["sun"]
         assert cfg_dict["ibl"] == preset["ibl"]
@@ -51,6 +53,7 @@ def test_mapscene_resolves_named_lighting_preset_into_recipe_fields() -> None:
     assert scene.recipe.lighting.intensity == 4.0
     assert scene.recipe.lighting.settings["resolved_preset"] == "rainier_showcase"
     assert scene.recipe.lighting.settings["renderer_config"]["shadows"]["technique"] == "pcss"
+    assert scene.recipe.lighting.settings["renderer_config"]["ibl"]["builtin"] == "clear_sky"
     assert scene.recipe.reproducibility_profile is not None
     assert scene.recipe.reproducibility_profile.renderer_backend == "gpu_terrain"
 

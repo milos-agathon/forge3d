@@ -38,9 +38,8 @@ def _all_test_files() -> list[str]:
 def default_lane_files() -> list[str]:
     """Every tests/test_*.py the default lane runs = all files minus the UNRUN set.
 
-    CI only checks out git-tracked files, so on a runner this is exactly the
-    tracked suite minus UNRUN; locally it additionally includes any untracked
-    example tests present in the tree, which is harmless.
+    The honesty gate requires every matching file to be tracked, so this is the
+    same suite locally and on a clean CI checkout.
     """
     unrun = set(unrun_files())
     return [f for f in _all_test_files() if f not in unrun]
@@ -50,11 +49,8 @@ def build_pytest_args(passthrough: list[str]) -> list[str]:
     """Compose the pytest argv: the explicit run-list + passthrough.
 
     We pass the file list explicitly rather than `tests/ --ignore=<file>`
-    because the repo root conftest.py's ``pytest_ignore_collect`` returns
-    ``False`` (a non-None firstresult) for non-example paths, which neutralizes
-    pytest's ``--ignore`` option. Naming the files to run sidesteps that and
-    also prevents UNRUN files that fail at COLLECTION time (module-level imports
-    of git-ignored examples) from ever being imported.
+    to make the lane's accounting directly inspectable and to prevent UNRUN
+    files that fail at collection time from ever being imported.
     """
     return [*default_lane_files(), *passthrough]
 

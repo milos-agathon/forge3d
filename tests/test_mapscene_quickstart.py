@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 import json
 import re
 from pathlib import Path
@@ -16,10 +17,18 @@ BUILDING_EXAMPLE = Path("examples/mapscene_buildings_labels.py")
 
 
 def _load_example(path: Path):
+    examples_dir = str(path.parent.resolve())
+    added_examples_dir = examples_dir not in sys.path
+    if added_examples_dir:
+        sys.path.insert(0, examples_dir)
     spec = importlib.util.spec_from_file_location(path.stem, path)
     module = importlib.util.module_from_spec(spec)
     assert spec is not None and spec.loader is not None
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if added_examples_dir:
+            sys.path.remove(examples_dir)
     return module
 
 

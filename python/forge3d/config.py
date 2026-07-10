@@ -580,8 +580,16 @@ class RendererConfig:
         for mode in self.gi.modes:
             if mode == "ibl":
                 has_env = any(light.type == "environment" and light.hdr_path for light in self.lighting.lights)
-                if not has_env and self.atmosphere.hdr_path is None:
-                    raise ValueError("gi mode 'ibl' requires either an environment light or atmosphere.hdr_path")
+                has_ibl_path = any(self.ibl.get(key) for key in ("path", "hdr_path", "environment_path"))
+                builtin = str(self.ibl.get("builtin") or "").lower().replace("_", "").replace("-", "")
+                has_builtin = builtin in {"clear", "clearsky"}
+                if builtin and not has_builtin:
+                    raise ValueError(f"unknown built-in IBL source: {self.ibl['builtin']!r}")
+                if not has_env and self.atmosphere.hdr_path is None and not has_ibl_path and not has_builtin:
+                    raise ValueError(
+                        "gi mode 'ibl' requires an environment light, atmosphere.hdr_path, "
+                        "ibl path, or recognized built-in IBL source"
+                    )
         if self.exaggeration is not None and float(self.exaggeration) <= 0.0:
             raise ValueError("exaggeration must be positive")
 

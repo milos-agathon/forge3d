@@ -500,7 +500,6 @@ pub fn sign_payload_digest(seed: &[u8], digest: &[u8]) -> Result<(String, String
 /// there via `forge3d.certificate.write_certificate`. Assembly/signing and
 /// writing are delegated to the pure-Python surface so there is one signing
 /// implementation.
-#[cfg(feature = "extension-module")]
 pub fn emit_certificate_for_kwarg(
     py: pyo3::Python<'_>,
     certificate: Option<&pyo3::Bound<'_, pyo3::PyAny>>,

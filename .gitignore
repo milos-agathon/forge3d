@@ -367,11 +367,7 @@ examples/output/
 examples/**/*.py
 tests/test_*example*.py
 tests/test_*examples*.py
-tests/test_france_population_spikes_height_shade.py
-tests/test_iberia_builtup_cover_3d.py
-tests/test_italy_forest_cover_example.py
-tests/test_poland_population_contour_3d.py
-tests/test_romania_builtup_cover_3d.py
+!tests/test_italy_forest_cover_example.py
 .superpowers/
 scripts/*
 
