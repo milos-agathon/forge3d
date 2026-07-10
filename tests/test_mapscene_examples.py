@@ -6,14 +6,17 @@ import pytest
 
 import forge3d.map_scene as map_scene
 
-import forge3d as _f3d_gpu
+from _terrain_runtime import (
+    terrain_rendering_available as _terrain_rendering_available,
+)
 
 _requires_gpu = pytest.mark.skipif(
-    not _f3d_gpu.has_gpu(),
+    not _terrain_rendering_available(),
     reason=(
-        "MapScene native terrain render requires a GPU adapter; on GPU-less "
-        "runners validation blocks with a native-render diagnostic by design "
-        "(SUTURA), so these render-asserting tests skip honestly instead"
+        "MapScene native terrain render requires a terrain-safe hardware "
+        "adapter; hosted runners (GPU-less, WARP, or guarded paravirtual "
+        "Metal) either block with a native-render diagnostic or raise by "
+        "design (SUTURA), so these render-asserting tests skip honestly"
     ),
 )
 
