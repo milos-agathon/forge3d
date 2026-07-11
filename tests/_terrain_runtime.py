@@ -85,8 +85,13 @@ def _running_on_unsupported_hosted_macos_ci() -> bool:
 
 def _running_on_unsupported_hosted_windows_ci() -> bool:
     # Hosted Windows runners can crash inside adapter probing before tests have
-    # a chance to skip terrain image cases cleanly.
-    return os.environ.get("GITHUB_ACTIONS") == "true" and platform.system() == "Windows"
+    # a chance to skip terrain image cases cleanly. A labeled self-hosted GPU
+    # lane opts in explicitly after its own hardware probe succeeds.
+    return (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        and platform.system() == "Windows"
+        and os.environ.get("FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN") != "1"
+    )
 
 
 @lru_cache(maxsize=1)

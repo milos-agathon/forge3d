@@ -457,6 +457,7 @@ jobs:
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     env:
       WGPU_BACKEND: vulkan
+      FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'
       FORGE3D_CERT_SIGNING_KEY: ${{ secrets.FORGE3D_CERT_SIGNING_KEY }}
       FORGE3D_REQUIRE_PRODUCTION_SIGNING: '1'
 
