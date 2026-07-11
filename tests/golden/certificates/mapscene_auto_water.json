@@ -125,42 +125,42 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "1a44da79a1f0",
-    "version": "1.31.0",
+    "git_sha": "e2282bfaf5fa",
+    "version": "1.32.0",
     "wgsl_module_hashes": {
       "terrain.shadow_depth.shader": "0602d15a5f19f10e937f0a2b1af364f19cd4356ed1d5b55282b49b9f97fa32de",
-      "terrain_pbr_pom.shader": "0307c801a78c43985979597e283004bea244e5f98a922abd7e4f65c30bf0740f"
+      "terrain_pbr_pom.shader": "41ddb326e9824a26960838c84635ef149a46fd4a0cc05a2ae6321ee0d3b27b99"
     }
   },
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.0030720001086592674,
       "label": "terrain.material_vt"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0030720001086592674,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.height_ao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.004095999989658594,
       "label": "terrain.sun_visibility"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 4.049920082092285,
+      "gpu_ms": 13.220864295959473,
       "label": "terrain.shadow"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.sky"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.15667200088500977,
+      "gpu_ms": 0.3461120128631592,
       "label": "terrain.main"
     },
     {
@@ -178,7 +178,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "72f0380dbb4ac1717c97f886a6b72729e559c6c9a1e559f2436b1692271651f7d5638531b61aca1e851470609f69accf6239c0cc17444e9808f3e48f898d5807",
+    "sig": "de0e7ccb8ae780f03ec0b3ecd74f1b0475c78e9ae738ff2e9492767990682875c36dc5c66e89349f59b84811bb65d47e4a4bdc5eae5e515cc44acba030a88d05",
     "signed_fields": [
       "adapter",
       "allocations",

@@ -304,7 +304,7 @@ jobs:
             -v "${PWD}:/workspace" \
             -w /workspace \
             python:3.11-slim \
-            bash -lc "python -m pip install -U pip pytest && python /workspace/scripts/install_compatible_wheel.py /workspace/dist && FORGE3D_NO_BOOTSTRAP=1 pytest tests/test_install_smoke.py -v --tb=short"
+            bash -lc "python -m pip install -U pip pytest numpy && python /workspace/scripts/install_compatible_wheel.py /workspace/dist && FORGE3D_NO_BOOTSTRAP=1 pytest tests/test_install_smoke.py -v --tb=short"
 
   # ============================================================================
   # Visual Golden Image Tests

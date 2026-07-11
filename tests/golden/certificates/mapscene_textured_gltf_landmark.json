@@ -124,47 +124,47 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "1a44da79a1f0",
-    "version": "1.31.0",
+    "git_sha": "e2282bfaf5fa",
+    "version": "1.32.0",
     "wgsl_module_hashes": {
       "terrain.shadow_depth.shader": "0602d15a5f19f10e937f0a2b1af364f19cd4356ed1d5b55282b49b9f97fa32de",
-      "terrain_pbr_pom.shader": "0307c801a78c43985979597e283004bea244e5f98a922abd7e4f65c30bf0740f"
+      "terrain_pbr_pom.shader": "41ddb326e9824a26960838c84635ef149a46fd4a0cc05a2ae6321ee0d3b27b99"
     }
   },
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0030720001086592674,
+      "gpu_ms": 0.004095999989658594,
       "label": "terrain.material_vt"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.004095999989658594,
       "label": "terrain.height_ao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.0030720001086592674,
       "label": "terrain.sun_visibility"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 1.6138240098953247,
+      "gpu_ms": 11.009023666381836,
       "label": "terrain.shadow"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.sky"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.043007999658584595,
+      "gpu_ms": 0.347135990858078,
       "label": "terrain.main"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.0030720001086592674,
       "label": "terrain.resolve"
     },
     {
@@ -177,7 +177,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "9a2ba25c6888355803386a3b0d811d5d8385729410ed0d546e6d2c3af1d9823caeda81ec1b5e2cc8c8bb421b05517ba071faee23c8ceb5f084c42b87a28ffb04",
+    "sig": "6a0b57e09359727b8650709cb76a70d629461e13f54f25ad7f05d27f9243aa17160502bf634e4ff0ff9276b5d49dc36642f1838a14d170db9358045c58388902",
     "signed_fields": [
       "adapter",
       "allocations",

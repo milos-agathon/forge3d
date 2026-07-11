@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sys
+import types
+
 import _terrain_runtime as terrain_runtime
 from forge3d import map_scene
 
@@ -32,6 +35,20 @@ def test_mapscene_allows_the_explicit_hosted_windows_gpu_override(monkeypatch) -
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN", "1")
     monkeypatch.setattr(map_scene.platform, "system", lambda: "Windows")
+    fake_forge3d = types.SimpleNamespace(
+        Session=lambda **_: object(),
+        TerrainRenderer=lambda *_: object(),
+        MaterialSet=object,
+        IBL=object,
+        TerrainRenderParams=object,
+        has_gpu=lambda: True,
+    )
+    monkeypatch.setitem(sys.modules, "forge3d", fake_forge3d)
+    monkeypatch.setattr(
+        map_scene.subprocess,
+        "run",
+        lambda *_, **__: types.SimpleNamespace(returncode=0),
+    )
     try:
         assert map_scene._terrain_renderer_runtime_available() is True
     finally:

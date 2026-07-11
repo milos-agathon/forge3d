@@ -162,59 +162,59 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "1a44da79a1f0",
-    "version": "1.31.0",
+    "git_sha": "e2282bfaf5fa",
+    "version": "1.32.0",
     "wgsl_module_hashes": {
       "overlays_shader": "3f7493a10d4734daa97dedac61a21ab27ebc20e1c9353018abb40f31fdfa803d",
       "terrain.shadow_depth.shader": "0602d15a5f19f10e937f0a2b1af364f19cd4356ed1d5b55282b49b9f97fa32de",
-      "terrain_pbr_pom.aov.shader": "0307c801a78c43985979597e283004bea244e5f98a922abd7e4f65c30bf0740f",
+      "terrain_pbr_pom.aov.shader": "41ddb326e9824a26960838c84635ef149a46fd4a0cc05a2ae6321ee0d3b27b99",
       "text_overlay_shader": "06e0fd5a97f2ad8d44664a1dc8f0e7fdd90231f032a863f7e23315314cb8e0df"
     }
   },
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.0030720001086592674,
       "label": "terrain.material_vt"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0030720001086592674,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.height_ao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.0030720001086592674,
       "label": "terrain.sun_visibility"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 1.614848017692566,
+      "gpu_ms": 4.947968006134033,
       "label": "terrain.shadow"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.sky"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.04198399931192398,
+      "gpu_ms": 0.18227200210094452,
       "label": "terrain.main"
     },
     {
       "draw_calls": 4,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.resolve"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.006144000217318535,
       "label": "scene.main"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.008191999979317188,
+      "gpu_ms": 0.01945599913597107,
       "label": "scene.readback_copy"
     },
     {
@@ -227,7 +227,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "f7256012513b08b425906e2388533a8ff3d7232d57ac67efd556af286124f3d62828cca225371a2cbc7727adebdd5eb8945704f52ff7bffe453679dd98e50d08",
+    "sig": "5735350802be870d3948db2215a8d07abf1b145173d87cf9cd73ac6aed12bbe69508fa3b013823673ce7d643715d41bfc8046f2c81f2226a4aac19bf5bb7ed0b",
     "signed_fields": [
       "adapter",
       "allocations",
