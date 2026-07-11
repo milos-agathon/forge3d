@@ -60,6 +60,13 @@ def test_matrix_rejects_zero_hardware_hashes(tmp_path):
     assert "no hardware-backed leg produced a hash" in result.stderr
 
 
+def test_matrix_accepts_documented_gated_infrastructure_failure(tmp_path):
+    _artifact(tmp_path / "hashes", "apple", marker="FAILED")
+    result = _run(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "GATED-FAILURE" in result.stdout
+
+
 def test_matrix_rejects_unattributed_hash(tmp_path):
     _artifact(tmp_path / "hashes", "nvidia", sha=SHA, adapter=False)
     result = _run(tmp_path)

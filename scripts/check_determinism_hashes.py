@@ -22,6 +22,7 @@ def main(argv=None) -> int:
     absent = {}
     adapters = {}
     failures = []
+    gated_failure = False
 
     for artifact_dir in sorted(args.hashes.glob("determinism-hash-*")):
         leg = artifact_dir.name.removeprefix("determinism-hash-")
@@ -47,6 +48,7 @@ def main(argv=None) -> int:
             # 04b explicitly permits a documented, loud Apple infrastructure
             # failure; its render job remains red and this table preserves why.
             absent[leg] = "GATED-FAILURE: " + failed_file.read_text().splitlines()[0]
+            gated_failure = True
 
     print("produced hashes:")
     for leg, sha in sorted(produced.items()):
@@ -61,7 +63,7 @@ def main(argv=None) -> int:
         print(f"informational/absent: {leg}: {why}")
     print(f"committed golden: {golden}" if golden else "no committed golden")
 
-    if not produced:
+    if not produced and not gated_failure:
         failures.append("no hardware-backed leg produced a hash")
     values = set(produced.values())
     if len(values) > 1:
