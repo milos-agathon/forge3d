@@ -969,6 +969,13 @@ def _committed_cert_path(spec: RecipeGolden) -> Path:
     return CERT_DIR / f"{spec.scene_id}.json"
 
 
+def _assert_certificate_is_clean(cert: dict) -> None:
+    assert cert.get("degradations") == [], (
+        "Certificate refresh must be degradation-free; resolve the missing "
+        f"capability or render-path fallback before signing: {cert.get('degradations')!r}"
+    )
+
+
 def _clear_degradation_sinks() -> None:
     """Isolate each scene's certificate: reset the process-global native and
     Python degradation sinks so a per-scene cert reflects only that scene."""
@@ -1008,6 +1015,7 @@ def _emit_or_verify_certificate(spec: RecipeGolden) -> None:
     cert_path = _committed_cert_path(spec)
 
     if _update_certificates_enabled():
+        _assert_certificate_is_clean(cert)
         CERT_DIR.mkdir(parents=True, exist_ok=True)
         _certificate.write_certificate(cert, cert_path)
         pubkey_hex = cert["signature"]["pubkey"]
@@ -1115,6 +1123,13 @@ def test_certificate_refresh_requires_a_real_render_but_not_an_absent_backend_pn
     assert _certificate_refresh_without_backend_baseline(RECIPE_GOLDENS[1]) is True
     monkeypatch.delenv("FORGE3D_UPDATE_RECIPE_CERTIFICATES")
     assert _certificate_refresh_without_backend_baseline(RECIPE_GOLDENS[1]) is False
+
+
+def test_certificate_refresh_rejects_capability_degradation() -> None:
+    with pytest.raises(AssertionError, match="must be degradation-free"):
+        _assert_certificate_is_clean(
+            {"degradations": [{"kind": "capability_absent", "name": "timestamp_query"}]}
+        )
 
 
 def test_recipe_golden_variant_uses_an_explicit_backend_baseline(
