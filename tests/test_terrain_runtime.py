@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import _terrain_runtime as terrain_runtime
+from forge3d import map_scene
 
 
 def test_running_on_unsupported_hosted_macos_ci_detects_github_actions(monkeypatch) -> None:
@@ -24,6 +25,17 @@ def test_hosted_windows_gpu_override_is_explicit(monkeypatch) -> None:
     assert terrain_runtime._running_on_unsupported_hosted_windows_ci() is True
     monkeypatch.setenv("FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN", "1")
     assert terrain_runtime._running_on_unsupported_hosted_windows_ci() is False
+
+
+def test_mapscene_allows_the_explicit_hosted_windows_gpu_override(monkeypatch) -> None:
+    map_scene._terrain_renderer_runtime_available.cache_clear()
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN", "1")
+    monkeypatch.setattr(map_scene.platform, "system", lambda: "Windows")
+    try:
+        assert map_scene._terrain_renderer_runtime_available() is True
+    finally:
+        map_scene._terrain_renderer_runtime_available.cache_clear()
 
 
 def test_terrain_rendering_available_short_circuits_on_hosted_macos_ci(monkeypatch) -> None:

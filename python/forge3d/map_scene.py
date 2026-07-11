@@ -1263,7 +1263,11 @@ def _frame_to_rgba(frame: Any, output: "OutputSpec") -> Any:
 
 @lru_cache(maxsize=1)
 def _terrain_renderer_runtime_available() -> bool:
-    if os.environ.get("GITHUB_ACTIONS") == "true" and platform.system() == "Windows":
+    if (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        and platform.system() == "Windows"
+        and os.environ.get("FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN") != "1"
+    ):
         return False
 
     try:
