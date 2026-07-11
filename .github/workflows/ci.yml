@@ -357,7 +357,7 @@ jobs:
       - name: Install wheel and test dependencies
         run: |
           python scripts/install_compatible_wheel.py dist
-          pip install pytest numpy pyproj
+          pip install pytest numpy pyproj pillow
 
       - name: Require production certificate signing key
         if: env.FORGE3D_REQUIRE_PRODUCTION_SIGNING == '1'

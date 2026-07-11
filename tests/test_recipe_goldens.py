@@ -956,6 +956,15 @@ def _assert_matches_golden(spec: RecipeGolden, actual_path: Path) -> None:
     assert mean_abs <= spec.mean_abs_max, f"{spec.scene_id} mean absolute difference too high: {mean_abs:.4f}"
 
 
+def _certificate_refresh_without_backend_baseline(spec: RecipeGolden) -> bool:
+    """Whether a certificate-only rotation lacks this backend's pixel fixture.
+
+    The protected pixel gate runs before this path.  Certificate rotation still
+    renders every catalog scene, but cannot compare an invented backend PNG.
+    """
+    return _update_certificates_enabled() and not spec.golden_path.exists()
+
+
 def _committed_cert_path(spec: RecipeGolden) -> Path:
     return CERT_DIR / f"{spec.scene_id}.json"
 
@@ -1096,6 +1105,18 @@ def test_certificate_update_mode_never_enables_pixel_updates(
     assert _update_goldens_enabled() is False
 
 
+def test_certificate_refresh_requires_a_real_render_but_not_an_absent_backend_png(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Metal certificate rotation must never fabricate or write pixel baselines."""
+    monkeypatch.setenv("FORGE3D_UPDATE_RECIPE_CERTIFICATES", "1")
+    monkeypatch.setenv("FORGE3D_RECIPE_GOLDEN_VARIANT", "metal")
+    assert _certificate_refresh_without_backend_baseline(RECIPE_GOLDENS[0]) is False
+    assert _certificate_refresh_without_backend_baseline(RECIPE_GOLDENS[1]) is True
+    monkeypatch.delenv("FORGE3D_UPDATE_RECIPE_CERTIFICATES")
+    assert _certificate_refresh_without_backend_baseline(RECIPE_GOLDENS[1]) is False
+
+
 def test_recipe_golden_variant_uses_an_explicit_backend_baseline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1172,5 +1193,11 @@ def test_recipe_goldens_render_and_match(tmp_path, spec: RecipeGolden) -> None:
         assert metadata["building_shadow_model"] == "terrain_csm_mesh_cast_receive"
     output_path = Path(scene.last_render_path or scene.recipe.output.path or "")
     assert output_path.exists()
-    _assert_matches_golden(spec, output_path)
+    if _certificate_refresh_without_backend_baseline(spec):
+        assert spec.canonical_golden_path.exists(), (
+            f"Certificate refresh requires the canonical baseline for {spec.scene_id}; "
+            "it must never create a backend-specific pixel golden."
+        )
+    else:
+        _assert_matches_golden(spec, output_path)
     _emit_or_verify_certificate(spec)
