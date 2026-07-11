@@ -406,29 +406,12 @@ jobs:
           FORGE3D_RUN_TERRAIN_GOLDENS: '1'
           FORGE3D_TERRAIN_GOLDEN_ARTIFACT_DIR: tests/artifacts/terrain_goldens
           FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR: tests/artifacts/recipe_goldens
-          FORGE3D_UPDATE_RECIPE_CERTIFICATES: ${{ inputs.update_recipe_certificates && '1' || '0' }}
+          FORGE3D_UPDATE_RECIPE_CERTIFICATES: '0'
           # This dedicated hardware lane anchors the CENSOR recipe-pixel gate
           # on the Metal reference for its terrain control scene. The complete
           # recipe catalog remains exercised by the normal GPU suite.
           FORGE3D_RECIPE_GOLDEN_VARIANT: metal
         run: pytest tests/test_terrain_visual_goldens.py tests/test_terrain_tv10_goldens.py tests/test_terrain_vt_pbr_families.py tests/test_recipe_goldens.py::test_recipe_golden_gate_rejects_pixel_regression 'tests/test_recipe_goldens.py::test_recipe_goldens_render_and_match[mapscene_terrain_raster]' -v --tb=short
-
-      - name: Refresh all signed recipe certificates
-        if: inputs.update_recipe_certificates && steps.terrain-goldens-probe.outputs.probe == 'positive'
-        env:
-          FORGE3D_NO_BOOTSTRAP: '1'
-          FORGE3D_RUN_TERRAIN_GOLDENS: '1'
-          FORGE3D_RECIPE_GOLDEN_VARIANT: metal
-          FORGE3D_UPDATE_RECIPE_CERTIFICATES: '1'
-        run: pytest tests/test_recipe_goldens.py::test_recipe_goldens_render_and_match -v --tb=short
-
-      - name: Upload refreshed recipe certificates
-        if: inputs.update_recipe_certificates && success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: refreshed-recipe-certificates
-          path: tests/golden/certificates/*.json
-          if-no-files-found: error
 
       - name: Record golden lane RAN
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'positive'
@@ -466,6 +449,49 @@ jobs:
         with:
           name: visual-golden-diffs
           path: tests/artifacts/
+
+  refresh-recipe-certificates:
+    name: Refresh Recipe Certificates
+    needs: build-wheels
+    if: github.event_name == 'workflow_dispatch' && inputs.update_recipe_certificates
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
+    env:
+      WGPU_BACKEND: vulkan
+      FORGE3D_CERT_SIGNING_KEY: ${{ secrets.FORGE3D_CERT_SIGNING_KEY }}
+      FORGE3D_REQUIRE_PRODUCTION_SIGNING: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-windows
+          path: dist/
+      - name: Install wheel and test dependencies
+        run: |
+          python scripts/install_compatible_wheel.py dist
+          pip install pytest numpy pyproj pillow
+      - name: Require clean production GPU evidence
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: |
+          if (-not $env:FORGE3D_CERT_SIGNING_KEY) { throw 'missing production signing key' }
+          python scripts/terrain_ci_probe.py --mode terrain
+      - name: Render and sign the recipe catalog
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+          FORGE3D_RUN_TERRAIN_GOLDENS: '1'
+          FORGE3D_UPDATE_RECIPE_CERTIFICATES: '1'
+        run: pytest tests/test_recipe_goldens.py::test_recipe_goldens_render_and_match -v --tb=short
+      - uses: actions/upload-artifact@v4
+        with:
+          name: refreshed-recipe-certificates
+          path: tests/golden/certificates/*.json
+          if-no-files-found: error
 
   # ============================================================================
   # Documentation Build
@@ -510,7 +536,7 @@ jobs:
   # ============================================================================
   ci-success:
     name: CI Success
-    needs: [terrain-golden-paths, test-rust, build-wheels, test-python, test-python-linux-arm, test-golden-images, build-docs]
+    needs: [terrain-golden-paths, test-rust, build-wheels, test-python, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, build-docs]
     runs-on: ubuntu-latest
     if: always()
 
@@ -532,6 +558,7 @@ jobs:
              [ "${{ needs.test-python.result }}" != "success" ] || \
              [ "${{ needs.test-python-linux-arm.result }}" != "success" ] || \
              { [ "${{ needs.test-golden-images.result }}" != "success" ] && [ "${{ needs.test-golden-images.result }}" != "skipped" ]; } || \
+             { [ "${{ needs.refresh-recipe-certificates.result }}" != "success" ] && [ "${{ needs.refresh-recipe-certificates.result }}" != "skipped" ]; } || \
              [ "${{ needs.build-docs.result }}" != "success" ]; then
             echo "❌ CI failed"
             exit 1
