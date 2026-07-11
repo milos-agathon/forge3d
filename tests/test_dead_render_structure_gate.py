@@ -17,15 +17,9 @@ FORBIDDEN_SYMBOLS = re.compile(
 # Frame-loop files allowed to contain `.create_bind_group(`:
 # - postfx_cache.rs: the identity-keyed caches themselves (miss-only creation).
 # - geometry/pass.rs: lazy autogen albedo bind group, created once and stored.
-# - frame_setup.rs, geometry/fog.rs, geometry/fog_dispatch.rs: KNOWN per-frame
-#   sky/fog allocations that predate CENSOR item 5 (which scoped the caching fix
-#   to the postfx/tonemap bind groups). Documented debt — do not add new ones.
 FRAME_LOOP_BIND_GROUP_ALLOWLIST = {
     "postfx_cache.rs",
     "geometry/pass.rs",
-    "frame_setup.rs",
-    "geometry/fog.rs",
-    "geometry/fog_dispatch.rs",
 }
 
 
@@ -72,6 +66,12 @@ def test_frame_loop_does_not_create_bind_groups() -> None:
     tonemap = (ROOT / "src/core/tonemap.rs").read_text(encoding="utf-8")
     assert ".create_bind_group(" not in tonemap
 
+    routine = "\n".join(
+        (main_loop / path).read_text(encoding="utf-8")
+        for path in ("frame_setup.rs", "geometry/fog.rs", "geometry/fog_dispatch.rs")
+    )
+    assert ".create_sampler(" not in routine
+
 
 def test_viewer_bind_group_cache_is_invalidated_with_resources() -> None:
     cache = (ROOT / "src/viewer/render/main_loop/postfx_cache.rs").read_text(
@@ -86,4 +86,12 @@ def test_viewer_bind_group_cache_is_invalidated_with_resources() -> None:
     assert "comp_bind_group_cache.borrow().contains_key" in cache
     assert "lit_bind_group_cache.borrow_mut().take()" in resize
     assert "comp_bind_group_cache.borrow_mut().clear()" in resize
+    for cache in (
+        "sky_bg0_cache",
+        "fog_bg0_cache",
+        "fog_bg2_cache",
+        "fog_bg2_half_cache",
+        "fog_upsample_bg_cache",
+    ):
+        assert f"{cache}.borrow_mut().take()" in resize
     assert "lit_bind_group_cache.borrow_mut().take()" in ibl

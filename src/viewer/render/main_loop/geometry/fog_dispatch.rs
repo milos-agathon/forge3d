@@ -3,7 +3,7 @@ use crate::viewer::{FogUpsampleParamsStd140, Viewer};
 
 impl Viewer {
     pub(super) fn dispatch_raymarch_fog(
-        &mut self,
+        &self,
         encoder: &mut wgpu::CommandEncoder,
         gi: &mut ScreenSpaceEffectsManager,
         bg0: &wgpu::BindGroup,
@@ -11,24 +11,8 @@ impl Viewer {
         bg2: &wgpu::BindGroup,
     ) {
         if self.fog_half_res_enabled {
-            let bg2_half = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("viewer.fog.bg2.half"),
-                layout: &self.fog_bgl2,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&self.fog_output_half_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&self.fog_history_half_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&self.fog_history_sampler),
-                    },
-                ],
-            });
+            self.ensure_half_res_fog_bind_groups(gi);
+            let bg2_half = self.fog_bg2_half_cache.borrow();
             let gx = ((self.config.width / 2) + 7) / 8;
             let gy = ((self.config.height / 2) + 7) / 8;
             {
@@ -39,7 +23,7 @@ impl Viewer {
                 cpass.set_pipeline(&self.fog_pipeline);
                 cpass.set_bind_group(0, bg0, &[]);
                 cpass.set_bind_group(1, bg1, &[]);
-                cpass.set_bind_group(2, &bg2_half, &[]);
+                cpass.set_bind_group(2, bg2_half.as_ref().unwrap(), &[]);
                 cpass.dispatch_workgroups(gx, gy, 1);
             }
 
@@ -63,13 +47,6 @@ impl Viewer {
                 },
             );
 
-            let upsampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
-                label: Some("viewer.fog.upsampler"),
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
-                mipmap_filter: wgpu::FilterMode::Nearest,
-                ..Default::default()
-            });
             let params = FogUpsampleParamsStd140 {
                 sigma: self.fog_upsigma.max(0.0),
                 use_bilateral: if self.fog_bilateral { 1 } else { 0 },
@@ -77,36 +54,7 @@ impl Viewer {
             };
             self.queue
                 .write_buffer(&self.fog_upsample_params, 0, bytemuck::bytes_of(&params));
-            let up_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("viewer.fog.upsample.bg"),
-                layout: &self.fog_upsample_bgl,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&self.fog_output_half_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&upsampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&self.fog_output_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::TextureView(&gi.gbuffer().depth_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Sampler(&self.fog_depth_sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: self.fog_upsample_params.as_entire_binding(),
-                    },
-                ],
-            });
+            let up_bg = self.fog_upsample_bg_cache.borrow();
             let ugx = (self.config.width + 7) / 8;
             let ugy = (self.config.height + 7) / 8;
             let mut up_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -114,7 +62,7 @@ impl Viewer {
                 timestamp_writes: None,
             });
             up_pass.set_pipeline(&self.fog_upsample_pipeline);
-            up_pass.set_bind_group(0, &up_bg, &[]);
+            up_pass.set_bind_group(0, up_bg.as_ref().unwrap(), &[]);
             up_pass.dispatch_workgroups(ugx, ugy, 1);
         } else {
             let gx = (self.config.width + 7) / 8;
@@ -153,30 +101,14 @@ impl Viewer {
     }
 
     pub(super) fn dispatch_froxel_fog(
-        &mut self,
+        &self,
         encoder: &mut wgpu::CommandEncoder,
         bg0: &wgpu::BindGroup,
         bg1: &wgpu::BindGroup,
         bg2: &wgpu::BindGroup,
     ) {
-        let bg3 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("viewer.fog.bg3"),
-            layout: &self.fog_bgl3,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&self.froxel_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&self.froxel_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&self.froxel_sampler),
-                },
-            ],
-        });
+        self.ensure_froxel_bind_group();
+        let bg3 = self.fog_bg3_cache.borrow();
         let gx3d = (16u32 + 3) / 4;
         let gy3d = (8u32 + 3) / 4;
         let gz3d = (64u32 + 3) / 4;
@@ -188,7 +120,7 @@ impl Viewer {
             pass.set_pipeline(&self.froxel_build_pipeline);
             pass.set_bind_group(0, bg0, &[]);
             pass.set_bind_group(1, bg1, &[]);
-            pass.set_bind_group(3, &bg3, &[]);
+            pass.set_bind_group(3, bg3.as_ref().unwrap(), &[]);
             pass.dispatch_workgroups(gx3d, gy3d, gz3d);
         }
 
@@ -202,7 +134,7 @@ impl Viewer {
             pass.set_pipeline(&self.froxel_apply_pipeline);
             pass.set_bind_group(0, bg0, &[]);
             pass.set_bind_group(2, bg2, &[]);
-            pass.set_bind_group(3, &bg3, &[]);
+            pass.set_bind_group(3, bg3.as_ref().unwrap(), &[]);
             pass.dispatch_workgroups(gx2d, gy2d, 1);
         }
 

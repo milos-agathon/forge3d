@@ -25,6 +25,11 @@ impl Viewer {
     pub fn resize_render_targets(&mut self, width: u32, height: u32) -> RenderResult<()> {
         self.lit_bind_group_cache.borrow_mut().take();
         self.comp_bind_group_cache.borrow_mut().clear();
+        self.sky_bg0_cache.borrow_mut().take();
+        self.fog_bg0_cache.borrow_mut().take();
+        self.fog_bg2_cache.borrow_mut().take();
+        self.fog_bg2_half_cache.borrow_mut().take();
+        self.fog_upsample_bg_cache.borrow_mut().take();
         if let Some(ref mut gi) = self.gi {
             gi.gbuffer_mut().resize(&self.device, width, height).ok();
             gi.set_ssr_params(&self.queue, &self.ssr_params);

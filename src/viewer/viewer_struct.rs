@@ -164,6 +164,8 @@ pub struct Viewer {
     pub(crate) sky_camera: TrackedBuffer,
     pub(crate) sky_output: TrackedTexture,
     pub(crate) sky_output_view: TextureView,
+    pub(crate) sky_bg0_cache: RefCell<Option<BindGroup>>,
+    pub(crate) sky_bg1_cache: RefCell<Option<BindGroup>>,
     pub(crate) sky_enabled: bool,
 
     // P6: Fog rendering resources and parameters
@@ -174,6 +176,12 @@ pub struct Viewer {
     pub(crate) fog_output_view: TextureView,
     pub(crate) fog_history: TrackedTexture,
     pub(crate) fog_history_view: TextureView,
+    pub(crate) fog_bg0_cache: RefCell<Option<BindGroup>>,
+    pub(crate) fog_bg1_cache: RefCell<Option<BindGroup>>,
+    pub(crate) fog_bg2_cache: RefCell<Option<BindGroup>>,
+    pub(crate) fog_bg2_half_cache: RefCell<Option<BindGroup>>,
+    pub(crate) fog_upsample_bg_cache: RefCell<Option<BindGroup>>,
+    pub(crate) fog_bg3_cache: RefCell<Option<BindGroup>>,
     pub(crate) fog_depth_sampler: Sampler,
     pub(crate) fog_history_sampler: Sampler,
     pub(crate) fog_pipeline: ComputePipeline,
@@ -220,6 +228,7 @@ pub struct Viewer {
     pub(crate) _csm_config: CsmConfig,
     pub(crate) csm_depth_pipeline: Option<RenderPipeline>,
     pub(crate) csm_depth_camera: Option<TrackedBuffer>,
+    pub(crate) csm_depth_bind_group: Option<BindGroup>,
     // Sky exposed controls (runtime adjustable)
     pub(crate) sky_model_id: u32, // 0=Preetham,1=Hosek-Wilkie
     pub(crate) sky_turbidity: f32,

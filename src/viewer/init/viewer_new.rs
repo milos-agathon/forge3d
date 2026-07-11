@@ -111,6 +111,19 @@ impl Viewer {
         csm_config.camera_near = config.znear;
         csm_config.camera_far = config.zfar;
         let csm = Some(CsmShadowMap::new(device.as_ref(), csm_config.clone())?);
+        let csm_depth_bind_group = match (&csm_depth_pipeline, &csm_depth_camera) {
+            (Some(pipeline), Some(camera)) => {
+                Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("viewer.csm.depth.bg"),
+                    layout: &pipeline.get_bind_group_layout(0),
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: camera.as_entire_binding(),
+                    }],
+                }))
+            }
+            _ => None,
+        };
 
         // Read sky params from environment
         let sky_params_init = read_sky_env_params();
@@ -229,6 +242,8 @@ impl Viewer {
             sky_camera: sky.sky_camera,
             sky_output: sky.sky_output,
             sky_output_view: sky.sky_output_view,
+            sky_bg0_cache: std::cell::RefCell::new(None),
+            sky_bg1_cache: std::cell::RefCell::new(None),
             sky_enabled: true,
             // Fog resources
             fog_enabled: false,
@@ -238,6 +253,12 @@ impl Viewer {
             fog_output_view: fog.fog_output_view,
             fog_history: fog.fog_history,
             fog_history_view: fog.fog_history_view,
+            fog_bg0_cache: std::cell::RefCell::new(None),
+            fog_bg1_cache: std::cell::RefCell::new(None),
+            fog_bg2_cache: std::cell::RefCell::new(None),
+            fog_bg2_half_cache: std::cell::RefCell::new(None),
+            fog_upsample_bg_cache: std::cell::RefCell::new(None),
+            fog_bg3_cache: std::cell::RefCell::new(None),
             fog_depth_sampler: fog.fog_depth_sampler,
             fog_history_sampler: fog.fog_history_sampler,
             fog_pipeline: fog.fog_pipeline,
@@ -277,6 +298,7 @@ impl Viewer {
             _csm_config: csm_config,
             csm_depth_pipeline,
             csm_depth_camera,
+            csm_depth_bind_group,
             // Sky controls
             sky_model_id: sky_params_init.model_pad[0],
             sky_turbidity: sky_params_init.sun_direction_turbidity[3],

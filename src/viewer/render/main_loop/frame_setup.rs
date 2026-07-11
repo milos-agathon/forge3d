@@ -184,29 +184,9 @@ impl Viewer {
             self.queue
                 .write_buffer(&self.sky_params, 0, bytemuck::bytes_of(&sky_params_frame));
 
-            // Bind and dispatch compute
-            let sky_bg0 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("viewer.sky.bg0"),
-                layout: &self.sky_bind_group_layout0,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self.sky_params.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&self.sky_output_view),
-                    },
-                ],
-            });
-            let sky_bg1 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("viewer.sky.bg1"),
-                layout: &self.sky_bind_group_layout1,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: self.sky_camera.as_entire_binding(),
-                }],
-            });
+            self.ensure_sky_bind_groups();
+            let sky_bg0 = self.sky_bg0_cache.borrow();
+            let sky_bg1 = self.sky_bg1_cache.borrow();
             let gx = (self.config.width + 7) / 8;
             let gy = (self.config.height + 7) / 8;
             {
@@ -215,8 +195,8 @@ impl Viewer {
                     timestamp_writes: None,
                 });
                 cpass.set_pipeline(&self.sky_pipeline);
-                cpass.set_bind_group(0, &sky_bg0, &[]);
-                cpass.set_bind_group(1, &sky_bg1, &[]);
+                cpass.set_bind_group(0, sky_bg0.as_ref().unwrap(), &[]);
+                cpass.set_bind_group(1, sky_bg1.as_ref().unwrap(), &[]);
                 cpass.dispatch_workgroups(gx, gy, 1);
             }
         }

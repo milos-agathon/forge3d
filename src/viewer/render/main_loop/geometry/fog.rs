@@ -93,74 +93,26 @@ impl Viewer {
             bytemuck::bytes_of(&mat4_to_array(fog_shadow_mat)),
         );
 
-        let bg0 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("viewer.fog.bg0"),
-            layout: &self.fog_bgl0,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: self.fog_params.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: self.fog_camera.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&gi.gbuffer().depth_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::Sampler(&self.fog_depth_sampler),
-                },
-            ],
-        });
-        let (shadow_tex_view, shadow_uniform_buf) = if let Some(ref csm) = self.csm {
-            (csm.shadow_array_view(), csm.uniform_buffer())
-        } else {
-            (&self.fog_shadow_view, self.fog_shadow_matrix.inner())
-        };
-        let bg1 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("viewer.fog.bg1"),
-            layout: &self.fog_bgl1,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(shadow_tex_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.fog_shadow_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: shadow_uniform_buf.as_entire_binding(),
-                },
-            ],
-        });
-        let bg2 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("viewer.fog.bg2"),
-            layout: &self.fog_bgl2,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&self.fog_output_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&self.fog_history_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&self.fog_history_sampler),
-                },
-            ],
-        });
+        self.ensure_fog_bind_groups(gi);
+        let bg0 = self.fog_bg0_cache.borrow();
+        let bg1 = self.fog_bg1_cache.borrow();
+        let bg2 = self.fog_bg2_cache.borrow();
 
         if matches!(self.fog_mode, FogMode::Raymarch) {
-            self.dispatch_raymarch_fog(encoder, gi, &bg0, &bg1, &bg2);
+            self.dispatch_raymarch_fog(
+                encoder,
+                gi,
+                bg0.as_ref().unwrap(),
+                bg1.as_ref().unwrap(),
+                bg2.as_ref().unwrap(),
+            );
         } else {
-            self.dispatch_froxel_fog(encoder, &bg0, &bg1, &bg2);
+            self.dispatch_froxel_fog(
+                encoder,
+                bg0.as_ref().unwrap(),
+                bg1.as_ref().unwrap(),
+                bg2.as_ref().unwrap(),
+            );
         }
 
         self.fog_frame_index = self.fog_frame_index.wrapping_add(1);
@@ -174,7 +126,6 @@ impl Viewer {
             self.csm_depth_camera.as_ref(),
         ) {
             let cascade_count = csm.cascade_count() as usize;
-            let bgl = csm_pipe.get_bind_group_layout(0);
             for cascade_idx in 0..cascade_count {
                 if let (Some(depth_view), Some(light_vp)) = (
                     csm.cascade_depth_view(cascade_idx),
@@ -183,14 +134,6 @@ impl Viewer {
                     let light_vp_arr = light_vp.to_cols_array();
                     self.queue
                         .write_buffer(csm_cam_buf, 0, bytemuck::cast_slice(&light_vp_arr));
-                    let csm_bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("viewer.csm.depth.bg"),
-                        layout: &bgl,
-                        entries: &[wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: csm_cam_buf.as_entire_binding(),
-                        }],
-                    });
                     let mut shadow_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("viewer.csm.depth"),
                         color_attachments: &[],
@@ -206,7 +149,7 @@ impl Viewer {
                         timestamp_writes: None,
                     });
                     shadow_pass.set_pipeline(csm_pipe);
-                    shadow_pass.set_bind_group(0, &csm_bg, &[]);
+                    shadow_pass.set_bind_group(0, self.csm_depth_bind_group.as_ref().unwrap(), &[]);
                     shadow_pass.set_vertex_buffer(0, vb.slice(..));
                     if let Some(ib) = self.geom_ib.as_ref() {
                         shadow_pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
