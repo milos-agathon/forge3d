@@ -20,3 +20,10 @@ paths: ["Cargo.toml", "pyproject.toml", ".cargo/**", ".github/workflows/**", "py
   `FORGE3D_CERT_SIGNING_KEY` and verify committed certificates against the
   pinned production public key. Fork PRs are explicitly untrusted and do not
   claim production-signing validation.
+- `determinism-matrix` is an experimental, non-required diagnostic until the
+  documented fixed-function filtering and downstream compiler differences in
+  `src/shaders/includes/determinism.wgsl` are eliminated. Its per-backend
+  render jobs and zero-byte diff must stay loud; cross-adapter hash divergence
+  is permitted as diagnostic evidence and must never be presented as a green
+  determinism guarantee or used to replace the committed hash casually. The
+  protected release gate remains the `CI Success` aggregate.
