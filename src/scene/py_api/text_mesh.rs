@@ -37,7 +37,7 @@ impl Scene {
         font: &pyo3::types::PyAny,
         size_px: Option<f32>,
         depth: Option<f32>,
-        position: Option<(f32, f32, f32)>,
+        position: Option<(f64, f64, f64)>,
         color: Option<(f32, f32, f32, f32)>,
         rotation_deg: Option<(f32, f32, f32)>,
         scale: Option<f32>,
@@ -108,17 +108,20 @@ impl Scene {
         let rx = rot.0.to_radians();
         let ry = rot.1.to_radians();
         let rz = rot.2.to_radians();
-        let t = glam::Mat4::from_translation(glam::Vec3::new(pos.0, pos.1, pos.2));
         let sx = glam::Mat4::from_scale(svec);
         let rr = glam::Mat4::from_rotation_z(rz)
             * glam::Mat4::from_rotation_y(ry)
             * glam::Mat4::from_rotation_x(rx);
-        let model = t * rr * sx;
+        let origin = glam::DVec3::new(pos.0, pos.1, pos.2);
+        let local_model = rr * sx;
+        let model = crate::scene::types::anchored_model(&self.camera_anchor, origin, local_model);
         let inst = Text3DInstance {
             vbuf,
             ibuf,
             index_count: inds.len() as u32,
             vertex_count: verts.len() as u32,
+            origin,
+            local_model,
             model,
             color: [col.0, col.1, col.2, col.3],
             light_dir: [ldir.0, ldir.1, ldir.2],
@@ -147,7 +150,7 @@ impl Scene {
     pub fn update_text_mesh_transform(
         &mut self,
         index: usize,
-        position: (f32, f32, f32),
+        position: (f64, f64, f64),
         rotation_deg: (f32, f32, f32),
         scale: Option<f32>,
         scale_xyz: Option<(f32, f32, f32)>,
@@ -160,7 +163,6 @@ impl Scene {
         let rx = rotation_deg.0.to_radians();
         let ry = rotation_deg.1.to_radians();
         let rz = rotation_deg.2.to_radians();
-        let t = glam::Mat4::from_translation(glam::Vec3::new(position.0, position.1, position.2));
         let s = scale.unwrap_or(1.0).max(1e-6);
         let sxyz = scale_xyz.unwrap_or((1.0, 1.0, 1.0));
         let svec = glam::Vec3::new(sxyz.0 * s, sxyz.1 * s, sxyz.2 * s);
@@ -168,8 +170,12 @@ impl Scene {
         let rr = glam::Mat4::from_rotation_z(rz)
             * glam::Mat4::from_rotation_y(ry)
             * glam::Mat4::from_rotation_x(rx);
-        let model = t * rr * sx;
+        let origin = glam::DVec3::new(position.0, position.1, position.2);
+        let local_model = rr * sx;
+        let model = crate::scene::types::anchored_model(&self.camera_anchor, origin, local_model);
         if let Some(inst) = self.text3d_instances.get_mut(index) {
+            inst.origin = origin;
+            inst.local_model = local_model;
             inst.model = model;
         }
         Ok(())

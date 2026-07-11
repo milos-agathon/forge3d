@@ -1,11 +1,32 @@
 use crate::gis::error::{GisError, GisResult};
 
-use super::math::{distance, ring_signed_area_and_centroid};
+use super::math::{distance, ring_signed_area_and_centroid, unwrap_dateline, wrap_lon};
 use super::model::{
     empty_geometry_error, CentroidStats, Coord, Geometry, EPSILON, INVALID_GEOMETRY,
 };
 
-pub(super) fn centroid_for_geometries(geometries: &[Geometry]) -> GisResult<Coord> {
+pub(super) fn centroid_for_geometries(
+    geometries: &[Geometry],
+    geographic: bool,
+) -> GisResult<Coord> {
+    // MENSURA dateline handling: a geographic polygon spanning 179° → -179°
+    // must be unwrapped before the shoelace runs, or the centroid lands on
+    // the wrong side of the planet. Only applied when the data plausibly is
+    // lon/lat degrees AND an antimeridian jump actually exists.
+    if geographic {
+        let mut unwrapped = geometries.to_vec();
+        if unwrap_dateline(&mut unwrapped) {
+            let centroid = centroid_for_unwrapped(&unwrapped)?;
+            return Ok(Coord {
+                x: wrap_lon(centroid.x),
+                y: centroid.y,
+            });
+        }
+    }
+    centroid_for_unwrapped(geometries)
+}
+
+fn centroid_for_unwrapped(geometries: &[Geometry]) -> GisResult<Coord> {
     let mut stats = CentroidStats::default();
     for geometry in geometries {
         accumulate_centroid(geometry, &mut stats)?;

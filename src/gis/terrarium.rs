@@ -3,6 +3,12 @@ use std::path::Path;
 use crate::gis::error::{GisError, GisResult};
 use crate::gis::raster_write::{RasterArray, RasterData};
 
+/// Height-system tag carried by every Terrarium DEM ingestion result
+/// (MENSURA): Terrarium tiles encode orthometric-style heights (AWS/Mapzen
+/// terrain derives from EGM96-referenced sources), NOT ellipsoidal ones.
+/// Converting to ellipsoidal requires `forge3d.crs.orthometric_to_ellipsoidal`.
+pub const TERRARIUM_HEIGHT_SYSTEM: &str = "orthometric_egm96";
+
 pub fn decode_terrarium_rgb(data: &[u8], height: usize, width: usize) -> GisResult<RasterArray> {
     let expected = height
         .checked_mul(width)
@@ -132,6 +138,10 @@ mod py {
             "info",
             super::super::raster_info_to_py_dict(py, &terrarium_info(&array, bounds))?,
         )?;
+        dict.set_item(
+            "height_system",
+            crate::gis::terrarium::TERRARIUM_HEIGHT_SYSTEM,
+        )?;
         dict.set_item("tile_count", index.tiles.len())?;
         dict.set_item("manifest", manifest_to_py(py, manifest)?)?;
         dict.set_item("warnings", warnings_to_py(py, &warnings)?)?;
@@ -214,6 +224,10 @@ mod py {
             )?,
         )?;
         dict.set_item("encoding", "terrarium")?;
+        dict.set_item(
+            "height_system",
+            crate::gis::terrarium::TERRARIUM_HEIGHT_SYSTEM,
+        )?;
         dict.set_item("nodata", py.None())?;
         dict.set_item("valid_count", array.width * array.height)?;
         dict.set_item("min", min)?;

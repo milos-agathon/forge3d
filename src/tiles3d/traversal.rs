@@ -4,7 +4,7 @@ use super::bounds::BoundingVolume;
 use super::sse::{compute_sse, SseParams};
 use super::tile::{Tile, TileRefine};
 use super::tileset::Tileset;
-use glam::{Mat4, Vec3};
+use glam::{DMat4, DVec3};
 
 /// Result of traversal for a single tile
 #[derive(Debug, Clone)]
@@ -12,7 +12,7 @@ pub struct VisibleTile<'a> {
     /// Reference to the tile
     pub tile: &'a Tile,
     /// World transform for this tile
-    pub world_transform: Mat4,
+    pub world_transform: DMat4,
     /// World-space bounding volume
     pub world_bounds: BoundingVolume,
     /// Computed SSE for this tile
@@ -76,15 +76,15 @@ impl TilesetTraverser {
     pub fn visible_tiles<'a>(
         &self,
         tileset: &'a Tileset,
-        camera_position: Vec3,
-        view_proj: Option<&Mat4>,
+        camera_position: DVec3,
+        view_proj: Option<&DMat4>,
     ) -> Vec<VisibleTile<'a>> {
         let mut result = Vec::new();
         let default_refine = tileset.default_refine();
 
         self.traverse_tile(
             tileset.root(),
-            Mat4::IDENTITY,
+            DMat4::IDENTITY,
             default_refine,
             camera_position,
             view_proj,
@@ -99,10 +99,10 @@ impl TilesetTraverser {
     fn traverse_tile<'a>(
         &self,
         tile: &'a Tile,
-        parent_transform: Mat4,
+        parent_transform: DMat4,
         parent_refine: TileRefine,
-        camera_position: Vec3,
-        view_proj: Option<&Mat4>,
+        camera_position: DVec3,
+        view_proj: Option<&DMat4>,
         depth: usize,
         result: &mut Vec<VisibleTile<'a>>,
     ) {
@@ -202,12 +202,12 @@ impl TilesetTraverser {
     }
 
     /// Count tiles that would be visible at given SSE threshold
-    pub fn count_visible_tiles(&self, tileset: &Tileset, camera_position: Vec3) -> usize {
+    pub fn count_visible_tiles(&self, tileset: &Tileset, camera_position: DVec3) -> usize {
         self.visible_tiles(tileset, camera_position, None).len()
     }
 
     /// Get statistics about the traversal
-    pub fn traversal_stats(&self, tileset: &Tileset, camera_position: Vec3) -> TraversalStats {
+    pub fn traversal_stats(&self, tileset: &Tileset, camera_position: DVec3) -> TraversalStats {
         let visible = self.visible_tiles(tileset, camera_position, None);
 
         let max_depth = visible.iter().map(|t| t.depth).max().unwrap_or(0);
@@ -282,7 +282,7 @@ mod tests {
         }"#;
 
         let tileset = Tileset::from_json(json, PathBuf::from(".")).unwrap();
-        let camera = Vec3::new(0.0, 0.0, 500.0);
+        let camera = DVec3::new(0.0, 0.0, 500.0);
 
         // Low SSE threshold -> more tiles (refined)
         let traverser_low = TilesetTraverser::new(1.0);

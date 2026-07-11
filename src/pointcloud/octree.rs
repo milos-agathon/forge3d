@@ -1,6 +1,6 @@
 //! Octree data structures for point cloud LOD
 
-use glam::Vec3;
+use glam::{DMat4, DVec3};
 
 /// Octree node key (Morton code style: D-X-Y-Z)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -74,31 +74,31 @@ impl OctreeKey {
 /// Axis-aligned bounding box for octree nodes
 #[derive(Debug, Clone, Copy)]
 pub struct OctreeBounds {
-    pub min: Vec3,
-    pub max: Vec3,
+    pub min: DVec3,
+    pub max: DVec3,
 }
 
 impl OctreeBounds {
-    pub fn new(min: Vec3, max: Vec3) -> Self {
+    pub fn new(min: DVec3, max: DVec3) -> Self {
         Self { min, max }
     }
 
-    pub fn center(&self) -> Vec3 {
+    pub fn center(&self) -> DVec3 {
         (self.min + self.max) * 0.5
     }
 
-    pub fn size(&self) -> Vec3 {
+    pub fn size(&self) -> DVec3 {
         self.max - self.min
     }
 
-    pub fn radius(&self) -> f32 {
+    pub fn radius(&self) -> f64 {
         self.size().length() * 0.5
     }
 
     /// Get bounds for child octant
     pub fn child_bounds(&self, octant: u8) -> Self {
         let center = self.center();
-        let min = Vec3::new(
+        let min = DVec3::new(
             if octant & 1 == 0 {
                 self.min.x
             } else {
@@ -115,7 +115,7 @@ impl OctreeBounds {
                 center.z
             },
         );
-        let max = Vec3::new(
+        let max = DVec3::new(
             if octant & 1 == 0 {
                 center.x
             } else {
@@ -135,7 +135,7 @@ impl OctreeBounds {
         Self { min, max }
     }
 
-    pub fn contains_point(&self, p: Vec3) -> bool {
+    pub fn contains_point(&self, p: DVec3) -> bool {
         p.x >= self.min.x
             && p.x <= self.max.x
             && p.y >= self.min.y
@@ -144,7 +144,7 @@ impl OctreeBounds {
             && p.z <= self.max.z
     }
 
-    pub fn intersects_frustum(&self, view_proj: &glam::Mat4) -> bool {
+    pub fn intersects_frustum(&self, view_proj: &DMat4) -> bool {
         let center = self.center();
         let radius = self.radius();
         let clip = *view_proj * center.extend(1.0);
@@ -169,7 +169,7 @@ pub struct OctreeNode {
 
 impl OctreeNode {
     pub fn new(key: OctreeKey, bounds: OctreeBounds, point_count: u64) -> Self {
-        let spacing = bounds.size().x / (1 << key.depth) as f32;
+        let spacing = (bounds.size().x / f64::from(1 << key.depth)) as f32;
         Self {
             key,
             bounds,

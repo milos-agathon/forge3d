@@ -1,7 +1,7 @@
 //! Screen-Space Error (SSE) computation for 3D Tiles LOD selection
 
 use super::bounds::BoundingVolume;
-use glam::{Mat4, Vec3};
+use glam::{DMat4, DVec3};
 
 /// Parameters for SSE computation
 #[derive(Debug, Clone, Copy)]
@@ -53,7 +53,7 @@ impl SseParams {
 pub fn compute_sse(
     geometric_error: f32,
     bounding_volume: &BoundingVolume,
-    camera_position: Vec3,
+    camera_position: DVec3,
     params: &SseParams,
 ) -> f32 {
     let center = bounding_volume.center();
@@ -63,16 +63,16 @@ pub fn compute_sse(
         return f32::MAX; // Camera inside tile, always refine
     }
 
-    // SSE = (geometric_error / distance) * sse_factor
-    // This gives us pixels of error on screen
-    (geometric_error / distance) * params.sse_factor()
+    // SSE = (geometric_error / distance) * sse_factor. The result is a pixel
+    // count, not a world coordinate; narrowing it to f32 is fine.
+    ((geometric_error as f64 / distance) * params.sse_factor() as f64) as f32
 }
 
 /// Compute SSE using view-projection matrix (for frustum-based computation)
 pub fn compute_sse_with_matrix(
     geometric_error: f32,
     bounding_volume: &BoundingVolume,
-    view_proj: &Mat4,
+    view_proj: &DMat4,
     params: &SseParams,
 ) -> f32 {
     let center = bounding_volume.center();
@@ -83,14 +83,14 @@ pub fn compute_sse_with_matrix(
     }
 
     let distance = clip.w;
-    (geometric_error / distance) * params.sse_factor()
+    ((geometric_error as f64 / distance) * params.sse_factor() as f64) as f32
 }
 
 /// Determine if a tile should be refined based on SSE threshold
 pub fn should_refine(
     geometric_error: f32,
     bounding_volume: &BoundingVolume,
-    camera_position: Vec3,
+    camera_position: DVec3,
     params: &SseParams,
     threshold: f32,
 ) -> bool {
@@ -98,8 +98,9 @@ pub fn should_refine(
     sse > threshold
 }
 
-/// Compute distance from camera to bounding volume surface (not center)
-pub fn distance_to_surface(bounding_volume: &BoundingVolume, camera_position: Vec3) -> f32 {
+/// Compute distance from camera to bounding volume surface (not center),
+/// in metres (f64 — the values involved are ECEF-magnitude).
+pub fn distance_to_surface(bounding_volume: &BoundingVolume, camera_position: DVec3) -> f64 {
     let center = bounding_volume.center();
     let radius = bounding_volume.radius();
     let center_dist = (center - camera_position).length();
@@ -110,11 +111,11 @@ pub fn distance_to_surface(bounding_volume: &BoundingVolume, camera_position: Ve
 pub fn compute_sse_surface(
     geometric_error: f32,
     bounding_volume: &BoundingVolume,
-    camera_position: Vec3,
+    camera_position: DVec3,
     params: &SseParams,
 ) -> f32 {
     let distance = distance_to_surface(bounding_volume, camera_position);
-    (geometric_error / distance) * params.sse_factor()
+    ((geometric_error as f64 / distance) * params.sse_factor() as f64) as f32
 }
 
 #[cfg(test)]
@@ -129,8 +130,8 @@ mod tests {
             sphere: [0.0, 0.0, 0.0, 10.0],
         });
 
-        let sse_near = compute_sse(10.0, &bounds, Vec3::new(0.0, 0.0, 100.0), &params);
-        let sse_far = compute_sse(10.0, &bounds, Vec3::new(0.0, 0.0, 1000.0), &params);
+        let sse_near = compute_sse(10.0, &bounds, DVec3::new(0.0, 0.0, 100.0), &params);
+        let sse_far = compute_sse(10.0, &bounds, DVec3::new(0.0, 0.0, 1000.0), &params);
 
         assert!(sse_near > sse_far);
     }
@@ -141,7 +142,7 @@ mod tests {
         let bounds = BoundingVolume::Sphere(BoundingSphere {
             sphere: [0.0, 0.0, 0.0, 10.0],
         });
-        let camera = Vec3::new(0.0, 0.0, 100.0);
+        let camera = DVec3::new(0.0, 0.0, 100.0);
 
         let sse_small = compute_sse(1.0, &bounds, camera, &params);
         let sse_large = compute_sse(10.0, &bounds, camera, &params);
@@ -157,11 +158,11 @@ mod tests {
         });
 
         // Close camera should trigger refinement
-        let near = Vec3::new(0.0, 0.0, 20.0);
+        let near = DVec3::new(0.0, 0.0, 20.0);
         assert!(should_refine(50.0, &bounds, near, &params, 16.0));
 
         // Far camera should not need refinement
-        let far = Vec3::new(0.0, 0.0, 10000.0);
+        let far = DVec3::new(0.0, 0.0, 10000.0);
         assert!(!should_refine(50.0, &bounds, far, &params, 16.0));
     }
 }

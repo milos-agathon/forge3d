@@ -3,6 +3,7 @@ use crate::py_functions::*;
 
 mod camera;
 mod diagnostics;
+mod geodesy;
 mod geometry;
 mod gis;
 mod interactive;
@@ -24,6 +25,7 @@ pub(crate) fn register_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     camera::register_camera_py_functions(m)?;
     rendering::register_rendering_py_functions(m)?;
     gis::register_gis_py_functions(m)?;
+    geodesy::register_geodesy_py_functions(m)?;
     tiles3d::register_tiles3d_py_functions(m)?;
     labels::register_labels_py_functions(m)?;
     Ok(())

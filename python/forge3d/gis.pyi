@@ -101,6 +101,7 @@ class CrsTransform:
     @property
     def axis_order_policy(self) -> str: ...
     def transform_point(self, x: float, y: float) -> tuple[float, float]: ...
+    def transform_point3(self, x: float, y: float, z: float) -> tuple[float, float, float]: ...
     def transform_bounds(
         self,
         bounds: tuple[float, float, float, float],
@@ -195,7 +196,15 @@ def repair_geometry(
 def geometry_measure(
     geometry: dict[str, Any],
     *,
+    crs: str | int | dict[str, Any],
     metrics: tuple[str, ...] | list[str] = ...,
+) -> dict[str, Any]: ...
+
+def measure_geometries(
+    geometry: dict[str, Any],
+    *,
+    crs: str | int | dict[str, Any],
+    metrics: tuple[str, ...] | list[str] | None = ...,
 ) -> dict[str, Any]: ...
 
 
@@ -487,6 +496,7 @@ def reproject_raster(
     dst_crs: str | dict[str, Any],
     *,
     resampling: str | None = ...,
+    on_transform_error: str = ...,
 ) -> dict[str, Any]: ...
 
 

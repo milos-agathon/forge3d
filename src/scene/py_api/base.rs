@@ -17,20 +17,40 @@ impl Scene {
     #[pyo3(text_signature = "($self, eye, target, up, fovy_deg, znear, zfar)")]
     pub fn set_camera_look_at(
         &mut self,
-        eye: (f32, f32, f32),
-        target: (f32, f32, f32),
-        up: (f32, f32, f32),
+        eye: (f64, f64, f64),
+        target: (f64, f64, f64),
+        up: (f64, f64, f64),
         fovy_deg: f32,
         znear: f32,
         zfar: f32,
     ) -> PyResult<()> {
         use crate::camera;
         let aspect = self.width as f32 / self.height as f32;
-        let eye_v = glam::Vec3::new(eye.0, eye.1, eye.2);
-        let target_v = glam::Vec3::new(target.0, target.1, target.2);
-        let up_v = glam::Vec3::new(up.0, up.1, up.2);
+        // MENSURA: world positions cross the PyO3 boundary in f64 and are
+        // narrowed only relative to the camera anchor. The scene's geometry
+        // is authored relative to the world origin, so the anchor offset of
+        // that origin is folded into the view transform; with the anchor at
+        // the origin (all coordinates < 1 km) this is bit-identical to the
+        // legacy path. Projection stays f32.
+        let eye_d = glam::DVec3::new(eye.0, eye.1, eye.2);
+        let target_d = glam::DVec3::new(target.0, target.1, target.2);
+        let up_v = self
+            .camera_anchor
+            .to_render_direction(glam::DVec3::new(up.0, up.1, up.2));
+        self.camera_anchor.rebase_if_needed(eye_d);
+        for inst in &mut self.text3d_instances {
+            inst.model = crate::scene::types::anchored_model(
+                &self.camera_anchor,
+                inst.origin,
+                inst.local_model,
+            );
+        }
+        let eye_v = self.camera_anchor.to_render_vec3(eye_d);
+        let target_v = self.camera_anchor.to_render_vec3(target_d);
         camera::validate_camera_params(eye_v, target_v, up_v, fovy_deg, znear, zfar)?;
-        self.scene.view = glam::Mat4::look_at_rh(eye_v, target_v, up_v);
+        let world_origin_offset = self.camera_anchor.model_offset(glam::DVec3::ZERO);
+        self.scene.view = glam::Mat4::look_at_rh(eye_v, target_v, up_v)
+            * glam::Mat4::from_translation(world_origin_offset);
         self.scene.proj = camera::perspective_wgpu(fovy_deg.to_radians(), aspect, znear, zfar);
         let uniforms = self
             .scene

@@ -1,7 +1,7 @@
 //! 3D Tiles renderer with caching
 //! Extended with P4: 3D Buildings Pipeline support
 
-use glam::{Mat4, Vec3};
+use glam::{DMat4, DVec3, Vec3};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -33,7 +33,9 @@ pub struct MeshData {
 /// Point data from pnts
 #[derive(Debug)]
 pub struct PointData {
-    pub positions: Vec<f32>,
+    /// World-space point coordinates retained as f64 until an Anchor prepares
+    /// a GPU vertex buffer.
+    pub positions: Vec<f64>,
     pub colors: Option<Vec<u8>>,
     pub normals: Option<Vec<f32>>,
 }
@@ -88,8 +90,8 @@ impl Tiles3dRenderer {
     pub fn get_visible_tiles<'a>(
         &self,
         tileset: &'a Tileset,
-        camera_pos: Vec3,
-        view_proj: Option<&Mat4>,
+        camera_pos: DVec3,
+        view_proj: Option<&DMat4>,
     ) -> Vec<VisibleTile<'a>> {
         self.traverser.visible_tiles(tileset, camera_pos, view_proj)
     }

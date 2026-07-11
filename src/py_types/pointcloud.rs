@@ -14,11 +14,11 @@ pub struct PyPointBuffer {
 impl PyPointBuffer {
     /// Construct a PointBuffer from flat position and optional color arrays.
     ///
-    /// * `positions` – flat f32 array [x,y,z, x,y,z, ...]
+    /// * `positions` – flat f64 world-coordinate array [x,y,z, x,y,z, ...]
     /// * `colors`    – optional flat u8 array [r,g,b, r,g,b, ...] (same point count)
     #[new]
     #[pyo3(signature = (positions, colors = None))]
-    fn new(positions: Vec<f32>, colors: Option<Vec<u8>>) -> PyResult<Self> {
+    fn new(positions: Vec<f64>, colors: Option<Vec<u8>>) -> PyResult<Self> {
         if !positions.len().is_multiple_of(3) {
             return Err(PyValueError::new_err(
                 "positions length must be a multiple of 3",
@@ -68,6 +68,23 @@ impl PyPointBuffer {
         PyArray1::from_vec_bound(py, data)
     }
 
+    /// Create a GPU buffer relative to an explicit world-space anchor.
+    #[pyo3(signature = (anchor_origin))]
+    fn create_gpu_buffer_anchored<'py>(
+        &self,
+        py: Python<'py>,
+        anchor_origin: (f64, f64, f64),
+    ) -> Bound<'py, PyArray1<f32>> {
+        let mut anchor = crate::camera::Anchor::new();
+        anchor.rebase_if_needed(glam::DVec3::new(
+            anchor_origin.0,
+            anchor_origin.1,
+            anchor_origin.2,
+        ));
+        let data = self.inner.create_gpu_buffer_anchored(&anchor);
+        PyArray1::from_vec_bound(py, data)
+    }
+
     /// Create a viewer-compatible GPU buffer as a numpy float32 array.
     ///
     /// Layout per point: `[x, y, z, elevation_norm, r, g, b, intensity, size, pad, pad, pad]`
@@ -79,8 +96,8 @@ impl PyPointBuffer {
     fn create_viewer_gpu_buffer<'py>(
         &self,
         py: Python<'py>,
-        bounds_min: [f32; 3],
-        bounds_max: [f32; 3],
+        bounds_min: [f64; 3],
+        bounds_max: [f64; 3],
     ) -> Bound<'py, PyArray1<f32>> {
         let data = self.inner.create_viewer_gpu_buffer(bounds_min, bounds_max);
         PyArray1::from_vec_bound(py, data)

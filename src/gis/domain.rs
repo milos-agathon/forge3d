@@ -26,9 +26,38 @@ mod py {
     use crate::gis::vector::{read_vector, VectorReadOptions};
     use crate::gis::warp;
 
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum DemHeightSystem {
+        Unspecified,
+        OrthometricEgm96,
+        Ellipsoidal,
+    }
+
+    impl DemHeightSystem {
+        fn parse(value: &str) -> Result<Self, GisError> {
+            match value {
+                "unspecified" => Ok(Self::Unspecified),
+                "orthometric_egm96" => Ok(Self::OrthometricEgm96),
+                "ellipsoidal" => Ok(Self::Ellipsoidal),
+                _ => Err(GisError::InvalidArgument(format!(
+                    "invalid_argument: unsupported height_system {value:?}"
+                ))),
+            }
+        }
+
+        const fn as_str(self) -> &'static str {
+            match self {
+                Self::Unspecified => "unspecified",
+                Self::OrthometricEgm96 => "orthometric_egm96",
+                Self::Ellipsoidal => "ellipsoidal",
+            }
+        }
+    }
+
     struct RasterSource {
         array: RasterArray,
         info: RasterInfo,
+        height_system: DemHeightSystem,
     }
 
     #[pyfunction(name = "read_cog", signature = (path_or_url, window = None, overview = None))]
@@ -267,7 +296,55 @@ mod py {
             source.info.crs_wkt = target.crs_wkt;
             source.info.crs_authority = target.crs_authority;
         }
-        let array = to_f32_array(&source.array)?;
+        // Keep a declared EGM96 DEM in f64 while applying its per-pixel geoid
+        // correction.  A float32 sample at ordinary terrain elevations has a
+        // several-micrometre ULP, which is larger than the ingestion contract.
+        let mut array = if source.height_system == DemHeightSystem::OrthometricEgm96 {
+            RasterArray::new(
+                RasterData::F64(raster_to_f64(&source.array)),
+                &[source.array.bands, source.array.height, source.array.width],
+            )?
+        } else {
+            to_f32_array(&source.array)?
+        };
+        if source.height_system == DemHeightSystem::OrthometricEgm96 {
+            let (left, bottom, right, top) = source.info.bounds.ok_or_else(|| {
+                GisError::InvalidArgument(
+                    "invalid_argument: orthometric_egm96 DEM requires EPSG:4326 bounds".to_string(),
+                )
+            })?;
+            let is_wgs84 = source.info.crs_authority.as_ref().is_some_and(|crs| {
+                crs.get("name")
+                    .is_some_and(|name| name.eq_ignore_ascii_case("EPSG"))
+                    && crs.get("code").is_some_and(|code| code == "4326")
+            });
+            if !is_wgs84 {
+                return Err(GisError::InvalidArgument(
+                    "invalid_argument: orthometric_egm96 DEM requires EPSG:4326 coordinates"
+                        .to_string(),
+                )
+                .into());
+            }
+            let RasterData::F64(values) = &mut array.data else {
+                unreachable!("EGM96 conversion preserves f64 samples")
+            };
+            for row in 0..array.height {
+                let lat = top - (row as f64 + 0.5) * (top - bottom) / array.height as f64;
+                for col in 0..array.width {
+                    let lon = left + (col as f64 + 0.5) * (right - left) / array.width as f64;
+                    let index = row * array.width + col;
+                    values[index] = crate::geo::geoid::orthometric_to_ellipsoidal(
+                        crate::geo::units::Height::<
+                            crate::geo::units::Orthometric<crate::geo::units::Egm96>,
+                        >::new(values[index]),
+                        crate::geo::units::Angle::new(lat),
+                        crate::geo::units::Angle::new(lon),
+                    )
+                    .metres();
+                }
+            }
+            source.height_system = DemHeightSystem::Ellipsoidal;
+        }
         let nodata_per_band =
             vec![nodata.or_else(|| source.info.nodata_per_band.first().copied().flatten())];
         let mask = valid_mask(&array, &nodata_per_band, None);
@@ -279,7 +356,11 @@ mod py {
             .into());
         }
         let mut info = source.info.clone();
-        info.dtype_per_band = vec!["float32".to_string()];
+        info.dtype_per_band = vec![match array.dtype() {
+            crate::gis::types::RasterDType::Float64 => "float64",
+            _ => "float32",
+        }
+        .to_string()];
         info.nodata_per_band = nodata_per_band.clone();
         let dict = PyDict::new_bound(py);
         dict.set_item("array", super::super::raster_array_to_py(py, &array)?)?;
@@ -289,6 +370,11 @@ mod py {
         dict.set_item("valid_count", valid_count)?;
         dict.set_item("nodata_summary", nodata_per_band)?;
         dict.set_item("scale", json_to_py(py, &json!({"units": "meters"}))?)?;
+        // MENSURA: DEM ingestion carries an explicit height-system tag.
+        // GeoTIFF/COG sources rarely declare a vertical datum; "unspecified"
+        // is the honest default — converting to ellipsoidal heights requires
+        // the caller to assert the system (see forge3d.crs.geoid_undulation).
+        dict.set_item("height_system", source.height_system.as_str())?;
         dict.set_item(
             "operation",
             operation_py(py, "prepare_dem", 1, 1, target_info.is_some(), Vec::new())?,
@@ -748,6 +834,7 @@ mod py {
             return Ok(RasterSource {
                 array: result.array,
                 info: result.info,
+                height_system: DemHeightSystem::Unspecified,
             });
         }
         if let Ok(info) = value.extract::<PyRef<'_, RasterInfo>>() {
@@ -761,6 +848,7 @@ mod py {
             return Ok(RasterSource {
                 array: result.array,
                 info: result.info,
+                height_system: DemHeightSystem::Unspecified,
             });
         }
         if let Ok(dict) = value.downcast::<PyDict>() {
@@ -776,11 +864,25 @@ mod py {
             } else {
                 synthetic_info(&array)
             };
-            return Ok(RasterSource { array, info });
+            let height_system = dict
+                .get_item("height_system")?
+                .map(|value| value.extract::<String>())
+                .transpose()?
+                .unwrap_or_else(|| "unspecified".to_string());
+            let height_system = DemHeightSystem::parse(&height_system)?;
+            return Ok(RasterSource {
+                array,
+                info,
+                height_system,
+            });
         }
         let array = super::super::extract_raster_array(value)?;
         let info = synthetic_info(&array);
-        Ok(RasterSource { array, info })
+        Ok(RasterSource {
+            array,
+            info,
+            height_system: DemHeightSystem::Unspecified,
+        })
     }
 
     fn raster_info_from_py(value: &Bound<'_, PyAny>) -> PyResult<RasterInfo> {

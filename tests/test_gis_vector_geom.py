@@ -124,7 +124,7 @@ def test_feature_inputs_are_normalized_for_c3_operations():
     line_feature = _feature(_line())
 
     assert gis.validate_geometry(line_feature)["geometry_type"] == "LineString"
-    assert gis.geometry_measure(line_feature)["length"] == pytest.approx(5.0)
+    assert gis.geometry_measure(line_feature, crs=32631)["length"] == pytest.approx(5.0)
     assert gis.geometry_centroid(line_feature)["geometry"]["coordinates"] == pytest.approx(
         [1.5, 2.0]
     )
@@ -146,7 +146,7 @@ def test_feature_collection_validation_measurement_and_centroid():
     )
 
     validation = gis.validate_geometry(payload)
-    measure = gis.geometry_measure(payload)
+    measure = gis.geometry_measure(payload, crs=32631)
     centroid = gis.geometry_centroid(payload)
 
     assert validation["valid"] is True
@@ -161,7 +161,7 @@ def test_feature_collection_validation_measurement_and_centroid():
 def test_read_vector_result_style_crs_propagates_to_operations():
     payload = _read_vector_result([_unit_square()])
 
-    measure = gis.geometry_measure(payload)
+    measure = gis.geometry_measure(payload, crs=32631)
     centroid = gis.geometry_centroid(payload)
 
     assert measure["operation"]["crs"]["source_kind"] == "vector"
@@ -170,8 +170,33 @@ def test_read_vector_result_style_crs_propagates_to_operations():
     assert centroid["operation"]["crs"]["authority"] == {"name": "EPSG", "code": "4326"}
 
 
+def test_declared_projected_crs_does_not_trigger_dateline_unwrap_from_numeric_ranges():
+    payload = _read_vector_result(
+        [{"type": "LineString", "coordinates": [[179.0, 0.0], [-179.0, 0.0]]}]
+    )
+    payload["info"]["crs_authority"] = {"name": "EPSG", "code": "3857"}
+    centroid = gis.geometry_centroid(payload)
+    assert centroid["geometry"]["coordinates"] == pytest.approx([0.0, 0.0])
+
+
+def test_dateline_representative_and_interpolated_points_stay_local():
+    line = {
+        "type": "Feature",
+        "properties": {},
+        "geometry": {"type": "LineString", "coordinates": [[179.0, 0.0], [-179.0, 0.0]]},
+        "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
+    }
+    representative = gis.representative_point(line)
+    rep_lon = representative["geometry"]["coordinates"][0]
+    assert abs(rep_lon) > 179.0
+
+    interpolated = gis.interpolate_line(line, 0.5, normalized=True)
+    interp_lon = interpolated["geometry"]["coordinates"][0]
+    assert abs(interp_lon) > 179.0
+
+
 def test_geometry_measure_polygon_area_and_boundary_length():
-    result = gis.geometry_measure(_unit_square())
+    result = gis.geometry_measure(_unit_square(), crs=32631)
 
     assert result["area"] == pytest.approx(1.0)
     assert result["length"] == pytest.approx(4.0)
@@ -180,7 +205,7 @@ def test_geometry_measure_polygon_area_and_boundary_length():
 
 
 def test_geometry_measure_polygon_with_hole_area_boundary_and_centroid():
-    measure = gis.geometry_measure(_polygon_with_hole())
+    measure = gis.geometry_measure(_polygon_with_hole(), crs=32631)
     centroid = gis.geometry_centroid(_polygon_with_hole())
 
     assert measure["area"] == pytest.approx(12.0)
@@ -189,8 +214,8 @@ def test_geometry_measure_polygon_with_hole_area_boundary_and_centroid():
 
 
 def test_geometry_measure_metric_subsets():
-    area_only = gis.geometry_measure(_unit_square(), metrics=("area",))
-    length_only = gis.geometry_measure(_unit_square(), metrics=("length",))
+    area_only = gis.geometry_measure(_unit_square(), crs=32631, metrics=("area",))
+    length_only = gis.geometry_measure(_unit_square(), crs=32631, metrics=("length",))
 
     assert area_only["area"] == pytest.approx(1.0)
     assert area_only["length"] is None
@@ -199,14 +224,14 @@ def test_geometry_measure_metric_subsets():
 
 
 def test_geometry_measure_line_length():
-    result = gis.geometry_measure(_line())
+    result = gis.geometry_measure(_line(), crs=32631)
 
     assert result["area"] is None
     assert result["length"] == pytest.approx(5.0)
 
 
 def test_geometry_measure_points_return_none_for_area_and_length():
-    result = gis.geometry_measure({"type": "Point", "coordinates": [1.0, 2.0]})
+    result = gis.geometry_measure({"type": "Point", "coordinates": [1.0, 2.0]}, crs=32631)
 
     assert result["area"] is None
     assert result["length"] is None
@@ -221,7 +246,8 @@ def test_geometry_measure_geometry_collection_sums_applicable_metrics():
                 _line(),
                 _unit_square(),
             ],
-        }
+        },
+        crs=32631,
     )
 
     assert result["area"] == pytest.approx(1.0)
@@ -231,7 +257,7 @@ def test_geometry_measure_geometry_collection_sums_applicable_metrics():
 
 def test_geometry_measure_rejects_unsupported_metric():
     with pytest.raises(ValueError, match="unsupported_option"):
-        gis.geometry_measure(_unit_square(), metrics=("area", "volume"))
+        gis.geometry_measure(_unit_square(), crs=32631, metrics=("area", "volume"))
 
 
 def test_geometry_centroid_point_line_polygon_and_collection():

@@ -3,10 +3,13 @@
 //! Provides right-handed, Y-up, -Z forward camera math (standard GL-style look-at).
 //! Supports both "wgpu" (0..1 Z) and "gl" (-1..1 Z) clip spaces.
 
+pub mod anchor;
 pub mod dof;
 pub mod validation;
 
-use glam::{Mat4, Vec3, Vec4Swizzles};
+pub use anchor::Anchor;
+
+use glam::{DVec3, Mat4, Vec3, Vec4Swizzles};
 use numpy::PyArray2;
 use pyo3::prelude::*;
 use pyo3::Bound;
@@ -24,6 +27,50 @@ pub use dof::{
     camera_dof_params, camera_f_stop_to_aperture, camera_hyperfocal_distance,
     create_camera_dof_params,
 };
+
+fn validate_dvec3_finite(v: DVec3) -> PyResult<()> {
+    if !v.is_finite() {
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(
+            validation::ERROR_VECFINITE,
+        ));
+    }
+    Ok(())
+}
+
+fn validate_dvec3_up_not_colinear(eye: DVec3, target: DVec3, up: DVec3) -> PyResult<()> {
+    let view_dir = (target - eye).normalize_or_zero();
+    let up_norm = up.normalize_or_zero();
+    if view_dir.cross(up_norm).length_squared() < 1e-12 {
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(
+            validation::ERROR_UPCOLINEAR,
+        ));
+    }
+    Ok(())
+}
+
+/// Build an f32 view matrix from f64 world-space camera coordinates. The
+/// camera-relative subtraction happens in f64; only the anchored offsets are
+/// narrowed by `Anchor`.
+fn anchored_view(
+    eye: (f64, f64, f64),
+    target: (f64, f64, f64),
+    up: (f64, f64, f64),
+) -> PyResult<Mat4> {
+    let eye_d = DVec3::new(eye.0, eye.1, eye.2);
+    let target_d = DVec3::new(target.0, target.1, target.2);
+    let up_d = DVec3::new(up.0, up.1, up.2);
+    validate_dvec3_finite(eye_d)?;
+    validate_dvec3_finite(target_d)?;
+    validate_dvec3_finite(up_d)?;
+    validate_dvec3_up_not_colinear(eye_d, target_d, up_d)?;
+
+    let mut anchor = Anchor::new();
+    anchor.rebase_if_needed(eye_d);
+    let eye_v = anchor.to_render_vec3(eye_d);
+    let target_v = anchor.to_render_vec3(target_d);
+    let up_v = anchor.to_render_direction(up_d);
+    Ok(Mat4::look_at_rh(eye_v, target_v, up_v))
+}
 
 /// Returns the GL->WGPU depth conversion matrix.
 /// Maps GL clip-space Z [-1,1] to WGPU/Vulkan/Metal [0,1].
@@ -64,21 +111,11 @@ fn mat4_to_numpy<'py>(py: Python<'py>, mat: Mat4) -> PyResult<Bound<'py, PyArray
 #[pyo3(text_signature = "(eye, target, up)")]
 pub fn camera_look_at<'py>(
     py: Python<'py>,
-    eye: (f32, f32, f32),
-    target: (f32, f32, f32),
-    up: (f32, f32, f32),
+    eye: (f64, f64, f64),
+    target: (f64, f64, f64),
+    up: (f64, f64, f64),
 ) -> PyResult<Bound<'py, PyArray2<f32>>> {
-    let eye_vec = Vec3::new(eye.0, eye.1, eye.2);
-    let target_vec = Vec3::new(target.0, target.1, target.2);
-    let up_vec = Vec3::new(up.0, up.1, up.2);
-
-    // Validate inputs
-    validate_vec3_finite(eye_vec, "eye")?;
-    validate_vec3_finite(target_vec, "target")?;
-    validate_vec3_finite(up_vec, "up")?;
-    validate_up_not_colinear(eye_vec, target_vec, up_vec)?;
-
-    let view_matrix = Mat4::look_at_rh(eye_vec, target_vec, up_vec);
+    let view_matrix = anchored_view(eye, target, up)?;
     mat4_to_numpy(py, view_matrix)
 }
 
@@ -175,9 +212,9 @@ pub fn camera_orthographic<'py>(
 #[pyo3(text_signature = "(eye, target, up, fovy_deg, aspect, znear, zfar, clip_space='wgpu')")]
 pub fn camera_view_proj<'py>(
     py: Python<'py>,
-    eye: (f32, f32, f32),
-    target: (f32, f32, f32),
-    up: (f32, f32, f32),
+    eye: (f64, f64, f64),
+    target: (f64, f64, f64),
+    up: (f64, f64, f64),
     fovy_deg: f32,
     aspect: f32,
     znear: f32,
@@ -186,22 +223,13 @@ pub fn camera_view_proj<'py>(
 ) -> PyResult<Bound<'py, PyArray2<f32>>> {
     let clip_space = clip_space.as_deref().unwrap_or("wgpu");
 
-    let eye_vec = Vec3::new(eye.0, eye.1, eye.2);
-    let target_vec = Vec3::new(target.0, target.1, target.2);
-    let up_vec = Vec3::new(up.0, up.1, up.2);
-
-    // Validate inputs
-    validate_vec3_finite(eye_vec, "eye")?;
-    validate_vec3_finite(target_vec, "target")?;
-    validate_vec3_finite(up_vec, "up")?;
-    validate_up_not_colinear(eye_vec, target_vec, up_vec)?;
     validate_fovy(fovy_deg)?;
     validate_aspect(aspect)?;
     validate_near(znear)?;
     validate_far(zfar, znear)?;
     validate_clip_space(clip_space)?;
 
-    let view_matrix = Mat4::look_at_rh(eye_vec, target_vec, up_vec);
+    let view_matrix = anchored_view(eye, target, up)?;
 
     let fovy_rad = fovy_deg.to_radians();
     let proj_gl = Mat4::perspective_rh_gl(fovy_rad, aspect, znear, zfar);
