@@ -87,5 +87,5 @@ def test_main_installs_best_matching_wheel(tmp_path, monkeypatch):
 
     assert module.main() == 0
     assert calls == [
-        ([module.sys.executable, "-m", "pip", "install", "--force-reinstall", str(best)], True)
+        ([module.sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", str(best)], True)
     ]

@@ -483,7 +483,6 @@ jobs:
           python scripts/terrain_ci_probe.py --mode terrain
       - name: Render and sign the recipe catalog
         env:
-          FORGE3D_NO_BOOTSTRAP: '1'
           FORGE3D_RUN_TERRAIN_GOLDENS: '1'
           FORGE3D_UPDATE_RECIPE_CERTIFICATES: '1'
         run: pytest tests/test_recipe_goldens.py::test_recipe_goldens_render_and_match -v --tb=short

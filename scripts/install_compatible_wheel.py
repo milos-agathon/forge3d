@@ -66,7 +66,7 @@ def main() -> int:
     chosen = compatible[0][1]
     print(f"Installing wheel: {chosen}")
     subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--force-reinstall", str(chosen)],
+        [sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", str(chosen)],
         check=True,
     )
     return 0
