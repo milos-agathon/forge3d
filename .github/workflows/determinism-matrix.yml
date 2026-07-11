@@ -7,17 +7,19 @@
 #
 # Gated vs informational legs (follows the repo convention of skipping visual
 # goldens on unsupported hosted GPUs, see ci.yml test-golden-images):
-#   - apple  : informational on hosted macos-14. Measured 2026-07-10: runners expose an
+#   - apple  : documented hosted absence. Measured 2026-07-10: runners expose an
 #              "Apple Paravirtual device" (VM GPU), NOT a physical M-series
 #              chip, and wgpu 0.19's Metal backend compiles MSL with Metal's
 #              default fastMathEnabled=true (no toggle) — the VM hash is
 #              bit-stable across runs but systematically differs from the
 #              dx12/vulkan golden, so it must never be enforced against
 #              hardware goldens. Deterministic mode therefore REFUSES
-#              virtualized adapters (src/core/gpu.rs), which makes this leg
-#              record an explicit ABSENT marker on hosted runners. It becomes
-#              gated only on a self-hosted M-series runner (also needs a wgpu
-#              with fast-math control for parity). Do not soften the diff.
+#              virtualized adapters (src/core/gpu.rs), which writes an auditable
+#              FAILED marker. This job is nonblocking on hosted runners; the
+#              diff gate recognizes that documented absence. A self-hosted
+#              M-series runner produces a hash the diff gate enforces (also
+#              needs a wgpu with fast-math control for parity). Do not soften
+#              the diff.
 #   - intel  : informational on hosted ubuntu (no Intel GPU; llvmpipe/lavapipe
 #              are software adapters). Becomes gated on a self-hosted
 #              gpu-intel runner.
@@ -95,9 +97,11 @@ jobs:
           - leg: apple
             os: macos-14
             backend: metal
-            gated: false
+            gated: true
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ !matrix.gated }}
+    # The hosted Apple leg intentionally records a documented virtual-adapter
+    # failure; every other gated leg remains hard-blocking.
+    continue-on-error: ${{ !matrix.gated || matrix.leg == 'apple' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

@@ -62,11 +62,12 @@ def test_matrix_rejects_zero_hardware_hashes(tmp_path):
     assert "no hardware-backed leg produced a hash" in result.stderr
 
 
-def test_hosted_apple_virtual_adapter_is_informational():
+def test_hosted_apple_virtual_adapter_is_a_nonblocking_gated_failure():
     workflow = WORKFLOW.read_text()
     apple = re.search(r"- leg: apple.*?gated: (true|false)", workflow, re.DOTALL)
     assert apple, "apple render leg missing"
-    assert apple.group(1) == "false"
+    assert apple.group(1) == "true"
+    assert "continue-on-error: ${{ !matrix.gated || matrix.leg == 'apple' }}" in workflow
 
 
 def test_matrix_accepts_documented_gated_infrastructure_failure(tmp_path):
