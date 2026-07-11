@@ -388,8 +388,11 @@ class TestEndToEndImageOutput:
 
     @pytest.fixture
     def gpu_session(self):
-        if not f3d.has_gpu():
-            pytest.skip("GPU not available")
+        # `has_gpu()` is true for hosted WARP/paravirtual adapters that cannot
+        # complete this terrain readback.  Require the same terrain-safe probe
+        # used by the visual lanes so those environments skip honestly.
+        if not terrain_rendering_available():
+            pytest.skip("terrain-safe GPU not available")
         return f3d.Session(window=False)
 
     def test_auto_lod_scatter_produces_nonempty_image(self, gpu_session):
