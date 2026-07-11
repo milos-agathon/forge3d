@@ -48,8 +48,8 @@ fn uv_to_direction(uv: vec2<f32>, face: u32) -> vec3<f32> {
 
 fn direction_to_equirect(dir: vec3<f32>) -> vec2<f32> {
     let d = normalize(dir);
-    let u = atan2(d.z, d.x) / TWO_PI + 0.5;
-    let v = acos(clamp(d.y, -1.0, 1.0)) / PI;
+    let u = det_atan2(d.z, d.x) / TWO_PI + 0.5;
+    let v = det_acos(clamp(d.y, -1.0, 1.0)) / PI;
     return vec2<f32>(fract(u), clamp(v, 0.0, 1.0));
 }
 

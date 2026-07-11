@@ -42,8 +42,8 @@ fn importance_sample_ggx(xi: vec2<f32>, roughness: f32) -> vec3<f32> {
     let cos_theta = sqrt((1.0 - xi.y) / (1.0 + (a * a - 1.0) * xi.y));
     let sin_theta = sqrt(1.0 - cos_theta * cos_theta);
     return vec3<f32>(
-        cos(phi) * sin_theta,
-        sin(phi) * sin_theta,
+        det_cos(phi) * sin_theta,
+        det_sin(phi) * sin_theta,
         cos_theta,
     );
 }

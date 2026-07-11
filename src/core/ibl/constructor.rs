@@ -4,20 +4,36 @@ use crate::core::resource_tracker::tracked_create_buffer_init;
 
 impl IBLRenderer {
     pub fn new(device: &wgpu::Device, quality: IBLQuality) -> RenderResult<Self> {
+        // IBL precompute feeds the deterministic terrain reference. Assemble
+        // it through the certificate-aware registry so normalized WGSL hashes
+        // describe exactly the source wgpu compiles.
+        let determinism = include_str!("../../shaders/includes/determinism.wgsl");
+        let equirect_source = format!(
+            "{determinism}\n{}",
+            include_str!("../../shaders/ibl_equirect.wgsl")
+        );
+        let prefilter_source = format!(
+            "{determinism}\n{}",
+            include_str!("../../shaders/ibl_prefilter.wgsl")
+        );
+        let brdf_source = format!(
+            "{determinism}\n{}",
+            include_str!("../../shaders/ibl_brdf.wgsl")
+        );
         let shader_equirect = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "ibl.precompute.shader.equirect",
-            include_str!("../../shaders/ibl_equirect.wgsl"),
+            &equirect_source,
         );
         let shader_prefilter = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "ibl.precompute.shader.prefilter",
-            include_str!("../../shaders/ibl_prefilter.wgsl"),
+            &prefilter_source,
         );
         let shader_brdf = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "ibl.precompute.shader.brdf",
-            include_str!("../../shaders/ibl_brdf.wgsl"),
+            &brdf_source,
         );
 
         let equirect_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

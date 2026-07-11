@@ -295,6 +295,18 @@ pub(crate) fn request_host_visible_allocation_for_test(bytes: u64, label: &str) 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 pub(crate) fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {
+    if let Some((info, software_fallback)) = crate::core::gpu::active_adapter_info() {
+        let d = PyDict::new_bound(py);
+        d.set_item("status", "ok")?;
+        d.set_item("name", info.name)?;
+        d.set_item("vendor", info.vendor)?;
+        d.set_item("device", info.device)?;
+        d.set_item("device_type", format!("{:?}", info.device_type))?;
+        d.set_item("backend", format!("{:?}", info.backend))?;
+        d.set_item("software_fallback", software_fallback)?;
+        return Ok(d.into_py(py));
+    }
+
     let mask = match backend.as_deref().map(|s| s.to_ascii_lowercase()) {
         Some(ref s) if s == "metal" => wgpu::Backends::METAL,
         Some(ref s) if s == "vulkan" => wgpu::Backends::VULKAN,
