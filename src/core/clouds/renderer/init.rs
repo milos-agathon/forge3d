@@ -1,21 +1,29 @@
 use super::*;
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::tracked_create_buffer;
 use wgpu::{
     BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry,
     BindingType, BufferBindingType, BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites,
     FragmentState, FrontFace, MultisampleState, PipelineLayoutDescriptor, PolygonMode,
-    PrimitiveState, PrimitiveTopology, SamplerBindingType, SamplerDescriptor,
-    ShaderModuleDescriptor, ShaderSource, ShaderStages, TextureSampleType, TextureViewDimension,
-    VertexBufferLayout, VertexState, VertexStepMode,
+    PrimitiveState, PrimitiveTopology, SamplerBindingType, SamplerDescriptor, ShaderStages,
+    TextureSampleType, TextureViewDimension, VertexBufferLayout, VertexState, VertexStepMode,
 };
 
 impl CloudRenderer {
-    pub fn new(device: &Device, color_format: TextureFormat, sample_count: u32) -> Self {
-        let uniform_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("cloud_uniform_buffer"),
-            size: std::mem::size_of::<CloudUniforms>() as wgpu::BufferAddress,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+    pub fn new(
+        device: &Device,
+        color_format: TextureFormat,
+        sample_count: u32,
+    ) -> RenderResult<Self> {
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("cloud_uniform_buffer"),
+                size: std::mem::size_of::<CloudUniforms>() as wgpu::BufferAddress,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         let bind_group_layout_uniforms =
             device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -107,7 +115,7 @@ impl CloudRenderer {
             ],
         });
 
-        let (vertex_buffer, index_buffer, index_count) = Self::create_cloud_quad_geometry(device);
+        let (vertex_buffer, index_buffer, index_count) = Self::create_cloud_quad_geometry(device)?;
 
         let cloud_sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("cloud_density_sampler"),
@@ -148,10 +156,11 @@ impl CloudRenderer {
                 resource: uniform_buffer.as_entire_binding(),
             }],
         });
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("cloud_shader"),
-            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("../../../shaders/clouds.wgsl"))),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "cloud_shader",
+            include_str!("../../../shaders/clouds.wgsl"),
+        );
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("cloud_pipeline_layout"),
             bind_group_layouts: &[
@@ -167,51 +176,54 @@ impl CloudRenderer {
             step_mode: VertexStepMode::Vertex,
             attributes: &vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x3],
         };
-        let cloud_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("cloud_render_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[vertex_buffer_layout],
+        let cloud_pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("cloud_render_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[vertex_buffer_layout],
+                },
+                primitive: PrimitiveState {
+                    topology: PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: MultisampleState {
+                    count: sample_count.max(1),
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                fragment: Some(FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(ColorTargetState {
+                        format: color_format,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::SrcAlpha,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: ColorWrites::ALL,
+                    })],
+                }),
+                multiview: None,
             },
-            primitive: PrimitiveState {
-                topology: PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: MultisampleState {
-                count: sample_count.max(1),
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            fragment: Some(FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(ColorTargetState {
-                    format: color_format,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::SrcAlpha,
-                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                        alpha: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                    }),
-                    write_mask: ColorWrites::ALL,
-                })],
-            }),
-            multiview: None,
-        });
+        );
 
         let uniforms = CloudUniforms::default();
         let mut params = CloudParams::default();
@@ -252,6 +264,6 @@ impl CloudRenderer {
             enabled: true,
         };
         renderer.update_uniforms();
-        renderer
+        Ok(renderer)
     }
 }

@@ -75,11 +75,21 @@ impl WavefrontScheduler {
     /// immediately after raygen — that means the queue state or the
     /// active-count readback is broken, and hiding it behind a one-iteration
     /// fallback would silently degrade the render into a primary-only pass.
+    ///
+    /// `timing`, when supplied as `(one_shot, label, draw_calls)`, opens a
+    /// certificate timing scope (CENSOR F-04) around this frame's FIRST
+    /// wavefront iteration (intersect + shade + shadow + scatter of the
+    /// primary wave) — the representative encoder region for this pipeline;
+    /// a whole frame spans multiple encoders because `read_ray_queue_header`
+    /// swaps + submits mid-frame, so it cannot be bracketed on one encoder.
+    /// The scope's queries are resolved on this frame's final encoder before
+    /// its submit; the caller reads them back after all frames complete.
     pub fn render_frame_simple(
         &mut self,
         uniforms_buffer: &Buffer,
         scene_bind_group: &BindGroup,
         accum_bind_group: &BindGroup,
+        mut timing: Option<(&mut crate::core::gpu_timing::OneShotTiming, &str, u32)>,
     ) -> Result<u32, Box<dyn std::error::Error>> {
         let mut encoder = self
             .device
@@ -147,6 +157,16 @@ impl WavefrontScheduler {
             // header writes land before this iteration's dispatches.
             self.queue_buffers
                 .begin_iteration(&self.queue, consumed_rays);
+            // The first iteration's dispatches all land on the encoder that
+            // read_ray_queue_header just swapped in, so begin/end bracket the
+            // timed region on the same encoder that executes it.
+            let timing_scope = if iteration == 0 {
+                timing
+                    .as_mut()
+                    .and_then(|(t, label, _)| t.begin(&mut encoder, label))
+            } else {
+                None
+            };
             self.dispatch_intersect(&mut encoder, uniforms_buffer, scene_bind_group)?;
             self.dispatch_shade(
                 &mut encoder,
@@ -166,12 +186,22 @@ impl WavefrontScheduler {
                 scene_bind_group,
                 accum_bind_group,
             )?;
+            // `end` is a no-op when `timing_scope` is None (iterations > 0).
+            if let Some((t, _, draw_calls)) = timing.as_mut() {
+                t.end(&mut encoder, timing_scope, *draw_calls);
+            }
             // This iteration consumes every ray present when it started.
             consumed_rays = header.in_count;
             iterations_executed += 1;
             // NOTE: no queue compaction here — compaction would relocate
             // queue entries and invalidate the consumed-prefix bookkeeping
             // (see the removal note in dispatch.rs).
+        }
+        // Resolve on this frame's final encoder: the end timestamp was written
+        // on an encoder already submitted (or on this one), so the resolved
+        // range is complete once this submit lands.
+        if let Some((t, _, _)) = timing.as_mut() {
+            t.resolve(&mut encoder);
         }
         self.queue.submit(std::iter::once(encoder.finish()));
         self.frame_index += 1;

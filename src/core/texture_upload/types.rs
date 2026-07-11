@@ -54,7 +54,7 @@ impl Default for HdrTextureConfig {
 
 /// Created HDR texture with associated resources
 pub struct HdrTexture {
-    pub texture: wgpu::Texture,
+    pub texture: crate::core::resource_tracker::TrackedTexture,
     pub view: wgpu::TextureView,
     pub format: HdrFormat,
     pub width: u32,

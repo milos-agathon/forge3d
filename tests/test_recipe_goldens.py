@@ -19,7 +19,18 @@ from tests._ssim import ssim
 
 ROOT = Path(__file__).resolve().parents[1]
 GOLDEN_DIR = ROOT / "tests" / "golden" / "recipes"
-UPDATE_GOLDENS = os.environ.get("FORGE3D_UPDATE_RECIPE_GOLDENS") == "1"
+CERT_DIR = ROOT / "tests" / "golden" / "certificates"
+SIGNING_PUB_PATH = CERT_DIR / "signing.pub"
+def _update_goldens_enabled() -> bool:
+    """Read baseline-update mode from the environment at CALL time.
+
+    This must never be an import-time constant: the negative control
+    (test_recipe_golden_gate_rejects_pixel_regression) disables update mode via
+    monkeypatch.delenv, which can only work if every consumer re-reads the
+    environment when it runs. An import-time constant silently turned the
+    rejecting gate into a copy-over-the-golden write during baseline refreshes.
+    """
+    return os.environ.get("FORGE3D_UPDATE_RECIPE_GOLDENS") == "1"
 ARTIFACT_DIR = (
     Path(os.environ["FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR"])
     if os.environ.get("FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR")
@@ -27,6 +38,16 @@ ARTIFACT_DIR = (
 )
 SSIM_MIN = 0.995
 MEAN_ABS_MAX = 2.0
+
+
+def _recipe_golden_variant() -> str | None:
+    """Return the explicitly selected backend baseline variant, if any."""
+    variant = os.environ.get("FORGE3D_RECIPE_GOLDEN_VARIANT")
+    if variant is None:
+        return None
+    if variant != "metal":
+        raise ValueError(f"Unknown recipe golden variant: {variant!r}")
+    return variant
 
 
 @dataclass(frozen=True)
@@ -40,8 +61,15 @@ class RecipeGolden:
     mean_abs_max: float = MEAN_ABS_MAX
 
     @property
-    def golden_path(self) -> Path:
+    def canonical_golden_path(self) -> Path:
         return GOLDEN_DIR / f"{self.scene_id}.png"
+
+    @property
+    def golden_path(self) -> Path:
+        variant = _recipe_golden_variant()
+        if variant is None:
+            return self.canonical_golden_path
+        return GOLDEN_DIR / f"{self.scene_id}.{variant}.png"
 
     @property
     def command(self) -> str:
@@ -667,7 +695,13 @@ def _furniture(tmp_path: Path) -> f3d.MapScene:
         legend={"items": [{"label": "Forest", "color": "#2f855a"}, {"label": "Snow", "color": "#f8fafc"}]},
         scale_bar={"length_m": 1000, "units": "km", "location": "lower_left", "geodesic": True},
         north_arrow={"location": "upper_right", "size": 34},
-        graticule={"bounds": (-122.5, 46.6, -121.9, 47.0), "interval_deg": 0.2, "include_labels": True},
+        graticule={
+            "bounds": (-122.5, 46.6, -121.9, 47.0),
+            "projected_bounds": (-122.5, 46.6, -121.9, 47.0),
+            "target_crs": "EPSG:4326",
+            "interval_deg": 0.2,
+            "include_labels": True,
+        },
     )
     return _base_scene(tmp_path, "mapscene_furniture_graticule", map_furniture=furniture, width=128, height=88)
 
@@ -893,7 +927,7 @@ def _write_failure_artifacts(spec: RecipeGolden, actual: np.ndarray, expected: n
 
 
 def _assert_matches_golden(spec: RecipeGolden, actual_path: Path) -> None:
-    if UPDATE_GOLDENS:
+    if _update_goldens_enabled():
         spec.golden_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(actual_path, spec.golden_path)
         return
@@ -913,6 +947,103 @@ def _assert_matches_golden(spec: RecipeGolden, actual_path: Path) -> None:
     assert mean_abs <= spec.mean_abs_max, f"{spec.scene_id} mean absolute difference too high: {mean_abs:.4f}"
 
 
+def _committed_cert_path(spec: RecipeGolden) -> Path:
+    return CERT_DIR / f"{spec.scene_id}.json"
+
+
+def _clear_degradation_sinks() -> None:
+    """Isolate each scene's certificate: reset the process-global native and
+    Python degradation sinks so a per-scene cert reflects only that scene."""
+    from forge3d import _degradation
+
+    _degradation.clear()
+    try:
+        from forge3d._forge3d import clear_native_degradations
+
+        clear_native_degradations()
+    except Exception:
+        # Native sink reset is best-effort; the Python sink is the one that
+        # would otherwise accumulate across scenes in one pytest process.
+        pass
+
+
+def _emit_or_verify_certificate(spec: RecipeGolden) -> None:
+    """Emit (UPDATE mode) or verify (normal GPU mode) the committed signed
+    certificate for ``spec``.
+
+    The certificate reflects the LAST in-process native render, so this must be
+    called immediately after this scene's ``render()`` and golden match.
+
+    UPDATE mode: sign a fresh certificate with the dev seed, write it to
+    ``tests/golden/certificates/<scene_id>.json``, and (first scene only) write
+    the dev public key hex to ``signing.pub``.
+
+    Normal mode: assert the committed cert exists and verifies against
+    ``signing.pub``, that its ``degradations`` are empty, and that the FRESH
+    render's ``wgsl_module_hashes`` match the committed cert's — the load-bearing
+    golden-gate check that ties committed certs to the current WGSL sources.
+    """
+    from forge3d import certificate as _certificate
+    from forge3d.diagnostics import render_certificate
+
+    cert = render_certificate()  # signed; reflects the last completed render
+    cert_path = _committed_cert_path(spec)
+
+    if _update_goldens_enabled():
+        CERT_DIR.mkdir(parents=True, exist_ok=True)
+        _certificate.write_certificate(cert, cert_path)
+        pubkey_hex = cert["signature"]["pubkey"]
+        if not SIGNING_PUB_PATH.exists():
+            SIGNING_PUB_PATH.write_text(pubkey_hex + "\n", encoding="utf-8")
+        return
+
+    assert cert_path.exists(), (
+        f"Missing recipe golden certificate {cert_path}. "
+        "Regenerate with FORGE3D_UPDATE_RECIPE_GOLDENS=1."
+    )
+    assert SIGNING_PUB_PATH.exists(), (
+        f"Missing signing public key {SIGNING_PUB_PATH}. "
+        "Regenerate with FORGE3D_UPDATE_RECIPE_GOLDENS=1."
+    )
+    pubkey = SIGNING_PUB_PATH.read_text(encoding="utf-8").strip()
+    assert _certificate.verify(cert_path, pubkey) is True, (
+        f"Committed certificate {cert_path} failed Ed25519 verification against "
+        f"{SIGNING_PUB_PATH}."
+    )
+
+    committed = json.loads(cert_path.read_text(encoding="utf-8"))
+    assert committed.get("degradations") == [], (
+        f"{spec.scene_id} committed certificate records degradations "
+        f"{committed.get('degradations')!r}; a clean golden must degrade nothing. "
+        "Investigate the fallback before regenerating."
+    )
+
+    fresh_hashes = (cert.get("engine") or {}).get("wgsl_module_hashes") or {}
+    committed_hashes = (committed.get("engine") or {}).get("wgsl_module_hashes") or {}
+    # The shader-hash registry is process-lifetime: other GPU tests running
+    # earlier in the same pytest process may register EXTRA modules (e.g. the
+    # minimal terrain pipeline). The tamper gate therefore checks that every
+    # module recorded in the committed certificate still exists with an
+    # identical hash — extra fresh entries are fine, changed or missing ones
+    # are not.
+    missing = sorted(set(committed_hashes) - set(fresh_hashes))
+    assert not missing, (
+        f"WGSL modules {missing} named in the committed certificate were never "
+        "compiled by this render; regenerate with FORGE3D_UPDATE_RECIPE_GOLDENS=1 "
+        "after verifying the pixel goldens"
+    )
+    changed = {
+        label: (committed_hashes[label], fresh_hashes[label])
+        for label in committed_hashes
+        if fresh_hashes[label] != committed_hashes[label]
+    }
+    assert not changed, (
+        "WGSL source changed since golden certificates were generated; regenerate "
+        "with FORGE3D_UPDATE_RECIPE_GOLDENS=1 after verifying the pixel goldens: "
+        f"{changed}"
+    )
+
+
 def test_recipe_golden_manifest_catalog_has_required_coverage() -> None:
     families = {spec.family for spec in RECIPE_GOLDENS}
     assert len(RECIPE_GOLDENS) >= 8
@@ -924,13 +1055,43 @@ def test_recipe_golden_catalog_links_docs_gallery() -> None:
     gallery = (ROOT / "docs" / "gallery" / "index.md").read_text(encoding="utf-8")
     for spec in RECIPE_GOLDENS:
         assert spec.scene_id in gallery
-        assert str(spec.golden_path.relative_to(ROOT)).replace("\\", "/") in gallery
+        assert str(spec.canonical_golden_path.relative_to(ROOT)).replace("\\", "/") in gallery
         assert spec.command in gallery
 
 
-def test_recipe_golden_gate_rejects_pixel_regression(tmp_path: Path) -> None:
+def test_update_mode_is_read_at_call_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Baseline-update mode must be a call-time decision, not an import-time
+    constant, or the negative control's delenv guard is dead code."""
+    monkeypatch.setenv("FORGE3D_UPDATE_RECIPE_GOLDENS", "1")
+    assert _update_goldens_enabled() is True
+    monkeypatch.delenv("FORGE3D_UPDATE_RECIPE_GOLDENS")
+    assert _update_goldens_enabled() is False
+
+
+def test_recipe_golden_variant_uses_an_explicit_backend_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = RECIPE_GOLDENS[0]
+    monkeypatch.delenv("FORGE3D_RECIPE_GOLDEN_VARIANT", raising=False)
+    assert spec.golden_path == spec.canonical_golden_path
+    monkeypatch.setenv("FORGE3D_RECIPE_GOLDEN_VARIANT", "metal")
+    assert spec.golden_path == GOLDEN_DIR / "mapscene_terrain_raster.metal.png"
+
+
+def test_recipe_golden_gate_rejects_pixel_regression(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # This negative control must remain a rejecting gate even during an
+    # intentional baseline-refresh run: simulate a refresh run by setting the
+    # env first, then prove the control's delenv actually disables update mode
+    # (call-time read) so the corrupted image is compared, not copied over the
+    # committed golden.
+    monkeypatch.setenv("FORGE3D_UPDATE_RECIPE_GOLDENS", "1")
+    monkeypatch.delenv("FORGE3D_UPDATE_RECIPE_GOLDENS", raising=False)
+    assert _update_goldens_enabled() is False
     spec = RECIPE_GOLDENS[0]
     assert spec.golden_path.exists()
+    golden_bytes_before = spec.golden_path.read_bytes()
     corrupted = f3d.png_to_numpy(spec.golden_path).copy()
     corrupted[: corrupted.shape[0] // 2, : corrupted.shape[1] // 2, :3] = 255 - corrupted[
         : corrupted.shape[0] // 2,
@@ -942,6 +1103,10 @@ def test_recipe_golden_gate_rejects_pixel_regression(tmp_path: Path) -> None:
 
     with pytest.raises(AssertionError):
         _assert_matches_golden(spec, actual_path)
+
+    assert spec.golden_path.read_bytes() == golden_bytes_before, (
+        "negative control must never write over the committed golden"
+    )
 
 
 @pytest.mark.parametrize("spec", RECIPE_GOLDENS, ids=lambda item: item.scene_id)
@@ -968,6 +1133,7 @@ def test_recipe_goldens_render_and_match(tmp_path, spec: RecipeGolden) -> None:
     assert intent["family"] == spec.family
     assert intent["backend"] == "gpu_terrain"
 
+    _clear_degradation_sinks()
     report = scene.render()
     assert scene.last_render_backend == "gpu_terrain"
     for feature in spec.expected_features:
@@ -979,3 +1145,4 @@ def test_recipe_goldens_render_and_match(tmp_path, spec: RecipeGolden) -> None:
     output_path = Path(scene.last_render_path or scene.recipe.output.path or "")
     assert output_path.exists()
     _assert_matches_golden(spec, output_path)
+    _emit_or_verify_certificate(spec)

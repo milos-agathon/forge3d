@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::terrain::render_params;
 
 impl TerrainScene {
@@ -135,23 +136,26 @@ impl TerrainScene {
         width: u32,
         height: u32,
         data: &[f32],
-    ) -> Result<wgpu::Texture> {
+    ) -> Result<TrackedTexture> {
         let size = wgpu::Extent3d {
             width,
             height,
             depth_or_array_layers: 1,
         };
 
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.heightmap"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        let texture = tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.heightmap"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+        )?;
 
         self.queue.write_texture(
             wgpu::ImageCopyTexture {
@@ -177,23 +181,26 @@ impl TerrainScene {
         width: u32,
         height: u32,
         data: &[u8],
-    ) -> Result<wgpu::Texture> {
+    ) -> Result<TrackedTexture> {
         let size = wgpu::Extent3d {
             width,
             height,
             depth_or_array_layers: 1,
         };
 
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.water_mask"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        let texture = tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.water_mask"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+        )?;
 
         self.queue.write_texture(
             wgpu::ImageCopyTexture {
@@ -218,7 +225,7 @@ impl TerrainScene {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         data: &[f32],
-    ) -> Result<(wgpu::Texture, wgpu::TextureView)> {
+    ) -> Result<(TrackedTexture, wgpu::TextureView)> {
         let width = 256u32;
         let height = 1u32;
         if data.len() != width as usize {
@@ -231,16 +238,19 @@ impl TerrainScene {
             depth_or_array_layers: 1,
         };
 
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.height_curve_lut"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        let texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.height_curve_lut"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+        )?;
 
         queue.write_texture(
             wgpu::ImageCopyTexture {
@@ -265,7 +275,7 @@ impl TerrainScene {
     pub(super) fn upload_height_curve_lut(
         &self,
         data: &[f32],
-    ) -> Result<(wgpu::Texture, wgpu::TextureView)> {
+    ) -> Result<(TrackedTexture, wgpu::TextureView)> {
         Self::upload_height_curve_lut_internal(&self.device, &self.queue, data)
     }
 

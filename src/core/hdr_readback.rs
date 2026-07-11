@@ -2,6 +2,7 @@
 // GPU texture readback utilities for HDR rendering
 // RELEVANT FILES: shaders/postprocess_tonemap.wgsl
 
+use crate::core::resource_tracker::tracked_create_buffer;
 use wgpu::{
     BufferDescriptor, BufferUsages, Device, Extent3d, ImageCopyTexture, ImageDataLayout, Origin3d,
     Queue, Texture, TextureAspect, TextureFormat,
@@ -30,12 +31,16 @@ pub fn read_hdr_texture(
 
     let buffer_size = padded_bytes_per_row * height;
 
-    let staging_buffer = device.create_buffer(&BufferDescriptor {
-        label: Some("hdr_staging_buffer"),
-        size: buffer_size as u64,
-        usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
+    let staging_buffer = tracked_create_buffer(
+        device,
+        &BufferDescriptor {
+            label: Some("hdr_readback.hdr_staging"),
+            size: buffer_size as u64,
+            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        },
+    )
+    .map_err(|e| e.to_string())?;
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("hdr_copy_encoder"),
@@ -106,12 +111,16 @@ pub fn read_ldr_texture(
 
     let buffer_size = padded_bytes_per_row * height;
 
-    let staging_buffer = device.create_buffer(&BufferDescriptor {
-        label: Some("ldr_staging_buffer"),
-        size: buffer_size as u64,
-        usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
+    let staging_buffer = tracked_create_buffer(
+        device,
+        &BufferDescriptor {
+            label: Some("hdr_readback.ldr_staging"),
+            size: buffer_size as u64,
+            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        },
+    )
+    .map_err(|e| e.to_string())?;
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("ldr_copy_encoder"),
@@ -187,12 +196,16 @@ pub fn read_r32_texture(
     };
 
     let buffer_size = padded_bytes_per_row * height;
-    let staging_buffer = device.create_buffer(&BufferDescriptor {
-        label: Some("r32_staging_buffer"),
-        size: buffer_size as u64,
-        usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
+    let staging_buffer = tracked_create_buffer(
+        device,
+        &BufferDescriptor {
+            label: Some("hdr_readback.r32_staging"),
+            size: buffer_size as u64,
+            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        },
+    )
+    .map_err(|e| e.to_string())?;
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("r32_copy_encoder"),
@@ -274,18 +287,22 @@ pub fn read_r32uint_texture(
     };
 
     let buffer_size = (padded_bytes_per_row * height) as u64;
-    let memory_tracker = crate::core::memory_tracker::global_tracker();
-    memory_tracker.track_buffer_allocation(buffer_size, true);
-    let staging_buffer = device.create_buffer(&BufferDescriptor {
-        label: Some("r32uint_staging_buffer"),
-        size: buffer_size,
-        usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
+    // Host-visible staging buffer; the tracked wrapper records it in the
+    // registry + ledger and frees on drop (superseding the prior manual
+    // track/free accounting).
+    let staging_buffer = tracked_create_buffer(
+        device,
+        &BufferDescriptor {
+            label: Some("hdr_readback.r32uint_staging"),
+            size: buffer_size,
+            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        },
+    )
+    .map_err(|e| e.to_string())?;
 
     let release_staging = |staging_buffer: &wgpu::Buffer| {
         staging_buffer.destroy();
-        memory_tracker.free_buffer_allocation(buffer_size, true);
     };
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {

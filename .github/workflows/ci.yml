@@ -99,13 +99,17 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libvulkan-dev
+          sudo apt-get install -y libvulkan-dev libproj-dev libsqlite3-dev sqlite3 pkg-config
 
       - name: Run cargo check
-        run: cargo check --workspace --features default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings
+        run: cargo check --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings
+
+      - name: Run cargo check (system PROJ feature)
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo check --workspace --features proj
 
       - name: Run cargo test (skip GPU-dependent tests)
-        run: cargo test --workspace --features default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile
+        run: cargo test --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile
         env:
           RUST_TEST_THREADS: 1
 
@@ -114,6 +118,11 @@ jobs:
 
   # ============================================================================
   # Interactive Viewer E2E (macOS only; optional)
+  #
+  # INFORMATIONAL ONLY: this job is `continue-on-error: true` on its test step
+  # and is deliberately NOT in `ci-success` needs. Its result never gates the
+  # build. The interactive lane's test files are accounted for by the
+  # `interactive_viewer` marker in the UNRUN/(e)-gate bookkeeping, not here.
   # ============================================================================
   test-interactive-viewer-macos:
     name: Interactive Viewer (macOS)
@@ -217,6 +226,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # COG/mapscene fixtures under assets/ and tests/data are Git LFS
+          # objects; without lfs the lane reads pointer files and fails with
+          # InvalidTiffHeader (found by the first exhaustive-lane CI run).
+          lfs: true
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
@@ -234,6 +248,12 @@ jobs:
           python scripts/install_compatible_wheel.py dist
           pip install pytest numpy pillow mypy
 
+      - name: Install system fonts (Linux)
+        if: runner.os == 'Linux'
+        # Legend/label helpers resolve DejaVu on Linux; hosted images ship no
+        # fonts by default (found by the first exhaustive-lane CI run).
+        run: sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
+
       - name: Run install smoke tests
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
@@ -244,22 +264,10 @@ jobs:
           FORGE3D_NO_BOOTSTRAP: '1'
         run: pytest tests/test_license.py -v --tb=short
 
-      - name: Run P0/P1 release contract tests
+      - name: Run default Python test lane (CENSOR honesty gate)
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
-        run: >
-          pytest
-          tests/test_api_contracts.py
-          tests/test_blender_quality_integration.py
-          tests/test_bloom_effect.py
-          tests/test_bloom_execute_behavior.py
-          tests/test_label_optimal_solver.py
-          tests/test_mesh_tbn.py
-          tests/test_provenance_offline_verify.py
-          tests/test_provenance_veritas.py
-          tests/test_recipe_manifest.py
-          tests/test_ssgi_ssr_wiring.py
-          -v --tb=short
+        run: python scripts/ci_pytest_lane.py -v --tb=short
 
   # ============================================================================
   # Linux aarch64 Wheel Smoke Test (QEMU)
@@ -298,16 +306,31 @@ jobs:
   test-golden-images:
     name: Visual Goldens
     needs: [build-wheels, terrain-golden-paths]
-    runs-on: windows-latest
+    # macos-14 is the repository's gated real-GPU lane (Metal). Hosted
+    # Windows runners only expose WARP here, which made this job perpetually
+    # report ABSENT and prevented an actual image mismatch from failing CI.
+    runs-on: macos-14
     if: github.event_name == 'workflow_dispatch' || needs.terrain-golden-paths.outputs.terrain_goldens == 'true'
+    # Expose which lane actually executed so ci-success can print an honest
+    # `ran|absent` distinction instead of treating both as opaque success.
+    outputs:
+      lane: ${{ steps.golden-absent.outputs.golden_lane || steps.golden-ran.outputs.golden_lane || 'unknown' }}
     env:
-      # The terrain shader path is not GL-safe on hosted runners; pin a stable backend.
-      WGPU_BACKEND: dx12
+      # Pin the hardware backend before the native module initializes.
+      WGPU_BACKEND: metal
+      # Permit the real-metal golden job through the test helper's conservative
+      # hosted-macOS guard only after this job's terrain probe has succeeded.
+      FORGE3D_ALLOW_HOSTED_MACOS_TERRAIN: '1'
       # Explicit opt-in for non-GPU environments that may only run recipe-level CPU goldens.
       FORGE3D_ALLOW_SOFTWARE_GOLDENS: ${{ vars.FORGE3D_ALLOW_SOFTWARE_GOLDENS }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # COG/mapscene fixtures under assets/ and tests/data are Git LFS
+          # objects; without lfs the lane reads pointer files and fails with
+          # InvalidTiffHeader (found by the first exhaustive-lane CI run).
+          lfs: true
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -317,7 +340,7 @@ jobs:
       - name: Download wheel artifact
         uses: actions/download-artifact@v4
         with:
-          name: wheels-windows
+          name: wheels-macos
           path: dist/
 
       - name: Install wheel and test dependencies
@@ -325,27 +348,67 @@ jobs:
           python scripts/install_compatible_wheel.py dist
           pip install pytest numpy pyproj
 
+      # Probe contract (CENSOR F-10): exit 0 = probe positive, exit 2 = no
+      # CI-safe adapter (honest ABSENT), exit 3 = adapter present but the smoke
+      # render crashed — a renderer defect that must FAIL this job rather than
+      # masquerade as hardware absence. No continue-on-error: only the ABSENT
+      # case maps to a zero exit with probe=absent.
       - name: Probe terrain golden backend
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1'
         id: terrain-goldens-probe
-        continue-on-error: true
+        shell: bash
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
-        run: python scripts/terrain_ci_probe.py --mode terrain
+        run: |
+          set +e
+          python scripts/terrain_ci_probe.py --mode terrain
+          code=$?
+          set -e
+          if [ "$code" = "0" ]; then
+            echo "probe=positive" >> "$GITHUB_OUTPUT"
+          elif [ "$code" = "2" ]; then
+            echo "probe=absent" >> "$GITHUB_OUTPUT"
+          else
+            echo "probe=crash" >> "$GITHUB_OUTPUT"
+            echo "::error::terrain probe crashed on a CI-safe adapter (exit $code); failing the golden job instead of recording ABSENT"
+            exit "$code"
+          fi
 
       - name: Run visual golden tests
-        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outcome == 'success'
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'positive'
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
           FORGE3D_RUN_TERRAIN_GOLDENS: '1'
           FORGE3D_TERRAIN_GOLDEN_ARTIFACT_DIR: tests/artifacts/terrain_goldens
           FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR: tests/artifacts/recipe_goldens
-          FORGE3D_ADJUDICATION_ARTIFACT_DIR: tests/artifacts/adjudication
-        run: pytest tests/test_terrain_visual_goldens.py tests/test_terrain_tv10_goldens.py tests/test_terrain_vt_pbr_families.py tests/test_recipe_goldens.py tests/test_adjudication_gate.py tests/test_hybrid_terrain_pt.py tests/test_provenance_veritas.py -v --tb=short
+          # This dedicated hardware lane anchors the CENSOR recipe-pixel gate
+          # on the Metal reference for its terrain control scene. The complete
+          # recipe catalog remains exercised by the normal GPU suite.
+          FORGE3D_RECIPE_GOLDEN_VARIANT: metal
+        run: pytest tests/test_terrain_visual_goldens.py tests/test_terrain_tv10_goldens.py tests/test_terrain_vt_pbr_families.py tests/test_recipe_goldens.py::test_recipe_golden_gate_rejects_pixel_regression 'tests/test_recipe_goldens.py::test_recipe_goldens_render_and_match[mapscene_terrain_raster]' -v --tb=short
 
-      - name: Skip unsupported terrain golden lane
-        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outcome != 'success'
-        run: echo "Skipping visual golden tests on unsupported hosted-runner adapter."
+      - name: Record golden lane RAN
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'positive'
+        id: golden-ran
+        shell: bash
+        run: echo "golden_lane=ran" >> "$GITHUB_OUTPUT"
+
+      - name: Record golden lane ABSENT
+        if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'absent'
+        id: golden-absent
+        shell: bash
+        run: |
+          mkdir -p golden-out
+          echo "golden lane ABSENT: no usable hardware adapter on this hosted runner" | tee golden-out/goldens.ABSENT
+          echo "golden_lane=absent" >> "$GITHUB_OUTPUT"
+
+      - name: Upload golden lane marker
+        if: steps.golden-absent.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-lane-marker
+          path: golden-out/
+          if-no-files-found: error
 
       - name: Run software-allowed recipe goldens
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS == '1'
@@ -375,7 +438,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build Rust docs
-        run: cargo doc --workspace --features default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings --no-deps
+        run: cargo doc --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings --no-deps
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -411,6 +474,15 @@ jobs:
     steps:
       - name: Check all jobs succeeded
         run: |
+          # Golden lane honesty: `test-golden-images` is gated by the
+          # `terrain-golden-paths` paths filter via its job-level `if:`. When no
+          # golden-relevant path changed the job is `skipped` — that is the ONLY
+          # reason `skipped` is acceptable here. Whenever the paths filter DID
+          # run the job, a golden pytest mismatch fails the job (no
+          # continue-on-error shields the pytest step) and therefore fails this
+          # aggregator. `absent` (no usable adapter) still reports as job
+          # `success` and is surfaced by the lane line below, not swallowed.
+          echo "golden lane: ${{ needs.test-golden-images.outputs.lane || 'skipped(paths)' }}"
           if [ "${{ needs.terrain-golden-paths.result }}" != "success" ] || \
              [ "${{ needs.test-rust.result }}" != "success" ] || \
              [ "${{ needs.build-wheels.result }}" != "success" ] || \

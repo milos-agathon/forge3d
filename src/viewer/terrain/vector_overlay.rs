@@ -3,8 +3,8 @@
 // Renders vector overlays (points/lines/polygons) as GPU geometry in world space,
 // optionally draped onto terrain heightfield, with proper lighting and shadowing.
 
+use crate::core::resource_tracker::TrackedBuffer;
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 
 /// Primitive type for vector overlay
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -143,8 +143,8 @@ impl Default for VectorOverlayLayer {
 /// GPU resources for a vector overlay layer
 pub struct VectorOverlayGpu {
     pub config: VectorOverlayLayer,
-    pub vertex_buffer: wgpu::Buffer,
-    pub index_buffer: wgpu::Buffer,
+    pub vertex_buffer: TrackedBuffer,
+    pub index_buffer: TrackedBuffer,
     pub vertex_count: u32,
     pub index_count: u32,
     pub id: u32,
@@ -179,7 +179,7 @@ pub struct VectorOverlayStack {
     pub pipeline_lines: Option<wgpu::RenderPipeline>,
     pub pipeline_points: Option<wgpu::RenderPipeline>,
     pub bind_group_layout: Option<wgpu::BindGroupLayout>,
-    pub uniform_buffer: Option<wgpu::Buffer>,
+    pub uniform_buffer: Option<TrackedBuffer>,
     pub bind_group: Option<wgpu::BindGroup>,
     pub sampler: Option<wgpu::Sampler>,
 

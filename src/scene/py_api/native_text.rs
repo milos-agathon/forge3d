@@ -164,6 +164,7 @@ impl Scene {
         channels: Option<u32>,
         smoothing: Option<f32>,
     ) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         let (h, w, c, data) = if let Ok(arr) = atlas.extract::<PyReadonlyArray3<u8>>() {
             let shape = arr.shape();
             if shape.len() != 3 {
@@ -216,20 +217,23 @@ impl Scene {
             let d = y * padded_bpr as usize;
             padded[d..d + row_bytes as usize].copy_from_slice(&rgba[s..s + row_bytes as usize]);
         }
-        let tex = g.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("text_msdf_atlas"),
-            size: wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
+        let tex = crate::core::resource_tracker::tracked_create_texture(
+            &g.device,
+            &wgpu::TextureDescriptor {
+                label: Some("text_msdf_atlas"),
+                size: wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         g.queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &tex,
@@ -254,7 +258,7 @@ impl Scene {
         // Update text overlay renderer state
         if let Some(ref mut tr) = self.text_overlay_renderer {
             tr.set_atlas(tex, view);
-            tr.recreate_bind_group(&g.device, None);
+            tr.recreate_bind_group(&g.device, None)?;
             if let Some(ch) = channels {
                 tr.set_channels(ch);
             }

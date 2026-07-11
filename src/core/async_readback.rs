@@ -4,7 +4,7 @@
 //! for improved performance in scenarios with frequent readbacks.
 
 use super::error::RenderError;
-use crate::core::memory_tracker::global_tracker;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
@@ -64,35 +64,30 @@ impl AsyncReadbackHandle {
 
 /// Internal readback buffer state
 struct ReadbackBuffer {
-    buffer: Arc<Buffer>,
+    buffer: Arc<TrackedBuffer>,
     size: u64,
     in_use: bool,
 }
 
 impl ReadbackBuffer {
-    fn new(device: &Device, size: u64, label: &str) -> Self {
-        let buffer = device.create_buffer(&BufferDescriptor {
-            label: Some(label),
-            size,
-            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+    fn new(device: &Device, size: u64, label: &str) -> Result<Self, RenderError> {
+        // `tracked_create_buffer` performs registry + ledger accounting itself,
+        // so no manual `track_buffer_allocation`/`free_buffer_allocation` here.
+        let buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some(label),
+                size,
+                usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        )?;
 
-        // Track allocation
-        global_tracker().track_buffer_allocation(size, true); // host-visible
-
-        Self {
+        Ok(Self {
             buffer: Arc::new(buffer),
             size,
             in_use: false,
-        }
-    }
-}
-
-impl Drop for ReadbackBuffer {
-    fn drop(&mut self) {
-        // Free allocation tracking
-        global_tracker().free_buffer_allocation(self.size, true);
+        })
     }
 }
 
@@ -108,7 +103,7 @@ pub struct AsyncReadbackManager {
 
 /// Internal task for the readback worker
 struct ReadbackTask {
-    buffer: Arc<Buffer>,
+    buffer: Arc<TrackedBuffer>,
     height: u32,
     padded_bpr: u32,
     row_bytes: u32,
@@ -212,7 +207,7 @@ impl AsyncReadbackManager {
     }
 
     /// Get an available readback buffer or create a new one
-    fn get_readback_buffer(&self, required_size: u64) -> Result<Arc<Buffer>, RenderError> {
+    fn get_readback_buffer(&self, required_size: u64) -> Result<Arc<TrackedBuffer>, RenderError> {
         let mut buffers = self.buffers.lock().unwrap();
 
         // Try to find an available buffer of sufficient size
@@ -230,21 +225,22 @@ impl AsyncReadbackManager {
                 &self.device,
                 required_size,
                 &format!("async-readback-{}", buffers.len()),
-            );
+            )?;
 
             let buffer = buffer_state.buffer.clone();
             buffers.push(buffer_state);
             Ok(buffer)
         } else {
             // Create temporary buffer (not managed by the pool)
-            let buffer = self.device.create_buffer(&BufferDescriptor {
-                label: Some("temp-readback"),
-                size: required_size,
-                usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            });
-
-            global_tracker().track_buffer_allocation(required_size, true);
+            let buffer = tracked_create_buffer(
+                &self.device,
+                &BufferDescriptor {
+                    label: Some("async_readback.temp_readback"),
+                    size: required_size,
+                    usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                },
+            )?;
             Ok(Arc::new(buffer))
         }
     }

@@ -28,6 +28,10 @@ def atrous_denoise(
 ) -> np.ndarray:
     """A-trous edge-aware denoiser guided by auxiliary features.
 
+    Outside CENSOR's render-certificate scope: a post-hoc filter over an
+    already-rendered (and certified) image — no render executes here, so there
+    is no ``certificate=`` contract.
+
     Args:
         color: float32 array (H, W, 3) in linear space.
         albedo: optional float32 (H, W, 3), guides edges in material/color.

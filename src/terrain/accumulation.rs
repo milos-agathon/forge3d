@@ -5,6 +5,8 @@
 //!
 //! RELEVANT FILES: src/terrain/renderer.rs, src/terrain/camera.rs
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use wgpu::{
     CommandEncoder, Device, Extent3d, Texture, TextureDescriptor, TextureDimension, TextureFormat,
     TextureUsages, TextureView, TextureViewDescriptor,
@@ -31,7 +33,7 @@ impl Default for AccumulationConfig {
 /// HDR accumulation buffer for multi-sample averaging
 pub struct AccumulationBuffer {
     /// Ping-pong HDR accumulation textures (Rgba32Float for precision)
-    textures: [Texture; 2],
+    textures: [TrackedTexture; 2],
     /// Views for the ping-pong textures
     views: [TextureView; 2],
     /// Index of the texture containing the current accumulation result
@@ -49,50 +51,53 @@ impl AccumulationBuffer {
         label: &str,
         width: u32,
         height: u32,
-    ) -> (Texture, TextureView) {
-        let texture = device.create_texture(&TextureDescriptor {
-            label: Some(label),
-            size: Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+    ) -> RenderResult<(TrackedTexture, TextureView)> {
+        let texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some(label),
+                size: Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                // Use Rgba32Float for maximum precision during accumulation
+                format: TextureFormat::Rgba32Float,
+                usage: TextureUsages::RENDER_ATTACHMENT
+                    | TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_SRC
+                    | TextureUsages::COPY_DST
+                    | TextureUsages::STORAGE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            // Use Rgba32Float for maximum precision during accumulation
-            format: TextureFormat::Rgba32Float,
-            usage: TextureUsages::RENDER_ATTACHMENT
-                | TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_SRC
-                | TextureUsages::COPY_DST
-                | TextureUsages::STORAGE_BINDING,
-            view_formats: &[],
-        });
+        )?;
 
         let view = texture.create_view(&TextureViewDescriptor {
             label: Some(&format!("{label}.view")),
             ..Default::default()
         });
 
-        (texture, view)
+        Ok((texture, view))
     }
 
     /// Create a new accumulation buffer
-    pub fn new(device: &Device, width: u32, height: u32) -> Self {
+    pub fn new(device: &Device, width: u32, height: u32) -> RenderResult<Self> {
         let (texture_a, view_a) =
-            Self::create_texture(device, "terrain.accumulation.texture_a", width, height);
+            Self::create_texture(device, "terrain.accumulation.texture_a", width, height)?;
         let (texture_b, view_b) =
-            Self::create_texture(device, "terrain.accumulation.texture_b", width, height);
+            Self::create_texture(device, "terrain.accumulation.texture_b", width, height)?;
 
-        Self {
+        Ok(Self {
             textures: [texture_a, texture_b],
             views: [view_a, view_b],
             current_index: 0,
             sample_count: 0,
             width,
             height,
-        }
+        })
     }
 
     /// Reset accumulation for a new render
@@ -107,11 +112,12 @@ impl AccumulationBuffer {
     }
 
     /// Resize the accumulation buffer
-    pub fn resize(&mut self, device: &Device, width: u32, height: u32) {
+    pub fn resize(&mut self, device: &Device, width: u32, height: u32) -> RenderResult<()> {
         if !self.needs_resize(width, height) {
-            return;
+            return Ok(());
         }
-        *self = Self::new(device, width, height);
+        *self = Self::new(device, width, height)?;
+        Ok(())
     }
 
     /// Clear the accumulation buffer
@@ -132,7 +138,7 @@ impl AccumulationBuffer {
 
     /// Texture containing the current accumulation result.
     pub fn current_texture(&self) -> &Texture {
-        &self.textures[self.current_index]
+        self.textures[self.current_index].inner()
     }
 
     /// View for the current accumulation texture.
@@ -142,7 +148,7 @@ impl AccumulationBuffer {
 
     /// Texture that should receive the next accumulation pass.
     pub fn write_texture(&self) -> &Texture {
-        &self.textures[1 - self.current_index]
+        self.textures[1 - self.current_index].inner()
     }
 
     /// View for the texture that should receive the next accumulation pass.
@@ -343,7 +349,7 @@ mod tests {
             return;
         };
 
-        let mut buffer = AccumulationBuffer::new(&device, 4, 4);
+        let mut buffer = AccumulationBuffer::new(&device, 4, 4).expect("alloc");
         let first = buffer.current_texture() as *const _;
         let second = buffer.write_texture() as *const _;
         assert_ne!(first, second);

@@ -1,8 +1,8 @@
 //! B16: Dual-source blending Order Independent Transparency
 //! High-quality OIT using dual-source color blending with WBOIT fallback
 
+use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 use bytemuck::{Pod, Zeroable};
-use wgpu::util::DeviceExt;
 
 mod constructor;
 mod controls;
@@ -78,12 +78,12 @@ pub struct DualSourceOITRenderer {
     height: u32,
     dual_source_supported: bool,
     _max_dual_source_targets: u32,
-    uniforms_buffer: wgpu::Buffer,
-    compose_uniforms_buffer: wgpu::Buffer,
-    dual_source_color_texture: Option<wgpu::Texture>,
+    uniforms_buffer: TrackedBuffer,
+    compose_uniforms_buffer: TrackedBuffer,
+    dual_source_color_texture: Option<TrackedTexture>,
     dual_source_color_view: Option<wgpu::TextureView>,
-    wboit_color_accum: Option<wgpu::Texture>,
-    wboit_reveal_accum: Option<wgpu::Texture>,
+    wboit_color_accum: Option<TrackedTexture>,
+    wboit_reveal_accum: Option<TrackedTexture>,
     wboit_color_view: Option<wgpu::TextureView>,
     wboit_reveal_view: Option<wgpu::TextureView>,
     dual_source_shader: wgpu::ShaderModule,

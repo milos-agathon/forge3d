@@ -105,6 +105,8 @@ _NATIVE_ONLY_EXPORTS = (
         "copc_read_node_points",  # P2.3: native COPC node decode
         "render_adjudication_pair",  # AEQUITAS: PT-vs-raster adjudication pair
         "hybrid_render_terrain_reference",  # PROMETHEUS: terrain PT reference
+        "render_brdf_tile",  # CENSOR: certified BRDF pixel render
+        "render_brdf_tile_overrides",  # CENSOR: certified BRDF pixel render
         "seal_provenance",  # VERITAS: Merkle+Ed25519 seal over VT provenance
         "verify_provenance",  # VERITAS: native manifest verification
         "declutter_optimal",  # CARTOGRAPHER-PRIME: bounded-optimal label solve
@@ -112,6 +114,11 @@ _NATIVE_ONLY_EXPORTS = (
         "native_degradations",  # CENSOR: global degradation sink snapshot
         "clear_native_degradations",  # CENSOR: global degradation sink reset
         "capabilities",  # CENSOR: negotiated GPU capability report
+        "render_execution_report",  # CENSOR: last-render execution certificate JSON
+        "begin_render_execution_capture",  # CENSOR: Python-render capture begin
+        "finish_render_execution_capture",  # CENSOR: Python-render capture finish
+        "abort_render_execution_capture",  # CENSOR: Python-render capture abort
+        "sign_render_certificate_digest",  # CENSOR: native Ed25519 signer
         "request_host_visible_allocation_for_test",  # CENSOR: budget-enforce test helper
 )
 
@@ -258,6 +265,7 @@ from . import terrain_scatter
 # -----------------------------------------------------------------------------
 from pathlib import Path
 from typing import Any, Mapping
+from .certificate import _captured_cpu_render
 
 
 class Renderer:
@@ -299,8 +307,20 @@ class Renderer:
         if overrides:
             self._config = load_renderer_config(self._config, overrides)
 
-    def render_triangle_rgba(self) -> np.ndarray:
+    @_captured_cpu_render(
+        "python.renderer.render_triangle_rgba", "renderer.cpu_triangle", draw_calls=1
+    )
+    def render_triangle_rgba(
+        self, *, certificate: bool | str | Path = False
+    ) -> np.ndarray:
         """Render a basic triangle pattern (fallback test method)."""
+        from . import _degradation
+
+        _degradation.record(
+            "cpu_fallback",
+            "renderer.triangle",
+            "fallback Renderer uses the deterministic CPU triangle implementation",
+        )
         img = np.zeros((self.height, self.width, 4), dtype=np.uint8)
         cx, cy = self.width // 2, self.height // 2
         size = min(self.width, self.height) // 4
@@ -313,16 +333,22 @@ class Renderer:
                     img[y, x] = [16, 16, 24, 255]
         return img
 
-    def render_triangle_png(self, path) -> None:
+    def render_triangle_png(
+        self, path, *, certificate: bool | str | Path = False
+    ) -> None:
         """Render triangle to PNG file."""
-        numpy_to_png(path, self.render_triangle_rgba())
+        numpy_to_png(path, self.render_triangle_rgba(certificate=certificate))
 
 
 # -----------------------------------------------------------------------------
 # Image I/O utilities
 # -----------------------------------------------------------------------------
 def numpy_to_png(path, array: np.ndarray) -> None:
-    """Save numpy array as PNG file."""
+    """Save an existing numpy array as PNG.
+
+    Outside CENSOR's render-certificate scope: array-to-PNG I/O executes no
+    render.
+    """
     path_str = str(path)
     if not path_str.lower().endswith('.png'):
         raise ValueError(f"File must have .png extension, got {path_str}")
@@ -335,7 +361,11 @@ def numpy_to_png(path, array: np.ndarray) -> None:
 
 
 def png_to_numpy(path) -> np.ndarray:
-    """Load PNG file as numpy array."""
+    """Load an existing PNG into a numpy array.
+
+    Outside CENSOR's render-certificate scope: PNG-to-array I/O executes no
+    render.
+    """
     return _load_png_rgba(path)
 
 
@@ -596,6 +626,9 @@ __all__ = [
     "render_adjudication_pair",
     # PROMETHEUS: GPU terrain path-traced reference
     "hybrid_render_terrain_reference",
+    # CENSOR: certified BRDF pixel renders
+    "render_brdf_tile",
+    "render_brdf_tile_overrides",
     # VERITAS: per-pixel cryptographic provenance
     "seal_provenance",
     "verify_provenance",
@@ -607,6 +640,13 @@ __all__ = [
     "clear_native_degradations",
     # CENSOR: negotiated GPU capability report
     "capabilities",
+    # CENSOR: last-render execution certificate JSON
+    "render_execution_report",
+    "begin_render_execution_capture",
+    "finish_render_execution_capture",
+    "abort_render_execution_capture",
+    # CENSOR: native Ed25519 certificate signer
+    "sign_render_certificate_digest",
     # CENSOR: budget-enforce test helper
     "request_host_visible_allocation_for_test",
     # CENSOR: typed GPU-error exceptions

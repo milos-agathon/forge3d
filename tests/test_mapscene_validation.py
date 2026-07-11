@@ -49,7 +49,6 @@ def test_validate_returns_structured_report_with_layer_summaries_and_memory_esti
             ),
             f3d.PointCloudLayer(
                 layer_id="points",
-                path="fixtures/points.las",
                 crs="EPSG:32610",
                 point_count=100,
                 metadata={"asset_status": "fixture"},

@@ -1,4 +1,5 @@
 use crate::core::error::RenderError;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use bytemuck::{Pod, Zeroable};
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
@@ -80,7 +81,7 @@ impl DebugFlags {
 /// H21: Texture atlas configuration
 #[derive(Debug)]
 pub struct TextureAtlas {
-    pub texture: wgpu::Texture,
+    pub texture: TrackedTexture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
     pub width: u32,
@@ -99,20 +100,23 @@ impl TextureAtlas {
         tile_size: u32,
         data: &[u8],
     ) -> Result<Self, RenderError> {
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("vf.Vector.Point.TextureAtlas"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("vf.Vector.Point.TextureAtlas"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
 
         queue.write_texture(
             wgpu::ImageCopyTexture {

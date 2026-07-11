@@ -1,12 +1,13 @@
 use super::*;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::terrain::renderer::core::TERRAIN_DEPTH_FORMAT;
 
 pub(in crate::terrain::renderer) struct RenderTargets {
-    pub(in crate::terrain::renderer) internal_texture: wgpu::Texture,
+    pub(in crate::terrain::renderer) internal_texture: TrackedTexture,
     pub(in crate::terrain::renderer) internal_view: wgpu::TextureView,
-    pub(in crate::terrain::renderer) _msaa_texture: Option<wgpu::Texture>,
+    pub(in crate::terrain::renderer) _msaa_texture: Option<TrackedTexture>,
     pub(in crate::terrain::renderer) msaa_view: Option<wgpu::TextureView>,
-    pub(in crate::terrain::renderer) _depth_texture: wgpu::Texture,
+    pub(in crate::terrain::renderer) _depth_texture: TrackedTexture,
     pub(in crate::terrain::renderer) depth_view: wgpu::TextureView,
     pub(in crate::terrain::renderer) out_width: u32,
     pub(in crate::terrain::renderer) out_height: u32,
@@ -151,27 +152,56 @@ impl TerrainScene {
         let internal_height = ((out_height as f32 * render_scale).round().max(1.0)) as u32;
         let needs_scaling = internal_width != out_width || internal_height != out_height;
 
-        let internal_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.internal.render_target"),
-            size: wgpu::Extent3d {
-                width: internal_width,
-                height: internal_height,
-                depth_or_array_layers: 1,
+        let internal_texture = tracked_create_texture(
+            self.device.as_ref(),
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.internal.render_target"),
+                size: wgpu::Extent3d {
+                    width: internal_width,
+                    height: internal_height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: color_format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: color_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
         let internal_view = internal_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let msaa_texture = if effective_msaa > 1 {
-            Some(self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("terrain.msaa.render_target"),
+            Some(tracked_create_texture(
+                self.device.as_ref(),
+                &wgpu::TextureDescriptor {
+                    label: Some("terrain.msaa.render_target"),
+                    size: wgpu::Extent3d {
+                        width: internal_width,
+                        height: internal_height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: effective_msaa,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: color_format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                },
+            )?)
+        } else {
+            None
+        };
+        let msaa_view = msaa_texture
+            .as_ref()
+            .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()));
+
+        let depth_texture = tracked_create_texture(
+            self.device.as_ref(),
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.depth.render_target"),
                 size: wgpu::Extent3d {
                     width: internal_width,
                     height: internal_height,
@@ -180,31 +210,11 @@ impl TerrainScene {
                 mip_level_count: 1,
                 sample_count: effective_msaa,
                 dimension: wgpu::TextureDimension::D2,
-                format: color_format,
+                format: TERRAIN_DEPTH_FORMAT,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                 view_formats: &[],
-            }))
-        } else {
-            None
-        };
-        let msaa_view = msaa_texture
-            .as_ref()
-            .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()));
-
-        let depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.depth.render_target"),
-            size: wgpu::Extent3d {
-                width: internal_width,
-                height: internal_height,
-                depth_or_array_layers: 1,
             },
-            mip_level_count: 1,
-            sample_count: effective_msaa,
-            dimension: wgpu::TextureDimension::D2,
-            format: TERRAIN_DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        )?;
         let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let color_attachment_sample_count = if effective_msaa > 1 {

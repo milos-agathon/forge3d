@@ -6,6 +6,7 @@ impl Scene {
     // B15: Image-Based Lighting (IBL) Polish API
     #[pyo3(text_signature = "($self, quality='medium')")]
     pub fn enable_ibl(&mut self, quality: Option<&str>) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         let g = crate::core::gpu::try_ctx()?;
 
         let quality_enum = match quality.unwrap_or("medium") {
@@ -20,7 +21,7 @@ impl Scene {
             }
         };
 
-        let mut renderer = crate::core::ibl::IBLRenderer::new(&g.device, quality_enum);
+        let mut renderer = crate::core::ibl::IBLRenderer::new(&g.device, quality_enum)?;
 
         // Initialize with default environment
         renderer

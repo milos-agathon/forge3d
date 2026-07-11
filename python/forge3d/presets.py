@@ -185,7 +185,7 @@ def rainier_showcase() -> Dict[str, Any]:
             "cascades": 4,
         },
         "gi": {
-            "modes": ["ssao"],
+            "modes": ["ibl", "ssao"],
             "ambient_occlusion_strength": 0.35,
         },
         "atmosphere": {
@@ -262,7 +262,7 @@ def rainier_relief() -> Dict[str, Any]:
             "light_size": 2.0,
         },
         "gi": {
-            "modes": ["ssao"],
+            "modes": ["ibl", "ssao"],
             "ambient_occlusion_strength": 0.45,
         },
         "atmosphere": {

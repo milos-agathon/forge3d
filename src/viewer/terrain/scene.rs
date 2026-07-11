@@ -5,11 +5,11 @@ use super::denoise::DenoisePass;
 use super::render::TerrainUniforms;
 use super::shader::TERRAIN_SHADER;
 use super::vector_overlay::{drape_vertices, VectorOverlayLayer, VectorOverlayStack};
+use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 use crate::shadows::{CsmConfig, CsmRenderer};
 use anyhow::Result;
 use glam::{Mat4, Vec3};
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 
 /// P0.1/M1: WBOIT compose shader for final compositing of accumulation buffers
 const WBOIT_COMPOSE_SHADER: &str = r#"
@@ -64,12 +64,12 @@ pub struct ViewerTerrainData {
     pub dimensions: (u32, u32),
     pub domain: (f32, f32),
     pub revision: u64,
-    pub _heightmap_texture: wgpu::Texture,
+    pub _heightmap_texture: TrackedTexture,
     pub heightmap_view: wgpu::TextureView,
-    pub vertex_buffer: wgpu::Buffer,
-    pub index_buffer: wgpu::Buffer,
+    pub vertex_buffer: TrackedBuffer,
+    pub index_buffer: TrackedBuffer,
     pub index_count: u32,
-    pub uniform_buffer: wgpu::Buffer,
+    pub uniform_buffer: TrackedBuffer,
     pub bind_group: wgpu::BindGroup,
     // Camera
     pub cam_radius: f32,
@@ -161,7 +161,7 @@ pub struct ViewerTerrainScene {
     pub(super) queue: Arc<wgpu::Queue>,
     pub(super) pipeline: wgpu::RenderPipeline,
     pub(super) bind_group_layout: wgpu::BindGroupLayout,
-    pub(super) depth_texture: Option<wgpu::Texture>,
+    pub(super) depth_texture: Option<TrackedTexture>,
     pub(super) depth_view: Option<wgpu::TextureView>,
     pub(super) depth_size: (u32, u32),
     pub terrain: Option<ViewerTerrainData>,
@@ -170,7 +170,7 @@ pub struct ViewerTerrainScene {
     /// PBR pipeline (created lazily when PBR mode enabled)
     pub pbr_pipeline: Option<wgpu::RenderPipeline>,
     pub(super) pbr_bind_group_layout: Option<wgpu::BindGroupLayout>,
-    pub(super) pbr_uniform_buffer: Option<wgpu::Buffer>,
+    pub(super) pbr_uniform_buffer: Option<TrackedBuffer>,
     pub(super) pbr_bind_group: Option<wgpu::BindGroup>,
     pub(super) terrain_ibl_renderer: Option<crate::core::ibl::IBLRenderer>,
     pub(super) terrain_ibl_hdr_path: Option<std::path::PathBuf>,
@@ -179,24 +179,24 @@ pub struct ViewerTerrainScene {
     pub(super) terrain_ibl_brdf_view: Option<wgpu::TextureView>,
     pub(super) terrain_ibl_sampler: Option<wgpu::Sampler>,
     pub(super) terrain_ibl_specular_mip_count: u32,
-    pub(super) terrain_ibl_fallback_cube: Option<wgpu::Texture>,
+    pub(super) terrain_ibl_fallback_cube: Option<TrackedTexture>,
     pub(super) terrain_ibl_fallback_cube_view: Option<wgpu::TextureView>,
-    pub(super) terrain_ibl_fallback_brdf: Option<wgpu::Texture>,
+    pub(super) terrain_ibl_fallback_brdf: Option<TrackedTexture>,
     pub(super) terrain_ibl_fallback_brdf_view: Option<wgpu::TextureView>,
     // Heightfield compute pipelines for AO and sun visibility
     pub(super) height_ao_pipeline: Option<wgpu::ComputePipeline>,
     pub(super) height_ao_bind_group_layout: Option<wgpu::BindGroupLayout>,
-    pub(super) height_ao_texture: Option<wgpu::Texture>,
+    pub(super) height_ao_texture: Option<TrackedTexture>,
     pub(super) height_ao_view: Option<wgpu::TextureView>,
-    pub(super) height_ao_uniform_buffer: Option<wgpu::Buffer>,
+    pub(super) height_ao_uniform_buffer: Option<TrackedBuffer>,
     pub(super) sun_vis_pipeline: Option<wgpu::ComputePipeline>,
     pub(super) sun_vis_bind_group_layout: Option<wgpu::BindGroupLayout>,
-    pub(super) sun_vis_texture: Option<wgpu::Texture>,
+    pub(super) sun_vis_texture: Option<TrackedTexture>,
     pub(super) sun_vis_view: Option<wgpu::TextureView>,
-    pub(super) sun_vis_uniform_buffer: Option<wgpu::Buffer>,
+    pub(super) sun_vis_uniform_buffer: Option<TrackedBuffer>,
     pub(super) sampler_nearest: Option<wgpu::Sampler>,
     // Fallback 1x1 white texture for when AO/sun_vis are disabled
-    pub(super) fallback_texture: Option<wgpu::Texture>,
+    pub(super) fallback_texture: Option<TrackedTexture>,
     pub(super) fallback_texture_view: Option<wgpu::TextureView>,
     // Post-process pass for lens effects (distortion, CA, vignette)
     pub(super) post_process: Option<super::post_process::PostProcessPass>,
@@ -217,9 +217,9 @@ pub struct ViewerTerrainScene {
     pub oit_enabled: bool,
     pub oit_mode: String,
     // P0.1/M1: WBOIT accumulation resources
-    pub(super) wboit_color_texture: Option<wgpu::Texture>,
+    pub(super) wboit_color_texture: Option<TrackedTexture>,
     pub(super) wboit_color_view: Option<wgpu::TextureView>,
-    pub(super) wboit_reveal_texture: Option<wgpu::Texture>,
+    pub(super) wboit_reveal_texture: Option<TrackedTexture>,
     pub(super) wboit_reveal_view: Option<wgpu::TextureView>,
     pub(super) wboit_compose_pipeline: Option<wgpu::RenderPipeline>,
     pub(super) wboit_compose_bind_group: Option<wgpu::BindGroup>,
@@ -229,12 +229,12 @@ pub struct ViewerTerrainScene {
     // P6.2: Shadow mapping support
     pub(super) csm_renderer: Option<crate::shadows::CsmRenderer>,
     pub(super) moment_pass: Option<crate::shadows::MomentGenerationPass>,
-    pub(super) csm_uniform_buffer: Option<wgpu::Buffer>,
+    pub(super) csm_uniform_buffer: Option<TrackedBuffer>,
 
     // Shadow rendering resources
     pub(super) shadow_pipeline: Option<wgpu::RenderPipeline>,
-    pub(super) shadow_uniform_buffers: Vec<wgpu::Buffer>, // One per cascade
-    pub(super) shadow_bind_groups: Vec<wgpu::BindGroup>,  // One per cascade
+    pub(super) shadow_uniform_buffers: Vec<TrackedBuffer>, // One per cascade
+    pub(super) shadow_bind_groups: Vec<wgpu::BindGroup>,   // One per cascade
 
     // P1.4: TAA support for terrain viewer
     pub(super) taa_renderer: Option<crate::core::taa::TaaRenderer>,

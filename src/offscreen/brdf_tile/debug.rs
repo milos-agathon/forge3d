@@ -1,6 +1,7 @@
 use std::sync::Once;
 
 use super::request::PreparedBrdfTileRequest;
+use crate::core::resource_tracker::tracked_create_buffer;
 
 pub(super) fn log_gpu_info_once() {
     static LOG_GPU_INFO: Once = Once::new();
@@ -45,12 +46,21 @@ pub(super) fn read_debug_dot_products(
     queue: &wgpu::Queue,
     debug_buffer: &wgpu::Buffer,
 ) {
-    let debug_staging = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("offscreen.brdf_tile.debug_staging"),
-        size: 16,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+    let debug_staging = match tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("offscreen.brdf_tile.debug_staging"),
+            size: 16,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    ) {
+        Ok(buffer) => buffer,
+        Err(e) => {
+            log::warn!("[M1] failed to allocate debug staging buffer: {e}");
+            return;
+        }
+    };
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("offscreen.brdf_tile.debug_readback"),

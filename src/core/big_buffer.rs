@@ -6,6 +6,7 @@
 
 use super::error::RenderError;
 use crate::core::memory_tracker::ResourceRegistry;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use wgpu::{Buffer, BufferAddress, BufferDescriptor, BufferUsages, Device};
@@ -139,7 +140,7 @@ impl BigBufferAllocator {
 /// Big buffer for efficient per-object data storage
 pub struct BigBuffer {
     /// The underlying GPU buffer
-    buffer: Buffer,
+    buffer: TrackedBuffer,
     /// Allocator for managing blocks within the buffer
     allocator: Arc<Mutex<BigBufferAllocator>>,
     /// Size of the buffer in bytes
@@ -151,7 +152,7 @@ impl BigBuffer {
     pub fn new(
         device: &Device,
         size: u32,
-        registry: Option<&ResourceRegistry>,
+        _registry: Option<&ResourceRegistry>,
     ) -> Result<Self, RenderError> {
         if size == 0 || size > BIG_BUFFER_MAX_SIZE as u32 {
             return Err(RenderError::Upload(format!(
@@ -165,17 +166,18 @@ impl BigBuffer {
             / BIG_BUFFER_BLOCK_SIZE as u32)
             * BIG_BUFFER_BLOCK_SIZE as u32;
 
-        let buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("BigBuffer"),
-            size: aligned_size as BufferAddress,
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
-
-        // Track allocation in registry
-        if let Some(registry) = registry {
-            registry.track_buffer_allocation(aligned_size as u64, false);
-        }
+        // `tracked_create_buffer` records this allocation in the global registry
+        // and ledger (superseding the legacy `_registry` accounting, which had no
+        // matching free on drop).
+        let buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("BigBuffer"),
+                size: aligned_size as BufferAddress,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            },
+        )?;
 
         let allocator = Arc::new(Mutex::new(BigBufferAllocator::new(aligned_size)));
 

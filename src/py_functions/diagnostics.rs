@@ -112,20 +112,26 @@ pub(crate) fn c6_mt_record_demo(py: Python<'_>) -> PyResult<Py<PyDict>> {
     let device = Arc::clone(&g.device);
     let queue = Arc::clone(&g.queue);
 
-    // Create two buffers
+    // Create two tracked buffers shared with the copy tasks.
     let sz: u64 = 4096;
-    let src = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("mt_src"),
-        size: sz,
-        usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::MAP_WRITE,
-        mapped_at_creation: false,
-    }));
-    let dst = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("mt_dst"),
-        size: sz,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    }));
+    let src = Arc::new(crate::core::resource_tracker::tracked_create_buffer(
+        &device,
+        &wgpu::BufferDescriptor {
+            label: Some("mt_src"),
+            size: sz,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::MAP_WRITE,
+            mapped_at_creation: false,
+        },
+    )?);
+    let dst = Arc::new(crate::core::resource_tracker::tracked_create_buffer(
+        &device,
+        &wgpu::BufferDescriptor {
+            label: Some("mt_dst"),
+            size: sz,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        },
+    )?);
 
     let config = MtConfig {
         thread_count: 2,
@@ -172,21 +178,25 @@ pub(crate) fn c7_async_compute_demo(py: Python<'_>) -> PyResult<Py<PyDict>> {
 
     // Minimal compute shader and pipeline
     let shader_src = "@compute @workgroup_size(1) fn main() {}";
-    let module = device.create_shader_module(ShaderModuleDescriptor {
-        label: Some("c7_trivial_compute"),
-        source: ShaderSource::Wgsl(shader_src.into()),
-    });
+    let module = crate::core::shader_registry::create_labeled_shader_module(
+        &device,
+        "c7_trivial_compute",
+        shader_src,
+    );
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("c7_compute_layout"),
         bind_group_layouts: &[],
         push_constant_ranges: &[],
     });
-    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("c7_compute_pipeline"),
-        layout: Some(&layout),
-        module: &module,
-        entry_point: "main",
-    });
+    let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+        &device,
+        &wgpu::ComputePipelineDescriptor {
+            label: Some("c7_compute_pipeline"),
+            layout: Some(&layout),
+            module: &module,
+            entry_point: "main",
+        },
+    );
 
     let desc = AcPassDesc {
         label: "trivial".to_string(),
@@ -359,6 +369,54 @@ pub(crate) fn native_degradations(py: Python<'_>) -> PyResult<PyObject> {
 #[pyfunction]
 pub(crate) fn clear_native_degradations() {
     crate::core::degradation::clear_degradations();
+}
+
+// ---------------------------------------------------------
+// CENSOR Task 9: RenderCertificate execution report
+// ---------------------------------------------------------
+/// Outside CENSOR's render-certificate scope: serialized JSON execution report
+/// for the LAST completed native render; this is a getter and renders nothing.
+/// The report includes
+/// engine revision + WGSL hashes, adapter/capabilities, live per-pass GPU
+/// timings, peak allocation ledger, and recorded degradations. Raises when no
+/// render has completed in this process yet.
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn render_execution_report() -> PyResult<String> {
+    Ok(crate::core::certificate::execution_report_json()?)
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn begin_render_execution_capture(entry_point: &str) {
+    crate::core::certificate::begin_external_render_capture(entry_point);
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (pass_label, draw_calls = 1))]
+pub(crate) fn finish_render_execution_capture(pass_label: &str, draw_calls: u32) -> PyResult<()> {
+    Ok(crate::core::certificate::finish_external_render_capture(
+        pass_label, draw_calls,
+    )?)
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn abort_render_execution_capture() {
+    crate::core::certificate::abort_external_render_capture();
+}
+
+/// Sign a canonical RenderCertificate SHA256 digest with `ed25519-dalek`.
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn sign_render_certificate_digest(
+    seed: Vec<u8>,
+    digest: Vec<u8>,
+) -> PyResult<(String, String)> {
+    Ok(crate::core::certificate::sign_payload_digest(
+        &seed, &digest,
+    )?)
 }
 
 // ---------------------------------------------------------

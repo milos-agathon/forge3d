@@ -5,27 +5,14 @@ use super::super::*;
 pub struct AovFrame {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
-    albedo_texture: Option<wgpu::Texture>,
-    normal_texture: Option<wgpu::Texture>,
-    depth_texture: Option<wgpu::Texture>,
+    albedo_texture: Option<crate::core::resource_tracker::TrackedTexture>,
+    normal_texture: Option<crate::core::resource_tracker::TrackedTexture>,
+    depth_texture: Option<crate::core::resource_tracker::TrackedTexture>,
     /// VERITAS: per-pixel VT source-id map (R32Uint, 0 == SOURCE_ID_NONE).
-    /// Tracked in the memory registry at creation; freed in `Drop`.
-    source_id_texture: Option<wgpu::Texture>,
+    /// Registry/ledger accounting is owned by the `TrackedTexture` wrapper.
+    source_id_texture: Option<crate::core::resource_tracker::TrackedTexture>,
     width: u32,
     height: u32,
-}
-
-#[cfg(feature = "extension-module")]
-impl Drop for AovFrame {
-    fn drop(&mut self) {
-        if self.source_id_texture.is_some() {
-            crate::core::memory_tracker::global_tracker().free_texture_allocation(
-                self.width,
-                self.height,
-                wgpu::TextureFormat::R32Uint,
-            );
-        }
-    }
 }
 
 #[cfg(feature = "images")]
@@ -158,10 +145,10 @@ impl AovFrame {
     pub(crate) fn new(
         device: Arc<wgpu::Device>,
         queue: Arc<wgpu::Queue>,
-        albedo_texture: Option<wgpu::Texture>,
-        normal_texture: Option<wgpu::Texture>,
-        depth_texture: Option<wgpu::Texture>,
-        source_id_texture: Option<wgpu::Texture>,
+        albedo_texture: Option<crate::core::resource_tracker::TrackedTexture>,
+        normal_texture: Option<crate::core::resource_tracker::TrackedTexture>,
+        depth_texture: Option<crate::core::resource_tracker::TrackedTexture>,
+        source_id_texture: Option<crate::core::resource_tracker::TrackedTexture>,
         width: u32,
         height: u32,
     ) -> Self {

@@ -1,10 +1,10 @@
+use crate::core::resource_tracker::tracked_create_buffer_init;
 use crate::viewer::event_loop::{
     set_pending_bundle_load, set_pending_bundle_save, update_ipc_transform_stats,
 };
 use crate::viewer::viewer_enums::ViewerCmd;
 use crate::viewer::viewer_types;
 use crate::viewer::Viewer;
-use wgpu::util::DeviceExt;
 
 pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
     match cmd {
@@ -152,14 +152,21 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 }
 
                 let vertex_data = bytemuck::cast_slice(&vertices);
-                let new_vb = viewer
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                match tracked_create_buffer_init(
+                    &viewer.device,
+                    &wgpu::util::BufferInitDescriptor {
                         label: Some("viewer.ipc.mesh.vb.transformed"),
                         contents: vertex_data,
                         usage: wgpu::BufferUsages::VERTEX,
-                    });
-                viewer.geom_vb = Some(new_vb);
+                    },
+                ) {
+                    Ok(new_vb) => {
+                        viewer.geom_vb = Some(new_vb);
+                    }
+                    Err(e) => {
+                        eprintln!("[viewer] failed to allocate transformed mesh vb: {e}");
+                    }
+                }
 
                 let msg = format!(
                     "[D1-CPU-TRANSFORM] frame={} vertices={} trans=[{:.3},{:.3},{:.3}] scale=[{:.3},{:.3},{:.3}]\n",

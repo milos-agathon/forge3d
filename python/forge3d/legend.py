@@ -9,6 +9,8 @@ from typing import Literal
 
 import numpy as np
 
+from .certificate import _captured_cpu_render
+
 
 def _linear_to_srgb(rgb: np.ndarray) -> np.ndarray:
     """Convert linear RGB values in [0, 1] to display sRGB."""
@@ -106,11 +108,19 @@ class Legend:
                 bar[:, x] = color
         return bar
 
-    def render(self) -> np.ndarray:
+    @_captured_cpu_render("python.legend.render", "legend.cpu", draw_calls=1)
+    def render(self, *, certificate: bool | str = False) -> np.ndarray:
         """Render the complete legend to an RGBA image."""
         try:
             from PIL import Image, ImageDraw, ImageFont
         except ImportError:
+            from . import _degradation
+
+            _degradation.record(
+                "optional_dependency_absent",
+                "legend.pillow",
+                "Pillow is unavailable; legend labels and ticks were omitted",
+            )
             return self._render_gradient_bar()
 
         cfg = self.config

@@ -1,17 +1,19 @@
 use super::config::MosaicConfig;
 use super::util::{copy_rows_with_padding, padded_bytes_per_row};
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::terrain::tiling::TileId;
 use half::f16;
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use wgpu::{
     Extent3d, ImageCopyTexture, ImageDataLayout, Origin3d, Queue, Sampler, SamplerDescriptor,
-    Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
+    TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
 };
 
 #[derive(Debug)]
 pub struct HeightMosaic {
-    pub texture: Texture,
+    pub texture: TrackedTexture,
     pub view: TextureView,
     pub sampler: Sampler,
     pub config: MosaicConfig,
@@ -22,7 +24,11 @@ pub struct HeightMosaic {
 }
 
 impl HeightMosaic {
-    pub fn new(device: &wgpu::Device, config: MosaicConfig, filter_linear: bool) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        config: MosaicConfig,
+        filter_linear: bool,
+    ) -> RenderResult<Self> {
         let (w, h) = config.texture_size();
         // E6: Choose format — prefer R32Float; if linear filtering requested but unsupported, fall back to RG16Float
         let has_f32_filter = device
@@ -35,24 +41,27 @@ impl HeightMosaic {
         } else {
             TextureFormat::R32Float
         };
-        let texture = device.create_texture(&TextureDescriptor {
-            label: Some(if use_rg16f {
-                "terrain-height-mosaic-rg16f"
-            } else {
-                "terrain-height-mosaic-r32f"
-            }),
-            size: Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
+        let texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some(if use_rg16f {
+                    "terrain-height-mosaic-rg16f"
+                } else {
+                    "terrain-height-mosaic-r32f"
+                }),
+                size: Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("terrain-height-mosaic-sampler"),
@@ -72,7 +81,7 @@ impl HeightMosaic {
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
-        Self {
+        Ok(Self {
             texture,
             view,
             sampler,
@@ -80,7 +89,7 @@ impl HeightMosaic {
             format,
             slot_map: HashMap::new(),
             lru: VecDeque::new(),
-        }
+        })
     }
 
     fn find_free_slot(&self) -> Option<(u32, u32)> {

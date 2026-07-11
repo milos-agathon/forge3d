@@ -8,15 +8,24 @@ import types
 from pathlib import Path
 import importlib.util
 import argparse
+import sys
 
 from forge3d.config import RendererConfig
 
 
 def _load_module_by_path(path: Path) -> types.ModuleType:
+    examples_dir = str(path.parent.resolve())
+    added_examples_dir = examples_dir not in sys.path
+    if added_examples_dir:
+        sys.path.insert(0, examples_dir)
     spec = importlib.util.spec_from_file_location("terrain_demo", str(path))
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+    try:
+        spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+    finally:
+        if added_examples_dir:
+            sys.path.remove(examples_dir)
     return mod
 
 

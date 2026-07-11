@@ -102,7 +102,6 @@ def test_point_cloud_layer_reports_underdeveloped_render_path_before_render():
         layers=[
             f3d.PointCloudLayer(
                 layer_id="points",
-                path="fixtures/points.las",
                 crs="EPSG:32610",
                 point_count=24,
                 metadata={"asset_status": "fixture"},

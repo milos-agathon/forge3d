@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_texture};
 
 impl ViewerTerrainScene {
     pub fn init_pbr_pipeline(&mut self, target_format: wgpu::TextureFormat) -> Result<()> {
@@ -170,14 +171,11 @@ impl ViewerTerrainScene {
                     ],
                 });
 
-        let shader = self
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("terrain_viewer_pbr.shader"),
-                source: wgpu::ShaderSource::Wgsl(
-                    crate::viewer::terrain::shader_pbr::TERRAIN_PBR_SHADER.into(),
-                ),
-            });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            &self.device,
+            "terrain_viewer_pbr.shader",
+            crate::viewer::terrain::shader_pbr::TERRAIN_PBR_SHADER,
+        );
 
         let pipeline_layout = self
             .device
@@ -187,9 +185,9 @@ impl ViewerTerrainScene {
                 push_constant_ranges: &[],
             });
 
-        let pbr_pipeline = self
-            .device
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let pbr_pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            &self.device,
+            &wgpu::RenderPipelineDescriptor {
                 label: Some("terrain_viewer_pbr.pipeline"),
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
@@ -239,7 +237,8 @@ impl ViewerTerrainScene {
                 }),
                 multisample: wgpu::MultisampleState::default(),
                 multiview: None,
-            });
+            },
+        );
 
         self.pbr_pipeline = Some(pbr_pipeline);
         self.pbr_bind_group_layout = Some(pbr_bind_group_layout);
@@ -273,32 +272,38 @@ impl ViewerTerrainScene {
             let ao_height = (height as f32 * self.pbr_config.height_ao.resolution_scale) as u32;
 
             // Create AO texture
-            let ao_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("terrain_viewer.height_ao_texture"),
-                size: wgpu::Extent3d {
-                    width: ao_width,
-                    height: ao_height,
-                    depth_or_array_layers: 1,
+            let ao_texture = tracked_create_texture(
+                &self.device,
+                &wgpu::TextureDescriptor {
+                    label: Some("terrain_viewer.height_ao_texture"),
+                    size: wgpu::Extent3d {
+                        width: ao_width,
+                        height: ao_height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::R32Float,
+                    usage: wgpu::TextureUsages::STORAGE_BINDING
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R32Float,
-                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            });
+            )?;
             self.height_ao_view =
                 Some(ao_texture.create_view(&wgpu::TextureViewDescriptor::default()));
             self.height_ao_texture = Some(ao_texture);
 
             // Create uniform buffer
-            self.height_ao_uniform_buffer =
-                Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+            self.height_ao_uniform_buffer = Some(tracked_create_buffer(
+                &self.device,
+                &wgpu::BufferDescriptor {
                     label: Some("terrain_viewer.height_ao_uniforms"),
                     size: 64,
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
-                }));
+                },
+            )?);
 
             // Create bind group layout
             let ao_bind_group_layout =
@@ -349,14 +354,11 @@ impl ViewerTerrainScene {
                         ],
                     });
 
-            let ao_shader = self
-                .device
-                .create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some("terrain_viewer.height_ao_shader"),
-                    source: wgpu::ShaderSource::Wgsl(
-                        include_str!("../../../shaders/heightfield_ao.wgsl").into(),
-                    ),
-                });
+            let ao_shader = crate::core::shader_registry::create_labeled_shader_module(
+                &self.device,
+                "terrain_viewer.height_ao_shader",
+                include_str!("../../../shaders/heightfield_ao.wgsl"),
+            );
 
             let ao_pipeline_layout =
                 self.device
@@ -366,14 +368,17 @@ impl ViewerTerrainScene {
                         push_constant_ranges: &[],
                     });
 
-            self.height_ao_pipeline = Some(self.device.create_compute_pipeline(
-                &wgpu::ComputePipelineDescriptor {
-                    label: Some("terrain_viewer.height_ao_pipeline"),
-                    layout: Some(&ao_pipeline_layout),
-                    module: &ao_shader,
-                    entry_point: "main",
-                },
-            ));
+            self.height_ao_pipeline = Some(
+                crate::core::shader_registry::create_compute_pipeline_scoped(
+                    &self.device,
+                    &wgpu::ComputePipelineDescriptor {
+                        label: Some("terrain_viewer.height_ao_pipeline"),
+                        layout: Some(&ao_pipeline_layout),
+                        module: &ao_shader,
+                        entry_point: "main",
+                    },
+                ),
+            );
             self.height_ao_bind_group_layout = Some(ao_bind_group_layout);
             println!(
                 "[terrain] Height AO compute pipeline initialized ({}x{})",
@@ -388,32 +393,38 @@ impl ViewerTerrainScene {
                 (height as f32 * self.pbr_config.sun_visibility.resolution_scale) as u32;
 
             // Create sun vis texture
-            let sv_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("terrain_viewer.sun_vis_texture"),
-                size: wgpu::Extent3d {
-                    width: sv_width,
-                    height: sv_height,
-                    depth_or_array_layers: 1,
+            let sv_texture = tracked_create_texture(
+                &self.device,
+                &wgpu::TextureDescriptor {
+                    label: Some("terrain_viewer.sun_vis_texture"),
+                    size: wgpu::Extent3d {
+                        width: sv_width,
+                        height: sv_height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::R32Float,
+                    usage: wgpu::TextureUsages::STORAGE_BINDING
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R32Float,
-                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            });
+            )?;
             self.sun_vis_view =
                 Some(sv_texture.create_view(&wgpu::TextureViewDescriptor::default()));
             self.sun_vis_texture = Some(sv_texture);
 
             // Create uniform buffer
-            self.sun_vis_uniform_buffer =
-                Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+            self.sun_vis_uniform_buffer = Some(tracked_create_buffer(
+                &self.device,
+                &wgpu::BufferDescriptor {
                     label: Some("terrain_viewer.sun_vis_uniforms"),
                     size: 64,
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
-                }));
+                },
+            )?);
 
             // Create bind group layout
             let sv_bind_group_layout =
@@ -464,14 +475,11 @@ impl ViewerTerrainScene {
                         ],
                     });
 
-            let sv_shader = self
-                .device
-                .create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some("terrain_viewer.sun_vis_shader"),
-                    source: wgpu::ShaderSource::Wgsl(
-                        include_str!("../../../shaders/heightfield_sun_vis.wgsl").into(),
-                    ),
-                });
+            let sv_shader = crate::core::shader_registry::create_labeled_shader_module(
+                &self.device,
+                "terrain_viewer.sun_vis_shader",
+                include_str!("../../../shaders/heightfield_sun_vis.wgsl"),
+            );
 
             let sv_pipeline_layout =
                 self.device
@@ -481,14 +489,17 @@ impl ViewerTerrainScene {
                         push_constant_ranges: &[],
                     });
 
-            self.sun_vis_pipeline = Some(self.device.create_compute_pipeline(
-                &wgpu::ComputePipelineDescriptor {
-                    label: Some("terrain_viewer.sun_vis_pipeline"),
-                    layout: Some(&sv_pipeline_layout),
-                    module: &sv_shader,
-                    entry_point: "main",
-                },
-            ));
+            self.sun_vis_pipeline = Some(
+                crate::core::shader_registry::create_compute_pipeline_scoped(
+                    &self.device,
+                    &wgpu::ComputePipelineDescriptor {
+                        label: Some("terrain_viewer.sun_vis_pipeline"),
+                        layout: Some(&sv_pipeline_layout),
+                        module: &sv_shader,
+                        entry_point: "main",
+                    },
+                ),
+            );
             self.sun_vis_bind_group_layout = Some(sv_bind_group_layout);
             println!(
                 "[terrain] Sun visibility compute pipeline initialized ({}x{})",

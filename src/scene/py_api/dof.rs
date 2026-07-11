@@ -6,6 +6,7 @@ impl Scene {
     // B6: Depth of Field API
     #[pyo3(text_signature = "($self, quality='medium')")]
     pub fn enable_dof(&mut self, quality: Option<&str>) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         let quality_enum = match quality.unwrap_or("medium") {
             "low" => crate::core::dof::DofQuality::Low,
             "medium" => crate::core::dof::DofQuality::Medium,
@@ -21,7 +22,7 @@ impl Scene {
 
         let g = crate::core::gpu::try_ctx()?;
         let renderer =
-            crate::core::dof::DofRenderer::new(&g.device, self.width, self.height, quality_enum);
+            crate::core::dof::DofRenderer::new(&g.device, self.width, self.height, quality_enum)?;
 
         self.dof_renderer = Some(renderer);
         self.dof_enabled = true;

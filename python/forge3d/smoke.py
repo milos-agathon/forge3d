@@ -11,6 +11,7 @@ from typing import Any, Iterable, Mapping, Sequence
 import numpy as np
 
 from ._native import get_native_module
+from .certificate import _captured_cpu_render
 
 _native = get_native_module()
 # PyO3 0.21 ABI3 extension classes are not safe to construct under Python 3.14
@@ -394,6 +395,7 @@ else:
             fovy_deg: float = 45.0,
             sun_direction: tuple[float, float, float] = (0.4, 0.8, -0.2),
             settings: SmokeRenderSettings | None = None,
+            certificate: bool | str | Path = False,
         ) -> np.ndarray:
             del camera_pos, target, up, fovy_deg
             settings = settings or SmokeRenderSettings()
@@ -403,8 +405,12 @@ else:
                 view_direction=(0.0, -1.0, 0.0),
                 sun_direction=sun_direction,
                 settings=settings,
+                certificate=certificate,
             )
 
+        @_captured_cpu_render(
+            "python.smoke.render_projection_rgba", "smoke.python_projection", draw_calls=1
+        )
         def render_projection_rgba(
             self,
             width: int,
@@ -412,7 +418,15 @@ else:
             view_direction: tuple[float, float, float] = (0.0, -1.0, 0.0),
             sun_direction: tuple[float, float, float] = (0.4, 0.8, -0.2),
             settings: SmokeRenderSettings | None = None,
+            certificate: bool | str | Path = False,
         ) -> np.ndarray:
+            from . import _degradation
+
+            _degradation.record(
+                "cpu_fallback",
+                "smoke.render",
+                "native smoke bindings are unavailable; NumPy CPU raymarching was used",
+            )
             settings = settings or SmokeRenderSettings()
             density = np.clip(self.density, 0.0, None).astype(np.float32, copy=False)
             soot_volume = np.clip(self.soot, 0.0, None).astype(np.float32, copy=False)

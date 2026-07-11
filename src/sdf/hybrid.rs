@@ -7,6 +7,7 @@ use once_cell::sync::OnceCell;
 use crate::accel::BvhHandle;
 use crate::core::error::{RenderError, RenderResult};
 use crate::core::gpu::try_ctx;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use crate::sdf::SdfScene;
 
 // Re-export types from hybrid_types
@@ -36,15 +37,19 @@ pub struct HybridScene {
 /// for (WGSL `BvhNode`, 48 bytes) — wgpu validates that a bound buffer covers
 /// at least one array element.
 fn dummy_storage_buffer() -> RenderResult<&'static wgpu::Buffer> {
-    static DUMMY: OnceCell<wgpu::Buffer> = OnceCell::new();
-    DUMMY.get_or_try_init(|| {
-        Ok(try_ctx()?.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("hybrid-dummy-storage"),
-            size: 64,
-            usage: wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        }))
-    })
+    static DUMMY: OnceCell<TrackedBuffer> = OnceCell::new();
+    let tracked = DUMMY.get_or_try_init(|| {
+        tracked_create_buffer(
+            &try_ctx()?.device,
+            &wgpu::BufferDescriptor {
+                label: Some("hybrid-dummy-storage"),
+                size: 64,
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            },
+        )
+    })?;
+    Ok(tracked.inner())
 }
 
 impl HybridScene {
@@ -236,19 +241,25 @@ impl HybridScene {
         let nodes_data: Vec<u8> = Vec::new();
 
         // Create buffers
-        let primitives_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("hybrid-sdf-primitives"),
-            size: primitives_data.len().max(4) as u64, // Ensure minimum size
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let primitives_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("hybrid-sdf-primitives"),
+                size: primitives_data.len().max(4) as u64, // Ensure minimum size
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
-        let nodes_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("hybrid-sdf-nodes"),
-            size: nodes_data.len().max(4) as u64, // Ensure minimum size
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let nodes_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("hybrid-sdf-nodes"),
+                size: nodes_data.len().max(4) as u64, // Ensure minimum size
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         // Upload data if not empty
         if !primitives_data.is_empty() {
@@ -300,29 +311,38 @@ impl HybridScene {
         };
 
         // Create buffers
-        let vertices_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("hybrid-mesh-vertices"),
-            size: vertices_data.len().max(std::mem::size_of::<Vertex>()) as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let vertices_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("hybrid-mesh-vertices"),
+                size: vertices_data.len().max(std::mem::size_of::<Vertex>()) as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
-        let indices_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("hybrid-mesh-indices"),
-            size: indices_data.len().max(4) as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let indices_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("hybrid-mesh-indices"),
+                size: indices_data.len().max(4) as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
-        let bvh_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("hybrid-mesh-bvh"),
-            size: bvh_data
-                .len()
-                .max(std::mem::size_of::<crate::accel::cpu_bvh::BvhNode>())
-                as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let bvh_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("hybrid-mesh-bvh"),
+                size: bvh_data
+                    .len()
+                    .max(std::mem::size_of::<crate::accel::cpu_bvh::BvhNode>())
+                    as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         // Upload data
         try_ctx()?

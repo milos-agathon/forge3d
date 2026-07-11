@@ -17,6 +17,10 @@ EXAMPLE_PATH = REPO_ROOT / "examples" / "california_fire_smoke_effect.py"
 
 
 def load_module():
+    examples_dir = str(EXAMPLE_PATH.parent)
+    added_examples_dir = examples_dir not in sys.path
+    if added_examples_dir:
+        sys.path.insert(0, examples_dir)
     spec = importlib.util.spec_from_file_location("california_fire_smoke_effect", EXAMPLE_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -25,6 +29,8 @@ def load_module():
         spec.loader.exec_module(module)
     finally:
         sys.modules.pop(spec.name, None)
+        if added_examples_dir:
+            sys.path.remove(examples_dir)
     return module
 
 

@@ -13,10 +13,18 @@ PUBLIC_DOCS = [
 
 
 def _load_example_module():
+    examples_dir = str(EXAMPLE.parent.resolve())
+    added_examples_dir = examples_dir not in sys.path
+    if added_examples_dir:
+        sys.path.insert(0, examples_dir)
     spec = importlib.util.spec_from_file_location("label_api_truth_basic", EXAMPLE)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if added_examples_dir:
+            sys.path.remove(examples_dir)
     return module
 
 

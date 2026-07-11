@@ -10,7 +10,13 @@ def test_default_latin_font_atlas_loads_bundled_ascii_coverage():
     assert atlas.line_height == 32
     for char in (" ", "A", "Z", "a", "z", "0", "9"):
         assert atlas.covers(char), char
-    assert atlas.coverage == {"start": 32, "end": 127, "name": "Basic Latin"}
+    assert {key: atlas.coverage[key] for key in ("start", "end", "name")} == {
+        "start": 32,
+        "end": 127,
+        "name": "Basic Latin",
+    }
+    assert atlas.coverage["atlas_kind"] == "sdf_font_atlas"
+    assert atlas.coverage["px_range"] > 0
     assert atlas.diagnostics == []
 
 

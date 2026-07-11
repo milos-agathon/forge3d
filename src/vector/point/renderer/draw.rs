@@ -13,6 +13,7 @@ impl PointRenderer {
         if let Some(instance_buffer) = &self.instance_buffer {
             let uniform = self.build_uniform(transform, viewport_size, pixel_scale);
             queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
+            crate::core::shader_registry::record_shader_use("point_instanced.wgsl");
             render_pass.set_pipeline(&self.oit_pipeline);
             render_pass.set_bind_group(0, &self.bind_group, &[]);
             render_pass.set_vertex_buffer(0, instance_buffer.slice(..));
@@ -37,6 +38,7 @@ impl PointRenderer {
             let pick_data: [u32; 4] = [base_pick_id, 0, 0, 0];
             queue.write_buffer(&self.pick_uniform_buffer, 0, bytemuck::bytes_of(&pick_data));
 
+            crate::core::shader_registry::record_shader_use("point_instanced.wgsl");
             render_pass.set_pipeline(&self.pick_pipeline);
             render_pass.set_bind_group(0, &self.pick_bind_group, &[]);
             render_pass.set_vertex_buffer(0, instance_buffer.slice(..));
@@ -58,6 +60,7 @@ impl PointRenderer {
             let uniform = self.build_uniform(transform, viewport_size, pixel_scale);
             queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
 
+            crate::core::shader_registry::record_shader_use("point_instanced.wgsl");
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.bind_group, &[]);
             render_pass.set_vertex_buffer(0, instance_buffer.slice(..));

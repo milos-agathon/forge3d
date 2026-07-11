@@ -1,29 +1,39 @@
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use wgpu::*;
 
 pub struct ColormapGpu {
-    pub texture: Texture,
+    pub texture: TrackedTexture,
     pub view: TextureView,
     pub sampler: Sampler,
     pub width: u32,
 }
 
 impl ColormapGpu {
-    pub fn from_rgba_u8(device: &Device, queue: &Queue, data: &[u8], width: u32) -> Self {
+    pub fn from_rgba_u8(
+        device: &Device,
+        queue: &Queue,
+        data: &[u8],
+        width: u32,
+    ) -> RenderResult<Self> {
         let size = Extent3d {
             width,
             height: 1,
             depth_or_array_layers: 1,
         };
-        let texture = device.create_texture(&TextureDescriptor {
-            label: Some("forge3d_colormap"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8Unorm,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        let texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("forge3d_colormap"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba8Unorm,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+        )?;
         queue.write_texture(
             ImageCopyTexture {
                 texture: &texture,
@@ -49,11 +59,11 @@ impl ColormapGpu {
             mipmap_filter: FilterMode::Nearest,
             ..Default::default()
         });
-        Self {
+        Ok(Self {
             texture,
             view,
             sampler,
             width,
-        }
+        })
     }
 }

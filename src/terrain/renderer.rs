@@ -21,7 +21,6 @@ use numpy::PyReadonlyArray2;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use std::sync::{Arc, Mutex};
-use wgpu::util::DeviceExt;
 use wgpu::TextureFormatFeatureFlags;
 
 use super::render_params::{AddressModeNative, FilterModeNative};
@@ -57,8 +56,9 @@ pub use self::core::{TerrainRenderer, TerrainScene, ViewerTerrainData};
 use self::atmosphere::create_atmosphere_init_resources;
 use self::bind_groups::create_base_bind_group_layouts;
 use self::core::{
-    clipmap_camera_config, is_clipmap_camera_mode, is_mesh_camera_mode, IblUniforms, NoopShadow,
-    OverlayBinding, PipelineCache, MATERIAL_LAYER_CAPACITY, TERRAIN_DEFAULT_CASCADE_SPLITS,
+    clipmap_camera_config, is_clipmap_camera_mode, is_mesh_camera_mode, ts_begin, ts_end,
+    IblUniforms, NoopShadow, OverlayBinding, PipelineCache, MATERIAL_LAYER_CAPACITY,
+    TERRAIN_DEFAULT_CASCADE_SPLITS,
 };
 use self::geometry::TerrainGeometryProvider;
 use self::height_ao::create_heightfield_init_resources;

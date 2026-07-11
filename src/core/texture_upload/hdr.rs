@@ -1,6 +1,7 @@
 use super::types::{HdrFormat, HdrTexture, HdrTextureConfig};
 use crate::core::error::{RenderError, RenderResult};
 use crate::core::memory_tracker::global_tracker;
+use crate::core::resource_tracker::tracked_create_texture;
 use std::num::NonZeroU32;
 
 pub fn create_texture_rgba32f(data: &[f32], config: HdrTextureConfig) -> RenderResult<HdrTexture> {
@@ -80,22 +81,23 @@ fn create_hdr_texture_internal(data: &[u8], config: HdrTextureConfig) -> RenderR
         1
     };
 
-    let texture = g.device.create_texture(&wgpu::TextureDescriptor {
-        label: config.label.as_deref(),
-        size: wgpu::Extent3d {
-            width: config.width,
-            height: config.height,
-            depth_or_array_layers: 1,
+    let texture = tracked_create_texture(
+        &g.device,
+        &wgpu::TextureDescriptor {
+            label: config.label.as_deref(),
+            size: wgpu::Extent3d {
+                width: config.width,
+                height: config.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: config.usage,
+            view_formats: &[],
         },
-        mip_level_count,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format,
-        usage: config.usage,
-        view_formats: &[],
-    });
-
-    tracker.track_texture_allocation(config.width, config.height, format);
+    )?;
 
     upload_texture_data(
         &g.queue,

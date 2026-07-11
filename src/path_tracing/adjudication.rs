@@ -12,13 +12,14 @@
 // RELEVANT FILES: src/path_tracing/wavefront/render.rs, src/path_tracing/reference_scene.rs
 
 use crate::core::error::RenderError;
-use crate::core::memory_tracker::global_tracker;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_buffer_init, TrackedBuffer,
+};
 use crate::path_tracing::reference_scene::ReferenceSceneDesc;
 use crate::path_tracing::wavefront::WavefrontScheduler;
 use bytemuck::{Pod, Zeroable};
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
-use wgpu::{Buffer, Device, Queue};
+use wgpu::{Device, Queue};
 
 /// Uniforms layout shared by every wavefront kernel (pt_raygen.wgsl et al.).
 /// 96 bytes; identical field placement to `compute_types::Uniforms`, but the
@@ -42,12 +43,19 @@ struct WavefrontUniforms {
     _pad_end: [u32; 3],
 }
 
-fn storage_buffer(device: &Device, label: &str, contents: &[u8]) -> Buffer {
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some(label),
-        contents,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-    })
+fn storage_buffer(
+    device: &Device,
+    label: &str,
+    contents: &[u8],
+) -> Result<TrackedBuffer, RenderError> {
+    tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        },
+    )
 }
 
 /// Render the linear-HDR path-traced reference: mean radiance over
@@ -59,6 +67,12 @@ fn storage_buffer(device: &Device, label: &str, contents: &[u8]) -> Buffer {
 /// proxy. Each frame must execute at least two wavefront iterations
 /// (primary wave + at least one bounce wave) or rendering fails.
 /// Returns RGBA f32, row-major, `width * height * 4` values, alpha = 1.
+///
+/// `timing` (CENSOR F-04): when supplied, the first frame's primary wavefront
+/// wave is timed under the "adjudication.path_trace" certificate label (see
+/// `render_frame_simple` — a whole frame cannot be bracketed on one encoder).
+/// The `OneShotTiming` MUST live on the same wgpu device as `device`; pass
+/// `None` when driving a standalone device (tests).
 pub fn render_pt_reference(
     device: &Arc<Device>,
     queue: &Arc<Queue>,
@@ -66,6 +80,7 @@ pub fn render_pt_reference(
     width: u32,
     height: u32,
     spp_frames: u32,
+    mut timing: Option<&mut crate::core::gpu_timing::OneShotTiming>,
 ) -> Result<Vec<f32>, RenderError> {
     if width == 0 || height == 0 || spp_frames == 0 {
         return Err(RenderError::Render(
@@ -86,25 +101,25 @@ pub fn render_pt_reference(
         device,
         "adjudication-spheres",
         bytemuck::cast_slice(&spheres),
-    );
+    )?;
     let area_lights = desc.area_lights();
     let area_lights_buffer = storage_buffer(
         device,
         "adjudication-area-lights",
         bytemuck::cast_slice(&area_lights),
-    );
+    )?;
     let dir_lights = desc.directional_lights();
     let dir_lights_buffer = storage_buffer(
         device,
         "adjudication-dir-lights",
         bytemuck::cast_slice(&dir_lights),
-    );
+    )?;
     let importance = desc.object_importance();
     let importance_buffer = storage_buffer(
         device,
         "adjudication-importance",
         bytemuck::cast_slice(&importance),
-    );
+    )?;
 
     // Ground plane as a real mesh BLAS so pt_intersect/pt_shadow see the exact
     // same two triangles the raster twin draws.
@@ -129,7 +144,7 @@ pub fn render_pt_reference(
         device,
         "adjudication-instances",
         bytemuck::cast_slice(&[plane_instance]),
-    ));
+    )?);
     scheduler.set_blas_descs_buffer(atlas.descs_buffer);
 
     // Fully bind the ReSTIR scene-spatial group and confirm it is Some, per
@@ -160,14 +175,17 @@ pub fn render_pt_reference(
     // --- Accumulation target (vec4<f32> per pixel, zero-initialized) ---
     let px_count = (width as usize) * (height as usize);
     let accum_bytes = (px_count * std::mem::size_of::<[f32; 4]>()) as u64;
-    let accum_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("adjudication-accum-hdr"),
-        size: accum_bytes,
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_SRC
-            | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+    let accum_buffer = tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("adjudication-accum-hdr"),
+            size: accum_bytes,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )?;
     let accum_bind_group = scheduler.create_accum_bind_group(&accum_buffer);
 
     // --- Camera uniforms exactly as pt_raygen.wgsl consumes them ---
@@ -188,11 +206,14 @@ pub fn render_pt_reference(
         seed_lo: desc.seed_lo,
         _pad_end: [0; 3],
     };
-    let uniforms_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("adjudication-uniforms"),
-        contents: bytemuck::bytes_of(&uniforms),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
+    let uniforms_buffer = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("adjudication-uniforms"),
+            contents: bytemuck::bytes_of(&uniforms),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        },
+    )?;
 
     // --- Accumulate frames ---
     // Per-frame seed decorrelation. pt_raygen derives
@@ -214,8 +235,22 @@ pub fn render_pt_reference(
         uniforms.seed_hi = splitmix32(desc.seed_hi ^ frame);
         uniforms.seed_lo = splitmix32(desc.seed_lo ^ frame.wrapping_mul(0x0000_9E3D));
         queue.write_buffer(&uniforms_buffer, 0, bytemuck::bytes_of(&uniforms));
+        // Only frame 0 carries the timing scope so the certificate records the
+        // "adjudication.path_trace" pass exactly once.
+        let frame_timing = if frame == 0 {
+            timing
+                .as_mut()
+                .map(|t| (&mut **t, "adjudication.path_trace", spp_frames))
+        } else {
+            None
+        };
         let iterations = scheduler
-            .render_frame_simple(&uniforms_buffer, &scene_bind_group, &accum_bind_group)
+            .render_frame_simple(
+                &uniforms_buffer,
+                &scene_bind_group,
+                &accum_bind_group,
+                frame_timing,
+            )
             .map_err(|e| RenderError::Render(format!("wavefront frame {frame}: {e}")))?;
         // Multi-bounce contract: a path-traced reference frame of this scene
         // always consumes the primary wave AND at least one bounce wave. One
@@ -233,13 +268,17 @@ pub fn render_pt_reference(
     }
 
     // --- Readback through a tracked host-visible staging buffer ---
-    let staging = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("adjudication-accum-readback"),
-        size: accum_bytes,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    global_tracker().track_buffer_allocation(accum_bytes, true);
+    // `tracked_create_buffer` records the host-visible allocation in the global
+    // ledger and releases it when `staging` is dropped below.
+    let staging = tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("adjudication-accum-readback"),
+            size: accum_bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        },
+    )?;
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("adjudication-accum-copy"),
     });
@@ -255,7 +294,6 @@ pub fn render_pt_reference(
     };
     staging.unmap();
     drop(staging);
-    global_tracker().free_buffer_allocation(accum_bytes, true);
 
     // Mean over frames; force alpha to 1 (the accum alpha channel is a ReSTIR
     // diagnostic, not coverage).
@@ -316,7 +354,9 @@ mod tests {
         };
         let (device, queue) = (std::sync::Arc::new(device), std::sync::Arc::new(queue));
         let desc = crate::path_tracing::reference_scene::adjudication_scene();
-        let hdr = super::render_pt_reference(&device, &queue, &desc, 32, 32, 2)
+        // timing = None: this test drives a standalone device, and a timing
+        // manager from the global context would live on a different device.
+        let hdr = super::render_pt_reference(&device, &queue, &desc, 32, 32, 2, None)
             .expect("multi-bounce PT reference render");
         assert_eq!(hdr.len(), 32 * 32 * 4);
         assert!(hdr.iter().any(|&v| v > 0.0), "PT reference is all black");

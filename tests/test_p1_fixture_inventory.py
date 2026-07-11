@@ -51,7 +51,14 @@ def test_p1_font_and_building_fixtures_are_available_or_synthesizable(tmp_path):
 
     atlas = FontAtlas.default_latin()
     assert atlas.covers("A")
-    assert atlas.coverage == {"start": 32, "end": 127, "name": "Basic Latin"}
+    assert {key: atlas.coverage[key] for key in ("start", "end", "name")} == {
+        "start": 32,
+        "end": 127,
+        "name": "Basic Latin",
+    }
+    assert atlas.coverage["atlas_kind"] == "sdf_font_atlas"
+    assert atlas.coverage["px_range"] > 0
+    assert Path(atlas.coverage["image_path"]).exists()
 
     available = [path for path in (atlas_json, atlas_png, cityjson, geojson) if path.exists()]
     for path in available:

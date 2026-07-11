@@ -171,7 +171,9 @@ impl ViewerTerrainScene {
             water_color,
         )) = pbr_uniforms_data
         {
-            self.ensure_terrain_ibl_resources();
+            if let Err(e) = self.ensure_terrain_ibl_resources() {
+                eprintln!("[terrain] IBL resource preparation failed: {e}");
+            }
             let pbr_uniforms = TerrainPbrUniforms {
                 view_proj: view_proj.to_cols_array_2d(),
                 sun_dir: [sun_dir.x, sun_dir.y, sun_dir.z, 0.0],
@@ -218,7 +220,9 @@ impl ViewerTerrainScene {
                     },
                 ],
             };
-            self.prepare_pbr_bind_group_internal(&pbr_uniforms);
+            if let Err(e) = self.prepare_pbr_bind_group_internal(&pbr_uniforms) {
+                eprintln!("[terrain] PBR bind group preparation failed: {e}");
+            }
         }
 
         self.dispatch_heightfield_compute(encoder, terrain_width, sun_dir);

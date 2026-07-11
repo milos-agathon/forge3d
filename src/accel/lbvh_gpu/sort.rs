@@ -42,13 +42,14 @@ impl GpuBvhBuilder {
                 _pad0: 0,
                 _pad1: 0,
             };
-            let ubuf = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            let ubuf = tracked_create_buffer_init(
+                &self.device,
+                &wgpu::util::BufferInitDescriptor {
                     label: Some("radix-uniforms"),
                     contents: cast_slice(&[u]),
                     usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-                });
+                },
+            )?;
 
             // Clear histogram
             let bg3c = self.device.create_bind_group(&wgpu::BindGroupDescriptor {

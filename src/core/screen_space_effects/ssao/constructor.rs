@@ -1,38 +1,39 @@
 use super::pipelines::{create_layouts, create_pipelines, SsaoLayouts, SsaoPipelines};
 use super::resources::{create_shared_buffers, create_textures, SsaoSharedBuffers, SsaoTextures};
 use super::*;
+use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 
 pub struct SsaoRenderer {
     pub(crate) settings: SsaoSettings,
-    pub(super) settings_buffer: Buffer,
-    pub(super) camera_buffer: Buffer,
+    pub(super) settings_buffer: TrackedBuffer,
+    pub(super) camera_buffer: TrackedBuffer,
     pub(super) ssao_pipeline: ComputePipeline,
     pub(super) gtao_pipeline: ComputePipeline,
     pub(super) ssao_bind_group_layout: BindGroupLayout,
     pub(super) blur_h_pipeline: ComputePipeline,
     pub(super) blur_v_pipeline: ComputePipeline,
     pub(super) blur_bind_group_layout: BindGroupLayout,
-    pub(super) blur_settings: Buffer,
+    pub(super) blur_settings: TrackedBuffer,
     pub(super) temporal_pipeline: ComputePipeline,
     pub(super) temporal_bind_group_layout: BindGroupLayout,
-    pub(crate) temporal_params_buffer: Buffer,
+    pub(crate) temporal_params_buffer: TrackedBuffer,
     pub(super) composite_pipeline: ComputePipeline,
     pub(super) composite_bind_group_layout: BindGroupLayout,
-    pub(super) comp_uniform: Buffer,
-    pub(super) _noise_texture: Texture,
+    pub(super) comp_uniform: TrackedBuffer,
+    pub(super) _noise_texture: TrackedTexture,
     pub(super) noise_view: TextureView,
     pub(super) noise_sampler: Sampler,
-    pub(super) ssao_texture: Texture,
+    pub(super) ssao_texture: TrackedTexture,
     pub(super) ssao_view: TextureView,
-    pub(super) ssao_blurred: Texture,
+    pub(super) ssao_blurred: TrackedTexture,
     pub(super) ssao_blurred_view: TextureView,
-    pub(super) ssao_history: Texture,
+    pub(super) ssao_history: TrackedTexture,
     pub(super) ssao_history_view: TextureView,
-    pub(super) ssao_resolved: Texture,
+    pub(super) ssao_resolved: TrackedTexture,
     pub(super) ssao_resolved_view: TextureView,
-    pub(super) _ssao_tmp: Texture,
+    pub(super) _ssao_tmp: TrackedTexture,
     pub(super) ssao_tmp_view: TextureView,
-    pub(super) ssao_composited: Texture,
+    pub(super) ssao_composited: TrackedTexture,
     pub(super) ssao_composited_view: TextureView,
     pub(super) width: u32,
     pub(super) height: u32,
@@ -63,7 +64,7 @@ impl SsaoRenderer {
             blur_settings,
             temporal_params_buffer,
             comp_uniform,
-        } = create_shared_buffers(device, &settings);
+        } = create_shared_buffers(device, &settings)?;
         let SsaoLayouts {
             ssao_bind_group_layout,
             blur_bind_group_layout,
@@ -100,7 +101,7 @@ impl SsaoRenderer {
             ssao_tmp_view,
             ssao_composited,
             ssao_composited_view,
-        } = create_textures(device, width, height);
+        } = create_textures(device, width, height)?;
 
         Ok(Self {
             settings,

@@ -407,10 +407,12 @@ class VectorScene:
     # ------------------------------------------------------------------
     # Rendering
     # ------------------------------------------------------------------
-    def render_oit(self, width: int, height: int) -> np.ndarray:
+    def render_oit(
+        self, width: int, height: int, *, certificate: bool | str = False
+    ) -> np.ndarray:
         """Render collected vectors using weighted blended OIT to an RGBA image."""
         from . import vector_render_oit_py as _render
-        return _render(
+        result = _render(
             int(width), int(height),
             points_xy=self._points or None,
             point_rgba=self._point_rgba or None,
@@ -418,25 +420,43 @@ class VectorScene:
             polylines=self._polylines or None,
             polyline_rgba=self._polyline_rgba or None,
             stroke_width=self._stroke_width or None,
+            certificate=certificate,
         )
+        return result
 
-    def render_pick_map(self, width: int, height: int, base_pick_id: int = 1) -> np.ndarray:
+    def render_pick_map(
+        self,
+        width: int,
+        height: int,
+        base_pick_id: int = 1,
+        *,
+        certificate: bool | str = False,
+    ) -> np.ndarray:
         """Render full R32Uint picking map for the collected vectors."""
         from . import vector_render_pick_map_py as _pick
-        return _pick(
+        result = _pick(
             int(width), int(height),
             points_xy=self._points or None,
             polylines=self._polylines or None,
             base_pick_id=int(base_pick_id),
+            certificate=certificate,
         )
+        return result
 
-    def render_oit_and_pick(self, width: int, height: int, base_pick_id: int = 1) -> tuple[np.ndarray, np.ndarray]:
+    def render_oit_and_pick(
+        self,
+        width: int,
+        height: int,
+        base_pick_id: int = 1,
+        *,
+        certificate: bool | str = False,
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Render combined OIT RGBA and full pick map in one call.
 
         Returns (rgba: np.ndarray(H,W,4) uint8, picks: np.ndarray(H,W) uint32)
         """
         from . import vector_render_oit_and_pick_py as _both
-        return _both(
+        result = _both(
             int(width), int(height),
             points_xy=self._points or None,
             point_rgba=self._point_rgba or None,
@@ -445,4 +465,6 @@ class VectorScene:
             polyline_rgba=self._polyline_rgba or None,
             stroke_width=self._stroke_width or None,
             base_pick_id=int(base_pick_id),
+            certificate=certificate,
         )
+        return result

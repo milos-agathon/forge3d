@@ -27,7 +27,7 @@ impl PointSpotLightRenderer {
             self.lights.remove(index);
 
             // Update indices in the map
-            for (_, idx) in self.light_id_map.iter_mut() {
+            for idx in self.light_id_map.values_mut() {
                 if *idx > index {
                     *idx -= 1;
                 }

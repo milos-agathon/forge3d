@@ -21,7 +21,7 @@ impl TerrainSpike {
             tiles_y,
             fixed_lod,
         };
-        let mosaic = crate::terrain::stream::HeightMosaic::new(&self.device, cfg, want_linear);
+        let mosaic = crate::terrain::stream::HeightMosaic::new(&self.device, cfg, want_linear)?;
 
         // If filter policy changed (e.g., RG16F fallback enables filtering), recreate pipeline accordingly
         let mosaic_filterable = want_linear;
@@ -41,14 +41,14 @@ impl TerrainSpike {
                 &self.colormap_lut.view,
                 &self.colormap_lut.sampler,
             );
-            let pt_buf_opt = self.page_table.as_ref().map(|pt| &pt.buffer);
+            let pt_buf_opt = self.page_table.as_ref().map(|pt| pt.buffer.inner());
             self.bg5_tile = self.tp.make_bg_tile(
                 &self.device,
                 &self.tile_ubo,
                 pt_buf_opt,
                 &self.tile_slot_ubo,
                 &self.mosaic_params_ubo,
-            );
+            )?;
             self.height_filterable = mosaic_filterable;
         }
 

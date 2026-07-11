@@ -1,4 +1,5 @@
 use super::OverlayStack;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::viewer::terrain::overlay::sampling::{blend_pixel, sample_bilinear};
 use crate::viewer::terrain::overlay::{OverlayData, OverlayLayerGpu};
 
@@ -8,9 +9,9 @@ impl OverlayStack {
     ///
     /// For the initial implementation, we use a simple CPU compositing approach.
     /// A GPU compute pass could be added later for better performance.
-    pub fn build_composite(&mut self, target_width: u32, target_height: u32) {
+    pub fn build_composite(&mut self, target_width: u32, target_height: u32) -> anyhow::Result<()> {
         if !self.dirty && self.composite_dimensions == (target_width, target_height) {
-            return;
+            return Ok(());
         }
 
         let visible_layers = visible_layers(&self.layers);
@@ -19,7 +20,7 @@ impl OverlayStack {
         let composite_rgba = composite_layers(&visible_layers, target_width, target_height);
         drop(visible_layers);
 
-        self.ensure_composite_texture(target_width, target_height);
+        self.ensure_composite_texture(target_width, target_height)?;
         upload_texture(
             &self.queue,
             self.composite_texture.as_ref().unwrap(),
@@ -40,12 +41,15 @@ impl OverlayStack {
             "[overlay] Built composite texture {}x{} from {} visible layers",
             target_width, target_height, visible_layer_count
         );
+        Ok(())
     }
 
     /// Ensure a fallback 1x1 transparent texture exists for when no overlays are present
-    pub fn ensure_fallback_texture(&mut self) -> (&wgpu::TextureView, &wgpu::Sampler) {
+    pub fn ensure_fallback_texture(
+        &mut self,
+    ) -> anyhow::Result<(&wgpu::TextureView, &wgpu::Sampler)> {
         if self.composite_texture.is_none() {
-            let (texture, view) = create_texture_and_view(&self.device, 1, 1, "overlay_fallback");
+            let (texture, view) = create_texture_and_view(&self.device, 1, 1, "overlay_fallback")?;
             upload_texture(&self.queue, &texture, &[0u8, 0, 0, 0], 1, 1);
 
             self.composite_texture = Some(texture);
@@ -53,10 +57,14 @@ impl OverlayStack {
             self.composite_dimensions = (1, 1);
         }
 
-        (self.composite_view.as_ref().unwrap(), &self.sampler)
+        Ok((self.composite_view.as_ref().unwrap(), &self.sampler))
     }
 
-    fn ensure_composite_texture(&mut self, target_width: u32, target_height: u32) {
+    fn ensure_composite_texture(
+        &mut self,
+        target_width: u32,
+        target_height: u32,
+    ) -> anyhow::Result<()> {
         if self.composite_dimensions != (target_width, target_height)
             || self.composite_texture.is_none()
         {
@@ -65,11 +73,12 @@ impl OverlayStack {
                 target_width,
                 target_height,
                 "overlay_composite",
-            );
+            )?;
             self.composite_texture = Some(texture);
             self.composite_view = Some(view);
             self.composite_dimensions = (target_width, target_height);
         }
+        Ok(())
     }
 }
 
@@ -151,23 +160,26 @@ fn create_texture_and_view(
     width: u32,
     height: u32,
     label: &str,
-) -> (wgpu::Texture, wgpu::TextureView) {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some(label),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+) -> anyhow::Result<(TrackedTexture, wgpu::TextureView)> {
+    let texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    )?;
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    (texture, view)
+    Ok((texture, view))
 }
 
 fn upload_texture(

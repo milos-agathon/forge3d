@@ -20,9 +20,9 @@ use pipeline::{create_accumulation_textures, create_compose_pipeline, create_edl
 #[cfg(feature = "weighted-oit")]
 /// OIT rendering state and resources.
 pub struct WeightedOIT {
-    _color_buffer: wgpu::Texture,
-    _reveal_buffer: wgpu::Texture,
-    _depth_buffer: wgpu::Texture,
+    _color_buffer: crate::core::resource_tracker::TrackedTexture,
+    _reveal_buffer: crate::core::resource_tracker::TrackedTexture,
+    _depth_buffer: crate::core::resource_tracker::TrackedTexture,
     color_view: wgpu::TextureView,
     reveal_view: wgpu::TextureView,
     depth_view: wgpu::TextureView,
@@ -43,7 +43,7 @@ impl WeightedOIT {
         target_format: wgpu::TextureFormat,
     ) -> Result<Self, RenderError> {
         let (color_buffer, reveal_buffer, depth_buffer) =
-            create_accumulation_textures(device, width, height);
+            create_accumulation_textures(device, width, height)?;
 
         let color_view = color_buffer.create_view(&wgpu::TextureViewDescriptor::default());
         let reveal_view = reveal_buffer.create_view(&wgpu::TextureViewDescriptor::default());
@@ -112,6 +112,7 @@ impl WeightedOIT {
 
     /// Compose final image from accumulation buffers.
     pub fn compose<'pass>(&'pass self, render_pass: &mut wgpu::RenderPass<'pass>) {
+        crate::core::shader_registry::record_shader_use("vf.Vector.OIT.Compose");
         render_pass.set_pipeline(&self.compose_pipeline);
         render_pass.set_bind_group(0, &self.compose_bind_group, &[]);
         render_pass.draw(0..3, 0..1);
@@ -129,7 +130,7 @@ impl WeightedOIT {
         color_view: &wgpu::TextureView,
         strength: f32,
         radius_px: f32,
-    ) -> (wgpu::RenderPipeline, wgpu::BindGroup) {
+    ) -> Result<(wgpu::RenderPipeline, wgpu::BindGroup), RenderError> {
         create_edl_pipeline(
             device,
             self.target_format,

@@ -6,6 +6,7 @@ impl Scene {
     // B5: Planar Reflections API
     #[pyo3(text_signature = "($self, quality='medium')")]
     pub fn enable_reflections(&mut self, quality: Option<&str>) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         let quality_enum = match quality.unwrap_or("medium") {
             "low" => crate::core::reflections::ReflectionQuality::Low,
             "medium" => crate::core::reflections::ReflectionQuality::Medium,
@@ -21,7 +22,7 @@ impl Scene {
 
         let g = crate::core::gpu::try_ctx()?;
         let mut renderer =
-            crate::core::reflections::PlanarReflectionRenderer::new(&g.device, quality_enum);
+            crate::core::reflections::PlanarReflectionRenderer::new(&g.device, quality_enum)?;
 
         if let Some(previous) = self.reflection_renderer.take() {
             let prev_uniforms = previous.uniforms;

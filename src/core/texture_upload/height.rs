@@ -1,5 +1,6 @@
 use super::hdr::align_copy_bytes_per_row;
 use crate::core::error::{RenderError, RenderResult};
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 
 pub fn create_r32f_height_texture(
     device: &wgpu::Device,
@@ -7,7 +8,7 @@ pub fn create_r32f_height_texture(
     data: &[f32],
     width: u32,
     height: u32,
-) -> RenderResult<(wgpu::Texture, wgpu::TextureView)> {
+) -> RenderResult<(TrackedTexture, wgpu::TextureView)> {
     let size = (width * height) as usize;
     if data.len() != size {
         return Err(RenderError::upload(format!(
@@ -26,22 +27,25 @@ pub fn create_r32f_height_texture(
         )));
     }
 
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("height_r32f"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+    let texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("height_r32f"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R32Float,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING
-            | wgpu::TextureUsages::COPY_DST
-            | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
+    )?;
 
     upload_r32f_data(queue, &texture, data, width, height)?;
 
@@ -122,7 +126,7 @@ pub fn create_r32f_height_texture_padded(
     data: &[f32],
     width: u32,
     height: u32,
-) -> RenderResult<(wgpu::Texture, wgpu::TextureView)> {
+) -> RenderResult<(TrackedTexture, wgpu::TextureView)> {
     let expected = (width as usize) * (height as usize);
     if data.len() != expected {
         return Err(RenderError::upload(format!(
@@ -144,22 +148,25 @@ pub fn create_r32f_height_texture_padded(
             .copy_from_slice(&src[src_off..src_off + bytes_per_row]);
     }
 
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("height_r32f"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+    let texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("height_r32f"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R32Float,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING
-            | wgpu::TextureUsages::COPY_DST
-            | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
+    )?;
 
     queue.write_texture(
         wgpu::ImageCopyTexture {

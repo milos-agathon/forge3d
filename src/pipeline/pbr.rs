@@ -3,7 +3,12 @@
 //! Provides GPU resource management, texture handling, and bind group creation
 //! for PBR materials using the metallic-roughness workflow.
 
+use crate::core::error::RenderResult;
 use crate::core::material::{texture_flags, PbrLighting, PbrMaterial};
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_buffer_init, tracked_create_texture, TrackedBuffer,
+    TrackedTexture,
+};
 use crate::lighting::types::{MaterialShading, ShadowTechnique};
 use crate::lighting::LightBuffer;
 use crate::mesh::vertex::TbnVertex;
@@ -11,11 +16,10 @@ use crate::shadows::{ShadowManager, ShadowManagerConfig};
 use bytemuck::{Pod, Zeroable};
 use glam::Mat4;
 use std::collections::HashMap;
-use wgpu::util::DeviceExt;
 use wgpu::{
     AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindingResource,
-    Buffer, BufferDescriptor, BufferUsages, Device, Extent3d, FilterMode, ImageCopyTexture,
-    ImageDataLayout, Origin3d, Queue, Sampler, SamplerDescriptor, Texture, TextureDescriptor,
+    BufferDescriptor, BufferUsages, Device, Extent3d, FilterMode, ImageCopyTexture,
+    ImageDataLayout, Origin3d, Queue, Sampler, SamplerDescriptor, TextureDescriptor,
     TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
 };
 
@@ -51,15 +55,15 @@ pub struct PbrPipelineWithShadows {
     /// CPU copy of scene transform uniforms
     pub scene_uniforms: PbrSceneUniforms,
     /// GPU buffer storing scene transform uniforms
-    pub scene_uniform_buffer: Buffer,
+    pub scene_uniform_buffer: TrackedBuffer,
     /// CPU copy of lighting parameters
     pub lighting_uniforms: PbrLighting,
     /// GPU buffer storing lighting parameters
-    pub lighting_uniform_buffer: Buffer,
+    pub lighting_uniform_buffer: TrackedBuffer,
     /// CPU copy of shading parameters (BRDF routing) - P2-06
     pub shading_uniforms: MaterialShading,
     /// GPU buffer storing shading parameters
-    pub shading_uniform_buffer: Buffer,
+    pub shading_uniform_buffer: TrackedBuffer,
     /// Cached bind group for global uniforms
     pub globals_bind_group: Option<BindGroup>,
     /// IBL resources (fallback or user-provided)

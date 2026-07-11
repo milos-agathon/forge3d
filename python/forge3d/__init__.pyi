@@ -188,8 +188,8 @@ class Renderer:
         **kwargs: Any,
     ) -> None: ...
     def info(self) -> str: ...
-    def render_triangle_rgba(self) -> np.ndarray: ...  # (H,W,4) uint8, C-contiguous
-    def render_triangle_png(self, path: PathLikeStr) -> None: ...
+    def render_triangle_rgba(self, *, certificate: bool | str | PathLikeStr = ...) -> np.ndarray: ...  # (H,W,4) uint8, C-contiguous
+    def render_triangle_png(self, path: PathLikeStr, *, certificate: bool | str | PathLikeStr = ...) -> None: ...
     def get_config(self) -> Dict[str, Any]: ...
     def set_lights(self, lights: Sequence[Mapping[str, Any]] | Mapping[str, Any]) -> None: ...
     def set_msaa_samples(self, samples: int) -> int: ...
@@ -210,8 +210,8 @@ class Scene:
         up: Tuple[float, float, float],
         fovy_deg: float, znear: float, zfar: float) -> None: ...
     def set_height_from_r32f(self, height_r32f: np.ndarray) -> None: ...
-    def render_png(self, path: PathLikeStr) -> None: ...
-    def render_rgba(self) -> np.ndarray: ...  # (H,W,4) uint8, C-contiguous
+    def render_png(self, path: PathLikeStr, certificate: bool | str | PathLikeStr | None = ...) -> None: ...
+    def render_rgba(self, certificate: bool | str | PathLikeStr | None = ...) -> np.ndarray: ...  # (H,W,4) uint8, C-contiguous
     def set_msaa_samples(self, samples: int) -> int: ...
     def debug_uniforms_f32(self) -> np.ndarray: ...
     def debug_lut_format(self) -> str: ...
@@ -708,6 +708,7 @@ class TerrainRenderer:
         target: Optional[Any] = ...,
         water_mask: Optional[np.ndarray] = ...,
         time_seconds: float = ...,
+        certificate: bool | str | PathLikeStr | None = ...,
     ) -> Frame: ...
     def render_with_aov(
         self,
@@ -717,6 +718,7 @@ class TerrainRenderer:
         heightmap: np.ndarray,
         water_mask: Optional[np.ndarray] = ...,
         time_seconds: float = ...,
+        certificate: bool | str | PathLikeStr | None = ...,
     ) -> Tuple[Frame, AovFrame]: ...
     def begin_offline_accumulation(
         self,
@@ -872,7 +874,24 @@ def set_point_lod_threshold(threshold: float) -> None: ...
 
 def is_weighted_oit_available() -> bool: ...
 
-def vector_oit_and_pick_demo(width: int = ..., height: int = ...) -> Tuple[np.ndarray, int]: ...
+def vector_oit_and_pick_demo(
+    width: int = ...,
+    height: int = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
+) -> Tuple[np.ndarray, int]: ...
+
+def vector_render_polygons_fill_py(
+    width: int,
+    height: int,
+    exteriors: Sequence[np.ndarray],
+    holes: Optional[Sequence[Sequence[np.ndarray]]] = ...,
+    fill_rgba: Optional[Tuple[float, float, float, float]] = ...,
+    stroke_rgba: Optional[Tuple[float, float, float, float]] = ...,
+    stroke_width: Optional[float] = ...,
+    fill_rgba_list: Optional[Sequence[Tuple[float, float, float, float]]] = ...,
+    coordinates_are_ndc: Optional[bool] = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
+) -> np.ndarray: ...
 
 def vector_render_oit_py(
     width: int,
@@ -884,6 +903,7 @@ def vector_render_oit_py(
     polylines: Optional[Sequence[Sequence[Tuple[float, float]]]] = ...,
     polyline_rgba: Optional[Sequence[Tuple[float, float, float, float]]] = ...,
     stroke_width: Optional[Sequence[float]] = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
 ) -> np.ndarray: ...  # (H,W,4) uint8
 
 def vector_render_oit_edl_py(
@@ -898,6 +918,7 @@ def vector_render_oit_edl_py(
     stroke_width: Optional[Sequence[float]] = ...,
     edl_strength: float = ...,
     edl_radius_px: float = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
 ) -> np.ndarray: ...  # (H,W,4) uint8
 
 def vector_render_pick_map_py(
@@ -907,6 +928,7 @@ def vector_render_pick_map_py(
     points_xy: Optional[Sequence[Tuple[float, float]]] = ...,
     polylines: Optional[Sequence[Sequence[Tuple[float, float]]]] = ...,
     base_pick_id: Optional[int] = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
 ) -> np.ndarray: ...  # (H,W) uint32
 
 def vector_render_oit_and_pick_py(
@@ -920,6 +942,7 @@ def vector_render_oit_and_pick_py(
     polyline_rgba: Optional[Sequence[Tuple[float, float, float, float]]] = ...,
     stroke_width: Optional[Sequence[float]] = ...,
     base_pick_id: Optional[int] = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
 ) -> Tuple[np.ndarray, np.ndarray]: ...  # (H,W,4) uint8, (H,W) uint32
 
 def composite_rgba_over(bottom: np.ndarray, top: np.ndarray, *, premultiplied: bool = ...) -> np.ndarray: ...  # (H,W,4) uint8
@@ -927,6 +950,11 @@ def composite_rgba_over(bottom: np.ndarray, top: np.ndarray, *, premultiplied: b
 # Optional export if compiled with --features terrain_spike
 class TerrainSpike:
     def __init__(self, width: int, height: int) -> None: ...
+    def render_png(
+        self,
+        path: PathLikeStr,
+        certificate: bool | str | PathLikeStr | None = ...,
+    ) -> None: ...
     def slope_aspect_compute(
         self,
         heights: np.ndarray,
@@ -949,13 +977,90 @@ class TerrainSpike:
 def png_to_numpy(path: PathLikeStr) -> np.ndarray: ...          # (H,W,4) uint8
 def numpy_to_png(path: PathLikeStr, array: np.ndarray) -> None: ...
 
-def render_triangle_rgba(width: int, height: int) -> np.ndarray: ...
-def render_triangle_png(path: PathLikeStr, width: int, height: int) -> None: ...
-
 def dem_stats(heightmap: np.ndarray) -> Tuple[float, float, float, float]: ...
 def dem_normalize(heightmap: np.ndarray, *, mode: str = ..., out_range: Tuple[float, float] = ..., eps: float = ..., return_stats: bool = ...) -> np.ndarray | Tuple[np.ndarray, Tuple[float, float, float, float]]: ...
 
-def render_debug_pattern_frame(width: int, height: int) -> Any: ...
+def render_debug_pattern_frame(
+    width: int,
+    height: int,
+    certificate: bool | str | PathLikeStr | None = ...,
+) -> Any: ...
+
+def render_brdf_tile(
+    model: str,
+    roughness: float,
+    width: int,
+    height: int,
+    ndf_only: bool = ...,
+    g_only: bool = ...,
+    dfg_only: bool = ...,
+    spec_only: bool = ...,
+    roughness_visualize: bool = ...,
+    exposure: float = ...,
+    light_intensity: float = ...,
+    base_color: Tuple[float, float, float] = ...,
+    clearcoat: float = ...,
+    clearcoat_roughness: float = ...,
+    sheen: float = ...,
+    sheen_tint: float = ...,
+    specular_tint: float = ...,
+    debug_dot_products: bool = ...,
+    debug_lambert_only: bool = ...,
+    debug_diffuse_only: bool = ...,
+    debug_d: bool = ...,
+    debug_spec_no_nl: bool = ...,
+    debug_energy: bool = ...,
+    debug_angle_sweep: bool = ...,
+    debug_angle_component: int = ...,
+    debug_no_srgb: bool = ...,
+    output_mode: int = ...,
+    metallic_override: float = ...,
+    mode: str | None = ...,
+    wi3_debug_mode: int = ...,
+    wi3_debug_roughness: float = ...,
+    sphere_sectors: int = ...,
+    sphere_stacks: int = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
+) -> np.ndarray: ...
+
+def render_brdf_tile_overrides(
+    model: str,
+    roughness: float,
+    width: int,
+    height: int,
+    ndf_only: bool = ...,
+    g_only: bool = ...,
+    dfg_only: bool = ...,
+    spec_only: bool = ...,
+    roughness_visualize: bool = ...,
+    exposure: float = ...,
+    light_intensity: float = ...,
+    base_color: Tuple[float, float, float] = ...,
+    clearcoat: float = ...,
+    clearcoat_roughness: float = ...,
+    sheen: float = ...,
+    sheen_tint: float = ...,
+    specular_tint: float = ...,
+    debug_dot_products: bool = ...,
+    debug_lambert_only: bool = ...,
+    debug_diffuse_only: bool = ...,
+    debug_d: bool = ...,
+    debug_spec_no_nl: bool = ...,
+    debug_energy: bool = ...,
+    debug_angle_sweep: bool = ...,
+    debug_angle_component: int = ...,
+    debug_no_srgb: bool = ...,
+    output_mode: int = ...,
+    metallic_override: float = ...,
+    mode: str | None = ...,
+    wi3_debug_mode: int = ...,
+    wi3_debug_roughness: float = ...,
+    sphere_sectors: int = ...,
+    sphere_stacks: int = ...,
+    light_dir: Tuple[float, float, float] | None = ...,
+    debug_kind: int = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
+) -> np.ndarray: ...
 
 class DeviceProbeResult(TypedDict, total=False):
     # status is always present: "ok" | "no_adapter" | "probe_error" | "native_missing".
@@ -1032,9 +1137,9 @@ class VectorScene:
     def clear(self) -> None: ...
     def add_point(self, x: float, y: float, rgba: Tuple[float, float, float, float] | None = ..., size: float | None = ...) -> None: ...
     def add_polyline(self, path: Sequence[Tuple[float, float]], rgba: Tuple[float, float, float, float] | None = ..., width: float | None = ...) -> None: ...
-    def render_oit(self, width: int, height: int) -> np.ndarray: ...  # (H,W,4) uint8
-    def render_pick_map(self, width: int, height: int, base_pick_id: int = ...) -> np.ndarray: ...  # (H,W) uint32
-    def render_oit_and_pick(self, width: int, height: int, base_pick_id: int = ...) -> Tuple[np.ndarray, np.ndarray]: ...  # (H,W,4) uint8, (H,W) uint32
+    def render_oit(self, width: int, height: int, *, certificate: bool | str | PathLikeStr = ...) -> np.ndarray: ...  # (H,W,4) uint8
+    def render_pick_map(self, width: int, height: int, base_pick_id: int = ..., *, certificate: bool | str | PathLikeStr = ...) -> np.ndarray: ...  # (H,W) uint32
+    def render_oit_and_pick(self, width: int, height: int, base_pick_id: int = ..., *, certificate: bool | str | PathLikeStr = ...) -> Tuple[np.ndarray, np.ndarray]: ...  # (H,W,4) uint8, (H,W) uint32
 
 # P5: Screen-space effects classes
 class SSAOSettings:
@@ -1218,6 +1323,15 @@ def clear_native_degradations() -> None: ...
 # CENSOR: negotiated GPU capability report
 def capabilities() -> dict: ...
 
+# CENSOR: last-render execution certificate JSON
+def render_execution_report() -> str: ...
+def begin_render_execution_capture(entry_point: str) -> None: ...
+def finish_render_execution_capture(pass_label: str, draw_calls: int = ...) -> None: ...
+def abort_render_execution_capture() -> None: ...
+
+# CENSOR: native Ed25519 certificate signer (signature hex, public-key hex)
+def sign_render_certificate_digest(seed: bytes, digest: bytes) -> tuple[str, str]: ...
+
 # CENSOR: budget-enforce test helper (raises MemoryBudgetExceeded when over budget)
 def request_host_visible_allocation_for_test(bytes: int, label: str) -> None: ...
 
@@ -1241,6 +1355,7 @@ def render_adjudication_pair(
     width: int,
     height: int,
     spp: int,
+    certificate: bool | str | PathLikeStr | None = ...,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Dict[str, float]]]: ...
 
 # PROMETHEUS: converged GPU path-traced terrain reference (sun + IBL)
@@ -1264,7 +1379,20 @@ def hybrid_render_terrain_reference(
     min_frames: int = ...,
     variance_threshold: float = ...,
     seed: int = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
 ) -> Dict[str, Any]: ...
+
+def render_offscreen_rgba(
+    width: int,
+    height: int,
+    *,
+    scene: Any | None = ...,
+    camera: Optional[Mapping[str, Any]] = ...,
+    seed: int = ...,
+    frames: int = ...,
+    denoiser: str = ...,
+    certificate: bool | str | PathLikeStr = ...,
+) -> np.ndarray: ...
 
 # P2.3: Label style bindings
 class LabelFlags:

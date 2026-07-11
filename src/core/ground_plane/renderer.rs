@@ -1,15 +1,17 @@
 use super::types::{GroundPlaneMode, GroundPlaneParams, GroundPlaneUniforms};
 use glam::{Mat4, Vec3};
-use std::borrow::Cow;
 use wgpu::{
     vertex_attr_array, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
-    BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, Buffer, BufferAddress,
-    BufferBindingType, BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites,
-    CompareFunction, DepthBiasState, DepthStencilState, Device, Face, FragmentState, FrontFace,
-    MultisampleState, PipelineLayoutDescriptor, PolygonMode, PrimitiveState, PrimitiveTopology,
-    Queue, RenderPipeline, RenderPipelineDescriptor, ShaderModuleDescriptor, ShaderSource,
-    ShaderStages, StencilState, TextureFormat, VertexBufferLayout, VertexState, VertexStepMode,
+    BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BufferAddress, BufferBindingType,
+    BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, CompareFunction, DepthBiasState,
+    DepthStencilState, Device, Face, FragmentState, FrontFace, MultisampleState,
+    PipelineLayoutDescriptor, PolygonMode, PrimitiveState, PrimitiveTopology, Queue,
+    RenderPipeline, RenderPipelineDescriptor, ShaderStages, StencilState, TextureFormat,
+    VertexBufferLayout, VertexState, VertexStepMode,
 };
+
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 
 /// Main ground plane rendering system
 pub struct GroundPlaneRenderer {
@@ -17,7 +19,7 @@ pub struct GroundPlaneRenderer {
     pub params: GroundPlaneParams,
 
     // GPU resources
-    pub uniform_buffer: Buffer,
+    pub uniform_buffer: TrackedBuffer,
     pub ground_pipeline: RenderPipeline,
 
     // Bind groups and layouts
@@ -25,8 +27,8 @@ pub struct GroundPlaneRenderer {
     pub bind_group: BindGroup,
 
     // Geometry
-    pub vertex_buffer: Buffer,
-    pub index_buffer: Buffer,
+    pub vertex_buffer: TrackedBuffer,
+    pub index_buffer: TrackedBuffer,
     pub index_count: u32,
 
     // State
@@ -40,17 +42,20 @@ impl GroundPlaneRenderer {
         color_format: TextureFormat,
         depth_format: Option<TextureFormat>,
         sample_count: u32,
-    ) -> Self {
+    ) -> RenderResult<Self> {
         let params = GroundPlaneParams::default();
         let uniforms = GroundPlaneUniforms::default();
 
         // Create uniform buffer
-        let uniform_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("ground_plane_uniform_buffer"),
-            size: std::mem::size_of::<GroundPlaneUniforms>() as wgpu::BufferAddress,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("ground_plane_uniform_buffer"),
+                size: std::mem::size_of::<GroundPlaneUniforms>() as wgpu::BufferAddress,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -78,12 +83,11 @@ impl GroundPlaneRenderer {
         });
 
         // Create shader
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("ground_plane_shader"),
-            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                "../../shaders/ground_plane.wgsl"
-            ))),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "ground_plane_shader",
+            include_str!("../../shaders/ground_plane.wgsl"),
+        );
 
         // Create pipeline layout
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
@@ -100,63 +104,66 @@ impl GroundPlaneRenderer {
         };
 
         // Create render pipeline
-        let ground_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some("ground_plane_render_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[vertex_buffer_layout],
+        let ground_pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &RenderPipelineDescriptor {
+                label: Some("ground_plane_render_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[vertex_buffer_layout],
+                },
+                primitive: PrimitiveState {
+                    topology: PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: FrontFace::Ccw,
+                    cull_mode: Some(Face::Back),
+                    unclipped_depth: false,
+                    polygon_mode: PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: depth_format.map(|format| DepthStencilState {
+                    format,
+                    depth_write_enabled: true,
+                    depth_compare: CompareFunction::LessEqual, // Allow ground plane to write depth
+                    stencil: StencilState::default(),
+                    bias: DepthBiasState::default(),
+                }),
+                multisample: MultisampleState {
+                    count: sample_count,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                fragment: Some(FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(ColorTargetState {
+                        format: color_format,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::SrcAlpha,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: ColorWrites::ALL,
+                    })],
+                }),
+                multiview: None,
             },
-            primitive: PrimitiveState {
-                topology: PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: FrontFace::Ccw,
-                cull_mode: Some(Face::Back),
-                unclipped_depth: false,
-                polygon_mode: PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: depth_format.map(|format| DepthStencilState {
-                format,
-                depth_write_enabled: true,
-                depth_compare: CompareFunction::LessEqual, // Allow ground plane to write depth
-                stencil: StencilState::default(),
-                bias: DepthBiasState::default(),
-            }),
-            multisample: MultisampleState {
-                count: sample_count,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            fragment: Some(FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(ColorTargetState {
-                    format: color_format,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::SrcAlpha,
-                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                        alpha: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                    }),
-                    write_mask: ColorWrites::ALL,
-                })],
-            }),
-            multiview: None,
-        });
+        );
 
         // Create ground plane geometry
         let (vertex_buffer, index_buffer, index_count) =
-            Self::create_ground_plane_geometry(device, params.size);
+            Self::create_ground_plane_geometry(device, params.size)?;
 
-        Self {
+        Ok(Self {
             uniforms,
             params,
             uniform_buffer,
@@ -167,11 +174,14 @@ impl GroundPlaneRenderer {
             index_buffer,
             index_count,
             enabled: true,
-        }
+        })
     }
 
     /// Create ground plane geometry (large quad)
-    fn create_ground_plane_geometry(device: &Device, size: f32) -> (Buffer, Buffer, u32) {
+    fn create_ground_plane_geometry(
+        device: &Device,
+        size: f32,
+    ) -> RenderResult<(TrackedBuffer, TrackedBuffer, u32)> {
         let half_size = size * 0.5;
 
         // Ground plane vertices: position(3) + uv(2) + normal(3)
@@ -188,31 +198,37 @@ impl GroundPlaneRenderer {
             2, 3, 0, // Second triangle
         ];
 
-        let vertex_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("ground_plane_vertex_buffer"),
-            size: (vertices.len() * std::mem::size_of::<f32>()) as wgpu::BufferAddress,
-            usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-            mapped_at_creation: true,
-        });
+        let vertex_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("ground_plane_vertex_buffer"),
+                size: (vertices.len() * std::mem::size_of::<f32>()) as wgpu::BufferAddress,
+                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                mapped_at_creation: true,
+            },
+        )?;
         vertex_buffer
             .slice(..)
             .get_mapped_range_mut()
             .copy_from_slice(bytemuck::cast_slice(vertices));
         vertex_buffer.unmap();
 
-        let index_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("ground_plane_index_buffer"),
-            size: (indices.len() * std::mem::size_of::<u16>()) as wgpu::BufferAddress,
-            usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
-            mapped_at_creation: true,
-        });
+        let index_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("ground_plane_index_buffer"),
+                size: (indices.len() * std::mem::size_of::<u16>()) as wgpu::BufferAddress,
+                usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
+                mapped_at_creation: true,
+            },
+        )?;
         index_buffer
             .slice(..)
             .get_mapped_range_mut()
             .copy_from_slice(bytemuck::cast_slice(indices));
         index_buffer.unmap();
 
-        (vertex_buffer, index_buffer, indices.len() as u32)
+        Ok((vertex_buffer, index_buffer, indices.len() as u32))
     }
 
     /// Update ground plane parameters

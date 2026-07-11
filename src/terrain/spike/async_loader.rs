@@ -128,7 +128,7 @@ impl TerrainSpike {
             fixed_lod: None,
         };
         let mosaic =
-            crate::terrain::stream::ColorMosaic::new(&self.device, cfg, srgb, filter_linear);
+            crate::terrain::stream::ColorMosaic::new(&self.device, cfg, srgb, filter_linear)?;
 
         // Lazy-create overlay renderer if needed
         if self.overlay_renderer.is_none() {
@@ -136,20 +136,20 @@ impl TerrainSpike {
                 &self.device,
                 TEXTURE_FORMAT,
                 self.height_filterable,
-            );
+            )?;
             self.overlay_renderer = Some(ov);
         }
         // Bind overlay view; use height mosaic if available for altitude/contour paths
         if let Some(ref mut ov) = self.overlay_renderer {
             let height_view_opt = self.height_mosaic.as_ref().map(|m| &m.view);
-            let pt_buf_opt = self.page_table.as_ref().map(|pt| &pt.buffer);
+            let pt_buf_opt = self.page_table.as_ref().map(|pt| pt.buffer.inner());
             ov.recreate_bind_group(
                 &self.device,
                 Some(&mosaic.view),
                 height_view_opt,
                 pt_buf_opt,
                 None,
-            );
+            )?;
             // Enable overlay by default with alpha 1.0
             ov.set_enabled(true);
             ov.set_overlay_alpha(1.0);

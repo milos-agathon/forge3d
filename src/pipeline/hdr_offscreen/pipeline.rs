@@ -1,34 +1,36 @@
 use super::types::*;
 use crate::core::gpu_timing::GpuTimingManager;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 use wgpu::{
     AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
-    BindGroupLayoutEntry, BindingResource, BindingType, BlendState, Buffer, BufferBindingType,
+    BindGroupLayoutEntry, BindingResource, BindingType, BlendState, BufferBindingType,
     BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, CommandEncoder, Device,
     Extent3d, FilterMode, FragmentState, ImageCopyTexture, ImageDataLayout, LoadOp,
     MultisampleState, Operations, Origin3d, PipelineLayoutDescriptor, PrimitiveState, Queue,
     RenderPass, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline,
-    RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor,
-    ShaderModuleDescriptor, ShaderSource, ShaderStages, StoreOp, Texture, TextureAspect,
-    TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
-    TextureView, TextureViewDescriptor, TextureViewDimension, VertexState,
+    RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages,
+    StoreOp, TextureAspect, TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType,
+    TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension, VertexState,
 };
 
 /// HDR off-screen rendering pipeline
 pub struct HdrOffscreenPipeline {
-    pub hdr_texture: Texture,
+    pub hdr_texture: TrackedTexture,
     pub hdr_view: TextureView,
-    pub msaa_texture: Option<Texture>,
+    pub msaa_texture: Option<TrackedTexture>,
     pub msaa_view: Option<TextureView>,
-    pub ldr_texture: Texture,
+    pub ldr_texture: TrackedTexture,
     pub ldr_view: TextureView,
-    pub depth_texture: Texture,
+    pub depth_texture: TrackedTexture,
     pub depth_view: TextureView,
     pub config: HdrOffscreenConfig,
     pub sample_count: u32,
-    pub tonemap_uniforms: Buffer,
+    pub tonemap_uniforms: TrackedBuffer,
     pub tonemap_bind_group: BindGroup,
     pub tonemap_pipeline: RenderPipeline,
-    pub default_lut_texture: Texture,
+    pub default_lut_texture: TrackedTexture,
     pub default_lut_view: TextureView,
     pub lut_sampler: Sampler,
 }
@@ -49,22 +51,26 @@ impl HdrOffscreenPipeline {
         config.sample_count = sample_count;
 
         // Create resolved HDR texture (always single-sample)
-        let hdr_texture = device.create_texture(&TextureDescriptor {
-            label: Some("hdr_offscreen_texture"),
-            size: Extent3d {
-                width: config.width,
-                height: config.height,
-                depth_or_array_layers: 1,
+        let hdr_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("hdr_offscreen_texture"),
+                size: Extent3d {
+                    width: config.width,
+                    height: config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: config.hdr_format,
+                usage: TextureUsages::RENDER_ATTACHMENT
+                    | TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: config.hdr_format,
-            usage: TextureUsages::RENDER_ATTACHMENT
-                | TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
 
         let hdr_view = hdr_texture.create_view(&TextureViewDescriptor {
             label: Some("hdr_offscreen_view"),
@@ -73,20 +79,24 @@ impl HdrOffscreenPipeline {
 
         // Optional multisampled color target when MSAA is requested
         let (msaa_texture, msaa_view) = if sample_count > 1 {
-            let texture = device.create_texture(&TextureDescriptor {
-                label: Some("hdr_offscreen_msaa_color"),
-                size: Extent3d {
-                    width: config.width,
-                    height: config.height,
-                    depth_or_array_layers: 1,
+            let texture = tracked_create_texture(
+                device,
+                &TextureDescriptor {
+                    label: Some("hdr_offscreen_msaa_color"),
+                    size: Extent3d {
+                        width: config.width,
+                        height: config.height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count,
+                    dimension: TextureDimension::D2,
+                    format: config.hdr_format,
+                    usage: TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count,
-                dimension: TextureDimension::D2,
-                format: config.hdr_format,
-                usage: TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[],
-            });
+            )
+            .map_err(|e| e.to_string())?;
             let view = texture.create_view(&TextureViewDescriptor {
                 label: Some("hdr_offscreen_msaa_view"),
                 ..Default::default()
@@ -97,22 +107,26 @@ impl HdrOffscreenPipeline {
         };
 
         // Create LDR output texture (sRGB8 output buffer suitable for readback)
-        let ldr_texture = device.create_texture(&TextureDescriptor {
-            label: Some("ldr_offscreen_texture"),
-            size: Extent3d {
-                width: config.width,
-                height: config.height,
-                depth_or_array_layers: 1,
+        let ldr_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("ldr_offscreen_texture"),
+                size: Extent3d {
+                    width: config.width,
+                    height: config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: config.ldr_format,
+                usage: TextureUsages::RENDER_ATTACHMENT
+                    | TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: config.ldr_format,
-            usage: TextureUsages::RENDER_ATTACHMENT
-                | TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
 
         let ldr_view = ldr_texture.create_view(&TextureViewDescriptor {
             label: Some("ldr_offscreen_view"),
@@ -120,20 +134,24 @@ impl HdrOffscreenPipeline {
         });
 
         // Create depth texture matching the MSAA sample count
-        let depth_texture = device.create_texture(&TextureDescriptor {
-            label: Some("hdr_offscreen_depth"),
-            size: Extent3d {
-                width: config.width,
-                height: config.height,
-                depth_or_array_layers: 1,
+        let depth_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("hdr_offscreen_depth"),
+                size: Extent3d {
+                    width: config.width,
+                    height: config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: sample_count.max(1),
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Depth32Float,
+                usage: TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: sample_count.max(1),
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Depth32Float,
-            usage: TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
 
         let depth_view = depth_texture.create_view(&TextureViewDescriptor {
             label: Some("hdr_offscreen_depth_view"),
@@ -141,12 +159,16 @@ impl HdrOffscreenPipeline {
         });
 
         // Create tone mapping uniforms
-        let tonemap_uniforms = device.create_buffer(&BufferDescriptor {
-            label: Some("tonemap_uniforms"),
-            size: std::mem::size_of::<ToneMappingUniforms>() as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let tonemap_uniforms = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("tonemap_uniforms"),
+                size: std::mem::size_of::<ToneMappingUniforms>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
         // Create tonemap pipeline
         let tonemap_shader_source = format!(
@@ -155,10 +177,11 @@ impl HdrOffscreenPipeline {
             include_str!("../../shaders/includes/tonemap_common.wgsl"),
             include_str!("../../shaders/postprocess_tonemap.wgsl")
         );
-        let tonemap_shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("tonemap_shader"),
-            source: ShaderSource::Wgsl(tonemap_shader_source.into()),
-        });
+        let tonemap_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "hdr_offscreen.tonemap_shader",
+            &tonemap_shader_source,
+        );
 
         // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -215,28 +238,31 @@ impl HdrOffscreenPipeline {
             push_constant_ranges: &[],
         });
 
-        let tonemap_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some("tonemap_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: VertexState {
-                module: &tonemap_shader,
-                entry_point: "vs_main",
-                buffers: &[],
+        let tonemap_pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &RenderPipelineDescriptor {
+                label: Some("tonemap_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: VertexState {
+                    module: &tonemap_shader,
+                    entry_point: "vs_main",
+                    buffers: &[],
+                },
+                fragment: Some(FragmentState {
+                    module: &tonemap_shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(ColorTargetState {
+                        format: config.ldr_format,
+                        blend: Some(BlendState::REPLACE),
+                        write_mask: ColorWrites::ALL,
+                    })],
+                }),
+                primitive: PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: MultisampleState::default(),
+                multiview: None,
             },
-            fragment: Some(FragmentState {
-                module: &tonemap_shader,
-                entry_point: "fs_main",
-                targets: &[Some(ColorTargetState {
-                    format: config.ldr_format,
-                    blend: Some(BlendState::REPLACE),
-                    write_mask: ColorWrites::ALL,
-                })],
-            }),
-            primitive: PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: MultisampleState::default(),
-            multiview: None,
-        });
+        );
 
         // Create sampler for HDR texture
         let sampler = device.create_sampler(&SamplerDescriptor {
@@ -249,20 +275,24 @@ impl HdrOffscreenPipeline {
             ..Default::default()
         });
 
-        let default_lut_texture = device.create_texture(&TextureDescriptor {
-            label: Some("hdr_offscreen_default_lut"),
-            size: Extent3d {
-                width: 2,
-                height: 2,
-                depth_or_array_layers: 2,
+        let default_lut_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("hdr_offscreen_default_lut"),
+                size: Extent3d {
+                    width: 2,
+                    height: 2,
+                    depth_or_array_layers: 2,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D3,
+                format: TextureFormat::Rgba8Unorm,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D3,
-            format: TextureFormat::Rgba8Unorm,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
         let default_lut_view = default_lut_texture.create_view(&TextureViewDescriptor::default());
         let lut_sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("hdr_offscreen_lut_sampler"),
@@ -462,12 +492,16 @@ impl HdrOffscreenPipeline {
 
         let buffer_size = padded_bytes_per_row * self.config.height;
 
-        let staging_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("ldr_staging_buffer"),
-            size: buffer_size as u64,
-            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let staging_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("ldr_staging_buffer"),
+                size: buffer_size as u64,
+                usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("ldr_copy_encoder"),

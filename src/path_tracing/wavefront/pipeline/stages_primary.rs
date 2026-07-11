@@ -18,12 +18,15 @@ impl WavefrontPipelines {
             push_constant_ranges: &[],
         });
         Ok(
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("raygen-pipeline"),
-                layout: Some(&pipeline_layout),
-                module: shader,
-                entry_point: "main",
-            }),
+            crate::core::shader_registry::create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("raygen-pipeline"),
+                    layout: Some(&pipeline_layout),
+                    module: shader,
+                    entry_point: "main",
+                },
+            ),
         )
     }
 
@@ -50,12 +53,15 @@ impl WavefrontPipelines {
             push_constant_ranges: &[],
         });
         Ok(
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("intersect-pipeline"),
-                layout: Some(&pipeline_layout),
-                module: shader,
-                entry_point: "main",
-            }),
+            crate::core::shader_registry::create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("intersect-pipeline"),
+                    layout: Some(&pipeline_layout),
+                    module: shader,
+                    entry_point: "main",
+                },
+            ),
         )
     }
 
@@ -83,12 +89,15 @@ impl WavefrontPipelines {
             push_constant_ranges: &[],
         });
         Ok(
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some("shade-pipeline"),
-                layout: Some(&pipeline_layout),
-                module: shader,
-                entry_point: "main",
-            }),
+            crate::core::shader_registry::create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("shade-pipeline"),
+                    layout: Some(&pipeline_layout),
+                    module: shader,
+                    entry_point: "main",
+                },
+            ),
         )
     }
 }

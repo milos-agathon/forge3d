@@ -126,6 +126,7 @@ class SmokeDomain:
         fovy_deg: float = ...,
         sun_direction: tuple[float, float, float] = ...,
         settings: SmokeRenderSettings | None = ...,
+        certificate: bool | str | Path = ...,
     ) -> np.ndarray: ...
     def render_projection_rgba(
         self,
@@ -134,6 +135,7 @@ class SmokeDomain:
         view_direction: tuple[float, float, float] = ...,
         sun_direction: tuple[float, float, float] = ...,
         settings: SmokeRenderSettings | None = ...,
+        certificate: bool | str | Path = ...,
     ) -> np.ndarray: ...
 
 

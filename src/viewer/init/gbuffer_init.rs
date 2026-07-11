@@ -2,22 +2,24 @@
 // GBuffer pipeline initialization for the Viewer
 
 use std::sync::Arc;
-use wgpu::{
-    BindGroup, BindGroupLayout, Buffer, Device, RenderPipeline, Sampler, Texture, TextureView,
-};
+use wgpu::{BindGroup, BindGroupLayout, Device, RenderPipeline, Sampler, TextureView};
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 use crate::core::screen_space_effects::ScreenSpaceEffectsManager;
 
 /// Resources created during GBuffer initialization
 pub struct GBufferResources {
     pub geom_bind_group_layout: Option<BindGroupLayout>,
     pub geom_pipeline: Option<RenderPipeline>,
-    pub geom_camera_buffer: Option<Buffer>,
+    pub geom_camera_buffer: Option<TrackedBuffer>,
     pub geom_bind_group: Option<BindGroup>,
-    pub geom_vb: Option<Buffer>,
-    pub z_texture: Option<Texture>,
+    pub geom_vb: Option<TrackedBuffer>,
+    pub z_texture: Option<TrackedTexture>,
     pub z_view: Option<TextureView>,
-    pub albedo_texture: Option<Texture>,
+    pub albedo_texture: Option<TrackedTexture>,
     pub albedo_view: Option<TextureView>,
     pub albedo_sampler: Option<Sampler>,
     pub comp_bind_group_layout: Option<BindGroupLayout>,
@@ -107,36 +109,42 @@ pub fn create_gbuffer_resources(
     width: u32,
     height: u32,
     surface_format: wgpu::TextureFormat,
-) -> GBufferResources {
+) -> RenderResult<GBufferResources> {
     let gi_ref = match gi {
         Some(g) => g,
-        None => return GBufferResources::default(),
+        None => return Ok(GBufferResources::default()),
     };
 
     // Z-buffer for rasterization
-    let z_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("viewer.gbuf.z"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+    let z_texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("viewer.gbuf.z"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Depth32Float,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
+    )?;
     let z_view = z_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
     // Camera uniform
-    let geom_camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("viewer.gbuf.cam"),
-        size: (std::mem::size_of::<[[f32; 4]; 4]>() * 2) as u64,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+    let geom_camera_buffer = tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("viewer.gbuf.cam"),
+            size: (std::mem::size_of::<[[f32; 4]; 4]>() * 2) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )?;
 
     // Bind group layout: camera uniform + albedo texture + sampler
     let geom_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -172,10 +180,11 @@ pub fn create_gbuffer_resources(
     });
 
     // Shader for geometry GBuffer write
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("viewer.gbuf.geom.shader"),
-        source: wgpu::ShaderSource::Wgsl(GBUFFER_GEOM_SHADER.into()),
-    });
+    let shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "viewer.gbuf.geom.shader",
+        GBUFFER_GEOM_SHADER,
+    );
 
     // Pipeline layout
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -186,86 +195,92 @@ pub fn create_gbuffer_resources(
 
     let gb = gi_ref.gbuffer();
     let gb_cfg = gb.config();
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("viewer.gbuf.geom.pipeline"),
-        layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: "vs_main",
-            buffers: &[wgpu::VertexBufferLayout {
-                array_stride: 40,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &[
-                    wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32x3,
-                        offset: 0,
-                        shader_location: 0,
+    let pipeline =
+        crate::core::shader_registry::with_error_scope(device, "viewer.gbuf.geom.pipeline", || {
+            crate::core::shader_registry::create_render_pipeline_scoped(
+                device,
+                &wgpu::RenderPipelineDescriptor {
+                    label: Some("viewer.gbuf.geom.pipeline"),
+                    layout: Some(&pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &shader,
+                        entry_point: "vs_main",
+                        buffers: &[wgpu::VertexBufferLayout {
+                            array_stride: 40,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &[
+                                wgpu::VertexAttribute {
+                                    format: wgpu::VertexFormat::Float32x3,
+                                    offset: 0,
+                                    shader_location: 0,
+                                },
+                                wgpu::VertexAttribute {
+                                    format: wgpu::VertexFormat::Float32x3,
+                                    offset: 12,
+                                    shader_location: 1,
+                                },
+                                wgpu::VertexAttribute {
+                                    format: wgpu::VertexFormat::Float32x2,
+                                    offset: 24,
+                                    shader_location: 2,
+                                },
+                                wgpu::VertexAttribute {
+                                    format: wgpu::VertexFormat::Float32x2,
+                                    offset: 32,
+                                    shader_location: 3,
+                                },
+                            ],
+                        }],
                     },
-                    wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32x3,
-                        offset: 12,
-                        shader_location: 1,
+                    fragment: Some(wgpu::FragmentState {
+                        module: &shader,
+                        entry_point: "fs_main",
+                        targets: &[
+                            Some(wgpu::ColorTargetState {
+                                format: gb_cfg.normal_format,
+                                blend: None,
+                                write_mask: wgpu::ColorWrites::ALL,
+                            }),
+                            Some(wgpu::ColorTargetState {
+                                format: gb_cfg.material_format,
+                                blend: None,
+                                write_mask: wgpu::ColorWrites::ALL,
+                            }),
+                            Some(wgpu::ColorTargetState {
+                                format: gb_cfg.depth_format,
+                                blend: None,
+                                write_mask: wgpu::ColorWrites::ALL,
+                            }),
+                        ],
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::TriangleList,
+                        strip_index_format: None,
+                        front_face: wgpu::FrontFace::Ccw,
+                        cull_mode: Some(wgpu::Face::Back),
+                        polygon_mode: wgpu::PolygonMode::Fill,
+                        unclipped_depth: false,
+                        conservative: false,
                     },
-                    wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32x2,
-                        offset: 24,
-                        shader_location: 2,
-                    },
-                    wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32x2,
-                        offset: 32,
-                        shader_location: 3,
-                    },
-                ],
-            }],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: "fs_main",
-            targets: &[
-                Some(wgpu::ColorTargetState {
-                    format: gb_cfg.normal_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                }),
-                Some(wgpu::ColorTargetState {
-                    format: gb_cfg.material_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                }),
-                Some(wgpu::ColorTargetState {
-                    format: gb_cfg.depth_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                }),
-            ],
-        }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            strip_index_format: None,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Back),
-            polygon_mode: wgpu::PolygonMode::Fill,
-            unclipped_depth: false,
-            conservative: false,
-        },
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: wgpu::TextureFormat::Depth32Float,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::Less,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }),
-        multisample: wgpu::MultisampleState::default(),
-        multiview: None,
-    });
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: wgpu::TextureFormat::Depth32Float,
+                        depth_write_enabled: true,
+                        depth_compare: wgpu::CompareFunction::Less,
+                        stencil: wgpu::StencilState::default(),
+                        bias: wgpu::DepthBiasState::default(),
+                    }),
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview: None,
+                },
+            )
+        });
 
     // Composite bind group layout and pipeline - delegated to composite_init
     let comp_bgl = super::composite_init::create_composite_bind_group_layout(device);
     let comp_pipeline =
         super::composite_init::create_composite_pipeline(device, &comp_bgl, surface_format);
 
-    GBufferResources {
+    Ok(GBufferResources {
         geom_bind_group_layout: Some(geom_bgl),
         geom_pipeline: Some(pipeline),
         geom_camera_buffer: Some(geom_camera_buffer),
@@ -278,5 +293,5 @@ pub fn create_gbuffer_resources(
         albedo_sampler: None,
         comp_bind_group_layout: Some(comp_bgl),
         comp_pipeline: Some(comp_pipeline),
-    }
+    })
 }

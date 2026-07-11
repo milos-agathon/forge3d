@@ -7,12 +7,15 @@ impl PointRenderer {
     ) -> Result<Self, RenderError> {
         let shader = super::pipelines::create_shader(device);
 
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Point.Uniform"),
-            size: std::mem::size_of::<PointUniform>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("vf.Vector.Point.Uniform"),
+                size: std::mem::size_of::<PointUniform>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vf.Vector.Point.BindGroupLayout"),
             entries: &[
@@ -45,20 +48,23 @@ impl PointRenderer {
             ],
         });
 
-        let default_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("vf.Vector.Point.DefaultTexture"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
+        let default_texture = crate::core::resource_tracker::tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("vf.Vector.Point.DefaultTexture"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
         let default_view = default_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
 
@@ -117,12 +123,15 @@ impl PointRenderer {
                 ],
             });
 
-        let pick_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Point.PickUniform"),
-            size: 16,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let pick_uniform_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("vf.Vector.Point.PickUniform"),
+                size: 16,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
         let pick_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("vf.Vector.Point.PickBindGroup"),
             layout: &pick_bind_group_layout,

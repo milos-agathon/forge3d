@@ -2,24 +2,27 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use super::*;
+use crate::core::resource_tracker::{
+    tracked_create_buffer_init, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 
 pub(in crate::terrain::renderer) struct UploadedHeightInputs {
     pub(in crate::terrain::renderer) width: u32,
     pub(in crate::terrain::renderer) height: u32,
     pub(in crate::terrain::renderer) heightmap_data: Vec<f32>,
     pub(in crate::terrain::renderer) terrain_data_hash: u64,
-    pub(in crate::terrain::renderer) _heightmap_texture: wgpu::Texture,
+    pub(in crate::terrain::renderer) _heightmap_texture: TrackedTexture,
     pub(in crate::terrain::renderer) heightmap_view: wgpu::TextureView,
-    pub(in crate::terrain::renderer) _water_mask_texture: Option<wgpu::Texture>,
+    pub(in crate::terrain::renderer) _water_mask_texture: Option<TrackedTexture>,
     pub(in crate::terrain::renderer) water_mask_view_uploaded: Option<wgpu::TextureView>,
 }
 
 pub(in crate::terrain::renderer) struct MaterialMapResources {
-    _normal_texture: wgpu::Texture,
+    _normal_texture: TrackedTexture,
     normal_view: wgpu::TextureView,
-    _roughness_texture: wgpu::Texture,
+    _roughness_texture: TrackedTexture,
     roughness_view: wgpu::TextureView,
-    _mask_texture: wgpu::Texture,
+    _mask_texture: TrackedTexture,
     mask_view: wgpu::TextureView,
     sampler: wgpu::Sampler,
 }
@@ -27,8 +30,8 @@ pub(in crate::terrain::renderer) struct MaterialMapResources {
 pub(in crate::terrain::renderer) struct PreparedMaterials {
     pub(in crate::terrain::renderer) gpu_materials:
         Arc<crate::render::material_set::GpuMaterialSet>,
-    pub(in crate::terrain::renderer) shading_buffer: wgpu::Buffer,
-    pub(in crate::terrain::renderer) overlay_buffer: wgpu::Buffer,
+    pub(in crate::terrain::renderer) shading_buffer: TrackedBuffer,
+    pub(in crate::terrain::renderer) overlay_buffer: TrackedBuffer,
     pub(in crate::terrain::renderer) overlay_binding: OverlayBinding,
     pub(in crate::terrain::renderer) fallback_colormap_view: Option<wgpu::TextureView>,
     pub(in crate::terrain::renderer) material_maps: MaterialMapResources,
@@ -191,24 +194,26 @@ impl TerrainScene {
 
         let shading_uniforms =
             self.build_shading_uniforms(material_set, gpu_materials.as_ref(), params, decoded)?;
-        let shading_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let shading_buffer = tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.shading_buffer"),
                 contents: bytemuck::cast_slice(&shading_uniforms),
                 usage: wgpu::BufferUsages::UNIFORM,
-            });
+            },
+        )?;
 
         let overlay_binding = self.extract_overlay_binding(params, offline_hdr_output);
         self.log_color_debug(params, &overlay_binding);
 
-        let overlay_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let overlay_buffer = tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.overlay_buffer"),
                 contents: bytemuck::bytes_of(&overlay_binding.uniform),
                 usage: wgpu::BufferUsages::UNIFORM,
-            });
+            },
+        )?;
 
         let fallback_colormap_view = if overlay_binding.lut.is_none() {
             Some(
@@ -284,7 +289,7 @@ impl TerrainScene {
         path: Option<&str>,
         fallback_rgba: [u8; 4],
         label: &'static str,
-    ) -> Result<(wgpu::Texture, wgpu::TextureView)> {
+    ) -> Result<(TrackedTexture, wgpu::TextureView)> {
         let (width, height, pixels) = if let Some(path) = path {
             let image = image::open(path)
                 .map_err(|err| anyhow!("Failed to load terrain material map '{}': {err}", path))?;
@@ -301,20 +306,23 @@ impl TerrainScene {
             (1, 1, fallback_rgba.to_vec())
         };
 
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(label),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let texture = tracked_create_texture(
+            self.device.as_ref(),
+            &wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         let (padded, padded_bpr) = pad_rgba8_rows(width, height, &pixels);
         self.queue.write_texture(
             wgpu::ImageCopyTexture {
@@ -356,13 +364,14 @@ impl TerrainScene {
             cos_theta,
             specular_mip_count: ibl_resources.specular_mip_count.max(1) as f32,
         };
-        let ibl_uniform_buffer =
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("terrain.ibl_uniform_buffer"),
-                    contents: bytemuck::bytes_of(&ibl_uniforms),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                });
+        let ibl_uniform_buffer = tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.ibl_uniform_buffer"),
+                contents: bytemuck::bytes_of(&ibl_uniforms),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        )?;
 
         Ok(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("terrain_pbr_pom.ibl_bind_group"),

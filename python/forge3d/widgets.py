@@ -214,6 +214,15 @@ if _widgets is None:  # pragma: no cover - only executed without ipywidgets
             del args, kwargs
             raise ImportError(_missing_ipywidgets_message()) from _WIDGETS_IMPORT_ERROR
 
+        def snapshot(self, *args: Any, **kwargs: Any) -> None:
+            """Capture an interactive-viewer snapshot for notebook output.
+
+            Outside CENSOR's render-certificate scope: this is an interactive
+            widget path, not a CENSOR offscreen render.
+            """
+            del args, kwargs
+            raise ImportError(_missing_ipywidgets_message()) from _WIDGETS_IMPORT_ERROR
+
 else:
     class _InlinePreview(_widgets.VBox):  # type: ignore[misc]
         """Internal inline fallback preview used when the live viewer is unavailable."""
@@ -474,7 +483,11 @@ else:
             width: Optional[int] = None,
             height: Optional[int] = None,
         ) -> Optional[Path]:
-            """Capture a snapshot and show it inline in the notebook output."""
+            """Capture an interactive-viewer snapshot for notebook output.
+
+            Outside CENSOR's render-certificate scope: this delegates to the
+            interactive viewer (or its fallback), not a CENSOR offscreen render.
+            """
             output_path: Optional[Path] = Path(path) if path is not None else None
             snapshot_width = int(width) if width is not None else self._width
             snapshot_height = int(height) if height is not None else self._height

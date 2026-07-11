@@ -1,5 +1,6 @@
 use super::draw::RenderTargets;
 use super::*;
+use crate::core::resource_tracker::tracked_create_buffer;
 use crate::terrain::renderer::core::TERRAIN_DEPTH_FORMAT;
 
 use crate::terrain::scatter::{
@@ -143,7 +144,7 @@ impl TerrainScene {
             return Ok(());
         }
 
-        self.ensure_scatter_renderer_sample_count(render_targets.sample_count);
+        self.ensure_scatter_renderer_sample_count(render_targets.sample_count)?;
 
         let color_view = render_targets
             .msaa_view
@@ -173,12 +174,15 @@ impl TerrainScene {
         let identity_packed =
             crate::terrain::scatter::pack_hlod_identity_instance(state.render_from_contract);
         let hlod_inst_bytes = (std::mem::size_of::<f32>() * 16) as u64;
-        let hlod_instbuf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("terrain.scatter.hlod.instance_buffer"),
-            size: hlod_inst_bytes,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let hlod_instbuf = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("terrain.scatter.hlod.instance_buffer"),
+                size: hlod_inst_bytes,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
         queue.write_buffer(&hlod_instbuf, 0, bytemuck::cast_slice(&identity_packed));
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -291,10 +295,10 @@ impl TerrainScene {
         Ok(())
     }
 
-    fn ensure_scatter_renderer_sample_count(&mut self, sample_count: u32) {
+    fn ensure_scatter_renderer_sample_count(&mut self, sample_count: u32) -> Result<()> {
         let sample_count = sample_count.max(1);
         if self.scatter_renderer_sample_count == sample_count {
-            return;
+            return Ok(());
         }
 
         self.scatter_renderer =
@@ -306,7 +310,8 @@ impl TerrainScene {
                 wgpu::CompareFunction::LessEqual,
                 false,
                 Some(&self.shadow_bind_group_layout),
-            );
+            )?;
         self.scatter_renderer_sample_count = sample_count;
+        Ok(())
     }
 }

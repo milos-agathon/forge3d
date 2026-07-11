@@ -31,8 +31,10 @@ pub use unified::{
     UnifiedPickingSystem,
 };
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use std::sync::Arc;
-use wgpu::{Buffer, BufferUsages, Device, Queue};
+use wgpu::{BufferUsages, Device, Queue};
 
 /// Result of a pick operation
 #[derive(Debug, Clone)]
@@ -83,7 +85,7 @@ pub struct PickingManager {
     config: PickingConfig,
     id_buffer_pass: Option<IdBufferPass>,
     tile_id_pass: Option<TileIdPass>,
-    readback_buffer: Option<Buffer>,
+    readback_buffer: Option<TrackedBuffer>,
     selection_manager: SelectionManager,
     bounds_manager: BoundsManager,
     terrain_query: TerrainQueryEngine,
@@ -115,31 +117,36 @@ impl PickingManager {
     }
 
     /// Initialize or resize the ID buffer
-    pub fn init(&mut self, width: u32, height: u32) {
+    pub fn init(&mut self, width: u32, height: u32) -> RenderResult<()> {
         if !self.config.enabled {
-            return;
+            return Ok(());
         }
 
         if self.width == width && self.height == height && self.id_buffer_pass.is_some() {
-            return;
+            return Ok(());
         }
 
         self.width = width;
         self.height = height;
 
-        self.id_buffer_pass = Some(IdBufferPass::new(&self.device, width, height));
+        self.id_buffer_pass = Some(IdBufferPass::new(&self.device, width, height)?);
 
         // Initialize tile ID pass for hover picking
         if self.config.hover_enabled {
-            self.tile_id_pass = Some(TileIdPass::new(&self.device, self.config.tile_size));
+            self.tile_id_pass = Some(TileIdPass::new(&self.device, self.config.tile_size)?);
         }
 
-        self.readback_buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("picking_readback_buffer"),
-            size: 4, // Single u32 pixel
-            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        }));
+        self.readback_buffer = Some(tracked_create_buffer(
+            &self.device,
+            &wgpu::BufferDescriptor {
+                label: Some("picking_readback_buffer"),
+                size: 4, // Single u32 pixel
+                usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        )?);
+
+        Ok(())
     }
 
     /// Enable or disable picking
@@ -259,8 +266,8 @@ impl PickingManager {
     }
 
     /// Get the readback buffer
-    pub fn readback_buffer(&self) -> Option<&Buffer> {
-        self.readback_buffer.as_ref()
+    pub fn readback_buffer(&self) -> Option<&wgpu::Buffer> {
+        self.readback_buffer.as_ref().map(|b| b.inner())
     }
 
     /// Copy a single pixel from the ID buffer to the readback buffer
@@ -350,13 +357,14 @@ impl PickingManager {
     }
 
     /// Enable or disable hover highlighting
-    pub fn set_hover_enabled(&mut self, enabled: bool) {
+    pub fn set_hover_enabled(&mut self, enabled: bool) -> RenderResult<()> {
         self.config.hover_enabled = enabled;
         if enabled && self.config.enabled && self.tile_id_pass.is_none() {
-            self.tile_id_pass = Some(TileIdPass::new(&self.device, self.config.tile_size));
+            self.tile_id_pass = Some(TileIdPass::new(&self.device, self.config.tile_size)?);
         } else if !enabled {
             self.tile_id_pass = None;
         }
+        Ok(())
     }
 
     /// Check if hover is enabled

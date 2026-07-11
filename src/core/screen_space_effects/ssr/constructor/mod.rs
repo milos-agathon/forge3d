@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 
 mod layouts;
 mod pipelines;
@@ -21,28 +22,28 @@ struct ConstructorPipelines {
 }
 
 struct ConstructorBuffers {
-    settings_buffer: Buffer,
-    camera_buffer: Buffer,
-    counters_buffer: Buffer,
-    counters_readback: Buffer,
-    composite_params: Buffer,
-    temporal_params: Buffer,
+    settings_buffer: TrackedBuffer,
+    camera_buffer: TrackedBuffer,
+    counters_buffer: TrackedBuffer,
+    counters_readback: TrackedBuffer,
+    composite_params: TrackedBuffer,
+    temporal_params: TrackedBuffer,
 }
 
 struct ConstructorResources {
-    ssr_spec_texture: Texture,
+    ssr_spec_texture: TrackedTexture,
     ssr_spec_view: TextureView,
-    ssr_final_texture: Texture,
+    ssr_final_texture: TrackedTexture,
     ssr_final_view: TextureView,
-    ssr_history_texture: Texture,
+    ssr_history_texture: TrackedTexture,
     ssr_history_view: TextureView,
-    ssr_filtered_texture: Texture,
+    ssr_filtered_texture: TrackedTexture,
     ssr_filtered_view: TextureView,
-    ssr_hit_texture: Texture,
+    ssr_hit_texture: TrackedTexture,
     ssr_hit_view: TextureView,
-    ssr_composited_texture: Texture,
+    ssr_composited_texture: TrackedTexture,
     ssr_composited_view: TextureView,
-    env_texture: Texture,
+    env_texture: TrackedTexture,
     env_view: TextureView,
     env_sampler: Sampler,
     linear_sampler: Sampler,
@@ -53,10 +54,10 @@ impl SsrRenderer {
         let mut settings = SsrSettings::default();
         settings.inv_resolution = [1.0 / width as f32, 1.0 / height as f32];
 
-        let buffers = resources::create_buffers(device);
+        let buffers = resources::create_buffers(device)?;
         let layouts = layouts::create_layouts(device);
         let pipelines = pipelines::create_pipelines(device, &layouts);
-        let textures = resources::create_textures(device, width, height);
+        let textures = resources::create_textures(device, width, height)?;
 
         Ok(Self {
             settings,

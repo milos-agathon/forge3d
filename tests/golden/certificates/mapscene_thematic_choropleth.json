@@ -1,0 +1,226 @@
+{
+  "adapter": {
+    "backend": "vulkan",
+    "device": "NVIDIA GeForce RTX 3070",
+    "driver_info": "595.95",
+    "vendor": "4318"
+  },
+  "allocations": {
+    "by_label": {
+      "Light Count Buffer 0": 16,
+      "Light Count Buffer 1": 16,
+      "Light Count Buffer 2": 16,
+      "Light Environment Stub Buffer": 16,
+      "Light Storage Buffer 0": 1280,
+      "Light Storage Buffer 1": 1280,
+      "Light Storage Buffer 2": 1280,
+      "colormap1d-lut": 1024,
+      "csm_evsm_maps": 134217728,
+      "csm_shadow_maps": 67108864,
+      "csm_uniforms": 864,
+      "forge3d-readback-staging": 45056,
+      "gpu_timing.readback_slot0": 512,
+      "gpu_timing.readback_slot1": 512,
+      "gpu_timing.resolve_slot0": 512,
+      "gpu_timing.resolve_slot1": 512,
+      "height_ao.uniform_buffer": 48,
+      "ibl.brdf.lut": 2097152,
+      "ibl.environment.cubemap": 3145728,
+      "ibl.environment.equirect": 32,
+      "ibl.irradiance.cubemap": 3145728,
+      "ibl.prefilter.uniforms": 48,
+      "ibl.specular.cubemap": 16776192,
+      "mesh_instanced.shadow_fallback_csm": 864,
+      "mesh_instanced.shadow_fallback_maps": 4,
+      "mesh_instanced.shadow_fallback_moments": 8,
+      "mesh_instanced_draw_uniforms": 122880,
+      "mesh_instanced_shadow_draw_uniforms": 122880,
+      "mesh_instanced_terrain_fallback": 4,
+      "mesh_instanced_terrain_uniforms": 32,
+      "mesh_instanced_uniforms": 240,
+      "src/terrain/renderer/constructor.rs:444": 4,
+      "src/terrain/renderer/constructor.rs:445": 1024,
+      "src/terrain/renderer/constructor.rs:446": 1,
+      "src/terrain/renderer/constructor.rs:447": 4,
+      "src/terrain/renderer/constructor.rs:448": 1048576,
+      "src/terrain/renderer/constructor.rs:449": 1048576,
+      "src/terrain/renderer/constructor.rs:454": 4,
+      "src/terrain/renderer/constructor.rs:459": 16,
+      "src/terrain/renderer/constructor.rs:460": 8,
+      "sun_vis.uniform_buffer": 64,
+      "terrain.ao_debug_fallback": 4,
+      "terrain.coarse_ao": 256,
+      "terrain.depth.render_target": 45056,
+      "terrain.detail_normal_fallback": 4,
+      "terrain.fog.uniform_buffer": 64,
+      "terrain.height_ao_fallback": 4,
+      "terrain.height_curve_lut": 1024,
+      "terrain.heightmap": 256,
+      "terrain.ibl_uniform_buffer": 16,
+      "terrain.internal.render_target": 45056,
+      "terrain.material_layer.uniform_buffer": 224,
+      "terrain.material_maps.mask": 4,
+      "terrain.material_maps.normal": 4,
+      "terrain.material_maps.roughness": 4,
+      "terrain.materials.albedo": 5592400,
+      "terrain.noop_shadow.csm_uniforms": 864,
+      "terrain.noop_shadow.maps": 4,
+      "terrain.noop_shadow.moments": 8,
+      "terrain.overlay_buffer": 96,
+      "terrain.probes.grid_uniform_buffer": 48,
+      "terrain.probes.ssbo": 144,
+      "terrain.reflection_probes.fallback_texture": 48,
+      "terrain.reflection_probes.grid_uniform_buffer": 80,
+      "terrain.shading_buffer": 176,
+      "terrain.shadow.cascade_0.uniforms": 112,
+      "terrain.shadow.cascade_1.uniforms": 112,
+      "terrain.shadow.cascade_2.uniforms": 112,
+      "terrain.shadow.cascade_3.uniforms": 112,
+      "terrain.shadow.csm_uniforms": 864,
+      "terrain.sky.fallback": 4,
+      "terrain.sun_vis_fallback": 4,
+      "terrain.uniform_buffer": 176,
+      "terrain.water_mask_fallback": 1,
+      "terrain.water_reflection.depth": 1059840,
+      "terrain.water_reflection.fallback": 4,
+      "terrain.water_reflection.texture": 1059840,
+      "terrain.water_reflection.uniform_buffer": 128,
+      "vf.Vector.Line.InstanceBuffer": 49152,
+      "vf.Vector.Line.PickUniform": 16,
+      "vf.Vector.Line.StagingBuffer": 768,
+      "vf.Vector.Line.Uniform": 128,
+      "vf.Vector.OIT.ColorAccum": 90112,
+      "vf.Vector.OIT.Depth": 45056,
+      "vf.Vector.OIT.RevealAccum": 22528,
+      "vf.Vector.Point.DefaultTexture": 4,
+      "vf.Vector.Point.PickUniform": 16,
+      "vf.Vector.Point.Uniform": 112,
+      "vf.Vector.Polygon.IndexBuffer": 12288,
+      "vf.Vector.Polygon.Uniform": 112,
+      "vf.Vector.Polygon.VertexBuffer": 32768,
+      "vf.Vector.PolygonFill.Final": 45056,
+      "vf.Vector.PolygonFill.Read": 45056,
+      "vf.Vector.RenderOIT.Final": 45056,
+      "vf.Vector.RenderOIT.Read": 45056,
+      "vt_atlas_fallback": 4,
+      "vt_fallback_colors": 256,
+      "vt_feedback_fallback": 16,
+      "vt_page_table_fallback": 64,
+      "vt_uniforms": 96
+    },
+    "peak_device_local_bytes": 236648894,
+    "peak_host_visible_bytes": 46080
+  },
+  "capabilities": {
+    "granted": [
+      "timestamp_query",
+      "pipeline_statistics_query",
+      "texture_binding_array",
+      "sampled_texture_and_storage_buffer_array_non_uniform_indexing",
+      "texture_compression_bc",
+      "float32_filterable",
+      "indirect_first_instance"
+    ],
+    "limits": {
+      "max_bind_groups": 8,
+      "max_buffer_size": 18446744073709551615,
+      "max_storage_buffers_per_shader_stage": 1048576,
+      "max_texture_dimension_2d": 32768,
+      "min_storage_buffer_offset_alignment": 32,
+      "min_uniform_buffer_offset_alignment": 64
+    },
+    "requested": [
+      "timestamp_query",
+      "pipeline_statistics_query",
+      "texture_binding_array",
+      "sampled_texture_and_storage_buffer_array_non_uniform_indexing",
+      "texture_compression_bc",
+      "float32_filterable",
+      "indirect_first_instance"
+    ]
+  },
+  "degradations": [],
+  "engine": {
+    "git_sha": "1a44da79a1f0",
+    "version": "1.31.0",
+    "wgsl_module_hashes": {
+      "line_aa.wgsl": "7dcbcf1bfd7ca6e1f6f475d2d327307006bb2201294616159a28bf6f0bae8dcd",
+      "polygon_fill.wgsl": "75693f644f709f14a914b3d0acec9d5c0b5668365363a1eafe08aecd15c75c5a",
+      "terrain.shadow_depth.shader": "0602d15a5f19f10e937f0a2b1af364f19cd4356ed1d5b55282b49b9f97fa32de",
+      "terrain_pbr_pom.shader": "0307c801a78c43985979597e283004bea244e5f98a922abd7e4f65c30bf0740f",
+      "vf.Vector.OIT.Compose": "f7932527734887fe2772d634708a7333f9d381774e0465c3ec68ceb9f00ace87"
+    }
+  },
+  "passes": [
+    {
+      "draw_calls": 0,
+      "gpu_ms": 0.002047999994829297,
+      "label": "terrain.material_vt"
+    },
+    {
+      "draw_calls": 0,
+      "gpu_ms": 0.002047999994829297,
+      "label": "terrain.height_ao"
+    },
+    {
+      "draw_calls": 0,
+      "gpu_ms": 0.0010239999974146485,
+      "label": "terrain.sun_visibility"
+    },
+    {
+      "draw_calls": 0,
+      "gpu_ms": 1.614848017692566,
+      "label": "terrain.shadow"
+    },
+    {
+      "draw_calls": 0,
+      "gpu_ms": 0.0010239999974146485,
+      "label": "terrain.sky"
+    },
+    {
+      "draw_calls": 1,
+      "gpu_ms": 0.043007999658584595,
+      "label": "terrain.main"
+    },
+    {
+      "draw_calls": 1,
+      "gpu_ms": 0.0010239999974146485,
+      "label": "terrain.resolve"
+    },
+    {
+      "draw_calls": 4,
+      "gpu_ms": 0.0030720001086592674,
+      "label": "vector.polygon_fill"
+    },
+    {
+      "draw_calls": 1,
+      "gpu_ms": 0.009216000325977802,
+      "label": "vector.oit"
+    },
+    {
+      "draw_calls": 1,
+      "gpu_ms": 0.004095999989658594,
+      "label": "vector.oit.compose"
+    },
+    {
+      "draw_calls": 1,
+      "gpu_ms": 0.0,
+      "label": "mapscene.finalize"
+    }
+  ],
+  "schema": "forge3d.render_certificate/1",
+  "signature": {
+    "alg": "ed25519",
+    "pubkey": "92f33f5957bd8532b7e878f34b95aabe077f8ab962cea2c4b06acf2c91491917",
+    "sig": "5d15ee9cc4ba9f133d1467254a2ed6cf7fe0be8966e58ed8f2be77c66f01f4b4f82c28b9a78edf9e0f73b4eccb94c67e8f527d309eb338493288cc0b19afcc05",
+    "signed_fields": [
+      "adapter",
+      "allocations",
+      "capabilities",
+      "degradations",
+      "engine",
+      "passes (gpu_ms excluded)",
+      "schema"
+    ]
+  }
+}

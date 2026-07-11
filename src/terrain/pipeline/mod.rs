@@ -24,6 +24,7 @@ pub struct TerrainPipeline {
     pub sample_count: u32,
     pub depth_format: Option<TextureFormat>,
     pub normal_format: TextureFormat,
+    pub shader_label: &'static str,
 }
 
 impl TerrainPipeline {
@@ -59,7 +60,7 @@ impl TerrainPipeline {
         page_table: Option<&Buffer>,
         tile_slot_ubo: &Buffer,
         mosaic_params_ubo: &Buffer,
-    ) -> BindGroup {
+    ) -> crate::core::error::RenderResult<BindGroup> {
         bind_groups::make_bg_tile(
             self,
             device,

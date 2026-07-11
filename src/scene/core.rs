@@ -3,9 +3,11 @@ use super::texture_helpers::{
     create_normal_texture,
 };
 use super::*;
+use crate::core::resource_tracker::{
+    tracked_create_buffer_init, tracked_create_texture, TrackedBuffer,
+};
 use numpy::{PyReadonlyArray2, PyUntypedArrayMethods};
 use pyo3::{types::PyAny, PyResult};
-use wgpu::util::DeviceExt;
 
 include!("core/constructor.rs");
 include!("core/height.rs");

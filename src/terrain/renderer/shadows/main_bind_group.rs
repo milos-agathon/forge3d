@@ -1,7 +1,8 @@
 use super::*;
+use crate::core::resource_tracker::tracked_create_buffer_init;
 
 impl TerrainScene {
-    pub(super) fn create_shadow_bind_group(&self) -> wgpu::BindGroup {
+    pub(super) fn create_shadow_bind_group(&self) -> Result<wgpu::BindGroup> {
         use crate::core::shadow_mapping::{CsmCascadeData, CsmUniforms};
 
         let csm = &self.csm_renderer.uniforms;
@@ -97,13 +98,14 @@ impl TerrainScene {
             _padding2: [0.0; 27],
         };
 
-        let terrain_csm_buffer =
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("terrain.shadow.csm_uniforms"),
-                    contents: bytemuck::bytes_of(&terrain_csm_uniforms),
-                    usage: wgpu::BufferUsages::STORAGE,
-                });
+        let terrain_csm_buffer = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.shadow.csm_uniforms"),
+                contents: bytemuck::bytes_of(&terrain_csm_uniforms),
+                usage: wgpu::BufferUsages::STORAGE,
+            },
+        )?;
 
         let shadow_texture_view = self.csm_renderer.shadow_texture_view();
         let moment_texture_view = self.csm_renderer.moment_texture_view();
@@ -111,7 +113,7 @@ impl TerrainScene {
             .as_ref()
             .unwrap_or(&self.noop_shadow.moment_maps_view);
 
-        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        Ok(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("terrain.shadow.main_bind_group"),
             layout: &self.shadow_bind_group_layout,
             entries: &[
@@ -136,6 +138,6 @@ impl TerrainScene {
                     resource: wgpu::BindingResource::Sampler(&self.noop_shadow.moment_sampler),
                 },
             ],
-        })
+        }))
     }
 }

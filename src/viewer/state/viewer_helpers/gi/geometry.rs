@@ -67,20 +67,23 @@ impl Viewer {
                 self.device
                     .create_sampler(&wgpu::SamplerDescriptor::default())
             });
-            let white_tex = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("viewer.geom.albedo.fallback.p51"),
-                size: wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
+            let white_tex = crate::core::resource_tracker::tracked_create_texture(
+                &self.device,
+                &wgpu::TextureDescriptor {
+                    label: Some("viewer.geom.albedo.fallback.p51"),
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
+            )?;
             self.queue.write_texture(
                 wgpu::ImageCopyTexture {
                     texture: &white_tex,

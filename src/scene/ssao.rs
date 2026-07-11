@@ -1,4 +1,8 @@
 use super::*;
+use crate::core::error::RenderError;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -22,17 +26,17 @@ pub(super) struct SsaoResources {
     pub(super) height: u32,
     _sampler: wgpu::Sampler,
     _blur_sampler: wgpu::Sampler,
-    settings_buffer: wgpu::Buffer,
-    blur_settings_buffer: wgpu::Buffer,
-    view_buffer: wgpu::Buffer,
-    ao_texture: wgpu::Texture,
+    settings_buffer: TrackedBuffer,
+    blur_settings_buffer: TrackedBuffer,
+    view_buffer: TrackedBuffer,
+    ao_texture: TrackedTexture,
     ao_view: wgpu::TextureView,
-    blur_texture: wgpu::Texture,
+    blur_texture: TrackedTexture,
     blur_view: wgpu::TextureView,
-    _noise_texture: wgpu::Texture,
+    _noise_texture: TrackedTexture,
     noise_view: wgpu::TextureView,
     noise_sampler: wgpu::Sampler,
-    _depth_texture: wgpu::Texture,
+    _depth_texture: TrackedTexture,
     depth_view: wgpu::TextureView,
     ssao_bind_group_layout: wgpu::BindGroupLayout,
     _ssao_output_bind_group_layout: wgpu::BindGroupLayout,

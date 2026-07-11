@@ -19,7 +19,6 @@ use crate::path_tracing::lighting::{GpuAreaLight, GpuDirectionalLight};
 use crate::path_tracing::restir::{
     create_reservoir_buffer, create_restir_gbuffer, create_restir_gbuffer_pos, Reservoir,
 };
-use wgpu::util::DeviceExt;
 
 /// Frames per convergence window: the gate measures the variance of the
 /// accumulated mean luminance across the last N frames (02-prometheus DoD).
@@ -80,8 +79,11 @@ pub struct TerrainReferenceOutput {
     pub gpu_resource_bytes: u64,
 }
 
-/// Registers every allocation with the global memory tracker and frees the
-/// entries on drop, so `?`/early-return paths cannot pollute the metrics.
+/// Accumulates the byte sizes of every GPU resource this render creates so the
+/// `gpu_resource_bytes` diagnostic can report the working set. The actual
+/// global-memory-tracker and allocation-ledger lifecycle is owned by the
+/// `tracked_create_*` wrappers each resource is allocated through (which also
+/// free on drop), so this helper only bookkeeps sizes.
 struct TrackedGpu {
     buffers: Vec<u64>,
     textures: Vec<(u32, u32, wgpu::TextureFormat, u64)>,
@@ -96,9 +98,7 @@ impl TrackedGpu {
     }
 
     fn buffer(&mut self, buf: &wgpu::Buffer) {
-        let size = buf.size();
-        global_tracker().track_buffer_allocation(size, false);
-        self.buffers.push(size);
+        self.buffers.push(buf.size());
     }
 
     fn texture(&mut self, width: u32, height: u32, format: wgpu::TextureFormat) {
@@ -109,7 +109,6 @@ impl TrackedGpu {
             wgpu::TextureFormat::R32Float | wgpu::TextureFormat::Rgba8Unorm => 4,
             _ => 4,
         };
-        global_tracker().track_texture_allocation(width, height, format);
         self.textures.push((
             width,
             height,
@@ -120,17 +119,6 @@ impl TrackedGpu {
 
     fn bytes(&self) -> u64 {
         self.buffers.iter().sum::<u64>() + self.textures.iter().map(|t| t.3).sum::<u64>()
-    }
-}
-
-impl Drop for TrackedGpu {
-    fn drop(&mut self) {
-        for size in self.buffers.drain(..) {
-            global_tracker().free_buffer_allocation(size, false);
-        }
-        for (w, h, fmt, _) in self.textures.drain(..) {
-            global_tracker().free_texture_allocation(w, h, fmt);
-        }
     }
 }
 
@@ -145,13 +133,15 @@ fn read_texture_pixels(
     let unpadded = width * bytes_per_pixel;
     let padded = align_copy_bpr(unpadded);
     let size = (padded as u64) * (height as u64);
-    let staging = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("hybrid-pt-terrain-readback"),
-        size,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    global_tracker().track_buffer_allocation(size, true);
+    let staging = tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("hybrid-pt-terrain-readback"),
+            size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        },
+    )?;
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("hybrid-pt-terrain-readback-enc"),
     });
@@ -191,7 +181,6 @@ fn read_texture_pixels(
     };
     staging.unmap();
     drop(staging);
-    global_tracker().free_buffer_allocation(size, true);
     Ok(out)
 }
 
@@ -201,13 +190,15 @@ fn read_buffer(
     buffer: &wgpu::Buffer,
     size: u64,
 ) -> Result<Vec<u8>, RenderError> {
-    let staging = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("hybrid-pt-terrain-buf-readback"),
-        size,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    global_tracker().track_buffer_allocation(size, true);
+    let staging = tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("hybrid-pt-terrain-buf-readback"),
+            size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        },
+    )?;
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("hybrid-pt-terrain-buf-enc"),
     });
@@ -222,7 +213,6 @@ fn read_buffer(
     };
     staging.unmap();
     drop(staging);
-    global_tracker().free_buffer_allocation(size, true);
     Ok(out)
 }
 
@@ -424,11 +414,14 @@ impl HybridPathTracer {
             seed_lo: desc.seed ^ 0x85EB_CA6B,
             _pad_end: [0; 3],
         };
-        let base_ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hybrid-pt-terrain-base-ubo"),
-            contents: bytemuck::bytes_of(&base),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let base_ubo = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("hybrid-pt-terrain-base-ubo"),
+                contents: bytemuck::bytes_of(&base),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        )?;
         tracked.buffer(&base_ubo);
         let hybrid_uniforms = HybridUniforms {
             sdf_primitive_count: 0,
@@ -447,11 +440,14 @@ impl HybridPathTracer {
             },
             _pad: [0; 2],
         };
-        let hybrid_ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hybrid-pt-terrain-hybrid-ubo"),
-            contents: bytemuck::bytes_of(&hybrid_uniforms),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let hybrid_ubo = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("hybrid-pt-terrain-hybrid-ubo"),
+                contents: bytemuck::bytes_of(&hybrid_uniforms),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        )?;
         tracked.buffer(&hybrid_ubo);
         let lighting = LightingUniforms {
             light_dir,
@@ -465,27 +461,36 @@ impl HybridPathTracer {
             specular_power: 32.0,
             _pad: [0; 5],
         };
-        let lighting_ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hybrid-pt-terrain-lighting-ubo"),
-            contents: bytemuck::bytes_of(&lighting),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let lighting_ubo = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("hybrid-pt-terrain-lighting-ubo"),
+                contents: bytemuck::bytes_of(&lighting),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        )?;
         tracked.buffer(&lighting_ubo);
         let terrain_uniforms = terrain_scene.uniforms(desc.spp, WELFORD_WINDOW);
-        let terrain_ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hybrid-pt-terrain-ubo"),
-            contents: bytemuck::bytes_of(&terrain_uniforms),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let terrain_ubo = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("hybrid-pt-terrain-ubo"),
+                contents: bytemuck::bytes_of(&terrain_uniforms),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        )?;
         tracked.buffer(&terrain_ubo);
 
         // --- Scene buffers (the spheres slot needs 1 dummy element) ---
-        let scene_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("hybrid-pt-terrain-scene"),
-            size: std::mem::size_of::<Sphere>() as u64,
-            usage: wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: false,
-        });
+        let scene_buf = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("hybrid-pt-terrain-scene"),
+                size: std::mem::size_of::<Sphere>() as u64,
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            },
+        )?;
         tracked.buffer(&scene_buf);
 
         // --- Directional-light table for the ReSTIR spatial pass ---
@@ -495,75 +500,93 @@ impl HybridPathTracer {
             [1.0, 0.97, 0.92],
             1.0,
         );
-        let dir_lights_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hybrid-pt-terrain-dir-lights"),
-            contents: bytemuck::bytes_of(&sun_light),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        let dir_lights_buf = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("hybrid-pt-terrain-dir-lights"),
+                contents: bytemuck::bytes_of(&sun_light),
+                usage: wgpu::BufferUsages::STORAGE,
+            },
+        )?;
         tracked.buffer(&dir_lights_buf);
         let area_light = <GpuAreaLight as bytemuck::Zeroable>::zeroed();
-        let area_lights_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hybrid-pt-terrain-area-lights"),
-            contents: bytemuck::bytes_of(&area_light),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        let area_lights_buf = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("hybrid-pt-terrain-area-lights"),
+                contents: bytemuck::bytes_of(&area_light),
+                usage: wgpu::BufferUsages::STORAGE,
+            },
+        )?;
         tracked.buffer(&area_lights_buf);
 
         // --- Accumulation (same shape as render.rs "hybrid-pt-accum"),
         // Welford variance, canonical ReSTIR reservoirs and G-buffer ---
         let px_count = (width as u64) * (height as u64);
         let px_usize = px_count as usize;
-        let accum_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("hybrid-pt-accum"),
-            size: px_count * 16,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let accum_buf = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("hybrid-pt-accum"),
+                size: px_count * 16,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
         tracked.buffer(&accum_buf);
-        let welford_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("hybrid-pt-terrain-welford"),
-            size: px_count * 8,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
+        let welford_buf = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("hybrid-pt-terrain-welford"),
+                size: px_count * 8,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            },
+        )?;
         tracked.buffer(&welford_buf);
         // Canonical Reservoir buffers (80-byte stride, matching
         // src/path_tracing/restir/types.rs and the pt_restir_* passes):
         // curr = fresh candidates, out = temporal merge, prev = final merged
         // history (spatial writes back into prev; the kernel shades from it).
-        let reservoir_curr = create_reservoir_buffer(device, px_usize);
-        let reservoir_out = create_reservoir_buffer(device, px_usize);
+        let reservoir_curr = create_reservoir_buffer(device, px_usize)?;
+        let reservoir_out = create_reservoir_buffer(device, px_usize)?;
         let prev_init = vec![Reservoir::default(); px_usize];
-        let reservoir_prev = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hybrid-pt-terrain-reservoir-prev"),
-            contents: bytemuck::cast_slice(&prev_init),
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-        });
+        let reservoir_prev = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("hybrid-pt-terrain-reservoir-prev"),
+                contents: bytemuck::cast_slice(&prev_init),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
+            },
+        )?;
         tracked.buffer(&reservoir_curr);
         tracked.buffer(&reservoir_out);
         tracked.buffer(&reservoir_prev);
-        let gbuffer_nr = create_restir_gbuffer(device, px_usize);
-        let gbuffer_pos = create_restir_gbuffer_pos(device, px_usize);
+        let gbuffer_nr = create_restir_gbuffer(device, px_usize)?;
+        let gbuffer_pos = create_restir_gbuffer_pos(device, px_usize)?;
         tracked.buffer(&gbuffer_nr);
         tracked.buffer(&gbuffer_pos);
 
         // --- Output + AOV targets (matching _pt_render_gpu_mesh's plumbing) ---
-        let out_tex = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("hybrid-pt-terrain-out"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let out_tex = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("hybrid-pt-terrain-out"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        )?;
         tracked.texture(width, height, wgpu::TextureFormat::Rgba16Float);
         let out_view = out_tex.create_view(&wgpu::TextureViewDescriptor::default());
         let aovs_all = [
@@ -575,7 +598,7 @@ impl HybridPathTracer {
             AovKind::Emission,
             AovKind::Visibility,
         ];
-        let aov_frames = AovFrames::new(device, width, height, &aovs_all);
+        let aov_frames = AovFrames::new(device, width, height, &aovs_all)?;
         for kind in aovs_all {
             tracked.texture(width, height, kind.texture_format());
         }
@@ -801,21 +824,31 @@ impl HybridPathTracer {
         let wg_x = width.div_ceil(8);
         let wg_y = height.div_ceil(8);
         let px_workgroups = ((px_count as u32) + 255) / 256;
+        // CENSOR F-04: live per-pass timing for the certificate. The gbuffer
+        // pass and frame 0's terrain/temporal/spatial dispatches are each
+        // bracketed on the encoder that executes them (one scope per label —
+        // timing every accumulation frame would multiply the pass list);
+        // when timestamp queries are unavailable the fallback below records
+        // the same labels in the same order with 0.0.
+        let mut timing = crate::core::gpu_timing::OneShotTiming::for_current_device();
         {
             let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("hybrid-pt-terrain-gbuffer-enc"),
             });
+            let gbuffer_scope = timing.begin(&mut enc, "hybrid_pt.terrain_gbuffer");
             {
                 let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("hybrid-pt-terrain-gbuffer-cpass"),
                     ..Default::default()
                 });
+                crate::core::shader_registry::record_shader_use("hybrid-pt-kernel");
                 cpass.set_pipeline(&self.pipeline_terrain_gbuffer);
                 cpass.set_bind_group(0, &bg0, &[]);
                 cpass.set_bind_group(1, &bg1, &[]);
                 cpass.set_bind_group(2, &bg_gbuffer, &[]);
                 cpass.dispatch_workgroups(wg_x, wg_y, 1);
             }
+            timing.end(&mut enc, gbuffer_scope, 1);
             queue.submit([enc.finish()]);
         }
 
@@ -830,11 +863,21 @@ impl HybridPathTracer {
             let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("hybrid-pt-terrain-frame"),
             });
+            // Only frame 0 carries timing scopes (one certificate pass per
+            // label); each scope brackets exactly one dispatch of its
+            // pipeline on the encoder that executes it.
+            let time_this_frame = frames == 0;
+            let terrain_scope = if time_this_frame {
+                timing.begin(&mut enc, "hybrid_pt.terrain")
+            } else {
+                None
+            };
             {
                 let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("hybrid-pt-terrain-cpass"),
                     ..Default::default()
                 });
+                crate::core::shader_registry::record_shader_use("hybrid-pt-kernel");
                 cpass.set_pipeline(&self.pipeline_terrain);
                 cpass.set_bind_group(0, &bg0, &[]);
                 cpass.set_bind_group(1, &bg1, &[]);
@@ -842,27 +885,52 @@ impl HybridPathTracer {
                 cpass.set_bind_group(3, &bg3, &[]);
                 cpass.dispatch_workgroups(wg_x, wg_y, 1);
             }
+            if time_this_frame {
+                timing.end(&mut enc, terrain_scope, 1);
+            }
+            let temporal_scope = if time_this_frame {
+                timing.begin(&mut enc, "hybrid_pt.restir_temporal")
+            } else {
+                None
+            };
             {
                 let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("hybrid-pt-restir-temporal-cpass"),
                     ..Default::default()
                 });
+                crate::core::shader_registry::record_shader_use("hybrid-pt-restir-temporal");
                 cpass.set_pipeline(&self.pipeline_restir_temporal);
                 cpass.set_bind_group(0, &bg0, &[]);
                 cpass.set_bind_group(1, &bg_empty, &[]);
                 cpass.set_bind_group(2, &bg_temporal, &[]);
                 cpass.dispatch_workgroups(px_workgroups, 1, 1);
             }
+            if time_this_frame {
+                timing.end(&mut enc, temporal_scope, 1);
+            }
+            let spatial_scope = if time_this_frame {
+                timing.begin(&mut enc, "hybrid_pt.restir_spatial")
+            } else {
+                None
+            };
             {
                 let mut cpass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("hybrid-pt-restir-spatial-cpass"),
                     ..Default::default()
                 });
+                crate::core::shader_registry::record_shader_use("hybrid-pt-restir-spatial");
                 cpass.set_pipeline(&self.pipeline_restir_spatial);
                 cpass.set_bind_group(0, &bg0, &[]);
                 cpass.set_bind_group(1, &bg_spatial_scene, &[]);
                 cpass.set_bind_group(2, &bg_spatial_reuse, &[]);
                 cpass.dispatch_workgroups(px_workgroups, 1, 1);
+            }
+            if time_this_frame {
+                timing.end(&mut enc, spatial_scope, 1);
+                // Resolve on frame 0's encoder: the gbuffer scope's stamps
+                // were written on the already-submitted gbuffer encoder, so
+                // the resolved range is complete once this submit lands.
+                timing.resolve(&mut enc);
             }
             queue.submit([enc.finish()]);
             frames += 1;
@@ -979,6 +1047,17 @@ impl HybridPathTracer {
                 "terrain PT exceeded the host-visible budget: peak {peak} > limit {}",
                 metrics.limit_bytes
             )));
+        }
+
+        // CENSOR F-04: record the timed scopes (gbuffer + frame 0's terrain/
+        // temporal/spatial dispatches, draw_calls = 1 dispatch each); when
+        // timestamps were unavailable, record the same labels in the same
+        // order with 0.0 (draw_calls = accumulated frames, as before).
+        if !timing.record_into_certificate() {
+            crate::core::certificate::record_pass("hybrid_pt.terrain_gbuffer", 0.0, 1);
+            crate::core::certificate::record_pass("hybrid_pt.terrain", 0.0, frames);
+            crate::core::certificate::record_pass("hybrid_pt.restir_temporal", 0.0, frames);
+            crate::core::certificate::record_pass("hybrid_pt.restir_spatial", 0.0, frames);
         }
 
         Ok(TerrainReferenceOutput {

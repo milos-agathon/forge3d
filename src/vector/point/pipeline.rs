@@ -16,12 +16,11 @@ impl PointPipelines {
         target_format: wgpu::TextureFormat,
     ) -> Self {
         // Load shader
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("point_instanced.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../../../shaders/point_instanced.wgsl"
-            ))),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "point_instanced.wgsl",
+            include_str!("../../../shaders/point_instanced.wgsl"),
+        );
 
         // Create bind group layout with uniform + optional atlas texture/sampler
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -64,7 +63,7 @@ impl PointPipelines {
         });
 
         // Create render pipeline
-        let render = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let render = crate::core::shader_registry::create_render_pipeline_scoped(device, &wgpu::RenderPipelineDescriptor {
             label: Some("vf.Vector.Point.Pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
@@ -140,7 +139,7 @@ impl PointPipelines {
             push_constant_ranges: &[],
         });
         
-        let oit = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let oit = crate::core::shader_registry::create_render_pipeline_scoped(device, &wgpu::RenderPipelineDescriptor {
             label: Some("vf.Vector.Point.OITPipeline"),
             layout: Some(&oit_pipeline_layout),
             vertex: wgpu::VertexState {
@@ -271,7 +270,7 @@ impl PointPipelines {
             push_constant_ranges: &[],
         });
 
-        let pick = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let pick = crate::core::shader_registry::create_render_pipeline_scoped(device, &wgpu::RenderPipelineDescriptor {
             label: Some("vf.Vector.Point.PickPipeline"),
             layout: Some(&pick_pipeline_layout),
             vertex: wgpu::VertexState {

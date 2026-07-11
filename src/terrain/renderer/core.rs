@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 
 /// Reusable GPU terrain scene (M2).
 ///
@@ -9,6 +10,7 @@ pub struct TerrainScene {
     pub(super) device: Arc<wgpu::Device>,
     pub(super) queue: Arc<wgpu::Queue>,
     pub(super) adapter: Arc<wgpu::Adapter>,
+    pub(super) allocation_owner: crate::core::resource_tracker::AllocationOwner,
     pub(super) pipeline: Mutex<PipelineCache>,
     pub(super) bind_group_layout: wgpu::BindGroupLayout,
     pub(super) ibl_bind_group_layout: wgpu::BindGroupLayout,
@@ -22,17 +24,17 @@ pub struct TerrainScene {
     pub(super) sky_bind_group_layout0: wgpu::BindGroupLayout,
     pub(super) sky_bind_group_layout1: wgpu::BindGroupLayout,
     pub(super) sky_pipeline: wgpu::ComputePipeline,
-    pub(super) _sky_fallback_texture: wgpu::Texture,
+    pub(super) _sky_fallback_texture: TrackedTexture,
     pub(super) sky_fallback_view: wgpu::TextureView,
-    pub(super) _height_curve_identity_texture: wgpu::Texture,
+    pub(super) _height_curve_identity_texture: TrackedTexture,
     pub(super) height_curve_identity_view: wgpu::TextureView,
-    pub(super) _water_mask_fallback_texture: wgpu::Texture,
+    pub(super) _water_mask_fallback_texture: TrackedTexture,
     pub(super) water_mask_fallback_view: wgpu::TextureView,
-    pub(super) _ao_debug_fallback_texture: wgpu::Texture,
+    pub(super) _ao_debug_fallback_texture: TrackedTexture,
     pub(super) ao_debug_fallback_view: wgpu::TextureView,
     pub(super) ao_debug_sampler: wgpu::Sampler,
     pub(super) ao_debug_view: Option<wgpu::TextureView>,
-    pub(super) coarse_ao_texture: Option<wgpu::Texture>,
+    pub(super) coarse_ao_texture: Option<TrackedTexture>,
     pub(super) coarse_ao_view: Option<wgpu::TextureView>,
     pub(super) detail_normal_fallback_view: wgpu::TextureView,
     pub(super) detail_normal_sampler: wgpu::Sampler,
@@ -42,15 +44,15 @@ pub struct TerrainScene {
     pub(super) sun_vis_sampler: wgpu::Sampler,
     pub(super) height_ao_compute_pipeline: wgpu::ComputePipeline,
     pub(super) height_ao_bind_group_layout: wgpu::BindGroupLayout,
-    pub(super) height_ao_uniform_buffer: wgpu::Buffer,
-    pub(super) height_ao_texture: Mutex<Option<wgpu::Texture>>,
+    pub(super) height_ao_uniform_buffer: TrackedBuffer,
+    pub(super) height_ao_texture: Mutex<Option<TrackedTexture>>,
     pub(super) height_ao_storage_view: Mutex<Option<wgpu::TextureView>>,
     pub(super) height_ao_sample_view: Mutex<Option<wgpu::TextureView>>,
     pub(super) height_ao_size: Mutex<(u32, u32)>,
     pub(super) sun_vis_compute_pipeline: wgpu::ComputePipeline,
     pub(super) sun_vis_bind_group_layout: wgpu::BindGroupLayout,
-    pub(super) sun_vis_uniform_buffer: wgpu::Buffer,
-    pub(super) sun_vis_texture: Mutex<Option<wgpu::Texture>>,
+    pub(super) sun_vis_uniform_buffer: TrackedBuffer,
+    pub(super) sun_vis_texture: Mutex<Option<TrackedTexture>>,
     pub(super) sun_vis_storage_view: Mutex<Option<wgpu::TextureView>>,
     pub(super) sun_vis_sample_view: Mutex<Option<wgpu::TextureView>>,
     pub(super) sun_vis_size: Mutex<(u32, u32)>,
@@ -67,29 +69,29 @@ pub struct TerrainScene {
     pub(super) shadow_technique: u32,
     pub(super) moment_pass: Option<crate::shadows::MomentGenerationPass>,
     pub(super) fog_bind_group_layout: wgpu::BindGroupLayout,
-    pub(super) fog_uniform_buffer: wgpu::Buffer,
+    pub(super) fog_uniform_buffer: TrackedBuffer,
     pub(super) water_reflection_bind_group_layout: wgpu::BindGroupLayout,
-    pub(super) water_reflection_uniform_buffer: wgpu::Buffer,
-    pub(super) water_reflection_texture: Mutex<wgpu::Texture>,
+    pub(super) water_reflection_uniform_buffer: TrackedBuffer,
+    pub(super) water_reflection_texture: Mutex<TrackedTexture>,
     pub(super) water_reflection_view: Mutex<wgpu::TextureView>,
     pub(super) water_reflection_sampler: wgpu::Sampler,
-    pub(super) water_reflection_depth_texture: Mutex<wgpu::Texture>,
+    pub(super) water_reflection_depth_texture: Mutex<TrackedTexture>,
     pub(super) water_reflection_depth_view: Mutex<wgpu::TextureView>,
     pub(super) water_reflection_size: Mutex<(u32, u32)>,
     pub(super) water_reflection_fallback_view: wgpu::TextureView,
     pub(super) water_reflection_pipeline: wgpu::RenderPipeline,
     pub(super) material_layer_bind_group_layout: wgpu::BindGroupLayout,
-    pub(super) material_layer_uniform_buffer: wgpu::Buffer,
-    pub(super) vt_uniform_buffer: wgpu::Buffer,
-    pub(super) vt_fallback_uniform_buffer: wgpu::Buffer,
-    pub(super) _vt_atlas_fallback_texture: wgpu::Texture,
+    pub(super) material_layer_uniform_buffer: TrackedBuffer,
+    pub(super) vt_uniform_buffer: TrackedBuffer,
+    pub(super) vt_fallback_uniform_buffer: TrackedBuffer,
+    pub(super) _vt_atlas_fallback_texture: TrackedTexture,
     pub(super) vt_atlas_fallback_view: wgpu::TextureView,
-    pub(super) _vt_page_table_fallback_texture: wgpu::Texture,
+    pub(super) _vt_page_table_fallback_texture: TrackedTexture,
     pub(super) vt_page_table_fallback_view: wgpu::TextureView,
-    pub(super) vt_feedback_fallback_buffer: wgpu::Buffer,
+    pub(super) vt_feedback_fallback_buffer: TrackedBuffer,
     pub(super) vt_atlas_sampler: wgpu::Sampler,
-    pub(super) probe_grid_uniform_buffer: wgpu::Buffer,
-    pub(super) probe_ssbo: wgpu::Buffer,
+    pub(super) probe_grid_uniform_buffer: TrackedBuffer,
+    pub(super) probe_ssbo: TrackedBuffer,
     pub(super) probe_grid_uniform_alloc_bytes: u64,
     pub(super) probe_ssbo_alloc_bytes: u64,
     pub(super) probe_grid_uniform_bytes: u64,
@@ -97,11 +99,11 @@ pub struct TerrainScene {
     pub(super) probe_cache_key: Option<u64>,
     pub(super) probe_cached_grid: Option<crate::terrain::probes::ProbeGridDesc>,
     pub(super) probe_cached_data: Vec<crate::terrain::probes::GpuProbeData>,
-    pub(super) reflection_probe_grid_uniform_buffer: wgpu::Buffer,
+    pub(super) reflection_probe_grid_uniform_buffer: TrackedBuffer,
     pub(super) reflection_probe_sampler: wgpu::Sampler,
-    pub(super) reflection_probe_fallback_texture: wgpu::Texture,
+    pub(super) reflection_probe_fallback_texture: TrackedTexture,
     pub(super) _reflection_probe_fallback_view: wgpu::TextureView,
-    pub(super) reflection_probe_texture: Option<wgpu::Texture>,
+    pub(super) reflection_probe_texture: Option<TrackedTexture>,
     pub(super) reflection_probe_view: wgpu::TextureView,
     pub(super) reflection_probe_grid_uniform_alloc_bytes: u64,
     pub(super) reflection_probe_grid_uniform_bytes: u64,
@@ -136,6 +138,11 @@ pub struct TerrainScene {
     pub(super) viewer_heightmap: Option<ViewerTerrainData>,
     pub(super) geometry_provider: Option<TerrainGeometryProvider>,
     pub(super) height_streaming: Option<super::streaming::HeightStreamingState>,
+    /// CENSOR Task 9: owned per-render GPU timing manager, lazily constructed on
+    /// the first render when the device granted `TIMESTAMP_QUERY`. Stored behind
+    /// a `Mutex<Option<..>>` because the draw methods borrow `&self`; a render
+    /// takes it out, scopes each pass, then puts it back.
+    pub(super) gpu_timing: Mutex<Option<crate::core::gpu_timing::GpuTimingManager>>,
     pub(super) _tracked_scene_textures: Vec<crate::core::resource_tracker::ResourceHandle>,
 }
 
@@ -143,10 +150,10 @@ pub struct ViewerTerrainData {
     pub heightmap: Vec<f32>,
     pub dimensions: (u32, u32),
     pub domain: (f32, f32),
-    pub heightmap_texture: wgpu::Texture,
+    pub heightmap_texture: TrackedTexture,
     pub heightmap_view: wgpu::TextureView,
-    pub vertex_buffer: wgpu::Buffer,
-    pub index_buffer: wgpu::Buffer,
+    pub vertex_buffer: TrackedBuffer,
+    pub index_buffer: TrackedBuffer,
     pub index_count: u32,
     pub cam_radius: f32,
     pub cam_phi_deg: f32,
@@ -168,7 +175,7 @@ pub(super) struct OfflineAccumulationState {
     pub(super) height_inputs: super::draw::UploadedHeightInputs,
     pub(super) materials: super::draw::PreparedMaterials,
     pub(super) ibl_bind_group: wgpu::BindGroup,
-    pub(super) height_curve_lut_uploaded: Option<(wgpu::Texture, wgpu::TextureView)>,
+    pub(super) height_curve_lut_uploaded: Option<(TrackedTexture, wgpu::TextureView)>,
     pub(super) hdr_aov_pipeline: wgpu::RenderPipeline,
     pub(super) hdr_background_blit_pipeline: wgpu::RenderPipeline,
     pub(super) render_targets: super::draw::RenderTargets,
@@ -176,9 +183,9 @@ pub(super) struct OfflineAccumulationState {
     pub(super) beauty_accumulation: crate::terrain::AccumulationBuffer,
     pub(super) albedo_accumulation: crate::terrain::AccumulationBuffer,
     pub(super) normal_accumulation: crate::terrain::AccumulationBuffer,
-    pub(super) _depth_reference_texture: wgpu::Texture,
+    pub(super) _depth_reference_texture: TrackedTexture,
     pub(super) depth_reference_view: wgpu::TextureView,
-    pub(super) luminance_texture: wgpu::Texture,
+    pub(super) luminance_texture: TrackedTexture,
     pub(super) luminance_view: wgpu::TextureView,
     pub(super) luminance_width: u32,
     pub(super) luminance_height: u32,
@@ -210,11 +217,11 @@ pub(super) struct OfflineComputeResources {
 }
 
 pub(super) struct NoopShadow {
-    pub(super) _csm_uniform_buffer: wgpu::Buffer,
-    pub(super) _shadow_maps_texture: wgpu::Texture,
+    pub(super) _csm_uniform_buffer: TrackedBuffer,
+    pub(super) _shadow_maps_texture: TrackedTexture,
     pub(super) _shadow_maps_view: wgpu::TextureView,
     pub(super) _shadow_sampler: wgpu::Sampler,
-    pub(super) _moment_maps_texture: wgpu::Texture,
+    pub(super) _moment_maps_texture: TrackedTexture,
     pub(super) moment_maps_view: wgpu::TextureView,
     pub(super) moment_sampler: wgpu::Sampler,
     pub(super) bind_group: wgpu::BindGroup,
@@ -289,6 +296,30 @@ pub(super) fn clipmap_camera_config(
 }
 
 impl TerrainScene {
+    pub(super) fn begin_certificate_capture(
+        &self,
+        entry_point: &str,
+    ) -> (
+        crate::core::certificate::RenderCaptureGuard,
+        crate::core::resource_tracker::AllocationOwnerGuard,
+    ) {
+        let allocation_scope = self.allocation_owner.activate();
+        let render_capture = crate::core::certificate::begin_render_capture_with_resources(
+            entry_point,
+            &[self.allocation_owner.id()],
+        );
+        (render_capture, allocation_scope)
+    }
+
+    pub(super) fn finish_certificate_capture(
+        &self,
+        capture: crate::core::certificate::RenderCaptureGuard,
+    ) {
+        capture.finish();
+    }
+}
+
+impl TerrainScene {
     /// Vertex count for the procedural-grid (`vs_main`) draws.
     ///
     /// The beauty/AOV/offline passes draw through `TerrainGeometryProvider`,
@@ -311,6 +342,112 @@ impl TerrainScene {
             return 6 * (grid_size - 1) * (grid_size - 1);
         }
         3
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CENSOR Task 9: per-render GPU-pass timing helpers.
+// ---------------------------------------------------------------------------
+
+/// Open a timing scope around a GPU pass when timing is active. The returned
+/// id is threaded to [`ts_end`]; `None` when timing is unavailable.
+pub(super) fn ts_begin(
+    timing: &mut Option<crate::core::gpu_timing::GpuTimingManager>,
+    encoder: &mut wgpu::CommandEncoder,
+    label: &str,
+) -> Option<crate::core::gpu_timing::TimingScopeId> {
+    timing.as_mut().map(|t| t.begin_scope(encoder, label))
+}
+
+/// Close a timing scope opened by [`ts_begin`], recording its draw-call count.
+pub(super) fn ts_end(
+    timing: &mut Option<crate::core::gpu_timing::GpuTimingManager>,
+    encoder: &mut wgpu::CommandEncoder,
+    scope: Option<crate::core::gpu_timing::TimingScopeId>,
+    draw_calls: u32,
+) {
+    if let (Some(t), Some(id)) = (timing.as_mut(), scope) {
+        t.end_scope_with_draws(encoder, id, draw_calls);
+    }
+}
+
+impl TerrainScene {
+    /// Take the render-timing manager out of the scene, lazily constructing it
+    /// the first time when the device granted `TIMESTAMP_QUERY`. Returns `None`
+    /// when timestamps are unavailable (the certificate then reports the passes
+    /// with `gpu_ms == 0`). The caller returns it via [`store_render_timing`].
+    pub(super) fn take_render_timing(&self) -> Option<crate::core::gpu_timing::GpuTimingManager> {
+        let mut guard = self.gpu_timing.lock().ok()?;
+        if guard.is_none() {
+            if !self
+                .device
+                .features()
+                .contains(wgpu::Features::TIMESTAMP_QUERY)
+            {
+                return None;
+            }
+            // Timestamps only: this path never issues pipeline-statistics
+            // queries, so enabling that query set would make `resolve_queries`
+            // resolve a never-written statistics range and lose the device on
+            // adapters that also advertise PIPELINE_STATISTICS_QUERY.
+            let config = crate::core::gpu_timing::GpuTimingConfig {
+                enable_timestamps: true,
+                enable_pipeline_stats: false,
+                enable_debug_markers: false,
+                label_prefix: "forge3d".to_string(),
+                max_queries_per_frame: 32,
+            };
+            match crate::core::gpu_timing::GpuTimingManager::new(
+                self.device.clone(),
+                self.queue.clone(),
+                config,
+            ) {
+                Ok(manager) => return Some(manager),
+                Err(e) => {
+                    log::warn!("failed to create GPU timing manager: {e}");
+                    return None;
+                }
+            }
+        }
+        guard.take()
+    }
+
+    /// Return a timing manager taken by [`take_render_timing`] to the scene.
+    pub(super) fn store_render_timing(
+        &self,
+        manager: Option<crate::core::gpu_timing::GpuTimingManager>,
+    ) {
+        if let Some(manager) = manager {
+            if let Ok(mut guard) = self.gpu_timing.lock() {
+                *guard = Some(manager);
+            }
+        }
+    }
+
+    /// Finalize a render's timing: resolve+read the timestamps and record each
+    /// timed pass into the global certificate capture. Consumes the manager's
+    /// current slot (offline single-shot pattern). Must be called AFTER the
+    /// render encoder was submitted (with `resolve_queries` recorded into it).
+    pub(super) fn record_render_timings(
+        &self,
+        timing: &mut Option<crate::core::gpu_timing::GpuTimingManager>,
+    ) {
+        if let Some(manager) = timing.as_mut() {
+            match manager.get_results_blocking() {
+                Ok(results) => {
+                    for result in results {
+                        // Invalid timestamps are recorded as 0.0, never as a
+                        // garbage delta (CENSOR audit F-04).
+                        crate::core::certificate::record_pass(
+                            &result.name,
+                            result.certificate_gpu_ms(),
+                            result.draw_calls,
+                        );
+                    }
+                }
+                Err(e) => log::warn!("GPU timing readback failed: {e}"),
+            }
+        }
     }
 }
 

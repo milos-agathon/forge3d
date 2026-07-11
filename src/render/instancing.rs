@@ -122,13 +122,17 @@ pub fn geometry_instance_mesh_gpu_py(
 /// Render an instanced mesh to RGBA8 using GPU instancing (feature-gated).
 #[cfg(all(feature = "extension-module", feature = "enable-gpu-instancing"))]
 #[pyfunction]
+#[pyo3(signature = (width, height, mesh, transforms, certificate=None))]
 pub fn geometry_instance_mesh_gpu_render_py(
     py: Python<'_>,
     width: u32,
     height: u32,
     mesh: &Bound<'_, PyDict>,
     transforms: PyReadonlyArray2<'_, f32>, // (N,16) row-major
+    certificate: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
+    let certificate_capture =
+        crate::core::certificate::begin_render_capture("geometry_instance_mesh_gpu_render_py");
     if width == 0 || height == 0 {
         return Err(PyValueError::new_err("image dimensions must be positive"));
     }
@@ -170,8 +174,11 @@ pub fn geometry_instance_mesh_gpu_render_py(
         &g.device,
         color_format,
         depth_format,
-    );
-    renderer.set_mesh(&g.device, &g.queue, &vertices, &indices);
+    )
+    .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    renderer
+        .set_mesh(&g.device, &g.queue, &vertices, &indices)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
     // Camera
     let view = glam::Mat4::look_at_rh(
@@ -200,40 +207,48 @@ pub fn geometry_instance_mesh_gpu_render_py(
             r[14], r[15],
         ]);
     }
-    renderer.upload_instances_from_rowmajor(&g.device, &g.queue, &rows);
+    renderer
+        .upload_instances_from_rowmajor(&g.device, &g.queue, &rows)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
     // Offscreen targets
-    let color = g.device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("instanced_color"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+    let color = crate::core::resource_tracker::tracked_create_texture(
+        &g.device,
+        &wgpu::TextureDescriptor {
+            label: Some("instanced_color"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: color_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: color_format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-            | wgpu::TextureUsages::COPY_SRC
-            | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
+    )?;
     let color_view = color.create_view(&wgpu::TextureViewDescriptor::default());
-    let depth = g.device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("instanced_depth"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+    let depth = crate::core::resource_tracker::tracked_create_texture(
+        &g.device,
+        &wgpu::TextureDescriptor {
+            label: Some("instanced_depth"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Depth32Float,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
+    )?;
     let depth_view = depth.create_view(&wgpu::TextureViewDescriptor::default());
 
     // Encode render pass
@@ -242,6 +257,10 @@ pub fn geometry_instance_mesh_gpu_render_py(
         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("instanced_encoder"),
         });
+    // CENSOR F-04: live per-pass timing for the certificate; falls back to a
+    // 0.0 pass record when TIMESTAMP_QUERY is not granted.
+    let mut timing = crate::core::gpu_timing::OneShotTiming::for_current_device();
+    let timing_scope = timing.begin(&mut encoder, "geometry.instanced_mesh");
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("instanced_pass"),
@@ -266,17 +285,21 @@ pub fn geometry_instance_mesh_gpu_render_py(
         });
         renderer.render(&mut pass, &g.queue, n as u32);
     }
+    timing.end(&mut encoder, timing_scope, 1);
 
     // Readback
     let row_bytes = (width * 4) as u32;
     let padded_bpr = crate::core::gpu::align_copy_bpr(row_bytes);
     let output_size = (padded_bpr * height) as u64;
-    let readback = g.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("instanced_readback"),
-        size: output_size,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+    let readback = crate::core::resource_tracker::tracked_create_buffer(
+        &g.device,
+        &wgpu::BufferDescriptor {
+            label: Some("instanced_readback"),
+            size: output_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )?;
     encoder.copy_texture_to_buffer(
         wgpu::ImageCopyTexture {
             texture: &color,
@@ -298,6 +321,7 @@ pub fn geometry_instance_mesh_gpu_render_py(
             depth_or_array_layers: 1,
         },
     );
+    timing.resolve(&mut encoder);
     g.queue.submit(Some(encoder.finish()));
 
     // Map and pack rows without padding
@@ -327,5 +351,10 @@ pub fn geometry_instance_mesh_gpu_render_py(
     // Return numpy array (H,W,4)
     let arr1 = PyArray1::<u8>::from_vec_bound(py, rgba);
     let out = arr1.reshape([height as usize, width as usize, 4])?;
+    if !timing.record_into_certificate() {
+        crate::core::certificate::record_pass("geometry.instanced_mesh", 0.0, 1);
+    }
+    certificate_capture.finish();
+    crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
     Ok(out.into_py(py))
 }

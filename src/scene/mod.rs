@@ -18,6 +18,7 @@ pub use self::types::SceneGlobals;
 use self::types::Text3DInstance;
 #[cfg(feature = "extension-module")]
 use crate::core::device_caps::DeviceCaps;
+use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 use bytemuck::{Pod, Zeroable};
 #[cfg(feature = "extension-module")]
 use numpy::{PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3, PyUntypedArrayMethods};
@@ -47,28 +48,28 @@ pub struct Scene {
 
     // E2/E1: Per-tile uniforms bind group (group 3)
     bg3_tile: wgpu::BindGroup,
-    _tile_ubo: wgpu::Buffer,
-    _tile_slot_ubo: wgpu::Buffer,
-    _mosaic_params_ubo: wgpu::Buffer,
+    _tile_ubo: TrackedBuffer,
+    _tile_slot_ubo: TrackedBuffer,
+    _mosaic_params_ubo: TrackedBuffer,
 
-    vbuf: wgpu::Buffer,
-    ibuf: wgpu::Buffer,
+    vbuf: TrackedBuffer,
+    ibuf: TrackedBuffer,
     nidx: u32,
 
-    ubo: wgpu::Buffer,
+    ubo: TrackedBuffer,
     colormap: crate::terrain::ColormapLUT,
     lut_format: &'static str,
 
-    color: wgpu::Texture,
+    color: TrackedTexture,
     color_view: wgpu::TextureView,
-    normal: wgpu::Texture,
+    normal: TrackedTexture,
     normal_view: wgpu::TextureView,
     sample_count: u32,
-    msaa_color: Option<wgpu::Texture>,
+    msaa_color: Option<TrackedTexture>,
     msaa_view: Option<wgpu::TextureView>,
-    msaa_normal: Option<wgpu::Texture>,
+    msaa_normal: Option<TrackedTexture>,
     msaa_normal_view: Option<wgpu::TextureView>,
-    depth: Option<wgpu::Texture>,
+    depth: Option<TrackedTexture>,
     depth_view: Option<wgpu::TextureView>,
 
     height_view: Option<wgpu::TextureView>,
@@ -153,6 +154,12 @@ pub struct Scene {
     text3d_renderer: Option<crate::core::text_mesh::TextMeshRenderer>,
     text3d_enabled: bool,
     text3d_instances: Vec<Text3DInstance>,
+
+    // CENSOR Task 9: per-render GPU-pass timing for the RenderCertificate.
+    // Lazily constructed on first render when TIMESTAMP_QUERY is granted;
+    // take/store between renders so each render owns one certificate capture.
+    render_timing: std::sync::Mutex<Option<crate::core::gpu_timing::GpuTimingManager>>,
+    allocation_owner: crate::core::resource_tracker::AllocationOwner,
 
     // F16: GPU Instancing (feature-gated)
     #[cfg(feature = "enable-gpu-instancing")]

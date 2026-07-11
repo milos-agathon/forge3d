@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::tracked_create_texture;
 
 impl IBLRenderer {
     pub fn generate_brdf_lut(
@@ -10,22 +11,26 @@ impl IBLRenderer {
             .brdf_size_override
             .unwrap_or(self.quality.brdf_size())
             .max(16);
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("ibl.brdf.lut"),
-            size: wgpu::Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 1,
+        let texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("ibl.brdf.lut"),
+                size: wgpu::Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("ibl.brdf.lut.view"),

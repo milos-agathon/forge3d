@@ -4,19 +4,21 @@ use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindingType, Buffer, BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, Device,
     FragmentState, IndexFormat, PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology, Queue,
-    RenderPass, RenderPipeline, RenderPipelineDescriptor, ShaderModuleDescriptor, ShaderSource,
-    ShaderStages, TextureFormat, VertexAttribute, VertexBufferLayout, VertexFormat, VertexState,
-    VertexStepMode,
+    RenderPass, RenderPipeline, RenderPipelineDescriptor, ShaderStages, TextureFormat,
+    VertexAttribute, VertexBufferLayout, VertexFormat, VertexState, VertexStepMode,
 };
+
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 
 pub struct TextMeshRenderer {
     pipeline: RenderPipeline,
     pub uniforms: MeshUniforms,
-    uniforms_buf: Buffer,
+    uniforms_buf: TrackedBuffer,
     pub bind_group_layout: BindGroupLayout,
     pub bind_group: BindGroup,
-    vbuf: Option<Buffer>,
-    ibuf: Option<Buffer>,
+    vbuf: Option<TrackedBuffer>,
+    ibuf: Option<TrackedBuffer>,
     index_count: u32,
 }
 
@@ -25,11 +27,12 @@ impl TextMeshRenderer {
         device: &Device,
         color_format: TextureFormat,
         depth_format: Option<TextureFormat>,
-    ) -> Self {
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("mesh_basic_shader"),
-            source: ShaderSource::Wgsl(include_str!("../../shaders/mesh_basic.wgsl").into()),
-        });
+    ) -> RenderResult<Self> {
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "mesh_basic_shader",
+            include_str!("../../shaders/mesh_basic.wgsl"),
+        );
 
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("text_mesh_bgl"),
@@ -71,45 +74,51 @@ impl TextMeshRenderer {
             ],
         };
 
-        let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some("text_mesh_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[vertex_layout],
+        let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &RenderPipelineDescriptor {
+                label: Some("text_mesh_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[vertex_layout],
+                },
+                primitive: PrimitiveState {
+                    topology: PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: depth_format.map(|df| wgpu::DepthStencilState {
+                    format: df,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Less,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(ColorTargetState {
+                        format: color_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: ColorWrites::ALL,
+                    })],
+                }),
+                multiview: None,
             },
-            primitive: PrimitiveState {
-                topology: PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: depth_format.map(|df| wgpu::DepthStencilState {
-                format: df,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(ColorTargetState {
-                    format: color_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: ColorWrites::ALL,
-                })],
-            }),
-            multiview: None,
-        });
+        );
 
         let uniforms = MeshUniforms::default();
-        let uniforms_buf = device.create_buffer(&BufferDescriptor {
-            label: Some("text_mesh_uniforms"),
-            size: std::mem::size_of::<MeshUniforms>() as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniforms_buf = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("text_mesh_uniforms"),
+                size: std::mem::size_of::<MeshUniforms>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("text_mesh_bg"),
             layout: &bind_group_layout,
@@ -119,7 +128,7 @@ impl TextMeshRenderer {
             }],
         });
 
-        Self {
+        Ok(Self {
             pipeline,
             uniforms,
             uniforms_buf,
@@ -128,7 +137,7 @@ impl TextMeshRenderer {
             vbuf: None,
             ibuf: None,
             index_count: 0,
-        }
+        })
     }
 
     pub fn set_mesh(
@@ -137,26 +146,33 @@ impl TextMeshRenderer {
         queue: &Queue,
         vertices: &[VertexPN],
         indices: &[u32],
-    ) {
+    ) -> RenderResult<()> {
         let vsize = (vertices.len() * std::mem::size_of::<VertexPN>()) as u64;
         let isize = (indices.len() * std::mem::size_of::<u32>()) as u64;
-        let vbuf = device.create_buffer(&BufferDescriptor {
-            label: Some("text_mesh_vbuf"),
-            size: vsize,
-            usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let ibuf = device.create_buffer(&BufferDescriptor {
-            label: Some("text_mesh_ibuf"),
-            size: isize,
-            usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let vbuf = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("text_mesh_vbuf"),
+                size: vsize,
+                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
+        let ibuf = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("text_mesh_ibuf"),
+                size: isize,
+                usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
         queue.write_buffer(&vbuf, 0, bytemuck::cast_slice(vertices));
         queue.write_buffer(&ibuf, 0, bytemuck::cast_slice(indices));
         self.vbuf = Some(vbuf);
         self.ibuf = Some(ibuf);
         self.index_count = indices.len() as u32;
+        Ok(())
     }
 
     pub fn set_model(&mut self, model: Mat4) {

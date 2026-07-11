@@ -3,8 +3,8 @@
 // Extracted from mod.rs as part of the viewer refactoring
 
 use std::path::Path;
-use wgpu::util::DeviceExt;
 
+use crate::core::resource_tracker::tracked_create_buffer_init;
 use crate::viewer::event_loop::update_ipc_stats;
 use crate::viewer::viewer_types::PackedVertex;
 use crate::viewer::Viewer;
@@ -55,21 +55,23 @@ impl Viewer {
         }
 
         let vertex_data = bytemuck::cast_slice(&vertices);
-        let vb = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let vb = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("viewer.ipc.mesh.vb"),
                 contents: vertex_data,
                 usage: wgpu::BufferUsages::VERTEX,
-            });
+            },
+        )?;
 
-        let ib = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let ib = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("viewer.ipc.mesh.ib"),
                 contents: bytemuck::cast_slice(&mesh.indices),
                 usage: wgpu::BufferUsages::INDEX,
-            });
+            },
+        )?;
 
         self.geom_vb = Some(vb);
         self.geom_ib = Some(ib);

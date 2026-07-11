@@ -2,8 +2,8 @@
 // GPU render helper functions for the interactive viewer
 // RELEVANT FILES: src/viewer/mod.rs
 
+use crate::core::resource_tracker::{tracked_create_buffer_init, tracked_create_texture};
 use crate::renderer::readback::read_texture_tight;
-use wgpu::util::DeviceExt;
 
 /// Arguments for render_view_to_rgba8_ex
 pub struct RenderViewArgs<'a> {
@@ -43,11 +43,14 @@ pub fn render_view_to_rgba8_ex(args: RenderViewArgs) -> anyhow::Result<Vec<u8>> 
 
     // Uniform for mode and far
     let params: [f32; 4] = [mode as f32, far, 0.0, 0.0];
-    let ub = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("p51.comp.params"),
-        contents: bytemuck::cast_slice(&params),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
+    let ub = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("p51.comp.params"),
+            contents: bytemuck::cast_slice(&params),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        },
+    )?;
     // Sampler
     let comp_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("p51.comp.sampler"),
@@ -88,20 +91,23 @@ pub fn render_view_to_rgba8_ex(args: RenderViewArgs) -> anyhow::Result<Vec<u8>> 
         ],
     });
     // Offscreen texture
-    let tex = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("p51.offscreen"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+    let tex = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("p51.offscreen"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: surface_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: surface_format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
+    )?;
     let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("p51.comp.encoder"),

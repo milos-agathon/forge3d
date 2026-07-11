@@ -151,6 +151,18 @@ def _save_png(path: Path, image: np.ndarray) -> None:
     f3d.numpy_to_png(path, image)
 
 
+def _golden_path(scene_name: str) -> Path:
+    """Keep the canonical Vulkan/DX12 baseline and an explicit Metal baseline.
+
+    The dedicated macOS lane is probe-positive real Metal hardware. Its
+    deterministic backend output differs measurably from the canonical
+    baseline, so it has its own committed reference at the same thresholds.
+    There is no fallback between backends: a missing Metal reference fails.
+    """
+    suffix = ".metal" if os.environ.get("WGPU_BACKEND", "").lower() == "metal" else ""
+    return GOLDEN_DIR / f"{scene_name}{suffix}.png"
+
+
 def _write_failure_artifacts(scene_name: str, actual: np.ndarray, expected: np.ndarray) -> None:
     if ARTIFACT_DIR is None:
         return
@@ -167,7 +179,7 @@ def _write_failure_artifacts(scene_name: str, actual: np.ndarray, expected: np.n
 
 
 def _assert_matches_golden(scene_name: str, actual: np.ndarray) -> None:
-    golden_path = GOLDEN_DIR / f"{scene_name}.png"
+    golden_path = _golden_path(scene_name)
     if UPDATE_GOLDENS:
         _save_png(golden_path, actual)
         return

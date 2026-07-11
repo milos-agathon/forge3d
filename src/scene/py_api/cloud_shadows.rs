@@ -6,6 +6,7 @@ impl Scene {
     // B7: Cloud Shadow API
     #[pyo3(text_signature = "($self, quality='medium')")]
     pub fn enable_cloud_shadows(&mut self, quality: Option<&str>) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         let quality_enum = match quality.unwrap_or("medium") {
             "low" => crate::core::cloud_shadows::CloudShadowQuality::Low,
             "medium" => crate::core::cloud_shadows::CloudShadowQuality::Medium,
@@ -21,7 +22,7 @@ impl Scene {
 
         let g = crate::core::gpu::try_ctx()?;
         let renderer =
-            crate::core::cloud_shadows::CloudShadowRenderer::new(&g.device, quality_enum);
+            crate::core::cloud_shadows::CloudShadowRenderer::new(&g.device, quality_enum)?;
 
         self.cloud_shadow_renderer = Some(renderer);
         self.cloud_shadows_enabled = true;

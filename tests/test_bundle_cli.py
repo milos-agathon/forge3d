@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 import tempfile
 import types
 from pathlib import Path
@@ -17,12 +18,19 @@ pytestmark = pytest.mark.usefixtures("pro_license")
 def _load_terrain_demo() -> types.ModuleType:
     """Load terrain_demo.py module by path."""
     repo = Path(__file__).resolve().parents[1]
-    spec = importlib.util.spec_from_file_location(
-        "terrain_demo", str(repo / "examples" / "terrain_demo.py")
-    )
+    example = repo / "examples" / "terrain_demo.py"
+    examples_dir = str(example.parent)
+    added_examples_dir = examples_dir not in sys.path
+    if added_examples_dir:
+        sys.path.insert(0, examples_dir)
+    spec = importlib.util.spec_from_file_location("terrain_demo", str(example))
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        if added_examples_dir:
+            sys.path.remove(examples_dir)
     return mod
 
 

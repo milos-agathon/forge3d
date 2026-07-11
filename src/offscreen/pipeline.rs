@@ -123,20 +123,15 @@ impl BrdfTilePipeline {
                     .filter(|c| c.is_ascii_digit())
                     .collect::<String>()
             })
-            .and_then(|digits| {
-                if digits.is_empty() {
-                    None
-                } else {
-                    Some(digits)
-                }
-            })
+            .filter(|digits| !digits.is_empty())
             .unwrap_or_else(|| "unknown".to_string());
         log::info!("BRDF_SHADER_VERSION = {}", shader_version);
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("brdf_tile.shader"),
-            source: wgpu::ShaderSource::Wgsl(shader_src.into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "brdf_tile.shader",
+            shader_src,
+        );
 
         // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -207,85 +202,88 @@ impl BrdfTilePipeline {
         });
 
         // Create render pipeline
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("brdf_tile.pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[
-                    // TbnVertex layout from sphere.rs
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<crate::offscreen::sphere::TbnVertex>()
-                            as wgpu::BufferAddress,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &[
-                            // position
-                            wgpu::VertexAttribute {
-                                offset: 0,
-                                shader_location: 0,
-                                format: wgpu::VertexFormat::Float32x3,
-                            },
-                            // uv
-                            wgpu::VertexAttribute {
-                                offset: 12,
-                                shader_location: 1,
-                                format: wgpu::VertexFormat::Float32x2,
-                            },
-                            // normal
-                            wgpu::VertexAttribute {
-                                offset: 20,
-                                shader_location: 2,
-                                format: wgpu::VertexFormat::Float32x3,
-                            },
-                            // tangent
-                            wgpu::VertexAttribute {
-                                offset: 32,
-                                shader_location: 3,
-                                format: wgpu::VertexFormat::Float32x3,
-                            },
-                            // bitangent
-                            wgpu::VertexAttribute {
-                                offset: 44,
-                                shader_location: 4,
-                                format: wgpu::VertexFormat::Float32x3,
-                            },
-                        ],
-                    },
-                ],
+        let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("brdf_tile.pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[
+                        // TbnVertex layout from sphere.rs
+                        wgpu::VertexBufferLayout {
+                            array_stride: std::mem::size_of::<crate::offscreen::sphere::TbnVertex>()
+                                as wgpu::BufferAddress,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &[
+                                // position
+                                wgpu::VertexAttribute {
+                                    offset: 0,
+                                    shader_location: 0,
+                                    format: wgpu::VertexFormat::Float32x3,
+                                },
+                                // uv
+                                wgpu::VertexAttribute {
+                                    offset: 12,
+                                    shader_location: 1,
+                                    format: wgpu::VertexFormat::Float32x2,
+                                },
+                                // normal
+                                wgpu::VertexAttribute {
+                                    offset: 20,
+                                    shader_location: 2,
+                                    format: wgpu::VertexFormat::Float32x3,
+                                },
+                                // tangent
+                                wgpu::VertexAttribute {
+                                    offset: 32,
+                                    shader_location: 3,
+                                    format: wgpu::VertexFormat::Float32x3,
+                                },
+                                // bitangent
+                                wgpu::VertexAttribute {
+                                    offset: 44,
+                                    shader_location: 4,
+                                    format: wgpu::VertexFormat::Float32x3,
+                                },
+                            ],
+                        },
+                    ],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: color_format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth24Plus,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Less,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: color_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth24Plus,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-        });
+        );
 
         Ok(Self {
             pipeline,

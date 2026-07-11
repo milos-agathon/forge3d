@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::tracked_create_texture;
 
 impl TerrainScene {
     pub(in crate::terrain::renderer) fn ensure_reflection_texture_size(
@@ -24,36 +25,43 @@ impl TerrainScene {
             size.0, size.1, target_width, target_height, width, height
         );
 
-        let new_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.water_reflection.texture"),
-            size: wgpu::Extent3d {
-                width: target_width,
-                height: target_height,
-                depth_or_array_layers: 1,
+        let new_texture = tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.water_reflection.texture"),
+                size: wgpu::Extent3d {
+                    width: target_width,
+                    height: target_height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.color_format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: self.color_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
         let new_view = new_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let new_depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.water_reflection.depth"),
-            size: wgpu::Extent3d {
-                width: target_width,
-                height: target_height,
-                depth_or_array_layers: 1,
+        let new_depth_texture = tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.water_reflection.depth"),
+                size: wgpu::Extent3d {
+                    width: target_width,
+                    height: target_height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        )?;
         let new_depth_view = new_depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let mut tex = self
@@ -106,20 +114,23 @@ impl TerrainScene {
             size.0, size.1, target_width, target_height, resolution_scale, width, height
         );
 
-        let new_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.height_ao.texture"),
-            size: wgpu::Extent3d {
-                width: target_width,
-                height: target_height,
-                depth_or_array_layers: 1,
+        let new_texture = tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.height_ao.texture"),
+                size: wgpu::Extent3d {
+                    width: target_width,
+                    height: target_height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
 
         let new_storage_view = new_texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("terrain.height_ao.storage_view"),
@@ -175,20 +186,23 @@ impl TerrainScene {
             size.0, size.1, target_width, target_height, resolution_scale, width, height
         );
 
-        let new_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.sun_vis.texture"),
-            size: wgpu::Extent3d {
-                width: target_width,
-                height: target_height,
-                depth_or_array_layers: 1,
+        let new_texture = tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.sun_vis.texture"),
+                size: wgpu::Extent3d {
+                    width: target_width,
+                    height: target_height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
 
         let new_storage_view = new_texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("terrain.sun_vis.storage_view"),

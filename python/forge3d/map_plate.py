@@ -265,7 +265,12 @@ class MapPlate:
         return rx0, ry0
 
     def compose(self) -> np.ndarray:
-        """Compose all elements into a final RGBA image."""
+        """Compose all elements into a final RGBA image.
+
+        Outside CENSOR's render-certificate scope: this composites images that
+        were themselves rendered under certificates (e.g. ``MapScene.render``);
+        no GPU render executes here, so there is no ``certificate=`` contract.
+        """
         cfg = self.config
         canvas = np.zeros((cfg.height, cfg.width, 4), dtype=np.uint8)
         canvas[..., :] = cfg.background
@@ -345,13 +350,21 @@ class MapPlate:
         return canvas
 
     def export_png(self, path: Path | str) -> None:
-        """Compose and export to PNG file."""
+        """Compose and export a PNG.
+
+        Outside CENSOR's render-certificate scope: this writes a composed
+        image; it does not execute a new render.
+        """
         from PIL import Image
         composed = self.compose()
         Image.fromarray(composed).save(str(path))
 
     def export_jpeg(self, path: Path | str, quality: int = 90) -> None:
-        """Compose and export to JPEG file."""
+        """Compose and export a JPEG.
+
+        Outside CENSOR's render-certificate scope: this writes a composed
+        image; it does not execute a new render.
+        """
         from PIL import Image
         composed = self.compose()
         rgb = composed[..., :3]

@@ -1,11 +1,14 @@
 use super::*;
+use crate::core::resource_tracker::{
+    tracked_create_buffer_init, tracked_create_texture, TrackedTexture,
+};
 use crate::terrain::hosek_sky::hosek_rgb_sky;
 
 pub(super) struct AtmosphereInitResources {
     pub(super) sky_bind_group_layout0: wgpu::BindGroupLayout,
     pub(super) sky_bind_group_layout1: wgpu::BindGroupLayout,
     pub(super) sky_pipeline: wgpu::ComputePipeline,
-    pub(super) sky_fallback_texture: wgpu::Texture,
+    pub(super) sky_fallback_texture: TrackedTexture,
     pub(super) sky_fallback_view: wgpu::TextureView,
 }
 
@@ -35,7 +38,7 @@ struct TerrainSkyCameraUniforms {
 pub(super) fn create_atmosphere_init_resources(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-) -> AtmosphereInitResources {
+) -> Result<AtmosphereInitResources> {
     let sky_bind_group_layout0 =
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("terrain.sky.bgl0"),
@@ -78,10 +81,11 @@ pub(super) fn create_atmosphere_init_resources(
             }],
         });
 
-    let sky_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("terrain.sky.shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/sky.wgsl").into()),
-    });
+    let sky_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "terrain.sky.shader",
+        include_str!("../../shaders/sky.wgsl"),
+    );
 
     let sky_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("terrain.sky.pipeline_layout"),
@@ -89,27 +93,33 @@ pub(super) fn create_atmosphere_init_resources(
         push_constant_ranges: &[],
     });
 
-    let sky_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("terrain.sky.pipeline"),
-        layout: Some(&sky_pipeline_layout),
-        module: &sky_shader,
-        entry_point: "cs_render_sky",
-    });
-
-    let sky_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("terrain.sky.fallback"),
-        size: wgpu::Extent3d {
-            width: 1,
-            height: 1,
-            depth_or_array_layers: 1,
+    let sky_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+        device,
+        &wgpu::ComputePipelineDescriptor {
+            label: Some("terrain.sky.pipeline"),
+            layout: Some(&sky_pipeline_layout),
+            module: &sky_shader,
+            entry_point: "cs_render_sky",
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    );
+
+    let sky_fallback_texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("terrain.sky.fallback"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        },
+    )?;
     queue.write_texture(
         wgpu::ImageCopyTexture {
             texture: &sky_fallback_texture,
@@ -132,13 +142,13 @@ pub(super) fn create_atmosphere_init_resources(
     let sky_fallback_view =
         sky_fallback_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-    AtmosphereInitResources {
+    Ok(AtmosphereInitResources {
         sky_bind_group_layout0,
         sky_bind_group_layout1,
         sky_pipeline,
         sky_fallback_texture,
         sky_fallback_view,
-    }
+    })
 }
 
 impl TerrainScene {
@@ -151,7 +161,7 @@ impl TerrainScene {
         eye: glam::Vec3,
         width: u32,
         height: u32,
-    ) -> Result<Option<(wgpu::Texture, wgpu::TextureView)>> {
+    ) -> Result<Option<(TrackedTexture, wgpu::TextureView)>> {
         if !decoded.sky.enabled || width == 0 || height == 0 {
             return Ok(None);
         }
@@ -185,13 +195,14 @@ impl TerrainScene {
             hosek_coeff_i: hosek.uniform_i(),
             hosek_radiance: hosek.uniform_radiance(),
         };
-        let sky_params = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let sky_params = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.sky.params"),
                 contents: bytemuck::bytes_of(&sky_uniforms),
                 usage: wgpu::BufferUsages::UNIFORM,
-            });
+            },
+        )?;
 
         let sky_camera_uniforms = TerrainSkyCameraUniforms {
             view: view_matrix.to_cols_array_2d(),
@@ -201,28 +212,32 @@ impl TerrainScene {
             eye_position: eye.to_array(),
             _pad0: 0.0,
         };
-        let sky_camera = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let sky_camera = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.sky.camera"),
                 contents: bytemuck::bytes_of(&sky_camera_uniforms),
                 usage: wgpu::BufferUsages::UNIFORM,
-            });
-
-        let sky_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.sky.output"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
+
+        let sky_texture = tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.sky.output"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+        )?;
         let sky_view = sky_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let sky_bg0 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -255,6 +270,7 @@ impl TerrainScene {
                 label: Some("terrain.sky.compute"),
                 timestamp_writes: None,
             });
+            crate::core::shader_registry::record_shader_use("terrain.sky.shader");
             cpass.set_pipeline(&self.sky_pipeline);
             cpass.set_bind_group(0, &sky_bg0, &[]);
             cpass.set_bind_group(1, &sky_bg1, &[]);

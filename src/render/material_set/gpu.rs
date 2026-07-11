@@ -18,13 +18,14 @@ use super::gpu_helpers::{
     prepare_layer_mips,
 };
 use super::MaterialSet;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 
 #[cfg(feature = "extension-module")]
 pub(crate) const MAX_LAYERS: usize = 4;
 
 #[cfg(feature = "extension-module")]
 pub(crate) struct GpuMaterialSet {
-    pub(crate) texture: wgpu::Texture,
+    pub(crate) texture: TrackedTexture,
     pub(crate) view: wgpu::TextureView,
     pub(crate) sampler: wgpu::Sampler,
     pub(crate) layer_count: u32,
@@ -177,20 +178,23 @@ impl GpuMaterialSet {
             layer_pixels.push(mip_chain);
         }
 
-        let texture = device.create_texture(&TextureDescriptor {
-            label: Some("terrain.materials.albedo"),
-            size: Extent3d {
-                width: target_width,
-                height: target_height,
-                depth_or_array_layers: layer_count_u32.max(1),
+        let texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("terrain.materials.albedo"),
+                size: Extent3d {
+                    width: target_width,
+                    height: target_height,
+                    depth_or_array_layers: layer_count_u32.max(1),
+                },
+                mip_level_count,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba8UnormSrgb,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8UnormSrgb,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
 
         for (layer_idx, mip_chain) in layer_pixels.iter().enumerate() {
             let mut mip_width = target_width;

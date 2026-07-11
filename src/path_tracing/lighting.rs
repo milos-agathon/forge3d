@@ -2,8 +2,9 @@
 // Area light GPU types and helpers for wavefront path tracing (P3: A4/A20/A25 wiring)
 // RELEVANT FILES: src/shaders/pt_shade.wgsl, src/path_tracing/wavefront/pipeline.rs
 
+use crate::core::error::RenderError;
+use crate::core::resource_tracker::{tracked_create_buffer_init, TrackedBuffer};
 use bytemuck::{Pod, Zeroable};
-use wgpu::util::DeviceExt;
 
 /// GPU layout matching WGSL `AreaLight` in pt_shade.wgsl
 ///
@@ -48,17 +49,23 @@ impl GpuAreaLight {
 }
 
 /// Create an area lights storage buffer for the wavefront scene bind group (Group 1, binding=4)
-pub fn create_area_lights_buffer(device: &wgpu::Device, lights: &[GpuAreaLight]) -> wgpu::Buffer {
+pub fn create_area_lights_buffer(
+    device: &wgpu::Device,
+    lights: &[GpuAreaLight],
+) -> Result<TrackedBuffer, RenderError> {
     let bytes = bytemuck::cast_slice(lights);
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("area-lights-buffer"),
-        contents: bytes,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-    })
+    tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("area-lights-buffer"),
+            contents: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        },
+    )
 }
 
 /// Create an empty area lights buffer (0 elements) that still satisfies binding requirements
-pub fn empty_area_lights_buffer(device: &wgpu::Device) -> wgpu::Buffer {
+pub fn empty_area_lights_buffer(device: &wgpu::Device) -> Result<TrackedBuffer, RenderError> {
     // Allocate a single zeroed element for portability; WGSL can treat length as 0 if not used
     let zero = [GpuAreaLight::disc(
         [0.0; 3],
@@ -112,16 +119,21 @@ impl GpuDirectionalLight {
 pub fn create_directional_lights_buffer(
     device: &wgpu::Device,
     lights: &[GpuDirectionalLight],
-) -> wgpu::Buffer {
+) -> Result<TrackedBuffer, RenderError> {
     let bytes = bytemuck::cast_slice(lights);
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("directional-lights-buffer"),
-        contents: bytes,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-    })
+    tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("directional-lights-buffer"),
+            contents: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        },
+    )
 }
 
-pub fn empty_directional_lights_buffer(device: &wgpu::Device) -> wgpu::Buffer {
+pub fn empty_directional_lights_buffer(
+    device: &wgpu::Device,
+) -> Result<TrackedBuffer, RenderError> {
     let zero = [GpuDirectionalLight::new(
         [0.0, -1.0, 0.0],
         0.0,

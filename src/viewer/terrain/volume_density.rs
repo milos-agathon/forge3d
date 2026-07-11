@@ -3,6 +3,7 @@ use std::hash::{Hash, Hasher};
 
 use half::f16;
 
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::viewer::ipc::{TerrainVolumetricsReport, TerrainVolumetricsVolumeReport};
 use crate::viewer::terrain::pbr_renderer::DensityVolumeConfig;
 
@@ -39,7 +40,7 @@ pub struct DensityVolumeAtlasData {
 }
 
 pub struct DensityVolumeAtlasGpu {
-    pub _texture: wgpu::Texture,
+    pub _texture: TrackedTexture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
     pub metadata: Vec<DensityVolumeGpuMetadata>,
@@ -54,22 +55,25 @@ impl DensityVolumeAtlasGpu {
         data: DensityVolumeAtlasData,
         raymarch_steps: u32,
         half_res: bool,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         let dimensions = data.dimensions;
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain_viewer.density_volume_atlas"),
-            size: wgpu::Extent3d {
-                width: dimensions[0],
-                height: dimensions[1],
-                depth_or_array_layers: dimensions[2],
+        let texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain_viewer.density_volume_atlas"),
+                size: wgpu::Extent3d {
+                    width: dimensions[0],
+                    height: dimensions[1],
+                    depth_or_array_layers: dimensions[2],
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D3,
+                format: wgpu::TextureFormat::R16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D3,
-            format: wgpu::TextureFormat::R16Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
 
         let texels = data
             .voxels
@@ -118,14 +122,14 @@ impl DensityVolumeAtlasGpu {
         report.raymarch_steps = raymarch_steps;
         report.half_res = half_res;
 
-        Self {
+        Ok(Self {
             _texture: texture,
             view,
             sampler,
             metadata: data.metadata,
             fingerprint: data.fingerprint,
             report,
-        }
+        })
     }
 }
 

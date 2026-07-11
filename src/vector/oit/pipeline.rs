@@ -1,6 +1,9 @@
 //! OIT pipeline and texture creation utilities.
 
-use wgpu::util::DeviceExt;
+use crate::core::error::RenderError;
+use crate::core::resource_tracker::{
+    tracked_create_buffer_init, tracked_create_texture, TrackedTexture,
+};
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -15,47 +18,56 @@ pub fn create_accumulation_textures(
     device: &wgpu::Device,
     width: u32,
     height: u32,
-) -> (wgpu::Texture, wgpu::Texture, wgpu::Texture) {
+) -> Result<(TrackedTexture, TrackedTexture, TrackedTexture), RenderError> {
     let size = wgpu::Extent3d {
         width,
         height,
         depth_or_array_layers: 1,
     };
 
-    let color_buffer = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("vf.Vector.OIT.ColorAccum"),
-        size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba16Float,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
+    let color_buffer = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("vf.Vector.OIT.ColorAccum"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        },
+    )?;
 
-    let reveal_buffer = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("vf.Vector.OIT.RevealAccum"),
-        size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R16Float,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
+    let reveal_buffer = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("vf.Vector.OIT.RevealAccum"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R16Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        },
+    )?;
 
-    let depth_buffer = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("vf.Vector.OIT.Depth"),
-        size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Depth32Float,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
+    let depth_buffer = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("vf.Vector.OIT.Depth"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        },
+    )?;
 
-    (color_buffer, reveal_buffer, depth_buffer)
+    Ok((color_buffer, reveal_buffer, depth_buffer))
 }
 
 /// Create the OIT compose pipeline and bind group.
@@ -65,12 +77,11 @@ pub fn create_compose_pipeline(
     color_view: &wgpu::TextureView,
     reveal_view: &wgpu::TextureView,
 ) -> (wgpu::RenderPipeline, wgpu::BindGroup) {
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("vf.Vector.OIT.Compose"),
-        source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-            "../../shaders/oit_compose.wgsl"
-        ))),
-    });
+    let shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "vf.Vector.OIT.Compose",
+        include_str!("../../shaders/oit_compose.wgsl"),
+    );
 
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("vf.Vector.OIT.ComposeBindGroupLayout"),
@@ -140,36 +151,39 @@ pub fn create_compose_pipeline(
         push_constant_ranges: &[],
     });
 
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("vf.Vector.OIT.ComposePipeline"),
-        layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: "vs_main",
-            buffers: &[],
+    let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+        device,
+        &wgpu::RenderPipelineDescriptor {
+            label: Some("vf.Vector.OIT.ComposePipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
         },
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: "fs_main",
-            targets: &[Some(wgpu::ColorTargetState {
-                format: target_format,
-                blend: None,
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            strip_index_format: None,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: None,
-            unclipped_depth: false,
-            polygon_mode: wgpu::PolygonMode::Fill,
-            conservative: false,
-        },
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        multiview: None,
-    });
+    );
 
     (pipeline, bind_group)
 }
@@ -184,13 +198,12 @@ pub fn create_edl_pipeline(
     height: u32,
     strength: f32,
     radius_px: f32,
-) -> (wgpu::RenderPipeline, wgpu::BindGroup) {
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("vf.Vector.PointEDL"),
-        source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-            "../../shaders/point_edl.wgsl"
-        ))),
-    });
+) -> Result<(wgpu::RenderPipeline, wgpu::BindGroup), RenderError> {
+    let shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "vf.Vector.PointEDL",
+        include_str!("../../shaders/point_edl.wgsl"),
+    );
 
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("vf.Vector.PointEDL.BindGroupLayout"),
@@ -249,11 +262,14 @@ pub fn create_edl_pipeline(
         strength,
         radius_px,
     };
-    let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("vf.Vector.PointEDL.Uniforms"),
-        contents: bytemuck::bytes_of(&uniforms),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    let uniform_buffer = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("vf.Vector.PointEDL.Uniforms"),
+            contents: bytemuck::bytes_of(&uniforms),
+            usage: wgpu::BufferUsages::UNIFORM,
+        },
+    )?;
 
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("vf.Vector.PointEDL.BindGroup"),
@@ -284,36 +300,39 @@ pub fn create_edl_pipeline(
         push_constant_ranges: &[],
     });
 
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("vf.Vector.PointEDL.Pipeline"),
-        layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: "vs_main",
-            buffers: &[],
+    let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+        device,
+        &wgpu::RenderPipelineDescriptor {
+            label: Some("vf.Vector.PointEDL.Pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
         },
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: "fs_main",
-            targets: &[Some(wgpu::ColorTargetState {
-                format: target_format,
-                blend: None,
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            strip_index_format: None,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: None,
-            unclipped_depth: false,
-            polygon_mode: wgpu::PolygonMode::Fill,
-            conservative: false,
-        },
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        multiview: None,
-    });
+    );
 
-    (pipeline, bind_group)
+    Ok((pipeline, bind_group))
 }

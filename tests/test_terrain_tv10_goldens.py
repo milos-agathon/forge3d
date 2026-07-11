@@ -196,6 +196,12 @@ def _save_png(path: Path, image: np.ndarray) -> None:
     f3d.numpy_to_png(path, image)
 
 
+def _golden_path(scene_name: str) -> Path:
+    """Use an explicit deterministic Metal baseline when the Metal lane runs."""
+    suffix = ".metal" if os.environ.get("WGPU_BACKEND", "").lower() == "metal" else ""
+    return GOLDEN_DIR / f"{scene_name}{suffix}.png"
+
+
 def _write_failure_artifacts(scene_name: str, actual: np.ndarray, expected: np.ndarray) -> None:
     if ARTIFACT_DIR is None:
         return
@@ -212,7 +218,7 @@ def _write_failure_artifacts(scene_name: str, actual: np.ndarray, expected: np.n
 
 
 def _assert_matches_golden(scene_name: str, actual: np.ndarray) -> None:
-    golden_path = GOLDEN_DIR / f"{scene_name}.png"
+    golden_path = _golden_path(scene_name)
     if UPDATE_GOLDENS:
         _save_png(golden_path, actual)
         return

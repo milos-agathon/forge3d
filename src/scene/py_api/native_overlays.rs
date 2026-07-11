@@ -58,7 +58,7 @@ impl Scene {
         // Ensure height view is bound
         if let Some(ref hv) = self.height_view {
             let g = crate::core::gpu::try_ctx()?;
-            ov.recreate_bind_group(&g.device, None, Some(hv), None, None);
+            ov.recreate_bind_group(&g.device, None, Some(hv), None, None)?;
         }
         let g = crate::core::gpu::try_ctx()?;
         ov.upload_uniforms(&g.queue);
@@ -67,6 +67,7 @@ impl Scene {
 
     #[pyo3(text_signature = "($self, image)")]
     pub fn set_native_overlay_texture(&mut self, image: &pyo3::PyAny) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         // Accept HxWx3 or HxWx4 uint8
         let (h, w, c, data) = if let Ok(arr) = image.extract::<PyReadonlyArray3<u8>>() {
             let shape = arr.shape();
@@ -126,20 +127,23 @@ impl Scene {
         }
 
         // Create texture and upload
-        let tex = g.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("native_overlay_tex"),
-            size: wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
+        let tex = crate::core::resource_tracker::tracked_create_texture(
+            &g.device,
+            &wgpu::TextureDescriptor {
+                label: Some("native_overlay_tex"),
+                size: wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         g.queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &tex,
@@ -164,7 +168,7 @@ impl Scene {
         ov.overlay_view = Some(view);
         // Recreate bind group with new overlay view and existing height view
         let height_view = self.height_view.as_ref();
-        ov.recreate_bind_group(&g.device, None, height_view, None, None);
+        ov.recreate_bind_group(&g.device, None, height_view, None, None)?;
         Ok(())
     }
 }

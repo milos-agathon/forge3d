@@ -39,12 +39,15 @@ pub(super) fn read_rgba_texture_to_vec(
 ) -> PyResult<Vec<u8>> {
     let bytes_per_row = (width * 4 + 255) / 256 * 256;
     let size = (bytes_per_row * height) as u64;
-    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some(read_label),
-        size,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+    let buffer = crate::core::resource_tracker::tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some(read_label),
+            size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )?;
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some(copy_label),
     });
@@ -125,12 +128,15 @@ pub(super) fn read_u32_texture_to_py(
 ) -> PyResult<Py<PyAny>> {
     let bytes_per_row = (width * 4 + 255) / 256 * 256;
     let size = (bytes_per_row * height) as u64;
-    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some(read_label),
-        size,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+    let buffer = crate::core::resource_tracker::tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some(read_label),
+            size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )?;
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some(copy_label),
     });
@@ -187,12 +193,15 @@ pub(super) fn read_single_u32_pixel(
     read_label: &'static str,
     cancel_message: &'static str,
 ) -> PyResult<u32> {
-    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some(read_label),
-        size: 4,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+    let buffer = crate::core::resource_tracker::tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some(read_label),
+            size: 4,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )?;
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some(copy_label),
     });

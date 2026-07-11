@@ -77,6 +77,11 @@ g-002*-review-*.zip
 logs/*-audit.json
 logs/mcp-puppeteer-*.log.gz
 specs/
+!specs/
+specs/*
+!specs/001-diagnostics-support-matrices/
+specs/001-diagnostics-support-matrices/*
+!specs/001-diagnostics-support-matrices/tasks.md
 output/
 logs/
 docs/*audit*.md
@@ -367,11 +372,7 @@ examples/output/
 examples/**/*.py
 tests/test_*example*.py
 tests/test_*examples*.py
-tests/test_france_population_spikes_height_shade.py
-tests/test_iberia_builtup_cover_3d.py
-tests/test_italy_forest_cover_example.py
-tests/test_poland_population_contour_3d.py
-tests/test_romania_builtup_cover_3d.py
+!tests/test_italy_forest_cover_example.py
 .superpowers/
 scripts/*
 

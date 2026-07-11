@@ -27,6 +27,11 @@ pub mod patterns {
         _dst_buffer: Arc<Buffer>,
         _size: u64,
     ) -> RenderResult<ComputePassDescriptor> {
+        crate::core::degradation::record_degradation(
+            "not_implemented",
+            "async_compute.buffer_copy",
+            "Buffer copy compute shader is not implemented; the async compute pass is unavailable",
+        );
         Err(RenderError::render(
             "Buffer copy compute shader not implemented",
         ))
@@ -39,6 +44,11 @@ pub mod patterns {
         _output_buffer: Arc<Buffer>,
         _element_count: u32,
     ) -> RenderResult<ComputePassDescriptor> {
+        crate::core::degradation::record_degradation(
+            "not_implemented",
+            "async_compute.reduction",
+            "Reduction compute shader is not implemented; the async compute pass is unavailable",
+        );
         Err(RenderError::render(
             "Reduction compute shader not implemented",
         ))
@@ -51,6 +61,11 @@ pub mod patterns {
         _output_buffer: Arc<Buffer>,
         _element_count: u32,
     ) -> RenderResult<ComputePassDescriptor> {
+        crate::core::degradation::record_degradation(
+            "not_implemented",
+            "async_compute.scan",
+            "Scan compute shader is not implemented; the async compute pass is unavailable",
+        );
         Err(RenderError::render("Scan compute shader not implemented"))
     }
 }

@@ -35,9 +35,6 @@ pub(crate) fn hybrid_render(
         return Err(PyValueError::new_err("image dimensions must be positive"));
     }
 
-    // Fallible first GPU touch: later ctx() calls cannot fail once this succeeds.
-    crate::core::gpu::try_ctx()?;
-
     let sdf_scene = if let Some(scene_obj) = scene {
         let extracted: PyRef<'_, PySdfScene> = scene_obj.extract()?;
         extracted.0.clone()
@@ -120,7 +117,7 @@ pub(crate) fn hybrid_render(
         for x in 0..w {
             let ndc_x = ((x as f32 + 0.5) / width as f32) * 2.0 - 1.0;
 
-            let mut dir = right * (ndc_x * half_w) + up * (ndc_y * half_h) - forward;
+            let mut dir = right * (ndc_x * half_w) + up * (ndc_y * half_h) + forward;
             dir = dir.normalize_or_zero();
             if dir.length_squared() == 0.0 {
                 dir = -forward;

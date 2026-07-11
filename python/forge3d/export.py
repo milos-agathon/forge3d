@@ -495,6 +495,9 @@ def export_svg(
 ) -> None:
     """[Pro] Export a vector scene to an SVG file.
 
+    Outside CENSOR's render-certificate scope: this emits vector markup, not
+    a pixel render.
+
     Args:
         scene: VectorScene containing geometry to export.
         path: Output file path.
@@ -531,6 +534,9 @@ def export_pdf(
     include_labels: bool = True,
 ) -> None:
     """[Pro] Export a vector scene to a PDF file.
+
+    Outside CENSOR's render-certificate scope: this emits vector/PDF output,
+    not a pixel render.
 
     Requires cairosvg package for PDF generation.
 

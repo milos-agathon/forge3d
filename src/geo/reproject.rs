@@ -133,6 +133,11 @@ pub fn reproject_coords(
     _from_crs: &str,
     _to_crs: &str,
 ) -> Result<Vec<[f64; 2]>, GeoError> {
+    crate::core::degradation::record_degradation(
+        "feature_not_compiled",
+        "geo.proj",
+        "PROJ-backed reprojection unavailable; results fall back to identity/string CRS compare",
+    );
     Err(GeoError::ProjNotAvailable)
 }
 
@@ -143,11 +148,21 @@ pub fn reproject_point(
     _from_crs: &str,
     _to_crs: &str,
 ) -> Result<(f64, f64), GeoError> {
+    crate::core::degradation::record_degradation(
+        "feature_not_compiled",
+        "geo.proj",
+        "PROJ-backed reprojection unavailable; results fall back to identity/string CRS compare",
+    );
     Err(GeoError::ProjNotAvailable)
 }
 
 #[cfg(not(feature = "proj"))]
 pub fn validate_crs(_crs: &str) -> Result<(), GeoError> {
+    crate::core::degradation::record_degradation(
+        "feature_not_compiled",
+        "geo.proj",
+        "PROJ-backed reprojection unavailable; results fall back to identity/string CRS compare",
+    );
     Err(GeoError::ProjNotAvailable)
 }
 

@@ -4,9 +4,11 @@
 //! with smooth anti-aliasing via shader-based quad expansion.
 
 use crate::core::error::RenderError;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_buffer_init, TrackedBuffer,
+};
 use crate::vector::api::PolylineDef;
 use crate::vector::layer::Layer;
-use wgpu::util::DeviceExt;
 
 // Re-export types from line_types module
 pub use super::line_types::{LineCap, LineInstance, LineJoin, LineUniform};
@@ -27,13 +29,13 @@ pub use super::line_helpers::calculate_line_joins;
 /// in the vertex shader, with anti-aliasing computed in the fragment shader.
 pub struct LineRenderer {
     render_pipeline: wgpu::RenderPipeline,
-    vertex_buffer: Option<wgpu::Buffer>,
-    uniform_buffer: wgpu::Buffer,
+    vertex_buffer: Option<TrackedBuffer>,
+    uniform_buffer: TrackedBuffer,
     bind_group: wgpu::BindGroup,
     vertex_capacity: usize,
     // Picking resources for object selection
     pick_pipeline: wgpu::RenderPipeline,
-    pick_uniform_buffer: wgpu::Buffer,
+    pick_uniform_buffer: TrackedBuffer,
     pick_bind_group: wgpu::BindGroup,
     // Weighted OIT pipeline (MRT) for transparency
     oit_pipeline: wgpu::RenderPipeline,
@@ -45,20 +47,22 @@ impl LineRenderer {
         target_format: wgpu::TextureFormat,
     ) -> Result<Self, RenderError> {
         // Load shader
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("line_aa.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                "../shaders/line_aa.wgsl"
-            ))),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "line_aa.wgsl",
+            include_str!("../shaders/line_aa.wgsl"),
+        );
 
         // Create uniform buffer
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Line.Uniform"),
-            size: std::mem::size_of::<LineUniform>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("vf.Vector.Line.Uniform"),
+                size: std::mem::size_of::<LineUniform>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         // Create bind group layout and bind group
         let bind_group_layout = create_uniform_bind_group_layout(device);
@@ -71,7 +75,7 @@ impl LineRenderer {
 
         // H5: Picking resources
         let pick_bind_group_layout = create_pick_bind_group_layout(device);
-        let pick_uniform_buffer = create_pick_uniform_buffer(device);
+        let pick_uniform_buffer = create_pick_uniform_buffer(device)?;
         let pick_bind_group = create_pick_bind_group(
             device,
             &pick_bind_group_layout,
@@ -153,12 +157,15 @@ impl LineRenderer {
         // Reallocate buffer if needed
         if instances.len() > self.vertex_capacity {
             let new_capacity = (instances.len() * 2).max(1024);
-            self.vertex_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("vf.Vector.Line.InstanceBuffer"),
-                size: (new_capacity * std::mem::size_of::<LineInstance>()) as u64,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
+            self.vertex_buffer = Some(tracked_create_buffer(
+                device,
+                &wgpu::BufferDescriptor {
+                    label: Some("vf.Vector.Line.InstanceBuffer"),
+                    size: (new_capacity * std::mem::size_of::<LineInstance>()) as u64,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                },
+            )?);
             self.vertex_capacity = new_capacity;
         }
 
@@ -167,11 +174,14 @@ impl LineRenderer {
             let instance_data = bytemuck::cast_slice(instances);
 
             // Use staging buffer for upload
-            let staging_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("vf.Vector.Line.StagingBuffer"),
-                contents: instance_data,
-                usage: wgpu::BufferUsages::COPY_SRC,
-            });
+            let staging_buffer = tracked_create_buffer_init(
+                device,
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("vf.Vector.Line.StagingBuffer"),
+                    contents: instance_data,
+                    usage: wgpu::BufferUsages::COPY_SRC,
+                },
+            )?;
 
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("vf.Vector.Line.Upload"),
@@ -220,6 +230,7 @@ impl LineRenderer {
             let pick_data: [u32; 4] = [base_pick_id, 0, 0, 0];
             queue.write_buffer(&self.pick_uniform_buffer, 0, bytemuck::bytes_of(&pick_data));
 
+            crate::core::shader_registry::record_shader_use("line_aa.wgsl");
             render_pass.set_pipeline(&self.pick_pipeline);
             render_pass.set_bind_group(0, &self.pick_bind_group, &[]);
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
@@ -255,6 +266,7 @@ impl LineRenderer {
             };
             queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
 
+            crate::core::shader_registry::record_shader_use("line_aa.wgsl");
             render_pass.set_pipeline(&self.oit_pipeline);
             render_pass.set_bind_group(0, &self.bind_group, &[]);
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
@@ -292,6 +304,7 @@ impl LineRenderer {
             queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
 
             // Set pipeline and resources
+            crate::core::shader_registry::record_shader_use("line_aa.wgsl");
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.bind_group, &[]);
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));

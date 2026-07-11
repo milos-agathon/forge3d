@@ -1,13 +1,16 @@
 use super::draw::RenderTargets;
 use super::*;
+use crate::core::resource_tracker::{
+    tracked_create_buffer_init, tracked_create_texture, TrackedTexture,
+};
 use crate::terrain::render_params;
 
 const TERRAIN_AOV_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 pub(super) struct AovAttachmentTarget {
-    pub(super) internal_texture: wgpu::Texture,
+    pub(super) internal_texture: TrackedTexture,
     pub(super) internal_view: wgpu::TextureView,
-    pub(super) _msaa_texture: Option<wgpu::Texture>,
+    pub(super) _msaa_texture: Option<TrackedTexture>,
     pub(super) msaa_view: Option<wgpu::TextureView>,
 }
 
@@ -74,35 +77,38 @@ impl TerrainScene {
         Ok(())
     }
 
-    /// VERITAS: single-sample R32Uint source-id attachment, tracked against
-    /// the memory registry (freed when the owning `AovFrame` drops).
-    fn create_source_id_attachment_target(&self, width: u32, height: u32) -> AovAttachmentTarget {
-        let internal_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain.aov.source_id"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+    /// VERITAS: single-sample R32Uint source-id attachment. Registry/ledger
+    /// accounting is owned by the `TrackedTexture` RAII wrapper (freed when
+    /// the owning `AovFrame` drops the texture).
+    fn create_source_id_attachment_target(
+        &self,
+        width: u32,
+        height: u32,
+    ) -> Result<AovAttachmentTarget> {
+        let internal_texture = tracked_create_texture(
+            self.device.as_ref(),
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.aov.source_id"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Uint,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Uint,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        crate::core::memory_tracker::global_tracker().track_texture_allocation(
-            width,
-            height,
-            wgpu::TextureFormat::R32Uint,
-        );
+        )?;
         let internal_view = internal_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        AovAttachmentTarget {
+        Ok(AovAttachmentTarget {
             internal_texture,
             internal_view,
             _msaa_texture: None,
             msaa_view: None,
-        }
+        })
     }
 
     fn create_aov_attachment_target(
@@ -111,40 +117,46 @@ impl TerrainScene {
         width: u32,
         height: u32,
         sample_count: u32,
-    ) -> AovAttachmentTarget {
-        let internal_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(label),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: TERRAIN_AOV_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let internal_view = internal_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        let msaa_texture = if sample_count > 1 {
-            Some(self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some(&format!("{label}.msaa")),
+    ) -> Result<AovAttachmentTarget> {
+        let internal_texture = tracked_create_texture(
+            self.device.as_ref(),
+            &wgpu::TextureDescriptor {
+                label: Some(label),
                 size: wgpu::Extent3d {
                     width,
                     height,
                     depth_or_array_layers: 1,
                 },
                 mip_level_count: 1,
-                sample_count,
+                sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: TERRAIN_AOV_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
-            }))
+            },
+        )?;
+        let internal_view = internal_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let msaa_texture = if sample_count > 1 {
+            Some(tracked_create_texture(
+                self.device.as_ref(),
+                &wgpu::TextureDescriptor {
+                    label: Some(&format!("{label}.msaa")),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: TERRAIN_AOV_FORMAT,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                },
+            )?)
         } else {
             None
         };
@@ -152,12 +164,12 @@ impl TerrainScene {
             .as_ref()
             .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()));
 
-        AovAttachmentTarget {
+        Ok(AovAttachmentTarget {
             internal_texture,
             internal_view,
             _msaa_texture: msaa_texture,
             msaa_view,
-        }
+        })
     }
 
     pub(super) fn create_aov_render_targets(
@@ -166,29 +178,30 @@ impl TerrainScene {
         height: u32,
         sample_count: u32,
         include_source_id: bool,
-    ) -> TerrainAovTargets {
-        TerrainAovTargets {
+    ) -> Result<TerrainAovTargets> {
+        Ok(TerrainAovTargets {
             albedo: self.create_aov_attachment_target(
                 "terrain.aov.albedo",
                 width,
                 height,
                 sample_count,
-            ),
+            )?,
             normal: self.create_aov_attachment_target(
                 "terrain.aov.normal",
                 width,
                 height,
                 sample_count,
-            ),
+            )?,
             depth: self.create_aov_attachment_target(
                 "terrain.aov.depth",
                 width,
                 height,
                 sample_count,
-            ),
+            )?,
             source_id: include_source_id
-                .then(|| self.create_source_id_attachment_target(width, height)),
-        }
+                .then(|| self.create_source_id_attachment_target(width, height))
+                .transpose()?,
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -341,6 +354,7 @@ impl TerrainScene {
                 occlusion_query_set: None,
             });
 
+            crate::core::shader_registry::record_shader_use("terrain_pbr_pom.aov.shader");
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, bind_group, &[]);
             pass.set_bind_group(1, light_bind_group, &[]);
@@ -361,34 +375,37 @@ impl TerrainScene {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         decoded: &crate::terrain::render_params::DecodedTerrainSettings,
-        internal_texture: wgpu::Texture,
+        internal_texture: TrackedTexture,
         internal_view: wgpu::TextureView,
         out_width: u32,
         out_height: u32,
         needs_scaling: bool,
         renormalize_normals: bool,
         label: &str,
-    ) -> Result<wgpu::Texture> {
+    ) -> Result<TrackedTexture> {
         if !needs_scaling {
             return Ok(internal_texture);
         }
 
-        let output_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(label),
-            size: wgpu::Extent3d {
-                width: out_width,
-                height: out_height,
-                depth_or_array_layers: 1,
+        let output_texture = tracked_create_texture(
+            self.device.as_ref(),
+            &wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width: out_width,
+                    height: out_height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: TERRAIN_AOV_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: TERRAIN_AOV_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
         let output_view = output_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let sampling = &decoded.sampling;
@@ -438,6 +455,11 @@ impl TerrainScene {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
+            crate::core::shader_registry::record_shader_use(if renormalize_normals {
+                "terrain.blit.normal.shader"
+            } else {
+                "terrain.blit.shader"
+            });
             blit_pass.set_pipeline(blit_pipeline);
             blit_pass.set_bind_group(0, &blit_bind_group, &[]);
             blit_pass.draw(0..3, 0..1);
@@ -457,6 +479,9 @@ impl TerrainScene {
         water_mask: Option<numpy::PyReadonlyArray2<'_, f32>>,
         time_seconds: f32,
     ) -> Result<(crate::Frame, crate::AovFrame)> {
+        let (certificate_capture, _allocation_scope) =
+            self.begin_certificate_capture("terrain.render_internal_with_aov");
+        let mut timing = self.take_render_timing();
         let decoded = params.decoded();
         self.prepare_frame_lighting(decoded)?;
 
@@ -476,7 +501,7 @@ impl TerrainScene {
             (height_inputs.width, height_inputs.height),
             params.z_scale,
             height_inputs.terrain_data_hash,
-        );
+        )?;
         super::probes::prepare_reflection_probes(
             self,
             &decoded.reflection_probes,
@@ -489,7 +514,7 @@ impl TerrainScene {
             (height_inputs.width, height_inputs.height),
             params.z_scale,
             height_inputs.terrain_data_hash,
-        );
+        )?;
         let materials = self.prepare_material_context(material_set, params, decoded)?;
 
         let uniforms = self.build_uniforms(
@@ -498,13 +523,14 @@ impl TerrainScene {
             height_inputs.width as f32,
             height_inputs.height as f32,
         )?;
-        let uniform_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let uniform_buffer = tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.uniform_buffer"),
                 contents: bytemuck::cast_slice(&uniforms),
                 usage: wgpu::BufferUsages::UNIFORM,
-            });
+            },
+        )?;
 
         let ibl_bind_group = self.prepare_ibl_bind_group(env_maps)?;
         let lut_texture_uploaded = if params.height_curve_mode.as_str() == "lut" {
@@ -553,13 +579,14 @@ impl TerrainScene {
             render_targets.internal_height,
             effective_msaa,
             want_source_id,
-        );
+        )?;
 
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("terrain.encoder.aov"),
             });
+        let vt_scope = ts_begin(&mut timing, &mut encoder, "terrain.material_vt");
         let material_vt_ready = self.prepare_material_vt_frame(
             &mut encoder,
             params,
@@ -568,7 +595,9 @@ impl TerrainScene {
             render_targets.internal_width,
             render_targets.internal_height,
         )?;
+        ts_end(&mut timing, &mut encoder, vt_scope, 0);
 
+        let ao_scope = ts_begin(&mut timing, &mut encoder, "terrain.height_ao");
         let height_ao_computed = self.compute_height_ao_pass(
             &mut encoder,
             &height_inputs.heightmap_view,
@@ -579,6 +608,9 @@ impl TerrainScene {
             params,
             decoded,
         )?;
+        ts_end(&mut timing, &mut encoder, ao_scope, 0);
+
+        let sun_vis_scope = ts_begin(&mut timing, &mut encoder, "terrain.sun_visibility");
         let sun_vis_computed = self.compute_sun_visibility_pass(
             &mut encoder,
             &height_inputs.heightmap_view,
@@ -589,7 +621,9 @@ impl TerrainScene {
             params,
             decoded,
         )?;
+        ts_end(&mut timing, &mut encoder, sun_vis_scope, 0);
 
+        let shadow_scope = ts_begin(&mut timing, &mut encoder, "terrain.shadow");
         let shadow_setup = self.prepare_shadow_setup(
             &mut encoder,
             params,
@@ -598,10 +632,12 @@ impl TerrainScene {
             height_inputs.width,
             height_inputs.height,
         )?;
+        ts_end(&mut timing, &mut encoder, shadow_scope, 0);
         let shadow_bind_group = shadow_setup
             .shadow_bind_group
             .as_ref()
             .unwrap_or(&self.noop_shadow.bind_group);
+        let sky_scope = ts_begin(&mut timing, &mut encoder, "terrain.sky");
         let sky_texture = self.render_sky_texture(
             &mut encoder,
             decoded,
@@ -611,6 +647,7 @@ impl TerrainScene {
             render_targets.internal_width,
             render_targets.internal_height,
         )?;
+        ts_end(&mut timing, &mut encoder, sky_scope, 0);
         let sky_view = sky_texture
             .as_ref()
             .map(|(_, view)| view)
@@ -674,9 +711,12 @@ impl TerrainScene {
         )?;
 
         if let Some((_, background_view)) = sky_texture.as_ref() {
+            let bg_scope = ts_begin(&mut timing, &mut encoder, "terrain.background");
             self.blit_background_texture(&mut encoder, &render_targets, background_view)?;
+            ts_end(&mut timing, &mut encoder, bg_scope, 1);
         }
 
+        let main_scope = ts_begin(&mut timing, &mut encoder, "terrain.main");
         self.run_main_pass_with_aov(
             &mut encoder,
             params,
@@ -690,6 +730,7 @@ impl TerrainScene {
             &pass_bind_groups.material_layer,
             sky_texture.is_some(),
         )?;
+        ts_end(&mut timing, &mut encoder, main_scope, 1);
 
         #[cfg(feature = "enable-gpu-instancing")]
         {
@@ -713,6 +754,7 @@ impl TerrainScene {
         }
 
         let needs_scaling = render_targets.needs_scaling;
+        let resolve_scope = ts_begin(&mut timing, &mut encoder, "terrain.resolve");
         let (final_texture, final_width, final_height) =
             self.resolve_output(&mut encoder, params, decoded, render_targets)?;
 
@@ -749,9 +791,17 @@ impl TerrainScene {
             false,
             "terrain.aov.depth.resolved",
         )?;
+        ts_end(&mut timing, &mut encoder, resolve_scope, 4);
         self.stage_material_vt_feedback_readback(&mut encoder)?;
+        if let Some(t) = timing.as_mut() {
+            t.resolve_queries(&mut encoder);
+        }
         self.queue.submit(Some(encoder.finish()));
         self.finish_material_vt_frame()?;
+
+        self.record_render_timings(&mut timing);
+        self.store_render_timing(timing);
+        self.finish_certificate_capture(certificate_capture);
 
         let aov_config = &decoded.aov;
         let aov_frame = crate::AovFrame::new(

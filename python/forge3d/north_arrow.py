@@ -10,6 +10,8 @@ from typing import Literal
 
 import numpy as np
 
+from .certificate import _captured_cpu_render
+
 
 @dataclass
 class NorthArrowConfig:
@@ -31,11 +33,19 @@ class NorthArrow:
     def __init__(self, config: NorthArrowConfig | None = None):
         self.config = config or NorthArrowConfig()
 
-    def render(self) -> np.ndarray:
+    @_captured_cpu_render("python.north_arrow.render", "north_arrow.cpu", draw_calls=1)
+    def render(self, *, certificate: bool | str = False) -> np.ndarray:
         """Render the north arrow to an RGBA image."""
         try:
             from PIL import Image, ImageDraw, ImageFont
         except ImportError:
+            from . import _degradation
+
+            _degradation.record(
+                "optional_dependency_absent",
+                "north_arrow.pillow",
+                "Pillow is unavailable; the simplified unlabeled north arrow was used",
+            )
             return self._render_simple()
 
         cfg = self.config

@@ -13,13 +13,14 @@ impl GpuBvhBuilder {
             _pad0: 0,
             _pad1: 0,
         };
-        let uniforms_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let uniforms_buffer = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("bitonic-sort-uniforms"),
                 contents: cast_slice(&[uniforms]),
                 usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            });
+            },
+        )?;
 
         let bgl0 = self.sort_bitonic_pipeline.get_bind_group_layout(0);
         let bgl1 = self.sort_bitonic_pipeline.get_bind_group_layout(1);
