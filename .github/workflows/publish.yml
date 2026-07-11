@@ -129,7 +129,7 @@ jobs:
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
         run: |
-          python -m pip install --upgrade pip pytest
+          python -m pip install --upgrade pip pytest numpy
           python scripts/install_compatible_wheel.py dist
           pytest tests/test_install_smoke.py -v --tb=short
 
@@ -147,7 +147,7 @@ jobs:
             -v "${PWD}:/workspace" \
             -w /workspace \
             python:3.11-slim \
-            bash -lc "python -m pip install -U pip pytest && python /workspace/scripts/install_compatible_wheel.py /workspace/dist && FORGE3D_NO_BOOTSTRAP=1 pytest tests/test_install_smoke.py -v --tb=short"
+            bash -lc "python -m pip install -U pip pytest numpy && python /workspace/scripts/install_compatible_wheel.py /workspace/dist && FORGE3D_NO_BOOTSTRAP=1 pytest tests/test_install_smoke.py -v --tb=short"
 
   release-assets:
     name: Upload Release Assets
