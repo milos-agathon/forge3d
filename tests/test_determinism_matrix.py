@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -7,6 +8,7 @@ import pytest
 
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "check_determinism_hashes.py"
+WORKFLOW = Path(__file__).parents[1] / ".github" / "workflows" / "determinism-matrix.yml"
 SCENE = "terra_determinata_v1"
 SHA = "d" * 64
 
@@ -58,6 +60,13 @@ def test_matrix_rejects_zero_hardware_hashes(tmp_path):
     result = _run(tmp_path)
     assert result.returncode == 1
     assert "no hardware-backed leg produced a hash" in result.stderr
+
+
+def test_hosted_apple_virtual_adapter_is_informational():
+    workflow = WORKFLOW.read_text()
+    apple = re.search(r"- leg: apple.*?gated: (true|false)", workflow, re.DOTALL)
+    assert apple, "apple render leg missing"
+    assert apple.group(1) == "false"
 
 
 def test_matrix_accepts_documented_gated_infrastructure_failure(tmp_path):

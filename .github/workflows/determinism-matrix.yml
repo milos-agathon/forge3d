@@ -7,7 +7,7 @@
 #
 # Gated vs informational legs (follows the repo convention of skipping visual
 # goldens on unsupported hosted GPUs, see ci.yml test-golden-images):
-#   - apple  : GATED. Measured 2026-07-10: hosted macos-14 runners expose an
+#   - apple  : informational on hosted macos-14. Measured 2026-07-10: runners expose an
 #              "Apple Paravirtual device" (VM GPU), NOT a physical M-series
 #              chip, and wgpu 0.19's Metal backend compiles MSL with Metal's
 #              default fastMathEnabled=true (no toggle) — the VM hash is
@@ -15,11 +15,9 @@
 #              dx12/vulkan golden, so it must never be enforced against
 #              hardware goldens. Deterministic mode therefore REFUSES
 #              virtualized adapters (src/core/gpu.rs), which makes this leg
-#              fail loudly at render on hosted runners: a documented
-#              infrastructure failure, not a hash mismatch. It turns into a
-#              real byte-exact measurement the moment it runs on a
-#              self-hosted M-series runner (also needs a wgpu with fast-math
-#              control for parity). Do not soften the diff.
+#              record an explicit ABSENT marker on hosted runners. It becomes
+#              gated only on a self-hosted M-series runner (also needs a wgpu
+#              with fast-math control for parity). Do not soften the diff.
 #   - intel  : informational on hosted ubuntu (no Intel GPU; llvmpipe/lavapipe
 #              are software adapters). Becomes gated on a self-hosted
 #              gpu-intel runner.
@@ -97,7 +95,7 @@ jobs:
           - leg: apple
             os: macos-14
             backend: metal
-            gated: true
+            gated: false
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ !matrix.gated }}
     steps:
