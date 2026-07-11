@@ -65,7 +65,10 @@ def main() -> int:
     compatible.sort(key=lambda item: (item[0], item[1].name))
     chosen = compatible[0][1]
     print(f"Installing wheel: {chosen}")
-    subprocess.run([sys.executable, "-m", "pip", "install", str(chosen)], check=True)
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--force-reinstall", str(chosen)],
+        check=True,
+    )
     return 0
 
 
