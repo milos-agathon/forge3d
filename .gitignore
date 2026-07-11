@@ -1,5 +1,11 @@
 # AI files
 .claude
+!.claude/
+.claude/*
+!.claude/rules/
+.claude/rules/*
+!.claude/rules/rust-core.md
+!.claude/rules/build-and-ci.md
 docs/prompt.md
 CLAUDE.md
 AGENTS.md
@@ -91,7 +97,10 @@ docs/**/*prompt*.md
 *.pdb
 
 # Generated agent docs and review packs
-docs/audits/
+docs/audits/*
+!docs/audits/fable5-moonshots/
+docs/audits/fable5-moonshots/*
+!docs/audits/fable5-moonshots/14-censor-implementation-audit.md
 docs/prompts/
 docs/perf/
 docs/fable-prompt-library.md
