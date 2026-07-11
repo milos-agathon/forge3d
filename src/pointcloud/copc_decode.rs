@@ -61,9 +61,9 @@ pub(crate) fn parse_uncompressed_points(
         let y = i32::from_le_bytes([data[off + 4], data[off + 5], data[off + 6], data[off + 7]]);
         let z = i32::from_le_bytes([data[off + 8], data[off + 9], data[off + 10], data[off + 11]]);
 
-        positions.push((x as f64 * header.scale[0] + header.offset[0]) as f32);
-        positions.push((y as f64 * header.scale[1] + header.offset[1]) as f32);
-        positions.push((z as f64 * header.scale[2] + header.offset[2]) as f32);
+        positions.push(x as f64 * header.scale[0] + header.offset[0]);
+        positions.push(y as f64 * header.scale[1] + header.offset[1]);
+        positions.push(z as f64 * header.scale[2] + header.offset[2]);
 
         if off + 14 <= data.len() {
             intensities.push(u16::from_le_bytes([data[off + 12], data[off + 13]]));

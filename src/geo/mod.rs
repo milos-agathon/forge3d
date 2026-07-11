@@ -2,7 +2,11 @@
 // Geographic utilities including CRS reprojection
 // RELEVANT FILES: src/geo/reproject.rs, python/forge3d/crs.py
 
+pub mod geodesic;
+pub mod geoid;
+pub mod projections;
 pub mod reproject;
+pub mod units;
 
 // Re-export main types and functions
 pub use reproject::GeoError;

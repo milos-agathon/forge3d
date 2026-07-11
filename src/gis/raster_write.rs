@@ -93,10 +93,11 @@ pub struct WriteRasterOptions {
     pub like_info: Option<RasterInfo>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CrsSpec {
     pub authority: Option<(String, String)>,
     pub wkt: Option<String>,
+    pub projection: Option<crate::geo::projections::ProjectionDefinition>,
 }
 
 impl CrsSpec {
@@ -112,12 +113,14 @@ impl CrsSpec {
             return Ok(Self {
                 authority: Some((authority, code)),
                 wkt: None,
+                projection: None,
             });
         }
         if looks_like_wkt(trimmed) {
             return Ok(Self {
                 authority: None,
                 wkt: Some(validate_wkt_literal(trimmed)?),
+                projection: None,
             });
         }
         Err(GisError::InvalidCrs(
@@ -165,7 +168,16 @@ impl CrsSpec {
         Ok(Self {
             authority: authority_pair,
             wkt,
+            projection: None,
         })
+    }
+
+    pub fn from_projection(projection: crate::geo::projections::ProjectionDefinition) -> Self {
+        Self {
+            authority: None,
+            wkt: None,
+            projection: Some(projection),
+        }
     }
 
     pub(crate) fn from_raster_info(info: &RasterInfo) -> Option<Self> {
@@ -181,6 +193,7 @@ impl CrsSpec {
             Some(Self {
                 authority,
                 wkt: info.crs_wkt.clone(),
+                projection: None,
             })
         }
     }
@@ -858,11 +871,25 @@ fn validate_authority_code(authority: &str, code: &str) -> GisResult<(String, St
             "CRS authority must be EPSG with a numeric code".to_string(),
         ));
     }
-    match code.as_str() {
-        "4326" | "3857" | "32631" => Ok((authority, code)),
-        _ => Err(GisError::InvalidCrs(format!(
-            "unsupported EPSG code {code}; this TIFF-only backend supports EPSG:4326, EPSG:3857, and EPSG:32631"
-        ))),
+    // MENSURA: the built-in pure-Rust projection engine handles 4326, 3857,
+    // and every WGS84 UTM zone. Other geographic-family codes (4000-4999)
+    // parse so downstream code can reject them with a precise diagnostic
+    // (e.g. geometry_measure's degree guard).
+    let numeric: u32 = code
+        .parse()
+        .map_err(|_| GisError::InvalidCrs(format!("EPSG code {code} is not a valid number")))?;
+    let supported = matches!(numeric, 4326 | 3857)
+        || (32601..=32660).contains(&numeric)
+        || (32701..=32760).contains(&numeric)
+        || (4000..5000).contains(&numeric)
+        || numeric == 4979;
+    if supported {
+        Ok((authority, code))
+    } else {
+        Err(GisError::InvalidCrs(format!(
+            "unsupported EPSG code {code}; this TIFF-only backend supports EPSG:4326, \
+             EPSG:3857, and the WGS84 UTM zones (EPSG:326zz/327zz)"
+        )))
     }
 }
 

@@ -1,6 +1,6 @@
 //! Point cloud renderer with caching
 
-use glam::Vec3;
+use glam::DVec3;
 use std::collections::HashMap;
 
 use super::copc::{CopcDataset, PointData as CopcPointData};
@@ -11,7 +11,7 @@ use super::traversal::{PointCloudTraverser, TraversalParams, VisibleNode};
 /// Point buffer ready for GPU upload
 #[derive(Debug)]
 pub struct PointBuffer {
-    pub positions: Vec<f32>,
+    pub positions: Vec<f64>,
     pub colors: Option<Vec<u8>>,
     pub point_count: usize,
 }
@@ -31,7 +31,7 @@ impl PointBuffer {
     }
 
     pub fn byte_size(&self) -> usize {
-        self.positions.len() * 4 + self.colors.as_ref().map_or(0, |c| c.len())
+        self.positions.len() * 8 + self.colors.as_ref().map_or(0, |c| c.len())
     }
 
     /// Create interleaved GPU vertex data: [x, y, z, r, g, b] per point.
@@ -40,6 +40,20 @@ impl PointBuffer {
     /// Colors are taken from `self.colors` (packed [r,g,b,r,g,b,...] as u8, normalized to 0..1).
     /// If no colors are present, defaults to white (1.0, 1.0, 1.0).
     pub fn create_gpu_buffer(&self) -> Vec<f32> {
+        let anchor = self.default_anchor();
+        self.create_gpu_buffer_anchored(&anchor)
+    }
+
+    fn default_anchor(&self) -> crate::camera::Anchor {
+        let mut anchor = crate::camera::Anchor::new();
+        if let Some(point) = self.positions.chunks_exact(3).next() {
+            anchor.rebase_if_needed(DVec3::new(point[0], point[1], point[2]));
+        }
+        anchor
+    }
+
+    /// Create GPU data after rebasing positions against an explicit anchor.
+    pub fn create_gpu_buffer_anchored(&self, anchor: &crate::camera::Anchor) -> Vec<f32> {
         if self.point_count == 0 {
             return Vec::new();
         }
@@ -49,12 +63,15 @@ impl PointBuffer {
         for i in 0..self.point_count {
             let pi = i * 3;
             // Position: x, y, z
-            let x = self.positions.get(pi).copied().unwrap_or(0.0);
-            let y = self.positions.get(pi + 1).copied().unwrap_or(0.0);
-            let z = self.positions.get(pi + 2).copied().unwrap_or(0.0);
-            out.push(x);
-            out.push(y);
-            out.push(z);
+            let point = DVec3::new(
+                self.positions.get(pi).copied().unwrap_or(0.0),
+                self.positions.get(pi + 1).copied().unwrap_or(0.0),
+                self.positions.get(pi + 2).copied().unwrap_or(0.0),
+            );
+            let render = anchor.to_render_vec3(point);
+            out.push(render.x);
+            out.push(render.y);
+            out.push(render.z);
 
             // Color: r, g, b (normalized from u8 or default white)
             if let Some(cols) = colors {
@@ -85,7 +102,18 @@ impl PointBuffer {
     /// `[x, y, z, elevation_norm, r, g, b, intensity, size, pad, pad, pad]`
     ///
     /// `bounds_min`/`bounds_max` normalise elevation (Y axis) to \[0, 1\].
-    pub fn create_viewer_gpu_buffer(&self, bounds_min: [f32; 3], bounds_max: [f32; 3]) -> Vec<f32> {
+    pub fn create_viewer_gpu_buffer(&self, bounds_min: [f64; 3], bounds_max: [f64; 3]) -> Vec<f32> {
+        let anchor = self.default_anchor();
+        self.create_viewer_gpu_buffer_anchored(&anchor, bounds_min, bounds_max)
+    }
+
+    /// Create viewer data after rebasing positions against an explicit anchor.
+    pub fn create_viewer_gpu_buffer_anchored(
+        &self,
+        anchor: &crate::camera::Anchor,
+        bounds_min: [f64; 3],
+        bounds_max: [f64; 3],
+    ) -> Vec<f32> {
         if self.point_count == 0 {
             return Vec::new();
         }
@@ -95,10 +123,13 @@ impl PointBuffer {
 
         for i in 0..self.point_count {
             let pi = i * 3;
-            let x = self.positions.get(pi).copied().unwrap_or(0.0);
-            let y = self.positions.get(pi + 1).copied().unwrap_or(0.0);
-            let z = self.positions.get(pi + 2).copied().unwrap_or(0.0);
-            let elev_norm = ((y - bounds_min[1]) / elev_range).clamp(0.0, 1.0);
+            let point = DVec3::new(
+                self.positions.get(pi).copied().unwrap_or(0.0),
+                self.positions.get(pi + 1).copied().unwrap_or(0.0),
+                self.positions.get(pi + 2).copied().unwrap_or(0.0),
+            );
+            let render = anchor.to_render_vec3(point);
+            let elev_norm = ((point.y - bounds_min[1]) / elev_range).clamp(0.0, 1.0) as f32;
 
             let (r, g, b) = if let Some(cols) = colors {
                 let ci = i * 3;
@@ -112,7 +143,7 @@ impl PointBuffer {
             };
 
             out.extend_from_slice(&[
-                x, y, z,         // position
+                render.x, render.y, render.z,  // position
                 elev_norm, // elevation_norm
                 r, g, b,   // rgb
                 0.5, // intensity (default)
@@ -196,14 +227,14 @@ impl PointCloudRenderer {
     }
 
     /// Get visible nodes from COPC dataset
-    pub fn get_visible_copc(&self, dataset: &CopcDataset, camera_pos: Vec3) -> Vec<VisibleNode> {
+    pub fn get_visible_copc(&self, dataset: &CopcDataset, camera_pos: DVec3) -> Vec<VisibleNode> {
         let root = dataset.root_node();
         self.traverser
             .visible_nodes(&root, camera_pos, None, |key| dataset.children(key))
     }
 
     /// Get visible nodes from EPT dataset
-    pub fn get_visible_ept(&self, dataset: &EptDataset, camera_pos: Vec3) -> Vec<VisibleNode> {
+    pub fn get_visible_ept(&self, dataset: &EptDataset, camera_pos: DVec3) -> Vec<VisibleNode> {
         let root = dataset.root_node();
         self.traverser
             .visible_nodes(&root, camera_pos, None, |key| dataset.children(key))
@@ -359,5 +390,27 @@ fn ept_to_buffer(data: EptPointData) -> PointBuffer {
         positions: data.positions,
         colors: data.colors,
         point_count,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn anchored_gpu_buffer_preserves_earth_scale_point_offset() {
+        let buffer = PointBuffer {
+            positions: vec![6_378_137.000_25, 2.0, -3.0, 6_378_137.000_50, 2.0, -3.0],
+            colors: None,
+            point_count: 2,
+        };
+        let mut anchor = crate::camera::Anchor::new();
+        anchor.rebase_if_needed(DVec3::new(6_378_137.0, 0.0, 0.0));
+        let gpu = buffer.create_gpu_buffer_anchored(&anchor);
+        assert!((gpu[0] - 0.000_25).abs() < 1e-6);
+        assert_eq!(gpu[1], 2.0);
+        assert_eq!(gpu[2], -3.0);
+        let automatic = buffer.create_gpu_buffer();
+        assert!((automatic[6] - 0.000_25).abs() < 1e-6);
     }
 }

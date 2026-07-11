@@ -99,7 +99,7 @@ class OctreeNode:
 @dataclass
 class PointData:
     """Decoded point data."""
-    positions: np.ndarray  # (N, 3) float32
+    positions: np.ndarray  # (N, 3) float64 world coordinates
     colors: Optional[np.ndarray] = None  # (N, 3) uint8
     intensities: Optional[np.ndarray] = None  # (N,) uint16
     classifications: Optional[np.ndarray] = None  # (N,) uint8
@@ -449,7 +449,7 @@ class CopcDataset:
             int(node_key.z),
             None if budget is None else int(budget),
         )
-        positions = np.asarray(result["positions"], dtype=np.float32).reshape((-1, 3))
+        positions = np.asarray(result["positions"], dtype=np.float64).reshape((-1, 3))
         colors = result.get("colors")
         intensities = result.get("intensities")
         classifications = result.get("classifications")

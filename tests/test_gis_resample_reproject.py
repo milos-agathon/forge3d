@@ -240,8 +240,17 @@ def test_crs_transformer_rejects_invalid_or_unavailable():
     with pytest.raises(ValueError, match="InvalidCrs"):
         gis.CrsTransform.from_crs("not-a-crs", "EPSG:3857")
 
+    # MENSURA: WGS84 UTM zones are handled by the built-in pure-Rust engine
+    # now. A parseable-but-untransformable pair reports BackendUnavailable;
+    # codes outside the parse whitelist fail earlier with InvalidCrs.
     with pytest.raises(RuntimeError, match="BackendUnavailable"):
-        gis.CrsTransform.from_crs("EPSG:4326", "EPSG:32631")
+        gis.CrsTransform.from_crs("EPSG:4326", "EPSG:4269")
+    with pytest.raises(ValueError, match="InvalidCrs"):
+        gis.CrsTransform.from_crs("EPSG:4326", "EPSG:2154")
+    utm = gis.CrsTransform.from_crs("EPSG:4326", "EPSG:32631")
+    e, n = utm.transform_point(3.0, 0.0)
+    assert e == pytest.approx(500000.0, abs=1e-6)
+    assert n == pytest.approx(0.0, abs=1e-6)
 
 
 def test_reproject_unsupported_crs_pair_reports_backend_unavailable(tmp_path: Path):
@@ -253,8 +262,15 @@ def test_reproject_unsupported_crs_pair_reports_backend_unavailable(tmp_path: Pa
         transform=(1.0, 0.0, 0.0, 0.0, -1.0, 2.0),
     )
 
+    # MENSURA: EPSG:32631 reprojects natively now. A parseable geographic
+    # CRS with no transform path reports BackendUnavailable; codes outside
+    # the parse whitelist fail earlier with InvalidCrs.
     with pytest.raises(RuntimeError, match="BackendUnavailable"):
-        gis.reproject_raster(path, "EPSG:32631", resampling="nearest")
+        gis.reproject_raster(path, "EPSG:4269", resampling="nearest")
+    with pytest.raises(ValueError, match="InvalidCrs"):
+        gis.reproject_raster(path, "EPSG:2154", resampling="nearest")
+    result = gis.reproject_raster(path, "EPSG:32631", resampling="nearest")
+    assert result["info"]["crs_authority"]["code"] == "32631"
 
 
 def test_reprojection_uses_nodata_for_out_of_source_pixels(tmp_path: Path):

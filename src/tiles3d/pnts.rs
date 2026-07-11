@@ -31,8 +31,10 @@ pub struct PntsPayload {
     pub header: PntsHeader,
     /// Number of points
     pub points_length: u32,
-    /// Point positions (3 floats per point, relative to RTC_CENTER if present)
-    pub positions: Vec<f32>,
+    /// Point positions (3 f64 values per point, relative to RTC_CENTER if present).
+    /// The PNTS `POSITION` payload is f32 by specification, but decoding it
+    /// into f64 prevents later Earth-scale metadata from being narrowed.
+    pub positions: Vec<f64>,
     /// RGB colors (3 u8 per point, optional)
     pub colors: Option<Vec<u8>>,
     /// RGBA colors (4 u8 per point, optional)
@@ -44,9 +46,9 @@ pub struct PntsPayload {
     /// RTC (Relative-To-Center) offset, if present
     pub rtc_center: Option<[f64; 3]>,
     /// Quantized volume offset (for POSITION_QUANTIZED)
-    pub quantized_volume_offset: Option<[f32; 3]>,
+    pub quantized_volume_offset: Option<[f64; 3]>,
     /// Quantized volume scale (for POSITION_QUANTIZED)
-    pub quantized_volume_scale: Option<[f32; 3]>,
+    pub quantized_volume_scale: Option<[f64; 3]>,
     /// Feature table JSON (for additional properties)
     pub feature_table: serde_json::Value,
     /// Batch table JSON (optional)
@@ -70,21 +72,29 @@ impl PntsPayload {
     }
 
     /// Get world-space positions (applies RTC_CENTER if present)
-    pub fn world_positions(&self) -> Vec<f32> {
+    pub fn world_positions(&self) -> Vec<f64> {
         if let Some(rtc) = self.rtc_center {
             self.positions
                 .chunks(3)
-                .flat_map(|p| {
-                    [
-                        p[0] + rtc[0] as f32,
-                        p[1] + rtc[1] as f32,
-                        p[2] + rtc[2] as f32,
-                    ]
-                })
+                .flat_map(|p| [p[0] + rtc[0], p[1] + rtc[1], p[2] + rtc[2]])
                 .collect()
         } else {
             self.positions.clone()
         }
+    }
+
+    /// Convert absolute PNTS positions to GPU-ready anchor-relative data.
+    /// This is deliberately the only path from decoded world coordinates to
+    /// f32 render vertices.
+    pub fn render_positions(&self, anchor: &crate::camera::Anchor) -> Vec<f32> {
+        self.world_positions()
+            .chunks_exact(3)
+            .flat_map(|point| {
+                let relative =
+                    anchor.to_render_vec3(glam::DVec3::new(point[0], point[1], point[2]));
+                [relative.x, relative.y, relative.z]
+            })
+            .collect()
     }
 }
 
@@ -171,11 +181,7 @@ pub fn decode_pnts(data: &[u8]) -> Tiles3dResult<PntsPayload> {
         .and_then(|v| v.as_array())
         .and_then(|arr| {
             if arr.len() == 3 {
-                Some([
-                    arr[0].as_f64()? as f32,
-                    arr[1].as_f64()? as f32,
-                    arr[2].as_f64()? as f32,
-                ])
+                Some([arr[0].as_f64()?, arr[1].as_f64()?, arr[2].as_f64()?])
             } else {
                 None
             }
@@ -186,11 +192,7 @@ pub fn decode_pnts(data: &[u8]) -> Tiles3dResult<PntsPayload> {
         .and_then(|v| v.as_array())
         .and_then(|arr| {
             if arr.len() == 3 {
-                Some([
-                    arr[0].as_f64()? as f32,
-                    arr[1].as_f64()? as f32,
-                    arr[2].as_f64()? as f32,
-                ])
+                Some([arr[0].as_f64()?, arr[1].as_f64()?, arr[2].as_f64()?])
             } else {
                 None
             }
@@ -228,7 +230,7 @@ pub fn load_pnts<P: AsRef<Path>>(path: P) -> Tiles3dResult<PntsPayload> {
     decode_pnts(&data)
 }
 
-fn extract_positions(ft: &serde_json::Value, bin: &[u8], count: u32) -> Tiles3dResult<Vec<f32>> {
+fn extract_positions(ft: &serde_json::Value, bin: &[u8], count: u32) -> Tiles3dResult<Vec<f64>> {
     // Try POSITION first (float32 x 3)
     if let Some(pos_info) = ft.get("POSITION") {
         let byte_offset = pos_info
@@ -245,7 +247,7 @@ fn extract_positions(ft: &serde_json::Value, bin: &[u8], count: u32) -> Tiles3dR
         for i in 0..(count as usize * 3) {
             let idx = byte_offset + i * 4;
             let val = f32::from_le_bytes([bin[idx], bin[idx + 1], bin[idx + 2], bin[idx + 3]]);
-            positions.push(val);
+            positions.push(f64::from(val));
         }
         return Ok(positions);
     }
@@ -269,9 +271,9 @@ fn extract_positions(ft: &serde_json::Value, bin: &[u8], count: u32) -> Tiles3dR
             .and_then(|v| v.as_array())
             .map(|arr| {
                 [
-                    arr.get(0).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
-                    arr.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
-                    arr.get(2).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
+                    arr.get(0).and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    arr.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    arr.get(2).and_then(|v| v.as_f64()).unwrap_or(0.0),
                 ]
             })
             .unwrap_or([0.0, 0.0, 0.0]);
@@ -281,9 +283,9 @@ fn extract_positions(ft: &serde_json::Value, bin: &[u8], count: u32) -> Tiles3dR
             .and_then(|v| v.as_array())
             .map(|arr| {
                 [
-                    arr.get(0).and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
-                    arr.get(1).and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
-                    arr.get(2).and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
+                    arr.get(0).and_then(|v| v.as_f64()).unwrap_or(1.0),
+                    arr.get(1).and_then(|v| v.as_f64()).unwrap_or(1.0),
+                    arr.get(2).and_then(|v| v.as_f64()).unwrap_or(1.0),
                 ]
             })
             .unwrap_or([1.0, 1.0, 1.0]);
@@ -293,7 +295,7 @@ fn extract_positions(ft: &serde_json::Value, bin: &[u8], count: u32) -> Tiles3dR
             for j in 0..3 {
                 let idx = byte_offset + (i * 3 + j) * 2;
                 let quantized = u16::from_le_bytes([bin[idx], bin[idx + 1]]);
-                let normalized = quantized as f32 / 65535.0;
+                let normalized = f64::from(quantized) / 65535.0;
                 let pos = vol_offset[j] + normalized * vol_scale[j];
                 positions.push(pos);
             }
@@ -454,4 +456,34 @@ fn decode_oct16p(x: u8, y: u8) -> (f32, f32, f32) {
 
     let len = (fx * fx + fy * fy + fz * fz).sqrt();
     (fx / len, fy / len, fz / len)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rtc_world_positions_preserve_earth_scale_offsets_in_f64() {
+        let payload = PntsPayload {
+            header: PntsHeader::zeroed(),
+            points_length: 1,
+            positions: vec![0.000_25, 0.0, 0.0],
+            colors: None,
+            colors_rgba: None,
+            normals: None,
+            batch_ids: None,
+            rtc_center: Some([6_378_137.0, 0.0, 0.0]),
+            quantized_volume_offset: None,
+            quantized_volume_scale: None,
+            feature_table: serde_json::Value::Null,
+            batch_table: None,
+        };
+        let world = payload.world_positions();
+        assert!((world[0] - 6_378_137.000_25).abs() < 1e-9);
+
+        let mut anchor = crate::camera::Anchor::new();
+        anchor.rebase_if_needed(glam::DVec3::new(6_378_137.0, 0.0, 0.0));
+        let render = payload.render_positions(&anchor);
+        assert!((render[0] - 0.000_25).abs() < 1e-6);
+    }
 }

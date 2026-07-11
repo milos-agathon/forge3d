@@ -464,6 +464,14 @@ from .crs import (
     crs_to_epsg,
     get_crs_from_rasterio,
     get_crs_from_geopandas,
+    geoid_undulation,
+    orthometric_to_ellipsoidal,
+    ellipsoidal_to_orthometric,
+    geodesic_inverse,
+    geodesic_direct,
+    wgs84_to_ecef,
+    ecef_to_wgs84,
+    dem_orthometric_to_ellipsoidal,
 )
 
 # -----------------------------------------------------------------------------
@@ -878,6 +886,14 @@ __all__ = [
     "transform_coords",
     "reproject_geom",
     "crs_to_epsg",
+    "geoid_undulation",
+    "orthometric_to_ellipsoidal",
+    "ellipsoidal_to_orthometric",
+    "geodesic_inverse",
+    "geodesic_direct",
+    "wgs84_to_ecef",
+    "ecef_to_wgs84",
+    "dem_orthometric_to_ellipsoidal",
     "get_crs_from_rasterio",
     "get_crs_from_geopandas",
     # P4: 3D Buildings Pipeline

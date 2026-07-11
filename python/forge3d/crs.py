@@ -355,6 +355,78 @@ def get_crs_from_geopandas(path: str, layer: Optional[str] = None) -> Optional[s
         return None
 
 
+# ---------------------------------------------------------------------------
+# MENSURA: EGM96 geoid, Karney geodesics, geodetic <-> ECEF (pure-Rust native)
+# ---------------------------------------------------------------------------
+
+def _require_geodesy_native() -> Any:
+    try:
+        from forge3d import _forge3d as _native
+    except ImportError as exc:  # pragma: no cover - native build required
+        raise RuntimeError(
+            "forge3d native extension is required for forge3d.crs geodesy functions"
+        ) from exc
+    return _native
+
+
+def geoid_undulation(lat: float, lon: float) -> float:
+    """EGM96 geoid undulation N(lat, lon) in metres.
+
+    Degree/order-120 spherical-harmonic synthesis following NGA's F477
+    reference convention (WGS84 ellipsoid, correction model, -0.53 m
+    zero-degree term).
+    """
+    return _require_geodesy_native().geoid_undulation(lat, lon)
+
+
+def orthometric_to_ellipsoidal(h_orthometric: float, lat: float, lon: float) -> float:
+    """Convert an orthometric (EGM96) height to ellipsoidal: h = H + N."""
+    return _require_geodesy_native().orthometric_to_ellipsoidal(h_orthometric, lat, lon)
+
+
+def ellipsoidal_to_orthometric(h_ellipsoidal: float, lat: float, lon: float) -> float:
+    """Convert an ellipsoidal height to orthometric (EGM96): H = h - N."""
+    return _require_geodesy_native().ellipsoidal_to_orthometric(h_ellipsoidal, lat, lon)
+
+
+def geodesic_inverse(lat1: float, lon1: float, lat2: float, lon2: float) -> dict[str, float]:
+    """Karney inverse geodesic on WGS84.
+
+    Returns {"s12": metres, "azi1": deg, "azi2": deg, "a12": deg}.
+    """
+    return _require_geodesy_native().geodesic_inverse(lat1, lon1, lat2, lon2)
+
+
+def geodesic_direct(lat1: float, lon1: float, azi1: float, s12: float) -> dict[str, float]:
+    """Karney direct geodesic on WGS84.
+
+    Returns {"lat2": deg, "lon2": deg, "azi2": deg, "a12": deg}.
+    """
+    return _require_geodesy_native().geodesic_direct(lat1, lon1, azi1, s12)
+
+
+def wgs84_to_ecef(lon: float, lat: float, h: float = 0.0) -> tuple[float, float, float]:
+    """WGS84 geodetic (degrees, ELLIPSOIDAL height metres) -> ECEF metres (f64)."""
+    return _require_geodesy_native().wgs84_to_ecef(lon, lat, h)
+
+
+def ecef_to_wgs84(x: float, y: float, z: float) -> tuple[float, float, float]:
+    """ECEF metres -> WGS84 geodetic (lon deg, lat deg, ellipsoidal height m)."""
+    return _require_geodesy_native().ecef_to_wgs84(x, y, z)
+
+
+def dem_orthometric_to_ellipsoidal(
+    dem: Any, bounds: tuple[float, float, float, float]
+) -> np.ndarray:
+    """Per-pixel orthometric (EGM96) -> ellipsoidal DEM conversion.
+
+    ``bounds`` is (left, bottom, right, top) in EPSG:4326 degrees; pixel
+    centres are sampled. Returns a float64 array of h = H + N(lat, lon).
+    """
+    dem64 = np.ascontiguousarray(np.asarray(dem, dtype=np.float64))
+    return _require_geodesy_native().dem_orthometric_to_ellipsoidal(dem64, tuple(bounds))
+
+
 __all__ = [
     "proj_available",
     "transform_coords",
@@ -363,4 +435,12 @@ __all__ = [
     "crs_to_epsg",
     "get_crs_from_rasterio",
     "get_crs_from_geopandas",
+    "geoid_undulation",
+    "orthometric_to_ellipsoidal",
+    "ellipsoidal_to_orthometric",
+    "geodesic_inverse",
+    "geodesic_direct",
+    "wgs84_to_ecef",
+    "ecef_to_wgs84",
+    "dem_orthometric_to_ellipsoidal",
 ]

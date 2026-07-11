@@ -347,5 +347,12 @@ def test_reproject_vector_rejects_vector_info_without_feature_payload(tmp_path: 
 def test_reproject_vector_valid_but_unsupported_crs_pair_fails_backend_unavailable():
     payload = _collection([_feature("Point", [1.0, 1.0])])
 
+    # MENSURA: EPSG:32631 is handled by the built-in engine now; a parseable
+    # geographic CRS with no transform path still reports BackendUnavailable.
     with pytest.raises(RuntimeError, match="BackendUnavailable"):
-        gis.reproject_vector(payload, "EPSG:32631")
+        gis.reproject_vector(payload, "EPSG:4269")
+
+    reprojected = gis.reproject_vector(payload, "EPSG:32631")
+    coords = reprojected["features"][0]["geometry"]["coordinates"]
+    assert abs(coords[0] - 277_438.26) < 1.0  # (1E, 1N) in UTM 31N
+    assert abs(coords[1] - 110_597.97) < 1.0

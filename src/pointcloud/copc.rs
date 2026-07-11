@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
-use glam::Vec3;
+use glam::DVec3;
 
 use super::copc_decode::decode_chunk;
 use super::error::{PointCloudError, PointCloudResult};
@@ -39,7 +39,7 @@ pub struct CopcInfo {
 /// Decoded point data
 #[derive(Debug)]
 pub struct PointData {
-    pub positions: Vec<f32>,
+    pub positions: Vec<f64>,
     pub colors: Option<Vec<u8>>,
     pub intensities: Option<Vec<u16>>,
     pub classifications: Option<Vec<u8>>,
@@ -80,15 +80,15 @@ impl CopcDataset {
 
         let info = vlr_result.copc_info;
         let root_bounds = OctreeBounds::new(
-            Vec3::new(
-                (info.center[0] - info.halfsize) as f32,
-                (info.center[1] - info.halfsize) as f32,
-                (info.center[2] - info.halfsize) as f32,
+            DVec3::new(
+                info.center[0] - info.halfsize,
+                info.center[1] - info.halfsize,
+                info.center[2] - info.halfsize,
             ),
-            Vec3::new(
-                (info.center[0] + info.halfsize) as f32,
-                (info.center[1] + info.halfsize) as f32,
-                (info.center[2] + info.halfsize) as f32,
+            DVec3::new(
+                info.center[0] + info.halfsize,
+                info.center[1] + info.halfsize,
+                info.center[2] + info.halfsize,
             ),
         );
 
