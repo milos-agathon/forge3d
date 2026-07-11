@@ -638,7 +638,11 @@ pub fn create_default_config(device: &Device) -> GpuTimingConfig {
 /// back to recording the same pass labels (same order) with `gpu_ms == 0.0`
 /// so certificate pass lists stay identical across adapters — 0.0 is the
 /// honest "no timestamps" value, never a fabricated timing.
-pub struct OneShotTiming(Option<GpuTimingManager>);
+pub struct OneShotTiming {
+    manager: Option<GpuTimingManager>,
+    failure: Option<String>,
+    labels: Vec<String>,
+}
 
 impl OneShotTiming {
     /// Build a timing manager from the already-initialized global GPU context.
@@ -647,7 +651,7 @@ impl OneShotTiming {
     /// and the `capability_absent` degradation already explains why).
     pub fn for_current_device() -> Self {
         let Some(ctx) = crate::core::gpu::ctx_if_initialized() else {
-            return Self(None);
+            return Self::inert();
         };
         Self::for_device(ctx.device.clone(), ctx.queue.clone())
     }
@@ -658,7 +662,7 @@ impl OneShotTiming {
     /// not granted or manager construction fails (each pass then records 0.0).
     pub fn for_device(device: Arc<Device>, queue: Arc<Queue>) -> Self {
         if !device.features().contains(Features::TIMESTAMP_QUERY) {
-            return Self(None);
+            return Self::inert();
         }
         let config = GpuTimingConfig {
             enable_timestamps: true,
@@ -670,24 +674,38 @@ impl OneShotTiming {
             max_queries_per_frame: 32,
         };
         match GpuTimingManager::new(device, queue, config) {
-            Ok(manager) => Self(Some(manager)),
-            Err(e) => {
-                log::warn!("one-shot GPU timing unavailable: {e}");
-                Self(None)
-            }
+            Ok(manager) => Self {
+                manager: Some(manager),
+                failure: None,
+                labels: Vec::new(),
+            },
+            Err(e) => Self {
+                manager: None,
+                failure: Some(format!("timing manager construction failed: {e}")),
+                labels: Vec::new(),
+            },
+        }
+    }
+
+    fn inert() -> Self {
+        Self {
+            manager: None,
+            failure: None,
+            labels: Vec::new(),
         }
     }
 
     /// True when live timestamps will be recorded (used by callers to decide
     /// whether the 0.0 fallback pass records are needed).
     pub fn is_live(&self) -> bool {
-        self.0.is_some()
+        self.manager.is_some()
     }
 
     /// Open a timing scope around a GPU pass. Must be called with the encoder
     /// outside any active render/compute pass.
     pub fn begin(&mut self, encoder: &mut CommandEncoder, label: &str) -> Option<TimingScopeId> {
-        self.0.as_mut().map(|t| t.begin_scope(encoder, label))
+        self.labels.push(label.to_string());
+        self.manager.as_mut().map(|t| t.begin_scope(encoder, label))
     }
 
     /// Close a scope opened by [`OneShotTiming::begin`], recording draw count.
@@ -697,7 +715,7 @@ impl OneShotTiming {
         scope: Option<TimingScopeId>,
         draw_calls: u32,
     ) {
-        if let (Some(t), Some(id)) = (self.0.as_mut(), scope) {
+        if let (Some(t), Some(id)) = (self.manager.as_mut(), scope) {
             t.end_scope_with_draws(encoder, id, draw_calls);
         }
     }
@@ -705,7 +723,7 @@ impl OneShotTiming {
     /// Resolve the query set into its readback buffer. Must be recorded on an
     /// encoder that is submitted before [`OneShotTiming::record_into_certificate`].
     pub fn resolve(&mut self, encoder: &mut CommandEncoder) {
-        if let Some(t) = self.0.as_mut() {
+        if let Some(t) = self.manager.as_mut() {
             t.resolve_queries(encoder);
         }
     }
@@ -715,7 +733,11 @@ impl OneShotTiming {
     /// when live passes were recorded; on `false` the caller records its 0.0
     /// fallback passes instead.
     pub fn record_into_certificate(mut self) -> bool {
-        let Some(manager) = self.0.as_mut() else {
+        if let Some(consequence) = self.failure.as_deref() {
+            self.record_failure(consequence);
+            return false;
+        }
+        let Some(manager) = self.manager.as_mut() else {
             return false;
         };
         match manager.get_results_blocking() {
@@ -729,11 +751,20 @@ impl OneShotTiming {
                 }
                 true
             }
-            Ok(_) => false,
-            Err(e) => {
-                log::warn!("one-shot GPU timing readback failed: {e}");
+            Ok(_) => {
+                self.record_failure("timestamp query resolved without any pass results");
                 false
             }
+            Err(e) => {
+                self.record_failure(&format!("timestamp query readback failed: {e}"));
+                false
+            }
+        }
+    }
+
+    fn record_failure(&self, consequence: &str) {
+        for label in &self.labels {
+            crate::core::degradation::record_degradation("timing_unavailable", label, consequence);
         }
     }
 }
@@ -883,5 +914,26 @@ mod tests {
             .certificate_gpu_ms(),
             3.25
         );
+    }
+
+    #[test]
+    fn one_shot_failure_is_render_local_degradation() {
+        crate::core::degradation::clear_degradations();
+        crate::core::degradation::begin_degradation_capture();
+        let timing = OneShotTiming {
+            manager: None,
+            failure: Some("forced readback failure".to_string()),
+            labels: vec!["test.pass".to_string()],
+        };
+        assert!(!timing.record_into_certificate());
+        let first = crate::core::degradation::finish_degradation_capture();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].kind, "timing_unavailable");
+        assert_eq!(first[0].name, "test.pass");
+        assert_eq!(first[0].consequence, "forced readback failure");
+
+        crate::core::degradation::begin_degradation_capture();
+        assert!(crate::core::degradation::finish_degradation_capture().is_empty());
+        crate::core::degradation::clear_degradations();
     }
 }
