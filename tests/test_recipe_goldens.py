@@ -33,6 +33,11 @@ def _update_goldens_enabled() -> bool:
     return os.environ.get("FORGE3D_UPDATE_RECIPE_GOLDENS") == "1"
 
 
+def _update_certificates_enabled() -> bool:
+    """Permit an explicit signed-certificate rotation without touching pixels."""
+    return os.environ.get("FORGE3D_UPDATE_RECIPE_CERTIFICATES") == "1"
+
+
 def _production_signing_required() -> bool:
     return os.environ.get("FORGE3D_REQUIRE_PRODUCTION_SIGNING") == "1"
 ARTIFACT_DIR = (
@@ -931,7 +936,7 @@ def _write_failure_artifacts(spec: RecipeGolden, actual: np.ndarray, expected: n
 
 
 def _assert_matches_golden(spec: RecipeGolden, actual_path: Path) -> None:
-    if _update_goldens_enabled():
+    if _update_certificates_enabled():
         spec.golden_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(actual_path, spec.golden_path)
         return
@@ -1080,6 +1085,14 @@ def test_update_mode_is_read_at_call_time(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("FORGE3D_UPDATE_RECIPE_GOLDENS", "1")
     assert _update_goldens_enabled() is True
     monkeypatch.delenv("FORGE3D_UPDATE_RECIPE_GOLDENS")
+    assert _update_goldens_enabled() is False
+
+
+def test_certificate_update_mode_never_enables_pixel_updates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FORGE3D_UPDATE_RECIPE_CERTIFICATES", "1")
+    assert _update_certificates_enabled() is True
     assert _update_goldens_enabled() is False
 
 

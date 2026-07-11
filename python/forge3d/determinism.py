@@ -300,12 +300,11 @@ def _main(argv: Optional[list] = None) -> int:
     parser.add_argument("--certificate")
     args = parser.parse_args(argv)
 
-    sha = _render_reference_inprocess(
-        args.scene,
-        args.width,
-        args.height,
-        args.out_png,
-        certificate=args.certificate or False,
+    render_args = (args.scene, args.width, args.height, args.out_png)
+    sha = (
+        _render_reference_inprocess(*render_args, certificate=args.certificate)
+        if args.certificate
+        else _render_reference_inprocess(*render_args)
     )
     # Attribute the hash to the actual adapter that produced it; the CI
     # artifact checker rejects unattributed or software-backed hashes.

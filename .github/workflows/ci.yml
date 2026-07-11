@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main, develop]
   workflow_dispatch:
+    inputs:
+      update_recipe_certificates:
+        description: Refresh signed recipe certificates after a reviewed WGSL change.
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -400,11 +406,29 @@ jobs:
           FORGE3D_RUN_TERRAIN_GOLDENS: '1'
           FORGE3D_TERRAIN_GOLDEN_ARTIFACT_DIR: tests/artifacts/terrain_goldens
           FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR: tests/artifacts/recipe_goldens
+          FORGE3D_UPDATE_RECIPE_CERTIFICATES: ${{ inputs.update_recipe_certificates && '1' || '0' }}
           # This dedicated hardware lane anchors the CENSOR recipe-pixel gate
           # on the Metal reference for its terrain control scene. The complete
           # recipe catalog remains exercised by the normal GPU suite.
           FORGE3D_RECIPE_GOLDEN_VARIANT: metal
         run: pytest tests/test_terrain_visual_goldens.py tests/test_terrain_tv10_goldens.py tests/test_terrain_vt_pbr_families.py tests/test_recipe_goldens.py::test_recipe_golden_gate_rejects_pixel_regression 'tests/test_recipe_goldens.py::test_recipe_goldens_render_and_match[mapscene_terrain_raster]' -v --tb=short
+
+      - name: Refresh all signed recipe certificates
+        if: inputs.update_recipe_certificates && steps.terrain-goldens-probe.outputs.probe == 'positive'
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+          FORGE3D_RUN_TERRAIN_GOLDENS: '1'
+          FORGE3D_RECIPE_GOLDEN_VARIANT: metal
+          FORGE3D_UPDATE_RECIPE_CERTIFICATES: '1'
+        run: pytest tests/test_recipe_goldens.py::test_recipe_goldens_render_and_match -v --tb=short
+
+      - name: Upload refreshed recipe certificates
+        if: inputs.update_recipe_certificates && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: refreshed-recipe-certificates
+          path: tests/golden/certificates/*.json
+          if-no-files-found: error
 
       - name: Record golden lane RAN
         if: env.FORGE3D_ALLOW_SOFTWARE_GOLDENS != '1' && steps.terrain-goldens-probe.outputs.probe == 'positive'

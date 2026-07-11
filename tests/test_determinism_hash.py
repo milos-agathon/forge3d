@@ -8,7 +8,9 @@
 # .github/workflows/determinism-matrix.yml
 from __future__ import annotations
 
+import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -143,13 +145,20 @@ def test_cli_attributes_hash_to_requested_backend(monkeypatch, tmp_path, capsys)
 
 @pytest.mark.skipif(sys.platform != "win32", reason="requires local DX12 and Vulkan")
 def test_device_probe_reports_initialized_render_adapter(monkeypatch, tmp_path):
-    """A post-render probe must not enumerate a different same-backend adapter."""
-    monkeypatch.setenv("FORGE3D_DETERMINISTIC", "1")
-    monkeypatch.setenv("WGPU_BACKENDS", "dx12")
-    determinism._render_reference_inprocess(
-        CANONICAL_SCENE, 64, 64, tmp_path / "active-adapter.png"
+    """A post-render probe reports its process's active adapter, not its argument."""
+    env = dict(os.environ)
+    env.update(FORGE3D_DETERMINISTIC="1", WGPU_BACKENDS="dx12")
+    source_python = Path(__file__).parents[1] / "python"
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(source_python), env["PYTHONPATH"]]
+        if env.get("PYTHONPATH")
+        else [str(source_python)]
     )
-
-    import forge3d as f3d
-
-    assert f3d.device_probe("vulkan")["backend"] == "Dx12"
+    script = (
+        "import json; import forge3d as f3d; "
+        "from forge3d.determinism import CANONICAL_SCENE, _render_reference_inprocess; "
+        f"_render_reference_inprocess(CANONICAL_SCENE, 64, 64, {str(tmp_path / 'active-adapter.png')!r}); "
+        "print(json.dumps(f3d.device_probe('vulkan')))"
+    )
+    result = subprocess.run([sys.executable, "-c", script], env=env, check=True, capture_output=True, text=True)
+    assert json.loads(result.stdout)["backend"] == "Dx12"
