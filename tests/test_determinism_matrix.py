@@ -67,7 +67,7 @@ def test_hosted_apple_virtual_adapter_is_a_nonblocking_gated_failure():
     apple = re.search(r"- leg: apple.*?gated: (true|false)", workflow, re.DOTALL)
     assert apple, "apple render leg missing"
     assert apple.group(1) == "true"
-    assert "continue-on-error: ${{ !matrix.gated || matrix.leg == 'apple' }}" in workflow
+    assert 'if [ "${{ matrix.leg }}" = "apple" ] && grep -q "hypervisor-virtualized GPU" render.err; then' in workflow
 
 
 def test_matrix_accepts_documented_gated_infrastructure_failure(tmp_path):
