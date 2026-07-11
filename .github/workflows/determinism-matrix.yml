@@ -84,6 +84,7 @@ jobs:
           sudo apt-get install -y mesa-vulkan-drivers vulkan-tools libvulkan1
       - name: Build extension
         run: |
+          python -m venv .venv
           python -m pip install -U pip maturin numpy
           maturin develop --release
       - name: Render canonical scene
