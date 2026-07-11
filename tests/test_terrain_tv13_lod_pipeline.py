@@ -16,6 +16,7 @@ import pytest
 import forge3d as f3d
 from forge3d._native import NATIVE_AVAILABLE
 from forge3d.terrain_params import make_terrain_params_config
+from _terrain_runtime import terrain_rendering_available
 
 if not NATIVE_AVAILABLE:
     pytest.skip(
@@ -255,8 +256,11 @@ class TestHLODRendering:
 
     @pytest.fixture
     def gpu_session(self):
-        if not f3d.has_gpu():
-            pytest.skip("GPU not available")
+        # `has_gpu()` is true for hosted WARP/paravirtual adapters that cannot
+        # complete this terrain readback.  Require the same terrain-safe probe
+        # used by the visual lanes so those environments skip honestly.
+        if not terrain_rendering_available():
+            pytest.skip("terrain-safe GPU not available")
         return f3d.Session(window=False)
 
     def _create_test_hdr(self, path):
