@@ -42,23 +42,39 @@ Regenerate only after you have verified the pixel goldens are correct. The WGSL
 hash check exists precisely so that a shader edit forces a conscious
 regeneration rather than silently drifting.
 
-## The signing key is a NON-PRODUCTION development key
+## Production signing provenance
 
-By default the certificates are signed with the fixed development seed in
-`forge3d.certificate.DEV_SIGNING_SEED`, derived deterministically from a public
-constant (see `forge3d.certificate._dev_signing_seed`). This lets anyone
-reproduce and re-verify these signatures offline with a stock CPython
-interpreter and no secrets:
+Committed certificates are signed by the repository production key. Only its
+public key is tracked in `signing.pub`; the random 32-byte seed is stored as the
+GitHub Actions secret `FORGE3D_CERT_SIGNING_KEY`. The protected internal/release
+golden lane fails when the secret is absent, when a certificate uses the local
+development key, when its public key differs from `signing.pub`, or when
+verification fails. Fork PRs receive no secret and are explicitly reported as
+an untrusted external certificate lane.
+
+Offline verification needs no secret or native extension:
 
 ```bash
 python -m forge3d.certificate verify tests/golden/certificates/mapscene_terrain_raster.json \
     --pubkey tests/golden/certificates/signing.pub
 ```
 
-The dev key provides **tamper evidence and reproducibility, not trust**. It is
-NOT a production signing key — it proves the certificate was produced by the
-committed pipeline and has not been altered, nothing more. A real deployment
-must supply its own 32-byte Ed25519 seed via the `FORGE3D_CERT_SIGNING_KEY`
-environment variable (64-char hex) or the `seed=` argument to
-`forge3d.certificate.sign_certificate`, and publish the matching public key
-out of band.
+Local development may still use the clearly labelled
+`forge3d.certificate.DEV_SIGNING_SEED`; that key is never accepted for committed
+release/golden certificates.
+
+## Key rotation
+
+Rotate atomically in one reviewed PR:
+
+1. Generate a cryptographically random 32-byte Ed25519 seed without printing or
+   committing it, and replace the Actions secret.
+2. Re-sign every committed certificate with that seed; do not alter its signed
+   payload or pixel golden.
+3. Replace `signing.pub` with the corresponding public key in the same commit.
+4. Run the offline verifier sweep and protected golden lane. Merge only when all
+   certificates verify against the new pinned public key and the old key is
+   rejected.
+
+If any step fails, restore the previous secret and discard the rotation commit;
+never ship a mixed public-key/certificate set.

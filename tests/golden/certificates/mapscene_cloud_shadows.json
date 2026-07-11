@@ -176,8 +176,8 @@
   "schema": "forge3d.render_certificate/1",
   "signature": {
     "alg": "ed25519",
-    "pubkey": "92f33f5957bd8532b7e878f34b95aabe077f8ab962cea2c4b06acf2c91491917",
-    "sig": "2a52043ffc0a920e7935ae6586a30523338e9eb66c2430328554cf0aaa4d119d28bb7cdbef2cec07a089fe9ccb58f1d270ccfa9e14d54e0544fb716e34a82202",
+    "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
+    "sig": "62cef036c17e27aa266656ff447fead982009167e4c60afcaa2b48d357d4c7d60697770ae8eb23cc580037b5b04d902aa0cf44e580fa1d028b63a8281abae904",
     "signed_fields": [
       "adapter",
       "allocations",

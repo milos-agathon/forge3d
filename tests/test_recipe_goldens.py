@@ -31,6 +31,10 @@ def _update_goldens_enabled() -> bool:
     rejecting gate into a copy-over-the-golden write during baseline refreshes.
     """
     return os.environ.get("FORGE3D_UPDATE_RECIPE_GOLDENS") == "1"
+
+
+def _production_signing_required() -> bool:
+    return os.environ.get("FORGE3D_REQUIRE_PRODUCTION_SIGNING") == "1"
 ARTIFACT_DIR = (
     Path(os.environ["FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR"])
     if os.environ.get("FORGE3D_RECIPE_GOLDEN_ARTIFACT_DIR")
@@ -974,7 +978,7 @@ def _emit_or_verify_certificate(spec: RecipeGolden) -> None:
     The certificate reflects the LAST in-process native render, so this must be
     called immediately after this scene's ``render()`` and golden match.
 
-    UPDATE mode: sign a fresh certificate with the dev seed, write it to
+    UPDATE mode: sign a fresh certificate with the configured seed, write it to
     ``tests/golden/certificates/<scene_id>.json``, and (first scene only) write
     the dev public key hex to ``signing.pub``.
 
@@ -1006,12 +1010,23 @@ def _emit_or_verify_certificate(spec: RecipeGolden) -> None:
         "Regenerate with FORGE3D_UPDATE_RECIPE_GOLDENS=1."
     )
     pubkey = SIGNING_PUB_PATH.read_text(encoding="utf-8").strip()
+    committed = json.loads(cert_path.read_text(encoding="utf-8"))
+    assert (committed.get("signature") or {}).get("pubkey") == pubkey, (
+        f"{cert_path} was not signed by the pinned production public key"
+    )
     assert _certificate.verify(cert_path, pubkey) is True, (
         f"Committed certificate {cert_path} failed Ed25519 verification against "
         f"{SIGNING_PUB_PATH}."
     )
 
-    committed = json.loads(cert_path.read_text(encoding="utf-8"))
+    if _production_signing_required():
+        assert os.environ.get("FORGE3D_CERT_SIGNING_KEY"), (
+            "protected golden lane requires FORGE3D_CERT_SIGNING_KEY"
+        )
+        assert (cert.get("signature") or {}).get("pubkey") == pubkey, (
+            "fresh golden certificate was not signed by the pinned production key"
+        )
+        assert _certificate.verify(cert, pubkey) is True
     assert committed.get("degradations") == [], (
         f"{spec.scene_id} committed certificate records degradations "
         f"{committed.get('degradations')!r}; a clean golden must degrade nothing. "

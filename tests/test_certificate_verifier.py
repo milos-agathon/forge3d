@@ -52,6 +52,19 @@ def test_sign_then_verify_roundtrip(tmp_path):
     assert certificate.verify(p, cert["signature"]["pubkey"]) is True
 
 
+def test_committed_certificates_use_pinned_production_key_not_dev_key():
+    cert_dir = Path(__file__).parent / "golden" / "certificates"
+    pinned = (cert_dir / "signing.pub").read_text(encoding="utf-8").strip()
+    dev_pub = certificate.sign_certificate(
+        copy.deepcopy(FIXTURE), seed=certificate.DEV_SIGNING_SEED
+    )["signature"]["pubkey"]
+    assert pinned != dev_pub
+    for path in cert_dir.glob("*.json"):
+        committed = json.loads(path.read_text(encoding="utf-8"))
+        assert committed["signature"]["pubkey"] == pinned
+        assert certificate.verify(path, pinned) is True
+
+
 def test_gpu_ms_is_not_signed(tmp_path):
     cert = certificate.sign_certificate(copy.deepcopy(FIXTURE))
     cert["passes"][0]["gpu_ms"] = 99.0

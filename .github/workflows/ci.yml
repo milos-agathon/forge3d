@@ -323,6 +323,11 @@ jobs:
       FORGE3D_ALLOW_HOSTED_MACOS_TERRAIN: '1'
       # Explicit opt-in for non-GPU environments that may only run recipe-level CPU goldens.
       FORGE3D_ALLOW_SOFTWARE_GOLDENS: ${{ vars.FORGE3D_ALLOW_SOFTWARE_GOLDENS }}
+      # Internal/release runs are the protected production-signing lane.
+      # Fork PRs do not receive secrets and are explicitly marked untrusted
+      # below; they never masquerade as production-signed validation.
+      FORGE3D_CERT_SIGNING_KEY: ${{ secrets.FORGE3D_CERT_SIGNING_KEY }}
+      FORGE3D_REQUIRE_PRODUCTION_SIGNING: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '1' || '0' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -347,6 +352,20 @@ jobs:
         run: |
           python scripts/install_compatible_wheel.py dist
           pip install pytest numpy pyproj
+
+      - name: Require production certificate signing key
+        if: env.FORGE3D_REQUIRE_PRODUCTION_SIGNING == '1'
+        shell: bash
+        run: |
+          if [ -z "$FORGE3D_CERT_SIGNING_KEY" ]; then
+            echo "::error::protected golden lane requires FORGE3D_CERT_SIGNING_KEY"
+            exit 1
+          fi
+
+      - name: Mark external PR certificate lane untrusted
+        if: env.FORGE3D_REQUIRE_PRODUCTION_SIGNING != '1'
+        shell: bash
+        run: echo "### Certificate provenance — UNTRUSTED external PR (production signing secret unavailable by policy)" >> "$GITHUB_STEP_SUMMARY"
 
       # Probe contract (CENSOR F-10): exit 0 = probe positive, exit 2 = no
       # CI-safe adapter (honest ABSENT), exit 3 = adapter present but the smoke

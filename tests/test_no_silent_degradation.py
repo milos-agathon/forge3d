@@ -369,5 +369,13 @@ def test_f_probe_positive_golden_mismatch_fails_ci_and_probe_negative_is_absent(
     assert "terrain-goldens-probe.outputs.probe == 'positive'" in pytest_step
     assert "goldens.ABSENT" in golden_job and "golden-lane-marker" in golden_job
     assert "terrain-goldens-probe.outputs.probe == 'absent'" in golden_job
+    signing_step = golden_job.split(
+        "- name: Require production certificate signing key", 1
+    )[1].split("\n      - name:", 1)[0]
+    assert "FORGE3D_CERT_SIGNING_KEY" in golden_job
+    assert "FORGE3D_REQUIRE_PRODUCTION_SIGNING" in golden_job
+    assert 'if [ -z "$FORGE3D_CERT_SIGNING_KEY" ]' in signing_step
+    assert "exit 1" in signing_step
+    assert "UNTRUSTED external PR" in golden_job
     assert 'needs.test-golden-images.result }}" != "success"' in aggregate
     assert 'needs.test-golden-images.result }}" != "skipped"' in aggregate
