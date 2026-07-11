@@ -277,12 +277,13 @@ def _resolve_pubkey(pubkey: Union[bytes, bytearray, str, "os.PathLike[str]"]) ->
 
 
 def verify(
-    path: Union[str, "os.PathLike[str]"],
+    path: Union[Mapping[str, Any], str, "os.PathLike[str]"],
     pubkey: Union[bytes, bytearray, str, "os.PathLike[str]"],
 ) -> bool:
     """Verify the certificate at ``path`` against the trusted ``pubkey``.
 
-    ``pubkey`` may be raw 32 bytes, a 64-char hex string, or a path to a file
+    ``path`` may be a certificate mapping or a JSON file path. ``pubkey`` may
+    be raw 32 bytes, a 64-char hex string, or a path to a file
     containing hex text or 32 raw bytes. Verification uses the CALLER-SUPPLIED
     public key, not the one embedded in the certificate, so tampering with the
     embedded ``pubkey`` cannot make an invalid certificate verify.
@@ -293,8 +294,9 @@ def verify(
     malformed certificate.
     """
     try:
-        text = Path(path).read_text(encoding="utf-8")
-        cert = json.loads(text)
+        cert = dict(path) if isinstance(path, Mapping) else json.loads(
+            Path(path).read_text(encoding="utf-8")
+        )
         if not isinstance(cert, dict):
             return False
         signature_block = cert.get("signature")

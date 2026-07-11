@@ -52,6 +52,11 @@ def test_sign_then_verify_roundtrip(tmp_path):
     assert certificate.verify(p, cert["signature"]["pubkey"]) is True
 
 
+def test_verify_accepts_in_memory_certificate_mapping():
+    cert = certificate.sign_certificate(copy.deepcopy(FIXTURE))
+    assert certificate.verify(cert, cert["signature"]["pubkey"]) is True
+
+
 def test_committed_certificates_use_pinned_production_key_not_dev_key():
     cert_dir = Path(__file__).parent / "golden" / "certificates"
     pinned = (cert_dir / "signing.pub").read_text(encoding="utf-8").strip()
