@@ -52,7 +52,9 @@ on:
       - 'src/shaders/terrain_pbr_pom.wgsl'
       - 'src/core/gpu.rs'
       - 'python/forge3d/determinism.py'
+      - 'scripts/check_determinism_hashes.py'
       - 'tests/test_determinism_hash.py'
+      - 'tests/test_determinism_matrix.py'
       - 'tests/goldens/determinism/**'
       - '.github/workflows/determinism-matrix.yml'
   pull_request:
@@ -64,7 +66,9 @@ on:
       - 'src/shaders/terrain_pbr_pom.wgsl'
       - 'src/core/gpu.rs'
       - 'python/forge3d/determinism.py'
+      - 'scripts/check_determinism_hashes.py'
       - 'tests/test_determinism_hash.py'
+      - 'tests/test_determinism_matrix.py'
       - 'tests/goldens/determinism/**'
       - '.github/workflows/determinism-matrix.yml'
 
@@ -216,60 +220,8 @@ jobs:
           pattern: determinism-hash-*
           path: hashes
       - name: Fail on any pairwise or golden mismatch
-        shell: python
-        run: |
-          import json, pathlib, sys
-
-          scene = "terra_determinata_v1"
-          golden_file = pathlib.Path(f"tests/goldens/determinism/{scene}.sha256")
-          golden = golden_file.read_text().split()[0].strip() if golden_file.exists() else None
-
-          produced = {}
-          absent = {}
-          adapters = {}
-          for artifact_dir in sorted(pathlib.Path("hashes").glob("determinism-hash-*")):
-              leg = artifact_dir.name.removeprefix("determinism-hash-")
-              sha_file = artifact_dir / f"{scene}.sha256"
-              absent_file = artifact_dir / f"{scene}.ABSENT"
-              failed_file = artifact_dir / f"{scene}.FAILED"
-              meta_file = artifact_dir / f"{scene}.json"
-              if sha_file.exists():
-                  produced[leg] = sha_file.read_text().split()[0].strip()
-                  if meta_file.exists():
-                      adapters[leg] = json.loads(meta_file.read_text()).get("adapter")
-              elif absent_file.exists():
-                  absent[leg] = absent_file.read_text().splitlines()[0]
-              elif failed_file.exists():
-                  # Gated leg that failed to render: its own job is already
-                  # red; report the reason here for the printed table.
-                  absent[leg] = "GATED-FAILURE: " + failed_file.read_text().splitlines()[0]
-
-          print("produced hashes:")
-          for leg, sha in sorted(produced.items()):
-              a = adapters.get(leg) or {}
-              ident = f"{a.get('name')} ({a.get('backend')}, {a.get('device_type')})" if a else "UNATTRIBUTED"
-              print(f"  {leg:8s} {sha}  adapter: {ident}")
-          for leg, why in sorted(absent.items()):
-              print(f"informational/absent: {leg}: {why}")
-          if golden:
-              print(f"committed golden: {golden}")
-          else:
-              print("WARNING: no committed golden found", file=sys.stderr)
-
-          failures = []
-          values = sorted(set(produced.values()))
-          if len(values) > 1:
-              failures.append(f"pairwise mismatch across legs: {produced}")
-          if golden and any(sha != golden for sha in produced.values()):
-              failures.append(f"mismatch against committed golden {golden}: {produced}")
-          if golden is None and produced:
-              failures.append("hashes were produced but no golden is committed")
-          if not produced:
-              print("no leg produced a hash (all informational legs device-absent);"
-                    " nothing to diff — the gated legs enforce the contract.")
-          if failures:
-              print("DETERMINISM FAILURE (zero-byte tolerance):", file=sys.stderr)
-              for f in failures:
-                  print("  " + f, file=sys.stderr)
-              sys.exit(1)
-          print("determinism diff: OK")
+        run: >-
+          python scripts/check_determinism_hashes.py
+          --hashes hashes
+          --golden tests/goldens/determinism/${{ env.SCENE }}.sha256
+          --scene ${{ env.SCENE }}

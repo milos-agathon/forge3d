@@ -139,3 +139,17 @@ def test_cli_attributes_hash_to_requested_backend(monkeypatch, tmp_path, capsys)
     assert determinism._main(["--out-png", str(tmp_path / "unused.png")]) == 0
     assert requested == ["dx12"]
     assert '"backend": "Dx12"' in capsys.readouterr().out
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="requires local DX12 and Vulkan")
+def test_device_probe_reports_initialized_render_adapter(monkeypatch, tmp_path):
+    """A post-render probe must not enumerate a different same-backend adapter."""
+    monkeypatch.setenv("FORGE3D_DETERMINISTIC", "1")
+    monkeypatch.setenv("WGPU_BACKENDS", "dx12")
+    determinism._render_reference_inprocess(
+        CANONICAL_SCENE, 64, 64, tmp_path / "active-adapter.png"
+    )
+
+    import forge3d as f3d
+
+    assert f3d.device_probe("vulkan")["backend"] == "Dx12"

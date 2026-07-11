@@ -42,6 +42,12 @@ pub fn active_backend() -> Option<String> {
         .map(|c| format!("{:?}", c.adapter.get_info().backend).to_lowercase())
 }
 
+/// Adapter that owns the initialized global render context, if any.
+pub(crate) fn active_adapter_info() -> Option<(wgpu::AdapterInfo, bool)> {
+    CTX.get()
+        .map(|c| (c.adapter.get_info(), c.software_fallback))
+}
+
 /// TERRA-DETERMINATA: deterministic rendering mode.
 ///
 /// When `FORGE3D_DETERMINISTIC` is set (1/true/yes), the process must pin a
