@@ -136,7 +136,7 @@ impl Viewer {
                                     self.selected_layer_name = first_result.layer_name.clone();
                                     println!(
                                         "[picking] Selected feature {} in layer {}",
-                                        first_result.feature_id, &first_result.layer_name
+                                        first_result.feature_id, first_result.layer_name
                                     );
                                 }
 

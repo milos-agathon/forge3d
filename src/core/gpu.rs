@@ -42,6 +42,12 @@ pub fn active_backend() -> Option<String> {
         .map(|c| format!("{:?}", c.adapter.get_info().backend).to_lowercase())
 }
 
+/// Adapter that owns the initialized global render context, if any.
+pub(crate) fn active_adapter_info() -> Option<(wgpu::AdapterInfo, bool)> {
+    CTX.get()
+        .map(|c| (c.adapter.get_info(), c.software_fallback))
+}
+
 /// TERRA-DETERMINATA: deterministic rendering mode.
 ///
 /// When `FORGE3D_DETERMINISTIC` is set (1/true/yes), the process must pin a
@@ -59,9 +65,32 @@ pub fn active_backend() -> Option<String> {
 /// dxcompiler DLLs happen to be installed. For wasm builds, RUSTFLAGS must
 /// NOT include `-C target-feature=+relaxed-simd` (relaxed SIMD is
 /// nondeterministic by design); the determinism CI matrix documents this.
+///
+/// Software rasterizer adapters (WARP, lavapipe) and hypervisor-virtualized
+/// GPUs (Apple Paravirtual, VirtIO, VMware, ...) are REFUSED under
+/// deterministic mode unless `FORGE3D_DETERMINISTIC_ALLOW_SOFTWARE=1` is set
+/// (see [`deterministic_allow_software`]): neither is the physical hardware a
+/// determinism leg claims to measure, and their hashes must never masquerade
+/// as a hardware leg's.
 pub fn deterministic_mode() -> bool {
     matches!(
         std::env::var("FORGE3D_DETERMINISTIC")
+            .unwrap_or_default()
+            .to_lowercase()
+            .as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+/// TERRA-DETERMINATA escape hatch: allow a software rasterizer or
+/// hypervisor-virtualized GPU adapter under deterministic mode. Off by
+/// default because such adapters are a different "vendor" whose hash must
+/// never masquerade as a hardware leg's; set
+/// `FORGE3D_DETERMINISTIC_ALLOW_SOFTWARE=1` only for an explicitly
+/// software/virtual-labelled determinism leg.
+pub fn deterministic_allow_software() -> bool {
+    matches!(
+        std::env::var("FORGE3D_DETERMINISTIC_ALLOW_SOFTWARE")
             .unwrap_or_default()
             .to_lowercase()
             .as_str(),
@@ -207,6 +236,34 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
         }
 
         if deterministic_mode() {
+            // A software rasterizer (WARP, lavapipe) or a hypervisor-virtualized
+            // GPU (e.g. the "Apple Paravirtual device" on hosted macOS runners)
+            // is effectively a different "vendor": accepting one under
+            // deterministic mode would silently change what a CI leg measures
+            // (a software/VM hash instead of the hardware hash the golden pins;
+            // measured 2026-07-10: the paravirtual Metal hash is bit-stable but
+            // systematically differs from real-hardware goldens). Refuse both
+            // unless the caller explicitly opts in for a dedicated leg.
+            let lowered_name = adapter_info.name.to_lowercase();
+            let virtualized = ["paravirtual", "virtio", "vmware", "virtualbox", "qxl"]
+                .iter()
+                .any(|marker| lowered_name.contains(marker));
+            if (software_fallback || virtualized) && !deterministic_allow_software() {
+                let kind = if software_fallback {
+                    "software rasterizer"
+                } else {
+                    "hypervisor-virtualized GPU"
+                };
+                return Err(RenderError::device(format!(
+                    "FORGE3D_DETERMINISTIC: only a {kind} adapter is available \
+                     ('{}', {:?} backend). Such an adapter is a different \"vendor\" and \
+                     its hash would not be comparable to hardware goldens; refusing to \
+                     render. Run on a host with a physical GPU for this backend, or set \
+                     FORGE3D_DETERMINISTIC_ALLOW_SOFTWARE=1 to explicitly measure this \
+                     adapter as its own leg.",
+                    adapter_info.name, adapter_info.backend
+                )));
+            }
             let (raw, _, expected) = requested_backend_from_env()?.ok_or_else(|| {
                 RenderError::device(
                     "FORGE3D_DETERMINISTIC requires WGPU_BACKENDS/WGPU_BACKEND to pin one backend",

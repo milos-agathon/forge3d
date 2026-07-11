@@ -290,7 +290,10 @@ tests/golden/labels/*.png
 tests/golden/labels/*.jpg
 tests/golden/labels/*.jpeg
 tests/golden/labels/*.webp
-tests/goldens/
+tests/goldens/*
+!tests/goldens/determinism/
+tests/goldens/determinism/*
+!tests/goldens/determinism/*.sha256
 /out/
 /diag_out/
 /artifacts/

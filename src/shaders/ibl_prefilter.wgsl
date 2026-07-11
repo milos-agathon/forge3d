@@ -54,8 +54,8 @@ fn hemisphere_sample_uniform(xi: vec2<f32>) -> vec3<f32> {
     let cos_theta = 1.0 - xi.y;
     let sin_theta = sqrt(1.0 - cos_theta * cos_theta);
     return vec3<f32>(
-        cos(phi) * sin_theta,
-        sin(phi) * sin_theta,
+        det_cos(phi) * sin_theta,
+        det_sin(phi) * sin_theta,
         cos_theta,
     );
 }
@@ -67,8 +67,8 @@ fn importance_sample_ggx(xi: vec2<f32>, normal: vec3<f32>, roughness: f32) -> ve
     let sin_theta = sqrt(1.0 - cos_theta * cos_theta);
 
     let h = vec3<f32>(
-        cos(phi) * sin_theta,
-        sin(phi) * sin_theta,
+        det_cos(phi) * sin_theta,
+        det_sin(phi) * sin_theta,
         cos_theta,
     );
 
@@ -112,8 +112,8 @@ fn cs_irradiance_convolve(@builtin(global_invocation_id) gid: vec3<u32>) {
         let cos_theta = sqrt(1.0 - xi.y); // cos-weighted distribution
         let sin_theta = sqrt(1.0 - cos_theta * cos_theta);
         let sample_dir_local = vec3<f32>(
-            cos(phi) * sin_theta,
-            sin(phi) * sin_theta,
+            det_cos(phi) * sin_theta,
+            det_sin(phi) * sin_theta,
             cos_theta,
         );
 
