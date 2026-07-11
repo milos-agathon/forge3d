@@ -936,7 +936,7 @@ def _write_failure_artifacts(spec: RecipeGolden, actual: np.ndarray, expected: n
 
 
 def _assert_matches_golden(spec: RecipeGolden, actual_path: Path) -> None:
-    if _update_certificates_enabled():
+    if _update_goldens_enabled():
         spec.golden_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(actual_path, spec.golden_path)
         return
@@ -998,7 +998,7 @@ def _emit_or_verify_certificate(spec: RecipeGolden) -> None:
     cert = render_certificate()  # signed; reflects the last completed render
     cert_path = _committed_cert_path(spec)
 
-    if _update_goldens_enabled():
+    if _update_certificates_enabled():
         CERT_DIR.mkdir(parents=True, exist_ok=True)
         _certificate.write_certificate(cert, cert_path)
         pubkey_hex = cert["signature"]["pubkey"]
