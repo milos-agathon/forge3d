@@ -456,7 +456,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.update_recipe_certificates
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     env:
-      WGPU_BACKEND: dx12
+      WGPU_BACKEND: vulkan
       FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'
       FORGE3D_CERT_SIGNING_KEY: ${{ secrets.FORGE3D_CERT_SIGNING_KEY }}
       FORGE3D_REQUIRE_PRODUCTION_SIGNING: '1'
@@ -483,6 +483,7 @@ jobs:
           python scripts/terrain_ci_probe.py --mode terrain
       - name: Render and sign the recipe catalog
         env:
+          FORGE3D_NO_BOOTSTRAP: '1'
           FORGE3D_RUN_TERRAIN_GOLDENS: '1'
           FORGE3D_UPDATE_RECIPE_CERTIFICATES: '1'
         run: pytest tests/test_recipe_goldens.py::test_recipe_goldens_render_and_match -v --tb=short

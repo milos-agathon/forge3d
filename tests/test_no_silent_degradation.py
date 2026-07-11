@@ -348,7 +348,12 @@ def test_e_unrun_accounting_is_exhaustive_and_honest():
 # ---------------------------------------------------------------------------
 def test_f_probe_positive_golden_mismatch_fails_ci_and_probe_negative_is_absent():
     ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    golden_job = ci_yml.split("  test-golden-images:", 1)[1].split("\n  build-docs:", 1)[0]
+    # Stop at the dispatch-only certificate refresh job.  That separate lane
+    # intentionally downloads the Windows wheel on the labeled GPU runner;
+    # the hosted Metal golden lane itself must remain macOS-wheel-only.
+    golden_job = ci_yml.split("  test-golden-images:", 1)[1].split(
+        "\n  refresh-recipe-certificates:", 1
+    )[0]
     pytest_step = golden_job.split("- name: Run visual golden tests", 1)[1].split("\n      - name:", 1)[0]
     probe_step = golden_job.split("- name: Probe terrain golden backend", 1)[1].split("\n      - name:", 1)[0]
     aggregate = ci_yml.split("  ci-success:", 1)[1]
