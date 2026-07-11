@@ -1,7 +1,7 @@
 //! Point cloud LOD traversal
 
 use super::octree::{OctreeBounds, OctreeKey, OctreeNode};
-use glam::{Mat4, Vec3};
+use glam::{DMat4, DVec3};
 
 /// Parameters for LOD traversal
 #[derive(Debug, Clone)]
@@ -71,8 +71,8 @@ impl PointCloudTraverser {
     pub fn visible_nodes<F>(
         &self,
         root: &OctreeNode,
-        camera_pos: Vec3,
-        view_proj: Option<&Mat4>,
+        camera_pos: DVec3,
+        view_proj: Option<&DMat4>,
         get_children: F,
     ) -> Vec<VisibleNode>
     where
@@ -146,7 +146,7 @@ impl PointCloudTraverser {
         result
     }
 
-    fn compute_priority(&self, bounds: &OctreeBounds, camera_pos: Vec3) -> f32 {
+    fn compute_priority(&self, bounds: &OctreeBounds, camera_pos: DVec3) -> f32 {
         let center = bounds.center();
         let distance = (center - camera_pos).length();
         let radius = bounds.radius();
@@ -156,20 +156,20 @@ impl PointCloudTraverser {
         }
 
         // Priority based on projected size
-        radius / distance
+        (radius / distance) as f32
     }
 
-    fn compute_screen_size(&self, bounds: &OctreeBounds, camera_pos: Vec3) -> f32 {
+    fn compute_screen_size(&self, bounds: &OctreeBounds, camera_pos: DVec3) -> f32 {
         let center = bounds.center();
         let distance = (center - camera_pos).length().max(0.001);
         let radius = bounds.radius();
 
         let sse_factor = self.params.viewport_height / (2.0 * (self.params.fov_y / 2.0).tan());
-        (radius / distance) * sse_factor
+        (radius / distance) as f32 * sse_factor
     }
 
     /// Get traversal statistics
-    pub fn stats<F>(&self, root: &OctreeNode, camera_pos: Vec3, get_children: F) -> TraversalStats
+    pub fn stats<F>(&self, root: &OctreeNode, camera_pos: DVec3, get_children: F) -> TraversalStats
     where
         F: Fn(&OctreeKey) -> Vec<OctreeNode>,
     {

@@ -1,0 +1,36 @@
+# EGM96 geoid-undulation reference values (NGA-published).
+# Columns: lat_deg lon_deg_east_0_360 N_metres source
+# Sources:
+#   f477    = OUTF477.DAT, NGA EGM96 harmonic package (degree 360 + correction model),
+#             https://earth-info.nga.mil/php/download.php?file=egm-96spherical
+#             archive SHA-256: 1f21ab8151c1b9fe25f483a4f6b78acdbf5306daf923725017b83d87a5f33472
+#             OUTF477.DAT member SHA-256: 0e7465f1d4069f783d7c3d1810c608967668fa1fc08ad6fadb95687c6ac6bbc3
+#   ww15mgh = WW15MGH.GRD 15-minute worldwide geoid height grid node values,
+#             https://earth-info.nga.mil/php/download.php?file=egm-96interpolation
+#             archive SHA-256: f051316cdf794a87e8291bcb7aee82d0e49a99c35301b6b82462fbe5078b7216
+#             WW15MGH.GRD member SHA-256: 4bcc2c8b2314528530de6d1dccbd0ff26cd15912c892d48a6ad38b3ed79bdbae
+# Extraction is deterministic: the six f477 rows are the published program
+# output coordinates listed below; the remaining values are exact 15-minute
+# grid nodes at the listed latitude/longitude. No source is downloaded in tests.
+# forge3d evaluates EGM96 truncated to degree/order 120; the committed gate is
+# |N_forge3d - N_published| < 0.5 m (dominated by 120-vs-360 truncation).
+38.6281550 269.7791550 -31.629 f477
+-14.6212170 305.0211140 -2.966 f477
+46.8743190 102.4487290 -43.572 f477
+-23.6174460 133.8747120 15.868 f477
+38.6254730 359.9995000 50.065 f477
+-0.4667440 0.0023000 17.330 f477
+0.0000000 0.0000000 17.162 ww15mgh
+51.5000000 0.0000000 45.818 ww15mgh
+40.7500000 285.7500000 -33.157 ww15mgh
+61.2500000 352.7500000 56.886 ww15mgh
+48.2500000 16.2500000 45.022 ww15mgh
+52.2500000 21.0000000 31.245 ww15mgh
+-25.7500000 28.2500000 24.645 ww15mgh
+37.0000000 262.7500000 -29.494 ww15mgh
+-30.0000000 140.0000000 12.594 ww15mgh
+60.2500000 24.7500000 18.261 ww15mgh
+52.5000000 13.2500000 39.772 ww15mgh
+-15.7500000 312.2500000 -12.798 ww15mgh
+55.7500000 37.5000000 14.647 ww15mgh
+30.0000000 320.0000000 16.299 ww15mgh

@@ -131,6 +131,7 @@ def test_public_gis_wrapper_surface():
         "validate_geometry",
         "repair_geometry",
         "geometry_measure",
+        "measure_geometries",
         "geometry_centroid",
         "representative_point",
         "interpolate_line",

@@ -1,7 +1,7 @@
 //! Tile structure for 3D Tiles
 
 use super::bounds::BoundingVolume;
-use glam::Mat4;
+use glam::DMat4;
 use serde::{Deserialize, Serialize};
 
 /// Refinement strategy for child tiles
@@ -57,33 +57,14 @@ pub struct Tile {
 
 impl Tile {
     /// Get the transform matrix for this tile
-    pub fn get_transform(&self) -> Mat4 {
+    pub fn get_transform(&self) -> DMat4 {
         self.transform
-            .map(|t| {
-                Mat4::from_cols_array(&[
-                    t[0] as f32,
-                    t[1] as f32,
-                    t[2] as f32,
-                    t[3] as f32,
-                    t[4] as f32,
-                    t[5] as f32,
-                    t[6] as f32,
-                    t[7] as f32,
-                    t[8] as f32,
-                    t[9] as f32,
-                    t[10] as f32,
-                    t[11] as f32,
-                    t[12] as f32,
-                    t[13] as f32,
-                    t[14] as f32,
-                    t[15] as f32,
-                ])
-            })
-            .unwrap_or(Mat4::IDENTITY)
+            .map(|t| DMat4::from_cols_array(&t))
+            .unwrap_or(DMat4::IDENTITY)
     }
 
     /// Get the world-space bounding volume (with transform applied)
-    pub fn world_bounding_volume(&self, parent_transform: &Mat4) -> BoundingVolume {
+    pub fn world_bounding_volume(&self, parent_transform: &DMat4) -> BoundingVolume {
         let local_transform = self.get_transform();
         let world_transform = *parent_transform * local_transform;
         self.bounding_volume.transform(&world_transform)
@@ -135,5 +116,44 @@ impl Default for Tile {
             transform: None,
             viewer_request_volume: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tiles3d::{BoundingSphere, BoundingVolume};
+    use glam::DVec3;
+
+    #[test]
+    fn earth_scale_transform_preserves_submillimetre_offsets() {
+        let tile = Tile {
+            transform: Some([
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                6_378_137.0,
+                0.0,
+                0.0,
+                1.0,
+            ]),
+            bounding_volume: BoundingVolume::Sphere(BoundingSphere {
+                sphere: [0.000_25, 0.0, 0.0, 1.0],
+            }),
+            ..Tile::default()
+        };
+
+        let bounds = tile.world_bounding_volume(&DMat4::IDENTITY);
+        let recovered = bounds.center() - DVec3::new(6_378_137.0, 0.0, 0.0);
+        assert!((recovered.x - 0.000_25).abs() < 1e-9);
     }
 }

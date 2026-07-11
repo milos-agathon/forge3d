@@ -39,6 +39,33 @@ impl ResamplingMethod {
     }
 }
 
+/// What `reproject_raster` does when a pixel's coordinate transform fails
+/// (MENSURA item 5). The default is to RAISE — an unsupported transform must
+/// never silently become nodata with a success status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TransformErrorPolicy {
+    #[default]
+    Raise,
+    Nodata,
+}
+
+impl TransformErrorPolicy {
+    pub fn parse(value: Option<&str>) -> GisResult<Self> {
+        match value
+            .unwrap_or("raise")
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "raise" => Ok(Self::Raise),
+            "nodata" => Ok(Self::Nodata),
+            other => Err(GisError::InvalidArgument(format!(
+                "unsupported_option: on_transform_error must be 'raise' or 'nodata', got {other:?}"
+            ))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum ResampleTarget {
     Shape { height: u32, width: u32 },
@@ -251,12 +278,21 @@ pub fn reproject_raster(
     path: impl AsRef<Path>,
     dst_crs: CrsSpec,
     method: ResamplingMethod,
+    on_transform_error: TransformErrorPolicy,
 ) -> GisResult<RasterOperationResult> {
     let loaded = read_raster(path)?;
     let src_crs = require_crs(&loaded.info)?;
     let source_transform = require_transform(&loaded.info)?;
     let source_bounds = raster_bounds(&loaded.info)?;
-    let dst_bounds = crate::gis::crs::transform_bounds(source_bounds, &src_crs, &dst_crs)?;
+    let dst_bounds = match crate::gis::crs::transform_bounds(source_bounds, &src_crs, &dst_crs) {
+        Ok(bounds) => bounds,
+        // Bounds calculation is part of transform execution. For an
+        // unsupported pair, keep the source grid only long enough to apply
+        // the caller's per-pixel error policy below; malformed CRS/arguments
+        // still fail immediately before reaching this point.
+        Err(GisError::BackendUnavailable(_)) => source_bounds,
+        Err(error) => return Err(error),
+    };
     let dst_transform = AffineTransform::new([
         (dst_bounds.right - dst_bounds.left) / loaded.info.width as f64,
         0.0,
@@ -267,6 +303,10 @@ pub fn reproject_raster(
     ])?;
     let source_values = raster_to_f64(&loaded.array);
     let mut out = vec![0.0; loaded.array.bands * loaded.array.height * loaded.array.width];
+    // MENSURA item 5: transform failures are counted, never silently
+    // absorbed. Out-of-extent samples remain legitimate nodata.
+    let mut failure_count: usize = 0;
+    let mut first_pixel: Option<(usize, usize)> = None;
     for band in 0..loaded.array.bands {
         let fill = loaded
             .info
@@ -278,26 +318,54 @@ pub fn reproject_raster(
         for row in 0..loaded.array.height {
             for col in 0..loaded.array.width {
                 let (x, y) = dst_transform.apply(col as f64 + 0.5, row as f64 + 0.5);
-                let value = transform_point(x, y, &dst_crs, &src_crs)
-                    .ok()
-                    .and_then(|(sx, sy)| {
-                        crate::gis::affine::inverse_apply(source_transform, sx, sy).ok()
-                    })
-                    .and_then(|(src_col, src_row)| {
-                        sample_band(
-                            &source_values,
-                            &loaded.array,
-                            band,
-                            src_col - 0.5,
-                            src_row - 0.5,
-                            method,
-                            loaded.info.nodata_per_band.get(band).copied().flatten(),
-                        )
-                    })
-                    .unwrap_or(fill);
+                let value = match transform_point(x, y, &dst_crs, &src_crs) {
+                    Ok((sx, sy)) => crate::gis::affine::inverse_apply(source_transform, sx, sy)
+                        .ok()
+                        .and_then(|(src_col, src_row)| {
+                            sample_band(
+                                &source_values,
+                                &loaded.array,
+                                band,
+                                src_col - 0.5,
+                                src_row - 0.5,
+                                method,
+                                loaded.info.nodata_per_band.get(band).copied().flatten(),
+                            )
+                        }),
+                    Err(_) => {
+                        failure_count += 1;
+                        if first_pixel.is_none() {
+                            first_pixel = Some((row, col));
+                        }
+                        None
+                    }
+                };
                 out[band * loaded.array.height * loaded.array.width
                     + row * loaded.array.width
-                    + col] = value;
+                    + col] = value.unwrap_or(fill);
+            }
+        }
+    }
+    let mut diagnostics = Vec::new();
+    if failure_count > 0 {
+        let (row, col) = first_pixel.expect("failure recorded");
+        match on_transform_error {
+            TransformErrorPolicy::Raise => {
+                return Err(GisError::TransformFailed(format!(
+                    "transform_failed: {failure_count} pixel(s) failed to transform \
+                     (first at row {row}, col {col}); pass on_transform_error='nodata' \
+                     to fill them with nodata instead"
+                )));
+            }
+            TransformErrorPolicy::Nodata => {
+                diagnostics.push(RasterWarning::new(
+                    "transform_failures_filled_nodata",
+                    format!(
+                        "{failure_count} pixel(s) failed to transform (first at row {row}, \
+                         col {col}) and were filled with nodata"
+                    ),
+                    Some("array"),
+                ));
             }
         }
     }
@@ -320,7 +388,7 @@ pub fn reproject_raster(
         array,
         info,
         resampling: method.name().to_string(),
-        diagnostics: Vec::new(),
+        diagnostics,
     })
 }
 

@@ -161,6 +161,16 @@ class TestNativeModuleSymbols:
         "validate_geometry",
         "repair_geometry",
         "geometry_measure",
+        "measure_geometries",
+        # MENSURA geodesy surface (src/py_functions/geodesy.rs)
+        "geoid_undulation",
+        "orthometric_to_ellipsoidal",
+        "ellipsoidal_to_orthometric",
+        "geodesic_inverse",
+        "geodesic_direct",
+        "wgs84_to_ecef",
+        "ecef_to_wgs84",
+        "dem_orthometric_to_ellipsoidal",
         "geometry_centroid",
         "representative_point",
         "interpolate_line",
@@ -1353,6 +1363,15 @@ class TestPointCloudBuffer:
         assert gpu[0] == pytest.approx(1.0)
         assert gpu[3] == pytest.approx(1.0)  # r = white
         assert gpu[6] == pytest.approx(4.0)
+
+    def test_create_gpu_buffer_anchored_preserves_earth_scale_offset(self):
+        pb = _native.PointBuffer(
+            [6378137.00025, 0.0, 0.0, 6378137.00050, 0.0, 0.0],
+            None,
+        )
+        gpu = pb.create_gpu_buffer_anchored((6378137.0, 0.0, 0.0))
+        assert gpu[0] == pytest.approx(0.00025, abs=1e-6)
+        assert gpu[6] == pytest.approx(0.00050, abs=1e-6)
 
     def test_create_gpu_buffer_with_colors(self):
         """Positions + colors properly interleaved, colors normalised."""

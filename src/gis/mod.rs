@@ -34,8 +34,8 @@ pub use geometry::{
 #[cfg(feature = "extension-module")]
 pub use geometry::{
     buffer_geometry_py, geometry_centroid_py, geometry_measure_py, interpolate_line_py,
-    repair_geometry_py, representative_point_py, simplify_geometry_py, union_geometries_py,
-    validate_geometry_py,
+    measure_geometries_py, repair_geometry_py, representative_point_py, simplify_geometry_py,
+    union_geometries_py, validate_geometry_py,
 };
 #[cfg(feature = "extension-module")]
 pub use osm::{parse_osm_features_py, query_osm_features_py};
@@ -70,7 +70,10 @@ pub use vector::{
     load_boundary_py, read_vector_py, reproject_vector_py, vector_bounds_py, vector_crs_py,
     vector_schema_py,
 };
-pub use warp::{align_raster_to, assign_crs, reproject_raster, resample_array, resample_raster};
+pub use warp::{
+    align_raster_to, assign_crs, reproject_raster, resample_array, resample_raster,
+    TransformErrorPolicy,
+};
 
 #[cfg(feature = "extension-module")]
 use std::collections::HashMap;
@@ -246,17 +249,10 @@ pub fn transform_bounds_py(
     bounds: (f64, f64, f64, f64),
     densify: Option<u32>,
 ) -> PyResult<(f64, f64, f64, f64)> {
-    if densify.unwrap_or(0) > 0 {
-        return Err(GisError::InvalidArgument(
-            "unsupported_option: transform_bounds densify is not supported by the built-in backend"
-                .to_string(),
-        )
-        .into());
-    }
     let bounds = crate::gis::affine::validate_bounds_tuple(bounds, false)?;
     let src_crs = extract_required_crs(Some(src_crs))?;
     let dst_crs = extract_required_crs(Some(dst_crs))?;
-    crate::gis::crs::transform_bounds(bounds, &src_crs, &dst_crs)
+    crate::gis::crs::transform_bounds_densified(bounds, &src_crs, &dst_crs, densify.unwrap_or(1))
         .map(|bounds| bounds.tuple())
         .map_err(Into::into)
 }
@@ -613,16 +609,18 @@ pub fn align_raster_to_py(
 }
 
 #[cfg(feature = "extension-module")]
-#[pyfunction(name = "reproject_raster", signature = (source, dst_crs, *, resampling = None))]
+#[pyfunction(name = "reproject_raster", signature = (source, dst_crs, *, resampling = None, on_transform_error = None))]
 pub fn reproject_raster_py(
     source: &Bound<'_, PyAny>,
     dst_crs: &Bound<'_, PyAny>,
     resampling: Option<&str>,
+    on_transform_error: Option<&str>,
 ) -> PyResult<PyObject> {
     let path = extract_path_or_info_path(source)?;
     let dst_crs = extract_required_crs(Some(dst_crs))?;
     let method = warp::ResamplingMethod::parse(resampling)?;
-    let result = reproject_raster(path, dst_crs, method)?;
+    let policy = warp::TransformErrorPolicy::parse(on_transform_error)?;
+    let result = reproject_raster(path, dst_crs, method, policy)?;
     raster_operation_to_py(source.py(), &result)
 }
 
@@ -821,6 +819,88 @@ pub(crate) fn extract_crs(crs: Option<&Bound<'_, PyAny>>) -> PyResult<Option<Crs
     let dict = crs
         .downcast::<PyDict>()
         .map_err(|_| GisError::InvalidCrs("crs must be a string, dict, or None".to_string()))?;
+    if let Some(method) = dict.get_item("method")? {
+        use crate::geo::projections::{
+            aea::AlbersEqualArea, lcc::LambertConformal2Sp, merc::MercatorA,
+            stere::PolarStereographicA, tmerc::TransverseMercator, Ellipsoid, ProjectionDefinition,
+        };
+        let method = method
+            .extract::<String>()
+            .or_else(|_| method.extract::<u32>().map(|value| value.to_string()))?;
+        let number = |key: &str| -> PyResult<f64> {
+            dict.get_item(key)?
+                .ok_or_else(|| {
+                    GisError::InvalidCrs(format!("projection CRS requires {key}")).into()
+                })
+                .and_then(|v| v.extract())
+        };
+        let p = match method.as_str() {
+            "tmerc" | "9807" => ProjectionDefinition::TransverseMercator(TransverseMercator {
+                ellipsoid: Ellipsoid {
+                    a: number("a")?,
+                    f: 1.0 / number("inv_f")?,
+                },
+                lat0_deg: number("lat0")?,
+                lon0_deg: number("lon0")?,
+                k0: number("k0")?,
+                false_easting: number("false_easting")?,
+                false_northing: number("false_northing")?,
+            }),
+            "lcc_2sp" | "9802" => ProjectionDefinition::LambertConformal2Sp(LambertConformal2Sp {
+                ellipsoid: Ellipsoid {
+                    a: number("a")?,
+                    f: 1.0 / number("inv_f")?,
+                },
+                lat_f_deg: number("lat0")?,
+                lon_f_deg: number("lon0")?,
+                lat1_deg: number("lat1")?,
+                lat2_deg: number("lat2")?,
+                easting_f: number("false_easting")?,
+                northing_f: number("false_northing")?,
+            }),
+            "aea" | "9822" => ProjectionDefinition::AlbersEqualArea(AlbersEqualArea {
+                ellipsoid: Ellipsoid {
+                    a: number("a")?,
+                    f: 1.0 / number("inv_f")?,
+                },
+                lat_f_deg: number("lat0")?,
+                lon_f_deg: number("lon0")?,
+                lat1_deg: number("lat1")?,
+                lat2_deg: number("lat2")?,
+                easting_f: number("false_easting")?,
+                northing_f: number("false_northing")?,
+            }),
+            "stere_a" | "9810" => ProjectionDefinition::PolarStereographicA(PolarStereographicA {
+                ellipsoid: Ellipsoid {
+                    a: number("a")?,
+                    f: 1.0 / number("inv_f")?,
+                },
+                lat0_deg: number("lat0")?,
+                lon0_deg: number("lon0")?,
+                k0: number("k0")?,
+                false_easting: number("false_easting")?,
+                false_northing: number("false_northing")?,
+            }),
+            "merc_a" | "9804" => ProjectionDefinition::MercatorA(MercatorA {
+                ellipsoid: Ellipsoid {
+                    a: number("a")?,
+                    f: 1.0 / number("inv_f")?,
+                },
+                lon0_deg: number("lon0")?,
+                k0: number("k0")?,
+                false_easting: number("false_easting")?,
+                false_northing: number("false_northing")?,
+            }),
+            "web_mercator" | "1024" => ProjectionDefinition::WebMercator,
+            _ => {
+                return Err(GisError::InvalidCrs(format!(
+                    "unsupported projection method {method:?}"
+                ))
+                .into())
+            }
+        };
+        return Ok(Some(CrsSpec::from_projection(p)));
+    }
     for (key, _) in dict.iter() {
         let key = key
             .extract::<String>()

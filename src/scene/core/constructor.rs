@@ -177,6 +177,7 @@ impl Scene {
             height_view: Some(hview),
             height_sampler: Some(hsamp),
             scene,
+            camera_anchor: crate::camera::Anchor::new(),
             last_uniforms: uniforms,
             ssao,
             ssao_enabled: false,

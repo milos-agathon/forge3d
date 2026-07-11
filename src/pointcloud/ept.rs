@@ -2,7 +2,7 @@
 
 use super::error::{PointCloudError, PointCloudResult};
 use super::octree::{OctreeBounds, OctreeKey, OctreeNode};
-use glam::Vec3;
+use glam::DVec3;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -58,16 +58,8 @@ impl EptDataset {
         let info: EptInfo = serde_json::from_str(&content)?;
 
         let root_bounds = OctreeBounds::new(
-            Vec3::new(
-                info.bounds[0] as f32,
-                info.bounds[1] as f32,
-                info.bounds[2] as f32,
-            ),
-            Vec3::new(
-                info.bounds[3] as f32,
-                info.bounds[4] as f32,
-                info.bounds[5] as f32,
-            ),
+            DVec3::new(info.bounds[0], info.bounds[1], info.bounds[2]),
+            DVec3::new(info.bounds[3], info.bounds[4], info.bounds[5]),
         );
 
         let mut dataset = Self {
@@ -238,9 +230,9 @@ impl EptDataset {
                 let yv = read_dim_value(&data[y_off..], y);
                 let zv = read_dim_value(&data[z_off..], z);
 
-                positions.push(xv as f32);
-                positions.push(yv as f32);
-                positions.push(zv as f32);
+                positions.push(xv);
+                positions.push(yv);
+                positions.push(zv);
             }
 
             if let Some(ref mut cols) = colors {
@@ -276,7 +268,7 @@ impl EptDataset {
 /// Decoded point data (shared with COPC)
 #[derive(Debug)]
 pub struct PointData {
-    pub positions: Vec<f32>,
+    pub positions: Vec<f64>,
     pub colors: Option<Vec<u8>>,
     pub intensities: Option<Vec<u16>>,
     pub classifications: Option<Vec<u8>>,

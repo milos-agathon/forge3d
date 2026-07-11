@@ -59,14 +59,14 @@ pub(crate) fn decode_b3dm_py(py: Python<'_>, data: &[u8]) -> PyResult<PyObject> 
 pub(crate) fn tiles3d_traverse_py(
     py: Python<'_>,
     path: &str,
-    camera_position: (f32, f32, f32),
+    camera_position: (f64, f64, f64),
     sse_threshold: f32,
     max_depth: usize,
 ) -> PyResult<Vec<PyObject>> {
     let tileset = crate::tiles3d::Tileset::load(path)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
     let traverser = crate::tiles3d::TilesetTraverser::new(sse_threshold).with_max_depth(max_depth);
-    let camera = glam::Vec3::new(camera_position.0, camera_position.1, camera_position.2);
+    let camera = glam::DVec3::new(camera_position.0, camera_position.1, camera_position.2);
 
     let mut out = Vec::new();
     for tile in traverser.visible_tiles(&tileset, camera, None) {

@@ -10,6 +10,16 @@ pub mod render_queue;
 #[cfg(feature = "extension-module")]
 use pyo3::{prelude::*, types::PyAny};
 
+fn cubic_hermite_f64(p0: f64, p1: f64, p2: f64, p3: f64, t: f32) -> f64 {
+    let t = f64::from(t);
+    let t2 = t * t;
+    let t3 = t2 * t;
+    0.5 * ((2.0 * p1)
+        + (-p0 + p2) * t
+        + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+        + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3)
+}
+
 /// A single camera keyframe with position and timing.
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(
@@ -24,11 +34,11 @@ pub struct CameraKeyframe {
     /// Polar angle in degrees measured down from the vertical axis.
     pub theta_deg: f32,
     /// Distance from target/center.
-    pub radius: f32,
+    pub radius: f64,
     /// Field of view in degrees.
     pub fov_deg: f32,
     /// Optional explicit terrain target in world space.
-    pub target: Option<[f32; 3]>,
+    pub target: Option<[f64; 3]>,
 }
 
 impl CameraKeyframe {
@@ -36,9 +46,9 @@ impl CameraKeyframe {
         time: f32,
         phi_deg: f32,
         theta_deg: f32,
-        radius: f32,
+        radius: f64,
         fov_deg: f32,
-        target: Option<[f32; 3]>,
+        target: Option<[f64; 3]>,
     ) -> Self {
         Self {
             time,
@@ -68,9 +78,9 @@ impl CameraKeyframe {
             time as f32,
             phi as f32,
             theta as f32,
-            radius as f32,
+            radius,
             fov as f32,
-            target.map(|value| [value.0 as f32, value.1 as f32, value.2 as f32]),
+            target.map(|value| [value.0, value.1, value.2]),
         )
     }
 
@@ -91,7 +101,7 @@ impl CameraKeyframe {
 
     #[getter]
     fn radius(&self) -> f64 {
-        self.radius as f64
+        self.radius
     }
 
     #[getter]
@@ -101,8 +111,7 @@ impl CameraKeyframe {
 
     #[getter]
     fn target(&self) -> Option<(f64, f64, f64)> {
-        self.target
-            .map(|value| (value[0] as f64, value[1] as f64, value[2] as f64))
+        self.target.map(|value| (value[0], value[1], value[2]))
     }
 
     fn __repr__(&self) -> String {
@@ -135,9 +144,9 @@ impl CameraKeyframe {
 pub struct CameraState {
     pub phi_deg: f32,
     pub theta_deg: f32,
-    pub radius: f32,
+    pub radius: f64,
     pub fov_deg: f32,
-    pub target: Option<[f32; 3]>,
+    pub target: Option<[f64; 3]>,
 }
 
 #[cfg(feature = "extension-module")]
@@ -155,7 +164,7 @@ impl CameraState {
 
     #[getter]
     fn radius(&self) -> f64 {
-        self.radius as f64
+        self.radius
     }
 
     #[getter]
@@ -165,8 +174,7 @@ impl CameraState {
 
     #[getter]
     fn target(&self) -> Option<(f64, f64, f64)> {
-        self.target
-            .map(|value| (value[0] as f64, value[1] as f64, value[2] as f64))
+        self.target.map(|value| (value[0], value[1], value[2]))
     }
 
     fn __repr__(&self) -> String {
@@ -258,16 +266,16 @@ impl CameraAnimation {
         k2: CameraKeyframe,
         k3: CameraKeyframe,
         t: f32,
-    ) -> Option<[f32; 3]> {
+    ) -> Option<[f64; 3]> {
         let p1 = k1.target?;
         let p2 = k2.target?;
         let p0 = k0.target.unwrap_or(p1);
         let p3 = k3.target.unwrap_or(p2);
 
         Some([
-            interpolation::cubic_hermite(p0[0], p1[0], p2[0], p3[0], t),
-            interpolation::cubic_hermite(p0[1], p1[1], p2[1], p3[1], t),
-            interpolation::cubic_hermite(p0[2], p1[2], p2[2], p3[2], t),
+            cubic_hermite_f64(p0[0], p1[0], p2[0], p3[0], t),
+            cubic_hermite_f64(p0[1], p1[1], p2[1], p3[1], t),
+            cubic_hermite_f64(p0[2], p1[2], p2[2], p3[2], t),
         ])
     }
 
@@ -294,7 +302,7 @@ impl CameraAnimation {
                 k3.theta_deg,
                 t,
             ),
-            radius: interpolation::cubic_hermite(k0.radius, k1.radius, k2.radius, k3.radius, t),
+            radius: cubic_hermite_f64(k0.radius, k1.radius, k2.radius, k3.radius, t),
             fov_deg: interpolation::cubic_hermite(
                 k0.fov_deg, k1.fov_deg, k2.fov_deg, k3.fov_deg, t,
             ),
@@ -353,6 +361,28 @@ impl CameraAnimation {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn earth_scale_targets_keep_submillimetre_offsets() {
+        let mut animation = CameraAnimation::new();
+        animation.add_keyframe(CameraKeyframe::new(
+            0.0,
+            0.0,
+            45.0,
+            1_000.000_25,
+            45.0,
+            Some([6_378_137.000_25, 0.0, 0.0]),
+        ));
+        let state = animation.evaluate(0.0).unwrap();
+        assert_eq!(state.radius, 1_000.000_25);
+        let recovered = state.target.unwrap()[0] - 6_378_137.0;
+        assert!((recovered - 0.000_25).abs() < 1e-9, "{recovered}");
+    }
+}
+
 #[cfg(feature = "extension-module")]
 #[pymethods]
 impl CameraAnimation {
@@ -376,9 +406,9 @@ impl CameraAnimation {
             time as f32,
             phi as f32,
             theta as f32,
-            radius as f32,
+            radius,
             fov as f32,
-            target.map(|value| [value.0 as f32, value.1 as f32, value.2 as f32]),
+            target.map(|value| [value.0, value.1, value.2]),
         ));
     }
 

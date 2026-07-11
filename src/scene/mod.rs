@@ -75,6 +75,9 @@ pub struct Scene {
     height_sampler: Option<wgpu::Sampler>,
 
     scene: SceneGlobals,
+    // MENSURA: f64 camera anchor; world camera coordinates are narrowed to
+    // f32 only relative to this origin (see src/camera/anchor.rs).
+    camera_anchor: crate::camera::Anchor,
     last_uniforms: crate::terrain::TerrainUniforms,
     ssao: SsaoResources,
     ssao_enabled: bool,

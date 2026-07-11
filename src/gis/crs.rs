@@ -1,12 +1,10 @@
 use std::collections::HashMap;
-use std::f64::consts::PI;
 
 use crate::gis::affine::validate_bounds_tuple;
 use crate::gis::error::{GisError, GisResult};
 use crate::gis::raster_write::CrsSpec;
 use crate::gis::types::{RasterBounds, RasterInfo, RasterWarning, WARNING_MISSING_CRS};
 
-const WEB_MERCATOR_RADIUS: f64 = 6_378_137.0;
 const WEB_MERCATOR_MAX_LAT: f64 = 85.051_128_78;
 
 #[derive(Debug, Clone)]
@@ -84,6 +82,9 @@ pub fn epsg_code(spec: &CrsSpec) -> Option<u32> {
 }
 
 pub fn canonical_label(spec: &CrsSpec) -> GisResult<String> {
+    if let Some(projection) = spec.projection {
+        return Ok(format!("forge3d:{projection:?}"));
+    }
     if let Some((name, code)) = &spec.authority {
         return Ok(format!("{}:{code}", name.to_ascii_uppercase()));
     }
@@ -100,35 +101,122 @@ pub fn transform_bounds(
     src: &CrsSpec,
     dst: &CrsSpec,
 ) -> GisResult<RasterBounds> {
+    // densify = 1 samples exactly the four corners (legacy behaviour).
+    transform_bounds_densified(bounds, src, dst, 1)
+}
+
+/// Transform bounds by densifying each edge into `densify` segments before
+/// reprojecting — required for correctness under any projection with curved
+/// parallels/meridians, where the extremum of an edge lies between corners.
+pub fn transform_bounds_densified(
+    bounds: RasterBounds,
+    src: &CrsSpec,
+    dst: &CrsSpec,
+    densify: u32,
+) -> GisResult<RasterBounds> {
     if crs_equal(src, dst) {
         return Ok(bounds);
     }
-    let corners = [
-        transform_point(bounds.left, bounds.bottom, src, dst)?,
-        transform_point(bounds.left, bounds.top, src, dst)?,
-        transform_point(bounds.right, bounds.bottom, src, dst)?,
-        transform_point(bounds.right, bounds.top, src, dst)?,
-    ];
-    let left = corners
-        .iter()
-        .map(|point| point.0)
-        .fold(f64::INFINITY, f64::min);
-    let right = corners
-        .iter()
-        .map(|point| point.0)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let bottom = corners
-        .iter()
-        .map(|point| point.1)
-        .fold(f64::INFINITY, f64::min);
-    let top = corners
-        .iter()
-        .map(|point| point.1)
-        .fold(f64::NEG_INFINITY, f64::max);
-    validate_bounds_tuple((left, bottom, right, top), false)
+    if densify == 0 {
+        return Err(GisError::InvalidArgument(
+            "invalid_argument: transform_bounds densify must be at least 1".to_string(),
+        ));
+    }
+    let n = densify as usize;
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    let mut fold = |x: f64, y: f64| -> GisResult<()> {
+        let (tx, ty) = transform_point(x, y, src, dst)?;
+        min_x = min_x.min(tx);
+        max_x = max_x.max(tx);
+        min_y = min_y.min(ty);
+        max_y = max_y.max(ty);
+        Ok(())
+    };
+    for i in 0..=n {
+        let t = i as f64 / n as f64;
+        let x = bounds.left + t * (bounds.right - bounds.left);
+        let y = bounds.bottom + t * (bounds.top - bounds.bottom);
+        fold(x, bounds.bottom)?;
+        fold(x, bounds.top)?;
+        fold(bounds.left, y)?;
+        fold(bounds.right, y)?;
+    }
+    validate_bounds_tuple((min_x, min_y, max_x, max_y), false)
 }
 
+/// Check whether a CRS pair is dispatchable by the built-in engine without
+/// evaluating any coordinate.
+pub fn transform_pair_supported(src: &CrsSpec, dst: &CrsSpec) -> GisResult<()> {
+    use crate::geo::projections::epsg_projection;
+    if crs_equal(src, dst) {
+        return Ok(());
+    }
+    if src.projection.is_some() || dst.projection.is_some() {
+        return Ok(());
+    }
+    let is_geocentric_pair = matches!(
+        (epsg_code(src), epsg_code(dst)),
+        (Some(4326 | 4979), Some(4978)) | (Some(4978), Some(4326 | 4979))
+    );
+    if is_geocentric_pair {
+        return Ok(());
+    }
+    let ok = |code: u32| code == 4326 || epsg_projection(code).is_some();
+    match (epsg_code(src), epsg_code(dst)) {
+        (Some(s), Some(d)) if ok(s) && ok(d) => Ok(()),
+        _ => Err(GisError::BackendUnavailable(format!(
+            "BackendUnavailable: CRS transform {} to {} requires an unavailable PROJ backend",
+            canonical_label(src)?,
+            canonical_label(dst)?
+        ))),
+    }
+}
+
+/// Transform a WGS84 geographic 3D coordinate to/from WGS84 geocentric
+/// coordinates (EPSG method 9602). Planar methods deliberately remain on
+/// [`transform_point`], whose two-value contract cannot carry ellipsoidal
+/// height.
+pub fn transform_point3(
+    x: f64,
+    y: f64,
+    z: f64,
+    src: &CrsSpec,
+    dst: &CrsSpec,
+) -> GisResult<(f64, f64, f64)> {
+    use crate::geo::projections::geocentric::{wgs84_ecef_to_geodetic, wgs84_geodetic_to_ecef};
+    use glam::DVec3;
+
+    if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+        return Err(GisError::TransformFailed(
+            "coordinate values must be finite".to_string(),
+        ));
+    }
+    match (epsg_code(src), epsg_code(dst)) {
+        (Some(4326 | 4979), Some(4978)) => {
+            let point = wgs84_geodetic_to_ecef(x, y, z)
+                .map_err(|error| GisError::TransformFailed(error.to_string()))?;
+            Ok((point.x, point.y, point.z))
+        }
+        (Some(4978), Some(4326 | 4979)) => wgs84_ecef_to_geodetic(DVec3::new(x, y, z))
+            .map_err(|error| GisError::TransformFailed(error.to_string())),
+        _ => Err(GisError::BackendUnavailable(format!(
+            "BackendUnavailable: CRS transform {} to {} has no built-in 3D path",
+            canonical_label(src)?,
+            canonical_label(dst)?
+        ))),
+    }
+}
+
+/// Dispatch a coordinate through the built-in pure-Rust projection engine
+/// (src/geo/projections). Supported EPSG codes: 4326, 3857, and the WGS84 UTM
+/// zones 326zz/327zz. Anything else is an explicit `BackendUnavailable` — the
+/// engine never silently passes coordinates through.
 pub fn transform_point(x: f64, y: f64, src: &CrsSpec, dst: &CrsSpec) -> GisResult<(f64, f64)> {
+    use crate::geo::projections::{epsg_forward, epsg_inverse, epsg_projection, ProjError};
+
     if !x.is_finite() || !y.is_finite() {
         return Err(GisError::TransformFailed(
             "coordinate values must be finite".to_string(),
@@ -137,14 +225,42 @@ pub fn transform_point(x: f64, y: f64, src: &CrsSpec, dst: &CrsSpec) -> GisResul
     if crs_equal(src, dst) {
         return Ok((x, y));
     }
-    match (epsg_code(src), epsg_code(dst)) {
-        (Some(4326), Some(3857)) => lonlat_to_web_mercator(x, y),
-        (Some(3857), Some(4326)) => web_mercator_to_lonlat(x, y),
-        _ => Err(GisError::BackendUnavailable(format!(
+    let unsupported = |src: &CrsSpec, dst: &CrsSpec| -> GisResult<(f64, f64)> {
+        Err(GisError::BackendUnavailable(format!(
             "BackendUnavailable: CRS transform {} to {} requires an unavailable PROJ backend",
             canonical_label(src)?,
             canonical_label(dst)?
-        ))),
+        )))
+    };
+    let map_err = |err: ProjError| -> GisError {
+        match err {
+            ProjError::Domain(msg) => GisError::InvalidBounds(msg),
+            other => GisError::TransformFailed(other.to_string()),
+        }
+    };
+    let (src_code, dst_code) = (epsg_code(src), epsg_code(dst));
+    // Route through geographic WGS84: src → 4326 → dst.
+    let (lon, lat) = if let Some(projection) = src.projection {
+        projection.inverse(x, y).map_err(map_err)?
+    } else if src_code == Some(4326) {
+        (x, y)
+    } else if let Some(code) = src_code.filter(|code| epsg_projection(*code).is_some()) {
+        epsg_inverse(code, x, y)
+            .expect("code checked supported")
+            .map_err(map_err)?
+    } else {
+        return unsupported(src, dst);
+    };
+    if let Some(projection) = dst.projection {
+        projection.forward(lon, lat).map_err(map_err)
+    } else if dst_code == Some(4326) {
+        Ok((lon, lat))
+    } else if let Some(code) = dst_code.filter(|code| epsg_projection(*code).is_some()) {
+        epsg_forward(code, lon, lat)
+            .expect("code checked supported")
+            .map_err(map_err)
+    } else {
+        unsupported(src, dst)
     }
 }
 
@@ -166,23 +282,6 @@ pub fn web_mercator_bounds(bounds: RasterBounds, src: &CrsSpec) -> GisResult<Ras
     }
     let dst = CrsSpec::from_string("EPSG:3857".to_string())?;
     transform_bounds(bounds, src, &dst)
-}
-
-fn lonlat_to_web_mercator(lon: f64, lat: f64) -> GisResult<(f64, f64)> {
-    if !(-WEB_MERCATOR_MAX_LAT..=WEB_MERCATOR_MAX_LAT).contains(&lat) {
-        return Err(GisError::InvalidBounds(format!(
-            "invalid_latitude_range: Web Mercator supports latitudes within +/-{WEB_MERCATOR_MAX_LAT}"
-        )));
-    }
-    let x = WEB_MERCATOR_RADIUS * lon.to_radians();
-    let y = WEB_MERCATOR_RADIUS * ((PI / 4.0 + lat.to_radians() / 2.0).tan()).ln();
-    Ok((x, y))
-}
-
-fn web_mercator_to_lonlat(x: f64, y: f64) -> GisResult<(f64, f64)> {
-    let lon = (x / WEB_MERCATOR_RADIUS).to_degrees();
-    let lat = (2.0 * (y / WEB_MERCATOR_RADIUS).exp().atan() - PI / 2.0).to_degrees();
-    Ok((lon, lat))
 }
 
 pub fn parse_crs_string(value: String) -> GisResult<CrsSpec> {
@@ -220,8 +319,11 @@ pub struct CrsTransform {
 
 impl CrsTransform {
     pub fn new(src: CrsSpec, dst: CrsSpec, always_xy: bool) -> GisResult<Self> {
-        // Probe once so unsupported pairs fail at creation, not first use.
-        transform_point(0.0, 0.0, &src, &dst)?;
+        // Check dispatchability once so unsupported pairs fail at creation,
+        // not first use. (A numeric probe point would false-negative on
+        // domain limits, e.g. UTM-south coordinates outside Web Mercator's
+        // latitude range.)
+        transform_pair_supported(&src, &dst)?;
         Ok(Self {
             src,
             dst,
@@ -275,6 +377,10 @@ impl CrsTransform {
 
     fn transform_point(&self, x: f64, y: f64) -> PyResult<(f64, f64)> {
         transform_point(x, y, &self.src, &self.dst).map_err(Into::into)
+    }
+
+    fn transform_point3(&self, x: f64, y: f64, z: f64) -> PyResult<(f64, f64, f64)> {
+        transform_point3(x, y, z, &self.src, &self.dst).map_err(Into::into)
     }
 
     fn transform_bounds(&self, bounds: (f64, f64, f64, f64)) -> PyResult<(f64, f64, f64, f64)> {
