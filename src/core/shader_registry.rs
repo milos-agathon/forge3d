@@ -139,12 +139,16 @@ pub fn create_labeled_shader_module(
     // verify on the platform that generated them (found by the first
     // cross-platform run of the certificate WGSL gate). The normalized text
     // is also what naga compiles, keeping hash == compiled bytes.
-    let normalized = source.replace("\r\n", "\n");
+    let normalized = normalize_shader_source(source);
     let final_label = register_shader_source(label, &normalized);
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(&final_label),
         source: wgpu::ShaderSource::Wgsl(normalized.into()),
     })
+}
+
+fn normalize_shader_source(source: &str) -> String {
+    source.replace("\r\n", "\n")
 }
 
 /// Snapshot of the process-wide collision cache, used only for diagnostics/tests.
@@ -211,6 +215,15 @@ mod tests {
     #[test]
     fn one_byte_source_change_changes_hash() {
         assert_ne!(hash("void main() {}"), hash("void main() {} "));
+    }
+
+    #[test]
+    fn normalized_wgsl_hash_is_line_ending_independent_but_content_sensitive() {
+        let lf = normalize_shader_source("@compute\nfn main() {}\n");
+        let crlf = normalize_shader_source("@compute\r\nfn main() {}\r\n");
+        assert_eq!(lf, crlf);
+        assert_eq!(hash(&lf), hash(&crlf));
+        assert_ne!(hash(&lf), hash("@compute\nfn main() { }\n"));
     }
 
     #[test]
