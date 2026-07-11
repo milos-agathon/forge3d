@@ -84,9 +84,10 @@ jobs:
           sudo apt-get install -y mesa-vulkan-drivers vulkan-tools libvulkan1
       - name: Build extension
         run: |
-          python -m venv .venv
+          python -m venv --system-site-packages .venv
           python -m pip install -U pip maturin numpy
           maturin develop --release
+          python -c "import os, pathlib; scripts = pathlib.Path('.venv') / ('Scripts' if os.name == 'nt' else 'bin'); open(os.environ['GITHUB_PATH'], 'a').write(str(scripts.resolve()) + os.linesep)"
       - name: Render canonical scene
         shell: bash
         env:
