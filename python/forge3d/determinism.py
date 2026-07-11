@@ -290,7 +290,8 @@ def _main(argv: Optional[list] = None) -> int:
     # probe failure is loud because an unattributable hash is worthless.
     import forge3d as f3d
 
-    probe = f3d.device_probe()
+    backend_env = os.environ.get("WGPU_BACKENDS") or os.environ.get("WGPU_BACKEND")
+    probe = f3d.device_probe(backend_env)
     adapter = {
         "name": probe.get("name"),
         "backend": probe.get("backend"),
@@ -303,8 +304,7 @@ def _main(argv: Optional[list] = None) -> int:
             {
                 "scene": args.scene,
                 "sha256": sha,
-                "backend_env": os.environ.get("WGPU_BACKENDS")
-                or os.environ.get("WGPU_BACKEND"),
+                "backend_env": backend_env,
                 "deterministic": os.environ.get("FORGE3D_DETERMINISTIC"),
                 "adapter": adapter,
             }

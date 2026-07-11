@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from _terrain_runtime import terrain_rendering_available
+from forge3d import determinism
 from forge3d.determinism import CANONICAL_SCENE, render_reference
 
 if not terrain_rendering_available():
@@ -108,3 +109,33 @@ def test_deterministic_mode_requires_backend_pin(tmp_path):
             os.environ["WGPU_BACKENDS"] = env_backends
         if env_backend is not None:
             os.environ["WGPU_BACKEND"] = env_backend
+
+
+def test_cli_attributes_hash_to_requested_backend(monkeypatch, tmp_path, capsys):
+    """Adapter reporting must probe the backend that rendered the hash."""
+    requested = []
+
+    monkeypatch.setenv("WGPU_BACKENDS", "dx12")
+    monkeypatch.setenv("FORGE3D_DETERMINISTIC", "1")
+    monkeypatch.setattr(
+        determinism,
+        "_render_reference_inprocess",
+        lambda *_args: "0" * 64,
+    )
+
+    import forge3d as f3d
+
+    def probe(backend=None):
+        requested.append(backend)
+        return {
+            "name": "test adapter",
+            "backend": "Dx12",
+            "device_type": "DiscreteGpu",
+            "software_fallback": False,
+        }
+
+    monkeypatch.setattr(f3d, "device_probe", probe)
+
+    assert determinism._main(["--out-png", str(tmp_path / "unused.png")]) == 0
+    assert requested == ["dx12"]
+    assert '"backend": "Dx12"' in capsys.readouterr().out
