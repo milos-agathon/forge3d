@@ -244,5 +244,7 @@ fn malformed_and_unknown_required_lookup_is_diagnostic() {
     ));
 }
 
+#[path = "gsub_tests/context.rs"]
+mod context;
 #[path = "gsub_tests/feature.rs"]
 mod feature;
