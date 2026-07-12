@@ -1,53 +1,102 @@
-use super::{apply_lookup_at, Glyph};
+use super::{apply_lookup_at, Glyph, GlyphFilter};
 use crate::labels::shape::TextError;
 use ttf_parser::opentype_layout::ChainedContextLookup;
-use ttf_parser::Tag;
+use ttf_parser::{Face, Tag};
+
+fn backward_matches(
+    filter: GlyphFilter<'_>,
+    buffer: &[Glyph],
+    before: usize,
+    count: u16,
+    mut matches: impl FnMut(u16, &Glyph) -> bool,
+) -> bool {
+    let mut cursor = before;
+    for index in 0..count {
+        let Some(at) = filter.previous(buffer, cursor) else {
+            return false;
+        };
+        if !matches(index, &buffer[at]) {
+            return false;
+        }
+        cursor = at;
+    }
+    true
+}
+
+fn forward_positions(
+    filter: GlyphFilter<'_>,
+    buffer: &[Glyph],
+    after: usize,
+    count: u16,
+    mut matches: impl FnMut(u16, &Glyph) -> bool,
+) -> Option<Vec<usize>> {
+    let mut positions = Vec::with_capacity(usize::from(count));
+    let mut cursor = after;
+    for index in 0..count {
+        let at = filter.next(buffer, cursor + 1)?;
+        if !matches(index, &buffer[at]) {
+            return None;
+        }
+        positions.push(at);
+        cursor = at;
+    }
+    Some(positions)
+}
 
 pub(super) fn apply_chain_context(
+    face: &Face<'_>,
+    data: Option<&[u8]>,
     table: ttf_parser::opentype_layout::LayoutTable<'_>,
+    filter: GlyphFilter<'_>,
     context: ChainedContextLookup<'_>,
     buffer: &mut Vec<Glyph>,
     position: usize,
     script: Tag,
     depth: u8,
 ) -> Result<Option<usize>, TextError> {
-    let (records, input_len) = match context {
+    let (records, input_positions) = match context {
         ChainedContextLookup::Format1 { coverage, sets } => {
-            let Some(set_index) = coverage.get(buffer[position].id) else {
-                return Ok(None);
-            };
-            let Some(set) = sets.get(set_index) else {
+            let Some(set) = coverage
+                .get(buffer[position].id)
+                .and_then(|index| sets.get(index))
+            else {
                 return Ok(None);
             };
             let mut matched = None;
             for index in 0..set.len() {
                 let Some(rule) = set.get(index) else { continue };
-                let backtrack = (0..rule.backtrack.len()).all(|index| {
-                    position
-                        .checked_sub(usize::from(index) + 1)
-                        .and_then(|at| buffer.get(at))
-                        .is_some_and(|glyph| rule.backtrack.get(index) == Some(glyph.id.0))
-                });
-                let input = (0..rule.input.len()).all(|index| {
-                    buffer
-                        .get(position + usize::from(index) + 1)
-                        .is_some_and(|glyph| rule.input.get(index) == Some(glyph.id.0))
-                });
-                let start = position + usize::from(rule.input.len()) + 1;
-                let lookahead = (0..rule.lookahead.len()).all(|index| {
-                    buffer
-                        .get(start + usize::from(index))
-                        .is_some_and(|glyph| rule.lookahead.get(index) == Some(glyph.id.0))
-                });
-                if backtrack && input && lookahead {
-                    matched = Some((rule.lookups, usize::from(rule.input.len()) + 1));
+                if !backward_matches(
+                    filter,
+                    buffer,
+                    position,
+                    rule.backtrack.len(),
+                    |i, glyph| rule.backtrack.get(i) == Some(glyph.id.0),
+                ) {
+                    continue;
+                }
+                let Some(tail) =
+                    forward_positions(filter, buffer, position, rule.input.len(), |i, glyph| {
+                        rule.input.get(i) == Some(glyph.id.0)
+                    })
+                else {
+                    continue;
+                };
+                let end = tail.last().copied().unwrap_or(position);
+                if forward_positions(filter, buffer, end, rule.lookahead.len(), |i, glyph| {
+                    rule.lookahead.get(i) == Some(glyph.id.0)
+                })
+                .is_some()
+                {
+                    matched = Some((rule.lookups, tail));
                     break;
                 }
             }
-            let Some((records, input_len)) = matched else {
+            let Some((records, tail)) = matched else {
                 return Ok(None);
             };
-            (records, input_len)
+            let mut positions = vec![position];
+            positions.extend(tail);
+            (records, positions)
         }
         ChainedContextLookup::Format2 {
             coverage,
@@ -65,36 +114,38 @@ pub(super) fn apply_chain_context(
             let mut matched = None;
             for index in 0..set.len() {
                 let Some(rule) = set.get(index) else { continue };
-                let backtrack = (0..rule.backtrack.len()).all(|index| {
-                    position
-                        .checked_sub(usize::from(index) + 1)
-                        .and_then(|at| buffer.get(at))
-                        .is_some_and(|glyph| {
-                            rule.backtrack.get(index) == Some(backtrack_classes.get(glyph.id))
-                        })
-                });
-                let input = (0..rule.input.len()).all(|index| {
-                    buffer
-                        .get(position + usize::from(index) + 1)
-                        .is_some_and(|glyph| {
-                            rule.input.get(index) == Some(input_classes.get(glyph.id))
-                        })
-                });
-                let start = position + usize::from(rule.input.len()) + 1;
-                let lookahead = (0..rule.lookahead.len()).all(|index| {
-                    buffer.get(start + usize::from(index)).is_some_and(|glyph| {
-                        rule.lookahead.get(index) == Some(lookahead_classes.get(glyph.id))
+                if !backward_matches(
+                    filter,
+                    buffer,
+                    position,
+                    rule.backtrack.len(),
+                    |i, glyph| rule.backtrack.get(i) == Some(backtrack_classes.get(glyph.id)),
+                ) {
+                    continue;
+                }
+                let Some(tail) =
+                    forward_positions(filter, buffer, position, rule.input.len(), |i, glyph| {
+                        rule.input.get(i) == Some(input_classes.get(glyph.id))
                     })
-                });
-                if backtrack && input && lookahead {
-                    matched = Some((rule.lookups, usize::from(rule.input.len()) + 1));
+                else {
+                    continue;
+                };
+                let end = tail.last().copied().unwrap_or(position);
+                if forward_positions(filter, buffer, end, rule.lookahead.len(), |i, glyph| {
+                    rule.lookahead.get(i) == Some(lookahead_classes.get(glyph.id))
+                })
+                .is_some()
+                {
+                    matched = Some((rule.lookups, tail));
                     break;
                 }
             }
-            let Some((records, input_len)) = matched else {
+            let Some((records, tail)) = matched else {
                 return Ok(None);
             };
-            (records, input_len)
+            let mut positions = vec![position];
+            positions.extend(tail);
+            (records, positions)
         }
         ChainedContextLookup::Format3 {
             coverage,
@@ -104,46 +155,59 @@ pub(super) fn apply_chain_context(
             lookups,
         } => {
             if !coverage.contains(buffer[position].id)
-                || (0..backtrack_coverages.len()).any(|index| {
-                    position
-                        .checked_sub(usize::from(index) + 1)
-                        .and_then(|at| buffer.get(at))
-                        .is_none_or(|glyph| {
-                            !backtrack_coverages
-                                .get(index)
-                                .is_some_and(|coverage| coverage.contains(glyph.id))
-                        })
-                })
-                || (0..input_coverages.len()).any(|index| {
-                    buffer
-                        .get(position + usize::from(index) + 1)
-                        .is_none_or(|glyph| {
-                            !input_coverages
-                                .get(index)
-                                .is_some_and(|coverage| coverage.contains(glyph.id))
-                        })
-                })
+                || !backward_matches(
+                    filter,
+                    buffer,
+                    position,
+                    backtrack_coverages.len(),
+                    |i, glyph| {
+                        backtrack_coverages
+                            .get(i)
+                            .is_some_and(|coverage| coverage.contains(glyph.id))
+                    },
+                )
             {
                 return Ok(None);
             }
-            let start = position + usize::from(input_coverages.len()) + 1;
-            if (0..lookahead_coverages.len()).any(|index| {
-                buffer.get(start + usize::from(index)).is_none_or(|glyph| {
-                    !lookahead_coverages
-                        .get(index)
+            let Some(tail) = forward_positions(
+                filter,
+                buffer,
+                position,
+                input_coverages.len(),
+                |i, glyph| {
+                    input_coverages
+                        .get(i)
                         .is_some_and(|coverage| coverage.contains(glyph.id))
-                })
-            }) {
+                },
+            ) else {
+                return Ok(None);
+            };
+            let end = tail.last().copied().unwrap_or(position);
+            if forward_positions(
+                filter,
+                buffer,
+                end,
+                lookahead_coverages.len(),
+                |i, glyph| {
+                    lookahead_coverages
+                        .get(i)
+                        .is_some_and(|coverage| coverage.contains(glyph.id))
+                },
+            )
+            .is_none()
+            {
                 return Ok(None);
             }
-            (lookups, usize::from(input_coverages.len()) + 1)
+            let mut positions = vec![position];
+            positions.extend(tail);
+            (lookups, positions)
         }
     };
+
     let records: Vec<_> = (0..records.len())
         .filter_map(|index| records.get(index))
         .collect();
-    let mut positions: Vec<Option<usize>> =
-        (0..input_len).map(|index| Some(position + index)).collect();
+    let mut positions: Vec<Option<usize>> = input_positions.into_iter().map(Some).collect();
     for record in records {
         let Some(Some(target)) = positions.get(usize::from(record.sequence_index)).copied() else {
             continue;
@@ -153,7 +217,17 @@ pub(super) fn apply_chain_context(
             .get(record.lookup_list_index)
             .ok_or(TextError::MalformedOpenType("GSUB contextual lookup"))?;
         let old_len = buffer.len();
-        apply_lookup_at(table, nested, buffer, target, script, depth + 1)?;
+        apply_lookup_at(
+            face,
+            data,
+            table,
+            record.lookup_list_index,
+            nested,
+            buffer,
+            target,
+            script,
+            depth + 1,
+        )?;
         let delta = buffer.len() as isize - old_len as isize;
         for slot in positions
             .iter_mut()

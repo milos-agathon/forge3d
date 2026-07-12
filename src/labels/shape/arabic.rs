@@ -1,3 +1,4 @@
+use crate::labels::shape::gsub::Glyph;
 use crate::labels::unicode::{joining_type, JoiningType};
 use ttf_parser::Tag;
 
@@ -72,9 +73,26 @@ pub fn arabic_features(text: &str) -> Vec<Form> {
         .collect()
 }
 
+pub fn apply_feature_masks(text: &str, glyphs: &mut [Glyph]) {
+    let forms = arabic_features(text);
+    for ((cluster, _), form) in text.char_indices().zip(forms) {
+        let Some(feature) = form.feature() else {
+            continue;
+        };
+        for glyph in glyphs
+            .iter_mut()
+            .filter(|glyph| glyph.cluster == cluster as u32)
+        {
+            glyph.enable_feature(feature);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{arabic_features, required_features, Form};
+    use super::{apply_feature_masks, arabic_features, required_features, Form};
+    use crate::labels::shape::gsub::Glyph;
+    use ttf_parser::GlyphId;
 
     #[test]
     fn joining_skips_transparent_marks() {
@@ -104,5 +122,14 @@ mod tests {
     fn lam_alef_enables_required_ligature_forms() {
         assert_eq!(arabic_features("لا"), vec![Form::Initial, Form::Final]);
         assert!(required_features().contains(&ttf_parser::Tag::from_bytes(b"rlig")));
+    }
+
+    #[test]
+    fn forms_are_attached_to_glyph_clusters_as_feature_masks() {
+        let mut glyphs = vec![Glyph::new(GlyphId(10), 0), Glyph::new(GlyphId(10), 2)];
+        apply_feature_masks("بب", &mut glyphs);
+        assert!(glyphs[0].allows_feature(ttf_parser::Tag::from_bytes(b"init")));
+        assert!(!glyphs[0].allows_feature(ttf_parser::Tag::from_bytes(b"fina")));
+        assert!(glyphs[1].allows_feature(ttf_parser::Tag::from_bytes(b"fina")));
     }
 }

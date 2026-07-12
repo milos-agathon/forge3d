@@ -1,4 +1,4 @@
-use super::{apply_gsub_data, Glyph};
+use super::{apply_gsub_data, apply_gsub_data_with_gdef, Glyph, GsubLookup};
 use ttf_parser::{GlyphId, Tag};
 
 fn glyphs(ids: &[u16]) -> Vec<Glyph> {
@@ -43,7 +43,12 @@ fn gsub(lookups: Vec<Vec<u8>>) -> Vec<u8> {
 
 fn apply(table: &[u8], ids: &[u16], selection: &[u16]) -> Vec<Glyph> {
     let mut buffer = glyphs(ids);
-    apply_gsub_data(table, &mut buffer, selection, Tag::from_bytes(b"latn")).unwrap();
+    let selection: Vec<_> = selection
+        .iter()
+        .copied()
+        .map(GsubLookup::unmasked)
+        .collect();
+    apply_gsub_data(table, &mut buffer, &selection, Tag::from_bytes(b"latn")).unwrap();
     buffer
 }
 
@@ -209,16 +214,16 @@ fn lam_alef_ligature_is_selected_through_rlig() {
     table.extend_from_slice(&[0, 8, 0, 0, 0, 1, 0, 0]);
     table.extend_from_slice(&lookup_list);
 
-    let selection = crate::labels::shape::LayoutTable::parse(&table)
-        .unwrap()
-        .selected_lookup_indices(Tag::from_bytes(b"arab"), None, &[])
-        .unwrap();
-    assert_eq!(selection, vec![0]);
+    let layout = crate::labels::shape::LayoutTable::parse(&table).unwrap();
+    let selection = GsubLookup::selected(&layout, Tag::from_bytes(b"arab"), None, &[]).unwrap();
     assert_eq!(
-        apply(&table, &[10, 11], &selection)
-            .iter()
-            .map(|glyph| glyph.id.0)
-            .collect::<Vec<_>>(),
+        selection,
+        vec![GsubLookup::for_feature(0, Tag::from_bytes(b"rlig"))]
+    );
+    let mut glyphs = glyphs(&[10, 11]);
+    apply_gsub_data(&table, &mut glyphs, &selection, Tag::from_bytes(b"arab")).unwrap();
+    assert_eq!(
+        glyphs.iter().map(|glyph| glyph.id.0).collect::<Vec<_>>(),
         vec![99]
     );
 }
@@ -229,7 +234,7 @@ fn malformed_and_unknown_required_lookup_is_diagnostic() {
     let error = apply_gsub_data(
         &gsub(vec![lookup(9, Vec::new())]),
         &mut buffer,
-        &[0],
+        &[GsubLookup::unmasked(0)],
         Tag::from_bytes(b"latn"),
     )
     .unwrap_err();
@@ -238,3 +243,6 @@ fn malformed_and_unknown_required_lookup_is_diagnostic() {
         crate::labels::shape::TextError::UnsupportedLookup { lookup_type: 9, .. }
     ));
 }
+
+#[path = "gsub_tests/feature.rs"]
+mod feature;

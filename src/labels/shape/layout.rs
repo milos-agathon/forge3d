@@ -150,6 +150,21 @@ impl<'a> LayoutTable<'a> {
         language: Option<Tag>,
         settings: &[FeatureSetting],
     ) -> Result<Vec<u16>, TextError> {
+        let mut lookups = Vec::new();
+        for (lookup, _) in self.selected_feature_lookups(script, language, settings)? {
+            if !lookups.contains(&lookup) {
+                lookups.push(lookup);
+            }
+        }
+        Ok(lookups)
+    }
+
+    pub fn selected_feature_lookups(
+        &self,
+        script: Tag,
+        language: Option<Tag>,
+        settings: &[FeatureSetting],
+    ) -> Result<Vec<(u16, Vec<Tag>)>, TextError> {
         let reader = Reader::new(self.data);
         let script = self.script_offset(script)?;
         let lang_sys = self.lang_sys_offset(script, language)?;
@@ -179,9 +194,17 @@ impl<'a> LayoutTable<'a> {
 
         let mut lookups = Vec::new();
         for feature in features {
+            let tag = self.feature_tag(feature)?;
             for lookup in self.feature_lookups(feature)? {
-                if !lookups.contains(&lookup) {
-                    lookups.push(lookup);
+                if let Some((_, tags)) = lookups
+                    .iter_mut()
+                    .find(|(existing, _): &&mut (u16, Vec<Tag>)| *existing == lookup)
+                {
+                    if !tags.contains(&tag) {
+                        tags.push(tag);
+                    }
+                } else {
+                    lookups.push((lookup, vec![tag]));
                 }
             }
         }
