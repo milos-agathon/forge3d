@@ -48,6 +48,7 @@ fn ignore_marks_allows_ligature_across_transparent_glyph() {
         buffer.iter().map(|glyph| glyph.id.0).collect::<Vec<_>>(),
         vec![99, 20]
     );
+    assert_eq!(buffer[0].component_clusters, vec![0, 2]);
 }
 
 #[test]

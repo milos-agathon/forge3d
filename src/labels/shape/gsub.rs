@@ -15,6 +15,7 @@ pub(super) use filter::GlyphFilter;
 pub struct Glyph {
     pub id: GlyphId,
     pub cluster: u32,
+    pub component_clusters: Vec<u32>,
     features: Vec<Tag>,
     pub(super) origin: u64,
 }
@@ -24,6 +25,7 @@ impl Glyph {
         Self {
             id,
             cluster,
+            component_clusters: vec![cluster],
             features: Vec::new(),
             origin: 0,
         }

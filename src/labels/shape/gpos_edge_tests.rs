@@ -1,48 +1,12 @@
-use super::gpos_tests::apply_positioning_data;
+use super::gpos_tests::{
+    apply_positioning_data, coverage, glyphs, gpos, lookup, lookup_with_subtables,
+};
 use super::PositioningGlyph;
 use crate::labels::shape::TextError;
 use ttf_parser::{GlyphId, Tag};
 
 mod tests {
     use super::*;
-
-    fn coverage(glyph: u16) -> Vec<u8> {
-        [1u16, 1, glyph]
-            .into_iter()
-            .flat_map(u16::to_be_bytes)
-            .collect()
-    }
-
-    fn lookup(kind: u16, mut subtable: Vec<u8>) -> Vec<u8> {
-        let mut out: Vec<u8> = [kind, 0, 1, 8]
-            .into_iter()
-            .flat_map(u16::to_be_bytes)
-            .collect();
-        out.append(&mut subtable);
-        out
-    }
-
-    fn gpos(lookups: Vec<Vec<u8>>) -> Vec<u8> {
-        let mut list = (lookups.len() as u16).to_be_bytes().to_vec();
-        let mut offset = 2 + lookups.len() * 2;
-        for lookup in &lookups {
-            list.extend_from_slice(&(offset as u16).to_be_bytes());
-            offset += lookup.len();
-        }
-        for lookup in lookups {
-            list.extend_from_slice(&lookup);
-        }
-        let mut out = vec![0, 1, 0, 0, 0, 0, 0, 0, 0, 10];
-        out.extend_from_slice(&list);
-        out
-    }
-
-    fn glyphs(ids: &[u16]) -> Vec<PositioningGlyph> {
-        ids.iter()
-            .enumerate()
-            .map(|(cluster, id)| PositioningGlyph::new(GlyphId(*id), cluster as u32))
-            .collect()
-    }
 
     fn mark_fixture() -> Vec<u8> {
         let mut table = vec![0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0];
@@ -83,6 +47,49 @@ mod tests {
         let extension = vec![0, 1, 0, 1, 0, 0, 1, 0];
         let error = apply_positioning_data(
             Some(&gpos(vec![lookup(9, extension)])),
+            None,
+            &mut buffer,
+            &[0],
+            Tag::from_bytes(b"latn"),
+        )
+        .unwrap_err();
+        assert!(matches!(error, TextError::OutOfBounds { .. }));
+
+        let mut truncated_device = vec![0, 1, 0, 8, 0, 0x10, 0, 14];
+        truncated_device.extend_from_slice(&coverage(10));
+        truncated_device.extend_from_slice(&[0, 10, 0, 10, 0, 1]);
+        let table = gpos(vec![lookup(1, truncated_device)]);
+        let error = apply_positioning_data(
+            Some(&table),
+            None,
+            &mut buffer,
+            &[0],
+            Tag::from_bytes(b"latn"),
+        )
+        .unwrap_err();
+        assert!(matches!(error, TextError::OutOfBounds { .. }));
+
+        let mut valid = vec![0, 1, 0, 8, 0, 4, 0, 1];
+        valid.extend_from_slice(&coverage(10));
+        let table = gpos(vec![lookup_with_subtables(1, vec![valid, vec![0, 1]])]);
+        let error = apply_positioning_data(
+            Some(&table),
+            None,
+            &mut buffer,
+            &[0],
+            Tag::from_bytes(b"latn"),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            TextError::MalformedOpenType("GPOS subtable") | TextError::OutOfBounds { .. }
+        ));
+
+        let mut bad_device = vec![0, 1, 0, 8, 0, 0x10, 0x7f, 0xff];
+        bad_device.extend_from_slice(&coverage(10));
+        let table = gpos(vec![lookup(1, bad_device)]);
+        let error = apply_positioning_data(
+            Some(&table),
             None,
             &mut buffer,
             &[0],
