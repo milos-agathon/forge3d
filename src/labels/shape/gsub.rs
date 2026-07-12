@@ -2,42 +2,140 @@ use super::ot::Reader;
 use super::TextError;
 use ttf_parser::{gsub::SubstitutionSubtable, Face, GlyphId, Tag};
 
+#[path = "gsub_apply.rs"]
+mod apply;
+
 #[path = "gsub_context.rs"]
 mod context;
+#[path = "gsub_filter.rs"]
+mod filter;
+pub(super) use filter::GlyphFilter;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Glyph {
     pub id: GlyphId,
     pub cluster: u32,
+    features: Vec<Tag>,
 }
 
 impl Glyph {
     pub fn new(id: GlyphId, cluster: u32) -> Self {
-        Self { id, cluster }
+        Self {
+            id,
+            cluster,
+            features: Vec::new(),
+        }
+    }
+
+    pub fn enable_feature(&mut self, feature: Tag) {
+        if !self.features.contains(&feature) {
+            self.features.push(feature);
+        }
+    }
+
+    pub fn allows_feature(&self, feature: Tag) -> bool {
+        !is_masked_feature(feature) || self.features.contains(&feature)
+    }
+
+    pub fn has_feature(&self, feature: Tag) -> bool {
+        self.features.contains(&feature)
+    }
+}
+
+fn is_masked_feature(feature: Tag) -> bool {
+    [
+        b"isol", b"init", b"medi", b"fina", b"rphf", b"half", b"pref",
+    ]
+    .iter()
+    .any(|tag| feature == Tag::from_bytes(tag))
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GsubLookup {
+    pub index: u16,
+    pub features: Vec<Tag>,
+}
+
+impl GsubLookup {
+    pub fn unmasked(index: u16) -> Self {
+        Self {
+            index,
+            features: Vec::new(),
+        }
+    }
+
+    pub fn for_feature(index: u16, feature: Tag) -> Self {
+        Self {
+            index,
+            features: vec![feature],
+        }
+    }
+
+    pub fn selected(
+        layout: &super::LayoutTable<'_>,
+        script: Tag,
+        language: Option<Tag>,
+        settings: &[super::FeatureSetting],
+    ) -> Result<Vec<Self>, TextError> {
+        Ok(layout
+            .selected_feature_lookups(script, language, settings)?
+            .into_iter()
+            .map(|(index, features)| Self { index, features })
+            .collect())
     }
 }
 
 pub fn apply_gsub(
     face: &Face<'_>,
     buffer: &mut Vec<Glyph>,
-    selection: &[u16],
+    selection: &[GsubLookup],
     script: Tag,
 ) -> Result<(), TextError> {
-    if let Some(data) = face.raw_face().table(Tag::from_bytes(b"GSUB")) {
-        validate_lookup_types(data, selection, script)?;
-    }
+    let data = face.raw_face().table(Tag::from_bytes(b"GSUB"));
+    apply_gsub_with_data(face, data, buffer, selection, script)
+}
+
+fn apply_gsub_with_data(
+    face: &Face<'_>,
+    data: Option<&[u8]>,
+    buffer: &mut Vec<Glyph>,
+    selection: &[GsubLookup],
+    script: Tag,
+) -> Result<(), TextError> {
     let table = face
         .tables()
         .gsub
         .ok_or(TextError::MalformedOpenType("GSUB"))?;
-    for &index in selection {
+    for selected in selection {
+        if let Some(data) = data {
+            validate_lookup_types(data, &[selected.index], script)?;
+        }
         let lookup = table
             .lookups
-            .get(index)
+            .get(selected.index)
             .ok_or(TextError::MalformedOpenType("GSUB LookupList"))?;
         let mut position = 0;
         while position < buffer.len() {
-            let changed = apply_lookup_at(table, lookup, buffer, position, script, 0)?;
+            if !selected.features.is_empty()
+                && !selected
+                    .features
+                    .iter()
+                    .any(|&feature| buffer[position].allows_feature(feature))
+            {
+                position += 1;
+                continue;
+            }
+            let changed = apply_lookup_at(
+                face,
+                data,
+                table,
+                selected.index,
+                lookup,
+                buffer,
+                position,
+                script,
+                0,
+            )?;
             position += changed.max(1);
         }
     }
@@ -62,12 +160,34 @@ fn validate_lookup_types(data: &[u8], selection: &[u16], script: Tag) -> Result<
                 script,
             });
         }
+        if lookup_type == 7 {
+            let subtable_count = usize::from(reader.u16(lookup + 4)?);
+            reader.slice_at(lookup + 6, subtable_count * 2)?;
+            for subtable in 0..subtable_count {
+                let offset = usize::from(reader.u16(lookup + 6 + subtable * 2)?);
+                let extension = lookup + offset;
+                if reader.u16(extension)? != 1 {
+                    return Err(TextError::MalformedOpenType("GSUB extension"));
+                }
+                let nested = reader.u16(extension + 2)?;
+                if !matches!(nested, 1 | 2 | 3 | 4 | 6) {
+                    return Err(TextError::UnsupportedLookup {
+                        table: "GSUB",
+                        lookup_type: nested,
+                        script,
+                    });
+                }
+            }
+        }
     }
     Ok(())
 }
 
 pub(super) fn apply_lookup_at(
+    face: &Face<'_>,
+    data: Option<&[u8]>,
     table: ttf_parser::opentype_layout::LayoutTable<'_>,
+    lookup_index: u16,
     lookup: ttf_parser::opentype_layout::Lookup<'_>,
     buffer: &mut Vec<Glyph>,
     position: usize,
@@ -77,134 +197,46 @@ pub(super) fn apply_lookup_at(
     if depth == 16 {
         return Err(TextError::MalformedOpenType("GSUB recursion"));
     }
+    if depth > 0 {
+        if let Some(data) = data {
+            validate_lookup_types(data, &[lookup_index], script)?;
+        }
+    }
+    let filter = GlyphFilter::new(face, lookup);
+    if buffer
+        .get(position)
+        .is_none_or(|glyph| filter.ignored(glyph))
+    {
+        return Ok(0);
+    }
     for subtable in lookup.subtables.into_iter::<SubstitutionSubtable<'_>>() {
-        if let Some(count) = apply_subtable(table, subtable, buffer, position, script, depth)? {
+        if let Some(count) = apply::apply_subtable(
+            face, data, table, filter, subtable, buffer, position, script, depth,
+        )? {
             return Ok(count);
         }
     }
     Ok(0)
 }
 
-fn apply_subtable(
-    table: ttf_parser::opentype_layout::LayoutTable<'_>,
-    subtable: SubstitutionSubtable<'_>,
-    buffer: &mut Vec<Glyph>,
-    position: usize,
-    script: Tag,
-    depth: u8,
-) -> Result<Option<usize>, TextError> {
-    let Some(glyph) = buffer.get(position).copied() else {
-        return Ok(None);
-    };
-    match subtable {
-        SubstitutionSubtable::Single(single) => {
-            let Some(index) = single.coverage().get(glyph.id) else {
-                return Ok(None);
-            };
-            buffer[position].id = match single {
-                ttf_parser::gsub::SingleSubstitution::Format1 { delta, .. } => {
-                    GlyphId(glyph.id.0.wrapping_add_signed(delta))
-                }
-                ttf_parser::gsub::SingleSubstitution::Format2 { substitutes, .. } => substitutes
-                    .get(index)
-                    .ok_or(TextError::MalformedOpenType("GSUB single"))?,
-            };
-            Ok(Some(1))
-        }
-        SubstitutionSubtable::Multiple(multiple) => {
-            let Some(index) = multiple.coverage.get(glyph.id) else {
-                return Ok(None);
-            };
-            let sequence = multiple
-                .sequences
-                .get(index)
-                .ok_or(TextError::MalformedOpenType("GSUB multiple"))?;
-            let replacements: Vec<_> = (0..sequence.substitutes.len())
-                .map(|index| {
-                    sequence
-                        .substitutes
-                        .get(index)
-                        .map(|id| Glyph::new(id, glyph.cluster))
-                        .ok_or(TextError::MalformedOpenType("GSUB multiple"))
-                })
-                .collect::<Result<_, _>>()?;
-            let count = replacements.len();
-            buffer.splice(position..=position, replacements);
-            Ok(Some(count))
-        }
-        SubstitutionSubtable::Alternate(alternate) => {
-            let Some(index) = alternate.coverage.get(glyph.id) else {
-                return Ok(None);
-            };
-            buffer[position].id = alternate
-                .alternate_sets
-                .get(index)
-                .and_then(|set| set.alternates.get(0))
-                .ok_or(TextError::MalformedOpenType("GSUB alternate"))?;
-            Ok(Some(1))
-        }
-        SubstitutionSubtable::Ligature(ligature) => {
-            let Some(index) = ligature.coverage.get(glyph.id) else {
-                return Ok(None);
-            };
-            let set = ligature
-                .ligature_sets
-                .get(index)
-                .ok_or(TextError::MalformedOpenType("GSUB ligature"))?;
-            for candidate_index in 0..set.len() {
-                let Some(candidate) = set.get(candidate_index) else {
-                    continue;
-                };
-                let count = usize::from(candidate.components.len()) + 1;
-                if position + count > buffer.len() {
-                    continue;
-                }
-                let matches = (0..candidate.components.len()).all(|component| {
-                    candidate.components.get(component)
-                        == buffer
-                            .get(position + usize::from(component) + 1)
-                            .map(|glyph| glyph.id)
-                });
-                if matches {
-                    let cluster = buffer[position..position + count]
-                        .iter()
-                        .map(|glyph| glyph.cluster)
-                        .min()
-                        .unwrap_or(glyph.cluster);
-                    buffer.splice(
-                        position..position + count,
-                        [Glyph::new(candidate.glyph, cluster)],
-                    );
-                    return Ok(Some(1));
-                }
-            }
-            Ok(None)
-        }
-        SubstitutionSubtable::ChainContext(context) => {
-            context::apply_chain_context(table, context, buffer, position, script, depth)
-        }
-        SubstitutionSubtable::Context(_) | SubstitutionSubtable::ReverseChainSingle(_) => {
-            Err(TextError::UnsupportedLookup {
-                table: "GSUB",
-                lookup_type: if matches!(subtable, SubstitutionSubtable::Context(_)) {
-                    5
-                } else {
-                    8
-                },
-                script,
-            })
-        }
-    }
-}
-
 #[cfg(test)]
 fn apply_gsub_data(
     data: &[u8],
     buffer: &mut Vec<Glyph>,
-    selection: &[u16],
+    selection: &[GsubLookup],
     script: Tag,
 ) -> Result<(), TextError> {
-    validate_lookup_types(data, selection, script)?;
+    apply_gsub_data_with_gdef(data, &[], buffer, selection, script)
+}
+
+#[cfg(test)]
+fn apply_gsub_data_with_gdef(
+    data: &[u8],
+    gdef: &[u8],
+    buffer: &mut Vec<Glyph>,
+    selection: &[GsubLookup],
+    script: Tag,
+) -> Result<(), TextError> {
     let mut head = [0u8; 54];
     head[18..20].copy_from_slice(&1000u16.to_be_bytes());
     let mut hhea = [0u8; 36];
@@ -215,10 +247,11 @@ fn apply_gsub_data(
         hhea: &hhea,
         maxp: &maxp,
         gsub: Some(data),
+        gdef: (!gdef.is_empty()).then_some(gdef),
         ..ttf_parser::RawFaceTables::default()
     })
     .map_err(|_| TextError::MalformedOpenType("test face"))?;
-    apply_gsub(&face, buffer, selection, script)
+    apply_gsub_with_data(&face, Some(data), buffer, selection, script)
 }
 
 #[cfg(test)]
