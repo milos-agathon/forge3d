@@ -2,6 +2,60 @@ use super::{apply_gpos_with_data, apply_legacy_kern, PositioningGlyph};
 use crate::labels::shape::TextError;
 use ttf_parser::{Face, Tag};
 
+pub(super) fn coverage(glyph: u16) -> Vec<u8> {
+    [1u16, 1, glyph]
+        .into_iter()
+        .flat_map(u16::to_be_bytes)
+        .collect()
+}
+
+pub(super) fn lookup(kind: u16, mut subtable: Vec<u8>) -> Vec<u8> {
+    let mut out: Vec<u8> = [kind, 0, 1, 8]
+        .into_iter()
+        .flat_map(u16::to_be_bytes)
+        .collect();
+    out.append(&mut subtable);
+    out
+}
+
+pub(super) fn lookup_with_subtables(kind: u16, subtables: Vec<Vec<u8>>) -> Vec<u8> {
+    let mut out = vec![];
+    out.extend_from_slice(&kind.to_be_bytes());
+    out.extend_from_slice(&0u16.to_be_bytes());
+    out.extend_from_slice(&(subtables.len() as u16).to_be_bytes());
+    let mut offset = 6 + subtables.len() * 2;
+    for subtable in &subtables {
+        out.extend_from_slice(&(offset as u16).to_be_bytes());
+        offset += subtable.len();
+    }
+    for subtable in subtables {
+        out.extend_from_slice(&subtable);
+    }
+    out
+}
+
+pub(super) fn gpos(lookups: Vec<Vec<u8>>) -> Vec<u8> {
+    let mut list = (lookups.len() as u16).to_be_bytes().to_vec();
+    let mut offset = 2 + lookups.len() * 2;
+    for lookup in &lookups {
+        list.extend_from_slice(&(offset as u16).to_be_bytes());
+        offset += lookup.len();
+    }
+    for lookup in lookups {
+        list.extend_from_slice(&lookup);
+    }
+    let mut out = vec![0, 1, 0, 0, 0, 0, 0, 0, 0, 10];
+    out.extend_from_slice(&list);
+    out
+}
+
+pub(super) fn glyphs(ids: &[u16]) -> Vec<PositioningGlyph> {
+    ids.iter()
+        .enumerate()
+        .map(|(cluster, id)| PositioningGlyph::new(ttf_parser::GlyphId(*id), cluster as u32))
+        .collect()
+}
+
 pub(super) fn apply_positioning_data(
     gpos: Option<&[u8]>,
     kern: Option<&[u8]>,
@@ -33,62 +87,11 @@ pub(super) fn apply_positioning_data(
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_positioning_data, PositioningGlyph};
+    use super::{
+        apply_positioning_data, coverage, glyphs, gpos, lookup, lookup_with_subtables,
+        PositioningGlyph,
+    };
     use ttf_parser::{GlyphId, Tag};
-
-    fn coverage(glyph: u16) -> Vec<u8> {
-        [1u16, 1, glyph]
-            .into_iter()
-            .flat_map(u16::to_be_bytes)
-            .collect()
-    }
-
-    fn lookup(kind: u16, mut subtable: Vec<u8>) -> Vec<u8> {
-        let mut out: Vec<u8> = [kind, 0, 1, 8]
-            .into_iter()
-            .flat_map(u16::to_be_bytes)
-            .collect();
-        out.append(&mut subtable);
-        out
-    }
-
-    fn lookup_with_subtables(kind: u16, subtables: Vec<Vec<u8>>) -> Vec<u8> {
-        let mut out = vec![];
-        out.extend_from_slice(&kind.to_be_bytes());
-        out.extend_from_slice(&0u16.to_be_bytes());
-        out.extend_from_slice(&(subtables.len() as u16).to_be_bytes());
-        let mut offset = 6 + subtables.len() * 2;
-        for subtable in &subtables {
-            out.extend_from_slice(&(offset as u16).to_be_bytes());
-            offset += subtable.len();
-        }
-        for subtable in subtables {
-            out.extend_from_slice(&subtable);
-        }
-        out
-    }
-
-    fn gpos(lookups: Vec<Vec<u8>>) -> Vec<u8> {
-        let mut list = (lookups.len() as u16).to_be_bytes().to_vec();
-        let mut offset = 2 + lookups.len() * 2;
-        for lookup in &lookups {
-            list.extend_from_slice(&(offset as u16).to_be_bytes());
-            offset += lookup.len();
-        }
-        for lookup in lookups {
-            list.extend_from_slice(&lookup);
-        }
-        let mut out = vec![0, 1, 0, 0, 0, 0, 0, 0, 0, 10];
-        out.extend_from_slice(&list);
-        out
-    }
-
-    fn glyphs(ids: &[u16]) -> Vec<PositioningGlyph> {
-        ids.iter()
-            .enumerate()
-            .map(|(cluster, id)| PositioningGlyph::new(GlyphId(*id), cluster as u32))
-            .collect()
-    }
 
     #[test]
     fn single_and_both_pair_formats_accumulate_value_records() {
@@ -182,14 +185,28 @@ mod tests {
         )
         .unwrap();
         assert_eq!(buffer[1].x_offset, -380);
+
+        for kind in [4, 5, 6] {
+            let mut buffer = glyphs(&[10, 30, 20]);
+            apply_positioning_data(
+                Some(&gpos(vec![lookup(kind, mark_fixture(kind))])),
+                None,
+                &mut buffer,
+                &[0],
+                Tag::from_bytes(b"latn"),
+            )
+            .unwrap();
+            assert_eq!(buffer[2].attached_to, None);
+        }
     }
 
     #[test]
     fn mark_to_ligature_selects_component_from_cluster() {
-        let mut buffer = glyphs(&[10, 20]);
-        buffer[0].component_clusters = vec![8, 4];
-        buffer[1].cluster = 3;
-        buffer[1].ligature_component = Some(1);
+        let mut ligature = crate::labels::shape::gsub::Glyph::new(GlyphId(10), 4);
+        ligature.component_clusters = vec![8, 4];
+        let mut mark = PositioningGlyph::new(GlyphId(20), 4);
+        mark.x_advance = 50;
+        let mut buffer = vec![PositioningGlyph::from(&ligature), mark];
         apply_positioning_data(
             Some(&gpos(vec![lookup(5, mark_fixture(5))])),
             None,

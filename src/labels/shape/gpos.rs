@@ -1,11 +1,12 @@
 use super::gsub::GlyphFilter;
-use super::{ShapedGlyph, TextError};
-use crate::labels::font::to_q26_6;
+use super::TextError;
 use ttf_parser::gpos::{PairAdjustment, PositioningSubtable, SingleAdjustment};
-use ttf_parser::{Face, GlyphId, Tag};
+use ttf_parser::{Face, Tag};
 
 #[path = "gpos_attach.rs"]
 mod attach;
+#[path = "gpos_buffer.rs"]
+mod buffer;
 #[path = "gpos_kern.rs"]
 mod kern;
 #[path = "gpos_validate.rs"]
@@ -13,54 +14,10 @@ mod validate;
 #[path = "gpos_value.rs"]
 mod value;
 use attach::attach;
+pub use buffer::PositioningGlyph;
 pub use kern::apply_legacy_kern;
 use validate::validate_lookup_type;
 use value::apply_value;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PositioningGlyph {
-    pub id: GlyphId,
-    pub cluster: u32,
-    pub x_advance: i32,
-    pub y_advance: i32,
-    pub x_offset: i32,
-    pub y_offset: i32,
-    pub attached_to: Option<usize>,
-    pub component_clusters: Vec<u32>,
-    pub ligature_component: Option<u16>,
-}
-
-impl PositioningGlyph {
-    pub fn new(id: GlyphId, cluster: u32) -> Self {
-        Self {
-            id,
-            cluster,
-            x_advance: 0,
-            y_advance: 0,
-            x_offset: 0,
-            y_offset: 0,
-            attached_to: None,
-            component_clusters: vec![cluster],
-            ligature_component: None,
-        }
-    }
-
-    pub fn normalize(self, font_index: usize, units_per_em: u16) -> Result<ShapedGlyph, TextError> {
-        if units_per_em == 0 {
-            return Err(TextError::MalformedOpenType("head unitsPerEm"));
-        }
-        Ok(ShapedGlyph {
-            glyph_id: self.id.0,
-            font_index,
-            cluster: self.cluster,
-            x_advance: to_q26_6(self.x_advance, units_per_em),
-            y_advance: to_q26_6(self.y_advance, units_per_em),
-            x_offset: to_q26_6(self.x_offset, units_per_em),
-            y_offset: to_q26_6(self.y_offset, units_per_em),
-            attached_to: self.attached_to,
-        })
-    }
-}
 
 pub fn apply_gpos(
     face: &Face<'_>,
@@ -84,32 +41,38 @@ fn apply_gpos_with_data(
         .gpos
         .ok_or(TextError::MalformedOpenType("GPOS"))?;
     for &index in selection {
-        if let Some(data) = data {
-            validate_lookup_type(data, index, script)?;
-        }
+        let declared_subtables = data
+            .map(|data| validate_lookup_type(data, index, script))
+            .transpose()?;
         let lookup = table
             .lookups
             .get(index)
             .ok_or(TextError::MalformedOpenType("GPOS LookupList"))?;
-        let mut parsed = false;
-        let filter = GlyphFilter::new(face, lookup);
-        let mut claimed = vec![false; buffer.len()];
-        for subtable in lookup.subtables.into_iter::<PositioningSubtable<'_>>() {
-            parsed = true;
-            apply_subtable(subtable, buffer, &mut claimed, filter, script)?;
+        let subtables: Vec<_> = lookup
+            .subtables
+            .into_iter::<PositioningSubtable<'_>>()
+            .collect();
+        if declared_subtables.is_some_and(|count| count != subtables.len()) {
+            return Err(TextError::MalformedOpenType("GPOS subtable"));
         }
-        if !parsed {
+        if subtables.is_empty() {
             return Err(TextError::UnsupportedLookup {
                 table: "GPOS",
                 lookup_type: 0,
                 script,
             });
         }
+        let filter = GlyphFilter::new(face, lookup);
+        let mut claimed = vec![false; buffer.len()];
+        for subtable in subtables {
+            apply_subtable(face, subtable, buffer, &mut claimed, filter, script)?;
+        }
     }
     Ok(())
 }
 
 fn apply_subtable(
+    face: &Face<'_>,
     subtable: PositioningSubtable<'_>,
     buffer: &mut [PositioningGlyph],
     claimed: &mut [bool],
@@ -131,7 +94,7 @@ fn apply_subtable(
                     }
                 };
                 if let Some(value) = value {
-                    apply_value(glyph, value)?;
+                    apply_value(face, glyph, value)?;
                     claimed[index] = true;
                 }
             }
@@ -166,8 +129,8 @@ fn apply_subtable(
                         .flatten(),
                 };
                 if let Some((first, second)) = values {
-                    apply_value(&mut buffer[index], first)?;
-                    apply_value(&mut buffer[next], second)?;
+                    apply_value(face, &mut buffer[index], first)?;
+                    apply_value(face, &mut buffer[next], second)?;
                     claimed[index] = true;
                 }
             }
@@ -180,12 +143,15 @@ fn apply_subtable(
                 let Some(mark_index) = mark.mark_coverage.get(buffer[index].id) else {
                     continue;
                 };
-                let Some(parent) = (0..index).rev().find(|&parent| {
-                    !filter.ignored_id(buffer[parent].id)
-                        && mark.base_coverage.contains(buffer[parent].id)
-                }) else {
+                let Some(parent) = (0..index)
+                    .rev()
+                    .find(|&parent| !filter.ignored_id(buffer[parent].id))
+                else {
                     continue;
                 };
+                if !mark.base_coverage.contains(buffer[parent].id) {
+                    continue;
+                }
                 let Some(base_index) = mark.base_coverage.get(buffer[parent].id) else {
                     continue;
                 };
@@ -195,7 +161,15 @@ fn apply_subtable(
                 let Some(parent_anchor) = mark.anchors.get(base_index, class) else {
                     continue;
                 };
-                attach(buffer, index, parent, mark_anchor, parent_anchor, None)?;
+                attach(
+                    face,
+                    buffer,
+                    index,
+                    parent,
+                    mark_anchor,
+                    parent_anchor,
+                    None,
+                )?;
                 claimed[index] = true;
             }
         }
@@ -207,12 +181,15 @@ fn apply_subtable(
                 let Some(mark_index) = mark.mark_coverage.get(buffer[index].id) else {
                     continue;
                 };
-                let Some(parent) = (0..index).rev().find(|&parent| {
-                    !filter.ignored_id(buffer[parent].id)
-                        && mark.ligature_coverage.contains(buffer[parent].id)
-                }) else {
+                let Some(parent) = (0..index)
+                    .rev()
+                    .find(|&parent| !filter.ignored_id(buffer[parent].id))
+                else {
                     continue;
                 };
+                if !mark.ligature_coverage.contains(buffer[parent].id) {
+                    continue;
+                }
                 let Some(ligature_index) = mark.ligature_coverage.get(buffer[parent].id) else {
                     continue;
                 };
@@ -237,6 +214,7 @@ fn apply_subtable(
                     continue;
                 };
                 attach(
+                    face,
                     buffer,
                     index,
                     parent,
@@ -255,12 +233,15 @@ fn apply_subtable(
                 let Some(mark_index) = mark.mark1_coverage.get(buffer[index].id) else {
                     continue;
                 };
-                let Some(parent) = (0..index).rev().find(|&parent| {
-                    !filter.ignored_id(buffer[parent].id)
-                        && mark.mark2_coverage.contains(buffer[parent].id)
-                }) else {
+                let Some(parent) = (0..index)
+                    .rev()
+                    .find(|&parent| !filter.ignored_id(buffer[parent].id))
+                else {
                     continue;
                 };
+                if !mark.mark2_coverage.contains(buffer[parent].id) {
+                    continue;
+                }
                 let Some(parent_index) = mark.mark2_coverage.get(buffer[parent].id) else {
                     continue;
                 };
@@ -270,7 +251,15 @@ fn apply_subtable(
                 let Some(parent_anchor) = mark.mark2_matrix.get(parent_index, class) else {
                     continue;
                 };
-                attach(buffer, index, parent, mark_anchor, parent_anchor, None)?;
+                attach(
+                    face,
+                    buffer,
+                    index,
+                    parent,
+                    mark_anchor,
+                    parent_anchor,
+                    None,
+                )?;
                 claimed[index] = true;
             }
         }

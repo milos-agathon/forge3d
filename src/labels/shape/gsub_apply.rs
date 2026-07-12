@@ -109,6 +109,10 @@ pub(super) fn apply_subtable(
                         .min()
                         .unwrap_or(glyph.cluster);
                     let mut replacement = Glyph::new(candidate.glyph, cluster);
+                    replacement.component_clusters = positions
+                        .iter()
+                        .flat_map(|&index| buffer[index].component_clusters.iter().copied())
+                        .collect();
                     replacement.features.clone_from(&glyph.features);
                     replacement.origin = glyph.origin;
                     buffer[position] = replacement;
