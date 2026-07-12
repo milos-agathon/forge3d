@@ -31,6 +31,24 @@ pub(crate) fn parse_named_instances(data: &[u8]) -> Result<Vec<NamedInstance>, T
         return Err(TextError::MalformedFvar);
     }
 
+    let axes_end = axes_offset
+        .checked_add(
+            axis_count
+                .checked_mul(axis_size)
+                .ok_or(TextError::MalformedFvar)?,
+        )
+        .ok_or(TextError::MalformedFvar)?;
+    let instances_end = axes_end
+        .checked_add(
+            instance_count
+                .checked_mul(instance_size)
+                .ok_or(TextError::MalformedFvar)?,
+        )
+        .ok_or(TextError::MalformedFvar)?;
+    if axes_offset < 16 || axes_end > data.len() || instances_end > data.len() {
+        return Err(TextError::MalformedFvar);
+    }
+
     let mut tags = Vec::with_capacity(axis_count);
     for axis in 0..axis_count {
         let offset = axes_offset
@@ -47,13 +65,7 @@ pub(crate) fn parse_named_instances(data: &[u8]) -> Result<Vec<NamedInstance>, T
         );
     }
 
-    let instances_offset = axes_offset
-        .checked_add(
-            axis_count
-                .checked_mul(axis_size)
-                .ok_or(TextError::MalformedFvar)?,
-        )
-        .ok_or(TextError::MalformedFvar)?;
+    let instances_offset = axes_end;
     let mut instances = Vec::with_capacity(instance_count);
     for index in 0..instance_count {
         let offset = instances_offset

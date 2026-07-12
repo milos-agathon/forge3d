@@ -1,6 +1,7 @@
 mod face;
 mod fvar;
 pub(crate) mod outline;
+mod variation;
 
 pub use face::{FaceDescriptor, FaceMetrics, FontCollection, FontGlyph, FontRequest, TextError};
 pub(crate) use fvar::parse_named_instances;
@@ -99,6 +100,67 @@ mod tests {
         }
         name.extend_from_slice(&utf16);
         with_tables(&[(*b"fvar", fvar), (*b"name", name)])
+    }
+
+    fn multi_axis_variable_demo_font() -> Vec<u8> {
+        let mut fvar = Vec::new();
+        fvar.extend_from_slice(&0x0001_0000u32.to_be_bytes());
+        fvar.extend_from_slice(&16u16.to_be_bytes());
+        fvar.extend_from_slice(&2u16.to_be_bytes());
+        fvar.extend_from_slice(&2u16.to_be_bytes());
+        fvar.extend_from_slice(&20u16.to_be_bytes());
+        fvar.extend_from_slice(&1u16.to_be_bytes());
+        fvar.extend_from_slice(&12u16.to_be_bytes());
+        for (tag, min, default, max, name_id) in [
+            (*b"wght", 100i32, 400i32, 900i32, 256u16),
+            (*b"wdth", 50i32, 100i32, 200i32, 257u16),
+        ] {
+            fvar.extend_from_slice(&tag);
+            for value in [min, default, max] {
+                fvar.extend_from_slice(&(value << 16).to_be_bytes());
+            }
+            fvar.extend_from_slice(&0u16.to_be_bytes());
+            fvar.extend_from_slice(&name_id.to_be_bytes());
+        }
+        fvar.extend_from_slice(&300u16.to_be_bytes());
+        fvar.extend_from_slice(&0u16.to_be_bytes());
+        fvar.extend_from_slice(&(700i32 << 16).to_be_bytes());
+        fvar.extend_from_slice(&(150i32 << 16).to_be_bytes());
+
+        let mut avar = Vec::new();
+        avar.extend_from_slice(&0x0001_0000u32.to_be_bytes());
+        avar.extend_from_slice(&0u16.to_be_bytes());
+        avar.extend_from_slice(&2u16.to_be_bytes());
+        for positive_end in [8192i16, 4096i16] {
+            avar.extend_from_slice(&3u16.to_be_bytes());
+            for (from, to) in [(-16384i16, -16384i16), (0, 0), (16384, positive_end)] {
+                avar.extend_from_slice(&from.to_be_bytes());
+                avar.extend_from_slice(&to.to_be_bytes());
+            }
+        }
+
+        let utf16: Vec<u8> = "Bold Condensed"
+            .encode_utf16()
+            .flat_map(u16::to_be_bytes)
+            .collect();
+        let mut name = Vec::new();
+        for value in [0u16, 1, 18, 3, 1, 0x0409, 300, utf16.len() as u16, 0] {
+            name.extend_from_slice(&value.to_be_bytes());
+        }
+        name.extend_from_slice(&utf16);
+        with_tables(&[(*b"avar", avar), (*b"fvar", fvar), (*b"name", name)])
+    }
+
+    fn table_offset(font: &[u8], wanted: [u8; 4]) -> usize {
+        let count = u16::from_be_bytes(font[4..6].try_into().unwrap()) as usize;
+        for index in 0..count {
+            let record = 12 + index * 16;
+            if font[record..record + 4] == wanted {
+                return u32::from_be_bytes(font[record + 8..record + 12].try_into().unwrap())
+                    as usize;
+            }
+        }
+        panic!("missing table")
     }
 
     fn demo_collection() -> Vec<u8> {
@@ -241,11 +303,10 @@ mod tests {
 
     #[test]
     fn named_instance_is_resolved_and_bound_to_descriptor() {
+        let original = variable_demo_font();
         let collection =
-            FontCollection::load(&[
-                FontRequest::from_bytes("variable.ttf", variable_demo_font())
-                    .with_named_instance("Bold"),
-            ])
+            FontCollection::load(&[FontRequest::from_bytes("variable.ttf", original.clone())
+                .with_named_instance("Bold")])
             .unwrap();
         assert_eq!(
             collection.descriptors()[0].variations,
@@ -256,6 +317,54 @@ mod tests {
             .face(0)
             .unwrap()
             .has_non_default_variation_coordinates());
+        assert_eq!(collection.font_bytes(0).unwrap(), original);
+    }
+
+    #[test]
+    fn multi_axis_avar_is_applied_once_to_the_complete_vector() {
+        let collection = FontCollection::load(&[FontRequest::from_bytes(
+            "multi-axis.ttf",
+            multi_axis_variable_demo_font(),
+        )
+        .with_named_instance("Bold Condensed")])
+        .unwrap();
+        let coordinates: Vec<i16> = collection
+            .face(0)
+            .unwrap()
+            .variation_coordinates()
+            .iter()
+            .map(|coordinate| coordinate.get())
+            .collect();
+        assert_eq!(coordinates, vec![4915, 2048]);
+    }
+
+    #[test]
+    fn fvar_rejects_truncated_declared_records() {
+        let mut truncated_axis = vec![0, 1, 0, 0, 0, 16, 0, 2, 0, 1, 0, 24, 0, 0, 0, 4];
+        truncated_axis.extend_from_slice(&[0; 20]);
+        assert_eq!(
+            parse_named_instances(&truncated_axis).unwrap_err(),
+            TextError::MalformedFvar
+        );
+
+        let mut truncated_instance = vec![0, 1, 0, 0, 0, 16, 0, 2, 0, 1, 0, 20, 0, 1, 0, 12];
+        truncated_instance.extend_from_slice(&[0; 20]);
+        truncated_instance.extend_from_slice(&[0; 8]);
+        assert_eq!(
+            parse_named_instances(&truncated_instance).unwrap_err(),
+            TextError::MalformedFvar
+        );
+    }
+
+    #[test]
+    fn load_rejects_malformed_avar_before_returning_collection() {
+        let mut font = multi_axis_variable_demo_font();
+        let avar = table_offset(&font, *b"avar");
+        font[avar + 6..avar + 8].copy_from_slice(&1u16.to_be_bytes());
+        let result = FontCollection::load(&[
+            FontRequest::from_bytes("bad-avar.ttf", font).with_named_instance("Bold Condensed")
+        ]);
+        assert!(matches!(result, Err(TextError::MalformedFvar)));
     }
 
     #[test]
