@@ -1,60 +1,10 @@
 use super::types::VertexPN;
+use crate::labels::font::outline::PathSink;
 use lyon_path::{math, Path};
 use lyon_tessellation::{
     BuffersBuilder, FillOptions, FillTessellator, FillVertex, FillVertexConstructor, VertexBuffers,
 };
-use ttf_parser::{Face, OutlineBuilder};
-
-struct PathSink<'a> {
-    builder: &'a mut lyon_path::path::Builder,
-    scale: f32,
-    offset: glam::Vec2,
-}
-impl OutlineBuilder for PathSink<'_> {
-    fn move_to(&mut self, x: f32, y: f32) {
-        self.builder.begin(math::point(
-            self.offset.x + x * self.scale,
-            self.offset.y - y * self.scale,
-        ));
-    }
-    fn line_to(&mut self, x: f32, y: f32) {
-        self.builder.line_to(math::point(
-            self.offset.x + x * self.scale,
-            self.offset.y - y * self.scale,
-        ));
-    }
-    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-        self.builder.quadratic_bezier_to(
-            math::point(
-                self.offset.x + x1 * self.scale,
-                self.offset.y - y1 * self.scale,
-            ),
-            math::point(
-                self.offset.x + x * self.scale,
-                self.offset.y - y * self.scale,
-            ),
-        );
-    }
-    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
-        self.builder.cubic_bezier_to(
-            math::point(
-                self.offset.x + x1 * self.scale,
-                self.offset.y - y1 * self.scale,
-            ),
-            math::point(
-                self.offset.x + x2 * self.scale,
-                self.offset.y - y2 * self.scale,
-            ),
-            math::point(
-                self.offset.x + x * self.scale,
-                self.offset.y - y * self.scale,
-            ),
-        );
-    }
-    fn close(&mut self) {
-        self.builder.end(true);
-    }
-}
+use ttf_parser::Face;
 
 #[derive(Clone, Copy)]
 struct FrontVertexCtor;
@@ -94,11 +44,7 @@ pub fn build_text_mesh(
         }
         if let Some(gid) = face.glyph_index(ch) {
             // Outline glyph into builder with current offset
-            let mut sink = PathSink {
-                builder: &mut path_builder,
-                scale,
-                offset: glam::Vec2::new(x_cursor, 0.0),
-            };
+            let mut sink = PathSink::new(&mut path_builder, scale, glam::Vec2::new(x_cursor, 0.0));
             // outline_glyph returns Option<Rect>; we ignore the bounds and just build when present
             let _ = face.outline_glyph(gid, &mut sink);
             // advance x_cursor
