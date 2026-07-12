@@ -15,6 +15,7 @@ pub mod callout;
 mod collision;
 pub mod curved;
 pub mod declutter;
+pub mod font;
 pub mod layer;
 pub mod leader;
 pub mod line_label;
