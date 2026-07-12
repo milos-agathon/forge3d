@@ -26,5 +26,6 @@ python src/labels/unicode/generate.py --version 17.0.0 --scripts <ucd>/Scripts.t
 Generated UTF-8 bytes SHA-256:
 `320d8cdfefe3d0e292ea2c00d831224c117a3c409212550090669b1c655592c6`.
 
-Unicode data use is governed by the terms linked in each source file:
-`https://www.unicode.org/terms_of_use.html`.
+The required Unicode License v3 copyright and permission notice is
+distributed alongside these tables in `LICENSE-UNICODE`. The authoritative
+license is published at `https://www.unicode.org/license.txt`.
