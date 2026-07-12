@@ -1,4 +1,4 @@
-use super::{outline::PathSink, parse_named_instances, to_q26_6};
+use super::{outline::PathSink, parse_named_instances, to_q26_6, variation};
 use crate::core::provenance::sha256;
 use lyon_path::Path;
 use std::fmt;
@@ -119,6 +119,8 @@ impl std::error::Error for TextError {}
 struct FontData {
     source: String,
     bytes: Arc<[u8]>,
+    face_bytes: Arc<[u8]>,
+    applied_variations: Vec<([u8; 4], f32)>,
     descriptor: FaceDescriptor,
 }
 
@@ -163,15 +165,21 @@ impl FontCollection {
                 Vec::new()
             };
             variations.sort_by_key(|(tag, _)| *tag);
-            faces.push(FontData {
+            let prepared =
+                variation::prepare(&face, &request.bytes, request.face_index, &variations)?;
+            let data = FontData {
                 source: request.source.clone(),
                 bytes: Arc::clone(&request.bytes),
+                face_bytes: prepared.face_bytes,
+                applied_variations: prepared.coordinates,
                 descriptor: FaceDescriptor {
                     sha256: sha256(&request.bytes),
                     face_index: request.face_index,
                     variations,
                 },
-            });
+            };
+            Self::parse_face(&data)?;
+            faces.push(data);
         }
         Ok(Self { faces })
     }
@@ -183,14 +191,16 @@ impl FontCollection {
             .collect()
     }
 
+    pub fn font_bytes(&self, index: usize) -> Result<&[u8], TextError> {
+        self.faces
+            .get(index)
+            .map(|face| face.bytes.as_ref())
+            .ok_or(TextError::InvalidFontIndex(index))
+    }
+
     pub fn glyph_for(&self, codepoint: char) -> Result<FontGlyph, TextError> {
-        for (font_index, data) in self.faces.iter().enumerate() {
-            let face = Face::parse(&data.bytes, data.descriptor.face_index).map_err(|_| {
-                TextError::InvalidFont {
-                    source: data.source.clone(),
-                    face_index: data.descriptor.face_index,
-                }
-            })?;
+        for font_index in 0..self.faces.len() {
+            let face = self.face(font_index)?;
             if let Some(glyph_id) = face.glyph_index(codepoint) {
                 if glyph_id.0 != 0 {
                     return Ok(FontGlyph {
@@ -211,16 +221,17 @@ impl FontCollection {
             .faces
             .get(index)
             .ok_or(TextError::InvalidFontIndex(index))?;
-        let mut face = Face::parse(&data.bytes, data.descriptor.face_index).map_err(|_| {
+        Self::parse_face(data)
+    }
+
+    fn parse_face(data: &FontData) -> Result<Face<'_>, TextError> {
+        let mut face = Face::parse(&data.face_bytes, data.descriptor.face_index).map_err(|_| {
             TextError::InvalidFont {
                 source: data.source.clone(),
                 face_index: data.descriptor.face_index,
             }
         })?;
-        for (tag, value) in &data.descriptor.variations {
-            face.set_variation(Tag::from_bytes(tag), *value as f32 / 65_536.0)
-                .ok_or(TextError::MalformedFvar)?;
-        }
+        variation::apply(&mut face, &data.applied_variations)?;
         Ok(face)
     }
 
