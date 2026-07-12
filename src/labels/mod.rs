@@ -24,6 +24,7 @@ mod projection;
 #[cfg(feature = "extension-module")]
 pub mod py_bindings;
 pub mod rtree;
+pub mod shape;
 mod types;
 pub mod typography;
 pub mod unicode;
