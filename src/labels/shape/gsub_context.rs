@@ -208,15 +208,24 @@ pub(super) fn apply_chain_context(
         .filter_map(|index| records.get(index))
         .collect();
     let mut positions: Vec<Option<usize>> = input_positions.into_iter().map(Some).collect();
+    let origins: Vec<u64> = positions
+        .iter()
+        .map(|position| buffer[position.expect("matched input")].origin)
+        .collect();
     for record in records {
-        let Some(Some(target)) = positions.get(usize::from(record.sequence_index)).copied() else {
+        let sequence_index = usize::from(record.sequence_index);
+        if sequence_index >= positions.len() {
+            return Err(TextError::MalformedOpenType(
+                "GSUB contextual sequence index",
+            ));
+        }
+        let Some(target) = positions[sequence_index] else {
             continue;
         };
         let nested = table
             .lookups
             .get(record.lookup_list_index)
             .ok_or(TextError::MalformedOpenType("GSUB contextual lookup"))?;
-        let old_len = buffer.len();
         apply_lookup_at(
             face,
             data,
@@ -228,17 +237,8 @@ pub(super) fn apply_chain_context(
             script,
             depth + 1,
         )?;
-        let delta = buffer.len() as isize - old_len as isize;
-        for slot in positions
-            .iter_mut()
-            .skip(usize::from(record.sequence_index) + 1)
-        {
-            let Some(at) = *slot else { continue };
-            if delta < 0 && at <= target + (-delta) as usize {
-                *slot = None;
-            } else {
-                *slot = Some((at as isize + delta) as usize);
-            }
+        for (slot, origin) in positions.iter_mut().zip(&origins) {
+            *slot = buffer.iter().position(|glyph| glyph.origin == *origin);
         }
     }
     Ok(Some(1))

@@ -16,6 +16,7 @@ pub struct Glyph {
     pub id: GlyphId,
     pub cluster: u32,
     features: Vec<Tag>,
+    pub(super) origin: u64,
 }
 
 impl Glyph {
@@ -24,6 +25,7 @@ impl Glyph {
             id,
             cluster,
             features: Vec::new(),
+            origin: 0,
         }
     }
 
@@ -102,6 +104,13 @@ fn apply_gsub_with_data(
     selection: &[GsubLookup],
     script: Tag,
 ) -> Result<(), TextError> {
+    let mut next_origin = buffer.iter().map(|glyph| glyph.origin).max().unwrap_or(0) + 1;
+    for glyph in buffer.iter_mut() {
+        if glyph.origin == 0 {
+            glyph.origin = next_origin;
+            next_origin += 1;
+        }
+    }
     let table = face
         .tables()
         .gsub
@@ -177,6 +186,10 @@ fn validate_lookup_types(data: &[u8], selection: &[u16], script: Tag) -> Result<
                         script,
                     });
                 }
+                let target = extension
+                    .checked_add(reader.u32(extension + 4)? as usize)
+                    .ok_or(TextError::MalformedOpenType("GSUB extension"))?;
+                reader.slice_at(target, 2)?;
             }
         }
     }
