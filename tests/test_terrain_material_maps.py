@@ -15,6 +15,21 @@ from forge3d.terrain_params import (
     make_terrain_params_config,
 )
 
+from _terrain_runtime import (
+    terrain_rendering_available as _terrain_rendering_available,
+)
+
+_requires_gpu = pytest.mark.skipif(
+    not _terrain_rendering_available(),
+    reason=(
+        "MapScene native terrain render requires a terrain-safe hardware "
+        "adapter; hosted runners (GPU-less, WARP, or guarded paravirtual "
+        "Metal) either block with a native-render diagnostic or raise by "
+        "design (SUTURA), so these render-asserting tests skip honestly"
+    ),
+)
+
+
 
 GPU_AVAILABLE = terrain_rendering_available()
 
@@ -94,6 +109,7 @@ def test_native_render_params_decode_material_map_paths(tmp_path: Path) -> None:
     }
 
 
+@_requires_gpu
 def test_mapscene_terrain_metadata_wires_material_maps_to_native_params(tmp_path: Path) -> None:
     normal_path = tmp_path / "normal.png"
     roughness_path = tmp_path / "roughness.png"

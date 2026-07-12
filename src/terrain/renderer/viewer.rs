@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::{tracked_create_buffer_init, TrackedBuffer};
 
 impl TerrainScene {
     pub fn load_terrain_for_viewer(&mut self, dem_path: &str) -> Result<()> {
@@ -94,7 +95,7 @@ impl TerrainScene {
     fn create_terrain_mesh(
         &self,
         grid_resolution: u32,
-    ) -> Result<(wgpu::Buffer, wgpu::Buffer, u32)> {
+    ) -> Result<(TrackedBuffer, TrackedBuffer, u32)> {
         let mut vertices: Vec<f32> = Vec::new();
         let mut indices: Vec<u32> = Vec::new();
 
@@ -124,21 +125,23 @@ impl TerrainScene {
             }
         }
 
-        let vertex_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let vertex_buffer = tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.viewer.vertex_buffer"),
                 contents: bytemuck::cast_slice(&vertices),
                 usage: wgpu::BufferUsages::VERTEX,
-            });
+            },
+        )?;
 
-        let index_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let index_buffer = tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.viewer.index_buffer"),
                 contents: bytemuck::cast_slice(&indices),
                 usage: wgpu::BufferUsages::INDEX,
-            });
+            },
+        )?;
 
         Ok((vertex_buffer, index_buffer, indices.len() as u32))
     }
@@ -225,13 +228,20 @@ impl TerrainScene {
         let uniforms =
             crate::terrain::TerrainUniforms::new(view, proj, sun_dir, 1.0, spacing, h_range, 1.0);
 
-        let uniform_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let uniform_buffer = match tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.viewer.uniforms"),
                 contents: bytemuck::cast_slice(&[uniforms]),
                 usage: wgpu::BufferUsages::UNIFORM,
-            });
+            },
+        ) {
+            Ok(buffer) => buffer,
+            Err(err) => {
+                log::error!(target: "terrain.viewer", "failed to allocate viewer uniform buffer: {err}");
+                return false;
+            }
+        };
 
         let pipeline_guard = self.pipeline.lock().unwrap();
         let pipeline = &pipeline_guard.pipeline;

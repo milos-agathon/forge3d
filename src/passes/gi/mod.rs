@@ -11,10 +11,11 @@ pub use params::{GiCompositeParams, GiCompositeParamsStd140};
 
 use crate::core::error::RenderResult;
 use crate::core::gpu_timing::GpuTimingManager;
+use crate::core::resource_tracker::{tracked_create_buffer_init, TrackedBuffer};
 use wgpu::{
-    util::DeviceExt, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindingResource, Buffer,
-    BufferUsages, CommandEncoder, ComputePassDescriptor, ComputePipeline,
-    ComputePipelineDescriptor, Device, ShaderModuleDescriptor, ShaderSource, TextureView,
+    BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindingResource, BufferUsages,
+    CommandEncoder, ComputePassDescriptor, ComputePipeline, ComputePipelineDescriptor, Device,
+    TextureView,
 };
 
 pub struct GiPass {
@@ -22,7 +23,7 @@ pub struct GiPass {
     bind_group_layout: BindGroupLayout,
     debug_pipeline: ComputePipeline,
     debug_bind_group_layout: BindGroupLayout,
-    params_buffer: Buffer,
+    params_buffer: TrackedBuffer,
     width: u32,
     height: u32,
     params: GiCompositeParams,
@@ -32,14 +33,16 @@ pub struct GiPass {
 
 impl GiPass {
     pub fn new(device: &Device, width: u32, height: u32) -> RenderResult<Self> {
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("p5.gi.composite"),
-            source: ShaderSource::Wgsl(include_str!("../../shaders/gi/composite.wgsl").into()),
-        });
-        let debug_shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("p5.gi.debug"),
-            source: ShaderSource::Wgsl(include_str!("../../shaders/gi/debug.wgsl").into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "p5.gi.composite",
+            include_str!("../../shaders/gi/composite.wgsl"),
+        );
+        let debug_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "p5.gi.debug",
+            include_str!("../../shaders/gi/debug.wgsl"),
+        );
 
         let bind_group_layout = bind_groups::create_composite_bind_group_layout(device);
         let pipeline = create_compute_pipeline(device, &shader, &bind_group_layout, "composite");
@@ -50,11 +53,14 @@ impl GiPass {
 
         let params = GiCompositeParams::default();
         let params_std: GiCompositeParamsStd140 = params.into();
-        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("p5.gi.composite.params"),
-            contents: bytemuck::bytes_of(&params_std),
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-        });
+        let params_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("p5.gi.composite.params"),
+                contents: bytemuck::bytes_of(&params_std),
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            },
+        )?;
 
         Ok(Self {
             pipeline,
@@ -233,16 +239,19 @@ fn create_compute_pipeline(
         "debug" => "cs_gi_debug",
         _ => "cs_gi_composite",
     };
-    device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: Some(&format!("p5.gi.{}.pipeline", kind)),
-        layout: Some(
-            &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(&format!("p5.gi.{}.layout", kind)),
-                bind_group_layouts: &[bind_group_layout],
-                push_constant_ranges: &[],
-            }),
-        ),
-        module: shader,
-        entry_point,
-    })
+    crate::core::shader_registry::create_compute_pipeline_scoped(
+        device,
+        &ComputePipelineDescriptor {
+            label: Some(&format!("p5.gi.{}.pipeline", kind)),
+            layout: Some(
+                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some(&format!("p5.gi.{}.layout", kind)),
+                    bind_group_layouts: &[bind_group_layout],
+                    push_constant_ranges: &[],
+                }),
+            ),
+            module: shader,
+            entry_point,
+        },
+    )
 }

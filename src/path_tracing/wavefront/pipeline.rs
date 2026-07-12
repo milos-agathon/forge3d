@@ -29,52 +29,51 @@ pub struct WavefrontPipelines {
 
 impl WavefrontPipelines {
     pub fn new(device: &Device) -> Result<Self, Box<dyn std::error::Error>> {
-        let raygen_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("pt-raygen-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/pt_raygen.wgsl").into()),
-        });
-        let intersect_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("pt-intersect-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/pt_intersect.wgsl").into(),
-            ),
-        });
-        let shade_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("pt-shade-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/pt_shade.wgsl").into()),
-        });
-        let scatter_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("pt-scatter-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/pt_scatter.wgsl").into()),
-        });
-        let shadow_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("pt-shadow-shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../../shaders/pt_shadow.wgsl").into()),
-        });
-        let restir_init_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("pt-restir-init-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/pt_restir_init.wgsl").into(),
-            ),
-        });
-        let restir_temporal_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("pt-restir-temporal-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/pt_restir_temporal.wgsl").into(),
-            ),
-        });
-        let restir_spatial_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("pt-restir-spatial-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/pt_restir_spatial.wgsl").into(),
-            ),
-        });
-        let ao_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("ao-from-aovs-shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/ao_from_aovs.wgsl").into(),
-            ),
-        });
+        let raygen_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "pt-raygen-shader",
+            include_str!("../../shaders/pt_raygen.wgsl"),
+        );
+        let intersect_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "pt-intersect-shader",
+            include_str!("../../shaders/pt_intersect.wgsl"),
+        );
+        let shade_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "pt-shade-shader",
+            include_str!("../../shaders/pt_shade.wgsl"),
+        );
+        let scatter_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "pt-scatter-shader",
+            include_str!("../../shaders/pt_scatter.wgsl"),
+        );
+        let shadow_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "pt-shadow-shader",
+            include_str!("../../shaders/pt_shadow.wgsl"),
+        );
+        let restir_init_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "pt-restir-init-shader",
+            include_str!("../../shaders/pt_restir_init.wgsl"),
+        );
+        let restir_temporal_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "pt-restir-temporal-shader",
+            include_str!("../../shaders/pt_restir_temporal.wgsl"),
+        );
+        let restir_spatial_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "pt-restir-spatial-shader",
+            include_str!("../../shaders/pt_restir_spatial.wgsl"),
+        );
+        let ao_shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "ao-from-aovs-shader",
+            include_str!("../../shaders/ao_from_aovs.wgsl"),
+        );
 
         let uniforms_bind_group_layout = Self::create_uniforms_bind_group_layout(device);
         let scene_bind_group_layout = Self::create_scene_bind_group_layout(device);
@@ -159,12 +158,15 @@ impl WavefrontPipelines {
             bind_group_layouts: &[&ao_bind_group_layout],
             push_constant_ranges: &[],
         });
-        let ao_compute = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("ao-from-aovs-pipeline"),
-            layout: Some(&ao_pipeline_layout),
-            module: &ao_shader,
-            entry_point: "main",
-        });
+        let ao_compute = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("ao-from-aovs-pipeline"),
+                layout: Some(&ao_pipeline_layout),
+                module: &ao_shader,
+                entry_point: "main",
+            },
+        );
 
         Ok(Self {
             raygen,

@@ -86,6 +86,18 @@ impl CapabilitySet {
             .map(|(n, _, _)| *n)
             .collect()
     }
+
+    /// Record a driver rejection of the negotiated request and downgrade to
+    /// an empty optional-feature set for one retry.
+    pub fn downgrade_after_request_failure(&mut self, error: &str) {
+        record_degradation("capability_request_failed", "negotiated_features", error);
+        for (name, feature, consequence) in WANTED {
+            if self.granted.contains(*feature) {
+                record_degradation("capability_absent", name, consequence);
+            }
+        }
+        self.granted = Features::empty();
+    }
 }
 
 #[cfg(test)]

@@ -3,12 +3,13 @@
 // Supports water tint toggling, transparency, and basic wave animation
 
 use glam::{Mat4, Vec2, Vec3};
-use std::borrow::Cow;
 use wgpu::{
     vertex_attr_array, AddressMode, BindGroup, BindGroupLayout, BlendComponent, BlendFactor,
-    BlendOperation, BlendState, Buffer, BufferAddress, Device, Queue, RenderPipeline, Sampler,
-    Texture, TextureFormat, TextureView,
+    BlendOperation, BlendState, BufferAddress, Device, Queue, RenderPipeline, Sampler,
+    TextureFormat, TextureView,
 };
+
+use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 
 mod constructor;
 mod controls;
@@ -153,18 +154,18 @@ impl Default for WaterSurfaceUniforms {
 pub struct WaterSurfaceRenderer {
     pub uniforms: WaterSurfaceUniforms,
     pub params: WaterSurfaceParams,
-    pub uniform_buffer: Buffer,
+    pub uniform_buffer: TrackedBuffer,
     pub water_pipeline: RenderPipeline,
     pub bind_group_layout: BindGroupLayout,
     pub bind_group: BindGroup,
     pub mask_bind_group_layout: BindGroupLayout,
     pub mask_bind_group: BindGroup,
-    pub mask_texture: Texture,
+    pub mask_texture: TrackedTexture,
     pub mask_view: TextureView,
     pub mask_sampler: Sampler,
     pub mask_size: (u32, u32),
-    pub vertex_buffer: Buffer,
-    pub index_buffer: Buffer,
+    pub vertex_buffer: TrackedBuffer,
+    pub index_buffer: TrackedBuffer,
     pub index_count: u32,
     pub animation_time: f32,
     pub enabled: bool,

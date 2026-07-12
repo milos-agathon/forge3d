@@ -1,12 +1,15 @@
 use super::uniforms::WaterReflectionUniforms;
-use wgpu::util::DeviceExt;
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{
+    tracked_create_buffer_init, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 
 pub(in crate::terrain::renderer) struct WaterReflectionInitResources {
-    pub(in crate::terrain::renderer) water_reflection_uniform_buffer: wgpu::Buffer,
-    pub(in crate::terrain::renderer) water_reflection_texture: wgpu::Texture,
+    pub(in crate::terrain::renderer) water_reflection_uniform_buffer: TrackedBuffer,
+    pub(in crate::terrain::renderer) water_reflection_texture: TrackedTexture,
     pub(in crate::terrain::renderer) water_reflection_view: wgpu::TextureView,
     pub(in crate::terrain::renderer) water_reflection_sampler: wgpu::Sampler,
-    pub(in crate::terrain::renderer) water_reflection_depth_texture: wgpu::Texture,
+    pub(in crate::terrain::renderer) water_reflection_depth_texture: TrackedTexture,
     pub(in crate::terrain::renderer) water_reflection_depth_view: wgpu::TextureView,
     pub(in crate::terrain::renderer) water_reflection_size: (u32, u32),
     pub(in crate::terrain::renderer) water_reflection_fallback_view: wgpu::TextureView,
@@ -16,46 +19,54 @@ pub(in crate::terrain::renderer) fn create_water_reflection_init_resources(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     color_format: wgpu::TextureFormat,
-) -> WaterReflectionInitResources {
-    let water_reflection_uniform_buffer =
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+) -> RenderResult<WaterReflectionInitResources> {
+    let water_reflection_uniform_buffer = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
             label: Some("terrain.water_reflection.uniform_buffer"),
             contents: bytemuck::bytes_of(&WaterReflectionUniforms::disabled()),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        },
+    )?;
 
     let water_reflection_resolution = 512u32;
-    let water_reflection_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("terrain.water_reflection.texture"),
-        size: wgpu::Extent3d {
-            width: water_reflection_resolution,
-            height: water_reflection_resolution,
-            depth_or_array_layers: 1,
+    let water_reflection_texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("terrain.water_reflection.texture"),
+            size: wgpu::Extent3d {
+                width: water_reflection_resolution,
+                height: water_reflection_resolution,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: color_format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: color_format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
+    )?;
     let water_reflection_view =
         water_reflection_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-    let water_reflection_depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("terrain.water_reflection.depth"),
-        size: wgpu::Extent3d {
-            width: water_reflection_resolution,
-            height: water_reflection_resolution,
-            depth_or_array_layers: 1,
+    let water_reflection_depth_texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("terrain.water_reflection.depth"),
+            size: wgpu::Extent3d {
+                width: water_reflection_resolution,
+                height: water_reflection_resolution,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Depth32Float,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
+    )?;
     let water_reflection_depth_view =
         water_reflection_depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -70,20 +81,23 @@ pub(in crate::terrain::renderer) fn create_water_reflection_init_resources(
         ..Default::default()
     });
 
-    let water_reflection_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("terrain.water_reflection.fallback"),
-        size: wgpu::Extent3d {
-            width: 1,
-            height: 1,
-            depth_or_array_layers: 1,
+    let water_reflection_fallback_texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("terrain.water_reflection.fallback"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: color_format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: color_format,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    )?;
     queue.write_texture(
         wgpu::ImageCopyTexture {
             texture: &water_reflection_fallback_texture,
@@ -106,7 +120,7 @@ pub(in crate::terrain::renderer) fn create_water_reflection_init_resources(
     let water_reflection_fallback_view =
         water_reflection_fallback_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-    WaterReflectionInitResources {
+    Ok(WaterReflectionInitResources {
         water_reflection_uniform_buffer,
         water_reflection_texture,
         water_reflection_view,
@@ -115,5 +129,5 @@ pub(in crate::terrain::renderer) fn create_water_reflection_init_resources(
         water_reflection_depth_view,
         water_reflection_size: (water_reflection_resolution, water_reflection_resolution),
         water_reflection_fallback_view,
-    }
+    })
 }

@@ -32,6 +32,14 @@ pub fn poison_context(reason: String) {
     let _ = POISONED.set(reason);
 }
 
+/// The already-initialized GPU context, if one exists, WITHOUT forcing lazy
+/// initialization. Certificate assembly and other observers use this to read
+/// adapter/capability state only when a render has already brought the context
+/// up — they must never spin up a GPU as a side effect.
+pub fn ctx_if_initialized() -> Option<&'static GpuContext> {
+    CTX.get()
+}
+
 /// Backend name of the already-initialized GPU context, if one exists.
 ///
 /// Returns `None` when no context has been created yet (peeks `CTX` without
@@ -307,16 +315,7 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
         )) {
             Ok(pair) => pair,
             Err(first_err) => {
-                crate::core::degradation::record_degradation(
-                    "capability_request_failed",
-                    "negotiated_features",
-                    &first_err.to_string(),
-                );
-                capabilities = crate::core::capabilities::CapabilitySet {
-                    wanted: capabilities.wanted,
-                    required: wgpu::Features::empty(),
-                    granted: wgpu::Features::empty(),
-                };
+                capabilities.downgrade_after_request_failure(&first_err.to_string());
                 pollster::block_on(adapter.request_device(
                     &wgpu::DeviceDescriptor {
                         required_features: wgpu::Features::empty(),

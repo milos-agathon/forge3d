@@ -6,6 +6,7 @@ mod finalize;
 mod frame_setup;
 mod geometry;
 mod postfx;
+mod postfx_cache;
 mod secondary;
 
 use crate::viewer::Viewer;

@@ -59,8 +59,7 @@ pub(crate) use std::path::Path;
 pub(crate) use std::sync::Arc;
 #[cfg(feature = "extension-module")]
 pub(crate) use wgpu::{
-    Extent3d as FgExtent3d, ShaderModuleDescriptor, ShaderSource, TextureFormat as FgTexFormat,
-    TextureUsages as FgTexUsages,
+    Extent3d as FgExtent3d, TextureFormat as FgTexFormat, TextureUsages as FgTexUsages,
 };
 
 #[cfg(feature = "extension-module")]

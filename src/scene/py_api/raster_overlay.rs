@@ -10,6 +10,7 @@ impl Scene {
         offset_xy: Option<(i32, i32)>,
         scale: Option<f32>,
     ) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         // Validate input array (HxWx3 or HxWx4, uint8)
         let (h, w, c, data) = if let Ok(arr) = image.extract::<numpy::PyReadonlyArray3<u8>>() {
             let shape = arr.shape();
@@ -51,20 +52,23 @@ impl Scene {
 
         // Create GPU texture and upload
         let g = crate::core::gpu::try_ctx()?;
-        let tex = g.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("scene-overlay-rgba8"),
-            size: wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
+        let tex = crate::core::resource_tracker::tracked_create_texture(
+            &g.device,
+            &wgpu::TextureDescriptor {
+                label: Some("scene-overlay-rgba8"),
+                size: wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         let row_bytes = w * 4;
         let padded_bpr = crate::core::gpu::align_copy_bpr(row_bytes);
         let mut padded = vec![0u8; (padded_bpr * h) as usize];
@@ -99,7 +103,7 @@ impl Scene {
             // Keep GPU resources alive
             ov.set_overlay_texture(tex, view);
             // Rebind with current height view for altitude/contours
-            ov.recreate_bind_group(&g.device, None, self.height_view.as_ref(), None, None);
+            ov.recreate_bind_group(&g.device, None, self.height_view.as_ref(), None, None)?;
 
             // Set params
             ov.set_enabled(true);

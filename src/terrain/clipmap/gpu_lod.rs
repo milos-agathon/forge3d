@@ -3,9 +3,10 @@
 //! Performs per-tile frustum culling and LOD selection on the GPU using
 //! a compute shader, outputting a compact list of visible tiles.
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_buffer_init};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
-use wgpu::util::DeviceExt;
 
 /// Configuration for GPU LOD selection.
 #[derive(Debug, Clone)]
@@ -194,12 +195,11 @@ pub struct GpuLodSelector {
 impl GpuLodSelector {
     /// Create a new GPU LOD selector.
     pub fn new(device: &wgpu::Device, config: GpuLodConfig) -> Self {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("clipmap_lod_select"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/clipmap_lod_select.wgsl").into(),
-            ),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "clipmap_lod_select",
+            include_str!("../../shaders/clipmap_lod_select.wgsl"),
+        );
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("lod_select_bind_group_layout"),
@@ -253,12 +253,15 @@ impl GpuLodSelector {
             push_constant_ranges: &[],
         });
 
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("lod_select_pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: "cs_main",
-        });
+        let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("lod_select_pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: "cs_main",
+            },
+        );
 
         Self {
             pipeline,
@@ -276,38 +279,47 @@ impl GpuLodSelector {
         tiles: &[TileInfo],
         view_proj: Mat4,
         camera_pos: Vec3,
-    ) -> LodSelectionResult {
+    ) -> RenderResult<LodSelectionResult> {
         if tiles.is_empty() {
-            return LodSelectionResult {
+            return Ok(LodSelectionResult {
                 visible_tiles: Vec::new(),
                 total_triangles: 0,
                 culled_count: 0,
-            };
+            });
         }
 
         // Create uniform buffer
         let frustum = FrustumPlanes::from_view_proj(view_proj);
         let params = LodSelectParams::new(view_proj, camera_pos, &frustum, &self.config);
-        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("lod_params_buffer"),
-            contents: bytemuck::bytes_of(&params),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let params_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("lod_params_buffer"),
+                contents: bytemuck::bytes_of(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        )?;
 
         // Create input tile buffer
-        let input_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("lod_input_tiles"),
-            contents: bytemuck::cast_slice(tiles),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        let input_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("lod_input_tiles"),
+                contents: bytemuck::cast_slice(tiles),
+                usage: wgpu::BufferUsages::STORAGE,
+            },
+        )?;
 
         // Create output buffers
-        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("lod_output_tiles"),
-            size: (tiles.len() * std::mem::size_of::<TileInfo>()) as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
+        let output_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("lod_output_tiles"),
+                size: (tiles.len() * std::mem::size_of::<TileInfo>()) as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            },
+        )?;
 
         let header = OutputHeader {
             visible_count: 0,
@@ -315,11 +327,14 @@ impl GpuLodSelector {
             _pad0: 0,
             _pad1: 0,
         };
-        let header_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("lod_output_header"),
-            contents: bytemuck::bytes_of(&header),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        });
+        let header_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("lod_output_header"),
+                contents: bytemuck::bytes_of(&header),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            },
+        )?;
 
         // Create bind group
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -359,11 +374,11 @@ impl GpuLodSelector {
 
         // Note: For actual readback, would need to copy to staging buffer and map
         // This is a simplified version that returns placeholder data
-        LodSelectionResult {
+        Ok(LodSelectionResult {
             visible_tiles: tiles.to_vec(),
             total_triangles: tiles.len() as u32 * 1000,
             culled_count: 0,
-        }
+        })
     }
 }
 

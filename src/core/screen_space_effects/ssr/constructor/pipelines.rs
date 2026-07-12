@@ -77,10 +77,7 @@ fn shader(device: &Device, label: &str, path: &str) -> ShaderModule {
         _ => unreachable!(),
     };
 
-    device.create_shader_module(ShaderModuleDescriptor {
-        label: Some(label),
-        source: ShaderSource::Wgsl(source.into()),
-    })
+    crate::core::shader_registry::create_labeled_shader_module(device, label, source)
 }
 
 fn compute_pipeline(
@@ -90,14 +87,17 @@ fn compute_pipeline(
     module: &ShaderModule,
     bind_group_layout: &BindGroupLayout,
 ) -> ComputePipeline {
-    device.create_compute_pipeline(&ComputePipelineDescriptor {
-        label: Some(&format!("{label}.pipeline")),
-        layout: Some(&device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: Some(&format!("{label}.layout")),
-            bind_group_layouts: &[bind_group_layout],
-            push_constant_ranges: &[],
-        })),
-        module,
-        entry_point,
-    })
+    crate::core::shader_registry::create_compute_pipeline_scoped(
+        device,
+        &ComputePipelineDescriptor {
+            label: Some(&format!("{label}.pipeline")),
+            layout: Some(&device.create_pipeline_layout(&PipelineLayoutDescriptor {
+                label: Some(&format!("{label}.layout")),
+                bind_group_layouts: &[bind_group_layout],
+                push_constant_ranges: &[],
+            })),
+            module,
+            entry_point,
+        },
+    )
 }

@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from ._canonical_json import canonical_json_value
 from ._map_scene_common import _layer_id, _stable_hash
 
 __all__ = [
@@ -302,29 +303,10 @@ def manifest_to_dict(manifest: RecipeManifest) -> dict[str, Any]:
     return payload
 
 
-def _canonical_json_value(value: Any) -> Any:
-    """Canonicalize a JSON value for byte-stable serialization.
-
-    Floats are normalized (``-0.0`` -> ``0.0``; non-finite values are
-    rejected) so that ``manifest_to_json`` -> ``manifest_from_json`` ->
-    ``manifest_to_json`` round-trips byte-identically: ``json`` serializes
-    floats via ``repr``, which is exact for every finite normalized float.
-    """
-    if isinstance(value, Mapping):
-        return {str(key): _canonical_json_value(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_canonical_json_value(item) for item in value]
-    if isinstance(value, bool) or value is None or isinstance(value, (int, str)):
-        return value
-    if isinstance(value, float):
-        if value != value or value in (float("inf"), float("-inf")):
-            raise ValueError("RecipeManifest serialization does not permit NaN or infinite floats")
-        return 0.0 if value == 0.0 else value
-    return value
-
-
 def manifest_to_json(manifest: RecipeManifest) -> str:
-    payload = _canonical_json_value(manifest_to_dict(manifest))
+    payload = canonical_json_value(
+        manifest_to_dict(manifest), error_context="RecipeManifest serialization"
+    )
     return json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
 
 

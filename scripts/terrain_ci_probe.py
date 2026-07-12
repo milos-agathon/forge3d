@@ -148,15 +148,25 @@ def main() -> int:
     probe = f3d.device_probe(backend)
     print(f"terrain-ci-probe backend={backend!r} probe={probe}")
 
+    # Exit-code contract (CENSOR audit F-10). CI must not conflate "this
+    # runner has no usable GPU" with "the renderer is broken":
+    #   0 = probe positive: CI-safe hardware adapter AND the smoke render ran.
+    #   2 = ABSENT: no CI-safe hardware adapter — the golden lane may honestly
+    #       record an ABSENT marker and succeed.
+    #   3 = CRASH: a CI-safe adapter is present but the terrain smoke render
+    #       raised — a renderer defect that must FAIL the golden job.
     if not _adapter_is_ci_safe(probe):
-        print("Skipping terrain CI lane on unsupported or software adapter.")
+        print("terrain-ci-probe: ABSENT — no CI-safe hardware adapter on this runner.")
         return 2
 
     try:
         _smoke_render(args.mode)
     except Exception as exc:
-        print(f"Skipping terrain CI lane after failed terrain smoke render: {exc}")
-        return 2
+        print(
+            "terrain-ci-probe: CRASH — CI-safe adapter present but the terrain "
+            f"smoke render failed: {exc}"
+        )
+        return 3
 
     print("Terrain CI lane is supported on this adapter.")
     return 0

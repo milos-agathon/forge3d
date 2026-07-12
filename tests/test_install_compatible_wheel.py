@@ -86,4 +86,6 @@ def test_main_installs_best_matching_wheel(tmp_path, monkeypatch):
     monkeypatch.setattr(module.sys, "argv", ["install_compatible_wheel.py", str(tmp_path)])
 
     assert module.main() == 0
-    assert calls == [([module.sys.executable, "-m", "pip", "install", str(best)], True)]
+    assert calls == [
+        ([module.sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", str(best)], True)
+    ]

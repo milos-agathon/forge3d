@@ -8,9 +8,14 @@ use wgpu::{
     BindGroupLayoutEntry, BindingType, Buffer, BufferBindingType, BufferDescriptor, BufferUsages,
     ColorTargetState, ColorWrites, Device, FragmentState, PipelineLayoutDescriptor, PrimitiveState,
     PrimitiveTopology, Queue, RenderPipeline, RenderPipelineDescriptor, Sampler,
-    SamplerBindingType, SamplerDescriptor, ShaderModuleDescriptor, ShaderSource, ShaderStages,
-    Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
-    TextureView, TextureViewDescriptor, TextureViewDimension, VertexState,
+    SamplerBindingType, SamplerDescriptor, ShaderStages, TextureDescriptor, TextureDimension,
+    TextureFormat, TextureSampleType, TextureUsages, TextureView, TextureViewDescriptor,
+    TextureViewDimension, VertexState,
+};
+
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
 };
 
 #[repr(C)]
@@ -46,13 +51,13 @@ impl Default for OverlayUniforms {
 
 pub struct OverlayRenderer {
     pub uniforms: OverlayUniforms,
-    pub uniform_buffer: Buffer,
+    pub uniform_buffer: TrackedBuffer,
     pub bind_group_layout: BindGroupLayout,
     pub bind_group: BindGroup,
     pub pipeline: RenderPipeline,
 
     // resources
-    pub overlay_tex: Option<Texture>,
+    pub overlay_tex: Option<TrackedTexture>,
     pub overlay_view: Option<TextureView>,
     pub overlay_sampler: Sampler,
     pub height_sampler: Sampler,
@@ -64,14 +69,21 @@ pub struct OverlayRenderer {
 }
 
 impl OverlayRenderer {
-    pub fn new(device: &Device, color_format: TextureFormat, height_filterable: bool) -> Self {
+    pub fn new(
+        device: &Device,
+        color_format: TextureFormat,
+        height_filterable: bool,
+    ) -> RenderResult<Self> {
         let uniforms = OverlayUniforms::default();
-        let uniform_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("overlay_uniforms"),
-            size: std::mem::size_of::<OverlayUniforms>() as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("overlay_uniforms"),
+                size: std::mem::size_of::<OverlayUniforms>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("overlay_bgl"),
@@ -195,29 +207,35 @@ impl OverlayRenderer {
         });
 
         // Dummy 1x1 RGBA texture for overlay
-        let dummy_tex = device.create_texture(&TextureDescriptor {
-            label: Some("overlay_dummy"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
+        let dummy_tex = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("overlay_dummy"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba8UnormSrgb,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8UnormSrgb,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         let dummy_view = dummy_tex.create_view(&TextureViewDescriptor::default());
 
         // Dummy 1x1 storage buffer for page table when not provided
-        let pt_dummy = device.create_buffer(&BufferDescriptor {
-            label: Some("overlay_page_table_dummy"),
-            size: std::mem::size_of::<[u32; 8]>() as u64,
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let pt_dummy = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("overlay_page_table_dummy"),
+                size: std::mem::size_of::<[u32; 8]>() as u64,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("overlay_bg"),
@@ -259,10 +277,11 @@ impl OverlayRenderer {
             ],
         });
 
-        let module = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("overlays_shader"),
-            source: ShaderSource::Wgsl(include_str!("../shaders/overlays.wgsl").into()),
-        });
+        let module = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "overlays_shader",
+            include_str!("../shaders/overlays.wgsl"),
+        );
 
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("overlays_pl"),
@@ -270,33 +289,36 @@ impl OverlayRenderer {
             push_constant_ranges: &[],
         });
 
-        let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some("overlays_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: VertexState {
-                module: &module,
-                entry_point: "vs_fullscreen",
-                buffers: &[],
+        let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &RenderPipelineDescriptor {
+                label: Some("overlays_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: VertexState {
+                    module: &module,
+                    entry_point: "vs_fullscreen",
+                    buffers: &[],
+                },
+                primitive: PrimitiveState {
+                    topology: PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(FragmentState {
+                    module: &module,
+                    entry_point: "fs_overlay",
+                    targets: &[Some(ColorTargetState {
+                        format: color_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: ColorWrites::ALL,
+                    })],
+                }),
+                multiview: None,
             },
-            primitive: PrimitiveState {
-                topology: PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(FragmentState {
-                module: &module,
-                entry_point: "fs_overlay",
-                targets: &[Some(ColorTargetState {
-                    format: color_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: ColorWrites::ALL,
-                })],
-            }),
-            multiview: None,
-        });
+        );
 
-        Self {
+        Ok(Self {
             uniforms,
             uniform_buffer,
             bind_group_layout,
@@ -308,7 +330,7 @@ impl OverlayRenderer {
             height_sampler,
             depth_sampler,
             overlay_format: TextureFormat::Rgba8UnormSrgb,
-        }
+        })
     }
 
     pub fn set_enabled(&mut self, enabled: bool) {
@@ -385,26 +407,29 @@ impl OverlayRenderer {
         height_view: Option<&TextureView>,
         page_table: Option<&Buffer>,
         depth_view: Option<&TextureView>, // M5: Terrain depth texture for occlusion
-    ) {
+    ) -> RenderResult<()> {
         // Use 1x1 fallback views when any overlay/height/depth view is missing.
         // Prefer provided view, then stored view, else fallback.
         let use_overlay_view = overlay_view.or(self.overlay_view.as_ref());
         let (dummy_tex, dummy_view) =
             if use_overlay_view.is_none() || height_view.is_none() || depth_view.is_none() {
-                let t = device.create_texture(&TextureDescriptor {
-                    label: Some("overlay_dummy_tmp"),
-                    size: wgpu::Extent3d {
-                        width: 1,
-                        height: 1,
-                        depth_or_array_layers: 1,
+                let t = tracked_create_texture(
+                    device,
+                    &TextureDescriptor {
+                        label: Some("overlay_dummy_tmp"),
+                        size: wgpu::Extent3d {
+                            width: 1,
+                            height: 1,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: TextureDimension::D2,
+                        format: TextureFormat::Rgba8UnormSrgb,
+                        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                        view_formats: &[],
                     },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: TextureDimension::D2,
-                    format: TextureFormat::Rgba8UnormSrgb,
-                    usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-                    view_formats: &[],
-                });
+                )?;
                 let v = t.create_view(&TextureViewDescriptor::default());
                 (Some(t), Some(v))
             } else {
@@ -416,12 +441,15 @@ impl OverlayRenderer {
         let depth_view = depth_view.unwrap_or_else(|| dummy_view.as_ref().unwrap());
 
         // Fallback dummy storage buffer if page table is not provided
-        let pt_dummy = device.create_buffer(&BufferDescriptor {
-            label: Some("overlay_page_table_dummy_recreate"),
-            size: std::mem::size_of::<[u32; 8]>() as u64,
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let pt_dummy = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("overlay_page_table_dummy_recreate"),
+                size: std::mem::size_of::<[u32; 8]>() as u64,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
         let pt_binding = page_table
             .map(|b| b.as_entire_binding())
             .unwrap_or_else(|| pt_dummy.as_entire_binding());
@@ -468,10 +496,11 @@ impl OverlayRenderer {
 
         // Keep dummy_tex alive so dummy_view stays valid.
         drop(dummy_tex);
+        Ok(())
     }
 
     /// Store overlay texture/view so GPU resources live as long as the renderer
-    pub fn set_overlay_texture(&mut self, tex: Texture, view: TextureView) {
+    pub fn set_overlay_texture(&mut self, tex: TrackedTexture, view: TextureView) {
         self.overlay_tex = Some(tex);
         self.overlay_view = Some(view);
     }
@@ -483,6 +512,7 @@ impl OverlayRenderer {
         if !overlay_en && !altitude_en && !contours_en {
             return;
         }
+        crate::core::shader_registry::record_shader_use("overlays_shader");
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.draw(0..3, 0..1);

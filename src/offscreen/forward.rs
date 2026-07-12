@@ -8,18 +8,16 @@
 // RELEVANT FILES: src/offscreen/adjudication_raster.rs, src/core/hdr_readback.rs
 
 use crate::core::error::RenderError;
-use crate::core::memory_tracker::global_tracker;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use std::ops::Range;
-use wgpu::{
-    BindGroup, Buffer, CommandEncoder, Device, Queue, RenderPipeline, Texture, TextureView,
-};
+use wgpu::{BindGroup, Buffer, CommandEncoder, Device, Queue, RenderPipeline, TextureView};
 
 /// HDR color + depth attachment pair for one offscreen forward pass.
 pub struct ForwardTargets {
     pub width: u32,
     pub height: u32,
     pub color_format: wgpu::TextureFormat,
-    pub color: Texture,
+    pub color: TrackedTexture,
     color_view: TextureView,
     depth_view: TextureView,
 }
@@ -43,26 +41,32 @@ impl ForwardTargets {
             height,
             depth_or_array_layers: 1,
         };
-        let color = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("offscreen-forward-color"),
-            size: extent,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: color_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let depth = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("offscreen-forward-depth"),
-            size: extent,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        let color = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("offscreen-forward-color"),
+                size: extent,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: color_format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            },
+        )?;
+        let depth = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("offscreen-forward-depth"),
+                size: extent,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            },
+        )?;
         let color_view = color.create_view(&wgpu::TextureViewDescriptor::default());
         let depth_view = depth.create_view(&wgpu::TextureViewDescriptor::default());
         Ok(Self {
@@ -142,36 +146,46 @@ pub fn encode_forward_pass(
 
 /// Render `draws` into `targets` and read the HDR color target back as
 /// tightly-packed f32 RGBA (row-major, `width * height * 4` values) through
-/// the established `core::hdr_readback::read_hdr_texture` path. The transient
-/// host-visible staging allocation is accounted through the global memory
-/// tracker for the duration of the readback.
+/// the established `core::hdr_readback::read_hdr_texture` path, whose wrapper
+/// already accounts the transient host-visible staging allocation.
+///
+/// `timing` (CENSOR F-04): when supplied as `(one_shot, label)`, the forward
+/// pass is bracketed in a certificate timing scope on the encoder that
+/// executes it and the queries are resolved before this submit. The
+/// `OneShotTiming` MUST live on the same wgpu device as `device`; pass `None`
+/// when driving a standalone device (tests).
 pub fn render_forward_hdr(
     device: &Device,
     queue: &Queue,
     targets: &ForwardTargets,
     clear: wgpu::Color,
     draws: &[ForwardDraw],
+    mut timing: Option<(&mut crate::core::gpu_timing::OneShotTiming, &str)>,
 ) -> Result<Vec<f32>, RenderError> {
-    let bpp: u32 = match targets.color_format {
-        wgpu::TextureFormat::Rgba32Float => 16,
-        wgpu::TextureFormat::Rgba16Float => 8,
+    match targets.color_format {
+        wgpu::TextureFormat::Rgba32Float | wgpu::TextureFormat::Rgba16Float => {}
         other => {
             return Err(RenderError::Render(format!(
                 "offscreen forward HDR readback: unsupported color format {other:?}"
             )))
         }
-    };
+    }
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("offscreen-forward-encoder"),
     });
+    let timing_scope = timing
+        .as_mut()
+        .and_then(|(t, label)| t.begin(&mut encoder, label));
     encode_forward_pass(&mut encoder, targets, clear, draws);
+    if let Some((t, _)) = timing.as_mut() {
+        t.end(&mut encoder, timing_scope, draws.len() as u32);
+        t.resolve(&mut encoder);
+    }
     queue.submit(std::iter::once(encoder.finish()));
 
-    // Mirror read_hdr_texture's staging-buffer footprint in the tracker.
-    let padded = crate::core::gpu::align_copy_bpr(targets.width * bpp);
-    let staging_size = (padded as u64) * (targets.height as u64);
-    global_tracker().track_buffer_allocation(staging_size, true);
-    let result = crate::core::hdr::read_hdr_texture(
+    // read_hdr_texture's wrapper already accounts the staging-buffer footprint;
+    // no manual mirror here (it would double-count host-visible bytes).
+    crate::core::hdr::read_hdr_texture(
         device,
         queue,
         &targets.color,
@@ -179,9 +193,7 @@ pub fn render_forward_hdr(
         targets.height,
         targets.color_format,
     )
-    .map_err(RenderError::Readback);
-    global_tracker().free_buffer_allocation(staging_size, true);
-    result
+    .map_err(RenderError::Readback)
 }
 
 #[cfg(test)]
@@ -218,43 +230,47 @@ fn fs() -> @location(0) vec4<f32> {
             return;
         };
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("forward-harness-test-shader"),
-            source: wgpu::ShaderSource::Wgsl(FLAT_TRIANGLE_WGSL.into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            &device,
+            "forward-harness-test-shader",
+            FLAT_TRIANGLE_WGSL,
+        );
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("forward-harness-test-layout"),
             bind_group_layouts: &[],
             push_constant_ranges: &[],
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("forward-harness-test-pipeline"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs",
-                buffers: &[],
+        let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            &device,
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("forward-harness-test-pipeline"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs",
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth32Float,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba32Float,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview: None,
             },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba32Float,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview: None,
-        });
+        );
 
         let targets = ForwardTargets::new(&device, 8, 4, wgpu::TextureFormat::Rgba32Float)
             .expect("forward targets");
@@ -266,8 +282,11 @@ fn fs() -> @location(0) vec4<f32> {
             index_count: 0,
             vertices: 0..3,
         }];
-        let pixels = render_forward_hdr(&device, &queue, &targets, wgpu::Color::BLACK, &draws)
-            .expect("forward render + readback");
+        // timing = None: this test drives a standalone device, and a timing
+        // manager from the global context would live on a different device.
+        let pixels =
+            render_forward_hdr(&device, &queue, &targets, wgpu::Color::BLACK, &draws, None)
+                .expect("forward render + readback");
 
         assert_eq!(pixels.len(), 8 * 4 * 4);
         for px in pixels.chunks_exact(4) {

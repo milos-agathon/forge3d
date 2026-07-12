@@ -2,13 +2,14 @@
 // Viewer struct definition with pub(crate) fields to allow method extraction
 // RELEVANT FILES: src/viewer/mod.rs
 
-use std::collections::{HashSet, VecDeque};
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 #[cfg(feature = "extension-module")]
 use wgpu::Adapter;
 use wgpu::{
-    BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, Queue, RenderPipeline, Sampler,
-    Surface, SurfaceConfiguration, Texture, TextureView,
+    BindGroup, BindGroupLayout, ComputePipeline, Device, Queue, RenderPipeline, Sampler, Surface,
+    SurfaceConfiguration, TextureView,
 };
 use winit::keyboard::KeyCode;
 use winit::window::Window;
@@ -16,6 +17,7 @@ use winit::window::Window;
 use crate::cli::args::GiVizMode;
 use crate::core::gpu_timing::GpuTimingManager;
 use crate::core::ibl::IBLRenderer;
+use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 use crate::core::screen_space_effects::ScreenSpaceEffectsManager;
 use crate::core::shadows::{CsmConfig, CsmShadowMap};
 use crate::core::text_overlay::TextOverlayRenderer;
@@ -63,48 +65,50 @@ pub struct Viewer {
     // Snapshot request path (processed on next frame before present)
     pub(crate) snapshot_request: Option<String>,
     // Offscreen color to read back when snapshotting this frame
-    pub(crate) pending_snapshot_tex: Option<Texture>,
+    pub(crate) pending_snapshot_tex: Option<TrackedTexture>,
     // P5.1: deferred capture queue processed after rendering
     pub(crate) pending_captures: VecDeque<CaptureKind>,
     // GBuffer geometry pipeline and resources
     pub(crate) geom_bind_group_layout: Option<BindGroupLayout>,
     pub(crate) geom_pipeline: Option<RenderPipeline>,
-    pub(crate) geom_camera_buffer: Option<Buffer>,
+    pub(crate) geom_camera_buffer: Option<TrackedBuffer>,
     pub(crate) geom_bind_group: Option<BindGroup>,
-    pub(crate) geom_vb: Option<Buffer>,
-    pub(crate) geom_ib: Option<Buffer>,
+    pub(crate) geom_vb: Option<TrackedBuffer>,
+    pub(crate) geom_ib: Option<TrackedBuffer>,
     pub(crate) geom_index_count: u32,
     // Store original mesh data for CPU-side transform (workaround for GPU buffer sync issue)
     pub(crate) original_mesh_positions: Vec<[f32; 3]>,
     pub(crate) original_mesh_normals: Vec<[f32; 3]>,
     pub(crate) original_mesh_uvs: Vec<[f32; 2]>,
     pub(crate) original_mesh_indices: Vec<u32>,
-    pub(crate) z_texture: Option<Texture>,
+    pub(crate) z_texture: Option<TrackedTexture>,
     pub(crate) z_view: Option<TextureView>,
     // Albedo texture for geometry
-    pub(crate) albedo_texture: Option<Texture>,
+    pub(crate) albedo_texture: Option<TrackedTexture>,
     pub(crate) albedo_view: Option<TextureView>,
     pub(crate) albedo_sampler: Option<Sampler>,
-    pub(crate) ssr_env_texture: Option<Texture>,
+    pub(crate) ssr_env_texture: Option<TrackedTexture>,
     // Composite pipeline (debug show material GBuffer on screen)
     pub(crate) comp_bind_group_layout: Option<BindGroupLayout>,
     pub(crate) comp_pipeline: Option<RenderPipeline>,
-    pub(crate) comp_uniform: Option<Buffer>,
+    pub(crate) comp_uniform: Option<TrackedBuffer>,
+    pub(crate) comp_bind_group_cache: RefCell<HashMap<[usize; 5], BindGroup>>,
     // Lit viz compute pipeline (albedo+normal shading)
     pub(crate) lit_bind_group_layout: BindGroupLayout,
     pub(crate) lit_pipeline: ComputePipeline,
-    pub(crate) lit_uniform: Buffer,
-    pub(crate) lit_output: Texture,
+    pub(crate) lit_uniform: TrackedBuffer,
+    pub(crate) lit_output: TrackedTexture,
     pub(crate) lit_output_view: TextureView,
-    pub(crate) gi_baseline_hdr: Texture,
+    pub(crate) lit_bind_group_cache: RefCell<Option<BindGroup>>,
+    pub(crate) gi_baseline_hdr: TrackedTexture,
     pub(crate) gi_baseline_hdr_view: TextureView,
-    pub(crate) gi_baseline_diffuse_hdr: Texture,
+    pub(crate) gi_baseline_diffuse_hdr: TrackedTexture,
     pub(crate) gi_baseline_diffuse_hdr_view: TextureView,
-    pub(crate) gi_baseline_spec_hdr: Texture,
+    pub(crate) gi_baseline_spec_hdr: TrackedTexture,
     pub(crate) gi_baseline_spec_hdr_view: TextureView,
-    pub(crate) gi_output_hdr: Texture,
+    pub(crate) gi_output_hdr: TrackedTexture,
     pub(crate) gi_output_hdr_view: TextureView,
-    pub(crate) gi_debug: Texture,
+    pub(crate) gi_debug: TrackedTexture,
     pub(crate) gi_debug_view: TextureView,
     pub(crate) gi_baseline_bgl: BindGroupLayout,
     pub(crate) gi_baseline_pipeline: ComputePipeline,
@@ -156,40 +160,48 @@ pub struct Viewer {
     pub(crate) sky_bind_group_layout0: BindGroupLayout,
     pub(crate) sky_bind_group_layout1: BindGroupLayout,
     pub(crate) sky_pipeline: ComputePipeline,
-    pub(crate) sky_params: Buffer,
-    pub(crate) sky_camera: Buffer,
-    pub(crate) sky_output: Texture,
+    pub(crate) sky_params: TrackedBuffer,
+    pub(crate) sky_camera: TrackedBuffer,
+    pub(crate) sky_output: TrackedTexture,
     pub(crate) sky_output_view: TextureView,
+    pub(crate) sky_bg0_cache: RefCell<Option<BindGroup>>,
+    pub(crate) sky_bg1_cache: RefCell<Option<BindGroup>>,
     pub(crate) sky_enabled: bool,
 
     // P6: Fog rendering resources and parameters
     pub(crate) fog_enabled: bool,
-    pub(crate) fog_params: Buffer,
-    pub(crate) fog_camera: Buffer,
-    pub(crate) fog_output: Texture,
+    pub(crate) fog_params: TrackedBuffer,
+    pub(crate) fog_camera: TrackedBuffer,
+    pub(crate) fog_output: TrackedTexture,
     pub(crate) fog_output_view: TextureView,
-    pub(crate) fog_history: Texture,
+    pub(crate) fog_history: TrackedTexture,
     pub(crate) fog_history_view: TextureView,
+    pub(crate) fog_bg0_cache: RefCell<Option<BindGroup>>,
+    pub(crate) fog_bg1_cache: RefCell<Option<BindGroup>>,
+    pub(crate) fog_bg2_cache: RefCell<Option<BindGroup>>,
+    pub(crate) fog_bg2_half_cache: RefCell<Option<BindGroup>>,
+    pub(crate) fog_upsample_bg_cache: RefCell<Option<BindGroup>>,
+    pub(crate) fog_bg3_cache: RefCell<Option<BindGroup>>,
     pub(crate) fog_depth_sampler: Sampler,
     pub(crate) fog_history_sampler: Sampler,
     pub(crate) fog_pipeline: ComputePipeline,
     pub(crate) fog_frame_index: u32,
     // Froxelized volumetrics (Milestone 4)
     pub(crate) fog_bgl3: BindGroupLayout,
-    pub(crate) _froxel_tex: Texture,
+    pub(crate) _froxel_tex: TrackedTexture,
     pub(crate) froxel_view: TextureView,
     pub(crate) froxel_sampler: Sampler,
     pub(crate) froxel_build_pipeline: ComputePipeline,
     pub(crate) froxel_apply_pipeline: ComputePipeline,
     // P6-10: Half-resolution fog + upsample
     pub(crate) fog_half_res_enabled: bool,
-    pub(crate) fog_output_half: Texture,
+    pub(crate) fog_output_half: TrackedTexture,
     pub(crate) fog_output_half_view: TextureView,
-    pub(crate) fog_history_half: Texture,
+    pub(crate) fog_history_half: TrackedTexture,
     pub(crate) fog_history_half_view: TextureView,
     pub(crate) fog_upsample_bgl: BindGroupLayout,
     pub(crate) fog_upsample_pipeline: ComputePipeline,
-    pub(crate) fog_upsample_params: Buffer,
+    pub(crate) fog_upsample_params: TrackedBuffer,
     // Bilateral upsample controls
     pub(crate) fog_bilateral: bool,
     pub(crate) fog_upsigma: f32,
@@ -197,12 +209,12 @@ pub struct Viewer {
     pub(crate) fog_bgl0: BindGroupLayout,
     pub(crate) fog_bgl1: BindGroupLayout,
     pub(crate) fog_bgl2: BindGroupLayout,
-    pub(crate) _fog_shadow_map: Texture,
+    pub(crate) _fog_shadow_map: TrackedTexture,
     pub(crate) fog_shadow_view: TextureView,
     pub(crate) fog_shadow_sampler: Sampler,
-    pub(crate) fog_shadow_matrix: Buffer,
+    pub(crate) fog_shadow_matrix: TrackedBuffer,
     // Fog zero fallback (1x1 RGBA16F zero) for disabled fog compositing
-    pub(crate) _fog_zero_tex: Texture,
+    pub(crate) _fog_zero_tex: TrackedTexture,
     pub(crate) fog_zero_view: TextureView,
     // Exposed toggles
     pub(crate) fog_density: f32,
@@ -215,7 +227,8 @@ pub struct Viewer {
     pub(crate) csm: Option<CsmShadowMap>,
     pub(crate) _csm_config: CsmConfig,
     pub(crate) csm_depth_pipeline: Option<RenderPipeline>,
-    pub(crate) csm_depth_camera: Option<Buffer>,
+    pub(crate) csm_depth_camera: Option<TrackedBuffer>,
+    pub(crate) csm_depth_bind_group: Option<BindGroup>,
     // Sky exposed controls (runtime adjustable)
     pub(crate) sky_model_id: u32, // 0=Preetham,1=Hosek-Wilkie
     pub(crate) sky_turbidity: f32,

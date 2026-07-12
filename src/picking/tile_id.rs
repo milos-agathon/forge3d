@@ -2,7 +2,11 @@
 // Small-tile ID buffer rendering for efficient hover/pick operations
 // Part of Plan 2: Standard GPU Ray Picking + Hover Support
 
-use wgpu::{BindGroup, BindGroupLayout, Buffer, Device, RenderPipeline, Texture, TextureView};
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
+use wgpu::{BindGroup, BindGroupLayout, Device, RenderPipeline, TextureView};
 
 /// Default tile size for ID buffer rendering
 pub const DEFAULT_TILE_SIZE: u32 = 64;
@@ -81,62 +85,69 @@ fn fs_main(in: VertexOutput) -> @location(0) u32 {
 
 /// Tile ID buffer pass for efficient hover picking
 pub struct TileIdPass {
-    id_texture: Texture,
+    id_texture: TrackedTexture,
     id_view: TextureView,
-    _depth_texture: Texture,
+    _depth_texture: TrackedTexture,
     depth_view: TextureView,
     pipeline: RenderPipeline,
     _bind_group_layout: BindGroupLayout,
-    uniform_buffer: Buffer,
+    uniform_buffer: TrackedBuffer,
     bind_group: BindGroup,
     tile_size: u32,
 }
 
 impl TileIdPass {
     /// Create a new tile ID pass
-    pub fn new(device: &Device, tile_size: u32) -> Self {
+    pub fn new(device: &Device, tile_size: u32) -> RenderResult<Self> {
         let tile_size = tile_size.max(16).min(256);
 
         // R32Uint keeps full 32-bit feature IDs per pixel.
-        let id_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("tile_id_texture"),
-            size: wgpu::Extent3d {
-                width: tile_size,
-                height: tile_size,
-                depth_or_array_layers: 1,
+        let id_texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("tile_id_texture"),
+                size: wgpu::Extent3d {
+                    width: tile_size,
+                    height: tile_size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Uint,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Uint,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        )?;
 
         let id_view = id_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // Depth buffer matches tile size to cull occluded IDs.
-        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("tile_id_depth"),
-            size: wgpu::Extent3d {
-                width: tile_size,
-                height: tile_size,
-                depth_or_array_layers: 1,
+        let depth_texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("tile_id_depth"),
+                size: wgpu::Extent3d {
+                    width: tile_size,
+                    height: tile_size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        )?;
 
         let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("tile_id_shader"),
-            source: wgpu::ShaderSource::Wgsl(TILE_ID_SHADER.into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "tile_id_shader",
+            TILE_ID_SHADER,
+        );
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("tile_id_bind_group_layout"),
@@ -152,12 +163,15 @@ impl TileIdPass {
             }],
         });
 
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("tile_id_uniform_buffer"),
-            size: std::mem::size_of::<TileIdUniforms>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("tile_id_uniform_buffer"),
+                size: std::mem::size_of::<TileIdUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("tile_id_bind_group"),
@@ -192,44 +206,47 @@ impl TileIdPass {
             ],
         };
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("tile_id_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[vertex_layout],
+        let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("tile_id_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[vertex_layout],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::R32Uint,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth32Float,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Less,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::R32Uint,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        });
+        );
 
-        Self {
+        Ok(Self {
             id_texture,
             id_view,
             _depth_texture: depth_texture,
@@ -239,7 +256,7 @@ impl TileIdPass {
             uniform_buffer,
             bind_group,
             tile_size,
-        }
+        })
     }
 
     /// Get the tile size
@@ -248,7 +265,7 @@ impl TileIdPass {
     }
 
     /// Get the ID texture for readback
-    pub fn id_texture(&self) -> &Texture {
+    pub fn id_texture(&self) -> &wgpu::Texture {
         &self.id_texture
     }
 
@@ -273,7 +290,7 @@ impl TileIdPass {
     }
 
     /// Get the uniform buffer
-    pub fn uniform_buffer(&self) -> &Buffer {
+    pub fn uniform_buffer(&self) -> &wgpu::Buffer {
         &self.uniform_buffer
     }
 

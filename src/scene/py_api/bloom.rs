@@ -105,16 +105,25 @@ impl Scene {
     /// -----
     /// The written PNG's raw RGBA bytes will match those returned by
     /// `Scene.render_rgba()` on the same frame (row-major, C-contiguous).
-    #[pyo3(text_signature = "($self, path)")]
-    pub fn render_png(&mut self, path: PathBuf) -> PyResult<()> {
-        self.render_png_impl(&path)
+    #[pyo3(signature = (path, certificate = None), text_signature = "($self, path, certificate=None)")]
+    pub fn render_png(
+        &mut self,
+        py: pyo3::Python<'_>,
+        path: PathBuf,
+        certificate: Option<pyo3::Bound<'_, pyo3::PyAny>>,
+    ) -> PyResult<()> {
+        self.render_png_impl(&path)?;
+        crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())
     }
-    #[pyo3(text_signature = "($self)")]
+    #[pyo3(signature = (certificate = None), text_signature = "($self, certificate=None)")]
     pub fn render_rgba<'py>(
         &mut self,
         py: pyo3::Python<'py>,
+        certificate: Option<pyo3::Bound<'py, pyo3::PyAny>>,
     ) -> pyo3::PyResult<pyo3::Bound<'py, numpy::PyArray3<u8>>> {
-        self.render_rgba_impl(py)
+        let out = self.render_rgba_impl(py)?;
+        crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
+        Ok(out)
     }
 
     #[pyo3(text_signature = "($self, samples)")]

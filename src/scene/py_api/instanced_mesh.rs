@@ -20,6 +20,7 @@ impl Scene {
         light_dir: Option<(f32, f32, f32)>,
         light_intensity: Option<f32>,
     ) -> PyResult<usize> {
+        let _allocation_scope = self.allocation_owner.activate();
         let pos = positions.as_array();
         if pos.ndim() != 2 || pos.shape()[1] != 3 {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -67,18 +68,24 @@ impl Scene {
         // Upload vertex/index buffers
         let vsize = (verts.len() * std::mem::size_of::<Vpn>()) as u64;
         let isize = (idx.len() * std::mem::size_of::<u32>()) as u64;
-        let vbuf = g.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("scene-instanced-vbuf"),
-            size: vsize,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let ibuf = g.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("scene-instanced-ibuf"),
-            size: isize,
-            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let vbuf = crate::core::resource_tracker::tracked_create_buffer(
+            &g.device,
+            &wgpu::BufferDescriptor {
+                label: Some("scene-instanced-vbuf"),
+                size: vsize,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
+        let ibuf = crate::core::resource_tracker::tracked_create_buffer(
+            &g.device,
+            &wgpu::BufferDescriptor {
+                label: Some("scene-instanced-ibuf"),
+                size: isize,
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
         g.queue.write_buffer(&vbuf, 0, bytemuck::cast_slice(&verts));
         // Flatten indices to u32
         let mut inds: Vec<u32> = Vec::with_capacity(idx.len());
@@ -100,12 +107,15 @@ impl Scene {
             ];
             packed.extend_from_slice(&cm);
         }
-        let instbuf = g.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("scene-instanced-instbuf"),
-            size: (packed.len() * std::mem::size_of::<f32>()) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let instbuf = crate::core::resource_tracker::tracked_create_buffer(
+            &g.device,
+            &wgpu::BufferDescriptor {
+                label: Some("scene-instanced-instbuf"),
+                size: (packed.len() * std::mem::size_of::<f32>()) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
         g.queue
             .write_buffer(&instbuf, 0, bytemuck::cast_slice(&packed));
 
@@ -116,12 +126,14 @@ impl Scene {
             } else {
                 None
             };
-            self.mesh_instanced_renderer =
-                Some(crate::render::mesh_instanced::MeshInstancedRenderer::new(
+            self.mesh_instanced_renderer = Some(
+                crate::render::mesh_instanced::MeshInstancedRenderer::new(
                     &g.device,
                     TEXTURE_FORMAT,
                     depth_format,
-                ));
+                )
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?,
+            );
         }
 
         let batch = InstancedBatch {
@@ -156,6 +168,7 @@ impl Scene {
         batch_index: usize,
         transforms: PyReadonlyArray2<'_, f32>,
     ) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         if batch_index >= self.instanced_batches.len() {
             return Err(pyo3::exceptions::PyIndexError::new_err(
                 "instanced batch index out of range",
@@ -179,12 +192,15 @@ impl Scene {
         }
         let b = &mut self.instanced_batches[batch_index];
         // Recreate buffer if needed (simplified: recreate always to match size)
-        b.instbuf = g.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("scene-instanced-instbuf"),
-            size: (packed.len() * std::mem::size_of::<f32>()) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        b.instbuf = crate::core::resource_tracker::tracked_create_buffer(
+            &g.device,
+            &wgpu::BufferDescriptor {
+                label: Some("scene-instanced-instbuf"),
+                size: (packed.len() * std::mem::size_of::<f32>()) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
         g.queue
             .write_buffer(&b.instbuf, 0, bytemuck::cast_slice(&packed));
         b.instance_count = ni as u32;

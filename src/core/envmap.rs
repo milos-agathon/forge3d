@@ -4,10 +4,12 @@
 //! realistic environment-based lighting using cubemap textures and roughness-based
 //! mip sampling for physically-based rendering.
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use glam::Vec3;
 use std::f32::consts::PI;
 use wgpu::{
-    Device, Extent3d, ImageCopyTexture, ImageDataLayout, Origin3d, Queue, Texture, TextureAspect,
+    Device, Extent3d, ImageCopyTexture, ImageDataLayout, Origin3d, Queue, TextureAspect,
     TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
 };
 
@@ -259,21 +261,24 @@ impl EnvironmentMap {
     }
 
     /// Upload environment map to GPU texture
-    pub fn upload_to_gpu(&self, device: &Device, queue: &Queue) -> Texture {
-        let texture = device.create_texture(&TextureDescriptor {
-            label: Some("environment_map"),
-            size: Extent3d {
-                width: self.width,
-                height: self.height,
-                depth_or_array_layers: 1,
+    pub fn upload_to_gpu(&self, device: &Device, queue: &Queue) -> RenderResult<TrackedTexture> {
+        let texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("environment_map"),
+                size: Extent3d {
+                    width: self.width,
+                    height: self.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1, // Only base mip; downsample chain not wired.
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba32Float, // HDR format
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1, // Only base mip; downsample chain not wired.
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba32Float, // HDR format
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
 
         // Convert RGB to RGBA
         let mut rgba_data = Vec::with_capacity(self.data.len() * 4 / 3);
@@ -305,7 +310,7 @@ impl EnvironmentMap {
             },
         );
 
-        texture
+        Ok(texture)
     }
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_texture};
 
 impl ViewerTerrainScene {
     pub fn init_wboit_pipeline(&mut self) {
@@ -58,12 +59,11 @@ impl ViewerTerrainScene {
         }
 
         // Create compose pipeline
-        let shader = self
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("terrain_viewer.wboit.compose_shader"),
-                source: wgpu::ShaderSource::Wgsl(WBOIT_COMPOSE_SHADER.into()),
-            });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            &self.device,
+            "terrain_viewer.wboit.compose_shader",
+            WBOIT_COMPOSE_SHADER,
+        );
 
         let pipeline_layout = self
             .device
@@ -73,49 +73,51 @@ impl ViewerTerrainScene {
                 push_constant_ranges: &[],
             });
 
-        self.wboit_compose_pipeline = Some(self.device.create_render_pipeline(
-            &wgpu::RenderPipelineDescriptor {
-                label: Some("terrain_viewer.wboit.compose_pipeline"),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: "vs_main",
-                    buffers: &[],
+        self.wboit_compose_pipeline =
+            Some(crate::core::shader_registry::create_render_pipeline_scoped(
+                &self.device,
+                &wgpu::RenderPipelineDescriptor {
+                    label: Some("terrain_viewer.wboit.compose_pipeline"),
+                    layout: Some(&pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &shader,
+                        entry_point: "vs_main",
+                        buffers: &[],
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &shader,
+                        entry_point: "fs_main",
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: self.surface_format,
+                            blend: Some(wgpu::BlendState {
+                                color: wgpu::BlendComponent {
+                                    src_factor: wgpu::BlendFactor::One,
+                                    dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                    operation: wgpu::BlendOperation::Add,
+                                },
+                                alpha: wgpu::BlendComponent {
+                                    src_factor: wgpu::BlendFactor::One,
+                                    dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                    operation: wgpu::BlendOperation::Add,
+                                },
+                            }),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::TriangleList,
+                        strip_index_format: None,
+                        front_face: wgpu::FrontFace::Ccw,
+                        cull_mode: None,
+                        unclipped_depth: false,
+                        polygon_mode: wgpu::PolygonMode::Fill,
+                        conservative: false,
+                    },
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview: None,
                 },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: "fs_main",
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: self.surface_format,
-                        blend: Some(wgpu::BlendState {
-                            color: wgpu::BlendComponent {
-                                src_factor: wgpu::BlendFactor::One,
-                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                                operation: wgpu::BlendOperation::Add,
-                            },
-                            alpha: wgpu::BlendComponent {
-                                src_factor: wgpu::BlendFactor::One,
-                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                                operation: wgpu::BlendOperation::Add,
-                            },
-                        }),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                multiview: None,
-            },
-        ));
+            ));
     }
 
     /// P6.2: Initialize Shadow Mapping (CSM) resources
@@ -154,7 +156,19 @@ impl ViewerTerrainScene {
             ..Default::default()
         };
 
-        let csm = CsmRenderer::new(&self.device, csm_config);
+        let csm = match CsmRenderer::new(&self.device, csm_config) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[terrain_scene] failed to create CSM renderer: {e}");
+                crate::core::degradation::record_degradation(
+                    "allocation_fallback",
+                    "viewer.csm",
+                    "cascaded shadow maps disabled; terrain renders without dynamic shadows",
+                );
+                self.csm_renderer = None;
+                return;
+            }
+        };
         println!(
             "[terrain_scene] CSM renderer created, shadow_map_size={}, has_moment_maps={}",
             csm.config.shadow_map_size,
@@ -163,16 +177,42 @@ impl ViewerTerrainScene {
         self.csm_renderer = Some(csm);
 
         // Create CSM uniform buffer - must match WGSL CsmUniforms struct size
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("terrain_viewer.csm_uniforms"),
-            size: std::mem::size_of::<crate::shadows::CsmUniforms>() as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, // ReadOnlyStorage in shader
-            mapped_at_creation: false,
-        });
+        let buffer = match tracked_create_buffer(
+            &self.device,
+            &wgpu::BufferDescriptor {
+                label: Some("terrain_viewer.csm_uniforms"),
+                size: std::mem::size_of::<crate::shadows::CsmUniforms>() as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, // ReadOnlyStorage in shader
+                mapped_at_creation: false,
+            },
+        ) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("[terrain_scene] failed to allocate CSM uniform buffer: {e}");
+                crate::core::degradation::record_degradation(
+                    "allocation_fallback",
+                    "viewer.csm_uniform",
+                    "CSM uniform buffer unavailable; terrain shadows disabled",
+                );
+                self.csm_renderer = None;
+                return;
+            }
+        };
         self.csm_uniform_buffer = Some(buffer);
 
         // Initialize MomentGenerationPass for VSM/EVSM/MSM techniques
-        self.moment_pass = Some(crate::shadows::MomentGenerationPass::new(&self.device));
+        self.moment_pass = match crate::shadows::MomentGenerationPass::new(&self.device) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                eprintln!("[terrain_scene] failed to create moment generation pass: {e}");
+                crate::core::degradation::record_degradation(
+                    "allocation_fallback",
+                    "viewer.csm_moment",
+                    "VSM/EVSM/MSM moment maps unavailable; shadows fall back to hard PCF",
+                );
+                None
+            }
+        };
 
         println!("[terrain_scene] Shadows initialized (VSM/EVSM/MSM enabled)");
     }
@@ -230,14 +270,11 @@ impl ViewerTerrainScene {
                 });
 
         // Create shader module
-        let shader = self
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("terrain_viewer.shadow_depth.shader"),
-                source: wgpu::ShaderSource::Wgsl(
-                    include_str!("../../../shaders/terrain_shadow_depth.wgsl").into(),
-                ),
-            });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            &self.device,
+            "terrain_viewer.shadow_depth.shader",
+            include_str!("../../../shaders/terrain_shadow_depth.wgsl"),
+        );
 
         // Create pipeline layout
         let pipeline_layout = self
@@ -249,9 +286,9 @@ impl ViewerTerrainScene {
             });
 
         // Create depth-only render pipeline
-        let pipeline = self
-            .device
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            &self.device,
+            &wgpu::RenderPipelineDescriptor {
                 label: Some("terrain_viewer.shadow_depth.pipeline"),
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
@@ -286,20 +323,37 @@ impl ViewerTerrainScene {
                 }),
                 multisample: wgpu::MultisampleState::default(),
                 multiview: None,
-            });
+            },
+        );
 
         self.shadow_pipeline = Some(pipeline);
 
         // Create per-cascade uniform buffers
         self.shadow_uniform_buffers.clear();
         for i in 0..cascade_count {
-            let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(&format!("terrain_viewer.shadow_uniforms_{}", i)),
-                size: std::mem::size_of::<crate::viewer::terrain::render::ShadowPassUniforms>()
-                    as u64,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+            let buffer = match tracked_create_buffer(
+                &self.device,
+                &wgpu::BufferDescriptor {
+                    label: Some(&format!("terrain_viewer.shadow_uniforms_{}", i)),
+                    size: std::mem::size_of::<crate::viewer::terrain::render::ShadowPassUniforms>()
+                        as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                },
+            ) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("[terrain_scene] failed to allocate shadow uniform buffer: {e}");
+                    crate::core::degradation::record_degradation(
+                        "allocation_fallback",
+                        "viewer.shadow_uniform",
+                        "shadow depth pass disabled; terrain renders without cast shadows",
+                    );
+                    self.shadow_uniform_buffers.clear();
+                    self.shadow_pipeline = None;
+                    return;
+                }
+            };
             self.shadow_uniform_buffers.push(buffer);
         }
 
@@ -454,29 +508,59 @@ impl ViewerTerrainScene {
         };
 
         // Create color accumulation texture (Rgba16Float for weighted color)
-        let color_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain_viewer.wboit.color_accum"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        let color_texture = match tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain_viewer.wboit.color_accum"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+        ) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("[terrain_scene] failed to allocate WBOIT color texture: {e}");
+                crate::core::degradation::record_degradation(
+                    "allocation_fallback",
+                    "viewer.wboit",
+                    "weighted OIT disabled; transparent overlays may composite incorrectly",
+                );
+                return;
+            }
+        };
         let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // Create reveal accumulation texture (R16Float for alpha product)
-        let reveal_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain_viewer.wboit.reveal_accum"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R16Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        let reveal_texture = match tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain_viewer.wboit.reveal_accum"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R16Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+        ) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("[terrain_scene] failed to allocate WBOIT reveal texture: {e}");
+                crate::core::degradation::record_degradation(
+                    "allocation_fallback",
+                    "viewer.wboit",
+                    "weighted OIT disabled; transparent overlays may composite incorrectly",
+                );
+                return;
+            }
+        };
         let reveal_view = reveal_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // Now create size-dependent resources (textures)
@@ -516,21 +600,29 @@ impl ViewerTerrainScene {
     /// Initialize post-process pass (called lazily when lens effects enabled)
     pub fn init_post_process(&mut self) {
         if self.post_process.is_none() {
-            self.post_process = Some(crate::viewer::terrain::post_process::PostProcessPass::new(
+            match crate::viewer::terrain::post_process::PostProcessPass::new(
                 self.device.clone(),
                 self.surface_format,
-            ));
+            ) {
+                Ok(pass) => self.post_process = Some(pass),
+                Err(e) => eprintln!("[terrain] failed to initialize post-process pass: {e}"),
+            }
         }
     }
 
     /// Initialize DoF pass (called lazily when DoF enabled)
     pub fn init_dof_pass(&mut self) {
         if self.dof_pass.is_none() {
-            self.dof_pass = Some(crate::viewer::terrain::dof::DofPass::new(
+            match crate::viewer::terrain::dof::DofPass::new(
                 self.device.clone(),
                 self.surface_format,
-            ));
-            println!("[terrain] DoF pass initialized");
+            ) {
+                Ok(pass) => {
+                    self.dof_pass = Some(pass);
+                    println!("[terrain] DoF pass initialized");
+                }
+                Err(e) => eprintln!("[terrain] failed to initialize DoF pass: {e}"),
+            }
         }
     }
 
@@ -545,23 +637,26 @@ impl ViewerTerrainScene {
     /// Initialize motion blur pass (called lazily when motion blur enabled)
     pub fn init_motion_blur_pass(&mut self) {
         if self.motion_blur_pass.is_none() {
-            self.motion_blur_pass = Some(
-                crate::viewer::terrain::motion_blur::MotionBlurAccumulator::new(
-                    self.device.clone(),
-                    self.surface_format,
-                ),
-            );
+            match crate::viewer::terrain::motion_blur::MotionBlurAccumulator::new(
+                self.device.clone(),
+                self.surface_format,
+            ) {
+                Ok(pass) => self.motion_blur_pass = Some(pass),
+                Err(e) => eprintln!("[terrain] failed to initialize motion blur pass: {e}"),
+            }
         }
     }
 
     /// Initialize volumetrics pass (called lazily when volumetrics enabled)
     pub fn init_volumetrics_pass(&mut self) {
         if self.volumetrics_pass.is_none() {
-            self.volumetrics_pass =
-                Some(crate::viewer::terrain::volumetrics::VolumetricsPass::new(
-                    self.device.clone(),
-                    self.surface_format,
-                ));
+            match crate::viewer::terrain::volumetrics::VolumetricsPass::new(
+                self.device.clone(),
+                self.surface_format,
+            ) {
+                Ok(pass) => self.volumetrics_pass = Some(pass),
+                Err(e) => eprintln!("[terrain] failed to initialize volumetrics pass: {e}"),
+            }
         }
     }
 }

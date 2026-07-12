@@ -4,6 +4,7 @@
 //! Terrain material VT writes feedback entries directly from the render shader,
 //! then this buffer stages the data back to the CPU for residency updates.
 
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use crate::core::tile_cache::TileId;
 use bytemuck::{Pod, Zeroable};
 use std::collections::HashSet;
@@ -14,9 +15,9 @@ use wgpu::{Buffer, BufferDescriptor, BufferUsages, CommandEncoder, Device, Queue
 /// GPU feedback buffer for collecting tile visibility information
 pub struct FeedbackBuffer {
     /// GPU buffer for collecting feedback data from shaders
-    feedback_buffer: Buffer,
-    /// CPU-readable staging buffer for feedback readback  
-    readback_buffer: Buffer,
+    feedback_buffer: TrackedBuffer,
+    /// CPU-readable staging buffer for feedback readback
+    readback_buffer: TrackedBuffer,
     pending_readback: Mutex<Option<Receiver<Result<(), wgpu::BufferAsyncError>>>>,
 }
 
@@ -41,20 +42,28 @@ impl FeedbackBuffer {
         let buffer_size = entry_size * max_tiles as u64;
 
         // Create GPU feedback buffer
-        let feedback_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("FeedbackBuffer_GPU"),
-            size: buffer_size,
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let feedback_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("FeedbackBuffer_GPU"),
+                size: buffer_size,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
         // Create CPU readback buffer
-        let readback_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("FeedbackBuffer_Readback"),
-            size: buffer_size,
-            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let readback_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("FeedbackBuffer_Readback"),
+                size: buffer_size,
+                usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
         Ok(Self {
             feedback_buffer,

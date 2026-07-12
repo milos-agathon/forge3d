@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import glob
 import os
 import subprocess
 import sys
@@ -180,10 +181,16 @@ def _run_engine_info_subprocess(extra_env: dict) -> subprocess.CompletedProcess:
     env.pop("WGPU_BACKENDS", None)
     env.pop("WGPU_BACKEND", None)
     env.pop("FORGE3D_DETERMINISTIC", None)
+    # Prepend the source tree ONLY when it actually contains the built native
+    # module (local `maturin develop` layout). On a clean CI checkout the
+    # source tree has no _forge3d.* — prepending it would shadow the installed
+    # wheel and turn every child into an ImportError instead of exercising the
+    # real adapter-acquisition path (found by the first exhaustive-lane CI run).
     repo_python = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "python"))
-    env["PYTHONPATH"] = os.pathsep.join(
-        [repo_python, env["PYTHONPATH"]] if env.get("PYTHONPATH") else [repo_python]
-    )
+    if glob.glob(os.path.join(repo_python, "forge3d", "_forge3d*")):
+        env["PYTHONPATH"] = os.pathsep.join(
+            [repo_python, env["PYTHONPATH"]] if env.get("PYTHONPATH") else [repo_python]
+        )
     env.update(extra_env)
     code = (
         "from forge3d import _forge3d\n"

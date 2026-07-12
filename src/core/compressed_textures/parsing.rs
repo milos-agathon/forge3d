@@ -45,6 +45,11 @@ impl DdsHeader {
 
 /// Parse KTX2 header; currently unimplemented.
 pub(super) fn parse_ktx2_header(_data: &[u8]) -> Result<Ktx2Header, String> {
+    crate::core::degradation::record_degradation(
+        "format_unsupported",
+        "compressed_textures.ktx2",
+        "KTX2 parsing is not implemented; the texture cannot be decoded",
+    );
     Err("KTX2 parsing not implemented".to_string())
 }
 
@@ -58,6 +63,11 @@ pub(super) fn extract_ktx2_texture_data(
 
 /// Parse DDS header; currently unimplemented.
 pub(super) fn parse_dds_header(_data: &[u8]) -> Result<DdsHeader, String> {
+    crate::core::degradation::record_degradation(
+        "format_unsupported",
+        "compressed_textures.dds",
+        "DDS parsing is not implemented; the texture cannot be decoded",
+    );
     Err("DDS parsing not implemented".to_string())
 }
 

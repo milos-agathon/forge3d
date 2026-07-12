@@ -1,5 +1,11 @@
 # AI files
 .claude
+!.claude/
+.claude/*
+!.claude/rules/
+.claude/rules/*
+!.claude/rules/rust-core.md
+!.claude/rules/build-and-ci.md
 docs/prompt.md
 CLAUDE.md
 AGENTS.md
@@ -77,6 +83,11 @@ g-002*-review-*.zip
 logs/*-audit.json
 logs/mcp-puppeteer-*.log.gz
 specs/
+!specs/
+specs/*
+!specs/001-diagnostics-support-matrices/
+specs/001-diagnostics-support-matrices/*
+!specs/001-diagnostics-support-matrices/tasks.md
 output/
 logs/
 docs/*audit*.md
@@ -86,7 +97,10 @@ docs/**/*prompt*.md
 *.pdb
 
 # Generated agent docs and review packs
-docs/audits/
+docs/audits/*
+!docs/audits/fable5-moonshots/
+docs/audits/fable5-moonshots/*
+!docs/audits/fable5-moonshots/14-censor-implementation-audit.md
 docs/prompts/
 docs/perf/
 docs/fable-prompt-library.md
@@ -285,7 +299,14 @@ __pycache__/
 !docs/tutorials/images/*.png
 !docs/tutorials/images/*.jpg
 tests/golden/adjudication/
+!tests/golden/adjudication/
+tests/golden/adjudication/*
+!tests/golden/adjudication/pt_reference.png
+!tests/golden/adjudication/raster_reference.png
 tests/golden/hybrid_terrain/
+!tests/golden/hybrid_terrain/
+tests/golden/hybrid_terrain/*
+!tests/golden/hybrid_terrain/mini_dem_reference.png
 tests/golden/labels/*.png
 tests/golden/labels/*.jpg
 tests/golden/labels/*.jpeg
@@ -370,11 +391,7 @@ examples/output/
 examples/**/*.py
 tests/test_*example*.py
 tests/test_*examples*.py
-tests/test_france_population_spikes_height_shade.py
-tests/test_iberia_builtup_cover_3d.py
-tests/test_italy_forest_cover_example.py
-tests/test_poland_population_contour_3d.py
-tests/test_romania_builtup_cover_3d.py
+!tests/test_italy_forest_cover_example.py
 .superpowers/
 scripts/*
 

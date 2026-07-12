@@ -1,13 +1,15 @@
 // src/lighting/shadow_map.rs
 // P0-S3: Shadow mapping infrastructure (Hard + PCF)
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::lighting::types::{Light, ShadowSettings, ShadowTechnique};
-use wgpu::{Device, Texture, TextureFormat, TextureView};
+use wgpu::{Device, TextureFormat, TextureView};
 
 /// Shadow map atlas for rendering depth from light's perspective
 pub struct ShadowMap {
     /// Depth texture (D32Float format)
-    pub texture: Texture,
+    pub texture: TrackedTexture,
     /// View for rendering (write)
     pub depth_view: TextureView,
     /// View for sampling (read)
@@ -22,24 +24,28 @@ pub struct ShadowMap {
 
 impl ShadowMap {
     /// Create a new shadow map with the given settings
-    pub fn new(device: &Device, settings: ShadowSettings) -> Self {
+    pub fn new(device: &Device, settings: ShadowSettings) -> RenderResult<Self> {
         let resolution = settings.map_res;
 
         // D32Float keeps depth precision for shadow comparisons.
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Shadow Map Depth Texture"),
-            size: wgpu::Extent3d {
-                width: resolution,
-                height: resolution,
-                depth_or_array_layers: 1,
+        let texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("Shadow Map Depth Texture"),
+                size: wgpu::Extent3d {
+                    width: resolution,
+                    height: resolution,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
 
         let depth_view = texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("Shadow Map Depth View"),
@@ -86,14 +92,14 @@ impl ShadowMap {
             })
         };
 
-        Self {
+        Ok(Self {
             texture,
             depth_view,
             sampled_view,
             sampler,
             resolution,
             settings,
-        }
+        })
     }
 
     /// Calculate memory usage in bytes
@@ -121,8 +127,9 @@ impl ShadowMap {
     }
 
     /// Recreate shadow map with new settings
-    pub fn resize(&mut self, device: &Device, new_settings: ShadowSettings) {
-        *self = Self::new(device, new_settings);
+    pub fn resize(&mut self, device: &Device, new_settings: ShadowSettings) -> RenderResult<()> {
+        *self = Self::new(device, new_settings)?;
+        Ok(())
     }
 }
 

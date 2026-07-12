@@ -33,8 +33,8 @@ impl Default for ImageImportConfig {
 /// Information about an imported texture.
 #[derive(Debug)]
 pub struct ImportedTextureInfo {
-    /// The created WGPU texture.
-    pub texture: wgpu::Texture,
+    /// The created WGPU texture (tracked in the global allocation ledger).
+    pub texture: crate::core::resource_tracker::TrackedTexture,
     /// Texture view for binding.
     pub view: wgpu::TextureView,
     /// Original image dimensions.

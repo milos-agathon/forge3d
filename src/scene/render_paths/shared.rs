@@ -15,23 +15,39 @@ impl Scene {
             && !self.dof_enabled
     }
 
-    fn readback_color_pixels(&self, readback_label: &str, copy_label: &str) -> PyResult<Vec<u8>> {
+    /// Copy the color target to a mappable buffer and read it back to RGBA
+    /// bytes. `timing` threads the render's [`GpuTimingManager`] so the
+    /// texture→buffer copy is recorded as the `scene.readback_copy` pass, and
+    /// `resolve_queries` is emitted into this final encoder — the last submit
+    /// of the render — so every timestamp written across the render (main and
+    /// readback encoders) is resolved before [`Scene::record_render_timings`]
+    /// reads it.
+    fn readback_color_pixels(
+        &self,
+        readback_label: &str,
+        copy_label: &str,
+        timing: &mut Option<crate::core::gpu_timing::GpuTimingManager>,
+    ) -> PyResult<Vec<u8>> {
         let g = crate::core::gpu::try_ctx()?;
         let bpp = 4u32;
         let unpadded = self.width * bpp;
         let padded = crate::core::gpu::align_copy_bpr(unpadded);
         let size = (padded * self.height) as wgpu::BufferAddress;
-        let readback = g.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(readback_label),
-            size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let readback = crate::core::resource_tracker::tracked_create_buffer(
+            &g.device,
+            &wgpu::BufferDescriptor {
+                label: Some(readback_label),
+                size,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        )?;
         let mut enc = g
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some(copy_label),
             });
+        let copy_scope = scene_ts_begin(timing, &mut enc, "scene.readback_copy");
         enc.copy_texture_to_buffer(
             wgpu::ImageCopyTexture {
                 texture: &self.color,
@@ -53,6 +69,10 @@ impl Scene {
                 depth_or_array_layers: 1,
             },
         );
+        scene_ts_end(timing, &mut enc, copy_scope, 1);
+        if let Some(t) = timing.as_mut() {
+            t.resolve_queries(&mut enc);
+        }
         g.queue.submit(Some(enc.finish()));
 
         let slice = readback.slice(..);

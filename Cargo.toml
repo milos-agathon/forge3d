@@ -1,6 +1,6 @@
 [package]
 name = "forge3d"
-version = "1.31.0"
+version = "1.32.0"
 edition = "2021"
 autoexamples = false
 description = "GPU-accelerated offline 3D map rendering with Rust-first GIS vector, rasterization, mask, thematic, CRS, affine, windowing, and reprojection support"
@@ -24,26 +24,19 @@ default = ["images", "enable-gpu-instancing", "enable-staging-rings"]
 extension-module = ["pyo3/extension-module"]
 # Optional async/double-buffered readback (R9)
 async_readback = ["dep:tokio"]
-terrain_spike = []
 weighted-oit = []
 wsI_bigbuf = []
 wsI_double_buf = []
-# Quiet cfg warnings in formats when unused
-exr = []
 # Workstream N: Advanced Rendering Systems
 enable-pbr = []
-enable-ibl = []
-enable-csm = []
 enable-tbn = []
 enable-normal-mapping = ["enable-tbn"]
 enable-hdr-offscreen = []
-enable-render-bundles = []
 # GPU instancing experimental flag (no-op stub for now)
 enable-gpu-instancing = []
 # P0-03: Renderer config plumbing (no shader/pipeline changes)
 enable-renderer-config = []
 # Workstream O: Resource & Memory Management
-enable-memory-pools = []
 enable-staging-rings = []
 # A14: AOV image format support
 images = ["dep:exr"]

@@ -40,6 +40,20 @@ except ImportError:
     _NATIVE = None
 
 
+def _record_empty_geometry_degradation() -> None:
+    """Record that building loading produced placeholder empty geometry."""
+    try:
+        from . import _degradation
+
+        _degradation.record(
+            "empty_geometry",
+            "buildings.extrusion",
+            "building footprints produced placeholder empty geometry",
+        )
+    except Exception:
+        pass
+
+
 # ============================================================================
 # Data Classes
 # ============================================================================
@@ -352,6 +366,7 @@ def add_buildings(
             continue
 
         # Create placeholder building (geometry would need actual extrusion)
+        _record_empty_geometry_degradation()
         building = Building(
             id=props.get("id", f"building_{i}"),
             positions=np.zeros((0, 3), dtype=np.float32),
@@ -493,6 +508,7 @@ def add_buildings_cityjson(
                     pass
 
         # Create placeholder building
+        _record_empty_geometry_degradation()
         building = Building(
             id=obj_id,
             positions=np.zeros((0, 3), dtype=np.float32),

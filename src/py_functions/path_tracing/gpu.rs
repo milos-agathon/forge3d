@@ -124,31 +124,12 @@ pub(crate) fn _pt_render_gpu(
         _pad_end: [0, 0, 0],
     };
 
-    let build_fallback = || {
-        let w = width as usize;
-        let h = height as usize;
-        let mut out = vec![0u8; w * h * 4];
-        for y in 0..h {
-            let t = 1.0 - (y as f32) / ((h.max(1) - 1) as f32).max(1.0);
-            let sky = (200.0 * t + 55.0).clamp(0.0, 255.0) as u8;
-            let ground = (120.0 * (1.0 - t)).clamp(0.0, 255.0) as u8;
-            for x in 0..w {
-                let index = (y * w + x) * 4;
-                let value = if y < h / 2 { sky } else { ground };
-                out[index] = value / 2;
-                out[index + 1] = value;
-                out[index + 2] = value / 3;
-                out[index + 3] = 255;
-            }
-        }
-        out
-    };
-
     let rgba =
         std::panic::catch_unwind(|| PathTracerGPU::render(width, height, &spheres, uniforms))
-            .ok()
-            .and_then(|result| result.ok())
-            .unwrap_or_else(build_fallback);
+            .map_err(|_| {
+                PyRuntimeError::new_err("GPU path tracer panicked; no fallback image was emitted")
+            })?
+            .map_err(|error| PyRuntimeError::new_err(format!("GPU path tracer failed: {error}")))?;
     let arr1 = PyArray1::<u8>::from_vec_bound(py, rgba);
     let arr3 = arr1.reshape([height as usize, width as usize, 4])?;
     Ok(arr3.into_py(py))

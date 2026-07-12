@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use anyhow::{anyhow, Result};
 use glam::{Mat4, Vec3};
 
-use crate::core::resource_tracker::{register_buffer, ResourceHandle};
+use crate::core::resource_tracker::{
+    register_buffer, tracked_create_buffer, ResourceHandle, TrackedBuffer,
+};
 use crate::geometry::simplify_mesh;
 use crate::geometry::MeshBuffers;
 use crate::render::mesh_instanced::VertexPN;
@@ -214,8 +216,8 @@ pub struct PreparedScatterDraw {
 }
 
 struct GpuScatterLevel {
-    vbuf: wgpu::Buffer,
-    ibuf: wgpu::Buffer,
+    vbuf: TrackedBuffer,
+    ibuf: TrackedBuffer,
     index_count: u32,
     max_distance: f32,
     mesh_height_max: f32,
@@ -226,15 +228,15 @@ struct GpuScatterLevel {
 }
 
 struct ScatterInstanceBuffer {
-    buffer: wgpu::Buffer,
+    buffer: TrackedBuffer,
     capacity: usize,
     bytes: u64,
     _handle: ResourceHandle,
 }
 
 struct GpuHlodCluster {
-    vbuf: wgpu::Buffer,
-    ibuf: wgpu::Buffer,
+    vbuf: TrackedBuffer,
+    ibuf: TrackedBuffer,
     index_count: u32,
     center: Vec3,
     radius: f32,
@@ -454,7 +456,7 @@ impl TerrainScatterBatch {
     pub fn level_instbuf(&self, level_index: usize) -> Option<&wgpu::Buffer> {
         self.instance_buffers[level_index]
             .as_ref()
-            .map(|buffer| &buffer.buffer)
+            .map(|buffer| &*buffer.buffer)
     }
 
     pub fn level_index_count(&self, level_index: usize) -> u32 {
@@ -490,14 +492,14 @@ impl TerrainScatterBatch {
         self.hlod_cache
             .as_ref()
             .and_then(|c| c.clusters.get(idx))
-            .map(|cluster| &cluster.vbuf)
+            .map(|cluster| &*cluster.vbuf)
     }
 
     pub fn hlod_cluster_ibuf(&self, idx: usize) -> Option<&wgpu::Buffer> {
         self.hlod_cache
             .as_ref()
             .and_then(|c| c.clusters.get(idx))
-            .map(|cluster| &cluster.ibuf)
+            .map(|cluster| &*cluster.ibuf)
     }
 
     pub fn hlod_cluster_index_count(&self, idx: usize) -> u32 {
@@ -830,18 +832,24 @@ fn build_hlod_cache(
             wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
         );
 
-        let vbuf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("terrain.scatter.hlod.vertex_buffer"),
-            size: vertex_buffer_bytes,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let ibuf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("terrain.scatter.hlod.index_buffer"),
-            size: index_buffer_bytes,
-            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let vbuf = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("terrain.scatter.hlod.vertex_buffer"),
+                size: vertex_buffer_bytes,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
+        let ibuf = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("terrain.scatter.hlod.index_buffer"),
+                size: index_buffer_bytes,
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         queue.write_buffer(&vbuf, 0, bytemuck::cast_slice(&vertices));
         queue.write_buffer(&ibuf, 0, bytemuck::cast_slice(&simplified.indices));
@@ -1068,18 +1076,24 @@ fn build_gpu_level(
         wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
     );
 
-    let vbuf = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("terrain.scatter.vertex_buffer"),
-        size: vertex_buffer_bytes,
-        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let ibuf = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("terrain.scatter.index_buffer"),
-        size: index_buffer_bytes,
-        usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+    let vbuf = tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("terrain.scatter.vertex_buffer"),
+            size: vertex_buffer_bytes,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )?;
+    let ibuf = tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("terrain.scatter.index_buffer"),
+            size: index_buffer_bytes,
+            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )?;
 
     queue.write_buffer(&vbuf, 0, bytemuck::cast_slice(&vertices));
     queue.write_buffer(&ibuf, 0, bytemuck::cast_slice(&mesh.indices));
@@ -1120,12 +1134,15 @@ fn ensure_instance_capacity(
         bytes,
         wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
     );
-    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("terrain.scatter.instance_buffer"),
-        size: bytes,
-        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+    let buffer = tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("terrain.scatter.instance_buffer"),
+            size: bytes,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )?;
     *slot = Some(ScatterInstanceBuffer {
         buffer,
         capacity,

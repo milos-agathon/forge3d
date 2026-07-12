@@ -14,7 +14,8 @@ use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use sha2::{Digest, Sha256};
-use wgpu::util::DeviceExt;
+
+use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 
 const CUBE_FACE_COUNT: u32 = 6;
 const CACHE_MAGIC: &[u8; 8] = b"IBLCACHE";
@@ -219,16 +220,16 @@ pub struct IBLRenderer {
     brdf_pipeline: wgpu::ComputePipeline,
 
     uniforms: PrefilterUniforms,
-    uniform_buffer: wgpu::Buffer,
+    uniform_buffer: TrackedBuffer,
 
-    environment_equirect: Option<wgpu::Texture>,
-    environment_cubemap: Option<wgpu::Texture>,
+    environment_equirect: Option<TrackedTexture>,
+    environment_cubemap: Option<TrackedTexture>,
     environment_view: Option<wgpu::TextureView>,
-    irradiance_map: Option<wgpu::Texture>,
+    irradiance_map: Option<TrackedTexture>,
     irradiance_view: Option<wgpu::TextureView>,
-    specular_map: Option<wgpu::Texture>,
+    specular_map: Option<TrackedTexture>,
     specular_view: Option<wgpu::TextureView>,
-    brdf_lut: Option<wgpu::Texture>,
+    brdf_lut: Option<TrackedTexture>,
     brdf_view: Option<wgpu::TextureView>,
 
     // M7: Optional overrides for budget fitting

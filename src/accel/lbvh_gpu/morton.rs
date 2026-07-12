@@ -25,13 +25,14 @@ impl GpuBvhBuilder {
             ],
             _pad3: 0.0,
         };
-        let ubuf = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let ubuf = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("lbvh-morton-uniforms"),
                 contents: cast_slice(&[uniforms]),
                 usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            });
+            },
+        )?;
 
         // Bind groups from pipeline layout
         let bgl0 = self.morton_pipeline.get_bind_group_layout(0);

@@ -23,31 +23,37 @@ pub fn create_fallback_pipeline(
     device: &Arc<Device>,
     surface_format: TextureFormat,
 ) -> RenderPipeline {
-    let fb_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("viewer.fallback.shader"),
-        source: wgpu::ShaderSource::Wgsl(FALLBACK_SHADER.into()),
-    });
+    let fb_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "viewer.fallback.shader",
+        FALLBACK_SHADER,
+    );
 
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("viewer.fallback.pipeline"),
-        layout: None,
-        vertex: wgpu::VertexState {
-            module: &fb_shader,
-            entry_point: "vs_fb",
-            buffers: &[],
-        },
-        primitive: wgpu::PrimitiveState::default(),
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        fragment: Some(wgpu::FragmentState {
-            module: &fb_shader,
-            entry_point: "fs_fb",
-            targets: &[Some(wgpu::ColorTargetState {
-                format: surface_format,
-                blend: None,
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        multiview: None,
+    crate::core::shader_registry::with_error_scope(device, "viewer.fallback.pipeline", || {
+        crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("viewer.fallback.pipeline"),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &fb_shader,
+                    entry_point: "vs_fb",
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &fb_shader,
+                    entry_point: "fs_fb",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview: None,
+            },
+        )
     })
 }

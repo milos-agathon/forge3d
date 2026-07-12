@@ -6,6 +6,20 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.32.0] - 2026-07-11
+### Added
+- Added signed render certificates with live GPU-pass timing and verified shader-source provenance across the production render surface.
+- Added CI gates for resource allocation ownership, negotiated capabilities, dead render structures, certificate coverage, clean-checkout fixtures, and determinism artifact attribution.
+
+### Fixed
+- Refused software and hypervisor-virtualized adapters in deterministic mode so their hashes cannot masquerade as physical-hardware evidence; real hardware hashes remain pairwise and golden checked with zero-byte tolerance.
+- Made the canonical determinism inputs and IBL precompute source deterministic, including explicit adapter metadata for every accepted hash.
+- Corrected clean-checkout golden, LFS, font, packaging, and cross-platform CI setup defects.
+
+### Changed
+- CENSOR render paths now report explicit degradations rather than silently claiming unavailable GPU timing or fallback behavior as successful execution.
+- No migration is required; existing Python APIs remain compatible.
+
 ## [1.31.0] - 2026-07-09
 ### Added
 - Completed the Blender-outmatch P2/P3 map rendering quality pass: COG/cache streaming, indexed clipmap terrain rendering, native 3D Tiles/COPC point rendering, terrain screen-space effects, VT timing/metadata, GPU water/cloud map-scene controls, memory/timing diagnostics, textured glTF landmarks, thematic GPU styling, and Arabic label shaping coverage.

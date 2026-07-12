@@ -23,7 +23,18 @@ impl PbrPipelineWithShadows {
     }
 
     pub(super) fn rebuild_shadow_resources(&mut self, device: &Device) {
-        let manager = ShadowManager::new(device, self.shadow_config.clone());
+        let manager = match ShadowManager::new(device, self.shadow_config.clone()) {
+            Ok(manager) => manager,
+            Err(e) => {
+                log::error!(target: "pbr.shadow", "failed to rebuild shadow resources: {e}");
+                crate::core::degradation::record_degradation(
+                    "allocation_fallback",
+                    "pbr.shadow_resources",
+                    "shadow resources not rebuilt; PBR pipeline renders without shadows",
+                );
+                return;
+            }
+        };
         self.shadow_config = manager.config().clone();
         let layout = manager.create_bind_group_layout(device);
         self.shadow_bind_group = None;
@@ -43,7 +54,10 @@ impl PbrPipelineWithShadows {
 }
 
 /// Create shadow manager with predefined quality presets
-pub fn create_csm_with_preset(device: &Device, preset: CsmQualityPreset) -> ShadowManager {
+pub fn create_csm_with_preset(
+    device: &Device,
+    preset: CsmQualityPreset,
+) -> crate::core::error::RenderResult<ShadowManager> {
     let mut config = ShadowManagerConfig::default();
 
     match preset {

@@ -44,17 +44,37 @@ pub async fn create_device_and_surface(
     let adapter = Arc::new(adapter);
     let adapter_name = adapter.get_info().name;
 
-    // Request device and queue
-    let (device, queue) = adapter
+    // Request every optional capability the adapter advertises. A driver may
+    // still reject that set, so retry once without optional features and
+    // record the downgrade instead of failing the viewer.
+    let mut capabilities = crate::core::capabilities::CapabilitySet::negotiate(adapter.features());
+    let requested_limits = adapter.limits();
+    let (device, queue) = match adapter
         .request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("Viewer Device"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
+                required_features: capabilities.granted,
+                required_limits: requested_limits.clone(),
             },
             None,
         )
-        .await?;
+        .await
+    {
+        Ok(pair) => pair,
+        Err(error) => {
+            capabilities.downgrade_after_request_failure(&error.to_string());
+            adapter
+                .request_device(
+                    &wgpu::DeviceDescriptor {
+                        label: Some("Viewer Device"),
+                        required_features: capabilities.granted,
+                        required_limits: requested_limits,
+                    },
+                    None,
+                )
+                .await?
+        }
+    };
 
     let device = Arc::new(device);
     let queue = Arc::new(queue);

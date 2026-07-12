@@ -1,17 +1,20 @@
 // src/render/mesh_instanced.rs
 // GPU instanced mesh renderer (feature-gated by enable-gpu-instancing)
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_buffer_init, tracked_create_texture, TrackedBuffer,
+    TrackedTexture,
+};
 use bytemuck::{Pod, Zeroable};
 use glam::Mat4;
 use std::cell::Cell;
-use wgpu::util::DeviceExt;
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindingType, Buffer, BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites, Device,
     FragmentState, IndexFormat, PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology, Queue,
-    RenderPass, RenderPipeline, RenderPipelineDescriptor, ShaderModuleDescriptor, ShaderSource,
-    ShaderStages, TextureFormat, VertexAttribute, VertexBufferLayout, VertexFormat, VertexState,
-    VertexStepMode,
+    RenderPass, RenderPipeline, RenderPipelineDescriptor, ShaderStages, TextureFormat,
+    VertexAttribute, VertexBufferLayout, VertexFormat, VertexState, VertexStepMode,
 };
 
 const DRAW_BATCH_UNIFORM_SLOT_COUNT: usize = 512;
@@ -80,24 +83,24 @@ pub struct MeshInstancedRenderer {
     pipeline: RenderPipeline,
     shadow_pipeline: Option<RenderPipeline>,
     uniforms: ScatterBatchUniforms,
-    uniforms_buf: Buffer,
+    uniforms_buf: TrackedBuffer,
     bind_group: BindGroup,
     shadow_bind_group: BindGroup,
     terrain_context: TerrainContextUniforms,
-    terrain_context_buf: Buffer,
+    terrain_context_buf: TrackedBuffer,
     terrain_bind_group_layout: BindGroupLayout,
     terrain_bind_group: BindGroup,
-    _terrain_fallback_height_texture: wgpu::Texture,
+    _terrain_fallback_height_texture: TrackedTexture,
     terrain_fallback_height_view: wgpu::TextureView,
-    per_draw_uniforms: Vec<Buffer>,
+    per_draw_uniforms: Vec<TrackedBuffer>,
     per_draw_bind_groups: Vec<BindGroup>,
     per_draw_cursor: Cell<usize>,
-    shadow_per_draw_uniforms: Vec<Buffer>,
+    shadow_per_draw_uniforms: Vec<TrackedBuffer>,
     shadow_per_draw_bind_groups: Vec<BindGroup>,
     shadow_per_draw_cursor: Cell<usize>,
-    vbuf: Option<Buffer>,
-    ibuf: Option<Buffer>,
-    instbuf: Option<Buffer>,
+    vbuf: Option<TrackedBuffer>,
+    ibuf: Option<TrackedBuffer>,
+    instbuf: Option<TrackedBuffer>,
     index_count: u32,
     instance_capacity: usize,
 }
@@ -107,7 +110,7 @@ impl MeshInstancedRenderer {
         device: &Device,
         color_format: TextureFormat,
         depth_format: Option<TextureFormat>,
-    ) -> Self {
+    ) -> RenderResult<Self> {
         Self::new_with_sample_count(device, color_format, depth_format, 1)
     }
 
@@ -116,7 +119,7 @@ impl MeshInstancedRenderer {
         color_format: TextureFormat,
         depth_format: Option<TextureFormat>,
         sample_count: u32,
-    ) -> Self {
+    ) -> RenderResult<Self> {
         Self::new_with_depth_state(
             device,
             color_format,
@@ -134,7 +137,7 @@ impl MeshInstancedRenderer {
         sample_count: u32,
         depth_compare: wgpu::CompareFunction,
         depth_write_enabled: bool,
-    ) -> Self {
+    ) -> RenderResult<Self> {
         Self::new_with_depth_state_and_shadow_layout(
             device,
             color_format,
@@ -154,11 +157,12 @@ impl MeshInstancedRenderer {
         depth_compare: wgpu::CompareFunction,
         depth_write_enabled: bool,
         shadow_bind_group_layout: Option<&BindGroupLayout>,
-    ) -> Self {
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("mesh_instanced_shader"),
-            source: ShaderSource::Wgsl(include_str!("../shaders/mesh_instanced.wgsl").into()),
-        });
+    ) -> RenderResult<Self> {
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "mesh_instanced_shader",
+            include_str!("../shaders/mesh_instanced.wgsl"),
+        );
 
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("mesh_instanced_bgl"),
@@ -211,7 +215,7 @@ impl MeshInstancedRenderer {
             }
         };
         let shadow_bind_group =
-            Self::create_fallback_shadow_bind_group(device, shadow_bind_group_layout);
+            Self::create_fallback_shadow_bind_group(device, shadow_bind_group_layout)?;
 
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("mesh_instanced_pl"),
@@ -273,73 +277,82 @@ impl MeshInstancedRenderer {
             ],
         };
 
-        let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some("mesh_instanced_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[vertex_layout.clone(), instance_layout.clone()],
-            },
-            primitive: PrimitiveState {
-                topology: PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: depth_format.map(|df| wgpu::DepthStencilState {
-                format: df,
-                depth_write_enabled,
-                depth_compare,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: sample_count.max(1),
-                ..Default::default()
-            },
-            fragment: Some(FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(ColorTargetState {
-                    format: color_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: ColorWrites::ALL,
-                })],
-            }),
-            multiview: None,
-        });
-        let shadow_pipeline = depth_format.map(|df| {
-            device.create_render_pipeline(&RenderPipelineDescriptor {
-                label: Some("mesh_instanced_shadow_pipeline"),
-                layout: Some(&shadow_pipeline_layout),
+        let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &RenderPipelineDescriptor {
+                label: Some("mesh_instanced_pipeline"),
+                layout: Some(&pipeline_layout),
                 vertex: VertexState {
                     module: &shader,
-                    entry_point: "vs_shadow",
-                    buffers: &[vertex_layout, instance_layout],
+                    entry_point: "vs_main",
+                    buffers: &[vertex_layout.clone(), instance_layout.clone()],
                 },
                 primitive: PrimitiveState {
                     topology: PrimitiveTopology::TriangleList,
                     ..Default::default()
                 },
-                depth_stencil: Some(wgpu::DepthStencilState {
+                depth_stencil: depth_format.map(|df| wgpu::DepthStencilState {
                     format: df,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    depth_write_enabled,
+                    depth_compare,
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 }),
-                multisample: wgpu::MultisampleState::default(),
-                fragment: None,
+                multisample: wgpu::MultisampleState {
+                    count: sample_count.max(1),
+                    ..Default::default()
+                },
+                fragment: Some(FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(ColorTargetState {
+                        format: color_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: ColorWrites::ALL,
+                    })],
+                }),
                 multiview: None,
-            })
+            },
+        );
+        let shadow_pipeline = depth_format.map(|df| {
+            crate::core::shader_registry::create_render_pipeline_scoped(
+                device,
+                &RenderPipelineDescriptor {
+                    label: Some("mesh_instanced_shadow_pipeline"),
+                    layout: Some(&shadow_pipeline_layout),
+                    vertex: VertexState {
+                        module: &shader,
+                        entry_point: "vs_shadow",
+                        buffers: &[vertex_layout, instance_layout],
+                    },
+                    primitive: PrimitiveState {
+                        topology: PrimitiveTopology::TriangleList,
+                        ..Default::default()
+                    },
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: df,
+                        depth_write_enabled: true,
+                        depth_compare: wgpu::CompareFunction::LessEqual,
+                        stencil: wgpu::StencilState::default(),
+                        bias: wgpu::DepthBiasState::default(),
+                    }),
+                    multisample: wgpu::MultisampleState::default(),
+                    fragment: None,
+                    multiview: None,
+                },
+            )
         });
 
         let uniforms = ScatterBatchUniforms::default();
-        let uniforms_buf = device.create_buffer(&BufferDescriptor {
-            label: Some("mesh_instanced_uniforms"),
-            size: std::mem::size_of::<ScatterBatchUniforms>() as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniforms_buf = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("mesh_instanced_uniforms"),
+                size: std::mem::size_of::<ScatterBatchUniforms>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("mesh_instanced_bg"),
             layout: &bind_group_layout,
@@ -350,26 +363,32 @@ impl MeshInstancedRenderer {
         });
 
         let terrain_context = TerrainContextUniforms::default();
-        let terrain_context_buf = device.create_buffer(&BufferDescriptor {
-            label: Some("mesh_instanced_terrain_uniforms"),
-            size: std::mem::size_of::<TerrainContextUniforms>() as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let terrain_fallback_height_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("mesh_instanced_terrain_fallback"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
+        let terrain_context_buf = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("mesh_instanced_terrain_uniforms"),
+                size: std::mem::size_of::<TerrainContextUniforms>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
+        let terrain_fallback_height_texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("mesh_instanced_terrain_fallback"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+        )?;
         let terrain_fallback_height_view =
             terrain_fallback_height_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let terrain_bind_group = device.create_bind_group(&BindGroupDescriptor {
@@ -390,12 +409,15 @@ impl MeshInstancedRenderer {
         let mut per_draw_uniforms = Vec::with_capacity(DRAW_BATCH_UNIFORM_SLOT_COUNT);
         let mut per_draw_bind_groups = Vec::with_capacity(DRAW_BATCH_UNIFORM_SLOT_COUNT);
         for _ in 0..DRAW_BATCH_UNIFORM_SLOT_COUNT {
-            let uniforms_buf = device.create_buffer(&BufferDescriptor {
-                label: Some("mesh_instanced_draw_uniforms"),
-                size: std::mem::size_of::<ScatterBatchUniforms>() as u64,
-                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+            let uniforms_buf = tracked_create_buffer(
+                device,
+                &BufferDescriptor {
+                    label: Some("mesh_instanced_draw_uniforms"),
+                    size: std::mem::size_of::<ScatterBatchUniforms>() as u64,
+                    usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                },
+            )?;
             let bind_group = device.create_bind_group(&BindGroupDescriptor {
                 label: Some("mesh_instanced_draw_bg"),
                 layout: &bind_group_layout,
@@ -410,12 +432,15 @@ impl MeshInstancedRenderer {
         let mut shadow_per_draw_uniforms = Vec::with_capacity(DRAW_BATCH_UNIFORM_SLOT_COUNT);
         let mut shadow_per_draw_bind_groups = Vec::with_capacity(DRAW_BATCH_UNIFORM_SLOT_COUNT);
         for _ in 0..DRAW_BATCH_UNIFORM_SLOT_COUNT {
-            let uniforms_buf = device.create_buffer(&BufferDescriptor {
-                label: Some("mesh_instanced_shadow_draw_uniforms"),
-                size: std::mem::size_of::<ScatterBatchUniforms>() as u64,
-                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+            let uniforms_buf = tracked_create_buffer(
+                device,
+                &BufferDescriptor {
+                    label: Some("mesh_instanced_shadow_draw_uniforms"),
+                    size: std::mem::size_of::<ScatterBatchUniforms>() as u64,
+                    usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                },
+            )?;
             let bind_group = device.create_bind_group(&BindGroupDescriptor {
                 label: Some("mesh_instanced_shadow_draw_bg"),
                 layout: &bind_group_layout,
@@ -428,7 +453,7 @@ impl MeshInstancedRenderer {
             shadow_per_draw_bind_groups.push(bind_group);
         }
 
-        Self {
+        Ok(Self {
             pipeline,
             shadow_pipeline,
             uniforms,
@@ -452,7 +477,7 @@ impl MeshInstancedRenderer {
             instbuf: None,
             index_count: 0,
             instance_capacity: 0,
-        }
+        })
     }
 
     fn create_fallback_shadow_bind_group_layout(device: &Device) -> BindGroupLayout {
@@ -505,27 +530,36 @@ impl MeshInstancedRenderer {
         })
     }
 
-    fn create_fallback_shadow_bind_group(device: &Device, layout: &BindGroupLayout) -> BindGroup {
+    fn create_fallback_shadow_bind_group(
+        device: &Device,
+        layout: &BindGroupLayout,
+    ) -> RenderResult<BindGroup> {
         let csm_zeroes = [0u8; FALLBACK_CSM_UNIFORM_BYTES];
-        let csm_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("mesh_instanced.shadow_fallback_csm"),
-            contents: &csm_zeroes,
-            usage: BufferUsages::STORAGE,
-        });
-        let shadow_maps = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("mesh_instanced.shadow_fallback_maps"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
+        let csm_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("mesh_instanced.shadow_fallback_csm"),
+                contents: &csm_zeroes,
+                usage: BufferUsages::STORAGE,
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
+        let shadow_maps = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("mesh_instanced.shadow_fallback_maps"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+        )?;
         let shadow_view = shadow_maps.create_view(&wgpu::TextureViewDescriptor {
             label: Some("mesh_instanced.shadow_fallback_maps_view"),
             dimension: Some(wgpu::TextureViewDimension::D2Array),
@@ -537,20 +571,23 @@ impl MeshInstancedRenderer {
             compare: Some(wgpu::CompareFunction::LessEqual),
             ..Default::default()
         });
-        let moment_maps = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("mesh_instanced.shadow_fallback_moments"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
+        let moment_maps = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("mesh_instanced.shadow_fallback_moments"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
         let moment_view = moment_maps.create_view(&wgpu::TextureViewDescriptor {
             label: Some("mesh_instanced.shadow_fallback_moments_view"),
             dimension: Some(wgpu::TextureViewDimension::D2Array),
@@ -561,7 +598,7 @@ impl MeshInstancedRenderer {
             label: Some("mesh_instanced.shadow_fallback_moment_sampler"),
             ..Default::default()
         });
-        device.create_bind_group(&BindGroupDescriptor {
+        Ok(device.create_bind_group(&BindGroupDescriptor {
             label: Some("mesh_instanced.shadow_fallback_bg"),
             layout,
             entries: &[
@@ -586,7 +623,7 @@ impl MeshInstancedRenderer {
                     resource: wgpu::BindingResource::Sampler(&moment_sampler),
                 },
             ],
-        })
+        }))
     }
 
     pub fn set_view_proj(&mut self, view: Mat4, proj: Mat4) {
@@ -659,26 +696,33 @@ impl MeshInstancedRenderer {
         queue: &Queue,
         vertices: &[VertexPN],
         indices: &[u32],
-    ) {
+    ) -> RenderResult<()> {
         let vsize = (vertices.len() * std::mem::size_of::<VertexPN>()) as u64;
         let isize = (indices.len() * std::mem::size_of::<u32>()) as u64;
-        let vbuf = device.create_buffer(&BufferDescriptor {
-            label: Some("mesh_instanced_vbuf"),
-            size: vsize,
-            usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let ibuf = device.create_buffer(&BufferDescriptor {
-            label: Some("mesh_instanced_ibuf"),
-            size: isize,
-            usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let vbuf = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("mesh_instanced_vbuf"),
+                size: vsize,
+                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
+        let ibuf = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("mesh_instanced_ibuf"),
+                size: isize,
+                usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
         queue.write_buffer(&vbuf, 0, bytemuck::cast_slice(vertices));
         queue.write_buffer(&ibuf, 0, bytemuck::cast_slice(indices));
         self.vbuf = Some(vbuf);
         self.ibuf = Some(ibuf);
         self.index_count = indices.len() as u32;
+        Ok(())
     }
 
     pub fn upload_instances_from_mat4(
@@ -686,19 +730,22 @@ impl MeshInstancedRenderer {
         device: &Device,
         queue: &Queue,
         transforms: &[Mat4],
-    ) {
+    ) -> RenderResult<()> {
         if transforms.is_empty() {
-            return;
+            return Ok(());
         }
         let needed = transforms.len();
         if needed > self.instance_capacity {
             let new_cap = (needed * 2).max(128);
-            self.instbuf = Some(device.create_buffer(&BufferDescriptor {
-                label: Some("mesh_instanced_instance_buf"),
-                size: (new_cap * 64) as u64, // 64 bytes per transform
-                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
+            self.instbuf = Some(tracked_create_buffer(
+                device,
+                &BufferDescriptor {
+                    label: Some("mesh_instanced_instance_buf"),
+                    size: (new_cap * 64) as u64, // 64 bytes per transform
+                    usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                },
+            )?);
             self.instance_capacity = new_cap;
         }
         let mut packed: Vec<f32> = Vec::with_capacity(needed * 16);
@@ -710,6 +757,7 @@ impl MeshInstancedRenderer {
         if let Some(inst) = &self.instbuf {
             queue.write_buffer(inst, 0, bytemuck::cast_slice(&packed));
         }
+        Ok(())
     }
 
     pub fn upload_instances_from_rowmajor(
@@ -717,19 +765,22 @@ impl MeshInstancedRenderer {
         device: &Device,
         queue: &Queue,
         row_major_4x4: &[[f32; 16]],
-    ) {
+    ) -> RenderResult<()> {
         if row_major_4x4.is_empty() {
-            return;
+            return Ok(());
         }
         let needed = row_major_4x4.len();
         if needed > self.instance_capacity {
             let new_cap = (needed * 2).max(128);
-            self.instbuf = Some(device.create_buffer(&BufferDescriptor {
-                label: Some("mesh_instanced_instance_buf"),
-                size: (new_cap * 64) as u64,
-                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
+            self.instbuf = Some(tracked_create_buffer(
+                device,
+                &BufferDescriptor {
+                    label: Some("mesh_instanced_instance_buf"),
+                    size: (new_cap * 64) as u64,
+                    usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                },
+            )?);
             self.instance_capacity = new_cap;
         }
         // Convert row-major to column-major packing
@@ -745,6 +796,7 @@ impl MeshInstancedRenderer {
         if let Some(inst) = &self.instbuf {
             queue.write_buffer(inst, 0, bytemuck::cast_slice(&packed));
         }
+        Ok(())
     }
 
     pub fn render<'rp>(&'rp self, pass: &mut RenderPass<'rp>, queue: &Queue, instance_count: u32) {
@@ -760,6 +812,7 @@ impl MeshInstancedRenderer {
         let Some(inst) = &self.instbuf else {
             return;
         };
+        crate::core::shader_registry::record_shader_use("mesh_instanced_shader");
         // Update uniforms
         queue.write_buffer(&self.uniforms_buf, 0, bytemuck::bytes_of(&self.uniforms));
 
@@ -915,44 +968,56 @@ mod tests {
     {
         let width = 96u32;
         let height = 96u32;
-        let color = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("mesh_instanced.test.color"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let color = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("mesh_instanced.test.color"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        )
+        .expect("alloc");
         let color_view = color.create_view(&wgpu::TextureViewDescriptor::default());
-        let depth = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("mesh_instanced.test.depth"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        let depth = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("mesh_instanced.test.depth"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        )
+        .expect("alloc");
         let depth_view = depth.create_view(&wgpu::TextureViewDescriptor::default());
         let row_bytes = width * 4;
         let padded_bpr = crate::core::gpu::align_copy_bpr(row_bytes);
-        let readback = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mesh_instanced.test.readback"),
-            size: (padded_bpr * height) as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let readback = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("mesh_instanced.test.readback"),
+                size: (padded_bpr * height) as u64,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        )
+        .expect("alloc");
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("mesh_instanced.test.encoder"),
@@ -1047,9 +1112,14 @@ mod tests {
             &device,
             wgpu::TextureFormat::Rgba8UnormSrgb,
             Some(wgpu::TextureFormat::Depth32Float),
-        );
-        shared_renderer.set_mesh(&device, &queue, &vertices, &indices);
-        shared_renderer.upload_instances_from_rowmajor(&device, &queue, &instance);
+        )
+        .expect("renderer");
+        shared_renderer
+            .set_mesh(&device, &queue, &vertices, &indices)
+            .expect("set_mesh");
+        shared_renderer
+            .upload_instances_from_rowmajor(&device, &queue, &instance)
+            .expect("upload");
         shared_renderer.set_view_proj(view, proj);
         shared_renderer.set_color(color);
         shared_renderer.set_light(light_dir, light_intensity);
@@ -1085,9 +1155,14 @@ mod tests {
             &device,
             wgpu::TextureFormat::Rgba8UnormSrgb,
             Some(wgpu::TextureFormat::Depth32Float),
-        );
-        per_draw_renderer.set_mesh(&device, &queue, &vertices, &indices);
-        per_draw_renderer.upload_instances_from_rowmajor(&device, &queue, &instance);
+        )
+        .expect("renderer");
+        per_draw_renderer
+            .set_mesh(&device, &queue, &vertices, &indices)
+            .expect("set_mesh");
+        per_draw_renderer
+            .upload_instances_from_rowmajor(&device, &queue, &instance)
+            .expect("upload");
         per_draw_renderer.reset_draw_batch_uniforms();
 
         let per_draw_pixels =

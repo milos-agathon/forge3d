@@ -19,12 +19,16 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             if viewer.point_cloud.is_none() {
                 eprintln!("[pointcloud] Creating PointCloudState...");
                 let depth_format = wgpu::TextureFormat::Depth32Float;
-                viewer.point_cloud = Some(PointCloudState::new(
-                    &viewer.device,
-                    viewer.config.format,
-                    depth_format,
-                ));
-                eprintln!("[pointcloud] PointCloudState created");
+                match PointCloudState::new(&viewer.device, viewer.config.format, depth_format) {
+                    Ok(pc) => {
+                        viewer.point_cloud = Some(pc);
+                        eprintln!("[pointcloud] PointCloudState created");
+                    }
+                    Err(e) => {
+                        eprintln!("[pointcloud] Failed to create PointCloudState: {e}");
+                        return false;
+                    }
+                }
             }
 
             if let Some(ref mut point_cloud) = viewer.point_cloud {

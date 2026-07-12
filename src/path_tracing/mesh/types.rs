@@ -1,6 +1,6 @@
 use crate::accel::cpu_bvh::{Aabb, BuildStats};
+use crate::core::resource_tracker::TrackedBuffer;
 use bytemuck::{Pod, Zeroable};
-use wgpu::Buffer;
 
 /// GPU-compatible vertex layout (matches WGSL Vertex struct)
 #[repr(C)]
@@ -36,19 +36,19 @@ pub struct BlasDesc {
 /// Mesh atlas buffers (concatenated vertices/indices/BVH) + descriptor table
 #[derive(Debug)]
 pub struct MeshAtlas {
-    pub vertex_buffer: Buffer,
-    pub index_buffer: Buffer,
-    pub bvh_buffer: Buffer,
-    pub descs_buffer: Buffer,
+    pub vertex_buffer: TrackedBuffer,
+    pub index_buffer: TrackedBuffer,
+    pub bvh_buffer: TrackedBuffer,
+    pub descs_buffer: TrackedBuffer,
     pub desc_count: u32,
 }
 
 /// GPU mesh handle containing all necessary buffers for path tracing
 #[derive(Debug)]
 pub struct GpuMesh {
-    pub vertex_buffer: Buffer,
-    pub index_buffer: Buffer,
-    pub bvh_buffer: Buffer,
+    pub vertex_buffer: TrackedBuffer,
+    pub index_buffer: TrackedBuffer,
+    pub bvh_buffer: TrackedBuffer,
     pub vertex_count: u32,
     pub triangle_count: u32,
     pub node_count: u32,

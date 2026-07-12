@@ -49,7 +49,13 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                     z_order: *z_order,
                 };
 
-                let id = terrain_viewer.add_vector_overlay_with_id(*id, layer);
+                let id = match terrain_viewer.add_vector_overlay_with_id(*id, layer) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        eprintln!("[vector_overlay] failed to add '{}': {e}", name);
+                        return true;
+                    }
+                };
                 println!(
                     "[vector_overlay] Added '{}' with {} vertices (id={})",
                     name,

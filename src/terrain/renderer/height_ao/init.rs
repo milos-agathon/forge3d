@@ -1,25 +1,26 @@
 use super::pipelines::{create_height_ao_pipeline_resources, create_sun_vis_pipeline_resources};
+use crate::core::resource_tracker::{tracked_create_texture, TrackedBuffer, TrackedTexture};
 
 pub(in crate::terrain::renderer) struct HeightfieldInitResources {
     pub(in crate::terrain::renderer) ao_debug_sampler: wgpu::Sampler,
-    pub(in crate::terrain::renderer) ao_debug_fallback_texture: wgpu::Texture,
+    pub(in crate::terrain::renderer) ao_debug_fallback_texture: TrackedTexture,
     pub(in crate::terrain::renderer) ao_debug_fallback_view: wgpu::TextureView,
     pub(in crate::terrain::renderer) height_ao_fallback_view: wgpu::TextureView,
     pub(in crate::terrain::renderer) height_ao_sampler: wgpu::Sampler,
     pub(in crate::terrain::renderer) height_ao_compute_pipeline: wgpu::ComputePipeline,
     pub(in crate::terrain::renderer) height_ao_bind_group_layout: wgpu::BindGroupLayout,
-    pub(in crate::terrain::renderer) height_ao_uniform_buffer: wgpu::Buffer,
+    pub(in crate::terrain::renderer) height_ao_uniform_buffer: TrackedBuffer,
     pub(in crate::terrain::renderer) sun_vis_fallback_view: wgpu::TextureView,
     pub(in crate::terrain::renderer) sun_vis_sampler: wgpu::Sampler,
     pub(in crate::terrain::renderer) sun_vis_compute_pipeline: wgpu::ComputePipeline,
     pub(in crate::terrain::renderer) sun_vis_bind_group_layout: wgpu::BindGroupLayout,
-    pub(in crate::terrain::renderer) sun_vis_uniform_buffer: wgpu::Buffer,
+    pub(in crate::terrain::renderer) sun_vis_uniform_buffer: TrackedBuffer,
 }
 
 pub(in crate::terrain::renderer) fn create_heightfield_init_resources(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-) -> HeightfieldInitResources {
+) -> anyhow::Result<HeightfieldInitResources> {
     let ao_debug_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("terrain.ao_debug.sampler"),
         address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -31,20 +32,23 @@ pub(in crate::terrain::renderer) fn create_heightfield_init_resources(
         ..Default::default()
     });
 
-    let height_ao_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("terrain.height_ao_fallback"),
-        size: wgpu::Extent3d {
-            width: 1,
-            height: 1,
-            depth_or_array_layers: 1,
+    let height_ao_fallback_texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("terrain.height_ao_fallback"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R32Float,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    )?;
     queue.write_texture(
         wgpu::ImageCopyTexture {
             texture: &height_ao_fallback_texture,
@@ -77,20 +81,23 @@ pub(in crate::terrain::renderer) fn create_heightfield_init_resources(
         ..Default::default()
     });
 
-    let sun_vis_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("terrain.sun_vis_fallback"),
-        size: wgpu::Extent3d {
-            width: 1,
-            height: 1,
-            depth_or_array_layers: 1,
+    let sun_vis_fallback_texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("terrain.sun_vis_fallback"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R32Float,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    )?;
     queue.write_texture(
         wgpu::ImageCopyTexture {
             texture: &sun_vis_fallback_texture,
@@ -124,24 +131,27 @@ pub(in crate::terrain::renderer) fn create_heightfield_init_resources(
     });
 
     let (height_ao_compute_pipeline, height_ao_bind_group_layout, height_ao_uniform_buffer) =
-        create_height_ao_pipeline_resources(device);
+        create_height_ao_pipeline_resources(device)?;
     let (sun_vis_compute_pipeline, sun_vis_bind_group_layout, sun_vis_uniform_buffer) =
-        create_sun_vis_pipeline_resources(device);
+        create_sun_vis_pipeline_resources(device)?;
 
-    let ao_debug_fallback_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("terrain.ao_debug_fallback"),
-        size: wgpu::Extent3d {
-            width: 1,
-            height: 1,
-            depth_or_array_layers: 1,
+    let ao_debug_fallback_texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("terrain.ao_debug_fallback"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R32Float,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    )?;
     queue.write_texture(
         wgpu::ImageCopyTexture {
             texture: &ao_debug_fallback_texture,
@@ -164,7 +174,7 @@ pub(in crate::terrain::renderer) fn create_heightfield_init_resources(
     let ao_debug_fallback_view =
         ao_debug_fallback_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-    HeightfieldInitResources {
+    Ok(HeightfieldInitResources {
         ao_debug_sampler,
         ao_debug_fallback_texture,
         ao_debug_fallback_view,
@@ -178,5 +188,5 @@ pub(in crate::terrain::renderer) fn create_heightfield_init_resources(
         sun_vis_compute_pipeline,
         sun_vis_bind_group_layout,
         sun_vis_uniform_buffer,
-    }
+    })
 }

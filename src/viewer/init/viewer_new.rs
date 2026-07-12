@@ -7,9 +7,11 @@ use std::sync::Arc;
 
 use winit::window::Window;
 
+use crate::core::error::RenderResult;
 use crate::core::gpu_timing::{
     create_default_config as create_gpu_timing_config, GpuTimingManager,
 };
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use crate::core::shadows::{CsmConfig, CsmShadowMap};
 use crate::render::params::SsrParams;
 
@@ -74,33 +76,33 @@ impl Viewer {
 
         // GBuffer resources (depends on GI manager)
         let gbuf =
-            create_gbuffer_resources(&device, gi.as_ref(), width, height, surface_config.format);
+            create_gbuffer_resources(&device, gi.as_ref(), width, height, surface_config.format)?;
 
         // CSM depth pipeline resources
         let (csm_depth_pipeline, csm_depth_camera) = if gi.is_some() {
-            create_csm_depth_resources(&device)
+            create_csm_depth_resources(&device)?
         } else {
             (None, None)
         };
 
         // Lit resources
-        let lit = create_lit_resources(&device, width, height);
+        let lit = create_lit_resources(&device, width, height)?;
 
         // GI baseline resources
-        let gi_base = create_gi_baseline_resources(&device, width, height);
+        let gi_base = create_gi_baseline_resources(&device, width, height)?;
 
         // Sky resources
-        let sky = create_sky_resources(&device, width, height);
+        let sky = create_sky_resources(&device, width, height)?;
 
         // Fog resources
-        let fog = create_fog_resources(&device, width, height);
+        let fog = create_fog_resources(&device, width, height)?;
 
         // Fallback pipeline
         let fb_pipeline = create_fallback_pipeline(&device, surface_config.format);
 
         // HUD overlay renderer
         let mut hud =
-            crate::core::text_overlay::TextOverlayRenderer::new(&device, surface_config.format);
+            crate::core::text_overlay::TextOverlayRenderer::new(&device, surface_config.format)?;
         hud.set_enabled(true);
         hud.set_resolution(width, height);
 
@@ -108,7 +110,20 @@ impl Viewer {
         let mut csm_config = CsmConfig::default();
         csm_config.camera_near = config.znear;
         csm_config.camera_far = config.zfar;
-        let csm = Some(CsmShadowMap::new(device.as_ref(), csm_config.clone()));
+        let csm = Some(CsmShadowMap::new(device.as_ref(), csm_config.clone())?);
+        let csm_depth_bind_group = match (&csm_depth_pipeline, &csm_depth_camera) {
+            (Some(pipeline), Some(camera)) => {
+                Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("viewer.csm.depth.bg"),
+                    layout: &pipeline.get_bind_group_layout(0),
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: camera.as_entire_binding(),
+                    }],
+                }))
+            }
+            _ => None,
+        };
 
         // Read sky params from environment
         let sky_params_init = read_sky_env_params();
@@ -167,12 +182,14 @@ impl Viewer {
             comp_bind_group_layout: gbuf.comp_bind_group_layout,
             comp_pipeline: gbuf.comp_pipeline,
             comp_uniform: None,
+            comp_bind_group_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             // Lit resources
             lit_bind_group_layout: lit.lit_bind_group_layout,
             lit_pipeline: lit.lit_pipeline,
             lit_uniform: lit.lit_uniform,
             lit_output: lit.lit_output,
             lit_output_view: lit.lit_output_view,
+            lit_bind_group_cache: std::cell::RefCell::new(None),
             // GI baseline resources
             gi_baseline_hdr: gi_base.gi_baseline_hdr,
             gi_baseline_hdr_view: gi_base.gi_baseline_hdr_view,
@@ -225,6 +242,8 @@ impl Viewer {
             sky_camera: sky.sky_camera,
             sky_output: sky.sky_output,
             sky_output_view: sky.sky_output_view,
+            sky_bg0_cache: std::cell::RefCell::new(None),
+            sky_bg1_cache: std::cell::RefCell::new(None),
             sky_enabled: true,
             // Fog resources
             fog_enabled: false,
@@ -234,6 +253,12 @@ impl Viewer {
             fog_output_view: fog.fog_output_view,
             fog_history: fog.fog_history,
             fog_history_view: fog.fog_history_view,
+            fog_bg0_cache: std::cell::RefCell::new(None),
+            fog_bg1_cache: std::cell::RefCell::new(None),
+            fog_bg2_cache: std::cell::RefCell::new(None),
+            fog_bg2_half_cache: std::cell::RefCell::new(None),
+            fog_upsample_bg_cache: std::cell::RefCell::new(None),
+            fog_bg3_cache: std::cell::RefCell::new(None),
             fog_depth_sampler: fog.fog_depth_sampler,
             fog_history_sampler: fog.fog_history_sampler,
             fog_pipeline: fog.fog_pipeline,
@@ -273,6 +298,7 @@ impl Viewer {
             _csm_config: csm_config,
             csm_depth_pipeline,
             csm_depth_camera,
+            csm_depth_bind_group,
             // Sky controls
             sky_model_id: sky_params_init.model_pad[0],
             sky_turbidity: sky_params_init.sun_direction_turbidity[3],
@@ -375,11 +401,12 @@ fn read_sky_env_params() -> SkyUniforms {
 /// Create CSM depth pipeline resources
 fn create_csm_depth_resources(
     device: &Arc<wgpu::Device>,
-) -> (Option<wgpu::RenderPipeline>, Option<wgpu::Buffer>) {
-    let csm_depth_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("viewer.csm.depth.shader"),
-        source: wgpu::ShaderSource::Wgsl(CSM_DEPTH_SHADER.into()),
-    });
+) -> RenderResult<(Option<wgpu::RenderPipeline>, Option<TrackedBuffer>)> {
+    let csm_depth_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "viewer.csm.depth.shader",
+        CSM_DEPTH_SHADER,
+    );
 
     let csm_depth_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("viewer.csm.depth.bgl"),
@@ -401,60 +428,69 @@ fn create_csm_depth_resources(
         push_constant_ranges: &[],
     });
 
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("viewer.csm.depth.pipeline"),
-        layout: Some(&csm_depth_pl),
-        vertex: wgpu::VertexState {
-            module: &csm_depth_shader,
-            entry_point: "vs_main",
-            buffers: &[wgpu::VertexBufferLayout {
-                array_stride: 40,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &[
-                    wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32x3,
-                        offset: 0,
-                        shader_location: 0,
+    let pipeline =
+        crate::core::shader_registry::with_error_scope(device, "viewer.csm.depth.pipeline", || {
+            crate::core::shader_registry::create_render_pipeline_scoped(
+                device,
+                &wgpu::RenderPipelineDescriptor {
+                    label: Some("viewer.csm.depth.pipeline"),
+                    layout: Some(&csm_depth_pl),
+                    vertex: wgpu::VertexState {
+                        module: &csm_depth_shader,
+                        entry_point: "vs_main",
+                        buffers: &[wgpu::VertexBufferLayout {
+                            array_stride: 40,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &[
+                                wgpu::VertexAttribute {
+                                    format: wgpu::VertexFormat::Float32x3,
+                                    offset: 0,
+                                    shader_location: 0,
+                                },
+                                wgpu::VertexAttribute {
+                                    format: wgpu::VertexFormat::Float32x3,
+                                    offset: 12,
+                                    shader_location: 1,
+                                },
+                                wgpu::VertexAttribute {
+                                    format: wgpu::VertexFormat::Float32x2,
+                                    offset: 24,
+                                    shader_location: 2,
+                                },
+                                wgpu::VertexAttribute {
+                                    format: wgpu::VertexFormat::Float32x2,
+                                    offset: 32,
+                                    shader_location: 3,
+                                },
+                            ],
+                        }],
                     },
-                    wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32x3,
-                        offset: 12,
-                        shader_location: 1,
-                    },
-                    wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32x2,
-                        offset: 24,
-                        shader_location: 2,
-                    },
-                    wgpu::VertexAttribute {
-                        format: wgpu::VertexFormat::Float32x2,
-                        offset: 32,
-                        shader_location: 3,
-                    },
-                ],
-            }],
+                    fragment: None,
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: wgpu::TextureFormat::Depth32Float,
+                        depth_write_enabled: true,
+                        depth_compare: wgpu::CompareFunction::LessEqual,
+                        stencil: wgpu::StencilState::default(),
+                        bias: wgpu::DepthBiasState::default(),
+                    }),
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview: None,
+                },
+            )
+        });
+
+    let camera = tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some("viewer.csm.depth.camera"),
+            size: std::mem::size_of::<[f32; 16]>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         },
-        fragment: None,
-        primitive: wgpu::PrimitiveState::default(),
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: wgpu::TextureFormat::Depth32Float,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::LessEqual,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }),
-        multisample: wgpu::MultisampleState::default(),
-        multiview: None,
-    });
+    )?;
 
-    let camera = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("viewer.csm.depth.camera"),
-        size: std::mem::size_of::<[f32; 16]>() as u64,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    (Some(pipeline), Some(camera))
+    Ok((Some(pipeline), Some(camera)))
 }
 
 const CSM_DEPTH_SHADER: &str = r#"

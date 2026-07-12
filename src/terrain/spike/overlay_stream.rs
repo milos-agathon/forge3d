@@ -147,20 +147,20 @@ impl TerrainSpike {
             )
         })?;
         let capacity = (mosaic.config.tiles_x * mosaic.config.tiles_y) as usize;
-        let pt = PageTable::new(&self.device, capacity);
+        let pt = PageTable::new(&self.device, capacity)?;
         // initial sync
         let mut pt = pt;
         pt.sync_from_mosaic(&self.queue, mosaic);
         self.page_table = Some(pt);
         // Recreate tile bind group to include the page table buffer at binding(1)
-        let pt_buf_opt = self.page_table.as_ref().map(|pt| &pt.buffer);
+        let pt_buf_opt = self.page_table.as_ref().map(|pt| pt.buffer.inner());
         self.bg5_tile = self.tp.make_bg_tile(
             &self.device,
             &self.tile_ubo,
             pt_buf_opt,
             &self.tile_slot_ubo,
             &self.mosaic_params_ubo,
-        );
+        )?;
         Ok(())
     }
 }

@@ -115,10 +115,11 @@ pub fn create_composite_pipeline(
     comp_bgl: &BindGroupLayout,
     surface_format: wgpu::TextureFormat,
 ) -> RenderPipeline {
-    let comp_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("viewer.comp.shader"),
-        source: wgpu::ShaderSource::Wgsl(COMPOSITE_SHADER.into()),
-    });
+    let comp_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "viewer.comp.shader",
+        COMPOSITE_SHADER,
+    );
 
     let comp_pl_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("viewer.comp.pl"),
@@ -126,29 +127,34 @@ pub fn create_composite_pipeline(
         push_constant_ranges: &[],
     });
 
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("viewer.comp.pipeline"),
-        layout: Some(&comp_pl_layout),
-        vertex: wgpu::VertexState {
-            module: &comp_shader,
-            entry_point: "vs_main",
-            buffers: &[],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &comp_shader,
-            entry_point: "fs_main",
-            targets: &[Some(wgpu::ColorTargetState {
-                format: surface_format,
-                blend: None,
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            ..Default::default()
-        },
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        multiview: None,
+    crate::core::shader_registry::with_error_scope(device, "viewer.comp.pipeline", || {
+        crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("viewer.comp.pipeline"),
+                layout: Some(&comp_pl_layout),
+                vertex: wgpu::VertexState {
+                    module: &comp_shader,
+                    entry_point: "vs_main",
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &comp_shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+            },
+        )
     })
 }

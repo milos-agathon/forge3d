@@ -1,9 +1,8 @@
 use super::buffers::{pack_tessellations, PolygonBuffers};
 use super::types::GpuExtrusionOutput;
+use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_buffer_init};
 use crate::vector::extrusion::{tessellate_polygon, TessellatedPolygon};
 use glam::Vec2;
-use std::borrow::Cow;
-use wgpu::util::DeviceExt;
 
 pub struct GpuExtrusion {
     pipeline: wgpu::ComputePipeline,
@@ -12,12 +11,11 @@ pub struct GpuExtrusion {
 
 impl GpuExtrusion {
     pub fn new(device: &wgpu::Device) -> Self {
-        let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("vf.Vector.Extrusion.Shader"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                "../../shaders/extrusion.wgsl"
-            ))),
-        });
+        let shader_module = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "vf.Vector.Extrusion.Shader",
+            include_str!("../../shaders/extrusion.wgsl"),
+        );
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vf.Vector.Extrusion.BindGroupLayout"),
@@ -130,12 +128,15 @@ impl GpuExtrusion {
             push_constant_ranges: &[],
         });
 
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("vf.Vector.Extrusion.Pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader_module,
-            entry_point: "main",
-        });
+        let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("vf.Vector.Extrusion.Pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader_module,
+                entry_point: "main",
+            },
+        );
 
         Self {
             pipeline,
@@ -185,97 +186,149 @@ impl GpuExtrusion {
             return Err("tessellated polygon produced empty mesh".to_string());
         }
 
-        let meta_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("vf.Vector.Extrusion.Meta"),
-            contents: bytemuck::cast_slice(&metas),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        let meta_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("vf.Vector.Extrusion.Meta"),
+                contents: bytemuck::cast_slice(&metas),
+                usage: wgpu::BufferUsages::STORAGE,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
-        let base_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("vf.Vector.Extrusion.BaseVertices"),
-            contents: bytemuck::cast_slice(&base_vertices),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        let base_vertex_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("vf.Vector.Extrusion.BaseVertices"),
+                contents: bytemuck::cast_slice(&base_vertices),
+                usage: wgpu::BufferUsages::STORAGE,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
-        let base_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("vf.Vector.Extrusion.BaseIndices"),
-            contents: bytemuck::cast_slice(&base_indices),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        let base_index_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("vf.Vector.Extrusion.BaseIndices"),
+                contents: bytemuck::cast_slice(&base_indices),
+                usage: wgpu::BufferUsages::STORAGE,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
-        let ring_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("vf.Vector.Extrusion.RingVertices"),
-            contents: bytemuck::cast_slice(&ring_vertices),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        let ring_vertex_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("vf.Vector.Extrusion.RingVertices"),
+                contents: bytemuck::cast_slice(&ring_vertices),
+                usage: wgpu::BufferUsages::STORAGE,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
         let positions_size = (vertex_count as u64) * 16;
         let indices_size = (index_count as u64) * 4;
         let normals_size = (vertex_count as u64) * 16;
         let uvs_size = (vertex_count as u64) * 8;
 
-        let positions_storage = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Extrusion.Output.Positions"),
-            size: positions_size,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
+        let positions_storage = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("vf.Vector.Extrusion.Output.Positions"),
+                size: positions_size,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
-        let indices_storage = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Extrusion.Output.Indices"),
-            size: indices_size,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
+        let indices_storage = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("vf.Vector.Extrusion.Output.Indices"),
+                size: indices_size,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
-        let normals_storage = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Extrusion.Output.Normals"),
-            size: normals_size,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
+        let normals_storage = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("vf.Vector.Extrusion.Output.Normals"),
+                size: normals_size,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
-        let uvs_storage = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Extrusion.Output.UVs"),
-            size: uvs_size,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
+        let uvs_storage = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("vf.Vector.Extrusion.Output.UVs"),
+                size: uvs_size,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
         // Readback requires a dedicated COPY_DST | MAP_READ staging buffer on current wgpu.
-        let positions_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Extrusion.Readback.Positions"),
-            size: positions_size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let positions_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("vf.Vector.Extrusion.Readback.Positions"),
+                size: positions_size,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
-        let indices_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Extrusion.Readback.Indices"),
-            size: indices_size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let indices_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("vf.Vector.Extrusion.Readback.Indices"),
+                size: indices_size,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
-        let normals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Extrusion.Readback.Normals"),
-            size: normals_size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let normals_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("vf.Vector.Extrusion.Readback.Normals"),
+                size: normals_size,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
-        let uvs_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vf.Vector.Extrusion.Readback.UVs"),
-            size: uvs_size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let uvs_buffer = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("vf.Vector.Extrusion.Readback.UVs"),
+                size: uvs_size,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
-        let height_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("vf.Vector.Extrusion.Height"),
-            contents: bytemuck::cast_slice(&[height]),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let height_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("vf.Vector.Extrusion.Height"),
+                contents: bytemuck::cast_slice(&[height]),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("vf.Vector.Extrusion.BindGroup"),

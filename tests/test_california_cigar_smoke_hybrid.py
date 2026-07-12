@@ -23,9 +23,10 @@ def skip_missing_california_cache(exc: RuntimeError) -> None:
 
 
 def load_module():
-    python_dir = REPO_ROOT / "python"
-    if str(python_dir) not in sys.path:
-        sys.path.insert(0, str(python_dir))
+    examples_dir = str(EXAMPLE_PATH.parent)
+    added_examples_dir = examples_dir not in sys.path
+    if added_examples_dir:
+        sys.path.insert(0, examples_dir)
     spec = importlib.util.spec_from_file_location("california_cigar_smoke_demo", EXAMPLE_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -34,6 +35,8 @@ def load_module():
         spec.loader.exec_module(module)
     finally:
         sys.modules.pop(spec.name, None)
+        if added_examples_dir:
+            sys.path.remove(examples_dir)
     return module
 
 

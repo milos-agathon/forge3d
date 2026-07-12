@@ -13,6 +13,11 @@ pub struct ResourceRegistry {
     pub(super) buffer_bytes: AtomicU64,
     pub(super) texture_bytes: AtomicU64,
     pub(super) host_visible_bytes: AtomicU64,
+    // Exact subset owned by resource_tracker::ResourceHandle. Unlike the
+    // public memory totals, these exclude estimate-only legacy bookkeeping and
+    // therefore must exactly equal the allocation ledger.
+    pub(super) ledger_host_visible_bytes: AtomicU64,
+    pub(super) ledger_device_local_bytes: AtomicU64,
     pub(super) peak_host_visible_bytes: AtomicU64,
     pub(super) peak_total_bytes: AtomicU64,
     pub(super) resident_tiles: AtomicU32,
@@ -33,6 +38,8 @@ impl ResourceRegistry {
             buffer_bytes: AtomicU64::new(0),
             texture_bytes: AtomicU64::new(0),
             host_visible_bytes: AtomicU64::new(0),
+            ledger_host_visible_bytes: AtomicU64::new(0),
+            ledger_device_local_bytes: AtomicU64::new(0),
             peak_host_visible_bytes: AtomicU64::new(0),
             peak_total_bytes: AtomicU64::new(0),
             resident_tiles: AtomicU32::new(0),
@@ -109,6 +116,10 @@ impl ResourceRegistry {
 
     pub fn track_texture_allocation(&self, width: u32, height: u32, format: TextureFormat) {
         let size = calculate_texture_size(width, height, format);
+        self.track_texture_allocation_bytes(size);
+    }
+
+    pub fn track_texture_allocation_bytes(&self, size: u64) {
         self.texture_count.fetch_add(1, Ordering::Relaxed);
         let texture_bytes = self.texture_bytes.fetch_add(size, Ordering::Relaxed) + size;
         let buffer_bytes = self.buffer_bytes.load(Ordering::Relaxed);
@@ -117,7 +128,10 @@ impl ResourceRegistry {
 
     pub fn free_texture_allocation(&self, width: u32, height: u32, format: TextureFormat) {
         let size = calculate_texture_size(width, height, format);
+        self.free_texture_allocation_bytes(size);
+    }
 
+    pub fn free_texture_allocation_bytes(&self, size: u64) {
         let _ = self
             .texture_count
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
@@ -128,6 +142,36 @@ impl ResourceRegistry {
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 Some(current.saturating_sub(size))
             });
+    }
+
+    /// Record one allocation that also owns an allocation-ledger entry.
+    pub fn track_ledger_allocation(&self, size: u64, is_host_visible: bool) {
+        let counter = if is_host_visible {
+            &self.ledger_host_visible_bytes
+        } else {
+            &self.ledger_device_local_bytes
+        };
+        counter.fetch_add(size, Ordering::Relaxed);
+    }
+
+    /// Remove one allocation that also owned an allocation-ledger entry.
+    pub fn free_ledger_allocation(&self, size: u64, is_host_visible: bool) {
+        let counter = if is_host_visible {
+            &self.ledger_host_visible_bytes
+        } else {
+            &self.ledger_device_local_bytes
+        };
+        let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            Some(current.saturating_sub(size))
+        });
+    }
+
+    /// Current registry totals for allocations that have ledger entries.
+    pub fn ledger_totals(&self) -> (u64, u64) {
+        (
+            self.ledger_host_visible_bytes.load(Ordering::Relaxed),
+            self.ledger_device_local_bytes.load(Ordering::Relaxed),
+        )
     }
 
     pub fn set_resident_tiles(&self, count: u32, tile_bytes: u64) {

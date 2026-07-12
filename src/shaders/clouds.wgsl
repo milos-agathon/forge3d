@@ -26,17 +26,6 @@ struct CloudUniforms {
 @group(2) @binding(2) var ibl_prefilter_tex : texture_cube<f32>;
 @group(2) @binding(3) var ibl_prefilter_samp : sampler;
 
-struct VsIn {
-    @location(0) position: vec3<f32>;
-    @location(1) uv: vec2<f32>;
-    @location(2) normal: vec3<f32>;
-};
-
-struct VsOut {
-    @builtin(position) clip_pos: vec4<f32>;
-    @location(0) uv: vec2<f32>;
-};
-
 fn saturate(value: f32) -> f32 {
     return clamp(value, 0.0, 1.0);
 }
@@ -107,6 +96,22 @@ fn evaluate_scattering(density: f32, view_dir: vec3<f32>, normal: vec3<f32>) -> 
     let sky_color = cloud_uniforms.sky_params.rgb;
     return (sky_color * (sun_light + ambient) + irradiance * 0.35 + reflection * 0.15) * absorption;
 }
+
+// Keep entry-point IO declarations adjacent to the entry points and use WGSL's
+// comma-delimited member form. On NVIDIA's Windows Vulkan driver, the previous
+// early, semicolon-delimited form produced Naga/SPIR-V that wedged the next GPU
+// allocation after this draw. The regression is covered by
+// test_cloud_render_keeps_following_vector_allocation_usable.
+struct VsIn {
+    @location(0) position: vec3<f32>,
+    @location(1) uv: vec2<f32>,
+    @location(2) normal: vec3<f32>,
+};
+
+struct VsOut {
+    @builtin(position) clip_pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
 
 @vertex
 fn vs_main(in: VsIn) -> VsOut {

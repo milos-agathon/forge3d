@@ -4,6 +4,8 @@
 //! multiple output channels from the GPU path tracer.
 //! RELEVANT FILES: src/shaders/pt_kernel.wgsl, src/path_tracing/compute.rs, python/forge3d/path_tracing.py
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use std::collections::HashMap;
 use wgpu::{
     Device, Extent3d, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
@@ -158,7 +160,7 @@ impl AovDesc {
 #[derive(Debug)]
 pub struct AovFrames {
     /// Map from AOV kind to GPU texture
-    pub textures: HashMap<AovKind, Texture>,
+    pub textures: HashMap<AovKind, TrackedTexture>,
     /// Enabled AOV flags bitmask
     pub enabled_mask: u32,
     /// Dimensions
@@ -168,7 +170,7 @@ pub struct AovFrames {
 
 impl AovFrames {
     /// Create AOV textures for the specified AOVs
-    pub fn new(device: &Device, width: u32, height: u32, aovs: &[AovKind]) -> Self {
+    pub fn new(device: &Device, width: u32, height: u32, aovs: &[AovKind]) -> RenderResult<Self> {
         let mut textures = HashMap::new();
         let mut enabled_mask = 0u32;
 
@@ -179,32 +181,35 @@ impl AovFrames {
         };
 
         for &aov_kind in aovs {
-            let texture = device.create_texture(&TextureDescriptor {
-                label: Some(&format!("AOV_{}", aov_kind.name())),
-                size: extent,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: TextureDimension::D2,
-                format: aov_kind.texture_format(),
-                usage: TextureUsages::STORAGE_BINDING | TextureUsages::COPY_SRC,
-                view_formats: &[],
-            });
+            let texture = tracked_create_texture(
+                device,
+                &TextureDescriptor {
+                    label: Some(&format!("AOV_{}", aov_kind.name())),
+                    size: extent,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: TextureDimension::D2,
+                    format: aov_kind.texture_format(),
+                    usage: TextureUsages::STORAGE_BINDING | TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                },
+            )?;
 
             textures.insert(aov_kind, texture);
             enabled_mask |= 1u32 << aov_kind.flag_bit();
         }
 
-        Self {
+        Ok(Self {
             textures,
             enabled_mask,
             width,
             height,
-        }
+        })
     }
 
     /// Get texture for specific AOV kind
     pub fn get_texture(&self, kind: AovKind) -> Option<&Texture> {
-        self.textures.get(&kind)
+        self.textures.get(&kind).map(|t| &**t)
     }
 
     /// Check if AOV is enabled

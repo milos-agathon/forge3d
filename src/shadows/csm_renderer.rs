@@ -7,12 +7,15 @@ use super::cascade_math::{
     snap_bounds_to_texel_grid,
 };
 use super::csm_types::{CascadeStatistics, CsmConfig, CsmUniforms, ShadowCascade};
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 use glam::{Mat4, Vec3, Vec4};
 use wgpu::{
-    AddressMode, BindGroup, Buffer, BufferDescriptor, BufferUsages, CompareFunction, Device,
-    Extent3d, FilterMode, Queue, Sampler, SamplerDescriptor, Texture, TextureDescriptor,
-    TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
-    TextureViewDimension,
+    AddressMode, BindGroup, BufferDescriptor, BufferUsages, CompareFunction, Device, Extent3d,
+    FilterMode, Queue, Sampler, SamplerDescriptor, Texture, TextureDescriptor, TextureDimension,
+    TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension,
 };
 
 /// Cascaded Shadow Maps renderer
@@ -20,30 +23,33 @@ use wgpu::{
 pub struct CsmRenderer {
     pub config: CsmConfig,
     pub uniforms: CsmUniforms,
-    pub uniform_buffer: Buffer,
-    pub shadow_maps: Texture,
+    pub uniform_buffer: TrackedBuffer,
+    pub shadow_maps: TrackedTexture,
     pub shadow_map_views: Vec<TextureView>,
     pub shadow_sampler: Sampler,
-    pub evsm_maps: Option<Texture>,
+    pub evsm_maps: Option<TrackedTexture>,
     pub bind_group: Option<BindGroup>,
 }
 
 impl CsmRenderer {
     /// Create a new CSM renderer
-    pub fn new(device: &Device, config: CsmConfig) -> Self {
-        let uniform_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("csm_uniforms"),
-            size: std::mem::size_of::<CsmUniforms>() as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+    pub fn new(device: &Device, config: CsmConfig) -> RenderResult<Self> {
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("csm_uniforms"),
+                size: std::mem::size_of::<CsmUniforms>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
-        let shadow_maps = create_shadow_map_texture(device, &config);
+        let shadow_maps = create_shadow_map_texture(device, &config)?;
         let shadow_map_views = create_shadow_map_views(&shadow_maps, &config);
         let shadow_sampler = create_shadow_sampler(device);
-        let evsm_maps = create_evsm_maps(device, &config);
+        let evsm_maps = create_evsm_maps(device, &config)?;
 
-        Self {
+        Ok(Self {
             config,
             uniforms: CsmUniforms::default(),
             uniform_buffer,
@@ -52,7 +58,7 @@ impl CsmRenderer {
             shadow_sampler,
             evsm_maps,
             bind_group: None,
-        }
+        })
     }
 
     /// Update light direction and view matrix
@@ -303,21 +309,24 @@ impl CsmRenderer {
 
 // GPU resource creation helpers
 
-fn create_shadow_map_texture(device: &Device, config: &CsmConfig) -> Texture {
-    device.create_texture(&TextureDescriptor {
-        label: Some("csm_shadow_maps"),
-        size: Extent3d {
-            width: config.shadow_map_size,
-            height: config.shadow_map_size,
-            depth_or_array_layers: config.cascade_count,
+fn create_shadow_map_texture(device: &Device, config: &CsmConfig) -> RenderResult<TrackedTexture> {
+    tracked_create_texture(
+        device,
+        &TextureDescriptor {
+            label: Some("csm_shadow_maps"),
+            size: Extent3d {
+                width: config.shadow_map_size,
+                height: config.shadow_map_size,
+                depth_or_array_layers: config.cascade_count,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Depth32Float,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format: TextureFormat::Depth32Float,
-        usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    })
+    )
 }
 
 fn create_shadow_map_views(shadow_maps: &Texture, config: &CsmConfig) -> Vec<TextureView> {
@@ -351,26 +360,30 @@ fn create_shadow_sampler(device: &Device) -> Sampler {
     })
 }
 
-fn create_evsm_maps(device: &Device, config: &CsmConfig) -> Option<Texture> {
+fn create_evsm_maps(device: &Device, config: &CsmConfig) -> RenderResult<Option<TrackedTexture>> {
     if config.enable_evsm {
-        Some(device.create_texture(&TextureDescriptor {
-            label: Some("csm_evsm_maps"),
-            size: Extent3d {
-                width: config.shadow_map_size,
-                height: config.shadow_map_size,
-                depth_or_array_layers: config.cascade_count,
+        let texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("csm_evsm_maps"),
+                size: Extent3d {
+                    width: config.shadow_map_size,
+                    height: config.shadow_map_size,
+                    depth_or_array_layers: config.cascade_count,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                // Use Rgba16Float for moment maps (VSM/EVSM/MSM)
+                format: TextureFormat::Rgba16Float,
+                usage: TextureUsages::RENDER_ATTACHMENT
+                    | TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::STORAGE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            // Use Rgba16Float for moment maps (VSM/EVSM/MSM)
-            format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::RENDER_ATTACHMENT
-                | TextureUsages::TEXTURE_BINDING
-                | TextureUsages::STORAGE_BINDING,
-            view_formats: &[],
-        }))
+        )?;
+        Ok(Some(texture))
     } else {
-        None
+        Ok(None)
     }
 }

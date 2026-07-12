@@ -2,7 +2,10 @@
 // GI baseline pipeline initialization for the Viewer
 
 use std::sync::Arc;
-use wgpu::{BindGroupLayout, ComputePipeline, Device, Texture, TextureView};
+use wgpu::{BindGroupLayout, ComputePipeline, Device, TextureView};
+
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 
 /// GI baseline shader source (copy lit to HDR)
 pub const GI_BASELINE_SHADER: &str = r#"
@@ -49,15 +52,15 @@ pub struct GiBaselineResources {
     pub gi_baseline_pipeline: ComputePipeline,
     pub gi_split_bgl: BindGroupLayout,
     pub gi_split_pipeline: ComputePipeline,
-    pub gi_baseline_hdr: Texture,
+    pub gi_baseline_hdr: TrackedTexture,
     pub gi_baseline_hdr_view: TextureView,
-    pub gi_baseline_diffuse_hdr: Texture,
+    pub gi_baseline_diffuse_hdr: TrackedTexture,
     pub gi_baseline_diffuse_hdr_view: TextureView,
-    pub gi_baseline_spec_hdr: Texture,
+    pub gi_baseline_spec_hdr: TrackedTexture,
     pub gi_baseline_spec_hdr_view: TextureView,
-    pub gi_output_hdr: Texture,
+    pub gi_output_hdr: TrackedTexture,
     pub gi_output_hdr_view: TextureView,
-    pub gi_debug: Texture,
+    pub gi_debug: TrackedTexture,
     pub gi_debug_view: TextureView,
 }
 
@@ -66,7 +69,7 @@ pub fn create_gi_baseline_resources(
     device: &Arc<Device>,
     width: u32,
     height: u32,
-) -> GiBaselineResources {
+) -> RenderResult<GiBaselineResources> {
     // GI baseline bind group layout
     let gi_baseline_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("viewer.gi.baseline.bgl"),
@@ -94,10 +97,11 @@ pub fn create_gi_baseline_resources(
         ],
     });
 
-    let gi_baseline_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("viewer.gi.baseline.shader"),
-        source: wgpu::ShaderSource::Wgsl(GI_BASELINE_SHADER.into()),
-    });
+    let gi_baseline_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "viewer.gi.baseline.shader",
+        GI_BASELINE_SHADER,
+    );
 
     let gi_baseline_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("viewer.gi.baseline.pl"),
@@ -105,12 +109,21 @@ pub fn create_gi_baseline_resources(
         push_constant_ranges: &[],
     });
 
-    let gi_baseline_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("viewer.gi.baseline.pipeline"),
-        layout: Some(&gi_baseline_pl),
-        module: &gi_baseline_shader,
-        entry_point: "cs_main",
-    });
+    let gi_baseline_pipeline = crate::core::shader_registry::with_error_scope(
+        device,
+        "viewer.gi.baseline.pipeline",
+        || {
+            crate::core::shader_registry::create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("viewer.gi.baseline.pipeline"),
+                    layout: Some(&gi_baseline_pl),
+                    module: &gi_baseline_shader,
+                    entry_point: "cs_main",
+                },
+            )
+        },
+    );
 
     // GI split bind group layout
     let gi_split_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -169,10 +182,11 @@ pub fn create_gi_baseline_resources(
         ],
     });
 
-    let gi_split_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("viewer.gi.split.shader"),
-        source: wgpu::ShaderSource::Wgsl(GI_SPLIT_SHADER.into()),
-    });
+    let gi_split_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "viewer.gi.split.shader",
+        GI_SPLIT_SHADER,
+    );
 
     let gi_split_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("viewer.gi.split.pl"),
@@ -180,101 +194,122 @@ pub fn create_gi_baseline_resources(
         push_constant_ranges: &[],
     });
 
-    let gi_split_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("viewer.gi.split.pipeline"),
-        layout: Some(&gi_split_pl),
-        module: &gi_split_shader,
-        entry_point: "cs_main",
-    });
+    let gi_split_pipeline =
+        crate::core::shader_registry::with_error_scope(device, "viewer.gi.split.pipeline", || {
+            crate::core::shader_registry::create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("viewer.gi.split.pipeline"),
+                    layout: Some(&gi_split_pl),
+                    module: &gi_split_shader,
+                    entry_point: "cs_main",
+                },
+            )
+        });
 
     // Create HDR textures
-    let gi_baseline_hdr = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("viewer.gi.baseline.hdr"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+    let gi_baseline_hdr = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("viewer.gi.baseline.hdr"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba16Float,
-        usage: wgpu::TextureUsages::STORAGE_BINDING
-            | wgpu::TextureUsages::TEXTURE_BINDING
-            | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
+    )?;
     let gi_baseline_hdr_view = gi_baseline_hdr.create_view(&wgpu::TextureViewDescriptor::default());
 
-    let gi_baseline_diffuse_hdr = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("viewer.gi.baseline.diffuse.hdr"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+    let gi_baseline_diffuse_hdr = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("viewer.gi.baseline.diffuse.hdr"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba16Float,
-        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
+    )?;
     let gi_baseline_diffuse_hdr_view =
         gi_baseline_diffuse_hdr.create_view(&wgpu::TextureViewDescriptor::default());
 
-    let gi_baseline_spec_hdr = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("viewer.gi.baseline.spec.hdr"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+    let gi_baseline_spec_hdr = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("viewer.gi.baseline.spec.hdr"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba16Float,
-        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
+    )?;
     let gi_baseline_spec_hdr_view =
         gi_baseline_spec_hdr.create_view(&wgpu::TextureViewDescriptor::default());
 
-    let gi_output_hdr = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("viewer.gi.output.hdr"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+    let gi_output_hdr = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("viewer.gi.output.hdr"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba16Float,
-        usage: wgpu::TextureUsages::STORAGE_BINDING
-            | wgpu::TextureUsages::TEXTURE_BINDING
-            | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
+    )?;
     let gi_output_hdr_view = gi_output_hdr.create_view(&wgpu::TextureViewDescriptor::default());
 
-    let gi_debug = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("viewer.gi.debug"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+    let gi_debug = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("viewer.gi.debug"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
+    )?;
     let gi_debug_view = gi_debug.create_view(&wgpu::TextureViewDescriptor::default());
 
-    GiBaselineResources {
+    Ok(GiBaselineResources {
         gi_baseline_bgl,
         gi_baseline_pipeline,
         gi_split_bgl,
@@ -289,5 +324,5 @@ pub fn create_gi_baseline_resources(
         gi_output_hdr_view,
         gi_debug,
         gi_debug_view,
-    }
+    })
 }

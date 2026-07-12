@@ -10,12 +10,13 @@ impl SsaoResources {
         let shader = create_ssao_shader(device);
         let layouts = create_ssao_layouts(device);
         let pipelines = create_ssao_pipelines(device, &shader, &layouts);
-        let buffers = create_ssao_buffers(device);
-        let (ao_texture, ao_view) = create_ssao_texture(device, width, height, "scene-ssao");
-        let (blur_texture, blur_view) =
-            create_ssao_texture(device, width, height, "scene-ssao-blur");
-        let noise = create_ssao_noise_resources(device, queue);
-        let depth = create_ssao_depth_resources(device, width, height);
+        let buffers = create_ssao_buffers(device).map_err(|e| e.to_string())?;
+        let (ao_texture, ao_view) =
+            create_ssao_texture(device, width, height, "scene-ssao").map_err(|e| e.to_string())?;
+        let (blur_texture, blur_view) = create_ssao_texture(device, width, height, "scene-ssao-blur")
+            .map_err(|e| e.to_string())?;
+        let noise = create_ssao_noise_resources(device, queue).map_err(|e| e.to_string())?;
+        let depth = create_ssao_depth_resources(device, width, height).map_err(|e| e.to_string())?;
 
         let resources = Self {
             radius: 1.0,

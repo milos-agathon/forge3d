@@ -17,13 +17,14 @@ impl GpuBvhBuilder {
             _pad0: 0,
             _pad1: 0,
         };
-        let ubuf = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let ubuf = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("lbvh-link-uniforms"),
                 contents: cast_slice(&[uniforms]),
                 usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            });
+            },
+        )?;
 
         let bgl0_leaves = self.init_leaves_pipeline.get_bind_group_layout(0);
         let bgl0_link = self.link_nodes_pipeline.get_bind_group_layout(0);

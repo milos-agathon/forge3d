@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 import json
 import re
 from pathlib import Path
@@ -8,6 +9,21 @@ import pytest
 
 from _terrain_runtime import terrain_rendering_available
 
+from _terrain_runtime import (
+    terrain_rendering_available as _terrain_rendering_available,
+)
+
+_requires_gpu = pytest.mark.skipif(
+    not _terrain_rendering_available(),
+    reason=(
+        "MapScene native terrain render requires a terrain-safe hardware "
+        "adapter; hosted runners (GPU-less, WARP, or guarded paravirtual "
+        "Metal) either block with a native-render diagnostic or raise by "
+        "design (SUTURA), so these render-asserting tests skip honestly"
+    ),
+)
+
+
 
 QUICKSTART = Path("docs/guides/offline_3d_map_rendering.md")
 START_QUICKSTART = Path("docs/start/quickstart.md")
@@ -16,10 +32,18 @@ BUILDING_EXAMPLE = Path("examples/mapscene_buildings_labels.py")
 
 
 def _load_example(path: Path):
+    examples_dir = str(path.parent.resolve())
+    added_examples_dir = examples_dir not in sys.path
+    if added_examples_dir:
+        sys.path.insert(0, examples_dir)
     spec = importlib.util.spec_from_file_location(path.stem, path)
     module = importlib.util.module_from_spec(spec)
     assert spec is not None and spec.loader is not None
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if added_examples_dir:
+            sys.path.remove(examples_dir)
     return module
 
 
@@ -33,6 +57,7 @@ def test_mapscene_quickstart_points_to_canonical_examples():
     assert "raw IPC" not in text
 
 
+@_requires_gpu
 def test_quickstart_vector_labels_scenario_is_executable(tmp_path):
     module = _load_example(VECTOR_EXAMPLE)
 
@@ -182,13 +207,14 @@ def test_quickstart_models_accept_path_objects_in_serialized_recipes(tmp_path):
     json.dumps(payload)
 
 
+@_requires_gpu
 def test_quickstart_building_scenario_renders_native_gpu_buildings(tmp_path):
     module = _load_example(BUILDING_EXAMPLE)
 
     payload = module.run_example(tmp_path)
 
     assert payload["validation_status"] == "ok"
-    assert payload["render_status"] == "ok"
+    assert payload["render_status"] == "ok", payload.get("diagnostics") or payload
     assert payload["render_backend"] == "gpu_terrain"
     assert payload["bundle_status"] == "ok"
     assert payload["building_backend"] == "terrain_scatter_instanced_mesh"

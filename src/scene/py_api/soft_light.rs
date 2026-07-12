@@ -6,8 +6,9 @@ impl Scene {
     // B12: Soft Light Radius (Raster) API
     #[pyo3(text_signature = "($self)")]
     pub fn enable_soft_light_radius(&mut self) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         let g = crate::core::gpu::try_ctx()?;
-        let renderer = crate::core::soft_light_radius::SoftLightRadiusRenderer::new(&g.device);
+        let renderer = crate::core::soft_light_radius::SoftLightRadiusRenderer::new(&g.device)?;
 
         self.soft_light_radius_renderer = Some(renderer);
         self.soft_light_radius_enabled = true;

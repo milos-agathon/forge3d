@@ -2,6 +2,7 @@
 
 use super::types::ImageImportConfig;
 use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 
 /// Create a texture suitable for image import.
 pub fn create_texture_for_import(
@@ -9,7 +10,7 @@ pub fn create_texture_for_import(
     width: u32,
     height: u32,
     config: &ImageImportConfig,
-) -> RenderResult<wgpu::Texture> {
+) -> RenderResult<TrackedTexture> {
     let size = wgpu::Extent3d {
         width,
         height,
@@ -22,16 +23,22 @@ pub fn create_texture_for_import(
         1
     };
 
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: config.label.as_deref(),
-        size,
-        mip_level_count,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: config.target_format,
-        usage: config.usage,
-        view_formats: &[],
-    });
+    let texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: config
+                .label
+                .as_deref()
+                .or(Some("external_image.import_texture")),
+            size,
+            mip_level_count,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: config.target_format,
+            usage: config.usage,
+            view_formats: &[],
+        },
+    )?;
 
     Ok(texture)
 }

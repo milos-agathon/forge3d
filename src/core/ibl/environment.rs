@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::tracked_create_texture;
 
 impl IBLRenderer {
     pub fn set_base_resolution(&mut self, base_resolution: u32) {
@@ -124,20 +125,24 @@ impl IBLRenderer {
             pad_image_rows(raw_bytes, resized_width, resized_height, 8)
         };
 
-        let equirect = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("ibl.environment.equirect"),
-            size: wgpu::Extent3d {
-                width: final_width,
-                height: final_height,
-                depth_or_array_layers: 1,
+        let equirect = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("ibl.environment.equirect"),
+                size: wgpu::Extent3d {
+                    width: final_width,
+                    height: final_height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
 
         queue.write_texture(
             wgpu::ImageCopyTexture {
@@ -160,23 +165,27 @@ impl IBLRenderer {
         );
 
         let env_size = self.base_resolution;
-        let cubemap = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("ibl.environment.cubemap"),
-            size: wgpu::Extent3d {
-                width: env_size,
-                height: env_size,
-                depth_or_array_layers: CUBE_FACE_COUNT,
+        let cubemap = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("ibl.environment.cubemap"),
+                size: wgpu::Extent3d {
+                    width: env_size,
+                    height: env_size,
+                    depth_or_array_layers: CUBE_FACE_COUNT,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::STORAGE_BINDING
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
 
         let cubemap_view = cubemap.create_view(&wgpu::TextureViewDescriptor {
             label: Some("ibl.environment.cubemap.view"),

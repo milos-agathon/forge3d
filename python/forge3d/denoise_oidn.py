@@ -162,7 +162,12 @@ def oidn_denoise(
     hdr: bool = True,
     quality: str = "high",
 ) -> np.ndarray:
-    """Denoise a linear HDR beauty pass with optional albedo/normal guidance."""
+    """Denoise a linear HDR beauty pass with optional albedo/normal guidance.
+
+    Outside CENSOR's render-certificate scope: a post-hoc filter over an
+    already-rendered (and certified) image — no render executes here, so there
+    is no ``certificate=`` contract.
+    """
 
     backend = _load_backend()
     if backend is None:

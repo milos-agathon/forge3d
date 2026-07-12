@@ -4,8 +4,10 @@
 //! Integrates with P1.1 motion vectors and P1.2 jitter sequence.
 
 use super::error::RenderResult;
+use super::resource_tracker::{
+    tracked_create_buffer_init, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 use std::mem::size_of;
-use wgpu::util::DeviceExt;
 use wgpu::*;
 
 const TAA_SHADER_SRC: &str = include_str!("../shaders/taa.wgsl");
@@ -46,9 +48,9 @@ impl Default for TaaSettings {
 /// TAA renderer with history buffer management
 pub struct TaaRenderer {
     settings: TaaSettings,
-    settings_buffer: Buffer,
+    settings_buffer: TrackedBuffer,
     /// Ping-pong history buffers (index 0 = read, index 1 = write; swap each frame)
-    history_textures: [Texture; 2],
+    history_textures: [TrackedTexture; 2],
     history_views: [TextureView; 2],
     /// Current read index (0 or 1)
     read_index: usize,
@@ -74,16 +76,19 @@ impl TaaRenderer {
             ..Default::default()
         };
 
-        let settings_buffer = device.create_buffer_init(&util::BufferInitDescriptor {
-            label: Some("taa.settings"),
-            contents: bytemuck::cast_slice(&[settings]),
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-        });
+        let settings_buffer = tracked_create_buffer_init(
+            device,
+            &util::BufferInitDescriptor {
+                label: Some("taa.settings"),
+                contents: bytemuck::cast_slice(&[settings]),
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            },
+        )?;
 
         // Create ping-pong history textures (Rgba16Float for HDR)
         let history_textures = [
-            Self::create_history_texture(device, width, height, 0),
-            Self::create_history_texture(device, width, height, 1),
+            Self::create_history_texture(device, width, height, 0)?,
+            Self::create_history_texture(device, width, height, 1)?,
         ];
 
         let history_views = [
@@ -103,10 +108,11 @@ impl TaaRenderer {
         });
 
         // Create shader module
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("taa.shader"),
-            source: ShaderSource::Wgsl(TAA_SHADER_SRC.into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "taa.shader",
+            TAA_SHADER_SRC,
+        );
 
         // Bind group layout:
         // 0: current color (texture)
@@ -203,12 +209,15 @@ impl TaaRenderer {
             push_constant_ranges: &[],
         });
 
-        let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("taa.pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: "taa_resolve",
-        });
+        let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &ComputePipelineDescriptor {
+                label: Some("taa.pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: "taa_resolve",
+            },
+        );
 
         Ok(Self {
             settings,
@@ -226,21 +235,29 @@ impl TaaRenderer {
         })
     }
 
-    fn create_history_texture(device: &Device, width: u32, height: u32, index: usize) -> Texture {
-        device.create_texture(&TextureDescriptor {
-            label: Some(&format!("taa.history.{}", index)),
-            size: Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+    fn create_history_texture(
+        device: &Device,
+        width: u32,
+        height: u32,
+        index: usize,
+    ) -> RenderResult<TrackedTexture> {
+        tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some(&format!("taa.history.{}", index)),
+                size: Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba16Float,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING,
-            view_formats: &[],
-        })
+        )
     }
 
     /// Enable/disable TAA
@@ -294,9 +311,9 @@ impl TaaRenderer {
     }
 
     /// Resize TAA buffers
-    pub fn resize(&mut self, device: &Device, width: u32, height: u32) {
+    pub fn resize(&mut self, device: &Device, width: u32, height: u32) -> RenderResult<()> {
         if self.width == width && self.height == height {
-            return;
+            return Ok(());
         }
 
         self.width = width;
@@ -305,8 +322,8 @@ impl TaaRenderer {
 
         // Recreate history textures
         self.history_textures = [
-            Self::create_history_texture(device, width, height, 0),
-            Self::create_history_texture(device, width, height, 1),
+            Self::create_history_texture(device, width, height, 0)?,
+            Self::create_history_texture(device, width, height, 1)?,
         ];
         self.history_views = [
             self.history_textures[0].create_view(&TextureViewDescriptor::default()),
@@ -314,6 +331,7 @@ impl TaaRenderer {
         ];
 
         self.first_frame = true;
+        Ok(())
     }
 
     /// Execute TAA resolve pass

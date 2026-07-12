@@ -6,13 +6,14 @@ impl Scene {
     // B11: Water Surface Color Toggle API
     #[pyo3(text_signature = "($self)")]
     pub fn enable_water_surface(&mut self) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         let g = crate::core::gpu::try_ctx()?;
         let renderer = crate::core::water_surface::WaterSurfaceRenderer::new(
             &g.device,
             wgpu::TextureFormat::Rgba8UnormSrgb,
             Some(wgpu::TextureFormat::Depth32Float),
             1,
-        );
+        )?;
 
         self.water_surface_renderer = Some(renderer);
         self.water_surface_enabled = true;

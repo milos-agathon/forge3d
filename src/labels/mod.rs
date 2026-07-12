@@ -572,8 +572,11 @@ impl LabelManager {
         renderer: &mut TextOverlayRenderer,
     ) {
         if let Some(atlas) = &self.atlas {
-            // Recreate bind group with the atlas view
-            renderer.recreate_bind_group(device, Some(&atlas.view));
+            // Recreate bind group with the atlas view. Best-effort HUD label path:
+            // the internal allocations were infallible before the tracked-wrapper
+            // migration, so a rare allocation failure is discarded rather than
+            // aborting the frame (this fn returns a count, not a Result).
+            let _ = renderer.recreate_bind_group(device, Some(&atlas.view));
         }
 
         // Use SDF mode (1 channel) for bitmap fonts, MSDF (3 channels) for proper MSDF atlases.
@@ -581,7 +584,7 @@ impl LabelManager {
         renderer.set_channels(1);
         renderer.set_smoothing(2.0);
 
-        renderer.upload_instances(device, queue, &self.visible_instances);
+        let _ = renderer.upload_instances(device, queue, &self.visible_instances);
     }
 
     /// Get reference to the atlas view if loaded.

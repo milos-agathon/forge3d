@@ -10,9 +10,10 @@ impl SsaoResources {
     ) -> Result<(), String> {
         self.width = width;
         self.height = height;
-        let (ao_texture, ao_view) = create_ssao_texture(device, width, height, "scene-ssao");
-        let (blur_texture, blur_view) =
-            create_ssao_texture(device, width, height, "scene-ssao-blur");
+        let (ao_texture, ao_view) =
+            create_ssao_texture(device, width, height, "scene-ssao").map_err(|e| e.to_string())?;
+        let (blur_texture, blur_view) = create_ssao_texture(device, width, height, "scene-ssao-blur")
+            .map_err(|e| e.to_string())?;
         self.ao_texture = ao_texture;
         self.ao_view = ao_view;
         self.blur_texture = blur_texture;

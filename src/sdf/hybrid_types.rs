@@ -1,7 +1,7 @@
 // src/sdf/hybrid_types.rs
 // Type definitions for hybrid SDF/mesh traversal system
 
-use wgpu::Buffer;
+use crate::core::resource_tracker::TrackedBuffer;
 
 /// Simplified vertex type for hybrid scene mesh geometry
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -14,8 +14,8 @@ pub struct Vertex {
 /// GPU buffers for SDF data
 #[derive(Debug)]
 pub struct SdfBuffers {
-    pub primitives_buffer: Buffer,
-    pub nodes_buffer: Buffer,
+    pub primitives_buffer: TrackedBuffer,
+    pub nodes_buffer: TrackedBuffer,
     pub primitive_count: u32,
     pub node_count: u32,
 }
@@ -23,9 +23,9 @@ pub struct SdfBuffers {
 /// GPU buffers for mesh data
 #[derive(Debug)]
 pub struct MeshBuffers {
-    pub vertices_buffer: Buffer,
-    pub indices_buffer: Buffer,
-    pub bvh_buffer: Buffer,
+    pub vertices_buffer: TrackedBuffer,
+    pub indices_buffer: TrackedBuffer,
+    pub bvh_buffer: TrackedBuffer,
     pub vertex_count: u32,
     pub index_count: u32,
     pub bvh_node_count: u32,

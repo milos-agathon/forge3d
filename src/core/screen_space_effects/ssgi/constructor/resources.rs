@@ -1,17 +1,23 @@
 use super::*;
-use wgpu::util::DeviceExt;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_buffer_init, tracked_create_texture, TrackedBuffer,
+    TrackedTexture,
+};
 
-pub(super) fn create_buffers(device: &Device) -> ConstructorBuffers {
+pub(super) fn create_buffers(device: &Device) -> RenderResult<ConstructorBuffers> {
     let comp_params: [f32; 4] = [1.0, 0.0, 0.0, 0.0];
-    ConstructorBuffers {
-        settings_buffer: uniform_buffer::<SsgiSettings>(device, "ssgi_settings"),
-        camera_buffer: uniform_buffer::<CameraParams>(device, "ssgi_camera"),
-        composite_uniform: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("ssgi.composite.uniform"),
-            contents: bytemuck::cast_slice(&comp_params),
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-        }),
-    }
+    Ok(ConstructorBuffers {
+        settings_buffer: uniform_buffer::<SsgiSettings>(device, "ssgi_settings")?,
+        camera_buffer: uniform_buffer::<CameraParams>(device, "ssgi_camera")?,
+        composite_uniform: tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("ssgi.composite.uniform"),
+                contents: bytemuck::cast_slice(&comp_params),
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            },
+        )?,
+    })
 }
 
 pub(super) fn create_textures(
@@ -19,44 +25,44 @@ pub(super) fn create_textures(
     width: u32,
     height: u32,
     material_format: TextureFormat,
-) -> ConstructorResources {
+) -> RenderResult<ConstructorResources> {
     let (ssgi_hit, ssgi_hit_view) = rgba16_texture(
         device,
         "ssgi_hit",
         width,
         height,
         TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
-    );
+    )?;
     let (ssgi_texture, ssgi_view) = rgba16_texture(
         device,
         "ssgi_texture",
         width,
         height,
         TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
-    );
+    )?;
     let (ssgi_history, ssgi_history_view) = rgba16_texture(
         device,
         "ssgi_history",
         width,
         height,
         TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::COPY_SRC,
-    );
+    )?;
     let (ssgi_filtered, ssgi_filtered_view) = rgba16_texture(
         device,
         "ssgi_filtered",
         width,
         height,
         TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
-    );
+    )?;
     let (ssgi_upscaled, ssgi_upscaled_view) = rgba16_texture(
         device,
         "ssgi_upscaled",
         width,
         height,
         TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-    );
+    )?;
     let (ssgi_composited, ssgi_composited_view) =
-        rgba8_texture(device, "ssgi_composited", width, height);
+        rgba8_texture(device, "ssgi_composited", width, height)?;
 
     let history_usage =
         TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::COPY_SRC;
@@ -68,7 +74,7 @@ pub(super) fn create_textures(
             height,
             material_format,
             history_usage,
-        ),
+        )?,
         scene_history_texture(
             device,
             "ssgi_scene_history_b",
@@ -76,27 +82,30 @@ pub(super) fn create_textures(
             height,
             material_format,
             history_usage,
-        ),
+        )?,
     ];
     let scene_history_views = [
         scene_history[0].create_view(&TextureViewDescriptor::default()),
         scene_history[1].create_view(&TextureViewDescriptor::default()),
     ];
 
-    let env_texture = device.create_texture(&TextureDescriptor {
-        label: Some("ssgi_env_cube"),
-        size: Extent3d {
-            width: 1,
-            height: 1,
-            depth_or_array_layers: 6,
+    let env_texture = tracked_create_texture(
+        device,
+        &TextureDescriptor {
+            label: Some("ssgi_env_cube"),
+            size: Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 6,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format: TextureFormat::Rgba8Unorm,
-        usage: TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
+    )?;
     let env_view = env_texture.create_view(&TextureViewDescriptor {
         label: Some("ssgi_env_cube_view"),
         format: Some(TextureFormat::Rgba8Unorm),
@@ -108,7 +117,7 @@ pub(super) fn create_textures(
         array_layer_count: None,
     });
 
-    ConstructorResources {
+    Ok(ConstructorResources {
         ssgi_hit,
         ssgi_hit_view,
         ssgi_texture,
@@ -136,16 +145,19 @@ pub(super) fn create_textures(
             address_mode_w: AddressMode::ClampToEdge,
             ..Default::default()
         }),
-    }
+    })
 }
 
-fn uniform_buffer<T>(device: &Device, label: &str) -> Buffer {
-    device.create_buffer(&BufferDescriptor {
-        label: Some(label),
-        size: std::mem::size_of::<T>() as u64,
-        usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    })
+fn uniform_buffer<T>(device: &Device, label: &str) -> RenderResult<TrackedBuffer> {
+    tracked_create_buffer(
+        device,
+        &BufferDescriptor {
+            label: Some(label),
+            size: std::mem::size_of::<T>() as u64,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )
 }
 
 fn rgba16_texture(
@@ -154,42 +166,53 @@ fn rgba16_texture(
     width: u32,
     height: u32,
     usage: TextureUsages,
-) -> (Texture, TextureView) {
-    let texture = device.create_texture(&TextureDescriptor {
-        label: Some(label),
-        size: Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+) -> RenderResult<(TrackedTexture, TextureView)> {
+    let texture = tracked_create_texture(
+        device,
+        &TextureDescriptor {
+            label: Some(label),
+            size: Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba16Float,
+            usage,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format: TextureFormat::Rgba16Float,
-        usage,
-        view_formats: &[],
-    });
+    )?;
     let view = texture.create_view(&TextureViewDescriptor::default());
-    (texture, view)
+    Ok((texture, view))
 }
 
-fn rgba8_texture(device: &Device, label: &str, width: u32, height: u32) -> (Texture, TextureView) {
-    let texture = device.create_texture(&TextureDescriptor {
-        label: Some(label),
-        size: Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+fn rgba8_texture(
+    device: &Device,
+    label: &str,
+    width: u32,
+    height: u32,
+) -> RenderResult<(TrackedTexture, TextureView)> {
+    let texture = tracked_create_texture(
+        device,
+        &TextureDescriptor {
+            label: Some(label),
+            size: Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format: TextureFormat::Rgba8Unorm,
-        usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
+    )?;
     let view = texture.create_view(&TextureViewDescriptor::default());
-    (texture, view)
+    Ok((texture, view))
 }
 
 fn scene_history_texture(
@@ -199,19 +222,22 @@ fn scene_history_texture(
     height: u32,
     format: TextureFormat,
     usage: TextureUsages,
-) -> Texture {
-    device.create_texture(&TextureDescriptor {
-        label: Some(label),
-        size: Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+) -> RenderResult<TrackedTexture> {
+    tracked_create_texture(
+        device,
+        &TextureDescriptor {
+            label: Some(label),
+            size: Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format,
+            usage,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format,
-        usage,
-        view_formats: &[],
-    })
+    )
 }

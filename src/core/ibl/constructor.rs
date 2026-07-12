@@ -1,43 +1,40 @@
 use super::*;
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::tracked_create_buffer_init;
 
 impl IBLRenderer {
-    pub fn new(device: &wgpu::Device, quality: IBLQuality) -> Self {
-        // TERRA-DETERMINATA: these precompute outputs feed the terrain hash,
-        // so compile every module with the same pinned deterministic helpers.
+    pub fn new(device: &wgpu::Device, quality: IBLQuality) -> RenderResult<Self> {
+        // IBL precompute feeds the deterministic terrain reference. Assemble
+        // it through the certificate-aware registry so normalized WGSL hashes
+        // describe exactly the source wgpu compiles.
         let determinism = include_str!("../../shaders/includes/determinism.wgsl");
-        let shader_equirect = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("ibl.precompute.shader.equirect"),
-            source: wgpu::ShaderSource::Wgsl(
-                format!(
-                    "{}\n{}",
-                    determinism,
-                    include_str!("../../shaders/ibl_equirect.wgsl")
-                )
-                .into(),
-            ),
-        });
-        let shader_prefilter = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("ibl.precompute.shader.prefilter"),
-            source: wgpu::ShaderSource::Wgsl(
-                format!(
-                    "{}\n{}",
-                    determinism,
-                    include_str!("../../shaders/ibl_prefilter.wgsl")
-                )
-                .into(),
-            ),
-        });
-        let shader_brdf = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("ibl.precompute.shader.brdf"),
-            source: wgpu::ShaderSource::Wgsl(
-                format!(
-                    "{}\n{}",
-                    determinism,
-                    include_str!("../../shaders/ibl_brdf.wgsl")
-                )
-                .into(),
-            ),
-        });
+        let equirect_source = format!(
+            "{determinism}\n{}",
+            include_str!("../../shaders/ibl_equirect.wgsl")
+        );
+        let prefilter_source = format!(
+            "{determinism}\n{}",
+            include_str!("../../shaders/ibl_prefilter.wgsl")
+        );
+        let brdf_source = format!(
+            "{determinism}\n{}",
+            include_str!("../../shaders/ibl_brdf.wgsl")
+        );
+        let shader_equirect = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "ibl.precompute.shader.equirect",
+            &equirect_source,
+        );
+        let shader_prefilter = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "ibl.precompute.shader.prefilter",
+            &prefilter_source,
+        );
+        let shader_brdf = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "ibl.precompute.shader.brdf",
+            &brdf_source,
+        );
 
         let equirect_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ibl.precompute.equirect.layout"),
@@ -191,21 +188,25 @@ impl IBLRenderer {
             ],
         });
 
-        let equirect_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("ibl.precompute.pipeline.equirect"),
-            layout: Some(
-                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("ibl.precompute.layout.equirect"),
-                    bind_group_layouts: &[&equirect_layout],
-                    push_constant_ranges: &[],
-                }),
-            ),
-            module: &shader_equirect,
-            entry_point: "cs_equirect_to_cubemap",
-        });
+        let equirect_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("ibl.precompute.pipeline.equirect"),
+                layout: Some(
+                    &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("ibl.precompute.layout.equirect"),
+                        bind_group_layouts: &[&equirect_layout],
+                        push_constant_ranges: &[],
+                    }),
+                ),
+                module: &shader_equirect,
+                entry_point: "cs_equirect_to_cubemap",
+            },
+        );
 
-        let irradiance_pipeline =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        let irradiance_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
                 label: Some("ibl.precompute.pipeline.irradiance"),
                 layout: Some(
                     &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -216,41 +217,51 @@ impl IBLRenderer {
                 ),
                 module: &shader_prefilter,
                 entry_point: "cs_irradiance_convolve",
-            });
+            },
+        );
 
-        let specular_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("ibl.precompute.pipeline.specular"),
-            layout: Some(
-                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("ibl.precompute.layout.specular"),
-                    bind_group_layouts: &[&convolve_layout],
-                    push_constant_ranges: &[],
-                }),
-            ),
-            module: &shader_prefilter,
-            entry_point: "cs_specular_prefilter",
-        });
+        let specular_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("ibl.precompute.pipeline.specular"),
+                layout: Some(
+                    &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("ibl.precompute.layout.specular"),
+                        bind_group_layouts: &[&convolve_layout],
+                        push_constant_ranges: &[],
+                    }),
+                ),
+                module: &shader_prefilter,
+                entry_point: "cs_specular_prefilter",
+            },
+        );
 
-        let brdf_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("ibl.precompute.pipeline.brdf"),
-            layout: Some(
-                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("ibl.precompute.layout.brdf"),
-                    bind_group_layouts: &[&brdf_layout],
-                    push_constant_ranges: &[],
-                }),
-            ),
-            module: &shader_brdf,
-            entry_point: "cs_brdf_lut",
-        });
+        let brdf_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("ibl.precompute.pipeline.brdf"),
+                layout: Some(
+                    &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("ibl.precompute.layout.brdf"),
+                        bind_group_layouts: &[&brdf_layout],
+                        push_constant_ranges: &[],
+                    }),
+                ),
+                module: &shader_brdf,
+                entry_point: "cs_brdf_lut",
+            },
+        );
 
         let base_resolution = quality.base_environment_size();
         let uniforms = PrefilterUniforms::new(base_resolution, quality);
-        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("ibl.prefilter.uniforms"),
-            contents: bytemuck::bytes_of(&uniforms),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let uniform_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("ibl.prefilter.uniforms"),
+                contents: bytemuck::bytes_of(&uniforms),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        )?;
 
         let env_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("ibl.runtime.sampler"),
@@ -279,7 +290,7 @@ impl IBLRenderer {
             ..Default::default()
         });
 
-        Self {
+        Ok(Self {
             quality,
             base_resolution,
             equirect_layout,
@@ -309,6 +320,6 @@ impl IBLRenderer {
             cache: None,
             pbr_bind_group: None,
             is_initialized: false,
-        }
+        })
     }
 }

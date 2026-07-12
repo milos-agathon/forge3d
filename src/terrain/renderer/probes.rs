@@ -3,9 +3,9 @@ use std::hash::{Hash, Hasher};
 
 use half::f16;
 use pyo3::Python;
-use wgpu::util::DeviceExt;
 
 use super::*;
+use crate::core::resource_tracker::{tracked_create_buffer_init, tracked_create_texture};
 use crate::render::material_set::MaterialSet;
 use crate::terrain::probes::{
     pack_probes_for_upload, GpuProbeData, HeightfieldAnalyticalBaker, HeightfieldReflectionBaker,
@@ -340,20 +340,21 @@ impl TerrainScene {
         grid_uniforms: &ProbeGridUniformsGpu,
         probe_data: &[GpuProbeData],
         active_probe_count: usize,
-    ) {
+    ) -> Result<()> {
         let required_bytes = (probe_data.len() * std::mem::size_of::<GpuProbeData>()) as u64;
         if self.probe_ssbo_alloc_bytes != required_bytes {
             let tracker = crate::core::memory_tracker::global_tracker();
             if self.probe_ssbo_alloc_bytes > 0 {
                 tracker.free_buffer_allocation(self.probe_ssbo_alloc_bytes, false);
             }
-            self.probe_ssbo = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            self.probe_ssbo = tracked_create_buffer_init(
+                &self.device,
+                &wgpu::util::BufferInitDescriptor {
                     label: Some("terrain.probes.ssbo"),
                     contents: bytemuck::cast_slice(probe_data),
                     usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                });
+                },
+            )?;
             tracker.track_buffer_allocation(required_bytes, false);
             self.probe_ssbo_alloc_bytes = required_bytes;
         } else {
@@ -373,6 +374,7 @@ impl TerrainScene {
             0
         };
         self.probe_ssbo_bytes = (active_probe_count * std::mem::size_of::<GpuProbeData>()) as u64;
+        Ok(())
     }
 
     pub(super) fn clear_reflection_probe_texture(&mut self) {
@@ -396,10 +398,10 @@ impl TerrainScene {
         self.reflection_probe_mip_levels = 0;
     }
 
-    fn upload_reflection_probe_texture(&mut self, baked: &ReflectionProbeSet) {
+    fn upload_reflection_probe_texture(&mut self, baked: &ReflectionProbeSet) -> Result<()> {
         if baked.probes.is_empty() {
             self.clear_reflection_probe_texture();
-            return;
+            return Ok(());
         }
 
         let probe_count = baked.probes.len() as u32;
@@ -412,20 +414,23 @@ impl TerrainScene {
             || self.reflection_probe_mip_levels != mip_levels;
 
         if needs_recreate {
-            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("terrain.reflection_probes.texture"),
-                size: wgpu::Extent3d {
-                    width: resolution,
-                    height: resolution,
-                    depth_or_array_layers: probe_count * 6,
+            let texture = tracked_create_texture(
+                &self.device,
+                &wgpu::TextureDescriptor {
+                    label: Some("terrain.reflection_probes.texture"),
+                    size: wgpu::Extent3d {
+                        width: resolution,
+                        height: resolution,
+                        depth_or_array_layers: probe_count * 6,
+                    },
+                    mip_level_count: mip_levels,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba16Float,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    view_formats: &[],
                 },
-                mip_level_count: mip_levels,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba16Float,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
+            )?;
             self.reflection_probe_view = texture.create_view(&wgpu::TextureViewDescriptor {
                 label: Some("terrain.reflection_probes.view"),
                 format: Some(wgpu::TextureFormat::Rgba16Float),
@@ -488,6 +493,7 @@ impl TerrainScene {
         self.reflection_probe_count = probe_count;
         self.reflection_probe_resolution = resolution;
         self.reflection_probe_mip_levels = mip_levels;
+        Ok(())
     }
 }
 
@@ -499,14 +505,14 @@ pub(super) fn prepare_probes(
     height_dims: (u32, u32),
     z_scale: f32,
     terrain_data_hash: u64,
-) {
+) -> Result<()> {
     if !settings.enabled {
         scene.upload_probe_data(
             &ProbeGridUniformsGpu::disabled(),
             &[GpuProbeData::zeroed()],
             0,
-        );
-        return;
+        )?;
+        return Ok(());
     }
 
     let bake_key = hash_probe_bake_inputs(
@@ -564,8 +570,8 @@ pub(super) fn prepare_probes(
                     &ProbeGridUniformsGpu::disabled(),
                     &[GpuProbeData::zeroed()],
                     0,
-                );
-                return;
+                )?;
+                return Ok(());
             }
         }
     }
@@ -584,8 +590,8 @@ pub(super) fn prepare_probes(
                 &ProbeGridUniformsGpu::disabled(),
                 &[GpuProbeData::zeroed()],
                 0,
-            );
-            return;
+            )?;
+            return Ok(());
         }
     };
     let probe_count = scene.probe_cached_data.len();
@@ -601,7 +607,8 @@ pub(super) fn prepare_probes(
         blend_params: [blend_x, blend_y, 1.0, probe_count as f32],
     };
     let gpu_data = scene.probe_cached_data.clone();
-    scene.upload_probe_data(&uniforms, &gpu_data, probe_count);
+    scene.upload_probe_data(&uniforms, &gpu_data, probe_count)?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -617,7 +624,7 @@ pub(super) fn prepare_reflection_probes(
     height_dims: (u32, u32),
     z_scale: f32,
     terrain_data_hash: u64,
-) {
+) -> Result<()> {
     if !settings.enabled {
         scene.clear_reflection_probe_texture();
         scene.queue.write_buffer(
@@ -626,7 +633,7 @@ pub(super) fn prepare_reflection_probes(
             bytemuck::bytes_of(&ReflectionProbeGridUniformsGpu::disabled()),
         );
         scene.reflection_probe_grid_uniform_bytes = 0;
-        return;
+        return Ok(());
     }
 
     let bake_key = hash_reflection_probe_inputs(
@@ -674,7 +681,7 @@ pub(super) fn prepare_reflection_probes(
         };
         match baker.bake(&placement) {
             Ok(baked) => {
-                scene.upload_reflection_probe_texture(&baked);
+                scene.upload_reflection_probe_texture(&baked)?;
                 scene.reflection_probe_cache_key = Some(bake_key);
                 scene.reflection_probe_cached_grid = Some(placement.grid.clone());
             }
@@ -692,7 +699,7 @@ pub(super) fn prepare_reflection_probes(
                     bytemuck::bytes_of(&ReflectionProbeGridUniformsGpu::disabled()),
                 );
                 scene.reflection_probe_grid_uniform_bytes = 0;
-                return;
+                return Ok(());
             }
         }
     }
@@ -706,7 +713,7 @@ pub(super) fn prepare_reflection_probes(
                 bytemuck::bytes_of(&ReflectionProbeGridUniformsGpu::disabled()),
             );
             scene.reflection_probe_grid_uniform_bytes = 0;
-            return;
+            return Ok(());
         }
     };
     let (height_min, height_max) = compute_height_bounds(heightfield, z_scale);
@@ -762,4 +769,5 @@ pub(super) fn prepare_reflection_probes(
     );
     scene.reflection_probe_grid_uniform_bytes =
         std::mem::size_of::<ReflectionProbeGridUniformsGpu>() as u64;
+    Ok(())
 }

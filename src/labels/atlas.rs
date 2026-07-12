@@ -1,10 +1,11 @@
 //! MSDF font atlas loading and text layout.
 
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::core::text_overlay::TextInstance;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use wgpu::{Device, Queue, Texture, TextureView};
+use wgpu::{Device, Queue, TextureView};
 
 /// Metrics for a single glyph in the atlas.
 #[derive(Debug, Clone, Copy)]
@@ -27,7 +28,7 @@ pub struct GlyphMetrics {
 
 /// MSDF font atlas with glyph metrics.
 pub struct MsdfAtlas {
-    pub texture: Arc<Texture>,
+    pub texture: Arc<TrackedTexture>,
     pub view: Arc<TextureView>,
     pub width: u32,
     pub height: u32,
@@ -72,21 +73,25 @@ impl MsdfAtlas {
         atlas_height: u32,
         metrics_json: &str,
     ) -> Result<Self, String> {
-        // Create texture
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("msdf_atlas"),
-            size: wgpu::Extent3d {
-                width: atlas_width,
-                height: atlas_height,
-                depth_or_array_layers: 1,
+        // Allocate the atlas texture through the tracked wrapper.
+        let texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("msdf_atlas"),
+                size: wgpu::Extent3d {
+                    width: atlas_width,
+                    height: atlas_height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )
+        .map_err(|e| e.to_string())?;
 
         // Upload image data
         queue.write_texture(

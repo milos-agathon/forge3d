@@ -11,6 +11,7 @@ from typing import Literal
 import numpy as np
 
 from .map_plate import BBox
+from .certificate import _captured_cpu_render
 
 
 @dataclass
@@ -109,11 +110,19 @@ class ScaleBar:
                 break
         return nice / unit_factor
 
-    def render(self) -> np.ndarray:
+    @_captured_cpu_render("python.scale_bar.render", "scale_bar.cpu", draw_calls=1)
+    def render(self, *, certificate: bool | str = False) -> np.ndarray:
         """Render the scale bar to an RGBA image."""
         try:
             from PIL import Image, ImageDraw, ImageFont
         except ImportError:
+            from . import _degradation
+
+            _degradation.record(
+                "optional_dependency_absent",
+                "scale_bar.pillow",
+                "Pillow is unavailable; scale-bar labels and divisions were omitted",
+            )
             return self._render_simple()
 
         cfg = self.config

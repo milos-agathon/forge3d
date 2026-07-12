@@ -1,11 +1,13 @@
 use super::*;
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_buffer, tracked_create_texture, TrackedBuffer};
 use wgpu::{
     BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry,
     BindingType, BufferBindingType, BufferDescriptor, BufferUsages, ColorTargetState, ColorWrites,
     Extent3d, FilterMode, FragmentState, PipelineLayoutDescriptor, PrimitiveState,
-    PrimitiveTopology, SamplerBindingType, SamplerDescriptor, ShaderModuleDescriptor, ShaderSource,
-    ShaderStages, TextureDescriptor, TextureDimension, TextureSampleType, TextureUsages,
-    TextureViewDescriptor, TextureViewDimension, VertexBufferLayout, VertexState, VertexStepMode,
+    PrimitiveTopology, SamplerBindingType, SamplerDescriptor, ShaderStages, TextureDescriptor,
+    TextureDimension, TextureSampleType, TextureUsages, TextureViewDescriptor,
+    TextureViewDimension, VertexBufferLayout, VertexState, VertexStepMode,
 };
 
 impl WaterSurfaceRenderer {
@@ -14,16 +16,19 @@ impl WaterSurfaceRenderer {
         color_format: TextureFormat,
         depth_format: Option<TextureFormat>,
         sample_count: u32,
-    ) -> Self {
+    ) -> RenderResult<Self> {
         let params = WaterSurfaceParams::default();
         let uniforms = WaterSurfaceUniforms::default();
 
-        let uniform_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("water_surface_uniform_buffer"),
-            size: std::mem::size_of::<WaterSurfaceUniforms>() as wgpu::BufferAddress,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("water_surface_uniform_buffer"),
+                size: std::mem::size_of::<WaterSurfaceUniforms>() as wgpu::BufferAddress,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("water_surface_bind_group_layout"),
@@ -58,20 +63,23 @@ impl WaterSurfaceRenderer {
             ..Default::default()
         });
         let mask_size = (1u32, 1u32);
-        let mask_texture = device.create_texture(&TextureDescriptor {
-            label: Some("water_mask_texture"),
-            size: Extent3d {
-                width: mask_size.0,
-                height: mask_size.1,
-                depth_or_array_layers: 1,
+        let mask_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("water_mask_texture"),
+                size: Extent3d {
+                    width: mask_size.0,
+                    height: mask_size.1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::R8Unorm,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::R8Unorm,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         let mask_view = mask_texture.create_view(&TextureViewDescriptor::default());
 
         let mask_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -110,12 +118,11 @@ impl WaterSurfaceRenderer {
             ],
         });
 
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("water_surface_shader"),
-            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                "../../shaders/water_surface.wgsl"
-            ))),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "water_surface_shader",
+            include_str!("../../shaders/water_surface.wgsl"),
+        );
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("water_surface_pipeline_layout"),
             bind_group_layouts: &[&bind_group_layout, &mask_bind_group_layout],
@@ -127,62 +134,65 @@ impl WaterSurfaceRenderer {
             step_mode: VertexStepMode::Vertex,
             attributes: &vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x3],
         };
-        let water_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("water_surface_render_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[vertex_buffer_layout],
+        let water_pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("water_surface_render_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[vertex_buffer_layout],
+                },
+                primitive: PrimitiveState {
+                    topology: PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: depth_format.map(|format| wgpu::DepthStencilState {
+                    format,
+                    depth_write_enabled: false,
+                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: sample_count,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                fragment: Some(FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(ColorTargetState {
+                        format: color_format,
+                        blend: Some(BlendState {
+                            color: BlendComponent {
+                                src_factor: BlendFactor::SrcAlpha,
+                                dst_factor: BlendFactor::OneMinusSrcAlpha,
+                                operation: BlendOperation::Add,
+                            },
+                            alpha: BlendComponent {
+                                src_factor: BlendFactor::One,
+                                dst_factor: BlendFactor::OneMinusSrcAlpha,
+                                operation: BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: ColorWrites::ALL,
+                    })],
+                }),
+                multiview: None,
             },
-            primitive: PrimitiveState {
-                topology: PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: depth_format.map(|format| wgpu::DepthStencilState {
-                format,
-                depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: sample_count,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            fragment: Some(FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(ColorTargetState {
-                    format: color_format,
-                    blend: Some(BlendState {
-                        color: BlendComponent {
-                            src_factor: BlendFactor::SrcAlpha,
-                            dst_factor: BlendFactor::OneMinusSrcAlpha,
-                            operation: BlendOperation::Add,
-                        },
-                        alpha: BlendComponent {
-                            src_factor: BlendFactor::One,
-                            dst_factor: BlendFactor::OneMinusSrcAlpha,
-                            operation: BlendOperation::Add,
-                        },
-                    }),
-                    write_mask: ColorWrites::ALL,
-                })],
-            }),
-            multiview: None,
-        });
+        );
 
         let (vertex_buffer, index_buffer, index_count) =
-            Self::create_water_surface_geometry(device, params.size);
+            Self::create_water_surface_geometry(device, params.size)?;
 
-        Self {
+        Ok(Self {
             uniforms,
             params,
             uniform_buffer,
@@ -200,10 +210,13 @@ impl WaterSurfaceRenderer {
             index_count,
             animation_time: 0.0,
             enabled: true,
-        }
+        })
     }
 
-    fn create_water_surface_geometry(device: &Device, size: f32) -> (Buffer, Buffer, u32) {
+    fn create_water_surface_geometry(
+        device: &Device,
+        size: f32,
+    ) -> RenderResult<(TrackedBuffer, TrackedBuffer, u32)> {
         let half_size = size * 0.5;
         let subdivisions = 32;
         let step = size / subdivisions as f32;
@@ -230,30 +243,36 @@ impl WaterSurfaceRenderer {
             }
         }
 
-        let vertex_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("water_surface_vertex_buffer"),
-            size: (vertices.len() * std::mem::size_of::<f32>()) as wgpu::BufferAddress,
-            usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-            mapped_at_creation: true,
-        });
+        let vertex_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("water_surface_vertex_buffer"),
+                size: (vertices.len() * std::mem::size_of::<f32>()) as wgpu::BufferAddress,
+                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                mapped_at_creation: true,
+            },
+        )?;
         vertex_buffer
             .slice(..)
             .get_mapped_range_mut()
             .copy_from_slice(bytemuck::cast_slice(&vertices));
         vertex_buffer.unmap();
 
-        let index_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("water_surface_index_buffer"),
-            size: (indices.len() * std::mem::size_of::<u32>()) as wgpu::BufferAddress,
-            usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
-            mapped_at_creation: true,
-        });
+        let index_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("water_surface_index_buffer"),
+                size: (indices.len() * std::mem::size_of::<u32>()) as wgpu::BufferAddress,
+                usage: BufferUsages::INDEX | BufferUsages::COPY_DST,
+                mapped_at_creation: true,
+            },
+        )?;
         index_buffer
             .slice(..)
             .get_mapped_range_mut()
             .copy_from_slice(bytemuck::cast_slice(&indices));
         index_buffer.unmap();
 
-        (vertex_buffer, index_buffer, indices.len() as u32)
+        Ok((vertex_buffer, index_buffer, indices.len() as u32))
     }
 }

@@ -2,12 +2,16 @@
 // Planar Reflections implementation with render-to-texture and clip plane support (B5)
 // RELEVANT FILES: shaders/planar_reflections.wgsl, python/forge3d/lighting.py, tests/test_b5_reflections.py
 
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 use glam::{Mat4, Vec3};
 use wgpu::{
-    AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindingResource, Buffer,
-    BufferDescriptor, BufferUsages, CommandEncoder, Device, Extent3d, FilterMode, Queue,
-    RenderPass, Sampler, SamplerDescriptor, Texture, TextureDescriptor, TextureDimension,
-    TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
+    AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindingResource, BufferDescriptor,
+    BufferUsages, CommandEncoder, Device, Extent3d, FilterMode, Queue, RenderPass, Sampler,
+    SamplerDescriptor, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+    TextureView, TextureViewDescriptor,
 };
 
 // Re-export types and math helpers
@@ -25,11 +29,11 @@ pub struct PlanarReflectionRenderer {
     /// Configuration
     pub uniforms: PlanarReflectionUniforms,
     /// Uniform buffer
-    pub uniform_buffer: Buffer,
+    pub uniform_buffer: TrackedBuffer,
     /// Reflection render target (color)
-    pub reflection_texture: Texture,
+    pub reflection_texture: TrackedTexture,
     /// Reflection depth buffer
-    pub reflection_depth: Texture,
+    pub reflection_depth: TrackedTexture,
     /// Reflection texture view for sampling
     pub reflection_view: TextureView,
     /// Reflection depth view for rendering
@@ -46,49 +50,58 @@ pub struct PlanarReflectionRenderer {
 
 impl PlanarReflectionRenderer {
     /// Create a new planar reflection renderer
-    pub fn new(device: &Device, quality: ReflectionQuality) -> Self {
+    pub fn new(device: &Device, quality: ReflectionQuality) -> RenderResult<Self> {
         let resolution = quality.resolution();
 
         // Create uniform buffer
-        let uniform_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("planar_reflection_uniforms"),
-            size: std::mem::size_of::<PlanarReflectionUniforms>() as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("planar_reflection_uniforms"),
+                size: std::mem::size_of::<PlanarReflectionUniforms>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         // Create reflection render target
-        let reflection_texture = device.create_texture(&TextureDescriptor {
-            label: Some("planar_reflection_texture"),
-            size: Extent3d {
-                width: resolution,
-                height: resolution,
-                depth_or_array_layers: 1,
+        let reflection_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("planar_reflection_texture"),
+                size: Extent3d {
+                    width: resolution,
+                    height: resolution,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                // Use 8-bit UNORM for performance; reflection pass content does not require HDR
+                format: TextureFormat::Rgba8Unorm,
+                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            // Use 8-bit UNORM for performance; reflection pass content does not require HDR
-            format: TextureFormat::Rgba8Unorm,
-            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
 
         // Create reflection depth buffer
-        let reflection_depth = device.create_texture(&TextureDescriptor {
-            label: Some("planar_reflection_depth"),
-            size: Extent3d {
-                width: resolution,
-                height: resolution,
-                depth_or_array_layers: 1,
+        let reflection_depth = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("planar_reflection_depth"),
+                size: Extent3d {
+                    width: resolution,
+                    height: resolution,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Depth32Float,
+                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Depth32Float,
-            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
 
         // Create texture views
         let reflection_view = reflection_texture.create_view(&TextureViewDescriptor::default());
@@ -115,7 +128,7 @@ impl PlanarReflectionRenderer {
         uniforms.max_blur_radius = quality.max_blur_radius();
         uniforms.camera_position = [0.0, 0.0, 0.0, 1.0];
 
-        Self {
+        Ok(Self {
             uniforms,
             uniform_buffer,
             reflection_texture,
@@ -126,7 +139,7 @@ impl PlanarReflectionRenderer {
             reflection_sampler,
             bind_group: None,
             quality,
-        }
+        })
     }
 
     /// Set reflection plane

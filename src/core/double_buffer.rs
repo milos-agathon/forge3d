@@ -6,6 +6,7 @@
 
 use super::error::RenderError;
 use crate::core::memory_tracker::ResourceRegistry;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use wgpu::{Buffer, BufferDescriptor, BufferUsages, Device, Queue};
 
 /// Configuration for double-buffering strategy
@@ -58,7 +59,7 @@ impl DoubleBufferConfig {
 /// Double-buffer for per-frame data with ping-pong strategy
 pub struct DoubleBuffer {
     /// Array of buffers (2 or 3 buffers)
-    buffers: Vec<Buffer>,
+    buffers: Vec<TrackedBuffer>,
     /// Current buffer index for writing
     current_write: usize,
     /// Current buffer index for reading/binding
@@ -92,7 +93,7 @@ impl DoubleBuffer {
         device: &Device,
         config: DoubleBufferConfig,
         label_prefix: &str,
-        registry: Option<&ResourceRegistry>,
+        _registry: Option<&ResourceRegistry>,
     ) -> Result<Self, RenderError> {
         if config.buffer_count < 2 || config.buffer_count > 3 {
             return Err(RenderError::Upload(format!(
@@ -103,19 +104,18 @@ impl DoubleBuffer {
 
         let mut buffers = Vec::with_capacity(config.buffer_count as usize);
         for i in 0..config.buffer_count {
-            let buffer = device.create_buffer(&BufferDescriptor {
-                label: Some(&format!("{}_double_buffer_{}", label_prefix, i)),
-                size: config.size,
-                usage: config.usage,
-                mapped_at_creation: false,
-            });
-
-            // Track in memory registry
-            if let Some(registry) = registry {
-                let is_host_visible = config.usage.contains(BufferUsages::MAP_READ)
-                    || config.usage.contains(BufferUsages::MAP_WRITE);
-                registry.track_buffer_allocation(config.size, is_host_visible);
-            }
+            // `tracked_create_buffer` records each allocation in the global
+            // registry + ledger (superseding the legacy `_registry` accounting,
+            // which had no matching free on drop).
+            let buffer = tracked_create_buffer(
+                device,
+                &BufferDescriptor {
+                    label: Some(&format!("{}_double_buffer_{}", label_prefix, i)),
+                    size: config.size,
+                    usage: config.usage,
+                    mapped_at_creation: false,
+                },
+            )?;
 
             buffers.push(buffer);
         }
@@ -254,7 +254,7 @@ impl DoubleBuffer {
 
     /// Get buffer by index (for advanced usage)
     pub fn get_buffer(&self, index: usize) -> Option<&Buffer> {
-        self.buffers.get(index)
+        self.buffers.get(index).map(|b| b.inner())
     }
 
     /// Get number of buffers

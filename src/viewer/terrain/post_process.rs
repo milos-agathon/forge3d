@@ -1,8 +1,10 @@
 // src/viewer/terrain/post_process.rs
 // Full-screen post-process pass for lens effects (distortion, CA, vignette)
 
+use crate::core::resource_tracker::{
+    tracked_create_buffer_init, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 
 /// Post-process uniforms for lens effects
 #[repr(C)]
@@ -22,15 +24,18 @@ pub struct PostProcessPass {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    uniform_buffer: wgpu::Buffer,
+    uniform_buffer: TrackedBuffer,
     // Intermediate texture for ping-pong rendering
-    intermediate_texture: Option<wgpu::Texture>,
+    intermediate_texture: Option<TrackedTexture>,
     pub intermediate_view: Option<wgpu::TextureView>,
     current_size: (u32, u32),
 }
 
 impl PostProcessPass {
-    pub fn new(device: Arc<wgpu::Device>, surface_format: wgpu::TextureFormat) -> Self {
+    pub fn new(
+        device: Arc<wgpu::Device>,
+        surface_format: wgpu::TextureFormat,
+    ) -> anyhow::Result<Self> {
         // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("post_process.bind_group_layout"),
@@ -75,42 +80,46 @@ impl PostProcessPass {
         });
 
         // Create shader module
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("post_process.shader"),
-            source: wgpu::ShaderSource::Wgsl(POST_PROCESS_SHADER.into()),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            &device,
+            "post_process.shader",
+            POST_PROCESS_SHADER,
+        );
 
         // Create render pipeline
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("post_process.pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[],
+        let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            &device,
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("post_process.pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        });
+        );
 
         // Create sampler (linear filtering with clamp)
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -125,17 +134,20 @@ impl PostProcessPass {
         });
 
         // Create uniform buffer
-        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("post_process.uniforms"),
-            contents: bytemuck::cast_slice(&[PostProcessUniforms {
-                screen_dims: [1.0, 1.0, 1.0, 1.0],
-                lens_params: [0.0, 0.0, 0.0, 0.7],
-                lens_params2: [0.3, 0.0, 0.0, 0.0],
-            }]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let uniform_buffer = tracked_create_buffer_init(
+            &device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("post_process.uniforms"),
+                contents: bytemuck::cast_slice(&[PostProcessUniforms {
+                    screen_dims: [1.0, 1.0, 1.0, 1.0],
+                    lens_params: [0.0, 0.0, 0.0, 0.7],
+                    lens_params2: [0.3, 0.0, 0.0, 0.0],
+                }]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        )?;
 
-        Self {
+        Ok(Self {
             device,
             pipeline,
             bind_group_layout,
@@ -144,7 +156,7 @@ impl PostProcessPass {
             intermediate_texture: None,
             intermediate_view: None,
             current_size: (0, 0),
-        }
+        })
     }
 
     /// Ensure intermediate texture is allocated at the correct size
@@ -153,28 +165,32 @@ impl PostProcessPass {
         width: u32,
         height: u32,
         format: wgpu::TextureFormat,
-    ) {
+    ) -> anyhow::Result<()> {
         if self.current_size != (width, height) || self.intermediate_texture.is_none() {
-            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("post_process.intermediate"),
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
+            let texture = tracked_create_texture(
+                &self.device,
+                &wgpu::TextureDescriptor {
+                    label: Some("post_process.intermediate"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            });
+            )?;
             self.intermediate_view =
                 Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
             self.intermediate_texture = Some(texture);
             self.current_size = (width, height);
         }
+        Ok(())
     }
 
     /// Get the intermediate texture view for rendering the scene to
@@ -183,9 +199,9 @@ impl PostProcessPass {
         width: u32,
         height: u32,
         format: wgpu::TextureFormat,
-    ) -> &wgpu::TextureView {
-        self.ensure_intermediate_texture(width, height, format);
-        self.intermediate_view.as_ref().unwrap()
+    ) -> anyhow::Result<&wgpu::TextureView> {
+        self.ensure_intermediate_texture(width, height, format)?;
+        Ok(self.intermediate_view.as_ref().unwrap())
     }
 
     pub fn apply_from_input(

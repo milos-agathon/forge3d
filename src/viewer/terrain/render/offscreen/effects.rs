@@ -1,4 +1,5 @@
 use super::SnapshotRenderState;
+use crate::core::resource_tracker::TrackedTexture;
 use crate::viewer::terrain::dof;
 use crate::viewer::terrain::ViewerTerrainScene;
 
@@ -10,10 +11,10 @@ impl ViewerTerrainScene {
         width: u32,
         height: u32,
         depth_view: &wgpu::TextureView,
-        color_tex: wgpu::Texture,
+        color_tex: TrackedTexture,
         color_view: wgpu::TextureView,
         state: &SnapshotRenderState,
-    ) -> wgpu::Texture {
+    ) -> TrackedTexture {
         let mut out_tex = color_tex;
         let mut out_view = color_view;
 
@@ -23,18 +24,31 @@ impl ViewerTerrainScene {
                 self.init_volumetrics_pass();
             }
 
-            let (vol_output_tex, vol_output_view) = self.create_snapshot_color_target(
+            let vol_target = match self.create_snapshot_color_target(
                 "terrain_viewer.snapshot_vol_output",
                 target_format,
                 width,
                 height,
-            );
-            if let Some(ref mut vol_pass) = self.volumetrics_pass {
+            ) {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    eprintln!("[terrain] failed to allocate volumetrics target: {e}");
+                    crate::core::degradation::record_degradation(
+                        "allocation_fallback",
+                        "viewer.volumetrics",
+                        "volumetric lighting skipped; snapshot rendered without volumetrics",
+                    );
+                    None
+                }
+            };
+            if let (Some((vol_output_tex, vol_output_view)), Some(ref mut vol_pass)) =
+                (vol_target, self.volumetrics_pass.as_mut())
+            {
                 let terrain = self.terrain.as_ref().unwrap();
                 let cam_radius = terrain.cam_radius;
                 let terrain_sun_intensity = terrain.sun_intensity;
 
-                vol_pass.apply(
+                if let Err(e) = vol_pass.apply(
                     encoder,
                     &self.queue,
                     &out_view,
@@ -59,7 +73,9 @@ impl ViewerTerrainScene {
                         state.h_range,
                     ],
                     &self.pbr_config.volumetrics,
-                );
+                ) {
+                    eprintln!("[terrain] volumetrics apply failed: {e}");
+                }
 
                 out_tex = vol_output_tex;
                 out_view = vol_output_view;
@@ -72,13 +88,26 @@ impl ViewerTerrainScene {
                 self.init_dof_pass();
             }
 
-            let (dof_output_tex, dof_output_view) = self.create_snapshot_color_target(
+            let dof_target = match self.create_snapshot_color_target(
                 "terrain_viewer.snapshot_dof_output",
                 target_format,
                 width,
                 height,
-            );
-            if let Some(ref mut dof) = self.dof_pass {
+            ) {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    eprintln!("[terrain] failed to allocate DoF target: {e}");
+                    crate::core::degradation::record_degradation(
+                        "allocation_fallback",
+                        "viewer.dof",
+                        "depth-of-field skipped; snapshot rendered fully in focus",
+                    );
+                    None
+                }
+            };
+            if let (Some((dof_output_tex, dof_output_view)), Some(ref mut dof)) =
+                (dof_target, self.dof_pass.as_mut())
+            {
                 let _ = dof.get_input_view(width, height, target_format);
                 let cam_radius = self
                     .terrain
@@ -96,7 +125,7 @@ impl ViewerTerrainScene {
                     tilt_yaw: self.pbr_config.dof.tilt_yaw,
                 };
 
-                dof.apply(
+                if let Err(e) = dof.apply(
                     encoder,
                     &self.queue,
                     &out_view,
@@ -108,7 +137,9 @@ impl ViewerTerrainScene {
                     &dof_cfg,
                     1.0,
                     cam_radius * 10.0,
-                );
+                ) {
+                    eprintln!("[terrain] DoF apply failed: {e}");
+                }
 
                 out_tex = dof_output_tex;
                 out_view = dof_output_view;
@@ -124,13 +155,26 @@ impl ViewerTerrainScene {
                 self.init_post_process();
             }
 
-            let (lens_output_tex, lens_output_view) = self.create_snapshot_color_target(
+            let lens_target = match self.create_snapshot_color_target(
                 "terrain_viewer.snapshot_lens_output",
                 target_format,
                 width,
                 height,
-            );
-            if let Some(ref mut pp) = self.post_process {
+            ) {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    eprintln!("[terrain] failed to allocate lens target: {e}");
+                    crate::core::degradation::record_degradation(
+                        "allocation_fallback",
+                        "viewer.lens",
+                        "lens post-process skipped; snapshot missing distortion/vignette",
+                    );
+                    None
+                }
+            };
+            if let (Some((lens_output_tex, lens_output_view)), Some(ref mut pp)) =
+                (lens_target, self.post_process.as_mut())
+            {
                 let lens = &self.pbr_config.lens_effects;
 
                 pp.apply_from_input(

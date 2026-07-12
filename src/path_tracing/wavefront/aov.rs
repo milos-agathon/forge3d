@@ -61,13 +61,14 @@ impl WavefrontScheduler {
             seed,
             _pad0: 0,
         };
-        let ubuf = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let ubuf = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("ao-uniforms"),
                 contents: bytemuck::bytes_of(&u),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
+            },
+        )?;
         let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("ao-bind-group"),
             layout: &self.pipelines.ao_bind_group_layout,

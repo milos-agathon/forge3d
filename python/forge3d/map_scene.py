@@ -1263,7 +1263,11 @@ def _frame_to_rgba(frame: Any, output: "OutputSpec") -> Any:
 
 @lru_cache(maxsize=1)
 def _terrain_renderer_runtime_available() -> bool:
-    if os.environ.get("GITHUB_ACTIONS") == "true" and platform.system() == "Windows":
+    if (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        and platform.system() == "Windows"
+        and os.environ.get("FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN") != "1"
+    ):
         return False
 
     try:
@@ -3649,11 +3653,21 @@ class BuildingLayer:
         metadata = _metadata(options.pop("metadata", None))
         metadata.update(_metadata(options))
         metadata.setdefault("source_format", "cityjson")
+        geometry_count = metadata.pop("geometry_count", None)
+        path_obj = Path(path)
+        if geometry_count is None and path_obj.exists():
+            try:
+                payload = json.loads(path_obj.read_text(encoding="utf-8"))
+                city_objects = payload.get("CityObjects") if isinstance(payload, Mapping) else None
+                if isinstance(city_objects, Mapping):
+                    geometry_count = len(city_objects)
+            except Exception:
+                geometry_count = None
         return cls(
-            layer_id=str(metadata.pop("layer_id", None) or Path(path).stem or "buildings"),
+            layer_id=str(metadata.pop("layer_id", None) or path_obj.stem or "buildings"),
             source={"path": str(path), "source_format": "cityjson"},
             support_level=str(metadata.pop("support_level", "underdeveloped")),
-            geometry_count=metadata.pop("geometry_count", None),
+            geometry_count=geometry_count,
             bounds=metadata.pop("bounds", None),
             material_status=str(metadata.pop("material_status", "scalar_pbr_underdeveloped")),
             features=metadata.pop("features", None),
@@ -3983,7 +3997,7 @@ def _lighting_from_preset(current: LightingPreset, preset_data: Mapping[str, Any
     renderer_config = {
         key: copy.deepcopy(value)
         for key, value in preset_data.items()
-        if key in {"lighting", "shading", "shadows", "gi", "atmosphere", "brdf_override"}
+        if key in {"lighting", "shading", "shadows", "gi", "atmosphere", "ibl", "brdf_override"}
     }
     settings = _deep_merge_mapping(
         {
@@ -5266,6 +5280,30 @@ class MapScene:
         return updated
 
     def render(
+        self,
+        path: str | None = None,
+        *,
+        emit_provenance: bool = False,
+        provenance_signing_key: bytes | None = None,
+        certificate: "bool | str | os.PathLike[str]" = False,
+    ) -> ValidationReport:
+        from . import certificate as _certificate
+
+        with _certificate._render_capture(
+            "python.map_scene.render", "mapscene.finalize", draw_calls=1
+        ):
+            report = self._render_impl(
+                path,
+                emit_provenance=emit_provenance,
+                provenance_signing_key=provenance_signing_key,
+            )
+        if certificate:
+            sha = _certificate.emit_render_certificate(certificate)
+            if sha is not None:
+                self.last_render_metadata["certificate_payload_sha256"] = sha
+        return report
+
+    def _render_impl(
         self,
         path: str | None = None,
         *,

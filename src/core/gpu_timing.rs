@@ -14,6 +14,7 @@
 //! single-shot renders.
 
 use super::error::{RenderError, RenderResult};
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use std::collections::HashMap;
 use std::sync::Arc;
 use wgpu::*;
@@ -67,6 +68,17 @@ pub struct TimingResult {
     pub pipeline_stats: Option<PipelineStatistics>,
 }
 
+impl TimingResult {
+    /// Certificate-safe duration: invalid/absent timestamps are always zero.
+    pub fn certificate_gpu_ms(&self) -> f64 {
+        if self.timestamp_valid {
+            self.gpu_time_ms as f64
+        } else {
+            0.0
+        }
+    }
+}
+
 /// Pipeline statistics from GPU
 #[derive(Debug, Clone, Default)]
 pub struct PipelineStatistics {
@@ -108,19 +120,27 @@ pub struct GpuTimingManager {
 
     // Timestamp queries (double-buffered: one slot per frame in flight)
     timestamp_query_set: [Option<QuerySet>; SLOTS],
-    timestamp_buffer: [Option<Buffer>; SLOTS],
-    timestamp_readback_buffer: [Option<Buffer>; SLOTS],
+    timestamp_buffer: [Option<TrackedBuffer>; SLOTS],
+    timestamp_readback_buffer: [Option<TrackedBuffer>; SLOTS],
 
     // Pipeline statistics queries (single-buffered; disabled by default)
     pipeline_stats_query_set: Option<QuerySet>,
-    pipeline_stats_buffer: Option<Buffer>,
-    pipeline_stats_readback_buffer: Option<Buffer>,
+    pipeline_stats_buffer: Option<TrackedBuffer>,
+    pipeline_stats_readback_buffer: Option<TrackedBuffer>,
 
     // Per-slot timing state so a slot's labels always match its queries.
     active_scopes: HashMap<TimingScopeId, String>,
     query_index: [u32; SLOTS],
     scope_labels: [Vec<String>; SLOTS],
     scope_draw_calls: [Vec<u32>; SLOTS],
+
+    /// Number of pipeline-statistics queries actually begun this frame.
+    /// Single-buffered like the stats query set. Currently no scope ever begins
+    /// a statistics query, so this stays 0 and `resolve_queries` skips the stats
+    /// range (resolving a never-written range loses the device on wgpu 0.19 /
+    /// Vulkan). A future caller that wires up statistics queries must increment
+    /// this when it writes one.
+    pipeline_stats_query_index: u32,
 
     /// Which slot the current frame writes/resolves into.
     frame_parity: usize,
@@ -166,6 +186,7 @@ impl GpuTimingManager {
             query_index: [0; SLOTS],
             scope_labels: [Vec::new(), Vec::new()],
             scope_draw_calls: [Vec::new(), Vec::new()],
+            pipeline_stats_query_index: 0,
             frame_parity: 0,
             supports_timestamps,
             supports_pipeline_stats,
@@ -191,19 +212,25 @@ impl GpuTimingManager {
                     count: query_count,
                 });
 
-                let timestamp_buffer = self.device.create_buffer(&BufferDescriptor {
-                    label: Some("gpu_timing_timestamp_buffer"),
-                    size: buffer_size,
-                    usage: BufferUsages::QUERY_RESOLVE | BufferUsages::COPY_SRC,
-                    mapped_at_creation: false,
-                });
+                let timestamp_buffer = tracked_create_buffer(
+                    &self.device,
+                    &BufferDescriptor {
+                        label: Some(&format!("gpu_timing.resolve_slot{slot}")),
+                        size: buffer_size,
+                        usage: BufferUsages::QUERY_RESOLVE | BufferUsages::COPY_SRC,
+                        mapped_at_creation: false,
+                    },
+                )?;
 
-                let timestamp_readback = self.device.create_buffer(&BufferDescriptor {
-                    label: Some("gpu_timing_timestamp_readback"),
-                    size: buffer_size,
-                    usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-                    mapped_at_creation: false,
-                });
+                let timestamp_readback = tracked_create_buffer(
+                    &self.device,
+                    &BufferDescriptor {
+                        label: Some(&format!("gpu_timing.readback_slot{slot}")),
+                        size: buffer_size,
+                        usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+                        mapped_at_creation: false,
+                    },
+                )?;
 
                 self.timestamp_query_set[slot] = Some(query_set);
                 self.timestamp_buffer[slot] = Some(timestamp_buffer);
@@ -226,19 +253,25 @@ impl GpuTimingManager {
 
             let stats_buffer_size = (query_count as u64) * std::mem::size_of::<u64>() as u64 * 4; // 4 stats
 
-            let pipeline_stats_buffer = self.device.create_buffer(&BufferDescriptor {
-                label: Some("gpu_timing_pipeline_stats_buffer"),
-                size: stats_buffer_size,
-                usage: BufferUsages::QUERY_RESOLVE | BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            });
+            let pipeline_stats_buffer = tracked_create_buffer(
+                &self.device,
+                &BufferDescriptor {
+                    label: Some("gpu_timing.pipeline_stats_resolve"),
+                    size: stats_buffer_size,
+                    usage: BufferUsages::QUERY_RESOLVE | BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                },
+            )?;
 
-            let pipeline_stats_readback = self.device.create_buffer(&BufferDescriptor {
-                label: Some("gpu_timing_pipeline_stats_readback"),
-                size: stats_buffer_size,
-                usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            });
+            let pipeline_stats_readback = tracked_create_buffer(
+                &self.device,
+                &BufferDescriptor {
+                    label: Some("gpu_timing.pipeline_stats_readback"),
+                    size: stats_buffer_size,
+                    usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                },
+            )?;
 
             self.pipeline_stats_query_set = Some(stats_query_set);
             self.pipeline_stats_buffer = Some(pipeline_stats_buffer);
@@ -349,14 +382,25 @@ impl GpuTimingManager {
         }
 
         // Resolve pipeline statistics queries (single-buffered).
-        if let (Some(ref query_set), Some(ref buffer)) =
-            (&self.pipeline_stats_query_set, &self.pipeline_stats_buffer)
-        {
-            encoder.resolve_query_set(query_set, 0..self.query_index[slot], buffer, 0);
+        //
+        // DEFENSIVE: only resolve when at least one statistics query was
+        // actually begun this frame. The scopes above write timestamps only and
+        // never begin a pipeline-statistics query, so `pipeline_stats_query_index`
+        // stays 0 and this range is skipped. Resolving a never-written
+        // statistics range loses the device (→ panic at the next submit) on
+        // wgpu 0.19 / Vulkan adapters that advertise PIPELINE_STATISTICS_QUERY,
+        // even when `enable_pipeline_stats` was requested by the config.
+        if self.pipeline_stats_query_index > 0 {
+            if let (Some(ref query_set), Some(ref buffer)) =
+                (&self.pipeline_stats_query_set, &self.pipeline_stats_buffer)
+            {
+                let stats_count = self.pipeline_stats_query_index;
+                encoder.resolve_query_set(query_set, 0..stats_count, buffer, 0);
 
-            if let Some(ref readback_buffer) = &self.pipeline_stats_readback_buffer {
-                let size = (self.query_index[slot] as u64) * std::mem::size_of::<u64>() as u64 * 4;
-                encoder.copy_buffer_to_buffer(buffer, 0, readback_buffer, 0, size);
+                if let Some(ref readback_buffer) = &self.pipeline_stats_readback_buffer {
+                    let size = (stats_count as u64) * std::mem::size_of::<u64>() as u64 * 4;
+                    encoder.copy_buffer_to_buffer(buffer, 0, readback_buffer, 0, size);
+                }
             }
         }
     }
@@ -370,6 +414,7 @@ impl GpuTimingManager {
         self.query_index[slot] = 0;
         self.scope_labels[slot].clear();
         self.scope_draw_calls[slot].clear();
+        self.pipeline_stats_query_index = 0;
     }
 
     /// Get timing results for the previously submitted frame (async, viewer path).
@@ -390,6 +435,48 @@ impl GpuTimingManager {
         self.read_results_from_slot(read_slot).await
     }
 
+    /// Try to read the previously submitted frame without waiting for GPU
+    /// progress. If its mapping is not ready after a non-blocking poll, discard
+    /// that timing sample so the slot can be reused next frame.
+    pub fn try_get_results(&mut self) -> RenderResult<Vec<TimingResult>> {
+        let slot = (self.frame_parity + 1) % SLOTS;
+        if self.query_index[slot] < 2 {
+            return Ok(Vec::new());
+        }
+
+        let count = self.query_index[slot];
+        let Some(readback_buffer) = self.timestamp_readback_buffer[slot].as_ref() else {
+            return Ok(Vec::new());
+        };
+        let size = (count as u64) * std::mem::size_of::<u64>() as u64;
+        let slice = readback_buffer.slice(0..size);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        slice.map_async(MapMode::Read, move |result| {
+            let _ = sender.send(result);
+        });
+        self.device.poll(Maintain::Poll);
+
+        match receiver.try_recv() {
+            Ok(Ok(())) => {
+                let data = slice.get_mapped_range();
+                let timestamps = bytemuck::cast_slice::<u8, u64>(&data).to_vec();
+                drop(data);
+                readback_buffer.unmap();
+                Ok(self.timing_results_from_timestamps(slot, &timestamps))
+            }
+            Ok(Err(error)) => Err(RenderError::Readback(format!(
+                "Failed to map timestamp buffer: {error}"
+            ))),
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                readback_buffer.unmap();
+                Ok(Vec::new())
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(RenderError::Readback(
+                "Timestamp buffer mapping was cancelled".to_string(),
+            )),
+        }
+    }
+
     /// Get timing results for the slot just resolved + submitted (offline single-shot).
     ///
     /// Reads the current slot (`frame_parity`) and blocks on device work with an
@@ -406,14 +493,13 @@ impl GpuTimingManager {
         self.query_index[slot] = 0;
         self.scope_labels[slot].clear();
         self.scope_draw_calls[slot].clear();
+        self.pipeline_stats_query_index = 0;
         Ok(results)
     }
 
     async fn read_results_from_slot(&mut self, slot: usize) -> RenderResult<Vec<TimingResult>> {
-        let mut results = Vec::new();
-
         if self.query_index[slot] < 2 {
-            return Ok(results); // Need at least one begin/end pair
+            return Ok(Vec::new()); // Need at least one begin/end pair
         }
 
         let count = self.query_index[slot];
@@ -423,7 +509,11 @@ impl GpuTimingManager {
             Vec::new()
         };
 
-        // Process timestamp pairs into timing results.
+        Ok(self.timing_results_from_timestamps(slot, &timestamps))
+    }
+
+    fn timing_results_from_timestamps(&self, slot: usize, timestamps: &[u64]) -> Vec<TimingResult> {
+        let mut results = Vec::new();
         let scope_count = timestamps.len() / 2;
         for scope_index in 0..scope_count {
             let begin_idx = scope_index * 2;
@@ -441,16 +531,23 @@ impl GpuTimingManager {
                 .copied()
                 .unwrap_or(0);
 
+            // Honest validity (CENSOR audit F-04): a zero begin stamp means the
+            // query was never written (driver skipped it), and end < begin is
+            // wraparound/garbage. Consumers must report such scopes as 0.0
+            // rather than presenting a garbage delta as a live timing.
+            let timestamp_valid =
+                timestamps[begin_idx] != 0 && timestamps[end_idx] >= timestamps[begin_idx];
+
             results.push(TimingResult {
                 name,
                 gpu_time_ms: duration_ms as f32,
-                timestamp_valid: true,
+                timestamp_valid,
                 draw_calls,
                 pipeline_stats: None, // Pipeline stats are not collected yet.
             });
         }
 
-        Ok(results)
+        results
     }
 
     async fn read_timestamp_buffer(&self, buffer: &Buffer, count: u32) -> RenderResult<Vec<u64>> {
@@ -529,6 +626,149 @@ pub fn create_default_config(device: &Device) -> GpuTimingConfig {
     }
 }
 
+/// One-shot per-render GPU timing for certified offscreen render paths
+/// (CENSOR audit F-04).
+///
+/// Wraps an optional [`GpuTimingManager`]: present when the initialized global
+/// device granted `TIMESTAMP_QUERY`, absent otherwise. Callers wrap each GPU
+/// pass in `begin`/`end`, call `resolve` on the encoder BEFORE submitting it,
+/// and after submission call [`OneShotTiming::record_into_certificate`], which
+/// blocking-reads the timestamps and records one certificate pass per scope
+/// with its live `gpu_ms`. When timing is unavailable the caller must fall
+/// back to recording the same pass labels (same order) with `gpu_ms == 0.0`
+/// so certificate pass lists stay identical across adapters — 0.0 is the
+/// honest "no timestamps" value, never a fabricated timing.
+pub struct OneShotTiming {
+    manager: Option<GpuTimingManager>,
+    failure: Option<String>,
+    labels: Vec<String>,
+}
+
+impl OneShotTiming {
+    /// Build a timing manager from the already-initialized global GPU context.
+    /// Returns an inert instance when no context exists, `TIMESTAMP_QUERY` was
+    /// not granted, or manager construction fails (each pass then records 0.0
+    /// and the `capability_absent` degradation already explains why).
+    pub fn for_current_device() -> Self {
+        let Some(ctx) = crate::core::gpu::ctx_if_initialized() else {
+            return Self::inert();
+        };
+        Self::for_device(ctx.device.clone(), ctx.queue.clone())
+    }
+
+    /// Build a timing manager for an explicit device/queue pair — for render
+    /// paths that own their device instead of using the global context (e.g.
+    /// `TerrainSpike`). Returns an inert instance when `TIMESTAMP_QUERY` was
+    /// not granted or manager construction fails (each pass then records 0.0).
+    pub fn for_device(device: Arc<Device>, queue: Arc<Queue>) -> Self {
+        if !device.features().contains(Features::TIMESTAMP_QUERY) {
+            return Self::inert();
+        }
+        let config = GpuTimingConfig {
+            enable_timestamps: true,
+            // Timestamps only: enabling statistics here would resolve a
+            // never-written statistics range (see Scene::take_render_timing).
+            enable_pipeline_stats: false,
+            enable_debug_markers: false,
+            label_prefix: "forge3d".to_string(),
+            max_queries_per_frame: 32,
+        };
+        match GpuTimingManager::new(device, queue, config) {
+            Ok(manager) => Self {
+                manager: Some(manager),
+                failure: None,
+                labels: Vec::new(),
+            },
+            Err(e) => Self {
+                manager: None,
+                failure: Some(format!("timing manager construction failed: {e}")),
+                labels: Vec::new(),
+            },
+        }
+    }
+
+    fn inert() -> Self {
+        Self {
+            manager: None,
+            failure: None,
+            labels: Vec::new(),
+        }
+    }
+
+    /// True when live timestamps will be recorded (used by callers to decide
+    /// whether the 0.0 fallback pass records are needed).
+    pub fn is_live(&self) -> bool {
+        self.manager.is_some()
+    }
+
+    /// Open a timing scope around a GPU pass. Must be called with the encoder
+    /// outside any active render/compute pass.
+    pub fn begin(&mut self, encoder: &mut CommandEncoder, label: &str) -> Option<TimingScopeId> {
+        self.labels.push(label.to_string());
+        self.manager.as_mut().map(|t| t.begin_scope(encoder, label))
+    }
+
+    /// Close a scope opened by [`OneShotTiming::begin`], recording draw count.
+    pub fn end(
+        &mut self,
+        encoder: &mut CommandEncoder,
+        scope: Option<TimingScopeId>,
+        draw_calls: u32,
+    ) {
+        if let (Some(t), Some(id)) = (self.manager.as_mut(), scope) {
+            t.end_scope_with_draws(encoder, id, draw_calls);
+        }
+    }
+
+    /// Resolve the query set into its readback buffer. Must be recorded on an
+    /// encoder that is submitted before [`OneShotTiming::record_into_certificate`].
+    pub fn resolve(&mut self, encoder: &mut CommandEncoder) {
+        if let Some(t) = self.manager.as_mut() {
+            t.resolve_queries(encoder);
+        }
+    }
+
+    /// Blocking-read the resolved timestamps and record every VALID scope into
+    /// the active certificate capture with its live timing. Returns `true`
+    /// when live passes were recorded; on `false` the caller records its 0.0
+    /// fallback passes instead.
+    pub fn record_into_certificate(mut self) -> bool {
+        if let Some(consequence) = self.failure.as_deref() {
+            self.record_failure(consequence);
+            return false;
+        }
+        let Some(manager) = self.manager.as_mut() else {
+            return false;
+        };
+        match manager.get_results_blocking() {
+            Ok(results) if !results.is_empty() => {
+                for result in &results {
+                    crate::core::certificate::record_pass(
+                        &result.name,
+                        result.certificate_gpu_ms(),
+                        result.draw_calls,
+                    );
+                }
+                true
+            }
+            Ok(_) => {
+                self.record_failure("timestamp query resolved without any pass results");
+                false
+            }
+            Err(e) => {
+                self.record_failure(&format!("timestamp query readback failed: {e}"));
+                false
+            }
+        }
+    }
+
+    fn record_failure(&self, consequence: &str) {
+        for label in &self.labels {
+            crate::core::degradation::record_degradation("timing_unavailable", label, consequence);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -561,18 +801,26 @@ mod tests {
         );
 
         // Two small buffers to copy between; the copy is what we time.
-        let src = device.create_buffer(&BufferDescriptor {
-            label: Some("gpu_timing_test_src"),
-            size: 4096,
-            usage: BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let dst = device.create_buffer(&BufferDescriptor {
-            label: Some("gpu_timing_test_dst"),
-            size: 4096,
-            usage: BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let src = tracked_create_buffer(
+            &device,
+            &BufferDescriptor {
+                label: Some("gpu_timing_test_src"),
+                size: 4096,
+                usage: BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )
+        .expect("alloc");
+        let dst = tracked_create_buffer(
+            &device,
+            &BufferDescriptor {
+                label: Some("gpu_timing_test_dst"),
+                size: 4096,
+                usage: BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )
+        .expect("alloc");
 
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("gpu_timing"),
@@ -644,5 +892,48 @@ mod tests {
         device.poll(Maintain::Wait);
         std::mem::forget(device);
         std::mem::forget(queue);
+    }
+
+    #[test]
+    fn certificate_gpu_ms_zeros_invalid_timestamps() {
+        assert_eq!(
+            TimingResult {
+                gpu_time_ms: 3.25,
+                timestamp_valid: false,
+                ..Default::default()
+            }
+            .certificate_gpu_ms(),
+            0.0
+        );
+        assert_eq!(
+            TimingResult {
+                gpu_time_ms: 3.25,
+                timestamp_valid: true,
+                ..Default::default()
+            }
+            .certificate_gpu_ms(),
+            3.25
+        );
+    }
+
+    #[test]
+    fn one_shot_failure_is_render_local_degradation() {
+        crate::core::degradation::clear_degradations();
+        crate::core::degradation::begin_degradation_capture();
+        let timing = OneShotTiming {
+            manager: None,
+            failure: Some("forced readback failure".to_string()),
+            labels: vec!["test.pass".to_string()],
+        };
+        assert!(!timing.record_into_certificate());
+        let first = crate::core::degradation::finish_degradation_capture();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].kind, "timing_unavailable");
+        assert_eq!(first[0].name, "test.pass");
+        assert_eq!(first[0].consequence, "forced readback failure");
+
+        crate::core::degradation::begin_degradation_capture();
+        assert!(crate::core::degradation::finish_degradation_capture().is_empty());
+        crate::core::degradation::clear_degradations();
     }
 }

@@ -2,8 +2,12 @@
 // Lit compute pipeline initialization for the Viewer
 
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
-use wgpu::{BindGroupLayout, Buffer, ComputePipeline, Device, Sampler, Texture, TextureView};
+use wgpu::{BindGroupLayout, ComputePipeline, Device, Sampler, TextureView};
+
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{
+    tracked_create_buffer_init, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 
 use super::super::viewer_constants::LIT_WGSL_VERSION;
 
@@ -104,15 +108,19 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
 pub struct LitResources {
     pub lit_bind_group_layout: BindGroupLayout,
     pub lit_pipeline: ComputePipeline,
-    pub lit_uniform: Buffer,
-    pub lit_output: Texture,
+    pub lit_uniform: TrackedBuffer,
+    pub lit_output: TrackedTexture,
     pub lit_output_view: TextureView,
     pub dummy_env_view: TextureView,
     pub dummy_env_sampler: Sampler,
 }
 
 /// Create lit compute pipeline and resources
-pub fn create_lit_resources(device: &Arc<Device>, width: u32, height: u32) -> LitResources {
+pub fn create_lit_resources(
+    device: &Arc<Device>,
+    width: u32,
+    height: u32,
+) -> RenderResult<LitResources> {
     let lit_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("viewer.lit.bgl"),
         entries: &[
@@ -185,10 +193,11 @@ pub fn create_lit_resources(device: &Arc<Device>, width: u32, height: u32) -> Li
         ],
     });
 
-    let lit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("viewer.lit.compute.shader"),
-        source: wgpu::ShaderSource::Wgsl(LIT_SHADER.into()),
-    });
+    let lit_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "viewer.lit.compute.shader",
+        LIT_SHADER,
+    );
 
     let lit_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("viewer.lit.pl"),
@@ -196,12 +205,18 @@ pub fn create_lit_resources(device: &Arc<Device>, width: u32, height: u32) -> Li
         push_constant_ranges: &[],
     });
 
-    let lit_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("viewer.lit.pipeline"),
-        layout: Some(&lit_pl),
-        module: &lit_shader,
-        entry_point: "cs_main",
-    });
+    let lit_pipeline =
+        crate::core::shader_registry::with_error_scope(device, "viewer.lit.pipeline", || {
+            crate::core::shader_registry::create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("viewer.lit.pipeline"),
+                    layout: Some(&lit_pl),
+                    module: &lit_shader,
+                    entry_point: "cs_main",
+                },
+            )
+        });
 
     println!(
         "[viewer] lit compute WGSL version {} compiled",
@@ -213,27 +228,33 @@ pub fn create_lit_resources(device: &Arc<Device>, width: u32, height: u32) -> Li
         0.6, 1.0, 4.0, 0.0, // ibl_intensity, use_ibl, brdf, pad
         0.5, 0.0, 0.0, 0.0, // roughness, debug_mode, pad, pad
     ];
-    let lit_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("viewer.lit.uniform"),
-        contents: bytemuck::cast_slice(&lit_params),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
+    let lit_uniform = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("viewer.lit.uniform"),
+            contents: bytemuck::cast_slice(&lit_params),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        },
+    )?;
 
     // Dummy IBL cube (1x1x6) and sampler
-    let dummy_env = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("viewer.lit.dummy.env"),
-        size: wgpu::Extent3d {
-            width: 1,
-            height: 1,
-            depth_or_array_layers: 6,
+    let dummy_env = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("viewer.lit.dummy.env"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 6,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
+    )?;
     let dummy_env_view = dummy_env.create_view(&wgpu::TextureViewDescriptor {
         label: Some("viewer.lit.dummy.env.view"),
         format: Some(wgpu::TextureFormat::Rgba8Unorm),
@@ -252,23 +273,26 @@ pub fn create_lit_resources(device: &Arc<Device>, width: u32, height: u32) -> Li
         ..Default::default()
     });
 
-    let lit_output = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("viewer.lit.output"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+    let lit_output = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("viewer.lit.output"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
+    )?;
     let lit_output_view = lit_output.create_view(&wgpu::TextureViewDescriptor::default());
 
-    LitResources {
+    Ok(LitResources {
         lit_bind_group_layout: lit_bgl,
         lit_pipeline,
         lit_uniform,
@@ -276,5 +300,5 @@ pub fn create_lit_resources(device: &Arc<Device>, width: u32, height: u32) -> Li
         lit_output_view,
         dummy_env_view,
         dummy_env_sampler,
-    }
+    })
 }

@@ -181,7 +181,7 @@ def test_terrain_shader_includes_probe_module() -> None:
 def test_reflection_probe_water_path_uses_shared_specular_mix() -> None:
     source = TERRAIN_SHADER.read_text(encoding="utf-8")
     assert (
-        "let blended_specular = mix(ibl_split.specular, local_specular, reflection_probe_result.weight);"
+        "let blended_specular = det_mix3(ibl_split.specular, local_specular, reflection_probe_result.weight);"
         in source
     )
     assert "var combined_reflection = ibl_contrib;" in source

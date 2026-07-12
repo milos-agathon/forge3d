@@ -1,9 +1,25 @@
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
 
 import forge3d.map_scene as map_scene
+
+from _terrain_runtime import (
+    terrain_rendering_available as _terrain_rendering_available,
+)
+
+_requires_gpu = pytest.mark.skipif(
+    not _terrain_rendering_available(),
+    reason=(
+        "MapScene native terrain render requires a terrain-safe hardware "
+        "adapter; hosted runners (GPU-less, WARP, or guarded paravirtual "
+        "Metal) either block with a native-render diagnostic or raise by "
+        "design (SUTURA), so these render-asserting tests skip honestly"
+    ),
+)
+
 
 
 EXAMPLES = {
@@ -18,10 +34,18 @@ EXAMPLES = {
 
 
 def _load_example(path: Path):
+    examples_dir = str(path.parent.resolve())
+    added_examples_dir = examples_dir not in sys.path
+    if added_examples_dir:
+        sys.path.insert(0, examples_dir)
     spec = importlib.util.spec_from_file_location(path.stem, path)
     module = importlib.util.module_from_spec(spec)
     assert spec is not None and spec.loader is not None
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if added_examples_dir:
+            sys.path.remove(examples_dir)
     return module
 
 
@@ -38,13 +62,14 @@ def test_canonical_mapscene_examples_exist_and_do_not_use_raw_ipc():
         assert "send_ipc" not in text
 
 
+@_requires_gpu
 def test_terrain_raster_example_validates_renders_and_bundles(tmp_path, monkeypatch):
     module = _load_example(EXAMPLES["terrain_raster"])
 
     payload = module.run_example(tmp_path)
 
     assert payload["validation_status"] == "ok"
-    assert payload["render_status"] == "ok"
+    assert payload["render_status"] == "ok", payload.get("diagnostics") or payload
     assert payload["render_backend"] == "gpu_terrain"
     assert payload["bundle_status"] == "ok"
     assert Path(payload["png_path"]).exists()
@@ -61,13 +86,14 @@ def test_terrain_raster_example_validates_renders_and_bundles(tmp_path, monkeypa
     assert blocked_scene.last_render_path is None
 
 
+@_requires_gpu
 def test_vector_labels_example_compiles_label_plan_and_bundles(tmp_path):
     module = _load_example(EXAMPLES["vector_labels"])
 
     payload = module.run_example(tmp_path)
 
     assert payload["validation_status"] == "warning"
-    assert payload["render_status"] == "warning"
+    assert payload["render_status"] == "warning", payload.get("diagnostics") or payload
     _supported_render_backend(payload)
     assert payload["bundle_status"] == "warning"
     assert payload["accepted_label_ids"] == ["city", "park"]
@@ -76,25 +102,27 @@ def test_vector_labels_example_compiles_label_plan_and_bundles(tmp_path):
     assert Path(payload["bundle_path"]).exists()
 
 
+@_requires_gpu
 def test_fuji_labels_demo_uses_public_mapscene_gpu_label_path(tmp_path):
     module = _load_example(EXAMPLES["fuji_labels"])
 
     payload = module.run_example(tmp_path)
 
     assert payload["validation_status"] == "ok"
-    assert payload["render_status"] == "ok"
+    assert payload["render_status"] == "ok", payload.get("diagnostics") or payload
     assert payload["render_backend"] == "gpu_terrain"
     assert payload["accepted_label_ids"]
     assert Path(payload["png_path"]).exists()
 
 
+@_requires_gpu
 def test_offline_quality_example_uses_native_accumulation_and_aovs(tmp_path):
     module = _load_example(EXAMPLES["offline_quality"])
 
     payload = module.run_example(tmp_path)
 
     assert payload["validation_status"] == "ok"
-    assert payload["render_status"] == "ok"
+    assert payload["render_status"] == "ok", payload.get("diagnostics") or payload
     assert payload["render_backend"] == "gpu_terrain"
     assert payload["bundle_status"] == "ok"
     assert payload["samples_used"] == 4
@@ -108,13 +136,14 @@ def test_offline_quality_example_uses_native_accumulation_and_aovs(tmp_path):
     assert Path(payload["bundle_path"]).exists()
 
 
+@_requires_gpu
 def test_buildings_labels_example_renders_native_gpu_buildings(tmp_path):
     module = _load_example(EXAMPLES["buildings_labels"])
 
     payload = module.run_example(tmp_path)
 
     assert payload["validation_status"] == "ok"
-    assert payload["render_status"] == "ok"
+    assert payload["render_status"] == "ok", payload.get("diagnostics") or payload
     assert payload["render_backend"] == "gpu_terrain"
     assert payload["bundle_status"] == "ok"
     assert "pro_gated_path" not in payload["diagnostic_codes"]
@@ -132,13 +161,14 @@ def test_buildings_labels_example_renders_native_gpu_buildings(tmp_path):
     assert Path(payload["bundle_path"]).exists()
 
 
+@_requires_gpu
 def test_bundled_datasets_showcase_covers_specs_001_to_004(tmp_path):
     module = _load_example(EXAMPLES["bundled_datasets_showcase"])
 
     payload = module.run_example(tmp_path)
 
     assert payload["validation_status"] == "warning"
-    assert payload["render_status"] == "warning"
+    assert payload["render_status"] == "warning", payload.get("diagnostics") or payload
     assert payload["bundle_status"] == "warning"
     assert payload["dataset_names"] == ["mini_dem", "sample_boundaries"]
     assert payload["accepted_label_ids"] == [
@@ -154,6 +184,7 @@ def test_bundled_datasets_showcase_covers_specs_001_to_004(tmp_path):
     assert Path(payload["bundle_path"]).exists()
 
 
+@_requires_gpu
 def test_p1_assets_bundle_showcase_covers_spec_005(tmp_path):
     module = _load_example(EXAMPLES["p1_assets_bundle_showcase"])
 

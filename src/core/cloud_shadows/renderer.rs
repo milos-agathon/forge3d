@@ -1,10 +1,14 @@
 use super::types::{CloudAnimationParams, CloudShadowQuality, CloudShadowUniforms};
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{
+    tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 use glam::Vec2;
 use wgpu::{
-    AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindingResource, Buffer,
-    BufferDescriptor, BufferUsages, CommandEncoder, ComputePipeline, ComputePipelineDescriptor,
-    Device, Extent3d, FilterMode, PipelineLayoutDescriptor, Queue, Sampler, SamplerDescriptor,
-    Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
+    AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindingResource, BufferDescriptor,
+    BufferUsages, CommandEncoder, ComputePipeline, ComputePipelineDescriptor, Device, Extent3d,
+    FilterMode, PipelineLayoutDescriptor, Queue, Sampler, SamplerDescriptor, Texture,
+    TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
     TextureViewDescriptor,
 };
 
@@ -13,9 +17,9 @@ pub struct CloudShadowRenderer {
     /// Configuration
     pub uniforms: CloudShadowUniforms,
     /// Uniform buffer
-    pub uniform_buffer: Buffer,
+    pub uniform_buffer: TrackedBuffer,
     /// Cloud shadow texture
-    pub shadow_texture: Texture,
+    pub shadow_texture: TrackedTexture,
     /// Cloud shadow texture view for reading
     pub shadow_view: TextureView,
     /// Cloud shadow texture view for compute writing
@@ -36,32 +40,38 @@ pub struct CloudShadowRenderer {
 
 impl CloudShadowRenderer {
     /// Create a new cloud shadow renderer
-    pub fn new(device: &Device, quality: CloudShadowQuality) -> Self {
+    pub fn new(device: &Device, quality: CloudShadowQuality) -> RenderResult<Self> {
         let texture_size = quality.texture_size();
 
         // Create uniform buffer
-        let uniform_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("cloud_shadow_uniforms"),
-            size: std::mem::size_of::<CloudShadowUniforms>() as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let uniform_buffer = tracked_create_buffer(
+            device,
+            &BufferDescriptor {
+                label: Some("cloud_shadow_uniforms"),
+                size: std::mem::size_of::<CloudShadowUniforms>() as u64,
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         // Create cloud shadow texture
-        let shadow_texture = device.create_texture(&TextureDescriptor {
-            label: Some("cloud_shadow_texture"),
-            size: Extent3d {
-                width: texture_size,
-                height: texture_size,
-                depth_or_array_layers: 1,
+        let shadow_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("cloud_shadow_texture"),
+                size: Extent3d {
+                    width: texture_size,
+                    height: texture_size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba8Unorm,
+                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8Unorm,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
 
         // Create texture views
         let shadow_view = shadow_texture.create_view(&TextureViewDescriptor::default());
@@ -81,12 +91,11 @@ impl CloudShadowRenderer {
         });
 
         // Load shader and create pipeline
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("cloud_shadow_compute_shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/cloud_shadows.wgsl").into(),
-            ),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "cloud_shadow_compute_shader",
+            include_str!("../../shaders/cloud_shadows.wgsl"),
+        );
 
         // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -123,19 +132,22 @@ impl CloudShadowRenderer {
         });
 
         // Create compute pipeline
-        let compute_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("cloud_shadow_pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: "cs_generate_cloud_shadows",
-        });
+        let compute_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            device,
+            &ComputePipelineDescriptor {
+                label: Some("cloud_shadow_pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: "cs_generate_cloud_shadows",
+            },
+        );
 
         let mut uniforms = CloudShadowUniforms::default();
         uniforms.texture_size = [texture_size as f32, texture_size as f32];
         uniforms.inv_texture_size = [1.0 / texture_size as f32, 1.0 / texture_size as f32];
         uniforms.noise_octaves = quality.noise_octaves();
 
-        Self {
+        Ok(Self {
             uniforms,
             uniform_buffer,
             shadow_texture,
@@ -147,7 +159,7 @@ impl CloudShadowRenderer {
             quality,
             animation_params: CloudAnimationParams::default(),
             current_time: 0.0,
-        }
+        })
     }
 
     /// Set cloud movement speed
@@ -286,9 +298,9 @@ impl CloudShadowRenderer {
     }
 
     /// Resize cloud shadow texture
-    pub fn resize(&mut self, device: &Device, new_quality: CloudShadowQuality) {
+    pub fn resize(&mut self, device: &Device, new_quality: CloudShadowQuality) -> RenderResult<()> {
         if new_quality as u8 == self.quality as u8 {
-            return; // No change needed
+            return Ok(()); // No change needed
         }
 
         self.quality = new_quality;
@@ -300,20 +312,23 @@ impl CloudShadowRenderer {
         self.uniforms.noise_octaves = new_quality.noise_octaves();
 
         // Recreate shadow texture
-        self.shadow_texture = device.create_texture(&TextureDescriptor {
-            label: Some("cloud_shadow_texture"),
-            size: Extent3d {
-                width: texture_size,
-                height: texture_size,
-                depth_or_array_layers: 1,
+        self.shadow_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("cloud_shadow_texture"),
+                size: Extent3d {
+                    width: texture_size,
+                    height: texture_size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba8Unorm,
+                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8Unorm,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
 
         // Recreate views
         self.shadow_view = self
@@ -325,6 +340,7 @@ impl CloudShadowRenderer {
 
         // Clear bind group to force recreation
         self.bind_group = None;
+        Ok(())
     }
 
     /// Get current animation parameters

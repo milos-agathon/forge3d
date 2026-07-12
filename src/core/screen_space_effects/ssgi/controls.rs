@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::resource_tracker::tracked_create_texture;
 
 impl SsgiRenderer {
     pub fn set_seed(&mut self, queue: &Queue, seed: u32) {
@@ -67,75 +68,87 @@ impl SsgiRenderer {
         };
 
         // Recreate output and temporal textures at new resolution
-        self.ssgi_hit = device.create_texture(&TextureDescriptor {
-            label: Some("ssgi_hit"),
-            size: Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
+        self.ssgi_hit = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("ssgi_hit"),
+                size: Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba16Float,
+                usage: TextureUsages::STORAGE_BINDING
+                    | TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::STORAGE_BINDING
-                | TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        )?;
         self.ssgi_hit_view = self.ssgi_hit.create_view(&TextureViewDescriptor::default());
-        self.ssgi_texture = device.create_texture(&TextureDescriptor {
-            label: Some("ssgi_texture"),
-            size: Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
+        self.ssgi_texture = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("ssgi_texture"),
+                size: Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba16Float,
+                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
         self.ssgi_view = self
             .ssgi_texture
             .create_view(&TextureViewDescriptor::default());
 
-        self.ssgi_history = device.create_texture(&TextureDescriptor {
-            label: Some("ssgi_history"),
-            size: Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
+        self.ssgi_history = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("ssgi_history"),
+                size: Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba16Float,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         self.ssgi_history_view = self
             .ssgi_history
             .create_view(&TextureViewDescriptor::default());
 
-        self.ssgi_filtered = device.create_texture(&TextureDescriptor {
-            label: Some("ssgi_filtered"),
-            size: Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
+        self.ssgi_filtered = tracked_create_texture(
+            device,
+            &TextureDescriptor {
+                label: Some("ssgi_filtered"),
+                size: Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba16Float,
+                usage: TextureUsages::STORAGE_BINDING
+                    | TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba16Float,
-            usage: TextureUsages::STORAGE_BINDING
-                | TextureUsages::TEXTURE_BINDING
-                | TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
+        )?;
         self.ssgi_filtered_view = self
             .ssgi_filtered
             .create_view(&TextureViewDescriptor::default());

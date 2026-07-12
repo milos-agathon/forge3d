@@ -19,7 +19,7 @@ impl TerrainBloomProcessor {
             return Ok(());
         }
 
-        self.ensure_textures(device, width, height);
+        self.ensure_textures(device, width, height)?;
 
         let bright_view = self
             .bright_view

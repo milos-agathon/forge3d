@@ -475,7 +475,9 @@ fn add_managed_vector_overlay(
         visible: true,
         z_order: overlay.z_order,
     };
-    let id = terrain_viewer.add_vector_overlay(layer);
+    let id = terrain_viewer
+        .add_vector_overlay(layer)
+        .map_err(|e| e.to_string())?;
     register_vector_overlay_bvh(viewer, id, overlay, primitive);
     Ok(Some(id))
 }

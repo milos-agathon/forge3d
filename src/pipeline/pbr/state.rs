@@ -69,15 +69,16 @@ impl PbrPipelineWithShadows {
         device: &Device,
         queue: &Queue,
         sampler: &Sampler,
-    ) {
+    ) -> RenderResult<()> {
         if self.material.bind_group.is_none() {
             self.material.create_bind_group(
                 device,
                 queue,
                 &self.material_bind_group_layout,
                 sampler,
-            );
+            )?;
         }
+        Ok(())
     }
 
     pub fn globals_layout(&self) -> &BindGroupLayout {

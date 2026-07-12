@@ -22,8 +22,8 @@ impl Default for SceneGlobals {
 }
 
 pub(super) struct Text3DInstance {
-    pub(super) vbuf: wgpu::Buffer,
-    pub(super) ibuf: wgpu::Buffer,
+    pub(super) vbuf: crate::core::resource_tracker::TrackedBuffer,
+    pub(super) ibuf: crate::core::resource_tracker::TrackedBuffer,
     pub(super) index_count: u32,
     pub(super) vertex_count: u32,
     /// Absolute object origin. It remains f64 until the active camera anchor
@@ -50,9 +50,9 @@ pub(super) fn anchored_model(
 // F16: GPU Instancing batch description
 #[cfg(feature = "enable-gpu-instancing")]
 pub(super) struct InstancedBatch {
-    pub(super) vbuf: wgpu::Buffer,
-    pub(super) ibuf: wgpu::Buffer,
-    pub(super) instbuf: wgpu::Buffer,
+    pub(super) vbuf: crate::core::resource_tracker::TrackedBuffer,
+    pub(super) ibuf: crate::core::resource_tracker::TrackedBuffer,
+    pub(super) instbuf: crate::core::resource_tracker::TrackedBuffer,
     pub(super) index_count: u32,
     pub(super) instance_count: u32,
     pub(super) color: [f32; 4],

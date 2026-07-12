@@ -5,6 +5,7 @@
 
 #![cfg(all(feature = "enable-pbr", feature = "enable-tbn"))]
 
+use crate::core::error::RenderResult;
 use crate::core::material::{PbrLighting, PbrMaterial};
 use crate::pipeline::pbr::{create_pbr_sampler, PbrPipelineWithShadows, PbrSceneUniforms};
 use crate::render::params::{BrdfModel as CfgBrdfModel, RendererConfig};
@@ -24,16 +25,16 @@ impl PbrRenderPass {
         queue: &Queue,
         material: PbrMaterial,
         enable_shadows: bool,
-    ) -> Self {
-        let mut pipeline = PbrPipelineWithShadows::new(device, queue, material, enable_shadows);
+    ) -> RenderResult<Self> {
+        let mut pipeline = PbrPipelineWithShadows::new(device, queue, material, enable_shadows)?;
         let material_sampler = create_pbr_sampler(device);
-        pipeline.ensure_material_bind_group(device, queue, &material_sampler);
+        pipeline.ensure_material_bind_group(device, queue, &material_sampler)?;
 
-        Self {
+        Ok(Self {
             pipeline,
             material_sampler,
             surface_format: None,
-        }
+        })
     }
 
     /// Access the underlying pipeline.
@@ -56,9 +57,9 @@ impl PbrRenderPass {
         self.pipeline.material.update_uniforms(queue);
     }
 
-    fn ensure_material_bind_group(&mut self, device: &Device, queue: &Queue) {
+    fn ensure_material_bind_group(&mut self, device: &Device, queue: &Queue) -> RenderResult<()> {
         self.pipeline
-            .ensure_material_bind_group(device, queue, &self.material_sampler);
+            .ensure_material_bind_group(device, queue, &self.material_sampler)
     }
 
     /// Prepare per-frame uniforms and ensure the pipeline is ready for the target format.
@@ -69,12 +70,13 @@ impl PbrRenderPass {
         surface_format: TextureFormat,
         scene_uniforms: &PbrSceneUniforms,
         lighting: &PbrLighting,
-    ) {
+    ) -> RenderResult<()> {
         self.pipeline.update_scene_uniforms(queue, scene_uniforms);
         self.pipeline.update_lighting_uniforms(queue, lighting);
         self.pipeline.ensure_pipeline(device, surface_format);
         self.surface_format = Some(surface_format);
-        self.ensure_material_bind_group(device, queue);
+        self.ensure_material_bind_group(device, queue)?;
+        Ok(())
     }
 
     /// Bind the pipeline and all dependent bind groups for a render pass.

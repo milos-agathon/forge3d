@@ -27,8 +27,12 @@ def test_tiles3d_public_api_loads_supported_local_tileset_fixture(tmp_path):
     report = _scene_with_layer(layer).validate()
 
     assert layer.source["path"] == str(tileset)
-    assert "python_public_3dtiles_incomplete" in [diagnostic.code for diagnostic in report.diagnostics]
-    assert _summary(report, "tiles.local").details["source_kind"] == "tileset.json"
+    assert report.status == "ok"
+    assert not report.diagnostics
+    assert report.supported_features["tiles3d.mapscene_render"] == "supported"
+    summary = _summary(report, "tiles.local")
+    assert summary.support_level == "supported"
+    assert summary.details["source_kind"] == "tileset.json"
 
 
 def test_tiles3d_validation_distinguishes_supported_and_unsupported_formats(tmp_path):

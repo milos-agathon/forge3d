@@ -16,7 +16,12 @@ pub mod degradation;
 // CENSOR: negotiated GPU capability set (replaces Features::empty())
 pub mod capabilities;
 
-pub mod framegraph; // Legacy compatibility layer
+// CENSOR: WGSL shader-hash registry + validation error scopes
+pub mod shader_registry;
+
+// CENSOR Task 9: RenderCertificate execution report (per-render pass timings)
+pub mod certificate;
+
 pub mod gpu_types;
 pub mod memory_tracker;
 pub mod resource_tracker;
@@ -25,7 +30,6 @@ pub mod resource_tracker;
 pub mod gpu_timing;
 
 // Q1: Post-processing compute pipeline
-pub mod postfx;
 
 // Q5: Bloom post-processing effect
 pub mod bloom;
@@ -151,10 +155,6 @@ pub mod overlay_layer;
 
 // D11: 3D Text Mesh (native)
 pub mod text_mesh;
-
-// N4: Render bundles
-pub mod render_bundles;
-pub mod render_bundles_types;
 
 // O1: Staging buffer rings with fence synchronization
 #[cfg(feature = "enable-staging-rings")]

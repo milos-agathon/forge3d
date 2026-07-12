@@ -1,11 +1,17 @@
 use super::{SnapshotRenderState, TerrainPbrUniforms, TerrainUniforms};
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::viewer::terrain::ViewerTerrainScene;
 
 impl ViewerTerrainScene {
     pub(super) fn prepare_snapshot_resources(&mut self, width: u32, height: u32) {
-        self.ensure_fallback_texture();
+        if let Err(e) = self.ensure_fallback_texture() {
+            eprintln!("[terrain] fallback texture allocation failed: {e}");
+        }
         if self.depth_view.is_none() {
-            self.ensure_depth(width, height);
+            if let Err(e) = self.ensure_depth(width, height) {
+                eprintln!("[terrain] depth target allocation failed: {e}");
+            }
         }
     }
 
@@ -15,48 +21,55 @@ impl ViewerTerrainScene {
         target_format: wgpu::TextureFormat,
         width: u32,
         height: u32,
-    ) -> (wgpu::Texture, wgpu::TextureView) {
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(label),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+    ) -> RenderResult<(TrackedTexture, wgpu::TextureView)> {
+        let texture = tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: target_format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: target_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        (texture, view)
+        Ok((texture, view))
     }
 
     pub(super) fn create_snapshot_depth_target(
         &self,
         width: u32,
         height: u32,
-    ) -> (wgpu::Texture, wgpu::TextureView) {
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("terrain_viewer.snapshot_depth"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+    ) -> RenderResult<(TrackedTexture, wgpu::TextureView)> {
+        let texture = tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain_viewer.snapshot_depth"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        )?;
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        (texture, view)
+        Ok((texture, view))
     }
 
     pub(super) fn build_snapshot_render_state(
@@ -220,7 +233,9 @@ impl ViewerTerrainScene {
             water_color,
         )) = pbr_uniforms_data
         {
-            self.ensure_terrain_ibl_resources();
+            if let Err(e) = self.ensure_terrain_ibl_resources() {
+                eprintln!("[terrain] IBL resource preparation failed: {e}");
+            }
             let pbr_uniforms = TerrainPbrUniforms {
                 view_proj: view_proj.to_cols_array_2d(),
                 sun_dir: [sun_dir.x, sun_dir.y, sun_dir.z, 0.0],
@@ -274,7 +289,9 @@ impl ViewerTerrainScene {
                 pbr_uniforms.overlay_params[2],
                 pbr_uniforms.overlay_params[3]
             );
-            self.prepare_pbr_bind_group_internal(&pbr_uniforms);
+            if let Err(e) = self.prepare_pbr_bind_group_internal(&pbr_uniforms) {
+                eprintln!("[terrain] PBR bind group preparation failed: {e}");
+            }
         }
 
         self.dispatch_heightfield_compute(encoder, terrain_width, sun_dir);

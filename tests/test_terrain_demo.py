@@ -293,10 +293,11 @@ def _build_params() -> TerrainRenderParamsConfig:
         sampling=SamplingSettings("Linear", "Linear", "Linear", 8, "Repeat", "Repeat", "Repeat"),
         clamp=ClampSettings((0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0), (0.0, 1.0)),
         overlays=[overlay],
-        exposure=1.0,
+        exposure=1.08,
         gamma=2.2,
         albedo_mode="mix",
         colormap_strength=0.5,
+        output_srgb_eotf=True,
     )
 
 

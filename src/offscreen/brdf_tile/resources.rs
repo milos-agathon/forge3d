@@ -1,4 +1,7 @@
-use wgpu::util::DeviceExt;
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{
+    tracked_create_buffer_init, tracked_create_texture, TrackedBuffer, TrackedTexture,
+};
 
 use super::math::{create_look_at_matrix, create_perspective_matrix, identity_matrix};
 use super::request::PreparedBrdfTileRequest;
@@ -15,84 +18,100 @@ const UP: [f32; 3] = [0.0, 1.0, 0.0];
 const PARAMS_MIN_SIZE: usize = 256;
 
 pub(super) struct RenderTargets {
-    pub(super) render_target: wgpu::Texture,
+    pub(super) render_target: TrackedTexture,
     render_view: wgpu::TextureView,
-    _depth_texture: wgpu::Texture,
+    _depth_texture: TrackedTexture,
     depth_view: wgpu::TextureView,
 }
 
 pub(super) struct MeshBuffers {
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
+    vertex_buffer: TrackedBuffer,
+    index_buffer: TrackedBuffer,
     num_indices: u32,
 }
 
 pub(super) struct UniformResources {
     pub(super) bind_group: wgpu::BindGroup,
-    pub(super) debug_buffer: wgpu::Buffer,
+    pub(super) debug_buffer: TrackedBuffer,
 }
 
 impl RenderTargets {
-    pub(super) fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
-        let render_target = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("offscreen.brdf_tile.render_target"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+    pub(super) fn new(device: &wgpu::Device, width: u32, height: u32) -> RenderResult<Self> {
+        let render_target = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("offscreen.brdf_tile.render_target"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("offscreen.brdf_tile.depth"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+        )?;
+        let depth_texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("offscreen.brdf_tile.depth"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth24Plus,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth24Plus,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        )?;
 
-        Self {
+        Ok(Self {
             render_view: render_target.create_view(&wgpu::TextureViewDescriptor::default()),
             depth_view: depth_texture.create_view(&wgpu::TextureViewDescriptor::default()),
             render_target,
             _depth_texture: depth_texture,
-        }
+        })
     }
 }
 
 impl MeshBuffers {
-    pub(super) fn new(device: &wgpu::Device, sphere_sectors: u32, sphere_stacks: u32) -> Self {
+    pub(super) fn new(
+        device: &wgpu::Device,
+        sphere_sectors: u32,
+        sphere_stacks: u32,
+    ) -> RenderResult<Self> {
         let (vertices, indices) =
             crate::offscreen::sphere::generate_uv_sphere(sphere_sectors, sphere_stacks, 1.0);
 
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("offscreen.brdf_tile.vertex_buffer"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("offscreen.brdf_tile.index_buffer"),
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let vertex_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("offscreen.brdf_tile.vertex_buffer"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            },
+        )?;
+        let index_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("offscreen.brdf_tile.index_buffer"),
+                contents: bytemuck::cast_slice(&indices),
+                usage: wgpu::BufferUsages::INDEX,
+            },
+        )?;
 
-        Self {
+        Ok(Self {
             vertex_buffer,
             index_buffer,
             num_indices: indices.len() as u32,
-        }
+        })
     }
 }
 
@@ -101,32 +120,47 @@ impl UniformResources {
         device: &wgpu::Device,
         pipeline: &crate::offscreen::pipeline::BrdfTilePipeline,
         request: &PreparedBrdfTileRequest,
-    ) -> Self {
-        let uniforms_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("offscreen.brdf_tile.uniforms"),
-            contents: bytemuck::cast_slice(&[camera_uniforms(request.width, request.height)]),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("offscreen.brdf_tile.params"),
-            contents: &padded_params_bytes(request),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let shading_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("offscreen.brdf_tile.shading"),
-            contents: bytemuck::cast_slice(&[shading_params(request)]),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let debug_push_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("offscreen.brdf_tile.debug_push"),
-            contents: bytemuck::bytes_of(&debug_push(request)),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let debug_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("offscreen.brdf_tile.debug_buffer"),
-            contents: bytemuck::cast_slice(&[u32::MAX, 0, u32::MAX, 0]),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-        });
+    ) -> RenderResult<Self> {
+        let uniforms_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("offscreen.brdf_tile.uniforms"),
+                contents: bytemuck::cast_slice(&[camera_uniforms(request.width, request.height)]),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        )?;
+        let params_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("offscreen.brdf_tile.params"),
+                contents: &padded_params_bytes(request),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        )?;
+        let shading_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("offscreen.brdf_tile.shading"),
+                contents: bytemuck::cast_slice(&[shading_params(request)]),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        )?;
+        let debug_push_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("offscreen.brdf_tile.debug_push"),
+                contents: bytemuck::bytes_of(&debug_push(request)),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        )?;
+        let debug_buffer = tracked_create_buffer_init(
+            device,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("offscreen.brdf_tile.debug_buffer"),
+                contents: bytemuck::cast_slice(&[u32::MAX, 0, u32::MAX, 0]),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            },
+        )?;
         let bind_group = pipeline.create_bind_group(
             device,
             &uniforms_buffer,
@@ -136,10 +170,10 @@ impl UniformResources {
             &debug_push_buffer,
         );
 
-        Self {
+        Ok(Self {
             bind_group,
             debug_buffer,
-        }
+        })
     }
 }
 

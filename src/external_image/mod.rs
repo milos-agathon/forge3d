@@ -70,8 +70,9 @@ pub fn import_image_to_texture(
     let texture = create_texture_for_import(device, width, height, &config)?;
     upload_rgba_data_to_texture(queue, &texture, &rgba_data, width, height)?;
 
+    // `create_texture_for_import` routes through the tracked wrapper, which
+    // already records the texture in the global allocation ledger.
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    global_tracker().track_texture_allocation(width, height, config.target_format);
 
     Ok(ImportedTextureInfo {
         texture,

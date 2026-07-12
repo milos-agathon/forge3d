@@ -25,10 +25,10 @@ pub struct RingVertexPacked {
 
 /// Buffers returned from a GPU extrusion dispatch.
 pub struct GpuExtrusionOutput {
-    pub positions: wgpu::Buffer,
-    pub indices: wgpu::Buffer,
-    pub normals: wgpu::Buffer,
-    pub uvs: wgpu::Buffer,
+    pub positions: crate::core::resource_tracker::TrackedBuffer,
+    pub indices: crate::core::resource_tracker::TrackedBuffer,
+    pub normals: crate::core::resource_tracker::TrackedBuffer,
+    pub uvs: crate::core::resource_tracker::TrackedBuffer,
     pub vertex_count: u32,
     pub index_count: u32,
 }

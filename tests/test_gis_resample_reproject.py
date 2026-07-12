@@ -253,7 +253,7 @@ def test_crs_transformer_rejects_invalid_or_unavailable():
     assert n == pytest.approx(0.0, abs=1e-6)
 
 
-def test_reproject_unsupported_crs_pair_reports_backend_unavailable(tmp_path: Path):
+def test_reproject_unsupported_crs_pair_reports_transform_failed(tmp_path: Path):
     path = tmp_path / "unsupported_pair.tif"
     _write(
         path,
@@ -263,9 +263,9 @@ def test_reproject_unsupported_crs_pair_reports_backend_unavailable(tmp_path: Pa
     )
 
     # MENSURA: EPSG:32631 reprojects natively now. A parseable geographic
-    # CRS with no transform path reports BackendUnavailable; codes outside
-    # the parse whitelist fail earlier with InvalidCrs.
-    with pytest.raises(RuntimeError, match="BackendUnavailable"):
+    # CRS with no transform path reaches the explicit per-pixel error policy;
+    # codes outside the parse whitelist fail earlier with InvalidCrs.
+    with pytest.raises(RuntimeError, match="TransformFailed"):
         gis.reproject_raster(path, "EPSG:4269", resampling="nearest")
     with pytest.raises(ValueError, match="InvalidCrs"):
         gis.reproject_raster(path, "EPSG:2154", resampling="nearest")

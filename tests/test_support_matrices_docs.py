@@ -73,14 +73,15 @@ def _markdown_table_rows(path: Path):
 
 
 def test_required_evidence_files_are_not_git_ignored():
-    result = subprocess.run(
-        ["git", "check-ignore", "-v", *sorted(GIT_VISIBLE_EVIDENCE)],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode == 1, result.stdout
+    ignored = []
+    for path in sorted(GIT_VISIBLE_EVIDENCE):
+        result = subprocess.run(
+            ["git", "check-ignore", "--quiet", path],
+            check=False,
+        )
+        if result.returncode == 0:
+            ignored.append(path)
+    assert ignored == []
 
 
 def test_required_support_matrix_docs_exist_and_use_prd_terms():

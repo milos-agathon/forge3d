@@ -20,13 +20,14 @@ impl GpuBvhBuilder {
         let aabb_data = cast_slice(&triangle_aabbs);
 
         // Create temporary buffer for updated AABBs
-        let aabb_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let aabb_buffer = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("Updated Primitive AABBs"),
                 contents: aabb_data,
                 usage: BufferUsages::STORAGE,
-            });
+            },
+        )?;
 
         // Execute refit passes; GPU kernels are pending.
         self.execute_refit(
@@ -60,24 +61,28 @@ impl GpuBvhBuilder {
             _pad0: 0,
             _pad1: 0,
         };
-        let ubuf = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let ubuf = tracked_create_buffer_init(
+            &self.device,
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("bvh-refit-uniforms"),
                 contents: cast_slice(&[uniforms]),
                 usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            });
+            },
+        )?;
 
         let bgl0 = self.refit_iterative_pipeline.get_bind_group_layout(0);
         let bgl1 = self.refit_iterative_pipeline.get_bind_group_layout(1);
         let bgl2 = self.refit_iterative_pipeline.get_bind_group_layout(2);
 
-        let node_flags = &self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("bvh-refit-node-flags"),
-            size: (node_count * 4) as u64,
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
+        let node_flags = tracked_create_buffer(
+            &self.device,
+            &wgpu::BufferDescriptor {
+                label: Some("bvh-refit-node-flags"),
+                size: (node_count * 4) as u64,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            },
+        )?;
 
         let bg0 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bvh-refit-bg0"),

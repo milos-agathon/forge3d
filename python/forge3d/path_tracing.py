@@ -13,6 +13,7 @@ must pass ``synthetic_ok=True`` to receive synthetic pixels.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import wraps
 from typing import Any, Dict, Optional, Tuple, Iterable, Mapping, Callable
 
 import numpy as np
@@ -37,6 +38,32 @@ def _require_synthetic_ok(synthetic_ok: bool, api_name: str) -> None:
             f"{api_name} produces deterministic synthetic output, not a real path-traced render; "
             "pass synthetic_ok=True to opt in."
         )
+
+
+def _captured_synthetic_render(name: str):
+    def decorate(function):
+        @wraps(function)
+        def wrapped(*args, **kwargs):
+            certificate = kwargs.pop("certificate", False)
+            from . import _degradation
+            from . import certificate as _certificate
+
+            with _certificate._render_capture(
+                f"python.{name}", f"python.{name}", draw_calls=1
+            ):
+                _degradation.record(
+                    "synthetic_output",
+                    name,
+                    "deterministic synthetic CPU data, not a GPU render",
+                )
+                result = function(*args, **kwargs)
+            if certificate:
+                _certificate.emit_render_certificate(certificate)
+            return result
+
+        return wrapped
+
+    return decorate
 
 
 # --- A19: Scene cache for HQ path tracing (Python fallback) ---
@@ -213,7 +240,10 @@ class PathTracer:
             self._mat_bias = np.array([0.0, 0.0, 0.0], dtype=np.float32)
         return None
 
-    def render_rgba(self, *args, spp: int = 1, **kwargs) -> np.ndarray:
+    @_captured_synthetic_render("path_tracing.PathTracer.render_rgba")
+    def render_rgba(
+        self, *args, spp: int = 1, certificate: bool | str = False, **kwargs
+    ) -> np.ndarray:
         """Produce a deterministic synthetic RGBA image.
 
         Overloads:
@@ -223,6 +253,8 @@ class PathTracer:
         """
         synthetic_ok = bool(kwargs.pop("synthetic_ok", False))
         _require_synthetic_ok(synthetic_ok, "PathTracer.render_rgba")
+        def _finish(arr: np.ndarray) -> np.ndarray:
+            return arr
 
         # New-style call with explicit (w,h, ...)
         if len(args) >= 2 and isinstance(args[0], (int, np.integer)) and isinstance(args[1], (int, np.integer)):
@@ -303,7 +335,7 @@ class PathTracer:
             rgba = np.empty((height, width, 4), dtype=np.uint8)
             rgba[..., :3] = (np.clip(rgb, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
             rgba[..., 3] = 255
-            return rgba
+            return _finish(rgba)
 
         # Backward-compatible path using internal size
         width, height = self._width, self._height
@@ -325,7 +357,7 @@ class PathTracer:
             rgba = np.empty((height, width, 4), dtype=np.uint8)
             rgba[..., :3] = (rgb * 255.0 + 0.5).astype(np.uint8)
             rgba[..., 3] = 255
-            return rgba
+            return _finish(rgba)
 
         # Tiled path
         out = np.empty((height, width, 4), dtype=np.uint8)
@@ -338,7 +370,7 @@ class PathTracer:
             ripple = 0.05 * np.sin(12.0 * xs + 0.7) * np.cos(9.0 * ys + 0.3)
             rgb = np.clip(rgb + ripple[..., None], 0.0, 1.0)
             out[ty : ty + th, tx : tx + tw, :3] = (rgb * 255.0 + 0.5).astype(np.uint8)
-        return out
+        return _finish(out)
 
     # A19: derive a cache key from inputs; best-effort stable representation.
     def _make_cache_key(
@@ -379,6 +411,7 @@ class PathTracer:
         except Exception:
             return f"a19:{repr(payload)}"
 
+    @_captured_synthetic_render("path_tracing.render_progressive")
     def render_progressive(
         self,
         *,
@@ -387,6 +420,8 @@ class PathTracer:
         min_updates_per_sec: float = 2.0,
         time_source: Callable[[], float] = _time.perf_counter,
         spp: int = 1,
+        synthetic_ok: bool = False,
+        certificate: bool | str = False,
     ) -> np.ndarray:
         """Render progressively in tiles, invoking callback on cadence.
 
@@ -400,6 +435,7 @@ class PathTracer:
 
         If the callback returns True, rendering stops early.
         """
+        _require_synthetic_ok(synthetic_ok, "PathTracer.render_progressive")
         width, height = self._width, self._height
         spp = int(spp)
         out = np.empty((height, width, 4), dtype=np.uint8)
@@ -464,6 +500,7 @@ def _synthetic_basis(width: int, height: int, *, seed: int) -> tuple[np.ndarray,
     return base, noise
 
 
+@_captured_synthetic_render("path_tracing.render_aovs")
 def render_aovs(
     width: int,
     height: int,
@@ -476,6 +513,7 @@ def render_aovs(
     use_gpu: bool = True,
     mesh: Any | None = None,
     synthetic_ok: bool = False,
+    certificate: bool | str = False,
 ) -> Dict[str, np.ndarray]:
     """Render a deterministic synthetic set of AOVs for tests and demos.
 
@@ -671,7 +709,8 @@ def save_aovs(
 
 # Additional functions needed by tests
 
-def render_rgba(*args, **kwargs) -> np.ndarray:
+@_captured_synthetic_render("path_tracing.render_rgba")
+def render_rgba(*args, certificate: bool | str = False, **kwargs) -> np.ndarray:
     """Render RGBA image (fallback implementation)."""
     # Handle positional arguments for width/height
     if len(args) >= 2 and isinstance(args[0], (int, np.integer)) and isinstance(args[1], (int, np.integer)):
@@ -856,6 +895,7 @@ def hybrid_render_terrain_reference(
     min_frames: int = 32,
     variance_threshold: float = 1e-3,
     seed: int = 7,
+    certificate: bool | str = False,
 ) -> dict:
     """Converged GPU path-traced reference of a real DEM under sun + IBL.
 
@@ -938,4 +978,5 @@ def hybrid_render_terrain_reference(
         min_frames=int(min_frames),
         variance_threshold=float(variance_threshold),
         seed=int(seed),
+        certificate=certificate,
     )

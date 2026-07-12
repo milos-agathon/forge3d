@@ -6,6 +6,7 @@ impl Scene {
     // B14: Rect Area Lights (LTC) API
     #[pyo3(text_signature = "($self, max_lights=16)")]
     pub fn enable_ltc_rect_area_lights(&mut self, max_lights: Option<usize>) -> PyResult<()> {
+        let _allocation_scope = self.allocation_owner.activate();
         let g = crate::core::gpu::try_ctx()?;
         let max_lights = max_lights.unwrap_or(16);
 

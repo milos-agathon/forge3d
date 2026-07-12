@@ -37,6 +37,7 @@ pub(crate) fn render_brdf_tile_impl<'py>(
     sphere_stacks: u32,
     light_dir: Option<(f32, f32, f32)>,
     debug_kind: u32,
+    certificate: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyArray3<u8>>> {
     let model_u32 = match model.to_lowercase().as_str() {
         "lambert" => 0,
@@ -199,6 +200,7 @@ pub(crate) fn render_brdf_tile_impl<'py>(
         debug_kind: Some(debug_kind),
     };
 
+    let certificate_capture = crate::core::certificate::begin_render_capture("render_brdf_tile");
     let ctx = crate::core::gpu::try_ctx()?;
     let buffer = crate::offscreen::brdf_tile::render_brdf_tile_with_overrides(
         ctx.device.as_ref(),
@@ -252,6 +254,12 @@ pub(crate) fn render_brdf_tile_impl<'py>(
         .map_err(|e| {
             PyRuntimeError::new_err(format!("Failed to reshape buffer to array: {}", e))
         })?;
+
+    // The `brdf.tile` pass (live gpu_ms) and `brdf_tile.shader` use are
+    // recorded inside `offscreen::brdf_tile::render_brdf_tile` at the point
+    // where the pipeline actually executes.
+    certificate_capture.finish();
+    crate::core::certificate::emit_certificate_for_kwarg(py, certificate)?;
 
     Ok(array.into_pyarray_bound(py))
 }

@@ -1,7 +1,9 @@
 // src/viewer/terrain/denoise.rs
 
+use crate::core::resource_tracker::{
+    tracked_create_buffer_init, tracked_create_texture, TrackedTexture,
+};
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -21,9 +23,9 @@ pub struct DenoisePass {
     pipeline: wgpu::ComputePipeline,
 
     // Ping-pong textures
-    pub texture_a: Option<wgpu::Texture>,
+    pub texture_a: Option<TrackedTexture>,
     pub view_a: Option<wgpu::TextureView>,
-    pub texture_b: Option<wgpu::Texture>,
+    pub texture_b: Option<TrackedTexture>,
     pub view_b: Option<wgpu::TextureView>,
 
     width: u32,
@@ -32,12 +34,11 @@ pub struct DenoisePass {
 
 impl DenoisePass {
     pub fn new(device: Arc<wgpu::Device>) -> Self {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("denoise_shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../shaders/denoise_atrous.wgsl").into(),
-            ),
-        });
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            &device,
+            "denoise_shader",
+            include_str!("../../shaders/denoise_atrous.wgsl"),
+        );
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("denoise_bgl"),
@@ -95,12 +96,15 @@ impl DenoisePass {
             push_constant_ranges: &[],
         });
 
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("denoise_pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: "main",
-        });
+        let pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+            &device,
+            &wgpu::ComputePipelineDescriptor {
+                label: Some("denoise_pipeline"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: "main",
+            },
+        );
 
         Self {
             device,
@@ -115,9 +119,9 @@ impl DenoisePass {
         }
     }
 
-    pub fn ensure_resources(&mut self, width: u32, height: u32) {
+    pub fn ensure_resources(&mut self, width: u32, height: u32) -> anyhow::Result<()> {
         if self.width == width && self.height == height && self.texture_a.is_some() {
-            return;
+            return Ok(());
         }
 
         self.width = width;
@@ -142,19 +146,24 @@ impl DenoisePass {
             view_formats: &[],
         };
 
-        let tex_a = self.device.create_texture(&desc);
-        let tex_b = self.device.create_texture(&desc);
+        let tex_a = tracked_create_texture(&self.device, &desc)?;
+        let tex_b = tracked_create_texture(&self.device, &desc)?;
 
         self.view_a = Some(tex_a.create_view(&wgpu::TextureViewDescriptor::default()));
         self.view_b = Some(tex_b.create_view(&wgpu::TextureViewDescriptor::default()));
 
         self.texture_a = Some(tex_a);
         self.texture_b = Some(tex_b);
+        Ok(())
     }
 
-    pub fn get_input_view(&mut self, width: u32, height: u32) -> &wgpu::TextureView {
-        self.ensure_resources(width, height);
-        self.view_a.as_ref().unwrap()
+    pub fn get_input_view(
+        &mut self,
+        width: u32,
+        height: u32,
+    ) -> anyhow::Result<&wgpu::TextureView> {
+        self.ensure_resources(width, height)?;
+        Ok(self.view_a.as_ref().unwrap())
     }
 
     pub fn apply(
@@ -163,15 +172,15 @@ impl DenoisePass {
         depth_view: &wgpu::TextureView,
         iterations: u32,
         sigma_color: f32,
-    ) {
+    ) -> anyhow::Result<()> {
         if iterations == 0 {
-            return;
+            return Ok(());
         }
 
         let width = self.width;
         let height = self.height;
         if width == 0 {
-            return;
+            return Ok(());
         }
 
         // Pass 0: Input (view_a) -> B
@@ -191,13 +200,14 @@ impl DenoisePass {
                 padding: [0.0; 2],
             };
 
-            let temp_buffer = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            let temp_buffer = tracked_create_buffer_init(
+                &self.device,
+                &wgpu::util::BufferInitDescriptor {
                     label: Some("temp_denoise_uniform"),
                     contents: bytemuck::cast_slice(&[uniforms]),
                     usage: wgpu::BufferUsages::UNIFORM,
-                });
+                },
+            )?;
 
             let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("denoise_bg"),
@@ -242,6 +252,7 @@ impl DenoisePass {
                 dest_storage = self.view_b.as_ref().unwrap();
             }
         }
+        Ok(())
     }
 
     // Helper to get the result view to blit from

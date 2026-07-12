@@ -7,7 +7,9 @@ impl ViewerTerrainScene {
         width: u32,
         height: u32,
     ) -> ScreenRenderFlags {
-        self.ensure_depth(width, height);
+        if let Err(e) = self.ensure_depth(width, height) {
+            eprintln!("[terrain] depth target allocation failed: {e}");
+        }
 
         if self.pbr_config.enabled && self.pbr_pipeline.is_none() {
             if let Err(e) = self.init_pbr_pipeline(self.surface_format) {

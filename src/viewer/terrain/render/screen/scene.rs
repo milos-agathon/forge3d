@@ -271,20 +271,29 @@ impl ViewerTerrainScene {
 
         if has_vector_overlays {
             if self.fallback_texture.is_none() {
-                let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("vector_overlay_fallback_texture"),
-                    size: wgpu::Extent3d {
-                        width: 1,
-                        height: 1,
-                        depth_or_array_layers: 1,
+                let texture = match crate::core::resource_tracker::tracked_create_texture(
+                    &self.device,
+                    &wgpu::TextureDescriptor {
+                        label: Some("vector_overlay_fallback_texture"),
+                        size: wgpu::Extent3d {
+                            width: 1,
+                            height: 1,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::R32Float,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                        view_formats: &[],
                     },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::R32Float,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                    view_formats: &[],
-                });
+                ) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        eprintln!("[terrain] failed to allocate overlay fallback texture: {e}");
+                        return false;
+                    }
+                };
                 self.queue.write_texture(
                     wgpu::ImageCopyTexture {
                         texture: &texture,
@@ -311,7 +320,9 @@ impl ViewerTerrainScene {
 
             if let Some(ref mut stack) = self.vector_overlay_stack {
                 if !stack.pipelines_ready() || (self.oit_enabled && !stack.oit_pipelines_ready()) {
-                    stack.init_pipelines(self.surface_format);
+                    if let Err(e) = stack.init_pipelines(self.surface_format) {
+                        eprintln!("[terrain] overlay pipeline init failed: {e}");
+                    }
                 }
                 let texture_view = self
                     .sun_vis_view

@@ -1,4 +1,5 @@
 use crate::core::error::RenderError;
+use crate::core::resource_tracker::TrackedBuffer;
 use std::sync::Arc;
 use wgpu::*;
 
@@ -22,13 +23,13 @@ pub trait CommandTask: Send + Sync {
 /// Example task for copying buffers
 pub struct CopyTask {
     name: String,
-    src_buffer: Arc<Buffer>,
-    dst_buffer: Arc<Buffer>,
+    src_buffer: Arc<TrackedBuffer>,
+    dst_buffer: Arc<TrackedBuffer>,
     size: u64,
 }
 
 impl CopyTask {
-    pub fn new(name: String, src: Arc<Buffer>, dst: Arc<Buffer>, size: u64) -> Self {
+    pub fn new(name: String, src: Arc<TrackedBuffer>, dst: Arc<TrackedBuffer>, size: u64) -> Self {
         Self {
             name,
             src_buffer: src,

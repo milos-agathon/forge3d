@@ -73,12 +73,15 @@ def test_p2_noop_success_paths_block_render(tmp_path):
     )
     output = tmp_path / "noop.png"
 
-    with pytest.raises(RuntimeError, match="blocking diagnostics"):
+    report = scene.validate()
+    assert report.status == "ok"
+    assert report.supported_features["vt.normal"] == "supported"
+    assert report.supported_features["buildings.textured_pbr"] == "supported"
+
+    with pytest.raises(f3d.MapSceneNativeUnavailable, match="native rendering unavailable"):
         scene.render(str(output))
 
     assert not output.exists()
-    codes = {diagnostic.code for diagnostic in scene.last_validation_report.diagnostics}
-    assert {"vt_unsupported_family", "unsupported_feature"}.issubset(codes)
 
 
 def test_advanced_label_diagnostics_are_deterministic_not_silent_success():

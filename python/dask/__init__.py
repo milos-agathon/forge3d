@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 __forge3d_stub__ = True
-__version__ = "0.0-stub"
+__version__ = "0.0.0"
 
 from . import array, base
 from .base import is_dask_collection

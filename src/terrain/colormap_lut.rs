@@ -1,9 +1,11 @@
 use super::*;
 
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
+
 // ---------- Colormaps ----------
 
 pub struct ColormapLUT {
-    pub texture: wgpu::Texture,
+    pub texture: TrackedTexture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
     pub format: wgpu::TextureFormat,
@@ -23,20 +25,23 @@ impl ColormapLUT {
             .into());
         }
 
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("colormap1d-lut"),
-            size: wgpu::Extent3d {
-                width: 256,
-                height: 1,
-                depth_or_array_layers: 1,
+        let texture = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("colormap1d-lut"),
+                size: wgpu::Extent3d {
+                    width: 256,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
 
         queue.write_texture(
             wgpu::ImageCopyTexture {
@@ -116,20 +121,23 @@ impl ColormapLUT {
         };
 
         // 256x1 RGBA8
-        let tex = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("colormap-lut"),
-            size: wgpu::Extent3d {
-                width: 256,
-                height: 1,
-                depth_or_array_layers: 1,
+        let tex = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("colormap-lut"),
+                size: wgpu::Extent3d {
+                    width: 256,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
         queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &tex,
@@ -204,20 +212,23 @@ impl ColormapLUT {
         };
 
         // Create 256xN texture for N palettes
-        let tex = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("colormap-lut-multi"),
-            size: wgpu::Extent3d {
-                width: 256,
-                height,
-                depth_or_array_layers: 1,
+        let tex = tracked_create_texture(
+            device,
+            &wgpu::TextureDescriptor {
+                label: Some("colormap-lut-multi"),
+                size: wgpu::Extent3d {
+                    width: 256,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
 
         // Create combined palette data
         let mut combined_data = Vec::with_capacity(256 * height as usize * 4);

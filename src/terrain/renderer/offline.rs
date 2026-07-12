@@ -1,10 +1,13 @@
 use super::draw::RenderTargets;
 use super::*;
+use crate::core::resource_tracker::{
+    tracked_create_buffer_init, tracked_create_texture, TrackedTexture,
+};
 use crate::terrain::accumulation::apply_jitter_to_projection;
 use crate::PyValueError;
 use half::f16;
 use numpy::{PyReadonlyArray2, PyReadonlyArray3, PyUntypedArrayMethods};
-use std::{borrow::Cow, time::Instant};
+use std::time::Instant;
 
 const OFFLINE_HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const OFFLINE_ACCUM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
@@ -85,21 +88,25 @@ impl TerrainScene {
             shader_source: &str,
             entry_point: &str,
         ) -> wgpu::ComputePipeline {
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some(label),
-                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(shader_source)),
-            });
+            let shader = crate::core::shader_registry::create_labeled_shader_module(
+                device,
+                label,
+                shader_source,
+            );
             let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(&format!("{label}.layout")),
                 bind_group_layouts: &[bind_group_layout],
                 push_constant_ranges: &[],
             });
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label: Some(label),
-                layout: Some(&pipeline_layout),
-                module: &shader,
-                entry_point,
-            })
+            crate::core::shader_registry::create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some(label),
+                    layout: Some(&pipeline_layout),
+                    module: &shader,
+                    entry_point,
+                },
+            )
         }
 
         let accumulate_bind_group_layout =
@@ -413,23 +420,26 @@ impl TerrainScene {
         height: u32,
         format: wgpu::TextureFormat,
         usage: wgpu::TextureUsages,
-    ) -> (wgpu::Texture, wgpu::TextureView) {
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(label),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+    ) -> Result<(TrackedTexture, wgpu::TextureView)> {
+        let texture = tracked_create_texture(
+            self.device.as_ref(),
+            &wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format,
-            usage,
-            view_formats: &[],
-        });
+        )?;
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        (texture, view)
+        Ok((texture, view))
     }
 
     fn build_offline_state(
@@ -463,7 +473,7 @@ impl TerrainScene {
             (height_inputs.width, height_inputs.height),
             offline_params.z_scale,
             height_inputs.terrain_data_hash,
-        );
+        )?;
         super::probes::prepare_reflection_probes(
             self,
             &decoded.reflection_probes,
@@ -476,7 +486,7 @@ impl TerrainScene {
             (height_inputs.width, height_inputs.height),
             offline_params.z_scale,
             height_inputs.terrain_data_hash,
-        );
+        )?;
 
         let materials =
             self.prepare_material_context_with_mode(material_set, &offline_params, &decoded, true)?;
@@ -498,29 +508,29 @@ impl TerrainScene {
             render_targets.internal_height,
             1,
             false,
-        );
+        )?;
         let beauty_accumulation = crate::terrain::AccumulationBuffer::new(
             self.device.as_ref(),
             render_targets.internal_width,
             render_targets.internal_height,
-        );
+        )?;
         let albedo_accumulation = crate::terrain::AccumulationBuffer::new(
             self.device.as_ref(),
             render_targets.internal_width,
             render_targets.internal_height,
-        );
+        )?;
         let normal_accumulation = crate::terrain::AccumulationBuffer::new(
             self.device.as_ref(),
             render_targets.internal_width,
             render_targets.internal_height,
-        );
+        )?;
         let (depth_reference_texture, depth_reference_view) = self.create_offline_output_texture(
             "terrain.offline.depth_reference",
             render_targets.internal_width,
             render_targets.internal_height,
             OFFLINE_DEPTH_FORMAT,
             wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING,
-        );
+        )?;
         let luminance_width = (render_targets.internal_width + 3) / 4;
         let luminance_height = (render_targets.internal_height + 3) / 4;
         let (luminance_texture, luminance_view) = self.create_offline_output_texture(
@@ -529,7 +539,7 @@ impl TerrainScene {
             luminance_height,
             OFFLINE_LUMINANCE_FORMAT,
             wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
-        );
+        )?;
         let out_width = render_targets.out_width;
         let out_height = render_targets.out_height;
         let internal_width = render_targets.internal_width;
@@ -599,10 +609,21 @@ impl TerrainScene {
         })
     }
 
+    /// Render one offline accumulation sample.
+    ///
+    /// `batch_scope_draws` (CENSOR F-04): when `Some(draws)`, this sample's
+    /// encoder is bracketed in a "terrain.offline.accumulate_batch" timing
+    /// scope (recorded with `draws` = the batch's sample count) and the
+    /// queries are resolved before this sample's submit. `accumulate_batch`
+    /// passes it for the FIRST sample of a batch only, so the certificate
+    /// keeps exactly one pass per batch; the timed region is that one
+    /// representative sample.
     fn render_offline_sample(
         &mut self,
         state: &mut super::core::OfflineAccumulationState,
         jitter: (f32, f32),
+        timing: &mut Option<crate::core::gpu_timing::GpuTimingManager>,
+        batch_scope_draws: Option<u32>,
     ) -> Result<()> {
         // Re-prepare per sample: interleaved non-offline renders may have
         // switched the geometry provider; the clipmap mesh cache makes this
@@ -618,19 +639,26 @@ impl TerrainScene {
         );
         let uniforms =
             Self::build_uniforms_with_matrices(&state.params, &state.decoded, view, jittered_proj);
-        let uniform_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let uniform_buffer = tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.offline.uniform_buffer"),
                 contents: bytemuck::cast_slice(&uniforms),
                 usage: wgpu::BufferUsages::UNIFORM,
-            });
+            },
+        )?;
 
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("terrain.offline.encoder"),
             });
+
+        let batch_scope = if batch_scope_draws.is_some() {
+            ts_begin(timing, &mut encoder, "terrain.offline.accumulate_batch")
+        } else {
+            None
+        };
 
         let material_vt_ready = self.prepare_material_vt_frame(
             &mut encoder,
@@ -780,7 +808,7 @@ impl TerrainScene {
                     &state.depth_reference_view,
                     state.internal_width,
                     state.internal_height,
-                );
+                )?;
             }
         }
 
@@ -789,21 +817,27 @@ impl TerrainScene {
             &state.render_targets.internal_view,
             &mut state.beauty_accumulation,
             state.total_samples,
-        );
+        )?;
         self.dispatch_offline_accumulation_pass(
             &mut encoder,
             &state.aov_targets.albedo.internal_view,
             &mut state.albedo_accumulation,
             state.total_samples,
-        );
+        )?;
         self.dispatch_offline_accumulation_pass(
             &mut encoder,
             &state.aov_targets.normal.internal_view,
             &mut state.normal_accumulation,
             state.total_samples,
-        );
+        )?;
 
         self.stage_material_vt_feedback_readback(&mut encoder)?;
+        if let Some(draws) = batch_scope_draws {
+            ts_end(timing, &mut encoder, batch_scope, draws);
+            if let Some(manager) = timing.as_mut() {
+                manager.resolve_queries(&mut encoder);
+            }
+        }
         self.queue.submit(Some(encoder.finish()));
         self.finish_material_vt_frame()?;
         state.total_samples += 1;
@@ -815,20 +849,21 @@ impl TerrainScene {
         sample_view: &wgpu::TextureView,
         accumulation: &mut crate::terrain::AccumulationBuffer,
         sample_index: u32,
-    ) {
+    ) -> Result<()> {
         let uniforms = OfflineAccumulateUniforms {
             sample_index,
             width: accumulation.width,
             height: accumulation.height,
             _pad: 0,
         };
-        let uniform_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let uniform_buffer = tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.offline.accumulate.uniforms"),
                 contents: bytemuck::bytes_of(&uniforms),
                 usage: wgpu::BufferUsages::UNIFORM,
-            });
+            },
+        )?;
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("terrain.offline.accumulate.bind_group"),
             layout: &self.offline_compute.accumulate_bind_group_layout,
@@ -856,6 +891,7 @@ impl TerrainScene {
             label: Some("terrain.offline.accumulate.pass"),
             timestamp_writes: None,
         });
+        crate::core::shader_registry::record_shader_use("terrain.offline.accumulate.pipeline");
         pass.set_pipeline(&self.offline_compute.accumulate_pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
         pass.dispatch_workgroups(
@@ -867,6 +903,7 @@ impl TerrainScene {
 
         accumulation.swap();
         accumulation.increment_sample();
+        Ok(())
     }
 
     fn blit_background_texture_with_pipeline(
@@ -928,6 +965,7 @@ impl TerrainScene {
             occlusion_query_set: None,
         });
 
+        crate::core::shader_registry::record_shader_use("terrain.blit.depth.shader");
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &blit_bind_group, &[]);
         pass.draw(0..3, 0..1);
@@ -1062,6 +1100,7 @@ impl TerrainScene {
             occlusion_query_set: None,
         });
 
+        crate::core::shader_registry::record_shader_use("terrain_pbr_pom.aov.shader");
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, bind_group, &[]);
         pass.set_bind_group(1, light_bind_group, &[]);
@@ -1082,24 +1121,27 @@ impl TerrainScene {
         height: u32,
         data: &[f32],
         label: &str,
-    ) -> wgpu::Texture {
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(label),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
+    ) -> Result<TrackedTexture> {
+        let texture = tracked_create_texture(
+            self.device.as_ref(),
+            &wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: OFFLINE_HDR_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
             },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: OFFLINE_HDR_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        )?;
 
         let mut bytes = Vec::with_capacity(data.len() * 2);
         for value in data {
@@ -1124,7 +1166,7 @@ impl TerrainScene {
                 depth_or_array_layers: 1,
             },
         );
-        texture
+        Ok(texture)
     }
 
     fn dispatch_offline_resolve_pass(
@@ -1134,20 +1176,21 @@ impl TerrainScene {
         output_view: &wgpu::TextureView,
         sample_count: u32,
         renormalize_normals: bool,
-    ) {
+    ) -> Result<()> {
         let uniforms = OfflineResolveUniforms {
             width: accumulation.width,
             height: accumulation.height,
             sample_count: sample_count.max(1),
             renormalize_normals: renormalize_normals as u32,
         };
-        let uniform_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let uniform_buffer = tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.offline.resolve.uniforms"),
                 contents: bytemuck::bytes_of(&uniforms),
                 usage: wgpu::BufferUsages::UNIFORM,
-            });
+            },
+        )?;
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("terrain.offline.resolve.bind_group"),
             layout: &self.offline_compute.resolve_bind_group_layout,
@@ -1171,6 +1214,7 @@ impl TerrainScene {
             label: Some("terrain.offline.resolve.pass"),
             timestamp_writes: None,
         });
+        crate::core::shader_registry::record_shader_use("terrain.offline.resolve.pipeline");
         pass.set_pipeline(&self.offline_compute.resolve_pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
         pass.dispatch_workgroups(
@@ -1178,6 +1222,7 @@ impl TerrainScene {
             (accumulation.height + 7) / 8,
             1,
         );
+        Ok(())
     }
 
     fn dispatch_offline_depth_copy_pass(
@@ -1190,19 +1235,20 @@ impl TerrainScene {
         bind_group_layout: &wgpu::BindGroupLayout,
         pipeline: &wgpu::ComputePipeline,
         label_prefix: &str,
-    ) {
+    ) -> Result<()> {
         let uniforms = OfflineDepthCopyUniforms {
             width,
             height,
             _pad: [0; 2],
         };
-        let uniform_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let uniform_buffer = tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("{label_prefix}.uniforms")),
                 contents: bytemuck::bytes_of(&uniforms),
                 usage: wgpu::BufferUsages::UNIFORM,
-            });
+            },
+        )?;
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(&format!("{label_prefix}.bind_group")),
             layout: bind_group_layout,
@@ -1226,9 +1272,11 @@ impl TerrainScene {
             label: Some(&format!("{label_prefix}.pass")),
             timestamp_writes: None,
         });
+        crate::core::shader_registry::record_shader_use(&format!("{label_prefix}.pipeline"));
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
         pass.dispatch_workgroups((width + 7) / 8, (height + 7) / 8, 1);
+        Ok(())
     }
 
     fn dispatch_offline_depth_extract_pass(
@@ -1238,7 +1286,7 @@ impl TerrainScene {
         output_view: &wgpu::TextureView,
         width: u32,
         height: u32,
-    ) {
+    ) -> Result<()> {
         self.dispatch_offline_depth_copy_pass(
             encoder,
             input_view,
@@ -1248,7 +1296,7 @@ impl TerrainScene {
             &self.offline_compute.depth_extract_bind_group_layout,
             &self.offline_compute.depth_extract_pipeline,
             "terrain.offline.depth_extract",
-        );
+        )
     }
 
     fn dispatch_offline_depth_expand_pass(
@@ -1258,7 +1306,7 @@ impl TerrainScene {
         output_view: &wgpu::TextureView,
         width: u32,
         height: u32,
-    ) {
+    ) -> Result<()> {
         self.dispatch_offline_depth_copy_pass(
             encoder,
             input_view,
@@ -1268,7 +1316,7 @@ impl TerrainScene {
             &self.offline_compute.depth_expand_bind_group_layout,
             &self.offline_compute.depth_expand_pipeline,
             "terrain.offline.depth_expand",
-        );
+        )
     }
 
     fn dispatch_offline_luminance_pass(
@@ -1277,20 +1325,21 @@ impl TerrainScene {
         accumulation: &crate::terrain::AccumulationBuffer,
         output_view: &wgpu::TextureView,
         sample_count: u32,
-    ) {
+    ) -> Result<()> {
         let uniforms = OfflineLuminanceUniforms {
             width: accumulation.width,
             height: accumulation.height,
             sample_count: sample_count.max(1),
             _pad: 0,
         };
-        let uniform_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let uniform_buffer = tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.offline.luminance.uniforms"),
                 contents: bytemuck::bytes_of(&uniforms),
                 usage: wgpu::BufferUsages::UNIFORM,
-            });
+            },
+        )?;
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("terrain.offline.luminance.bind_group"),
             layout: &self.offline_compute.luminance_bind_group_layout,
@@ -1314,6 +1363,7 @@ impl TerrainScene {
             label: Some("terrain.offline.luminance.pass"),
             timestamp_writes: None,
         });
+        crate::core::shader_registry::record_shader_use("terrain.offline.luminance.pipeline");
         pass.set_pipeline(&self.offline_compute.luminance_pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
         pass.dispatch_workgroups(
@@ -1321,6 +1371,7 @@ impl TerrainScene {
             ((accumulation.height + 3) / 4 + 7) / 8,
             1,
         );
+        Ok(())
     }
 
     fn dispatch_offline_tonemap_pass(
@@ -1333,7 +1384,7 @@ impl TerrainScene {
         operator_index: u32,
         white_point: f32,
         gamma: f32,
-    ) {
+    ) -> Result<()> {
         let uniforms = OfflineTonemapUniforms {
             width,
             height,
@@ -1343,13 +1394,14 @@ impl TerrainScene {
             gamma,
             _pad1: [0.0; 2],
         };
-        let uniform_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let uniform_buffer = tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain.offline.tonemap.uniforms"),
                 contents: bytemuck::bytes_of(&uniforms),
                 usage: wgpu::BufferUsages::UNIFORM,
-            });
+            },
+        )?;
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("terrain.offline.tonemap.bind_group"),
             layout: &self.offline_compute.tonemap_bind_group_layout,
@@ -1373,9 +1425,11 @@ impl TerrainScene {
             label: Some("terrain.offline.tonemap.pass"),
             timestamp_writes: None,
         });
+        crate::core::shader_registry::record_shader_use("terrain.offline.tonemap.pipeline");
         pass.set_pipeline(&self.offline_compute.tonemap_pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
         pass.dispatch_workgroups((width + 7) / 8, (height + 7) / 8, 1);
+        Ok(())
     }
 
     fn resolved_offline_tonemap_operator(
@@ -1492,6 +1546,14 @@ impl TerrainRenderer {
             return Err(PyValueError::new_err("sample_count must be >= 1"));
         }
 
+        let (certificate_capture, _allocation_scope) = self
+            .scene
+            .begin_certificate_capture("terrain.accumulate_batch");
+        // CENSOR F-04: live GPU timing through the scene's per-render timing
+        // manager. The first sample of the batch carries the one
+        // "terrain.offline.accumulate_batch" scope (see render_offline_sample).
+        let mut timing = self.scene.take_render_timing();
+
         let start = Instant::now();
         let mut state = {
             let mut guard = self
@@ -1505,10 +1567,15 @@ impl TerrainRenderer {
         };
 
         let work_result = (|| -> PyResult<()> {
-            for _ in 0..sample_count {
+            for sample_index in 0..sample_count {
                 let jitter = state.jitter_sequence.next();
+                let batch_scope_draws = if sample_index == 0 {
+                    Some(sample_count)
+                } else {
+                    None
+                };
                 self.scene
-                    .render_offline_sample(&mut state, jitter)
+                    .render_offline_sample(&mut state, jitter, &mut timing, batch_scope_draws)
                     .map_err(|e| {
                         PyRuntimeError::new_err(format!("Offline sample render failed: {e:#}"))
                     })?;
@@ -1523,7 +1590,50 @@ impl TerrainRenderer {
             .lock()
             .map_err(|_| PyRuntimeError::new_err("offline_state mutex poisoned"))?;
         *guard = Some(state);
-        work_result?;
+        if let Err(err) = work_result {
+            // Drop the manager rather than storing it: the batch scope may
+            // hold unresolved/undrained queries that would otherwise leak
+            // into the NEXT render's certificate. take_render_timing lazily
+            // rebuilds one.
+            drop(timing);
+            return Err(err);
+        }
+        // Record the batch pass: live timestamps when they read back, else the
+        // honest 0.0 record with the same label so certificate pass lists stay
+        // identical across adapters.
+        let mut recorded_live = false;
+        let mut drained = true;
+        if let Some(manager) = timing.as_mut() {
+            match manager.get_results_blocking() {
+                Ok(results) => {
+                    for result in &results {
+                        // Invalid timestamps are recorded as 0.0, never as a
+                        // garbage delta (CENSOR audit F-04).
+                        crate::core::certificate::record_pass(
+                            &result.name,
+                            result.certificate_gpu_ms(),
+                            result.draw_calls,
+                        );
+                        recorded_live = true;
+                    }
+                }
+                Err(e) => {
+                    drained = false;
+                    log::warn!("GPU timing readback failed: {e}");
+                }
+            }
+        }
+        if !recorded_live {
+            crate::core::certificate::record_pass(
+                "terrain.offline.accumulate_batch",
+                0.0,
+                sample_count,
+            );
+        }
+        if drained {
+            self.scene.store_render_timing(timing);
+        }
+        self.scene.finish_certificate_capture(certificate_capture);
         Py::new(
             py,
             crate::OfflineBatchResult::new(total_samples, start.elapsed().as_secs_f64() * 1000.0),
@@ -1565,12 +1675,14 @@ impl TerrainRenderer {
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("terrain.offline.metrics.encoder"),
                     });
-            self.scene.dispatch_offline_luminance_pass(
-                &mut encoder,
-                &state.beauty_accumulation,
-                &state.luminance_view,
-                state.total_samples,
-            );
+            self.scene
+                .dispatch_offline_luminance_pass(
+                    &mut encoder,
+                    &state.beauty_accumulation,
+                    &state.luminance_view,
+                    state.total_samples,
+                )
+                .map_err(|e| PyRuntimeError::new_err(format!("Luminance pass failed: {e:#}")))?;
             self.scene.queue.submit(Some(encoder.finish()));
 
             let luminance = py
@@ -1699,23 +1811,28 @@ impl TerrainRenderer {
                     label: Some("terrain.offline.resolve.encoder"),
                 });
 
-        let (beauty_internal, beauty_internal_view) = self.scene.create_offline_output_texture(
-            "terrain.offline.beauty.internal",
-            internal_width,
-            internal_height,
-            OFFLINE_HDR_FORMAT,
-            wgpu::TextureUsages::STORAGE_BINDING
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::COPY_DST,
-        );
-        self.scene.dispatch_offline_resolve_pass(
-            &mut encoder,
-            &state.beauty_accumulation,
-            &beauty_internal_view,
-            state.total_samples,
-            false,
-        );
+        let (beauty_internal, beauty_internal_view) = self
+            .scene
+            .create_offline_output_texture(
+                "terrain.offline.beauty.internal",
+                internal_width,
+                internal_height,
+                OFFLINE_HDR_FORMAT,
+                wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST,
+            )
+            .map_err(|e| PyRuntimeError::new_err(format!("Beauty target alloc failed: {e:#}")))?;
+        self.scene
+            .dispatch_offline_resolve_pass(
+                &mut encoder,
+                &state.beauty_accumulation,
+                &beauty_internal_view,
+                state.total_samples,
+                false,
+            )
+            .map_err(|e| PyRuntimeError::new_err(format!("Beauty resolve pass failed: {e:#}")))?;
         let beauty_texture = self
             .scene
             .resolve_aux_output(
@@ -1731,23 +1848,28 @@ impl TerrainRenderer {
             )
             .map_err(|e| PyRuntimeError::new_err(format!("Beauty resolve failed: {e:#}")))?;
 
-        let (albedo_internal, albedo_internal_view) = self.scene.create_offline_output_texture(
-            "terrain.offline.albedo.internal",
-            internal_width,
-            internal_height,
-            OFFLINE_HDR_FORMAT,
-            wgpu::TextureUsages::STORAGE_BINDING
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::COPY_DST,
-        );
-        self.scene.dispatch_offline_resolve_pass(
-            &mut encoder,
-            &state.albedo_accumulation,
-            &albedo_internal_view,
-            state.total_samples,
-            false,
-        );
+        let (albedo_internal, albedo_internal_view) = self
+            .scene
+            .create_offline_output_texture(
+                "terrain.offline.albedo.internal",
+                internal_width,
+                internal_height,
+                OFFLINE_HDR_FORMAT,
+                wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST,
+            )
+            .map_err(|e| PyRuntimeError::new_err(format!("Albedo target alloc failed: {e:#}")))?;
+        self.scene
+            .dispatch_offline_resolve_pass(
+                &mut encoder,
+                &state.albedo_accumulation,
+                &albedo_internal_view,
+                state.total_samples,
+                false,
+            )
+            .map_err(|e| PyRuntimeError::new_err(format!("Albedo resolve pass failed: {e:#}")))?;
         let albedo_texture = self
             .scene
             .resolve_aux_output(
@@ -1763,23 +1885,28 @@ impl TerrainRenderer {
             )
             .map_err(|e| PyRuntimeError::new_err(format!("Albedo resolve failed: {e:#}")))?;
 
-        let (normal_internal, normal_internal_view) = self.scene.create_offline_output_texture(
-            "terrain.offline.normal.internal",
-            internal_width,
-            internal_height,
-            OFFLINE_HDR_FORMAT,
-            wgpu::TextureUsages::STORAGE_BINDING
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::COPY_DST,
-        );
-        self.scene.dispatch_offline_resolve_pass(
-            &mut encoder,
-            &state.normal_accumulation,
-            &normal_internal_view,
-            state.total_samples,
-            true,
-        );
+        let (normal_internal, normal_internal_view) = self
+            .scene
+            .create_offline_output_texture(
+                "terrain.offline.normal.internal",
+                internal_width,
+                internal_height,
+                OFFLINE_HDR_FORMAT,
+                wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST,
+            )
+            .map_err(|e| PyRuntimeError::new_err(format!("Normal target alloc failed: {e:#}")))?;
+        self.scene
+            .dispatch_offline_resolve_pass(
+                &mut encoder,
+                &state.normal_accumulation,
+                &normal_internal_view,
+                state.total_samples,
+                true,
+            )
+            .map_err(|e| PyRuntimeError::new_err(format!("Normal resolve pass failed: {e:#}")))?;
         let normal_texture = self
             .scene
             .resolve_aux_output(
@@ -1795,22 +1922,27 @@ impl TerrainRenderer {
             )
             .map_err(|e| PyRuntimeError::new_err(format!("Normal resolve failed: {e:#}")))?;
 
-        let (depth_internal, depth_internal_view) = self.scene.create_offline_output_texture(
-            "terrain.offline.depth.internal",
-            internal_width,
-            internal_height,
-            OFFLINE_HDR_FORMAT,
-            wgpu::TextureUsages::STORAGE_BINDING
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
-        );
-        self.scene.dispatch_offline_depth_expand_pass(
-            &mut encoder,
-            &state.depth_reference_view,
-            &depth_internal_view,
-            internal_width,
-            internal_height,
-        );
+        let (depth_internal, depth_internal_view) = self
+            .scene
+            .create_offline_output_texture(
+                "terrain.offline.depth.internal",
+                internal_width,
+                internal_height,
+                OFFLINE_HDR_FORMAT,
+                wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC,
+            )
+            .map_err(|e| PyRuntimeError::new_err(format!("Depth target alloc failed: {e:#}")))?;
+        self.scene
+            .dispatch_offline_depth_expand_pass(
+                &mut encoder,
+                &state.depth_reference_view,
+                &depth_internal_view,
+                internal_width,
+                internal_height,
+            )
+            .map_err(|e| PyRuntimeError::new_err(format!("Depth expand pass failed: {e:#}")))?;
         let depth_texture = self
             .scene
             .resolve_aux_output(
@@ -1882,9 +2014,10 @@ impl TerrainRenderer {
             }
         }
 
-        let texture =
-            self.scene
-                .upload_rgba16_texture(width, height, &rgba, "terrain.offline.hdr_upload");
+        let texture = self
+            .scene
+            .upload_rgba16_texture(width, height, &rgba, "terrain.offline.hdr_upload")
+            .map_err(|e| PyRuntimeError::new_err(format!("HDR upload failed: {e:#}")))?;
         Py::new(
             py,
             crate::HdrFrame::new(
@@ -1921,13 +2054,16 @@ impl TerrainRenderer {
             }
         };
 
-        let (texture, output_view) = self.scene.create_offline_output_texture(
-            "terrain.offline.tonemapped",
-            width,
-            height,
-            OFFLINE_LDR_FORMAT,
-            wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
-        );
+        let (texture, output_view) = self
+            .scene
+            .create_offline_output_texture(
+                "terrain.offline.tonemapped",
+                width,
+                height,
+                OFFLINE_LDR_FORMAT,
+                wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            )
+            .map_err(|e| PyRuntimeError::new_err(format!("Tonemap target alloc failed: {e:#}")))?;
         let hdr_view = hdr_frame
             .texture()
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -1937,16 +2073,18 @@ impl TerrainRenderer {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("terrain.offline.tonemap.encoder"),
                 });
-        self.scene.dispatch_offline_tonemap_pass(
-            &mut encoder,
-            &hdr_view,
-            &output_view,
-            width,
-            height,
-            operator_index,
-            white_point,
-            gamma,
-        );
+        self.scene
+            .dispatch_offline_tonemap_pass(
+                &mut encoder,
+                &hdr_view,
+                &output_view,
+                width,
+                height,
+                operator_index,
+                white_point,
+                gamma,
+            )
+            .map_err(|e| PyRuntimeError::new_err(format!("Tonemap pass failed: {e:#}")))?;
         self.scene.queue.submit(Some(encoder.finish()));
         let frame = crate::Frame::new(
             self.scene.device.clone(),

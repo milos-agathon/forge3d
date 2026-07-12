@@ -1,5 +1,6 @@
 impl Scene {
     pub(super) fn rebuild_msaa_state(&mut self) -> Result<(), String> {
+        let _allocation_scope = self.allocation_owner.activate();
         let g = crate::core::gpu::try_ctx().map_err(|e| e.to_string())?;
         let depth_format = if self.sample_count > 1 {
             Some(wgpu::TextureFormat::Depth32Float)
@@ -7,14 +8,19 @@ impl Scene {
             None
         };
 
-        let (color, color_view) = create_color_texture(&g.device, self.width, self.height);
-        let (normal, normal_view) = create_normal_texture(&g.device, self.width, self.height);
+        let (color, color_view) =
+            create_color_texture(&g.device, self.width, self.height).map_err(|e| e.to_string())?;
+        let (normal, normal_view) =
+            create_normal_texture(&g.device, self.width, self.height).map_err(|e| e.to_string())?;
         let (msaa_color, msaa_view) =
-            create_msaa_targets(&g.device, self.width, self.height, self.sample_count);
+            create_msaa_targets(&g.device, self.width, self.height, self.sample_count)
+                .map_err(|e| e.to_string())?;
         let (msaa_normal, msaa_normal_view) =
-            create_msaa_normal_targets(&g.device, self.width, self.height, self.sample_count);
+            create_msaa_normal_targets(&g.device, self.width, self.height, self.sample_count)
+                .map_err(|e| e.to_string())?;
         let (depth, depth_view) =
-            create_depth_target(&g.device, self.width, self.height, self.sample_count);
+            create_depth_target(&g.device, self.width, self.height, self.sample_count)
+                .map_err(|e| e.to_string())?;
 
         self.depth = depth;
         self.depth_view = depth_view;
@@ -76,12 +82,15 @@ impl Scene {
 
         // Recreate native overlay bind group with current overlay/height views
         if let Some(ref mut ov) = self.overlay_renderer {
-            ov.recreate_bind_group(&g.device, None, self.height_view.as_ref(), None, None);
+            ov.recreate_bind_group(&g.device, None, self.height_view.as_ref(), None, None)
+                .map_err(|e| e.to_string())?;
             ov.upload_uniforms(&g.queue);
         }
 
         if let Some(ref mut renderer) = self.dof_renderer {
-            renderer.resize(&g.device, self.width, self.height);
+            renderer
+                .resize(&g.device, self.width, self.height)
+                .map_err(|e| e.to_string())?;
             if let Some(ref depth_view) = self.depth_view {
                 let color_storage_view = self.color.create_view(&wgpu::TextureViewDescriptor {
                     label: Some("scene-color-storage"),
@@ -104,7 +113,8 @@ impl Scene {
 
         // D11: Recreate 3D text renderer to match current depth format
         let mut text3d =
-            crate::core::text_mesh::TextMeshRenderer::new(&g.device, TEXTURE_FORMAT, depth_format);
+            crate::core::text_mesh::TextMeshRenderer::new(&g.device, TEXTURE_FORMAT, depth_format)
+                .map_err(|e| e.to_string())?;
         text3d.set_view_proj(self.scene.view, self.scene.proj);
         text3d.upload_uniforms(&g.queue);
         self.text3d_renderer = Some(text3d);

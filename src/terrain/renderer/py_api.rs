@@ -65,7 +65,7 @@ impl TerrainRenderer {
         self.scene.light_debug_info()
     }
 
-    #[pyo3(signature = (material_set, env_maps, params, heightmap, target=None, water_mask=None, time_seconds=0.0))]
+    #[pyo3(signature = (material_set, env_maps, params, heightmap, target=None, water_mask=None, time_seconds=0.0, certificate=None))]
     pub fn render_terrain_pbr_pom<'py>(
         &mut self,
         py: Python<'py>,
@@ -76,6 +76,7 @@ impl TerrainRenderer {
         target: Option<&Bound<'_, PyAny>>,
         water_mask: Option<PyReadonlyArray2<'py, f32>>,
         time_seconds: f32,
+        certificate: Option<Bound<'py, PyAny>>,
     ) -> PyResult<Py<crate::Frame>> {
         if self
             .scene
@@ -105,10 +106,12 @@ impl TerrainRenderer {
             )
             .map_err(|e| PyRuntimeError::new_err(format!("Rendering failed: {:#}", e)))?;
 
+        crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
+
         Py::new(py, frame)
     }
 
-    #[pyo3(signature = (material_set, env_maps, params, heightmap, water_mask=None, time_seconds=0.0))]
+    #[pyo3(signature = (material_set, env_maps, params, heightmap, water_mask=None, time_seconds=0.0, certificate=None))]
     pub fn render_with_aov<'py>(
         &mut self,
         py: Python<'py>,
@@ -118,6 +121,7 @@ impl TerrainRenderer {
         heightmap: PyReadonlyArray2<'py, f32>,
         water_mask: Option<PyReadonlyArray2<'py, f32>>,
         time_seconds: f32,
+        certificate: Option<Bound<'py, PyAny>>,
     ) -> PyResult<(Py<crate::Frame>, Py<crate::AovFrame>)> {
         if self
             .scene
@@ -141,6 +145,7 @@ impl TerrainRenderer {
             )
             .map_err(|e| PyRuntimeError::new_err(format!("Rendering with AOV failed: {:#}", e)))?;
 
+        crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
         Ok((Py::new(py, frame)?, Py::new(py, aov_frame)?))
     }
 

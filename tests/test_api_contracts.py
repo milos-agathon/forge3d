@@ -245,8 +245,18 @@ class TestNativeModuleSymbols:
         "clear_native_degradations",
         # CENSOR: negotiated GPU capability report
         "capabilities",
+        # CENSOR: last-render execution certificate JSON
+        "render_execution_report",
+        "begin_render_execution_capture",
+        "finish_render_execution_capture",
+        "abort_render_execution_capture",
+        # CENSOR: Ed25519 certificate signing through the Rust implementation
+        "sign_render_certificate_digest",
         # CENSOR: budget-enforce test helper
         "request_host_visible_allocation_for_test",
+        # CENSOR: certified BRDF pixel renders
+        "render_brdf_tile",
+        "render_brdf_tile_overrides",
     ]
 
     LATER_GIS_FUNCTIONS = []
@@ -742,6 +752,14 @@ class TestPackageLevelApiContracts:
         # CARTOGRAPHER-PRIME: bounded-optimal label solve + rationale
         "declutter_optimal",
         "LabelRationale",
+        # CENSOR: native Ed25519 certificate signer
+        "sign_render_certificate_digest",
+        "begin_render_execution_capture",
+        "finish_render_execution_capture",
+        "abort_render_execution_capture",
+        # CENSOR: certified BRDF pixel renders
+        "render_brdf_tile",
+        "render_brdf_tile_overrides",
     ]
 
     @pytest.mark.parametrize("attr_name", EXPECTED_PACKAGE_ATTRS)

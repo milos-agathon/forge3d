@@ -11,10 +11,10 @@
 // RELEVANT FILES: src/offscreen/forward.rs, src/shaders/adjudication_raster.wgsl
 
 use crate::core::error::RenderError;
+use crate::core::resource_tracker::{tracked_create_buffer_init, TrackedBuffer};
 use crate::path_tracing::reference_scene::ReferenceSceneDesc;
 use bytemuck::{Pod, Zeroable};
-use wgpu::util::DeviceExt;
-use wgpu::{Buffer, Device, Queue};
+use wgpu::{Device, Queue};
 
 /// Supersampling factor (subsamples are tent-weighted on downsample to match
 /// the PT reference's +/-0.5px tent reconstruction filter).
@@ -103,22 +103,35 @@ fn base_uniforms(desc: &ReferenceSceneDesc, rw: u32, rh: u32, aspect: f32) -> Ad
     }
 }
 
-fn uniform_buffer(device: &Device, label: &str, u: &AdjUniforms) -> Buffer {
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some(label),
-        contents: bytemuck::bytes_of(u),
-        usage: wgpu::BufferUsages::UNIFORM,
-    })
+fn uniform_buffer(
+    device: &Device,
+    label: &str,
+    u: &AdjUniforms,
+) -> Result<TrackedBuffer, RenderError> {
+    tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents: bytemuck::bytes_of(u),
+            usage: wgpu::BufferUsages::UNIFORM,
+        },
+    )
 }
 
 /// Render the linear-HDR raster reference at (width, height).
 /// Returns RGBA f32, row-major, `width * height * 4` values, alpha = 1.
+///
+/// `timing` (CENSOR F-04): when supplied, the forward raster pass is timed
+/// under the "adjudication.raster" certificate label inside the shared
+/// `offscreen::forward` harness. Must live on the same wgpu device as
+/// `device`; pass `None` when driving a standalone device.
 pub fn render_raster_reference(
     device: &Device,
     queue: &Queue,
     desc: &ReferenceSceneDesc,
     width: u32,
     height: u32,
+    timing: Option<&mut crate::core::gpu_timing::OneShotTiming>,
 ) -> Result<Vec<f32>, RenderError> {
     if width == 0 || height == 0 {
         return Err(RenderError::Render(
@@ -130,12 +143,11 @@ pub fn render_raster_reference(
     let aspect = width as f32 / height as f32;
 
     // --- Shader + pipelines ---
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("adjudication-raster-shader"),
-        source: wgpu::ShaderSource::Wgsl(
-            include_str!("../shaders/adjudication_raster.wgsl").into(),
-        ),
-    });
+    let shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "adjudication-raster-shader",
+        include_str!("../shaders/adjudication_raster.wgsl"),
+    );
     let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("adjudication-raster-bgl"),
         entries: &[
@@ -173,102 +185,123 @@ pub fn render_raster_reference(
         blend: None,
         write_mask: wgpu::ColorWrites::ALL,
     })];
-    let sky_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("adjudication-sky-pipeline"),
-        layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: "vs_sky",
-            buffers: &[],
+    let sky_pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+        device,
+        &wgpu::RenderPipelineDescriptor {
+            label: Some("adjudication-sky-pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_sky",
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: depth_format,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_sky",
+                targets: &color_target,
+            }),
+            multiview: None,
         },
-        primitive: wgpu::PrimitiveState::default(),
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: depth_format,
-            depth_write_enabled: false,
-            depth_compare: wgpu::CompareFunction::Always,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }),
-        multisample: wgpu::MultisampleState::default(),
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: "fs_sky",
-            targets: &color_target,
-        }),
-        multiview: None,
-    });
-    let mesh_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("adjudication-mesh-pipeline"),
-        layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: "vs_mesh",
-            buffers: &[wgpu::VertexBufferLayout {
-                array_stride: 12,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &[wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x3,
-                    offset: 0,
-                    shader_location: 0,
+    );
+    let mesh_pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+        device,
+        &wgpu::RenderPipelineDescriptor {
+            label: Some("adjudication-mesh-pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_mesh",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: 12,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[wgpu::VertexAttribute {
+                        format: wgpu::VertexFormat::Float32x3,
+                        offset: 0,
+                        shader_location: 0,
+                    }],
                 }],
-            }],
+            },
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: depth_format,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_mesh",
+                targets: &color_target,
+            }),
+            multiview: None,
         },
-        primitive: wgpu::PrimitiveState {
-            cull_mode: None,
-            ..Default::default()
-        },
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: depth_format,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::LessEqual,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }),
-        multisample: wgpu::MultisampleState::default(),
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: "fs_mesh",
-            targets: &color_target,
-        }),
-        multiview: None,
-    });
+    );
 
     // --- Geometry: shared unit sphere + plane quad ---
     let (sphere_verts, sphere_indices) = crate::offscreen::sphere::generate_uv_sphere(192, 96, 1.0);
     let sphere_positions: Vec<[f32; 3]> = sphere_verts.iter().map(|v| v.position).collect();
-    let sphere_vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("adjudication-sphere-vb"),
-        contents: bytemuck::cast_slice(&sphere_positions),
-        usage: wgpu::BufferUsages::VERTEX,
-    });
-    let sphere_ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("adjudication-sphere-ib"),
-        contents: bytemuck::cast_slice(&sphere_indices),
-        usage: wgpu::BufferUsages::INDEX,
-    });
+    let sphere_vb = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("adjudication-sphere-vb"),
+            contents: bytemuck::cast_slice(&sphere_positions),
+            usage: wgpu::BufferUsages::VERTEX,
+        },
+    )?;
+    let sphere_ib = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("adjudication-sphere-ib"),
+            contents: bytemuck::cast_slice(&sphere_indices),
+            usage: wgpu::BufferUsages::INDEX,
+        },
+    )?;
     let plane = desc.plane_mesh();
-    let plane_vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("adjudication-plane-vb"),
-        contents: bytemuck::cast_slice(&plane.vertices),
-        usage: wgpu::BufferUsages::VERTEX,
-    });
+    let plane_vb = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("adjudication-plane-vb"),
+            contents: bytemuck::cast_slice(&plane.vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        },
+    )?;
     let plane_indices: Vec<u32> = plane.indices.iter().flatten().copied().collect();
-    let plane_ib = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("adjudication-plane-ib"),
-        contents: bytemuck::cast_slice(&plane_indices),
-        usage: wgpu::BufferUsages::INDEX,
-    });
+    let plane_ib = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("adjudication-plane-ib"),
+            contents: bytemuck::cast_slice(&plane_indices),
+            usage: wgpu::BufferUsages::INDEX,
+        },
+    )?;
 
     // --- View-projection (same pixel->ray mapping as pt_raygen's NDC math) ---
     let (origin, forward, _right, up) = desc.camera_basis();
     let view = glam::Mat4::look_at_rh(origin, origin + forward, up);
     let proj = glam::Mat4::perspective_rh(desc.fov_y_rad(), aspect, 0.05, 400.0);
     let vp = proj * view;
-    let vp_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("adjudication-vp"),
-        contents: bytemuck::cast_slice(&vp.to_cols_array()),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    let vp_buffer = tracked_create_buffer_init(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("adjudication-vp"),
+            contents: bytemuck::cast_slice(&vp.to_cols_array()),
+            usage: wgpu::BufferUsages::UNIFORM,
+        },
+    )?;
 
     // --- Per-draw uniforms: plane (also used by sky) + one per sphere ---
     let base = base_uniforms(desc, rw, rh, aspect);
@@ -282,9 +315,9 @@ pub fn render_raster_reference(
     let bind_groups: Vec<wgpu::BindGroup> = draw_uniforms
         .iter()
         .enumerate()
-        .map(|(i, u)| {
-            let ub = uniform_buffer(device, &format!("adjudication-uniforms-{i}"), u);
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
+        .map(|(i, u)| -> Result<wgpu::BindGroup, RenderError> {
+            let ub = uniform_buffer(device, &format!("adjudication-uniforms-{i}"), u)?;
+            Ok(device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("adjudication-raster-bg"),
                 layout: &bind_layout,
                 entries: &[
@@ -297,14 +330,15 @@ pub fn render_raster_reference(
                         resource: vp_buffer.as_entire_binding(),
                     },
                 ],
-            })
+            }))
         })
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
 
     // --- Targets + pass encoding + HDR readback: routed through the shared
     // offscreen forward-raster path (see ADJUDICATION_RASTER_ROUTING_STATUS).
     // Draw order matters: sky (depth Always), then plane, then spheres. ---
     let targets = crate::offscreen::forward::ForwardTargets::new(device, rw, rh, color_format)?;
+    crate::core::shader_registry::record_shader_use("adjudication-raster-shader");
     let mut draws = vec![
         crate::offscreen::forward::ForwardDraw {
             pipeline: &sky_pipeline,
@@ -317,8 +351,8 @@ pub fn render_raster_reference(
         crate::offscreen::forward::ForwardDraw {
             pipeline: &mesh_pipeline,
             bind_group: Some(&bind_groups[0]),
-            vertex_buffer: Some(&plane_vb),
-            index_buffer: Some(&plane_ib),
+            vertex_buffer: Some(plane_vb.inner()),
+            index_buffer: Some(plane_ib.inner()),
             index_count: plane_indices.len() as u32,
             vertices: 0..0,
         },
@@ -327,8 +361,8 @@ pub fn render_raster_reference(
         draws.push(crate::offscreen::forward::ForwardDraw {
             pipeline: &mesh_pipeline,
             bind_group: Some(bind_group),
-            vertex_buffer: Some(&sphere_vb),
-            index_buffer: Some(&sphere_ib),
+            vertex_buffer: Some(sphere_vb.inner()),
+            index_buffer: Some(sphere_ib.inner()),
             index_count: sphere_indices.len() as u32,
             vertices: 0..0,
         });
@@ -339,6 +373,7 @@ pub fn render_raster_reference(
         &targets,
         wgpu::Color::BLACK,
         &draws,
+        timing.map(|t| (t, "adjudication.raster")),
     )?;
 
     // --- Tent-weighted downsample SSAA x SSAA -> (width, height) ---
@@ -412,10 +447,12 @@ mod tests {
             );
         }
         // The forward harness itself must keep using the established core
-        // readback + memory-tracker accounting.
+        // readback path and route its own allocations through the tracked
+        // wrappers (CENSOR: read_hdr_texture's wrapper accounts the staging
+        // buffer, so forward.rs no longer duplicates that accounting manually).
         let harness = include_str!("forward.rs");
         assert!(harness.contains("read_hdr_texture"));
-        assert!(harness.contains("global_tracker()"));
+        assert!(harness.contains("tracked_create_texture"));
         // The shared tonemap is applied to BOTH paths by the capture API.
         let capture = include_str!("../py_functions/adjudication.rs");
         assert!(

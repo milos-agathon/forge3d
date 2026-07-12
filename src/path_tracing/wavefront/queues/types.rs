@@ -1,5 +1,6 @@
-use crate::core::memory_tracker::global_tracker;
-use wgpu::{Buffer, BufferUsages, CommandEncoder, Device, Queue};
+use crate::core::error::RenderError;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
+use wgpu::{BufferUsages, CommandEncoder, Device, Queue};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -89,27 +90,27 @@ pub struct ShadowRay {
 
 pub struct QueueBuffers {
     pub capacity: u32,
-    pub ray_queue_header: Buffer,
-    pub hit_queue_header: Buffer,
-    pub scatter_queue_header: Buffer,
-    pub miss_queue_header: Buffer,
-    pub ray_queue: Buffer,
-    pub hit_queue: Buffer,
-    pub scatter_queue: Buffer,
-    pub miss_queue: Buffer,
-    pub shadow_queue_header: Buffer,
-    pub shadow_queue: Buffer,
+    pub ray_queue_header: TrackedBuffer,
+    pub hit_queue_header: TrackedBuffer,
+    pub scatter_queue_header: TrackedBuffer,
+    pub miss_queue_header: TrackedBuffer,
+    pub ray_queue: TrackedBuffer,
+    pub hit_queue: TrackedBuffer,
+    pub scatter_queue: TrackedBuffer,
+    pub miss_queue: TrackedBuffer,
+    pub shadow_queue_header: TrackedBuffer,
+    pub shadow_queue: TrackedBuffer,
 }
 
 impl QueueBuffers {
     pub fn new(device: &Device, capacity: u32) -> Result<Self, Box<dyn std::error::Error>> {
         let header_size = std::mem::size_of::<QueueHeader>() as u64;
-        let ray_queue_header = create_header_buffer(device, "ray-queue-header", header_size);
-        let hit_queue_header = create_header_buffer(device, "hit-queue-header", header_size);
+        let ray_queue_header = create_header_buffer(device, "ray-queue-header", header_size)?;
+        let hit_queue_header = create_header_buffer(device, "hit-queue-header", header_size)?;
         let scatter_queue_header =
-            create_header_buffer(device, "scatter-queue-header", header_size);
-        let miss_queue_header = create_header_buffer(device, "miss-queue-header", header_size);
-        let shadow_queue_header = create_header_buffer(device, "shadow-queue-header", header_size);
+            create_header_buffer(device, "scatter-queue-header", header_size)?;
+        let miss_queue_header = create_header_buffer(device, "miss-queue-header", header_size)?;
+        let shadow_queue_header = create_header_buffer(device, "shadow-queue-header", header_size)?;
 
         let ray_size = (std::mem::size_of::<Ray>() * capacity as usize) as u64;
         let hit_size = (std::mem::size_of::<Hit>() * capacity as usize) as u64;
@@ -122,12 +123,12 @@ impl QueueBuffers {
             hit_queue_header,
             scatter_queue_header,
             miss_queue_header,
-            ray_queue: create_data_buffer(device, "ray-queue", ray_size),
-            hit_queue: create_data_buffer(device, "hit-queue", hit_size),
-            scatter_queue: create_data_buffer(device, "scatter-queue", scatter_size),
-            miss_queue: create_data_buffer(device, "miss-queue", ray_size),
+            ray_queue: create_data_buffer(device, "ray-queue", ray_size)?,
+            hit_queue: create_data_buffer(device, "hit-queue", hit_size)?,
+            scatter_queue: create_data_buffer(device, "scatter-queue", scatter_size)?,
+            miss_queue: create_data_buffer(device, "miss-queue", ray_size)?,
             shadow_queue_header,
-            shadow_queue: create_data_buffer(device, "shadow-queue", shadow_size),
+            shadow_queue: create_data_buffer(device, "shadow-queue", shadow_size)?,
         })
     }
 
@@ -169,13 +170,17 @@ impl QueueBuffers {
         encoder: &mut CommandEncoder,
     ) -> Result<QueueHeader, Box<dyn std::error::Error>> {
         let header_size = std::mem::size_of::<QueueHeader>() as u64;
-        let staging = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("ray-queue-header-readback"),
-            size: header_size,
-            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        global_tracker().track_buffer_allocation(header_size, true);
+        // `tracked_create_buffer` records this host-visible readback allocation
+        // in the global ledger and releases it when `staging` drops below.
+        let staging = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("ray-queue-header-readback"),
+                size: header_size,
+                usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        )?;
 
         encoder.copy_buffer_to_buffer(&self.ray_queue_header, 0, &staging, 0, header_size);
         let next_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -201,7 +206,6 @@ impl QueueBuffers {
             Ok(header)
         })();
 
-        global_tracker().free_buffer_allocation(header_size, true);
         read_result
     }
 
@@ -241,22 +245,36 @@ impl QueueBuffers {
     }
 }
 
-fn create_header_buffer(device: &Device, label: &str, size: u64) -> Buffer {
-    device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some(label),
-        size,
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    })
+fn create_header_buffer(
+    device: &Device,
+    label: &str,
+    size: u64,
+) -> Result<TrackedBuffer, RenderError> {
+    tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some(label),
+            size,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        },
+    )
 }
 
-fn create_data_buffer(device: &Device, label: &str, size: u64) -> Buffer {
-    device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some(label),
-        size,
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    })
+fn create_data_buffer(
+    device: &Device,
+    label: &str,
+    size: u64,
+) -> Result<TrackedBuffer, RenderError> {
+    tracked_create_buffer(
+        device,
+        &wgpu::BufferDescriptor {
+            label: Some(label),
+            size,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    )
 }
 
 #[cfg(test)]

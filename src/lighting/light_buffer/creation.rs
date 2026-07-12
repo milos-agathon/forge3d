@@ -1,11 +1,13 @@
 use super::r2::r2_sample;
 use super::types::{LightBuffer, MAX_LIGHTS};
+use crate::core::error::RenderResult;
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use crate::lighting::types::Light;
-use wgpu::{Buffer, BufferUsages, Device};
+use wgpu::{BufferUsages, Device};
 
 impl LightBuffer {
     /// Create a new light buffer manager
-    pub fn new(device: &Device) -> Self {
+    pub fn new(device: &Device) -> RenderResult<Self> {
         // Create bind group layout
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Light Buffer Bind Group Layout"),
@@ -47,24 +49,27 @@ impl LightBuffer {
 
         // Create triple-buffered storage buffers
         let buffers = [
-            Self::create_light_buffer(device, 0),
-            Self::create_light_buffer(device, 1),
-            Self::create_light_buffer(device, 2),
+            Self::create_light_buffer(device, 0)?,
+            Self::create_light_buffer(device, 1)?,
+            Self::create_light_buffer(device, 2)?,
         ];
 
         // Create triple-buffered count buffers
         let count_buffers = [
-            Self::create_count_buffer(device, 0),
-            Self::create_count_buffer(device, 1),
-            Self::create_count_buffer(device, 2),
+            Self::create_count_buffer(device, 0)?,
+            Self::create_count_buffer(device, 1)?,
+            Self::create_count_buffer(device, 2)?,
         ];
         // P1-05: Environment params use zeros until full IBL data is wired.
-        let environment_stub = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Light Environment Stub Buffer"),
-            size: 16, // vec4<f32>
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let environment_stub = tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some("Light Environment Stub Buffer"),
+                size: 16, // vec4<f32>
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         // Initialize count buffer with zero lights for default bind group
         let seed = r2_sample(0);
@@ -96,7 +101,7 @@ impl LightBuffer {
             ],
         });
 
-        Self {
+        Ok(Self {
             buffers,
             count_buffers,
             environment_stub,
@@ -107,26 +112,32 @@ impl LightBuffer {
             bind_group: Some(default_bind_group),
             bind_group_layout,
             last_uploaded_lights: Vec::new(),
-        }
+        })
     }
 
     /// Create a single light storage buffer
-    fn create_light_buffer(device: &Device, index: usize) -> Buffer {
-        device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(&format!("Light Storage Buffer {}", index)),
-            size: (MAX_LIGHTS * std::mem::size_of::<Light>()) as u64,
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        })
+    fn create_light_buffer(device: &Device, index: usize) -> RenderResult<TrackedBuffer> {
+        tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some(&format!("Light Storage Buffer {}", index)),
+                size: (MAX_LIGHTS * std::mem::size_of::<Light>()) as u64,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )
     }
 
     /// Create a single count uniform buffer
-    fn create_count_buffer(device: &Device, index: usize) -> Buffer {
-        device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(&format!("Light Count Buffer {}", index)),
-            size: 16, // Single u32 with padding to 16 bytes (uniform buffer alignment)
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        })
+    fn create_count_buffer(device: &Device, index: usize) -> RenderResult<TrackedBuffer> {
+        tracked_create_buffer(
+            device,
+            &wgpu::BufferDescriptor {
+                label: Some(&format!("Light Count Buffer {}", index)),
+                size: 16, // Single u32 with padding to 16 bytes (uniform buffer alignment)
+                usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )
     }
 }

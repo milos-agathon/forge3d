@@ -8,3 +8,4 @@ include!("render_paths/png.rs");
 include!("render_paths/rgba.rs");
 include!("render_paths/shared.rs");
 include!("render_paths/helpers.rs");
+include!("render_paths/timing.rs");

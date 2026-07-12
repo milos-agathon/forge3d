@@ -78,6 +78,6 @@ def test_pro_gated_textured_import_remains_explicitly_pro_gated(tmp_path):
     codes = [diagnostic.code for diagnostic in report.diagnostics]
 
     assert "pro_gated_path" in codes
-    assert "unsupported_feature" in codes
+    assert "unsupported_feature" not in codes
     assert report.unsupported_features["buildings.pro_gated_path"] == "Pro-gated"
-    assert report.unsupported_features["buildings.textured_pbr"] == "unsupported"
+    assert report.supported_features["buildings.textured_pbr"] == "supported"
