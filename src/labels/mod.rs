@@ -26,6 +26,7 @@ pub mod py_bindings;
 pub mod rtree;
 mod types;
 pub mod typography;
+pub mod unicode;
 
 pub use atlas::{GlyphMetrics, MsdfAtlas};
 pub use callout::{Callout, CalloutStyle, PointerDirection};
