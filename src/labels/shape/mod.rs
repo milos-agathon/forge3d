@@ -1,3 +1,6 @@
+pub mod arabic;
+pub mod devanagari;
+pub mod gsub;
 pub mod layout;
 pub mod ot;
 mod types;
