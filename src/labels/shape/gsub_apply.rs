@@ -40,6 +40,7 @@ pub(super) fn apply_subtable(
                 .sequences
                 .get(index)
                 .ok_or(TextError::MalformedOpenType("GSUB multiple"))?;
+            let mut next_origin = buffer.iter().map(|glyph| glyph.origin).max().unwrap_or(0) + 1;
             let replacements: Vec<_> = (0..sequence.substitutes.len())
                 .map(|index| {
                     sequence
@@ -48,6 +49,13 @@ pub(super) fn apply_subtable(
                         .map(|id| {
                             let mut replacement = Glyph::new(id, glyph.cluster);
                             replacement.features.clone_from(&glyph.features);
+                            replacement.origin = if index == 0 {
+                                glyph.origin
+                            } else {
+                                let origin = next_origin;
+                                next_origin += 1;
+                                origin
+                            };
                             replacement
                         })
                         .ok_or(TextError::MalformedOpenType("GSUB multiple"))
@@ -102,6 +110,7 @@ pub(super) fn apply_subtable(
                         .unwrap_or(glyph.cluster);
                     let mut replacement = Glyph::new(candidate.glyph, cluster);
                     replacement.features.clone_from(&glyph.features);
+                    replacement.origin = glyph.origin;
                     buffer[position] = replacement;
                     for &index in positions[1..].iter().rev() {
                         buffer.remove(index);

@@ -9,6 +9,10 @@ fn is_consonant(ch: char) -> bool {
     matches!(ch, '\u{0915}'..='\u{0939}' | '\u{0958}'..='\u{095F}' | '\u{0978}'..='\u{097F}')
 }
 
+fn is_postbase_matra(ch: char) -> bool {
+    matches!(ch, '\u{093E}' | '\u{0940}' | '\u{0947}'..='\u{094C}' | '\u{094E}'..='\u{094F}')
+}
+
 fn syllable_ranges(text: &str) -> Vec<(u32, u32)> {
     let mut ranges = Vec::new();
     let mut start = 0usize;
@@ -152,8 +156,23 @@ pub fn finish_reordering(text: &str, glyphs: &mut Vec<crate::labels::shape::gsub
             let glyph = glyphs.remove(index);
             let insert = glyphs
                 .iter()
-                .rposition(|item| (start..end).contains(&item.cluster))
-                .map_or(first, |index| index + 1);
+                .enumerate()
+                .skip(first)
+                .find(|(_, item)| {
+                    (start..end).contains(&item.cluster)
+                        && text
+                            .get(item.cluster as usize..)
+                            .and_then(|tail| tail.chars().next())
+                            .is_some_and(is_postbase_matra)
+                })
+                .map(|(index, _)| index)
+                .or_else(|| {
+                    glyphs
+                        .iter()
+                        .rposition(|item| (start..end).contains(&item.cluster))
+                        .map(|index| index + 1)
+                })
+                .unwrap_or(first);
             glyphs.insert(insert, glyph);
         }
     }
@@ -228,6 +247,23 @@ mod tests {
         assert_eq!(
             glyphs.iter().map(|glyph| glyph.id.0).collect::<Vec<_>>(),
             vec![1, 2, 3, 5, 4]
+        );
+    }
+
+    #[test]
+    fn reph_precedes_postbase_matra() {
+        let text = "र्का";
+        let mut reph = crate::labels::shape::gsub::Glyph::new(ttf_parser::GlyphId(90), 0);
+        reph.enable_feature(ttf_parser::Tag::from_bytes(b"rphf"));
+        let mut glyphs = vec![
+            reph,
+            crate::labels::shape::gsub::Glyph::new(ttf_parser::GlyphId(12), "र्".len() as u32),
+            crate::labels::shape::gsub::Glyph::new(ttf_parser::GlyphId(13), "र्क".len() as u32),
+        ];
+        super::finish_reordering(text, &mut glyphs);
+        assert_eq!(
+            glyphs.iter().map(|glyph| glyph.id.0).collect::<Vec<_>>(),
+            vec![12, 90, 13]
         );
     }
 }
