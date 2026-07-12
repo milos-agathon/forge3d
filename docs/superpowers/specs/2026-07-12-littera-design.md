@@ -19,7 +19,7 @@ Existing `ttf-parser`, `lyon_path`, `lyon_geom`, `lyon_tessellation`, NumPy/PyO3
 
 ## Font and shaping contracts
 
-`ShapedGlyph` stores `glyph_id`, source `font_index`, UTF-8 cluster byte offset, advances, and offsets as signed 1/64-em integers. `ShapedRun` is one same-direction, same-script visual segment and stores glyphs, bidi level, direction, script, and language. `ShapedText` stores runs in final visual order plus legal line-break offsets. Mixed-direction curved text traverses each run according to its own direction while preserving visual run order; it is never collapsed to one paragraph direction.
+`ShapedGlyph` stores `glyph_id`, source `font_index`, UTF-8 cluster byte offset, advances, and offsets as signed 1/64-em integers. `ShapedRun` is one same-direction, same-script logical segment and stores glyphs, resolved bidi levels, direction, script, and language. `ShapedText` keeps runs in logical order and stores per-character resolved levels plus legal line-break offsets; it does not freeze a final visual order before wrapping is known. After a caller chooses concrete line ranges, the positioned-outline iterator applies UAX #9 L1-L4 independently to each line. An unwrapped or curved label treats the full text range as one line, then traverses each reordered run according to its own direction.
 
 Every shaped result owns an immutable native `FontCollection` (`Arc<[u8]>` per face), so later rasterization, atlas baking, and export cannot substitute font bytes. Its serializable descriptor records each face's SHA-256 over the exact bytes, TTC face index, and sorted variation coordinates as `(four-byte tag, signed 16.16 value)` pairs. Each `ShapedGlyph.font_index` resolves through that descriptor. APIs accepting a serialized result plus external fonts verify all fingerprints, face indices, and coordinates before consuming it.
 
@@ -29,7 +29,7 @@ Font fallback happens before shaping per character cluster, producing maximal sa
 
 OpenType parsing uses bounded big-endian readers over `RawFace` table bytes. Every offset/count access is checked. Lookup selection honors requested script/language, `DFLT`/`dflt`, required features, and caller feature overrides. GSUB types 1/2/3/4/6/7 and GPOS types 1/2/4/5/6/9 are implemented once in shared coverage/class/anchor/value-record primitives. Arabic joining enables contextual features from generated joining data; Devanagari preprocessing supplies the required matra/conjunct ordering. GPOS absence alone enables legacy `kern`.
 
-UAX #9 is a standalone deterministic pass covering paragraph selection, explicit embeddings/overrides/isolates, weak and neutral resolution including brackets, implicit levels, reset/reordering, and mirroring. UAX #14 returns legal break offsets for multi-line labels and callouts. Conformance fixtures lock both algorithms.
+UAX #9 is a standalone deterministic pass covering paragraph selection, explicit embeddings/overrides/isolates, weak and neutral resolution including brackets, implicit levels, and mirroring. It stores the resolved logical levels; L1-L4 reset and visual reordering run only after actual line boundaries are supplied. UAX #14 returns legal break offsets for multi-line labels and callouts. Conformance fixtures lock both algorithms.
 
 ## Rendering surfaces
 
