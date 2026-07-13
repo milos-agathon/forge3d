@@ -69,7 +69,10 @@ def test_arabic_script_shaping_is_accepted_with_native_joined_glyphs():
     assert plan.accepted[0].typography["engine"] == "littera"
     assert plan.accepted[0].typography["glyph_ids"]
     assert plan.accepted[0].typography["direction"] == "rtl"
-    assert plan.accepted[0].typography["render_mapping"] == "shaped_clusters"
+    assert (
+        plan.accepted[0].typography["render_mapping"]
+        == "source_atlas_glyphs_task_8_deferred"
+    )
     assert plan.accepted[0].typography["compositor"] == "deferred_task_8"
     assert plan.accepted[0].typography["shaped_runs"][0]["glyphs"]
     assert plan.accepted[0].typography["font_indices"]
