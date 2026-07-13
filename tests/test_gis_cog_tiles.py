@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import http.server
+import socketserver
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +12,27 @@ import pytest
 
 import forge3d.gis as gis
 from forge3d._native import NATIVE_AVAILABLE
+
+
+def _serve_bytes(body: bytes, *, content_type: str = "image/tiff"):
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            self.send_response(200)
+            self.send_header("content-type", content_type)
+            self.send_header("content-length", str(len(body)))
+            self.send_header("connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            return
+
+    class _Server(socketserver.TCPServer):
+        allow_reuse_address = True
+
+    server = _Server(("127.0.0.1", 0), _Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}/data.tif"
 
 
 pytestmark = pytest.mark.skipif(
@@ -55,9 +79,34 @@ def test_read_cog_local_window(tmp_path: Path):
     assert result["info"]["transform"] == pytest.approx((2.0, 0.0, 12.0, 0.0, -2.0, 18.0))
 
 
-def test_read_cog_rejects_remote_without_cog_streaming():
-    with pytest.raises(RuntimeError, match="backend_unavailable.*cog_streaming"):
-        gis.read_cog("https://example.com/data.tif")
+def test_read_cog_remote_fetches_and_decodes(tmp_path: Path):
+    path = tmp_path / "remote_source.tif"
+    data = np.arange(12, dtype=np.uint16).reshape(3, 4)
+    gis.write_raster(
+        path,
+        data,
+        crs="EPSG:4326",
+        transform=(1.0, 0.0, -2.0, 0.0, -1.0, 3.0),
+    )
+    local = gis.read_cog(path)
+
+    server, url = _serve_bytes(path.read_bytes(), content_type="image/tiff")
+    try:
+        remote = gis.read_cog(url)
+    finally:
+        server.shutdown()
+
+    np.testing.assert_array_equal(remote["array"], local["array"])
+    assert remote["info"]["crs_authority"] == {"name": "EPSG", "code": "4326"}
+    assert remote["info"]["width"] == 4
+    assert remote["info"]["height"] == 3
+
+
+def test_read_cog_remote_unreachable_host_raises():
+    # Remote COG reads are wired through the gis-remote fetch/cache path now that
+    # the feature ships; an unreachable host must raise (never a silent success).
+    with pytest.raises(RuntimeError):
+        gis.read_cog("http://127.0.0.1:1/data.tif")
 
 
 def test_read_cog_rejects_overview_for_local_reader(tmp_path: Path):

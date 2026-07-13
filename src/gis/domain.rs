@@ -73,13 +73,35 @@ mod py {
         window: Option<(i64, i64, u32, u32)>,
         overview: Option<i64>,
     ) -> PyResult<PyObject> {
-        if path_or_url.starts_with("http://") || path_or_url.starts_with("https://") {
-            return Err(GisError::BackendUnavailable(
-                "backend_unavailable: cog_streaming feature required for remote COG reads"
-                    .to_string(),
-            )
-            .into());
-        }
+        let mut remote_warnings: Vec<RasterWarning> = Vec::new();
+        // Remote COG: route through the shipped gis-remote fetch/cache path, then
+        // decode the cached file with the local TIFF reader. Cache-aware -- repeat
+        // reads of the same URL reuse the on-disk cache.
+        let read_path: PathBuf =
+            if path_or_url.starts_with("http://") || path_or_url.starts_with("https://") {
+                let cache_dir = remote_cog_cache_dir()?;
+                // Release the GIL across the blocking fetch so concurrent Python
+                // threads (and same-process test servers) can run.
+                let info = py.allow_threads(|| {
+                    crate::gis::remote::fetch_remote_geodata(
+                        &path_or_url,
+                        Some(&cache_dir),
+                        None,
+                        None,
+                    )
+                })?;
+                remote_warnings.push(RasterWarning::new(
+                    if info.from_cache { "cache_hit" } else { "cache_miss" },
+                    format!("read_cog fetched remote COG ({})", info.status),
+                    Some("path_or_url"),
+                ));
+                info.cache_path.ok_or_else(|| {
+                    GisError::Io("io: remote COG fetch produced no cache path".to_string())
+                })?
+            } else {
+                PathBuf::from(&path_or_url)
+            };
+
         if overview.unwrap_or(0) != 0 {
             return Err(GisError::InvalidArgument(
                 "metadata_unavailable: local TIFF reader has no overview selection support"
@@ -88,7 +110,7 @@ mod py {
             .into());
         }
         let result = raster_info::read_raster(
-            &path_or_url,
+            &read_path,
             None,
             window.map(|(col_off, row_off, width, height)| PixelWindow {
                 col_off,
@@ -98,6 +120,8 @@ mod py {
             }),
             false,
         )?;
+        let mut warnings = remote_warnings;
+        warnings.extend(result.warnings.iter().cloned());
         let dict = PyDict::new_bound(py);
         dict.set_item(
             "array",
@@ -123,8 +147,17 @@ mod py {
         tile_info.set_item("block_size", result.info.block_size.clone())?;
         tile_info.set_item("compression", result.info.compression.clone())?;
         dict.set_item("tile_info", tile_info)?;
-        dict.set_item("warnings", warnings_to_py(py, &result.warnings)?)?;
+        dict.set_item("warnings", warnings_to_py(py, &warnings)?)?;
         Ok(dict.into_py(py))
+    }
+
+    /// Default on-disk cache for remote COG reads (under the OS temp dir). Keyed
+    /// per URL by the gis-remote fetch layer, so repeat reads reuse the file.
+    fn remote_cog_cache_dir() -> Result<PathBuf, GisError> {
+        let dir = std::env::temp_dir().join("forge3d").join("cog_cache");
+        std::fs::create_dir_all(&dir)
+            .map_err(|err| GisError::Io(format!("io: cannot create COG cache dir: {err}")))?;
+        Ok(dir)
     }
 
     #[pyfunction(name = "load_context_vectors", signature = (path_or_features, layers = None))]
