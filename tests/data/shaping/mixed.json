@@ -1,217 +1,12 @@
 [
   {
-    "id": "mixed-00-00",
+    "id": "mixed-000",
     "text": "Map שלום",
     "fonts": [
       "assets/fonts/NotoSans-subset.ttf",
       "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 8.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          4
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 11,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 58,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 24,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          4,
-          12
-        ],
-        "direction": "rtl",
-        "script": "hebr",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 16,
-            "font_index": 2,
-            "cluster": 4,
-            "x_advance": 43,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 12,
-            "font_index": 2,
-            "cluster": 6,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 19,
-            "font_index": 2,
-            "cluster": 8,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 9,
-            "font_index": 2,
-            "cluster": 10,
-            "x_advance": 43,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-00-01",
-    "text": "Map שלום",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 10.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          4
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 11,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 58,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 24,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          4,
-          12
-        ],
-        "direction": "rtl",
-        "script": "hebr",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 16,
-            "font_index": 2,
-            "cluster": 4,
-            "x_advance": 43,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 12,
-            "font_index": 2,
-            "cluster": 6,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 19,
-            "font_index": 2,
-            "cluster": 8,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 9,
-            "font_index": 2,
-            "cluster": 10,
-            "x_advance": 43,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-00-02",
-    "text": "Map שלום",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
     ],
     "size": 12.0,
     "options": {},
@@ -309,557 +104,13 @@
     ]
   },
   {
-    "id": "mixed-00-03",
-    "text": "Map שלום",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 16.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          4
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 11,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 58,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 24,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          4,
-          12
-        ],
-        "direction": "rtl",
-        "script": "hebr",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 16,
-            "font_index": 2,
-            "cluster": 4,
-            "x_advance": 43,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 12,
-            "font_index": 2,
-            "cluster": 6,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 19,
-            "font_index": 2,
-            "cluster": 8,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 9,
-            "font_index": 2,
-            "cluster": 10,
-            "x_advance": 43,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-00-04",
-    "text": "Map שלום",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 24.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          4
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 11,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 58,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 24,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          4,
-          12
-        ],
-        "direction": "rtl",
-        "script": "hebr",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 16,
-            "font_index": 2,
-            "cluster": 4,
-            "x_advance": 43,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 12,
-            "font_index": 2,
-            "cluster": 6,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 19,
-            "font_index": 2,
-            "cluster": 8,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 9,
-            "font_index": 2,
-            "cluster": 10,
-            "x_advance": 43,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-00-05",
-    "text": "Map שלום",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 32.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          4
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 11,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 58,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 24,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          4,
-          12
-        ],
-        "direction": "rtl",
-        "script": "hebr",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 16,
-            "font_index": 2,
-            "cluster": 4,
-            "x_advance": 43,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 12,
-            "font_index": 2,
-            "cluster": 6,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 19,
-            "font_index": 2,
-            "cluster": 8,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 9,
-            "font_index": 2,
-            "cluster": 10,
-            "x_advance": 43,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-01-00",
+    "id": "mixed-001",
     "text": "ABC مرحبا",
     "fonts": [
       "assets/fonts/NotoSans-subset.ttf",
       "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 8.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          4
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 7,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 41,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 8,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 42,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 9,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 40,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          4,
-          14
-        ],
-        "direction": "rtl",
-        "script": "arab",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 49,
-            "font_index": 1,
-            "cluster": 4,
-            "x_advance": 34,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 21,
-            "font_index": 1,
-            "cluster": 6,
-            "x_advance": 25,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 17,
-            "font_index": 1,
-            "cluster": 8,
-            "x_advance": 38,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 10,
-            "font_index": 1,
-            "cluster": 10,
-            "x_advance": 22,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 59,
-            "font_index": 1,
-            "cluster": 10,
-            "x_advance": 0,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 5,
-            "font_index": 1,
-            "cluster": 12,
-            "x_advance": 19,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-01-01",
-    "text": "ABC مرحبا",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 10.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          4
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 7,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 41,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 8,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 42,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 9,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 40,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          4,
-          14
-        ],
-        "direction": "rtl",
-        "script": "arab",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 49,
-            "font_index": 1,
-            "cluster": 4,
-            "x_advance": 34,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 21,
-            "font_index": 1,
-            "cluster": 6,
-            "x_advance": 25,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 17,
-            "font_index": 1,
-            "cluster": 8,
-            "x_advance": 38,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 10,
-            "font_index": 1,
-            "cluster": 10,
-            "x_advance": 22,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 59,
-            "font_index": 1,
-            "cluster": 10,
-            "x_advance": 0,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 5,
-            "font_index": 1,
-            "cluster": 12,
-            "x_advance": 19,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-01-02",
-    "text": "ABC مرحبا",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
     ],
     "size": 12.0,
     "options": {},
@@ -972,572 +223,13 @@
     ]
   },
   {
-    "id": "mixed-01-03",
-    "text": "ABC مرحبا",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 16.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          4
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 7,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 41,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 8,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 42,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 9,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 40,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          4,
-          14
-        ],
-        "direction": "rtl",
-        "script": "arab",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 49,
-            "font_index": 1,
-            "cluster": 4,
-            "x_advance": 34,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 21,
-            "font_index": 1,
-            "cluster": 6,
-            "x_advance": 25,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 17,
-            "font_index": 1,
-            "cluster": 8,
-            "x_advance": 38,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 10,
-            "font_index": 1,
-            "cluster": 10,
-            "x_advance": 22,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 59,
-            "font_index": 1,
-            "cluster": 10,
-            "x_advance": 0,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 5,
-            "font_index": 1,
-            "cluster": 12,
-            "x_advance": 19,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-01-04",
-    "text": "ABC مرحبا",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 24.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          4
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 7,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 41,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 8,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 42,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 9,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 40,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          4,
-          14
-        ],
-        "direction": "rtl",
-        "script": "arab",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 49,
-            "font_index": 1,
-            "cluster": 4,
-            "x_advance": 34,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 21,
-            "font_index": 1,
-            "cluster": 6,
-            "x_advance": 25,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 17,
-            "font_index": 1,
-            "cluster": 8,
-            "x_advance": 38,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 10,
-            "font_index": 1,
-            "cluster": 10,
-            "x_advance": 22,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 59,
-            "font_index": 1,
-            "cluster": 10,
-            "x_advance": 0,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 5,
-            "font_index": 1,
-            "cluster": 12,
-            "x_advance": 19,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-01-05",
-    "text": "ABC مرحبا",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 32.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          4
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 7,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 41,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 8,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 42,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 9,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 40,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          4,
-          14
-        ],
-        "direction": "rtl",
-        "script": "arab",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 49,
-            "font_index": 1,
-            "cluster": 4,
-            "x_advance": 34,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 21,
-            "font_index": 1,
-            "cluster": 6,
-            "x_advance": 25,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 17,
-            "font_index": 1,
-            "cluster": 8,
-            "x_advance": 38,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 10,
-            "font_index": 1,
-            "cluster": 10,
-            "x_advance": 22,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 59,
-            "font_index": 1,
-            "cluster": 10,
-            "x_advance": 0,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 5,
-            "font_index": 1,
-            "cluster": 12,
-            "x_advance": 19,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-02-00",
+    "id": "mixed-002",
     "text": "Road דרך",
     "fonts": [
       "assets/fonts/NotoSans-subset.ttf",
       "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 8.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          5
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 12,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 40,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 23,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 17,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 4,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          5,
-          11
-        ],
-        "direction": "rtl",
-        "script": "hebr",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 7,
-            "font_index": 2,
-            "cluster": 5,
-            "x_advance": 33,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 2,
-            "cluster": 7,
-            "x_advance": 32,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 8,
-            "font_index": 2,
-            "cluster": 9,
-            "x_advance": 33,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-02-01",
-    "text": "Road דרך",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 10.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          5
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 12,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 40,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 23,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 17,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 4,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          5,
-          11
-        ],
-        "direction": "rtl",
-        "script": "hebr",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 7,
-            "font_index": 2,
-            "cluster": 5,
-            "x_advance": 33,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 2,
-            "cluster": 7,
-            "x_advance": 32,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 8,
-            "font_index": 2,
-            "cluster": 9,
-            "x_advance": 33,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-02-02",
-    "text": "Road דרך",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
     ],
     "size": 12.0,
     "options": {},
@@ -1635,601 +327,13 @@
     ]
   },
   {
-    "id": "mixed-02-03",
-    "text": "Road דרך",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 16.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          5
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 12,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 40,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 23,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 17,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 4,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          5,
-          11
-        ],
-        "direction": "rtl",
-        "script": "hebr",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 7,
-            "font_index": 2,
-            "cluster": 5,
-            "x_advance": 33,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 2,
-            "cluster": 7,
-            "x_advance": 32,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 8,
-            "font_index": 2,
-            "cluster": 9,
-            "x_advance": 33,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-02-04",
-    "text": "Road דרך",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 24.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          5
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 12,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 40,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 23,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 17,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 4,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          5,
-          11
-        ],
-        "direction": "rtl",
-        "script": "hebr",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 7,
-            "font_index": 2,
-            "cluster": 5,
-            "x_advance": 33,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 2,
-            "cluster": 7,
-            "x_advance": 32,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 8,
-            "font_index": 2,
-            "cluster": 9,
-            "x_advance": 33,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-02-05",
-    "text": "Road דרך",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 32.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          5
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 12,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 40,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 23,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 17,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 4,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          5,
-          11
-        ],
-        "direction": "rtl",
-        "script": "hebr",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 7,
-            "font_index": 2,
-            "cluster": 5,
-            "x_advance": 33,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 2,
-            "cluster": 7,
-            "x_advance": 32,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 8,
-            "font_index": 2,
-            "cluster": 9,
-            "x_advance": 33,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-03-00",
+    "id": "mixed-003",
     "text": "City مدينة",
     "fonts": [
       "assets/fonts/NotoSans-subset.ttf",
       "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 8.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          5
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 9,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 40,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 20,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 26,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 23,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 28,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 33,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 4,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          5,
-          15
-        ],
-        "direction": "rtl",
-        "script": "arab",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 49,
-            "font_index": 1,
-            "cluster": 5,
-            "x_advance": 34,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 19,
-            "font_index": 1,
-            "cluster": 7,
-            "x_advance": 34,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 13,
-            "font_index": 1,
-            "cluster": 9,
-            "x_advance": 19,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 60,
-            "font_index": 1,
-            "cluster": 9,
-            "x_advance": 0,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 10,
-            "font_index": 1,
-            "cluster": 11,
-            "x_advance": 22,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 57,
-            "font_index": 1,
-            "cluster": 11,
-            "x_advance": 0,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 52,
-            "font_index": 1,
-            "cluster": 13,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 58,
-            "font_index": 1,
-            "cluster": 13,
-            "x_advance": 0,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-03-01",
-    "text": "City مدينة",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 10.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          5
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 9,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 40,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 20,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 26,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 23,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 28,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 33,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 4,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          5,
-          15
-        ],
-        "direction": "rtl",
-        "script": "arab",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 49,
-            "font_index": 1,
-            "cluster": 5,
-            "x_advance": 34,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 19,
-            "font_index": 1,
-            "cluster": 7,
-            "x_advance": 34,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 13,
-            "font_index": 1,
-            "cluster": 9,
-            "x_advance": 19,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 60,
-            "font_index": 1,
-            "cluster": 9,
-            "x_advance": 0,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 10,
-            "font_index": 1,
-            "cluster": 11,
-            "x_advance": 22,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 57,
-            "font_index": 1,
-            "cluster": 11,
-            "x_advance": 0,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 52,
-            "font_index": 1,
-            "cluster": 13,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 58,
-            "font_index": 1,
-            "cluster": 13,
-            "x_advance": 0,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-03-02",
-    "text": "City مدينة",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
     ],
     "size": 12.0,
     "options": {},
@@ -2364,670 +468,13 @@
     ]
   },
   {
-    "id": "mixed-03-03",
-    "text": "City مدينة",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 16.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          5
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 9,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 40,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 20,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 26,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 23,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 28,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 33,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 4,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          5,
-          15
-        ],
-        "direction": "rtl",
-        "script": "arab",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 49,
-            "font_index": 1,
-            "cluster": 5,
-            "x_advance": 34,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 19,
-            "font_index": 1,
-            "cluster": 7,
-            "x_advance": 34,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 13,
-            "font_index": 1,
-            "cluster": 9,
-            "x_advance": 19,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 60,
-            "font_index": 1,
-            "cluster": 9,
-            "x_advance": 0,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 10,
-            "font_index": 1,
-            "cluster": 11,
-            "x_advance": 22,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 57,
-            "font_index": 1,
-            "cluster": 11,
-            "x_advance": 0,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 52,
-            "font_index": 1,
-            "cluster": 13,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 58,
-            "font_index": 1,
-            "cluster": 13,
-            "x_advance": 0,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-03-04",
-    "text": "City مدينة",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 24.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          5
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 9,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 40,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 20,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 26,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 23,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 28,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 33,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 4,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          5,
-          15
-        ],
-        "direction": "rtl",
-        "script": "arab",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 49,
-            "font_index": 1,
-            "cluster": 5,
-            "x_advance": 34,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 19,
-            "font_index": 1,
-            "cluster": 7,
-            "x_advance": 34,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 13,
-            "font_index": 1,
-            "cluster": 9,
-            "x_advance": 19,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 60,
-            "font_index": 1,
-            "cluster": 9,
-            "x_advance": 0,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 10,
-            "font_index": 1,
-            "cluster": 11,
-            "x_advance": 22,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 57,
-            "font_index": 1,
-            "cluster": 11,
-            "x_advance": 0,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 52,
-            "font_index": 1,
-            "cluster": 13,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 58,
-            "font_index": 1,
-            "cluster": 13,
-            "x_advance": 0,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-03-05",
-    "text": "City مدينة",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 32.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          5
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 9,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 40,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 20,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 26,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 23,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 28,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 33,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 4,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          5,
-          15
-        ],
-        "direction": "rtl",
-        "script": "arab",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 49,
-            "font_index": 1,
-            "cluster": 5,
-            "x_advance": 34,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 19,
-            "font_index": 1,
-            "cluster": 7,
-            "x_advance": 34,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 13,
-            "font_index": 1,
-            "cluster": 9,
-            "x_advance": 19,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 60,
-            "font_index": 1,
-            "cluster": 9,
-            "x_advance": 0,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 10,
-            "font_index": 1,
-            "cluster": 11,
-            "x_advance": 22,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 57,
-            "font_index": 1,
-            "cluster": 11,
-            "x_advance": 0,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 52,
-            "font_index": 1,
-            "cluster": 13,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 58,
-            "font_index": 1,
-            "cluster": 13,
-            "x_advance": 0,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-04-00",
+    "id": "mixed-004",
     "text": "Hello עולם",
     "fonts": [
       "assets/fonts/NotoSans-subset.ttf",
       "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 8.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          6
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 10,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 47,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 18,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 21,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 21,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 23,
-            "font_index": 0,
-            "cluster": 4,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 5,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          6,
-          14
-        ],
-        "direction": "rtl",
-        "script": "hebr",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 5,
-            "font_index": 2,
-            "cluster": 6,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 19,
-            "font_index": 2,
-            "cluster": 8,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 12,
-            "font_index": 2,
-            "cluster": 10,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 9,
-            "font_index": 2,
-            "cluster": 12,
-            "x_advance": 43,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-04-01",
-    "text": "Hello עולם",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 10.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          6
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 10,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 47,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 18,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 21,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 21,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 23,
-            "font_index": 0,
-            "cluster": 4,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 5,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          6,
-          14
-        ],
-        "direction": "rtl",
-        "script": "hebr",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 5,
-            "font_index": 2,
-            "cluster": 6,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 19,
-            "font_index": 2,
-            "cluster": 8,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 12,
-            "font_index": 2,
-            "cluster": 10,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 9,
-            "font_index": 2,
-            "cluster": 12,
-            "x_advance": 43,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-04-02",
-    "text": "Hello עולם",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
     ],
     "size": 12.0,
     "options": {},
@@ -3141,607 +588,13 @@
     ]
   },
   {
-    "id": "mixed-04-03",
-    "text": "Hello עולם",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 16.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          6
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 10,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 47,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 18,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 21,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 21,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 23,
-            "font_index": 0,
-            "cluster": 4,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 5,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          6,
-          14
-        ],
-        "direction": "rtl",
-        "script": "hebr",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 5,
-            "font_index": 2,
-            "cluster": 6,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 19,
-            "font_index": 2,
-            "cluster": 8,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 12,
-            "font_index": 2,
-            "cluster": 10,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 9,
-            "font_index": 2,
-            "cluster": 12,
-            "x_advance": 43,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-04-04",
-    "text": "Hello עולם",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 24.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          6
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 10,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 47,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 18,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 21,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 21,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 23,
-            "font_index": 0,
-            "cluster": 4,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 5,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          6,
-          14
-        ],
-        "direction": "rtl",
-        "script": "hebr",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 5,
-            "font_index": 2,
-            "cluster": 6,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 19,
-            "font_index": 2,
-            "cluster": 8,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 12,
-            "font_index": 2,
-            "cluster": 10,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 9,
-            "font_index": 2,
-            "cluster": 12,
-            "x_advance": 43,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-04-05",
-    "text": "Hello עולם",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 32.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          6
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 10,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 47,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 18,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 21,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 21,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 23,
-            "font_index": 0,
-            "cluster": 4,
-            "x_advance": 39,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 5,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          6,
-          14
-        ],
-        "direction": "rtl",
-        "script": "hebr",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 5,
-            "font_index": 2,
-            "cluster": 6,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 19,
-            "font_index": 2,
-            "cluster": 8,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 12,
-            "font_index": 2,
-            "cluster": 10,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 9,
-            "font_index": 2,
-            "cluster": 12,
-            "x_advance": 43,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-05-00",
+    "id": "mixed-005",
     "text": "Atlas שלום",
     "fonts": [
       "assets/fonts/NotoSans-subset.ttf",
       "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 8.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          6
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 7,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 41,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 26,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 23,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 21,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 25,
-            "font_index": 0,
-            "cluster": 4,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 5,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          6,
-          14
-        ],
-        "direction": "rtl",
-        "script": "hebr",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 16,
-            "font_index": 2,
-            "cluster": 6,
-            "x_advance": 43,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 12,
-            "font_index": 2,
-            "cluster": 8,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 19,
-            "font_index": 2,
-            "cluster": 10,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 9,
-            "font_index": 2,
-            "cluster": 12,
-            "x_advance": 43,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-05-01",
-    "text": "Atlas שלום",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 10.0,
-    "options": {},
-    "runs": [
-      {
-        "text_range": [
-          0,
-          6
-        ],
-        "direction": "ltr",
-        "script": "latn",
-        "language": null,
-        "bidi_levels": [
-          0,
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 7,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 41,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 26,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 23,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 21,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 25,
-            "font_index": 0,
-            "cluster": 4,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 5,
-            "x_advance": 17,
-            "x_offset": 0
-          }
-        ]
-      },
-      {
-        "text_range": [
-          6,
-          14
-        ],
-        "direction": "rtl",
-        "script": "hebr",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 16,
-            "font_index": 2,
-            "cluster": 6,
-            "x_advance": 43,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 12,
-            "font_index": 2,
-            "cluster": 8,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 19,
-            "font_index": 2,
-            "cluster": 10,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 9,
-            "font_index": 2,
-            "cluster": 12,
-            "x_advance": 43,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "mixed-05-02",
-    "text": "Atlas שלום",
-    "fonts": [
-      "assets/fonts/NotoSans-subset.ttf",
-      "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
     ],
     "size": 12.0,
     "options": {},
@@ -3855,29 +708,26 @@
     ]
   },
   {
-    "id": "mixed-05-03",
-    "text": "Atlas שלום",
+    "id": "mixed-006",
+    "text": "A⁧שלום⁩",
     "fonts": [
       "assets/fonts/NotoSans-subset.ttf",
       "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
     ],
-    "size": 16.0,
+    "size": 12.0,
     "options": {},
     "runs": [
       {
         "text_range": [
           0,
-          6
+          4
         ],
         "direction": "ltr",
         "script": "latn",
         "language": null,
         "bidi_levels": [
-          0,
-          0,
-          0,
-          0,
           0,
           0
         ],
@@ -3888,48 +738,13 @@
             "cluster": 0,
             "x_advance": 41,
             "x_offset": 0
-          },
-          {
-            "glyph_id": 26,
-            "font_index": 0,
-            "cluster": 1,
-            "x_advance": 23,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 21,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 25,
-            "font_index": 0,
-            "cluster": 4,
-            "x_advance": 31,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 3,
-            "font_index": 0,
-            "cluster": 5,
-            "x_advance": 17,
-            "x_offset": 0
           }
         ]
       },
       {
         "text_range": [
-          6,
-          14
+          4,
+          12
         ],
         "direction": "rtl",
         "script": "hebr",
@@ -3944,28 +759,28 @@
           {
             "glyph_id": 16,
             "font_index": 2,
-            "cluster": 6,
+            "cluster": 4,
             "x_advance": 43,
             "x_offset": 0
           },
           {
             "glyph_id": 12,
             "font_index": 2,
-            "cluster": 8,
+            "cluster": 6,
             "x_advance": 31,
             "x_offset": 0
           },
           {
             "glyph_id": 19,
             "font_index": 2,
-            "cluster": 10,
+            "cluster": 8,
             "x_advance": 17,
             "x_offset": 0
           },
           {
             "glyph_id": 9,
             "font_index": 2,
-            "cluster": 12,
+            "cluster": 10,
             "x_advance": 43,
             "x_offset": 0
           }
@@ -3974,14 +789,15 @@
     ]
   },
   {
-    "id": "mixed-05-04",
-    "text": "Atlas שלום",
+    "id": "mixed-007",
+    "text": "office\noffice",
     "fonts": [
       "assets/fonts/NotoSans-subset.ttf",
       "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
     ],
-    "size": 24.0,
+    "size": 12.0,
     "options": {},
     "runs": [
       {
@@ -4002,45 +818,121 @@
         ],
         "glyphs": [
           {
-            "glyph_id": 7,
+            "glyph_id": 23,
             "font_index": 0,
             "cluster": 0,
-            "x_advance": 41,
+            "x_advance": 39,
             "x_offset": 0
           },
           {
-            "glyph_id": 26,
+            "glyph_id": 42,
             "font_index": 0,
             "cluster": 1,
-            "x_advance": 23,
+            "x_advance": 61,
             "x_offset": 0
           },
           {
-            "glyph_id": 21,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 15,
-            "font_index": 0,
-            "cluster": 3,
-            "x_advance": 36,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 25,
+            "glyph_id": 16,
             "font_index": 0,
             "cluster": 4,
             "x_advance": 31,
             "x_offset": 0
           },
           {
-            "glyph_id": 3,
+            "glyph_id": 18,
             "font_index": 0,
             "cluster": 5,
-            "x_advance": 17,
+            "x_advance": 36,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 7,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 11,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 36,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-008",
+    "text": "地图 Map",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "ltr",
+        "script": "hani",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 9,
+            "font_index": 3,
+            "cluster": 0,
+            "x_advance": 64,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 8,
+            "font_index": 3,
+            "cluster": 3,
+            "x_advance": 64,
             "x_offset": 0
           }
         ]
@@ -4048,7 +940,222 @@
       {
         "text_range": [
           6,
-          14
+          7
+        ],
+        "direction": "ltr",
+        "script": "hani",
+        "language": null,
+        "bidi_levels": [
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          10
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 7,
+            "x_advance": 58,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 15,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 24,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 39,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-009",
+    "text": "Map 地图",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          4
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 58,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 15,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 24,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          4,
+          10
+        ],
+        "direction": "ltr",
+        "script": "hani",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 9,
+            "font_index": 3,
+            "cluster": 4,
+            "x_advance": 64,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 8,
+            "font_index": 3,
+            "cluster": 7,
+            "x_advance": 64,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-010",
+    "text": "office שלום",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          15
         ],
         "direction": "rtl",
         "script": "hebr",
@@ -4063,28 +1170,28 @@
           {
             "glyph_id": 16,
             "font_index": 2,
-            "cluster": 6,
+            "cluster": 7,
             "x_advance": 43,
             "x_offset": 0
           },
           {
             "glyph_id": 12,
             "font_index": 2,
-            "cluster": 8,
+            "cluster": 9,
             "x_advance": 31,
             "x_offset": 0
           },
           {
             "glyph_id": 19,
             "font_index": 2,
-            "cluster": 10,
+            "cluster": 11,
             "x_advance": 17,
             "x_offset": 0
           },
           {
             "glyph_id": 9,
             "font_index": 2,
-            "cluster": 12,
+            "cluster": 13,
             "x_advance": 43,
             "x_offset": 0
           }
@@ -4093,25 +1200,1943 @@
     ]
   },
   {
-    "id": "mixed-05-05",
-    "text": "Atlas שלום",
+    "id": "mixed-011",
+    "text": "office עולם",
     "fonts": [
       "assets/fonts/NotoSans-subset.ttf",
       "assets/fonts/NotoSansArabic-subset.ttf",
-      "assets/fonts/NotoSansHebrew-subset.ttf"
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
     ],
-    "size": 32.0,
+    "size": 12.0,
     "options": {},
     "runs": [
       {
         "text_range": [
           0,
-          6
+          7
         ],
         "direction": "ltr",
         "script": "latn",
         "language": null,
         "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          15
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 5,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 19,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 9,
+            "font_index": 2,
+            "cluster": 13,
+            "x_advance": 43,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-012",
+    "text": "office מפה",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 13,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 40,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 14,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 37,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 38,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-013",
+    "text": "office דרך",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 7,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 15,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 32,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 8,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 33,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-014",
+    "text": "office עיר",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 5,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 22,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 16,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 15,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 32,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-015",
+    "text": "office כתב",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 11,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 32,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-016",
+    "text": "office בבב",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-017",
+    "text": "office בבד",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 33,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-018",
+    "text": "office בבה",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 38,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-019",
+    "text": "office בבו",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 19,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-020",
+    "text": "office בבי",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 22,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 16,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-021",
+    "text": "office בבכ",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 11,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 32,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-022",
+    "text": "office בבל",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 31,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-023",
+    "text": "office בבמ",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 40,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-025",
+    "text": "office בבע",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 36,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-026",
+    "text": "office בבר",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 15,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 32,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-027",
+    "text": "office בבש",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 43,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-028",
+    "text": "office בבת",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 41,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-029",
+    "text": "office בדב",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 39,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 61,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-070",
+    "text": "AVATAR שלום",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
           0,
           0,
           0,
@@ -4128,37 +3153,44 @@
             "x_offset": 0
           },
           {
-            "glyph_id": 26,
+            "glyph_id": 14,
             "font_index": 0,
             "cluster": 1,
-            "x_advance": 23,
+            "x_advance": 38,
             "x_offset": 0
           },
           {
-            "glyph_id": 21,
+            "glyph_id": 7,
             "font_index": 0,
             "cluster": 2,
-            "x_advance": 17,
+            "x_advance": 41,
             "x_offset": 0
           },
           {
-            "glyph_id": 15,
+            "glyph_id": 13,
             "font_index": 0,
             "cluster": 3,
             "x_advance": 36,
             "x_offset": 0
           },
           {
-            "glyph_id": 25,
+            "glyph_id": 7,
             "font_index": 0,
             "cluster": 4,
-            "x_advance": 31,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 40,
             "x_offset": 0
           },
           {
             "glyph_id": 3,
             "font_index": 0,
-            "cluster": 5,
+            "cluster": 6,
             "x_advance": 17,
             "x_offset": 0
           }
@@ -4166,8 +3198,8 @@
       },
       {
         "text_range": [
-          6,
-          14
+          7,
+          15
         ],
         "direction": "rtl",
         "script": "hebr",
@@ -4182,29 +3214,757 @@
           {
             "glyph_id": 16,
             "font_index": 2,
-            "cluster": 6,
+            "cluster": 7,
             "x_advance": 43,
             "x_offset": 0
           },
           {
             "glyph_id": 12,
             "font_index": 2,
-            "cluster": 8,
+            "cluster": 9,
             "x_advance": 31,
             "x_offset": 0
           },
           {
             "glyph_id": 19,
             "font_index": 2,
-            "cluster": 10,
+            "cluster": 11,
             "x_advance": 17,
             "x_offset": 0
           },
           {
             "glyph_id": 9,
             "font_index": 2,
-            "cluster": 12,
+            "cluster": 13,
             "x_advance": 43,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-071",
+    "text": "AVATAR עולם",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 14,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 40,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          15
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 5,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 19,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 9,
+            "font_index": 2,
+            "cluster": 13,
+            "x_advance": 43,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-072",
+    "text": "AVATAR מפה",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 14,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 40,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 13,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 40,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 14,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 37,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 38,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-073",
+    "text": "AVATAR דרך",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 14,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 40,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 7,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 15,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 32,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 8,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 33,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-074",
+    "text": "AVATAR עיר",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 14,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 40,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 5,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 22,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 16,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 15,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 32,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-075",
+    "text": "AVATAR כתב",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 14,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 40,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 11,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 32,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "mixed-076",
+    "text": "AVATAR בבב",
+    "fonts": [
+      "assets/fonts/NotoSans-subset.ttf",
+      "assets/fonts/NotoSansArabic-subset.ttf",
+      "assets/fonts/NotoSansHebrew-subset.ttf",
+      "assets/fonts/NotoSansSC-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {},
+    "runs": [
+      {
+        "text_range": [
+          0,
+          7
+        ],
+        "direction": "ltr",
+        "script": "latn",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 14,
+            "font_index": 0,
+            "cluster": 1,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 5,
+            "x_advance": 40,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 3,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      },
+      {
+        "text_range": [
+          7,
+          13
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 7,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 9,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 2,
+            "cluster": 11,
+            "x_advance": 35,
             "x_offset": 0
           }
         ]

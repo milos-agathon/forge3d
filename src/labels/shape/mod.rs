@@ -28,7 +28,35 @@ struct Character {
     end: usize,
     level: u8,
     script: Tag,
-    font_index: usize,
+    font_index: Option<usize>,
+    render: bool,
+    mandatory_break: bool,
+}
+
+fn is_mandatory_break(ch: char) -> bool {
+    matches!(ch, '\n' | '\r' | '\u{0085}' | '\u{2028}' | '\u{2029}')
+}
+
+fn is_default_ignorable(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{00AD}'
+            | '\u{034F}'
+            | '\u{061C}'
+            | '\u{115F}'..='\u{1160}'
+            | '\u{17B4}'..='\u{17B5}'
+            | '\u{180B}'..='\u{180F}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{206F}'
+            | '\u{3164}'
+            | '\u{FE00}'..='\u{FE0F}'
+            | '\u{FEFF}'
+            | '\u{FFA0}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0000}'..='\u{E0FFF}'
+    )
 }
 
 fn script_tag(script: Script) -> Result<Tag, TextError> {
@@ -84,37 +112,71 @@ fn characters(
     levels: &[u8],
     scripts: &[Tag],
 ) -> Result<Vec<Character>, TextError> {
-    text.char_indices()
+    let mut output = text
+        .char_indices()
         .enumerate()
         .map(|(index, (byte, ch))| {
-            let glyph = fonts
-                .glyph_for(ch)
-                .map_err(|error| TextError::Font(error.to_string()))?;
+            let mandatory_break = is_mandatory_break(ch);
+            let render = !mandatory_break && !is_default_ignorable(ch);
+            let font_index = render
+                .then(|| fonts.glyph_for(ch).map(|glyph| glyph.font_index))
+                .transpose()
+                .map_err(TextError::Font)?;
             Ok(Character {
                 byte,
                 end: byte + ch.len_utf8(),
                 level: levels[index],
                 script: scripts[index],
-                font_index: glyph.font_index,
+                font_index,
+                render,
+                mandatory_break,
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    for index in 0..output.len() {
+        if output[index].font_index.is_some() || output[index].mandatory_break {
+            continue;
+        }
+        output[index].font_index = output[..index]
+            .iter()
+            .rev()
+            .take_while(|item| !item.mandatory_break)
+            .find_map(|item| item.font_index)
+            .or_else(|| {
+                output[index + 1..]
+                    .iter()
+                    .take_while(|item| !item.mandatory_break)
+                    .find_map(|item| item.font_index)
+            });
+    }
+    Ok(output)
 }
 
 fn spans(characters: &[Character]) -> Vec<Range<usize>> {
     let mut output = Vec::new();
     let mut start = 0;
     while start < characters.len() {
+        while start < characters.len()
+            && (characters[start].mandatory_break || characters[start].font_index.is_none())
+        {
+            start += 1;
+        }
+        if start == characters.len() {
+            break;
+        }
         let first = characters[start];
         let mut end = start + 1;
         while end < characters.len()
+            && !characters[end].mandatory_break
             && characters[end].font_index == first.font_index
             && characters[end].script == first.script
             && characters[end].level & 1 == first.level & 1
         {
             end += 1;
         }
-        output.push(start..end);
+        if characters[start..end].iter().any(|item| item.render) {
+            output.push(start..end);
+        }
         start = end;
     }
     output
@@ -134,7 +196,7 @@ fn selected_lookups(
     LayoutTable::parse(table)?.selected_feature_lookups(layout_script, language, features)
 }
 
-fn default_feature(tag: Tag, script: Tag) -> bool {
+fn default_feature(tag: Tag, script: Tag, language: Option<Tag>) -> bool {
     let common = [b"ccmp", b"rlig", b"liga", b"clig", b"calt"];
     let positioning = [
         b"kern", b"mark", b"mkmk", b"curs", b"dist", b"abvm", b"blwm",
@@ -144,27 +206,29 @@ fn default_feature(tag: Tag, script: Tag) -> bool {
         b"nukt", b"akhn", b"rphf", b"rkrf", b"pref", b"blwf", b"half", b"pstf", b"vatu", b"cjct",
         b"abvs", b"blws", b"psts", b"haln", b"pres",
     ];
-    common
-        .iter()
-        .chain(positioning.iter())
-        .chain(
-            (script == Tag::from_bytes(b"arab"))
-                .then_some(arabic.iter())
-                .into_iter()
-                .flatten(),
-        )
-        .chain(
-            (script == Tag::from_bytes(b"deva"))
-                .then_some(devanagari.iter())
-                .into_iter()
-                .flatten(),
-        )
-        .any(|candidate| tag == Tag::from_bytes(candidate))
+    (tag == Tag::from_bytes(b"locl") && language.is_some())
+        || common
+            .iter()
+            .chain(positioning.iter())
+            .chain(
+                (script == Tag::from_bytes(b"arab"))
+                    .then_some(arabic.iter())
+                    .into_iter()
+                    .flatten(),
+            )
+            .chain(
+                (script == Tag::from_bytes(b"deva"))
+                    .then_some(devanagari.iter())
+                    .into_iter()
+                    .flatten(),
+            )
+            .any(|candidate| tag == Tag::from_bytes(candidate))
 }
 
 fn effective_features(
     table: &[u8],
     script: Tag,
+    language: Option<Tag>,
     requested: &[FeatureSetting],
 ) -> Result<Vec<FeatureSetting>, TextError> {
     let reader = Reader::new(table);
@@ -187,7 +251,7 @@ fn effective_features(
                 .iter()
                 .copied()
                 .find(|setting| setting.tag == tag)
-                .unwrap_or_else(|| FeatureSetting::new(tag, default_feature(tag, script)))
+                .unwrap_or_else(|| FeatureSetting::new(tag, default_feature(tag, script, language)))
         })
         .collect())
 }
@@ -204,26 +268,27 @@ fn shape_span(
     let byte_start = first.byte;
     let byte_end = chars[range.end - 1].end;
     let run_text = &text[byte_start..byte_end];
-    let face = fonts
-        .face(first.font_index)
-        .map_err(|error| TextError::Font(error.to_string()))?;
+    let font_index = first.font_index.expect("spans exclude unassigned controls");
+    let face = fonts.face(font_index).map_err(TextError::Font)?;
     let mut glyphs: Vec<Glyph> = if first.script == Tag::from_bytes(b"deva") {
         devanagari::reorder_devanagari(run_text)
             .into_iter()
+            .filter(|item| !is_default_ignorable(item.ch) && !is_mandatory_break(item.ch))
             .map(|item| {
-                let id = face.glyph_index(item.ch).ok_or_else(|| {
-                    TextError::Font(format!("missing glyph U+{:04X}", item.ch as u32))
-                })?;
+                let id = face
+                    .glyph_index(item.ch)
+                    .ok_or(TextError::MalformedOpenType("cmap glyph"))?;
                 Ok(Glyph::new(id, item.cluster))
             })
             .collect::<Result<_, _>>()?
     } else {
         run_text
             .char_indices()
+            .filter(|(_, ch)| !is_default_ignorable(*ch) && !is_mandatory_break(*ch))
             .map(|(cluster, ch)| {
                 let id = face
                     .glyph_index(ch)
-                    .ok_or_else(|| TextError::Font(format!("missing glyph U+{:04X}", ch as u32)))?;
+                    .ok_or(TextError::MalformedOpenType("cmap glyph"))?;
                 Ok(Glyph::new(id, cluster as u32))
             })
             .collect::<Result<_, _>>()?
@@ -235,7 +300,7 @@ fn shape_span(
         devanagari::apply_feature_masks(run_text, &mut glyphs);
     }
     if let Some(table) = face.raw_face().table(Tag::from_bytes(b"GSUB")) {
-        let settings = effective_features(table, first.script, features)?;
+        let settings = effective_features(table, first.script, language, features)?;
         let selection = selected_lookups(table, first.script, language, &settings)?
             .into_iter()
             .map(|(index, features)| GsubLookup { index, features })
@@ -246,6 +311,7 @@ fn shape_span(
         devanagari::finish_reordering(run_text, &mut glyphs);
         normalize_devanagari_mark_clusters(run_text, &mut glyphs);
     }
+    normalize_zwnj_clusters(run_text, &mut glyphs);
 
     let mut positioned: Vec<PositioningGlyph> = glyphs.iter().map(PositioningGlyph::from).collect();
     for glyph in &mut positioned {
@@ -255,7 +321,7 @@ fn shape_span(
         );
     }
     if let Some(table) = face.raw_face().table(Tag::from_bytes(b"GPOS")) {
-        let settings = effective_features(table, first.script, features)?;
+        let settings = effective_features(table, first.script, language, features)?;
         let layout_script = if first.script == Tag::from_bytes(b"deva") {
             Tag::from_bytes(b"dev2")
         } else {
@@ -275,7 +341,7 @@ fn shape_span(
         .into_iter()
         .map(|mut glyph| {
             glyph.cluster += byte_start as u32;
-            glyph.normalize(first.font_index, units_per_em)
+            glyph.normalize(font_index, units_per_em)
         })
         .collect::<Result<Vec<_>, _>>()?;
     let direction = if first.level & 1 == 1 {
@@ -291,6 +357,20 @@ fn shape_span(
         script: first.script,
         language,
     })
+}
+
+fn normalize_zwnj_clusters(text: &str, glyphs: &mut [Glyph]) {
+    for (cluster, ch) in text.char_indices() {
+        if ch != '\u{200C}' {
+            continue;
+        }
+        if let Some(glyph) = glyphs
+            .iter_mut()
+            .find(|glyph| glyph.cluster > cluster as u32)
+        {
+            glyph.cluster = cluster as u32;
+        }
+    }
 }
 
 fn normalize_devanagari_mark_clusters(text: &str, glyphs: &mut [Glyph]) {

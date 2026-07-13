@@ -29,6 +29,9 @@ REJECTION_REASONS = (
     "invalid_geometry",
     "unsupported_geometry_type",
     "empty_text",
+    "font_chain_required",
+    "malformed_font",
+    "shaping_failed",
 )
 
 CARTOGRAPHIC_PRIORITY_PRESET = (
@@ -167,9 +170,12 @@ def _native_shape_label_glyphs(text: str, glyph_atlas: Any) -> tuple[list[str] |
         "engine": "littera",
         "direction": payload["runs"][0]["direction"] if payload["runs"] else "ltr",
         "glyph_ids": [glyph["glyph_id"] for glyph in glyph_records],
+        "font_indices": [glyph["font_index"] for glyph in glyph_records],
         "clusters": [glyph["cluster"] for glyph in glyph_records],
         "advances": [glyph["x_advance"] for glyph in glyph_records],
         "render_mapping": "shaped_clusters",
+        "shaped_runs": payload["runs"],
+        "compositor": "deferred_task_8",
     }
     return glyphs, details
 
@@ -213,11 +219,11 @@ def _requires_complex_shaping(text: str) -> bool:
 
 
 def _shape_label_glyphs(text: str, glyph_atlas: Any | None = None) -> tuple[list[str] | None, Mapping[str, Any]]:
-    if not _requires_complex_shaping(text):
-        return list(text), {}
     native_shaped = _native_shape_label_glyphs(text, glyph_atlas)
     if native_shaped is not None:
         return native_shaped
+    if not _requires_complex_shaping(text):
+        return list(text), {}
     return None, {
         "shaping": "font_chain_required",
         "diagnostics": [{"status": "diagnostic_block", "reason": "font_chain_required"}],
@@ -980,19 +986,19 @@ class LabelPlan:
                 continue
 
             if glyph_sequence is None:
-                diagnostics.append(
-                    experimental_feature_diagnostic(
-                        "complex-script shaping",
-                        layer_id="labels",
-                        object_id=label_id,
-                    )
+                shaping_diagnostics = list(shaping_details.get("diagnostics", ()))
+                reason = str(
+                    shaping_diagnostics[0].get("reason", "shaping_failed")
+                    if shaping_diagnostics
+                    else "shaping_failed"
                 )
+                if reason not in REJECTION_REASONS:
+                    reason = "shaping_failed"
                 rejected.append(
                     RejectedLabel(
                         label_id=label_id,
                         source_id=source_id,
-                        reason="unsupported_geometry_type",
-                        diagnostic_refs=["experimental_feature"],
+                        reason=reason,
                         ordering_key=ordering_key,
                         details=dict(shaping_details),
                     )
