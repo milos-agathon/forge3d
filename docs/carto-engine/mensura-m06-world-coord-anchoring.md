@@ -72,9 +72,15 @@ To fully meet M-06, the interactive viewer must be anchored like `Scene`:
    `labels_command.rs`). Because every subsystem subtracts the SAME origin, this
    is a rigid translation — correct by construction.
 
-This is left explicit and un-done rather than shipped unverified: it is a large,
-coordinated change to a live GPU runtime whose end-to-end correctness (camera +
-terrain + overlay alignment at Earth-scale) can only be confirmed by a **rendered
-frame from the running viewer**, which the CI/test environment here cannot
-produce (its GPU test lane hangs). The math is unit-verifiable; the pixels are
-not, in this environment.
+This is left explicit and un-done because it is a large, coordinated change to a
+live GPU runtime — NOT because it is unverifiable here. Verification IS available
+in this environment: the interactive viewer launches headless, loads a DEM,
+accepts camera commands over IPC, and writes a snapshot PNG (confirmed on an
+RTX 3070 / Vulkan; the viewer even exposes a windowless
+`terrain::render::offscreen::render_to_texture`). The honest verification plan is
+a **differential Earth-scale render**: place the anchor origin at a projected/ECEF
+magnitude (~1e6–6.4e6 m), render the viewer, perturb the world target by a small
+offset, and assert pixel/reconstructed-coordinate stability that the current f32
+IPC path cannot hold. An earlier revision of this section claimed the environment
+"cannot produce a rendered frame (its GPU test lane hangs)" — that was false and
+untested; retracted. The residual is unimplemented, not unverifiable.
