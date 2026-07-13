@@ -200,3 +200,24 @@ def test_height_system_persists_across_geotiff_write_read(tmp_path):
     gis.write_raster(str(plain), np.ones((1, 4, 4), dtype=np.float32),
                      crs="EPSG:4326", transform=(0.1, 0, 10, 0, -0.1, 52))
     assert gis.read_raster_info(str(plain)).height_system == "unspecified"
+
+
+def test_prepare_dem_accepts_chart_datum_without_promoting_it():
+    # M-03: chart_datum is a valid declaration; carried, not silently promoted
+    # to ellipsoidal (no tidal model shipped), and not rejected.
+    raw = np.full((1, 2, 2), 5.0, dtype=np.float32)
+    result = gis.prepare_dem(
+        {
+            "array": raw,
+            "height_system": "chart_datum",
+            "info": {
+                "width": 2,
+                "height": 2,
+                "band_count": 1,
+                "crs_authority": {"name": "EPSG", "code": "4326"},
+                "bounds": (10.0, 50.0, 12.0, 52.0),
+            },
+        }
+    )
+    assert result["height_system"] == "chart_datum"
+    assert float(np.asarray(result["array"])[0, 0, 0]) == 5.0  # unchanged
