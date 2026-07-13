@@ -45,14 +45,17 @@ def test_cityjson_keeps_an_f64_origin_before_narrowing():
     assert re.search(r"sub\(\s*ring\[[ij]\]\s*,\s*origin\s*\)", geom)
 
 
-def test_interactive_viewer_is_a_local_frame_not_absolute_world():
-    # The viewer never holds absolute geospatial coordinates: its orbit camera
-    # is distance-bounded (a local frame), and the viewer terrain path contains
-    # no ECEF/geodetic conversion. If a future change introduces absolute
-    # coordinates here, it must anchor them and this guard should be revisited.
-    cam = _src("viewer/camera_controller.rs")
-    assert "clamp(0.1, 1000.0)" in cam, "orbit camera is no longer a bounded local frame"
-    # No absolute-Earth-scale geodesy in the viewer terrain render path.
+def test_viewer_terrain_render_path_does_no_absolute_earth_scale_geodesy():
+    # HONEST SCOPE: this asserts only that the viewer's terrain render path never
+    # *derives* absolute ECEF/geodetic world coordinates itself. It does NOT
+    # prove the viewer is a local frame — `set_look_at` (camera_controller.rs)
+    # stores an arbitrary f32 orbit target with no magnitude limit (the
+    # clamp(0.1,1000) in zoom() bounds only the interactive orbit distance). The
+    # viewer's local frame is a CONVENTION enforced Python-side (normalized/
+    # terrain-local overlay coords), not a Rust contract: a caller that pushes
+    # absolute projected coordinates through the f32 IPC camera/label fields
+    # would lose precision. That un-anchored viewer path is the documented M-06
+    # residual (see mensura-m06-world-coord-anchoring.md).
     forbidden = re.compile(r"\b(6_?378_?137|wgs84_to_ecef|geodetic_to_ecef)\b", re.IGNORECASE)
     for rel in ("viewer/terrain/scene.rs", "viewer/cmd/terrain_command.rs",
                 "viewer/camera_controller.rs"):

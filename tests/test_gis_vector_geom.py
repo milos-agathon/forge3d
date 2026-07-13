@@ -469,3 +469,47 @@ def test_topology_ops_split_dateline_crossing_polygon(op):
 
     collect(geom["coordinates"])
     assert xs and all(-180.01 <= x <= 180.01 for x in xs)
+
+
+def _fc_4326(poly):
+    return {
+        "type": "FeatureCollection",
+        "info": {"crs_authority": {"name": "EPSG", "code": "4326"}},
+        "features": [{"type": "Feature", "properties": {}, "geometry": poly}],
+    }
+
+
+def _box(w, e, s, n):
+    return {"type": "Polygon", "coordinates": [[[w, n], [e, n], [e, s], [w, s], [w, n]]]}
+
+
+def _all_lons_in_range(result):
+    xs = []
+
+    def collect(v):
+        if isinstance(v, (list, tuple)) and v and isinstance(v[0], (int, float)):
+            xs.append(v[0])
+        elif isinstance(v, (list, tuple)):
+            for x in v:
+                collect(x)
+
+    feats = result.get("features") if isinstance(result, dict) else None
+    geoms = [f["geometry"] for f in feats] if feats else (
+        [result["geometry"]] if isinstance(result, dict) and "geometry" in result else []
+    )
+    for gm in geoms:
+        collect(gm.get("coordinates", []))
+    return bool(xs) and all(-180.01 <= x <= 180.01 for x in xs)
+
+
+def test_clip_dissolve_intersect_split_dateline_crossing_geometry():
+    # MENSURA M-04: the remaining feature-gated topology ops (clip, dissolve,
+    # intersect) also emit split, in-range geometry across the antimeridian.
+    cross = _box(175, -175, -5, 5)  # crosses +/-180
+    assert _all_lons_in_range(gis.dissolve_vector(_fc_4326(cross)))
+    assert _all_lons_in_range(
+        gis.clip_vector(_fc_4326(cross), _box(178, -178, -3, 3), clip_crs="EPSG:4326")
+    )
+    assert _all_lons_in_range(
+        gis.intersect_vectors(_fc_4326(cross), _fc_4326(_box(178, -170, -4, 4)))
+    )

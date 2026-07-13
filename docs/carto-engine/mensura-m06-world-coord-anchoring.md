@@ -1,16 +1,23 @@
 # MENSURA M-06 — World-Coordinate Anchoring: Audit, Verdict, Boundary
 
-**Verdict (after a full data-flow trace of every flagged subsystem): M-06's
-acceptance is met.** Every path that carries *absolute geospatial* coordinates
-(ECEF / projected UTM / Web Mercator, magnitudes 5e5–6.4e6 m, where f32 costs
-0.03–1 m) keeps them in `f64` and narrows only through the single
-`Anchor::narrow` site. The `f32` "world" storage the earlier inventory/audit
-flagged as renderer-wide turned out, on tracing, to be **local- or
-normalized-frame** coordinates where `f32` is correct — a mis-classification of
-frame, not a precision bug.
+**Verdict (partial — honest after a full data-flow trace).** The paths that
+carry *absolute geospatial* coordinates in **production** — offscreen `Scene`,
+3D-Tiles, point clouds, CityJSON (origin-relative) — keep them in `f64` and
+narrow only through the single `Anchor::narrow` site (this production half
+verified; it does not by itself satisfy M-06's renderer-*wide* acceptance).
+But the **interactive viewer is NOT anchored**: `set_look_at`
+(`src/viewer/camera_controller.rs`) stores an arbitrary `f32` orbit target with
+no magnitude limit, and the IPC camera/label/callout fields are `f32`
+(`request.rs`, `commands.rs`). Its terrain-local frame is a *convention*
+enforced Python-side (normalized/terrain-local overlay coords), **not** a Rust
+contract — a caller that pushes absolute projected coordinates through those f32
+IPC fields would lose 0.03–1 m of precision. So M-06 is **not** fully met; the
+un-anchored viewer path is the genuine residual (§ Residual below).
 
-This file records the audit the plan requires and locks the boundary with
-`tests/test_m06_anchoring_boundary.py`.
+An earlier revision of this file over-claimed "acceptance met" by treating the
+viewer's *conventional* local frame as if it were *enforced*; that claim is
+retracted here. This file records the audit the plan requires and locks the
+verified half with `tests/test_m06_anchoring_boundary.py`.
 
 ## Acceptance, and how each clause is met
 
@@ -51,12 +58,23 @@ the *correct* representation; widening them to f64 would add cost without
 precision. A regression that introduces a genuine absolute-world f32 path (or
 de-anchors one above) is caught by `test_m06_anchoring_boundary.py`.
 
-## Residual (optional, not a correctness gap)
+## Residual — the un-anchored interactive viewer (the real M-06 gap)
 
-If a future workflow feeds the interactive viewer *un-normalized* absolute
-projected coordinates (rather than the current normalized/terrain-local ones),
-the viewer would need the same treatment as `Scene`: an `Anchor` on the viewer
-struct and f64 IPC world fields. That change is a rigid translation — safe by
-construction — but its end-to-end validation requires a rendered frame from the
-running viewer, so it is deliberately left as an explicit, guarded follow-up
-rather than an unverified rewrite of the default user path.
+To fully meet M-06, the interactive viewer must be anchored like `Scene`:
+1. Widen the IPC world fields to `f64` (`request.rs`/`commands.rs`:
+   `SetCamLookAt.{eye,target}`, `SetTransform.translation`, `SetTerrain(Camera).target`,
+   `LoadOverlay.extent`, `AddVectorOverlay.vertices`, `AddLabel/AddLineLabel/AddCurvedLabel/AddCallout`).
+2. Add `camera_anchor: Anchor` to the viewer; on each camera update rebase it and
+   store an `f64` world target; widen `OrbitCamera.target` to `DVec3`.
+3. Build the view matrix anchor-relative (`camera/mod.rs:anchored_view` pattern),
+   and subtract the same origin at every geometry consumption boundary
+   (`ipc_command.rs`, `terrain_command.rs`, `vector_overlay_command.rs`,
+   `labels_command.rs`). Because every subsystem subtracts the SAME origin, this
+   is a rigid translation — correct by construction.
+
+This is left explicit and un-done rather than shipped unverified: it is a large,
+coordinated change to a live GPU runtime whose end-to-end correctness (camera +
+terrain + overlay alignment at Earth-scale) can only be confirmed by a **rendered
+frame from the running viewer**, which the CI/test environment here cannot
+produce (its GPU test lane hangs). The math is unit-verifiable; the pixels are
+not, in this environment.
