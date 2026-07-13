@@ -466,4 +466,40 @@ mod tests {
             (100.0, 200.0)
         );
     }
+
+    #[test]
+    fn projection_domain_edges_are_handled() {
+        let wgs84 = spec("EPSG:4326");
+        // North pole -> UPS North (Polar Stereographic A) maps to the false
+        // origin (2e6, 2e6), and inverts back to lat = 90.
+        let ups_n = spec("EPSG:5041");
+        let (e, n) = transform_point(0.0, 90.0, &wgs84, &ups_n).expect("pole forward");
+        assert!((e - 2_000_000.0).abs() < 1e-3, "pole easting {e}");
+        assert!((n - 2_000_000.0).abs() < 1e-3, "pole northing {n}");
+        let (_lon, lat) = transform_point(e, n, &ups_n, &wgs84).expect("pole inverse");
+        assert!((lat - 90.0).abs() < 1e-9, "recovered pole lat {lat}");
+
+        // UTM 33N central meridian (lon 15) at the equator sits at the false
+        // easting with zero northing.
+        let utm33n = spec("EPSG:32633");
+        let (e, n) = transform_point(15.0, 0.0, &wgs84, &utm33n).expect("cm forward");
+        assert!(
+            (e - 500_000.0).abs() < 1e-3 && n.abs() < 1e-3,
+            "cm ({e},{n})"
+        );
+
+        // Southern UTM carries the 10,000,000 m false northing.
+        let utm33s = spec("EPSG:32733");
+        let (_e, n) = transform_point(15.0, -0.001, &wgs84, &utm33s).expect("south forward");
+        assert!(n > 9_999_000.0, "southern false northing {n}");
+
+        // Non-finite input is rejected, never projected.
+        assert!(transform_point(f64::INFINITY, 0.0, &wgs84, &utm33n).is_err());
+        assert!(transform_point(0.0, f64::NAN, &wgs84, &utm33n).is_err());
+
+        // An out-of-zone longitude (30 deg from the central meridian) still
+        // yields a finite, distorted result rather than NaN or a panic.
+        let (e, n) = transform_point(45.0, 10.0, &wgs84, &utm33n).expect("out-of-zone");
+        assert!(e.is_finite() && n.is_finite(), "out-of-zone ({e},{n})");
+    }
 }
