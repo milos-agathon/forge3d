@@ -404,3 +404,36 @@ def test_no_python_gis_backend_imports_in_forge3d_gis():
         assert banned not in imports
 
 
+
+
+def test_union_splits_dateline_crossing_polygon_into_coherent_pieces():
+    # MENSURA M-04: a polygon crossing +/-180 comes back as a MultiPolygon split
+    # at the antimeridian, each piece coherent in [-180, 180] rather than the
+    # world-spanning complement.
+    poly = {
+        "type": "Polygon",
+        "coordinates": [[[170, 10], [-170, 10], [-170, -10], [170, -10], [170, 10]]],
+        "info": {"crs_authority": {"name": "EPSG", "code": "4326"}},
+    }
+    geom = gis.union_geometries([poly])["geometry"]
+    assert geom["type"] == "MultiPolygon"
+    assert len(geom["coordinates"]) == 2
+    for piece in geom["coordinates"]:
+        xs = [pt[0] for ring in piece for pt in ring]
+        assert all(-180.0 <= x <= 180.0 for x in xs), xs
+        east = all(x >= 170.0 - 1e-6 for x in xs)
+        west = all(x <= -170.0 + 1e-6 for x in xs)
+        assert east or west, f"piece straddles dateline: {xs}"
+
+
+def test_declared_projected_crs_polygon_is_not_dateline_split():
+    # MENSURA M-04: a DECLARED projected CRS forces planar handling even when the
+    # numeric coordinates happen to fall in lon/lat ranges — no false split.
+    poly = {
+        "type": "Polygon",
+        "coordinates": [[[170, 10], [-170, 10], [-170, -10], [170, -10], [170, 10]]],
+        "info": {"crs_authority": {"name": "EPSG", "code": "32633"}},
+    }
+    geom = gis.union_geometries([poly])["geometry"]
+    # Planar: no antimeridian semantics, so it stays a single Polygon.
+    assert geom["type"] == "Polygon"

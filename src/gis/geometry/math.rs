@@ -124,27 +124,6 @@ pub(super) fn unwrap_dateline(geometries: &mut [Geometry]) -> bool {
     changed
 }
 
-/// Wrap every vertex longitude of a geometry back into (-180, 180] after an
-/// operation ran on dateline-unwrapped coordinates.
-pub(super) fn wrap_geometry_lons(geometry: &mut Geometry) {
-    fn wrap_points(points: &mut [Coord]) {
-        for p in points {
-            p.x = wrap_lon(p.x);
-        }
-    }
-    match geometry {
-        Geometry::Empty => {}
-        Geometry::Point(p) => p.x = wrap_lon(p.x),
-        Geometry::MultiPoint(ps) | Geometry::LineString(ps) => wrap_points(ps),
-        Geometry::MultiLineString(lines) => lines.iter_mut().for_each(|l| wrap_points(l)),
-        Geometry::Polygon(rings) => rings.iter_mut().for_each(|r| wrap_points(r)),
-        Geometry::MultiPolygon(polys) => polys
-            .iter_mut()
-            .for_each(|rings| rings.iter_mut().for_each(|r| wrap_points(r))),
-        Geometry::Collection(items) => items.iter_mut().for_each(wrap_geometry_lons),
-    }
-}
-
 /// Shift every vertex longitude of a geometry by `delta` degrees (used to
 /// align two dateline-unwrapped operands onto the same 360° sheet).
 pub(super) fn shift_geometry_lons(geometry: &mut Geometry, delta: f64) {

@@ -3,6 +3,7 @@ use serde_json::{json, Map, Value};
 use crate::gis::error::{GisError, GisResult};
 use crate::gis::types::RasterWarning;
 
+mod antimeridian;
 mod centroid;
 mod line_ops;
 mod math;
@@ -19,7 +20,7 @@ use line_ops::{
     interpolate_lines, lines_for_interpolation, normalized_target_distance,
     representative_for_geometry, total_line_length, validate_distance,
 };
-use math::{looks_geographic, unwrap_dateline, wrap_geometry_lons};
+use math::{looks_geographic, unwrap_dateline};
 pub use measure::MeasureMode;
 use measure::{measure_geometries, validate_metric_names};
 use model::{
@@ -274,7 +275,7 @@ pub fn union_geometries(source: &Value) -> GisResult<Value> {
         dateline_normalized(&input.geometries, geographic_for_input(&input));
     let mut geometry = union_polygonal(&geometries)?;
     if wrapped {
-        wrap_geometry_lons(&mut geometry);
+        geometry = antimeridian::split_at_antimeridian(&geometry);
     }
     let output_geometry_type = geometry.geometry_type();
     let type_changed = output_geometry_type != input.input_geometry_type;
@@ -334,7 +335,7 @@ pub fn buffer_geometry(source: &Value, distance: f64, quad_segs: i64) -> GisResu
     );
     let mut output = buffer_topology(&geometries[0], distance, quad_segs as usize)?;
     if wrapped {
-        wrap_geometry_lons(&mut output);
+        output = antimeridian::split_at_antimeridian(&output);
     }
     buffer_geometry_output(&input, output, true)
 }
@@ -362,7 +363,7 @@ pub fn simplify_geometry(
     );
     let mut output = simplify_topology(&geometries[0], tolerance, preserve_topology)?;
     if wrapped {
-        wrap_geometry_lons(&mut output);
+        output = antimeridian::split_at_antimeridian(&output);
     }
     simplify_geometry_output(&input, output, &input.crs)
 }
@@ -381,7 +382,7 @@ pub(crate) fn prepare_polygonal_clip_mask(source: &Value) -> GisResult<Polygonal
         union_polygonal(&geometries)?
     };
     if wrapped {
-        wrap_geometry_lons(&mut geometry);
+        geometry = antimeridian::split_at_antimeridian(&geometry);
     }
     Ok(PolygonalClipMask { geometry })
 }
@@ -436,7 +437,7 @@ pub(crate) fn union_polygonal_geometry_values(
     let (geometries, wrapped) = dateline_normalized(&geometries, geographic);
     let mut output = union_polygonal(&geometries)?;
     if wrapped {
-        wrap_geometry_lons(&mut output);
+        output = antimeridian::split_at_antimeridian(&output);
     }
     if output.is_empty() {
         Ok(None)
@@ -495,7 +496,7 @@ fn intersect_polygonal_geometry_values_for_operation(
     }
     let mut output = intersection_polygonal(&both[0], &both[1], operation)?;
     if wrapped {
-        wrap_geometry_lons(&mut output);
+        output = antimeridian::split_at_antimeridian(&output);
     }
     if output.is_empty() {
         Ok(None)
@@ -629,15 +630,23 @@ fn require_polygonal_geometry(geometry: &Geometry, operation: &str) -> GisResult
 fn normalize_union_input(source: &Value) -> GisResult<NormalizedInput> {
     if let Some(items) = source.as_array() {
         let mut geometries = Vec::with_capacity(items.len());
+        // Inherit the first declared CRS so a projected-CRS geometry array is
+        // measured/normalized planar instead of falling through to the numeric
+        // range guess (looks_geographic). Mixed-CRS input is ill-defined; the
+        // first declaration wins.
+        let mut crs: Option<Value> = None;
         for item in items {
             let input = normalize_input(item, false)?;
+            if crs.is_none() {
+                crs = input.crs.clone();
+            }
             geometries.extend(input.geometries);
         }
         return Ok(NormalizedInput {
             input_geometry_type: common_geometry_type(&geometries),
             input_count: items.len(),
             geometries,
-            crs: None,
+            crs,
         });
     }
     if source.get("type").and_then(Value::as_str) == Some("FeatureCollection") {

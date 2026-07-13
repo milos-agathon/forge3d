@@ -122,7 +122,8 @@ pub fn read_raster_py(
         overwrite = false,
         creation_options = None,
         like_path = None,
-        like_info = None
+        like_info = None,
+        height_system = None
     )
 )]
 #[allow(clippy::too_many_arguments)]
@@ -137,6 +138,7 @@ pub fn write_raster_py(
     creation_options: Option<&Bound<'_, PyAny>>,
     like_path: Option<String>,
     like_info: Option<&Bound<'_, PyAny>>,
+    height_system: Option<String>,
 ) -> PyResult<RasterInfo> {
     if like_path.is_some() && like_info.is_some() {
         return Err(GisError::InvalidArgument(
@@ -163,6 +165,24 @@ pub fn write_raster_py(
         None
     };
 
+    // MENSURA M-03: the vertical datum to persist. Explicit param wins;
+    // otherwise inherit a like_info's datum; otherwise "unspecified".
+    let height_system = match height_system {
+        Some(hs) => {
+            if !crate::gis::types::is_valid_height_system(&hs) {
+                return Err(GisError::InvalidArgument(format!(
+                    "invalid_argument: unsupported height_system {hs:?}"
+                ))
+                .into());
+            }
+            hs
+        }
+        None => like_info
+            .as_ref()
+            .map(|info| info.height_system.clone())
+            .unwrap_or_else(|| crate::gis::types::HEIGHT_SYSTEM_UNSPECIFIED.to_string()),
+    };
+
     let options = WriteRasterOptions {
         crs,
         transform,
@@ -172,6 +192,7 @@ pub fn write_raster_py(
         creation_options,
         creation_options_explicit,
         like_info,
+        height_system,
     };
     write_raster(path, raster_array, options).map_err(Into::into)
 }

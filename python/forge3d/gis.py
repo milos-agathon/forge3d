@@ -394,11 +394,17 @@ def write_raster(
     creation_options: dict[str, Any] | None = None,
     like_path: os.PathLike[str] | str | None = None,
     like_info: Any | None = None,
+    height_system: str | None = None,
 ):
     """Write a local GeoTIFF and return reopened metadata.
 
     Accepted array shapes are (height, width) and band-first
     (bands, height, width). HWC arrays are not a separate G-002a1 mode.
+
+    ``height_system`` (MENSURA) persists the vertical datum
+    ("ellipsoidal" / "orthometric_egm96" / "chart_datum") as a private GeoTIFF
+    tag so it survives a write->read round trip; the default inherits from
+    ``like_info`` or stays "unspecified".
     """
     like_path_value = None if like_path is None else os.fspath(like_path)
     return _require_native().write_raster(
@@ -412,6 +418,7 @@ def write_raster(
         creation_options=creation_options,
         like_path=like_path_value,
         like_info=like_info,
+        height_system=height_system,
     )
 
 

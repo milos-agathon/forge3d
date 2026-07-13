@@ -102,6 +102,7 @@ pub fn assign_crs(path: impl AsRef<Path>, crs: CrsSpec, overwrite: bool) -> GisR
         creation_options: Default::default(),
         creation_options_explicit: false,
         like_info: None,
+        height_system: loaded.info.height_system.clone(),
     };
     let mut info = write_raster(path, loaded.array, options)?;
     info.warnings.push(RasterWarning::new(

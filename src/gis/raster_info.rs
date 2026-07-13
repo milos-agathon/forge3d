@@ -49,6 +49,18 @@ pub fn read_raster_info(path: impl AsRef<Path>) -> GisResult<RasterInfo> {
 
     info.dtype_per_band = dtype_per_band(&mut decoder, band_count)?;
     info.nodata_per_band = nodata_per_band(&mut decoder, band_count)?;
+    // MENSURA M-03: read back the persisted vertical datum, if any. An absent
+    // or unrecognized tag leaves the "unspecified" default intact.
+    if let Some(value) = decoder.find_tag(Tag::Unknown(
+        crate::gis::raster_write::FORGE3D_HEIGHT_SYSTEM_TAG,
+    ))? {
+        if let Ok(raw) = value.into_string() {
+            let tag = raw.trim_matches(char::from(0)).trim();
+            if crate::gis::types::is_valid_height_system(tag) {
+                info.height_system = tag.to_string();
+            }
+        }
+    }
     info.block_size = Some(vec![decoder.chunk_dimensions(); band_count as usize]);
     info.tiling = Some(match decoder.get_chunk_type() {
         ChunkType::Strip => "striped".to_string(),
@@ -1131,6 +1143,7 @@ mod tests {
                 creation_options: CreationOptions::default(),
                 creation_options_explicit: false,
                 like_info: None,
+                height_system: crate::gis::types::HEIGHT_SYSTEM_ELLIPSOIDAL.to_string(),
             },
         )
         .expect("write test raster");
@@ -1154,6 +1167,8 @@ mod tests {
         assert_eq!(result.info.band_count, 1);
         assert_eq!(result.info.dtype_per_band, vec!["uint8"]);
         assert_eq!(result.nodata_per_band, vec![Some(99.0)]);
+        // MENSURA M-03: the vertical datum survived the GeoTIFF write->read.
+        assert_eq!(result.info.height_system, "ellipsoidal");
         assert_eq!(
             result.window_transform.map(AffineTransform::tuple),
             Some((2.0, 0.0, 12.0, 0.0, -3.0, 50.0))

@@ -178,3 +178,25 @@ def test_raster_info_as_dict_includes_height_system(tmp_path):
     info = gis.read_raster_info(str(path))
     d = info.as_dict()
     assert d["height_system"] == "unspecified"
+
+
+def test_height_system_persists_across_geotiff_write_read(tmp_path):
+    # M-03: an explicitly declared vertical datum survives a GeoTIFF write->read
+    # round trip via the private forge3d ASCII tag (65001).
+    for declared in ("orthometric_egm96", "ellipsoidal", "chart_datum"):
+        path = tmp_path / f"dem_{declared}.tif"
+        data = np.ones((1, 4, 4), dtype=np.float32)
+        gis.write_raster(
+            str(path),
+            data,
+            crs="EPSG:4326",
+            transform=(0.1, 0, 10, 0, -0.1, 52),
+            height_system=declared,
+        )
+        info = gis.read_raster_info(str(path))
+        assert info.height_system == declared, declared
+    # An undeclared write stays "unspecified" (no tag written).
+    plain = tmp_path / "plain.tif"
+    gis.write_raster(str(plain), np.ones((1, 4, 4), dtype=np.float32),
+                     crs="EPSG:4326", transform=(0.1, 0, 10, 0, -0.1, 52))
+    assert gis.read_raster_info(str(plain)).height_system == "unspecified"

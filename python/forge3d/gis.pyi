@@ -341,6 +341,7 @@ def write_raster(
     creation_options: dict[str, Any] | None = ...,
     like_path: os.PathLike[str] | str | None = ...,
     like_info: RasterInfo | None = ...,
+    height_system: str | None = ...,
 ) -> RasterInfo: ...
 
 

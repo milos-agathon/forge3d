@@ -12,6 +12,9 @@ use crate::gis::raster_info::read_raster_info;
 use crate::gis::types::{AffineTransform, RasterDType, RasterInfo};
 
 const FORGE3D_NODATA_PREFIX: &str = "forge3d:nodata_per_band=";
+/// Private TIFF ASCII tag (32768–65535 range) carrying the MENSURA vertical
+/// datum, so `height_system` survives a GeoTIFF write→read round trip.
+pub(crate) const FORGE3D_HEIGHT_SYSTEM_TAG: u16 = 65001;
 
 #[derive(Debug, Clone)]
 pub enum RasterData {
@@ -91,6 +94,9 @@ pub struct WriteRasterOptions {
     pub creation_options: CreationOptions,
     pub creation_options_explicit: bool,
     pub like_info: Option<RasterInfo>,
+    /// MENSURA M-03: vertical datum persisted as a private GeoTIFF ASCII tag
+    /// (see `FORGE3D_HEIGHT_SYSTEM_TAG`). "unspecified" is not written.
+    pub height_system: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -780,6 +786,19 @@ where
         );
         directory
             .write_tag(Tag::ImageDescription, encoded.as_str())
+            .map_err(|err| GisError::WriteFailed(err.to_string()))?;
+    }
+
+    // MENSURA M-03: persist a declared vertical datum. "unspecified" is the
+    // absent state and is never written (an absent tag reads back as such).
+    if crate::gis::types::is_valid_height_system(&options.height_system)
+        && options.height_system != crate::gis::types::HEIGHT_SYSTEM_UNSPECIFIED
+    {
+        directory
+            .write_tag(
+                Tag::Unknown(FORGE3D_HEIGHT_SYSTEM_TAG),
+                options.height_system.as_str(),
+            )
             .map_err(|err| GisError::WriteFailed(err.to_string()))?;
     }
 
