@@ -246,12 +246,16 @@ fn effective_features(
         .collect::<Result<Vec<_>, TextError>>()?;
     Ok(tags
         .into_iter()
-        .map(|tag| {
-            requested
+        .filter_map(|tag| {
+            let setting = requested
                 .iter()
                 .copied()
                 .find(|setting| setting.tag == tag)
-                .unwrap_or_else(|| FeatureSetting::new(tag, default_feature(tag, script, language)))
+                .unwrap_or_else(|| {
+                    FeatureSetting::new(tag, default_feature(tag, script, language))
+                });
+            (!(language.is_some() && tag == Tag::from_bytes(b"locl") && setting.enabled))
+                .then_some(setting)
         })
         .collect())
 }

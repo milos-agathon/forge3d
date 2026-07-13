@@ -471,92 +471,6 @@
   },
   {
     "id": "arabic-007",
-    "text": "ل‍ا",
-    "fonts": [
-      "assets/fonts/NotoSansArabic-subset.ttf"
-    ],
-    "size": 12.0,
-    "options": {
-      "script": "arab"
-    },
-    "runs": [
-      {
-        "text_range": [
-          0,
-          7
-        ],
-        "direction": "rtl",
-        "script": "arab",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 42,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 17,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 5,
-            "font_index": 0,
-            "cluster": 5,
-            "x_advance": 19,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "arabic-008",
-    "text": "ل‌ا",
-    "fonts": [
-      "assets/fonts/NotoSansArabic-subset.ttf"
-    ],
-    "size": 12.0,
-    "options": {
-      "script": "arab"
-    },
-    "runs": [
-      {
-        "text_range": [
-          0,
-          7
-        ],
-        "direction": "rtl",
-        "script": "arab",
-        "language": null,
-        "bidi_levels": [
-          1,
-          1,
-          1
-        ],
-        "glyphs": [
-          {
-            "glyph_id": 38,
-            "font_index": 0,
-            "cluster": 0,
-            "x_advance": 44,
-            "x_offset": 0
-          },
-          {
-            "glyph_id": 4,
-            "font_index": 0,
-            "cluster": 2,
-            "x_advance": 15,
-            "x_offset": 0
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "arabic-009",
     "text": "ااا",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -606,7 +520,7 @@
     ]
   },
   {
-    "id": "arabic-010",
+    "id": "arabic-008",
     "text": "ااب",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -663,7 +577,7 @@
     ]
   },
   {
-    "id": "arabic-011",
+    "id": "arabic-009",
     "text": "اات",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -720,7 +634,7 @@
     ]
   },
   {
-    "id": "arabic-012",
+    "id": "arabic-010",
     "text": "ااس",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -770,7 +684,7 @@
     ]
   },
   {
-    "id": "arabic-013",
+    "id": "arabic-011",
     "text": "اار",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -820,7 +734,7 @@
     ]
   },
   {
-    "id": "arabic-014",
+    "id": "arabic-012",
     "text": "اال",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -870,7 +784,7 @@
     ]
   },
   {
-    "id": "arabic-015",
+    "id": "arabic-013",
     "text": "اام",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -920,7 +834,7 @@
     ]
   },
   {
-    "id": "arabic-016",
+    "id": "arabic-014",
     "text": "اان",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -977,7 +891,7 @@
     ]
   },
   {
-    "id": "arabic-017",
+    "id": "arabic-015",
     "text": "ابا",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -1034,7 +948,7 @@
     ]
   },
   {
-    "id": "arabic-018",
+    "id": "arabic-016",
     "text": "ابب",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -1098,7 +1012,7 @@
     ]
   },
   {
-    "id": "arabic-019",
+    "id": "arabic-017",
     "text": "ابت",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -1162,7 +1076,7 @@
     ]
   },
   {
-    "id": "arabic-020",
+    "id": "arabic-018",
     "text": "ابس",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -1219,7 +1133,7 @@
     ]
   },
   {
-    "id": "arabic-021",
+    "id": "arabic-019",
     "text": "ابر",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -1276,7 +1190,7 @@
     ]
   },
   {
-    "id": "arabic-022",
+    "id": "arabic-020",
     "text": "ابل",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -1333,7 +1247,7 @@
     ]
   },
   {
-    "id": "arabic-023",
+    "id": "arabic-021",
     "text": "ابم",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -1390,7 +1304,7 @@
     ]
   },
   {
-    "id": "arabic-024",
+    "id": "arabic-022",
     "text": "ابن",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -1454,7 +1368,7 @@
     ]
   },
   {
-    "id": "arabic-025",
+    "id": "arabic-023",
     "text": "اتا",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -1511,7 +1425,7 @@
     ]
   },
   {
-    "id": "arabic-026",
+    "id": "arabic-024",
     "text": "اتب",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -1575,7 +1489,7 @@
     ]
   },
   {
-    "id": "arabic-027",
+    "id": "arabic-025",
     "text": "اتت",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -1639,7 +1553,7 @@
     ]
   },
   {
-    "id": "arabic-028",
+    "id": "arabic-026",
     "text": "اتس",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -1696,7 +1610,7 @@
     ]
   },
   {
-    "id": "arabic-029",
+    "id": "arabic-027",
     "text": "اتر",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -1753,7 +1667,7 @@
     ]
   },
   {
-    "id": "arabic-030",
+    "id": "arabic-028",
     "text": "اتل",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -1810,7 +1724,7 @@
     ]
   },
   {
-    "id": "arabic-031",
+    "id": "arabic-029",
     "text": "اتم",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -1867,7 +1781,7 @@
     ]
   },
   {
-    "id": "arabic-032",
+    "id": "arabic-030",
     "text": "اتن",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -1931,7 +1845,7 @@
     ]
   },
   {
-    "id": "arabic-033",
+    "id": "arabic-031",
     "text": "اسا",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -1981,7 +1895,7 @@
     ]
   },
   {
-    "id": "arabic-034",
+    "id": "arabic-032",
     "text": "اسب",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -2038,7 +1952,7 @@
     ]
   },
   {
-    "id": "arabic-035",
+    "id": "arabic-033",
     "text": "است",
     "fonts": [
       "assets/fonts/NotoSansArabic-subset.ttf"
@@ -2088,6 +2002,106 @@
             "font_index": 0,
             "cluster": 4,
             "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-034",
+    "text": "اسس",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 15,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 25,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 50,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 23,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 81,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-035",
+    "text": "اسر",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 15,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 25,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 50,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 21,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 25,
             "x_offset": 0
           }
         ]
