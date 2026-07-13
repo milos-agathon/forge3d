@@ -871,24 +871,23 @@ fn validate_authority_code(authority: &str, code: &str) -> GisResult<(String, St
             "CRS authority must be EPSG with a numeric code".to_string(),
         ));
     }
-    // MENSURA: the built-in pure-Rust projection engine handles 4326, 3857,
-    // and every WGS84 UTM zone. Other geographic-family codes (4000-4999)
-    // parse so downstream code can reject them with a precise diagnostic
-    // (e.g. geometry_measure's degree guard).
+    // MENSURA: projected-CRS support is defined by the one authoritative
+    // projection table (`crate::geo::projections::epsg_projection_definition`);
+    // this check delegates to it so the two never drift. Geographic-family
+    // codes (4000-4999, incl. 4326 and 4979) parse so downstream code can reject
+    // them with a precise diagnostic (e.g. geometry_measure's degree guard).
     let numeric: u32 = code
         .parse()
         .map_err(|_| GisError::InvalidCrs(format!("EPSG code {code} is not a valid number")))?;
-    let supported = matches!(numeric, 4326 | 3857)
-        || (32601..=32660).contains(&numeric)
-        || (32701..=32760).contains(&numeric)
-        || (4000..5000).contains(&numeric)
-        || numeric == 4979;
+    let supported = (4000..5000).contains(&numeric)
+        || crate::geo::projections::epsg_projection_definition(numeric).is_some();
     if supported {
         Ok((authority, code))
     } else {
         Err(GisError::InvalidCrs(format!(
-            "unsupported EPSG code {code}; this TIFF-only backend supports EPSG:4326, \
-             EPSG:3857, and the WGS84 UTM zones (EPSG:326zz/327zz)"
+            "unsupported EPSG code {code}; the built-in projection engine supports EPSG:4326, \
+             the WGS84 UTM zones (EPSG:326zz/327zz), and a curated set of projected CRSs \
+             (3857, 3395, 2154, 5070, 5041, 5042)"
         )))
     }
 }

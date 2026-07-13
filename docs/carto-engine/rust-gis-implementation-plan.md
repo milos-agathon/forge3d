@@ -6,7 +6,7 @@
 
 **Architecture:** GIS operations are implemented in Rust under `src/gis/`. Python exposes thin wrappers over Rust bindings and may use `rasterio`, `geopandas`, `shapely`, `rioxarray`, `xarray`, or R `terra` only as reference behavior in docs/tests, never as the forge3d backend. The roadmap is contract-level: every future function, attribute, diagnostic, error, and test requirement below is derived from existing examples or explicitly listed as an exception.
 
-**Tech Stack:** Rust, PyO3, numpy arrays at the Python boundary, `gdal`/`proj` for broad geospatial support, `geo`/`geo-types`/`geojson` for vector data, `tiff`/`image`/existing forge3d COG code where narrower native support is enough, and `ndarray` for array validation and data movement.
+**Tech Stack:** Rust, PyO3, numpy arrays at the Python boundary, the current `tiff`/`image` raster backend, optional pure-Rust `geo` topology, existing forge3d COG code, and `ndarray` for array validation and data movement. `gdal`/`proj` remain possible backends for the broad driver/CRS contracts below; they are not wired into the shipped `forge3d.gis` wheel.
 
 ## Global Constraints
 
@@ -76,6 +76,149 @@ Priority combines occurrence count, distinct physical scripts, distinct content 
 | `src/gis/domain.rs` | DEM, landcover, population, building, and scene-prep helpers built from primitives | later |
 
 `src/geo/` already contains limited PROJ-backed coordinate reprojection. Reuse or re-export it when implementing `src/gis/crs.rs`; do not duplicate it.
+
+## Implementation Status (Audited 2026-07-13)
+
+Status is based on executable behavior in the maturin wheel, not on whether a Python name or PyO3 function is registered. The shipped feature list in `pyproject.toml` includes `cog_streaming`, `gis-remote`, and the core GIS code, but omits both `geos-topology` and `proj`. CI compiles `geos-topology`; that does not make topology available to wheel users.
+
+`src/geo/` and `src/gis/` have different ownership. `src/geo/` is the dependency-light coordinate-math layer used by camera anchoring, 3D Tiles, geodesy bindings, and GIS. `src/gis/` owns raster/vector IO, metadata, masks, rasterization, and operation orchestration. MENSURA's geodesic, geoid, typed-unit, ECEF, and projection primitives therefore stay in `src/geo/`; GIS adapters consume them from `src/gis/`.
+
+| Area / planned APIs | Wheel status | Accurate limits and remaining work |
+|---|---|---|
+| Raster foundation: `read_raster_info`, `read_raster`, `write_raster` | **Partial, usable** | Local TIFF/GeoTIFF only. The reader accepts CRS GeoKeys only for EPSG:4326, EPSG:3857, and EPSG:32631, while CRS parsing/writing accepts every WGS84 UTM zone. This breaks non-zone-31 UTM write/read validation (for example EPSG:32632). Make the reader and writer share one supported-CRS table before calling the foundation complete. Broader raster drivers remain unimplemented. |
+| Affine, bounds, nodata, masks, and windowing | **Implemented subset** | Core helpers work and are tested. The contract remains TIFF-backed; rotated/sheared and boundless cases are diagnostic/subset behavior rather than GDAL-equivalent coverage. |
+| CRS parsing and transforms: `parse_crs`, `CrsTransform`, `transform_bounds`, `web_mercator_bounds` | **Partial** | Public dispatch supports same-CRS, EPSG:4326, EPSG:3857, and WGS84 UTM 32601-32660/32701-32760. MENSURA's AEA, LCC, stereographic, and generic transverse-Mercator implementations exist in `src/geo/projections/` but are not reachable through EPSG dispatch. The optional `proj` implementation in `src/geo/reproject.rs` is not used by `src/gis/crs.rs` and is omitted from wheels. Wire one authoritative transform backend/dispatch path; do not claim arbitrary WKT/PROJ transforms meanwhile. |
+| Resampling and alignment: `resample_raster`, `align_raster_grid`, `assert_grid_compatible` | **Implemented subset** | Nearest and bilinear only. Mode/cubic/Lanczos and GDAL-grade categorical resampling are absent. Alignment deliberately does not reproject. |
+| Raster reprojection: `reproject_raster`, `calculate_default_transform` | **Partial; honest failure policy implemented** | Same built-in CRS limits as above and CPU per-pixel sampling. The default policy raises `TransformFailed` with the failure count and first pixel for parseable-but-untransformable pairs; `on_transform_error="nodata"` is the only opt-in fill path and emits a diagnostic. This is the MENSURA public contract and must not be replaced by a silent all-nodata success. `warped_vrt_info` is absent. |
+| Vector read/metadata: `read_vector`, schema/count/type/CRS/bounds | **Partial, GeoJSON only** | GPKG, Shapefile, FlatGeobuf, and WFS are registered expectations but return `BackendUnavailable`/`UnsupportedDriver`; no `gdal-vector` Cargo feature exists. Either add and ship a real backend or narrow the contract and fixtures to GeoJSON. |
+| Vector reprojection | **Partial** | GeoJSON-like inputs work only for the built-in CRS pairs. The GIS path does not use the existing optional PROJ implementation. |
+| Geometry validation, measure, centroid, line interpolation | **Implemented subset** | Validation and planar operations work. MENSURA adds WGS84 geodesic length/area. Other geographic CRSs are rejected rather than measured in degrees. |
+| `repair_geometry` | **Registered stub** | It always raises `BackendUnavailable`: `require_topology_backend("make_valid")` can never succeed and the implementation ends in `unreachable!`. Implement make-valid and positive tests; merely shipping `geos-topology` will not fix it. |
+| Polygon `representative_point` | **Registered stub** | Point and line inputs work, but polygon/MultiPolygon always return a topology-backend error even in topology builds. Implement a guaranteed-interior polygon point and feature-enabled tests. |
+| Union/buffer/clip/intersection/dissolve/simplify/multi-feature `load_boundary` | **Implemented in Rust, unavailable in shipped wheel** | These use optional pure-Rust `geo` behind `geos-topology`; the wheel omits that feature, so public calls are stubs in practice. Add `geos-topology` to maturin features and run wheel-level positive tests. `load_boundary(where=...)` is still unimplemented, and the planned union/destination-CRS options are absent. |
+| `rasterize_vectors` | **Correctness subset; serious performance defect** | The core loops over every grid cell for every feature: O(features x width x height), matching the measured roughly 50 ms/feature independent of feature size. Bound each feature to its pixel window or use a scanline/tiled rasterizer; keep the spin-off performance task as the owner. The planned `merge_alg` and per-geometry `burn_values` contract is also absent. |
+| `geometry_mask` and `mask_raster` | **Partial** | `geometry_mask` reuses the same O(features x grid) rasterizer and inherits its defect. `mask_raster` accepts a precomputed boolean mask, not geometries as the original contract states; keep that explicit or add a composed geometry overload. |
+| `normalize_raster`, `classify_raster` | **Implemented subset** | Min-max normalization and explicit-bin classification work. Other planned normalization/classification methods remain absent. |
+| `fetch_remote_geodata`, `cache_geodata` | **Shipped** | `gis-remote` is in maturin features and explicit fetch/cache behavior is implemented. Network tests remain mocked/conditional by design. |
+| `fetch_vector` | **Partial** | Remote GeoJSON works through the explicit cache/fetch path. GPKG/WFS and other vector drivers do not. |
+| `read_cog` | **Local subset; remote path miswired** | Local TIFF reads work only at overview 0. Every HTTP(S) input raises `BackendUnavailable` unconditionally even though wheels include `cog_streaming` and a range reader exists under `src/terrain/cog/`. Wire that existing reader or remove the remote COG claim. |
+| Slippy tiles | **Implemented subset** | WGS84/Web-Mercator tile indexing works with explicit antimeridian/latitude limits. Other input CRSs inherit the transform-backend limits. |
+| OSM: `parse_osm_features`, `query_osm_features`, `prepare_osm_scene` | **Parser shipped; query/scene cache-only** | Basic nodes and ways parse; relations are skipped with diagnostics. `query_osm_features` has no endpoint argument or `gis-remote` execution path and always raises without an injected `cache["osm_json"]`; `prepare_osm_scene` inherits that limitation. Add an explicit endpoint/fetch policy before calling either a query API. |
+| Terrarium | **Decode shipped; build cache-only** | RGB decode and cached tile mosaics work. `build_terrarium_dem` does not fetch missing tiles or consume a URL template despite the planned fetch/mosaic contract. |
+| Context/building helpers | **Partial** | GeoJSON and simple CityJSON paths work. GPKG is unavailable, and `load_building_footprints(dst_crs=...)` always raises for a missing PROJ path rather than using GIS reprojection. |
+| DEM, terrain derivatives, landcover, population | **Implemented subset** | Local raster/array composition works. Derivatives are limited to slope/hillshade; domain helpers inherit TIFF, CRS, resampling, and alignment limits. |
+| `read_gridded_dataset`, `subset_grid` | **Raster-like subset** | NetCDF/HDF5 always raise `BackendUnavailable`; `subset_grid` accepts raster-like path sources only. Add a real multidimensional backend only when a recipe requires it. |
+| `warped_vrt_info` | **Absent** | No Rust function, PyO3 registration, Python wrapper, or test exists. Keep deferred unless a caller needs virtual-warp metadata. |
+| Routing | **Deferred** | Still belongs outside `src/gis/`. |
+
+### Remaining Work Order
+
+1. **P0 shipped-wheel truth:** include `geos-topology` in maturin and add wheel-level positive topology tests; implement `repair_geometry` and polygon `representative_point` separately because they are not completed by that feature.
+2. **P0 rasterization:** close the spin-off O(features x grid) task in the shared rasterizer so both `rasterize_vectors` and `geometry_mask` benefit.
+3. **P0 CRS/raster correctness:** unify GeoTIFF CRS read/write support and complete the MENSURA transform dispatch. An optional internal support preflight may avoid wasted allocation, but the default public failure must remain `TransformFailed{count, first_pixel}` for parseable unsupported pairs.
+4. **P1 backend wiring:** route GIS transforms through the existing PROJ path when enabled, and route remote `read_cog` through the existing COG range reader when `cog_streaming` is enabled.
+5. **P1 contract completion:** decide whether to implement broad vector drivers, rasterize merge semantics, boundary filtering/reprojection, live OSM, Terrarium fetching, and multidimensional grids. Until then keep them marked partial rather than adding more registered stubs.
+6. **P2/defer:** implement `warped_vrt_info` and broader thematic/derivative methods only when an actual recipe needs them.
+
+## MENSURA Full-Implementation Plan
+
+The authoritative scope is [`docs/prompts/fable5-moonshots/13-mensura.md`](../prompts/fable5-moonshots/13-mensura.md). MENSURA is not complete merely because its modules or Python names exist. Completion requires all six measurable wins, the public GIS/renderer wiring that makes them load-bearing, and actual measured evidence from the shipped extension. The tasks below cover that full scope without expanding into a full EPSG registry, globe rendering, NTv2/NADCON grids, or a general `f64` renderer.
+
+Current focused evidence from the 2026-07-13 audit: 404 tests passed and one optional test skipped across the MENSURA/API-contract files; `cargo test --doc` passed all five `compile_fail` examples. The built extension measured `7.105e-14 degrees` maximum angular and `8.425e-09 m` ECEF conservation residual over 10,000 points, `0.4593 m` worst EGM96 residual, `3.725e-09 m`/`1.191e-10 degrees` worst Karney inverse residual, and one heuristic-gate-approved world-coordinate narrowing site. These numbers validate the implemented numerical subset; they do not close the wiring gaps below. The optional pyproj differential covered UTM, Web Mercator, and ECEF only, not all parameterized projection methods.
+
+### M-01: Phantom-Typed Units, Heights, CRS, And Epochs
+
+**Current status: implemented core, incomplete transform coverage/CI proof.** `src/geo/units.rs` defines the required length, angle, height, CRS, and epoch types; exact foot/US-survey-foot and degree/radian/grad conversions; five `compile_fail` examples that pass locally under `cargo test --doc`; and a typed Helmert route. The only concrete epoch transform is ITRF2000 -> ITRF2014 at the 2010.0 reference epoch.
+
+- [x] Define `Length<U>`, `Angle<U>`, `Height<S>`, `Coord<C,E>`, sealed marker traits, same-type arithmetic, and explicit conversions.
+- [x] Make metre-plus-angle, orthometric-versus-ellipsoidal height arithmetic, epoch mismatch, CRS mismatch, and direct world-coordinate narrowing fail to compile in rustdoc examples.
+- [x] Prove the five intended `compile_fail` contracts with a local `cargo test --doc` run.
+- [ ] Add `cargo test --doc` to CI; the existing `cargo doc` job checks documentation generation but does not execute doctests.
+- [ ] Complete the supported WGS84/ITRF-family Helmert surface: document frame realization and coordinate epoch separately, add the sanctioned inverse routes, cover ITRF2008, and either implement published rates for transforms away from their reference epoch or reject non-reference epochs explicitly. Do not imply plate-motion support from marker types alone.
+- [ ] Route every geodetic trust boundary through typed constructors; keep raw triples crate-private and validate finite longitude, latitude, height, Helmert parameter, and epoch inputs before numerical work.
+- [ ] Add conversion and conservation tests for every shipped unit and datum direction, including round trips at Earth-radius magnitudes below `1e-4 m` ECEF residual.
+
+**Acceptance:** illegal combinations are compiler errors; all supported unit/datum round trips have named authoritative parameters and measured error; unsupported datum/epoch transforms are explicit errors, never identities.
+
+### M-02: Pure-Rust Projections And CRS Dispatch
+
+**Current status: kernels implemented, public dispatch and conformance proof partial.** Forward/inverse implementations exist for transverse Mercator (8th-order Kruger), LCC 2SP, Albers Equal Area, Polar Stereographic A, Mercator A, Web Mercator, and geocentric/ECEF. Bare-EPSG GIS dispatch reaches only Web Mercator and WGS84 UTM. Several tests accept centimetre-rounded published values, so the blanket source comment claiming every method is proven to 1 mm is stronger than the evidence.
+
+- [x] Implement all six requested projection methods plus geodetic/ECEF in pure Rust `f64`, without a required PROJ dependency.
+- [x] Preserve the WGS84 UTM full-zone 8th-order transverse-Mercator path and spherical EPSG:3857 compatibility.
+- [ ] Add a parameterized CRS/projection definition consumed by `src/gis/crs.rs` so LCC, AEA, Polar Stereographic A, Mercator A, and generic transverse Mercator are reachable without pretending to ship a full EPSG/WKT registry.
+- [ ] Make raster/vector transforms, bounds densification, CRS inspection, and GeoTIFF CRS metadata use one authoritative projection dispatcher and supported-CRS table. Keep optional PROJ only as a differential oracle, not a wheel requirement or hidden Python fallback.
+- [ ] Replace conformance claims based only on centimetre-rounded examples with reproducible evidence at `<= 1 mm` forward and inverse for every method. Record the actual worst residual per method; where the printed Guidance Note value lacks millimetre precision, add an authoritative higher-precision EPSG registry example or an optional PROJ differential check without weakening the gate.
+- [ ] Add domain and convergence tests for poles, central meridians, false origins, southern UTM, zone edges, inverse non-convergence, non-finite inputs, and out-of-area coordinates.
+- [ ] Keep the public boundary explicit: unsupported WKT/PROJ pipelines and unregistered EPSG codes raise a stable error; they never fall back to `pyproj` or return unchanged coordinates.
+
+**Acceptance:** all seven numerical paths are reachable through the intended Rust GIS surface, every method has a reported `<= 1 mm` forward/inverse residual, and the optional PROJ oracle differs by `< 1 mm` over a fixed-seed 10,000-point corpus.
+
+### M-03: EGM96 And The Vertical-Datum Boundary
+
+**Current status: evaluator implemented, ingestion boundary partial.** The degree/order-120 EGM96 evaluator uses fully normalized stable recursion and a documented 236,168-byte coefficient asset. Twenty NGA reference points and per-pixel conversion tests exist. Terrarium results carry `orthometric_egm96`, but `RasterInfo`, GeoTIFF/COG reads, raster writes, and general DEM preparation do not carry a first-class height system; `prepare_dem` currently reports `unspecified`.
+
+- [x] Ship the compact EGM96 degree/order-120 coefficient asset with format/provenance documentation and Holmes-Featherstone-style normalized evaluation.
+- [x] Expose typed geoid undulation and orthometric/Ellipsoidal conversions, and require `Height<Ellipsoidal>` at the typed WGS84-to-ECEF boundary.
+- [ ] Add a `HeightSystem` field/enum to `RasterInfo` and preserve it through local TIFF/GeoTIFF, COG, windows, resampling, reprojection, alignment, write/read round trips, Terrarium mosaics, and domain-helper outputs.
+- [ ] Define explicit ingestion policy: read a supported vertical CRS/tag when present; otherwise require a caller declaration or retain `unspecified`. Never infer EGM96 solely from a horizontal CRS or generic elevation band.
+- [ ] Require an explicit orthometric-to-ellipsoidal conversion before DEM/terrain data enters ECEF, 3D Tiles, or any Earth-fixed render path. Reject `unspecified`, chart-datum, or mismatched geoid inputs at that boundary.
+- [ ] Add GeoTIFF/COG/Terrarium integration fixtures proving height-system preservation and a render-boundary test proving each orthometric pixel differs from its ellipsoidal value by exactly `N(lat,lon)` within `1e-6 m`.
+- [x] Report the actual worst residual across the 20 NGA points (`0.4593 m`), assert it remains `< 0.5 m`, and verify the coefficient asset remains `< 1 MiB` (currently 236,168 bytes).
+- [ ] Add polar, equatorial, longitude-wrap, invalid-latitude, and non-finite input tests.
+
+**Acceptance:** no DEM reaches ECEF through an untyped bare height, vertical metadata survives every GIS operation that preserves values, and the measured geoid/per-pixel gates are published in CI output.
+
+### M-04: Karney Geodesics, CRS-Aware Measures, Bounds, And Dateline Topology
+
+**Current status: geodesic solver and basic GIS integration implemented; topology normalization partial.** Direct/inverse Karney tests cover 50 committed GeodTest cases at the requested thresholds. EPSG:4326 measurements return metres/m2 and projected CRSs stay planar. Bounds densification is implemented. Geographic geometry handling currently unwraps longitude sequences onto a continuous 360-degree sheet and wraps outputs; it does not split geometries at +/-180 degrees as required before every topology operation.
+
+- [x] Ship Karney direct/inverse geodesics and the 50-case GeodTest regression at `|delta s| < 1e-8 m` and `|delta azimuth| < 1e-9 degrees`.
+- [x] Return WGS84 geographic length/perimeter in metres and geodesic polygon area in square metres; reject unsupported geographic CRSs rather than returning degrees.
+- [x] Densify every transformed bounds edge and compare against a 1,000-sample reference within `1e-6 * extent`.
+- [ ] Replace coordinate-range guessing in centroid/topology paths with explicit CRS context. A projected geometry whose numeric coordinates happen to fit lon/lat ranges must never be treated as geographic.
+- [ ] Implement a canonical antimeridian splitter at +/-180 degrees that preserves ring closure, holes, orientation, feature properties, and MultiPolygon/collection structure. Use it before geographic area, centroid, length, buffer, clip, intersection, union, dissolve, simplify, validation/repair, and representative-point operations; normalize outputs deterministically.
+- [ ] Add dateline regressions for lines, holes, multipolygons, collections, paired operands on opposite 360-degree sheets, pole-adjacent polygons, and each feature-gated topology operation. The existing 179-to--179 area/centroid case is necessary but not sufficient.
+- [ ] Emit unambiguous units and algorithm metadata (`metres_geodesic_wgs84`, square metres, source-CRS planar) on all measurement results and lock this in Python stubs/API contracts.
+
+**Acceptance:** no geographic measure is expressed in degrees, topology produces the small dateline-crossing geometry rather than its world-spanning complement, and all densification/geodesic thresholds report actual maxima.
+
+### M-05: Raster Reprojection Failure Semantics
+
+**Current status: core policy implemented.** `reproject_raster` defaults to `on_transform_error="raise"`, counts failed pixels, records the first `(row,col)`, and raises `TransformFailed`; explicit `"nodata"` fills and emits `transform_failures_filled_nodata`.
+
+- [x] Remove the silent transform-error-to-nodata fallback and expose the explicit raise/nodata policy through Rust, PyO3, Python, and stubs.
+- [x] Test partial transform failures, explicit nodata fill plus diagnostics, invalid policy values, a successful supported transform, and a wholly unsupported parseable pair.
+- [ ] Make error payloads structured and stable across Rust/PyO3/Python, including `count`, `first_pixel`, source CRS, destination CRS, and policy, instead of requiring callers to parse display text.
+- [ ] Ensure default-grid calculation, bounds densification, nearest/bilinear sampling, multiband data, nodata variants, and all future projection methods use the same policy. Add a gate that no `.ok()`/default-value transform suppression reappears in raster or vector reprojection.
+- [ ] If an internal support preflight is added for performance, preserve the public MENSURA contract: a parseable unsupported pair under the default raster policy raises `TransformFailed`, never a successful all-nodata raster.
+
+**Acceptance:** every failed coordinate is counted or explicitly filled by caller choice; default execution cannot report success when all transforms failed.
+
+### M-06: Camera-Relative Anchoring And The Single f32 Cliff
+
+**Current status: primitive and one camera path implemented; renderer-wide integration incomplete.** `Anchor` owns an `f64` origin, a 1 km default rebase threshold, typed and untyped relative conversion helpers, and the sole intended world-coordinate `as f32`. `Scene.set_camera_look_at` accepts `f64` triples and rebases its camera. Other camera helpers, terrain/viewer paths, point-cloud traversal, vector upload paths, and object model origins still expose `f32` world-like coordinates or do not consume the anchor; the current grep gate is heuristic and can miss unlabelled casts.
+
+- [x] Widen `Scene.set_camera_look_at` to `f64`, subtract an `f64` anchor before narrowing, and keep projection matrices in `f32`.
+- [x] Provide `Anchor::to_render_f32(Coord<...>)`, relative view construction, model offsets, and an Earth-radius precision regression.
+- [ ] Validate anchor epsilon and all camera/world inputs as finite and require a positive threshold; make rebase behavior deterministic at the threshold.
+- [ ] Give every geospatial renderable an `f64` object origin and recompute `(object_origin - anchor)` after a rebase. Wire this through Scene meshes, terrain/MapScene, 3D Tiles, point clouds, vector layers, viewer/offscreen render paths, culling/bounds, picking, labels, and shadows wherever coordinates are world-space rather than already local.
+- [ ] Separate local/render-space camera APIs from world-space APIs. Either widen `camera_look_at`/`camera_view_proj` world inputs to `f64` and anchor them, or name/document them as local-space only so they cannot silently accept ECEF/projected positions.
+- [ ] Audit every Rust GPU uniform and WGSL input carrying camera/object/world position. Absolute geospatial positions must stay `f64` on CPU and enter shaders only as anchor-relative `f32`; record each audited binding in a source-level allowlist.
+- [ ] Strengthen `test_world_coord_f32_gate.py` beyond nearby-name regexes: cover casts hidden behind helper functions/array conversions and assert that every world-to-render conversion calls `Anchor`. Keep exactly one sanctioned narrowing implementation in `src/camera/anchor.rs`.
+- [ ] Add rebase integration tests at local, UTM, and ECEF magnitudes covering stationary output invariance, multiple object origins, culling/picking consistency, and camera movement across repeated 1 km rebases.
+
+**Acceptance:** all geospatial world coordinates remain `f64` until subtraction from the current anchor, all dependent model offsets update on rebase, and the repository has exactly one auditable world-coordinate narrowing site.
+
+### M-07: Cross-Cutting API, Packaging, And Evidence Closure
+
+- [ ] Register every completed native symbol/class in the PyO3 module, re-export it from Python, update `__all__`, `.pyi` stubs, and positive `EXPECTED_FUNCTIONS`/`EXPECTED_CLASSES` contract tests. Remove or clearly feature-gate registered stubs.
+- [ ] Keep `pyproject.toml` runtime dependencies unchanged and add no required PROJ, pyproj, GeographicLib, uom, nalgebra, or trybuild dependency. Keep `proj` optional/dev-only and the EGM96 asset below 1 MiB.
+- [x] Run the 10,000-point fixed-seed conservation chain (`4326 -> local UTM -> 3857 -> ECEF -> 4326`) from the built extension: current maxima are `7.105e-14 degrees` angular and `8.425e-09 m` ECEF, below the required thresholds.
+- [ ] Capture actual worst residuals for every projection, EGM96, Karney distance/azimuth, and bounds densification; report the five compile-fail doctests and exact single-cliff count. A passing test name without the measured number is not completion evidence.
+- [ ] Rebuild the release extension, then run `cargo fmt --check`, `cargo forge3d-clippy`, the curated Cargo feature matrix (including `geos-topology`), `cargo test --doc`, the focused MENSURA tests, API-contract tests, and the full Python suite. Report unrelated failures separately; do not call MENSURA complete while a MENSURA gate is skipped or source-only.
+
+**MENSURA is complete only when M-01 through M-07 acceptance criteria are green in the shipped wheel.** Passing numerical unit tests does not compensate for missing vertical metadata, unreachable projection methods, unshipped topology, or renderer paths that bypass the anchor.
 
 ## Shared Output Types
 
@@ -263,40 +406,36 @@ Proof sources:
 
 ### G-002a1: Raster Read/Write Foundation
 
-- [ ] Add `src/gis/` module skeleton with `error.rs`, `types.rs`, `raster_info.rs`, and `raster_write.rs`.
-- [ ] Add Rust `RasterInfo`, `AffineTransform`, and error/warning types.
-- [ ] Implement `read_raster_info`.
-- [ ] Implement `read_raster` only after metadata tests pass.
-- [ ] Implement `write_raster`.
-- [ ] Add thin PyO3 wrappers and `.pyi` stubs.
-- [ ] Add fixture tests from `T-raster-meta`, `T-raster-read`, and `T-raster-write`.
+- [x] Add `src/gis/` module skeleton, Rust metadata/error types, thin PyO3 wrappers, stubs, and fixture tests.
+- [x] Implement local TIFF/GeoTIFF `read_raster_info`, `read_raster`, and `write_raster`.
+- [ ] Unify the GeoTIFF reader/writer CRS table so every accepted WGS84 UTM zone round-trips; add a non-zone-31 regression test.
+- [ ] Add broader raster drivers only with a real backend and fixtures; current status remains TIFF-only.
 
 ### G-002b: Raster CRS, Transform, Alignment, And Reprojection
 
-- [ ] Add `crs.rs` and `affine.rs` using existing `src/geo/reproject.rs` where possible.
-- [ ] Add CRS parsing/inspection/assignment and transformer contracts.
-- [ ] Add transform/bounds/resolution/window helpers.
-- [ ] Add nodata/mask helpers.
-- [ ] Add alignment diagnostics for shape/CRS/transform/nodata mismatch.
-- [ ] Add raster reprojection only with explicit resampling.
-- [ ] Add fixture tests from `T-crs`, `T-affine`, `T-window`, `T-reproject`, and `T-align`.
+- [x] Add `crs.rs`/`affine.rs`, parsing/inspection/assignment, affine/window, nodata/mask, alignment diagnostics, explicit-resampling reprojection, and fixture tests.
+- [x] Ship built-in same-CRS, WGS84, Web Mercator, and WGS84 UTM transforms.
+- [x] Raise `TransformFailed{count, first_pixel}` by default for a parseable unsupported raster transform; allow nodata fill only through explicit `on_transform_error="nodata"` with a diagnostic.
+- [ ] Optionally preflight transform support before expensive allocation while preserving the public MENSURA `TransformFailed` contract.
+- [ ] Wire `src/gis/crs.rs` to the existing optional PROJ backend instead of leaving two unrelated transform surfaces.
+- [ ] Expose additional MENSURA projection methods through supported CRS definitions only when authoritative CRS parameters are available.
+- [ ] Implement `warped_vrt_info` only if a real caller still needs it.
 
 ### G-002c: Vector, Mask, Rasterization, Classification
 
-- [ ] Add `vector.rs`, `rasterize.rs`, and `thematic.rs`.
-- [ ] Add vector metadata/read before full feature mutation helpers.
-- [ ] Add vector reprojection separate from raster reprojection.
-- [ ] Add geometry validation/repair before union/clip/intersection helpers.
-- [ ] Add masks/rasterization against explicit `RasterInfo` target grids.
-- [ ] Add raster normalization/classification with nodata-aware tests.
-- [ ] Add fixture tests from `T-vector-io`, `T-vector-crs`, `T-vector-geom`, `T-rasterize-mask`, and `T-thematic`.
+- [x] Add `vector.rs`, `rasterize.rs`, and `thematic.rs`, GeoJSON metadata/read/reprojection, explicit-grid masks/rasterization, nodata-aware thematic helpers, and fixture tests.
+- [x] Implement polygon topology operations behind `geos-topology` and test them in Cargo feature builds.
+- [ ] Ship `geos-topology` in maturin wheels and add wheel-level positive tests.
+- [ ] Implement real make-valid and polygon representative-point operations; both are currently registered stubs.
+- [ ] Close the shared rasterizer's O(features x grid) defect and then add missing merge/burn semantics.
+- [ ] Implement or explicitly defer non-GeoJSON vector drivers and `load_boundary` filtering/reprojection.
 
 ### Later: Domain Helpers And Remote Data
 
-- [ ] Build remote/cache contracts only after local raster/vector metadata contracts are stable.
-- [ ] Build OSM/Terrarium/slippy-tile helpers only on top of explicit remote/cache and CRS contracts.
-- [ ] Build DEM/landcover/population/building/gridded helpers as small wrappers over core raster/vector primitives.
-- [ ] Add fixture tests from `T-remote`, `T-osm`, and `T-domain`.
+- [x] Build explicit remote/cache, local COG, slippy-tile, OSM parsing, Terrarium decoding/cached mosaic, DEM/landcover/population/building, raster-like grid, and fixture-test subsets.
+- [ ] Wire remote COG reads to the shipped `cog_streaming` backend.
+- [ ] Add explicit live OSM and Terrarium fetch policies; current helpers are cache-only.
+- [ ] Add GPKG/other vector, destination-CRS building, and NetCDF/HDF support only with real backends and fixtures.
 
 ### Defer
 
