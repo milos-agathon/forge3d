@@ -73,6 +73,15 @@ mod py {
         window: Option<(i64, i64, u32, u32)>,
         overview: Option<i64>,
     ) -> PyResult<PyObject> {
+        // Validate cheap arguments BEFORE any network fetch so an unsupported
+        // request (e.g. overview != 0) fails fast instead of downloading first.
+        if overview.unwrap_or(0) != 0 {
+            return Err(GisError::InvalidArgument(
+                "metadata_unavailable: local TIFF reader has no overview selection support"
+                    .to_string(),
+            )
+            .into());
+        }
         let mut remote_warnings: Vec<RasterWarning> = Vec::new();
         // Remote COG: route through the shipped gis-remote fetch/cache path, then
         // decode the cached file with the local TIFF reader. Cache-aware -- repeat
@@ -102,13 +111,6 @@ mod py {
                 PathBuf::from(&path_or_url)
             };
 
-        if overview.unwrap_or(0) != 0 {
-            return Err(GisError::InvalidArgument(
-                "metadata_unavailable: local TIFF reader has no overview selection support"
-                    .to_string(),
-            )
-            .into());
-        }
         let result = raster_info::read_raster(
             &read_path,
             None,

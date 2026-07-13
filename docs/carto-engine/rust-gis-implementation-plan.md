@@ -79,7 +79,7 @@ Priority combines occurrence count, distinct physical scripts, distinct content 
 
 ## Implementation Status (Audited 2026-07-13)
 
-Status is based on executable behavior in the maturin wheel, not on whether a Python name or PyO3 function is registered. The shipped feature list in `pyproject.toml` includes `cog_streaming`, `gis-remote`, and the core GIS code, but omits both `geos-topology` and `proj`. CI compiles `geos-topology`; that does not make topology available to wheel users.
+Status is based on executable behavior in the maturin wheel, not on whether a Python name or PyO3 function is registered. The shipped feature list in `pyproject.toml` includes `cog_streaming`, `gis-remote`, the core GIS code, and — since the gis-operations work (2026-07-13) — `geos-topology`, so the topology operations are now available to wheel users. Only `proj` remains compiled out of the wheel (it needs the libproj system library; it is exercised in a dedicated CI job and used only as a differential oracle, never a runtime fallback).
 
 `src/geo/` and `src/gis/` have different ownership. `src/geo/` is the dependency-light coordinate-math layer used by camera anchoring, 3D Tiles, geodesy bindings, and GIS. `src/gis/` owns raster/vector IO, metadata, masks, rasterization, and operation orchestration. MENSURA's geodesic, geoid, typed-unit, ECEF, and projection primitives therefore stay in `src/geo/`; GIS adapters consume them from `src/gis/`.
 
@@ -116,7 +116,9 @@ Status is based on executable behavior in the maturin wheel, not on whether a Py
 1. **P0 shipped-wheel truth:** include `geos-topology` in maturin and add wheel-level positive topology tests; implement `repair_geometry` and polygon `representative_point` separately because they are not completed by that feature.
 2. **P0 rasterization:** close the spin-off O(features x grid) task in the shared rasterizer so both `rasterize_vectors` and `geometry_mask` benefit.
 3. **P0 CRS/raster correctness:** unify GeoTIFF CRS read/write support and complete the MENSURA transform dispatch. An optional internal support preflight may avoid wasted allocation, but the default public failure must remain `TransformFailed{count, first_pixel}` for parseable unsupported pairs.
-4. **P1 backend wiring:** route GIS transforms through the existing PROJ path when enabled, and route remote `read_cog` through the existing COG range reader when `cog_streaming` is enabled.
+4. **P1 backend wiring.** Two independent items:
+   - **PROJ policy (authoritative, resolves the earlier contradiction):** the built-in pure-Rust dispatcher is the *single runtime transform surface*. Optional PROJ (`src/geo/reproject.rs`, `#[cfg(feature = "proj")]`-only, omitted from the wheel) is used ONLY as a test-time differential oracle — it is NEVER a runtime or `pyproj` fallback (M-02). "Wiring GIS transforms to PROJ" therefore means *not having two transform surfaces*, not adding a runtime fallback; no runtime PROJ path is required or wanted, so there is nothing to implement here beyond keeping the built-in dispatcher authoritative.
+   - **Remote `read_cog`:** route it through a COG *range* reader when `cog_streaming` is enabled. Status: **partial** — remote reads work via a full fetch-to-cache convenience (see the `read_cog` row), but range-based streaming is not implemented.
 5. **P1 contract completion:** decide whether to implement broad vector drivers, rasterize merge semantics, boundary filtering/reprojection, live OSM, Terrarium fetching, and multidimensional grids. Until then keep them marked partial rather than adding more registered stubs.
 6. **P2/defer:** implement `warped_vrt_info` and broader thematic/derivative methods only when an actual recipe needs them.
 
@@ -138,9 +140,14 @@ Landed here (each with a red→green test and verified in the shipped wheel):
    table now backs the GeoTIFF reader, writer, and transform dispatch, so every accepted
    WGS84 UTM zone round-trips (32632 regression added). The default unsupported-pair
    failure remains `TransformFailed{count, first_pixel}`.
-4. **P1 remote read_cog (item 4) — done.** `read_cog` routes http(s) through the shipped
-   gis-remote fetch/cache path (cache-aware) then decodes locally, with the GIL released
-   across the fetch.
+4. **P1 remote read_cog (item 4) — partial.** `read_cog` now *works* on http(s) inputs:
+   it routes them through the shipped gis-remote fetch/cache path (cache-aware), decodes
+   locally, releases the GIL across the fetch, and validates `overview` before fetching.
+   It does NOT satisfy the range-reader requirement: it downloads the WHOLE object (a
+   diagnostic says so), so a windowed remote read still transfers the full file and
+   `cog_streaming`'s range reader is unused. Range-based streaming remains future work
+   (the existing `src/terrain/cog` reader is a heightfield `HeightReader`, not a general
+   typed-raster reader).
 
 **Out of scope in this worktree (MENSURA, `13-mensura.md`):** completing the transform
 dispatch to reach LCC/AEA/stereographic/generic-TM by bare EPSG lives entirely in
@@ -482,13 +489,15 @@ Proof sources:
 - [x] Implement polygon topology operations behind `geos-topology` and test them in Cargo feature builds.
 - [x] Ship `geos-topology` in maturin wheels and add wheel-level positive tests. (Added to `[tool.maturin] features`; wheel-level topology tests run under `FORGE3D_EXPECT_GEOS_TOPOLOGY=1`; no-silent-degradation gate (d) reconciled.)
 - [x] Implement real make-valid and polygon representative-point operations; both are currently registered stubs. (`make_valid` via even-odd boolean fill preserves a bowtie's area; `representative_point` via `geo::InteriorPoint`.)
-- [x] Close the shared rasterizer's O(features x grid) defect, then add missing merge/burn semantics. (Per-feature pixel-window bound landed; `merge_alg`/per-geometry `burn_values` still absent.)
+- [x] Close the shared rasterizer's O(features x grid) defect. (Per-feature pixel-window bound landed; regression guard added.)
+- [ ] Add the missing rasterize `merge_alg` and per-geometry `burn_values` semantics. Still absent.
 - [ ] Implement or explicitly defer non-GeoJSON vector drivers and `load_boundary` filtering/reprojection.
 
 ### Later: Domain Helpers And Remote Data
 
 - [x] Build explicit remote/cache, local COG, slippy-tile, OSM parsing, Terrarium decoding/cached mosaic, DEM/landcover/population/building, raster-like grid, and fixture-test subsets.
-- [x] Wire remote COG reads to the shipped remote backend. (`read_cog` routes http(s) through the gis-remote fetch/cache path, then decodes locally; live-server + unreachable-host tests added.)
+- [x] Make remote `read_cog` work: route http(s) through the gis-remote fetch/cache path, decode locally, and validate `overview` before fetching. Live-server, unreachable-host, and overview-before-fetch tests added.
+- [ ] Wire remote `read_cog` to a COG *range* reader (`cog_streaming`) so a windowed remote read transfers only the overlapping tiles. The current impl downloads the whole object (a diagnostic notes this); the existing `src/terrain/cog` reader is a heightfield `HeightReader`, so this needs a general range-backed reader (parse full IFD/GeoKeys, fetch per-tile ranges, decode per dtype/compression).
 - [ ] Add explicit live OSM and Terrarium fetch policies; current helpers are cache-only.
 - [ ] Add GPKG/other vector, destination-CRS building, and NetCDF/HDF support only with real backends and fixtures.
 

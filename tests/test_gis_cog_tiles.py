@@ -109,6 +109,14 @@ def test_read_cog_remote_unreachable_host_raises():
         gis.read_cog("http://127.0.0.1:1/data.tif")
 
 
+def test_read_cog_remote_overview_rejected_before_fetch():
+    # overview is validated before any download: the unsupported overview must be
+    # rejected (metadata_unavailable) without ever contacting the host, so the
+    # error is the overview rejection, not a network error from the dead port.
+    with pytest.raises(ValueError, match="metadata_unavailable|invalid_argument"):
+        gis.read_cog("http://127.0.0.1:1/data.tif", overview=1)
+
+
 def test_read_cog_rejects_overview_for_local_reader(tmp_path: Path):
     path = tmp_path / "overview.tif"
     gis.write_raster(path, np.ones((2, 2), dtype=np.uint8))
