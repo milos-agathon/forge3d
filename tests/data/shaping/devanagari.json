@@ -1,0 +1,2180 @@
+[
+  {
+    "id": "devanagari-00-00",
+    "text": "नमस्ते",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 8.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          18
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 28,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 25,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 9,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-00-01",
+    "text": "नमस्ते",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 10.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          18
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 28,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 25,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 9,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-00-02",
+    "text": "नमस्ते",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          18
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 28,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 25,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 9,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-00-03",
+    "text": "नमस्ते",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 16.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          18
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 28,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 25,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 9,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-00-04",
+    "text": "नमस्ते",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 24.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          18
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 28,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 25,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 9,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-00-05",
+    "text": "नमस्ते",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 32.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          18
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 28,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 25,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 9,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-01-00",
+    "text": "भारत",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 8.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          12
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 45,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 26,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 9,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 36,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-01-01",
+    "text": "भारत",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 10.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          12
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 45,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 26,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 9,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 36,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-01-02",
+    "text": "भारत",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          12
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 45,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 26,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 9,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 36,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-01-03",
+    "text": "भारत",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 16.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          12
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 45,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 26,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 9,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 36,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-01-04",
+    "text": "भारत",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 24.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          12
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 45,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 26,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 9,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 36,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-01-05",
+    "text": "भारत",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 32.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          12
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 45,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 26,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 9,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 36,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-02-00",
+    "text": "मानचित्र",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 8.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          24
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 73,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 8,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 33,
+            "font_index": 0,
+            "cluster": 15,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-02-01",
+    "text": "मानचित्र",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 10.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          24
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 73,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 8,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 33,
+            "font_index": 0,
+            "cluster": 15,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-02-02",
+    "text": "मानचित्र",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          24
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 73,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 8,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 33,
+            "font_index": 0,
+            "cluster": 15,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-02-03",
+    "text": "मानचित्र",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 16.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          24
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 73,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 8,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 33,
+            "font_index": 0,
+            "cluster": 15,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-02-04",
+    "text": "मानचित्र",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 24.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          24
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 73,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 8,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 33,
+            "font_index": 0,
+            "cluster": 15,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-02-05",
+    "text": "मानचित्र",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 32.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          24
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 73,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 8,
+            "font_index": 0,
+            "cluster": 9,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 33,
+            "font_index": 0,
+            "cluster": 15,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-03-00",
+    "text": "शहर",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 8.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          9
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 14,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 44,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 17,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 34,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 26,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-03-01",
+    "text": "शहर",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 10.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          9
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 14,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 44,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 17,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 34,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 26,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-03-02",
+    "text": "शहर",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          9
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 14,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 44,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 17,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 34,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 26,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-03-03",
+    "text": "शहर",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 16.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          9
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 14,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 44,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 17,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 34,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 26,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-03-04",
+    "text": "शहर",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 24.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          9
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 14,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 44,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 17,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 34,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 26,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-03-05",
+    "text": "शहर",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 32.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          9
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 14,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 44,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 17,
+            "font_index": 0,
+            "cluster": 3,
+            "x_advance": 34,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 26,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-04-00",
+    "text": "भाषा",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 8.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          12
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 45,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 15,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 37,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-04-01",
+    "text": "भाषा",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 10.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          12
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 45,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 15,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 37,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-04-02",
+    "text": "भाषा",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          12
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 45,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 15,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 37,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-04-03",
+    "text": "भाषा",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 16.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          12
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 45,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 15,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 37,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-04-04",
+    "text": "भाषा",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 24.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          12
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 45,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 15,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 37,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-04-05",
+    "text": "भाषा",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 32.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          12
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 45,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 15,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 37,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-05-00",
+    "text": "क्षेत्र",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 8.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          21
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 46,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 33,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-05-01",
+    "text": "क्षेत्र",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 10.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          21
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 46,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 33,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-05-02",
+    "text": "क्षेत्र",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          21
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 46,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 33,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-05-03",
+    "text": "क्षेत्र",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 16.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          21
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 46,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 33,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-05-04",
+    "text": "क्षेत्र",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 24.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          21
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 46,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 33,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "devanagari-05-05",
+    "text": "क्षेत्र",
+    "fonts": [
+      "assets/fonts/NotoSansDevanagari-subset.ttf"
+    ],
+    "size": 32.0,
+    "options": {
+      "script": "deva"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          21
+        ],
+        "direction": "ltr",
+        "script": "deva",
+        "language": null,
+        "bidi_levels": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 46,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 33,
+            "font_index": 0,
+            "cluster": 12,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  }
+]

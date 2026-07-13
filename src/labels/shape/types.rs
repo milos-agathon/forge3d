@@ -56,6 +56,9 @@ pub enum TextError {
         script: Tag,
     },
     InvalidSize,
+    Font(String),
+    Bidi(String),
+    UnsupportedScript(String),
 }
 
 impl fmt::Display for TextError {
@@ -77,6 +80,8 @@ impl fmt::Display for TextError {
                 "unsupported {table} lookup type {lookup_type} for script {script}"
             ),
             Self::InvalidSize => write!(f, "text size must be finite and positive"),
+            Self::Font(message) | Self::Bidi(message) => f.write_str(message),
+            Self::UnsupportedScript(script) => write!(f, "unsupported script {script}"),
         }
     }
 }

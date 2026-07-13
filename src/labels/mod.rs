@@ -23,6 +23,8 @@ pub mod optimal;
 mod projection;
 #[cfg(feature = "extension-module")]
 pub mod py_bindings;
+#[cfg(feature = "extension-module")]
+pub mod py_text;
 pub mod rtree;
 pub mod shape;
 mod types;

@@ -8,6 +8,7 @@ from typing import Tuple, Optional, Sequence, Any, Dict, List, Literal, Mapping,
 import os
 import numpy as np
 from . import gis
+from . import text as text
 from .graticule import GraticuleSpec, generate_graticule
 from .legend import Legend, LegendConfig
 from .map_plate import BBox, MapPlate, MapPlateConfig, PlateRegion
