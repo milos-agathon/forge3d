@@ -62,7 +62,7 @@ def test_unsupported_crs_pair_raises_not_nodata_success(tmp_path):
     transform = (0.01, 0.0, 13.0, 0.0, -0.01, 52.0)
     gis.write_raster(str(path), data, crs="EPSG:4326", transform=transform)
     with pytest.raises(Exception) as excinfo:
-        gis.reproject_raster(str(path), "EPSG:2154", resampling="nearest")
+        gis.reproject_raster(str(path), "EPSG:27700", resampling="nearest")
     message = str(excinfo.value)
     assert "InvalidCrs" in message or "BackendUnavailable" in message
     # A parseable-but-untransformable pair reaches the per-pixel policy.
