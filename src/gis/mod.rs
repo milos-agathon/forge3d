@@ -1522,6 +1522,7 @@ fn raster_info_to_py_dict(py: Python<'_>, info: &RasterInfo) -> PyResult<PyObjec
     dict.set_item("tiling", info.tiling.clone())?;
     dict.set_item("compression", info.compression.clone())?;
     dict.set_item("is_georeferenced", info.is_georeferenced)?;
+    dict.set_item("height_system", info.height_system.clone())?;
     dict.set_item("warnings", warnings_to_py(py, &info.warnings)?)?;
     Ok(dict.into_py(py))
 }

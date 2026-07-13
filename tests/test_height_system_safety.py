@@ -9,9 +9,15 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 import forge3d
 from forge3d import gis
+
+
+def _height_system(info):
+    """Read height_system from a RasterInfo object or its dict form."""
+    return info["height_system"] if isinstance(info, dict) else info.height_system
 
 REPO_SRC = Path(__file__).parent.parent / "src"
 
@@ -100,3 +106,63 @@ def test_dem_conversion_is_per_pixel_exact():
     lon0 = bounds[0] + 0.5 * (bounds[2] - bounds[0]) / 3
     n00 = forge3d.geoid_undulation(lat0, lon0)
     assert abs(out[0, 0] - (100.0 + n00)) < 1e-9
+
+
+def test_raster_info_exposes_height_system_field_default_unspecified(tmp_path):
+    # M-03: RasterInfo carries a first-class height_system field (not just a
+    # sidecar dict key), defaulting to the honest "unspecified" on a plain read.
+    path = tmp_path / "plain.tif"
+    data = np.ones((1, 4, 4), dtype=np.float32)
+    gis.write_raster(str(path), data, crs="EPSG:4326", transform=(0.1, 0, 10, 0, -0.1, 52))
+    info = gis.read_raster_info(str(path))
+    assert _height_system(info) == "unspecified"
+
+
+def test_height_system_survives_reprojection(tmp_path):
+    # M-03: horizontal reprojection preserves the vertical-datum tag through
+    # the shared operation_info builder.
+    path = tmp_path / "dem.tif"
+    data = np.ones((1, 8, 8), dtype=np.float32)
+    gis.write_raster(str(path), data, crs="EPSG:4326", transform=(0.01, 0, 13, 0, -0.01, 52))
+    result = gis.reproject_raster(str(path), "EPSG:3857", resampling="nearest")
+    assert result["info"]["height_system"] == "unspecified"
+
+
+def test_prepare_dem_returned_info_carries_converted_height_system():
+    # M-03: the converted vertical datum lands on the RasterInfo field, not
+    # only the sidecar key, so it survives being fed back into other ops.
+    raw = np.full((1, 2, 2), 100.0, dtype=np.float32)
+    result = gis.prepare_dem(
+        {
+            "array": raw,
+            "height_system": "orthometric_egm96",
+            "info": {
+                "width": 2,
+                "height": 2,
+                "band_count": 1,
+                "crs_authority": {"name": "EPSG", "code": "4326"},
+                "bounds": (10.0, 50.0, 12.0, 52.0),
+            },
+        }
+    )
+    assert result["height_system"] == "ellipsoidal"
+    assert result["info"]["height_system"] == "ellipsoidal"
+
+
+def test_invalid_height_system_declaration_is_rejected():
+    # M-03 policy: an unrecognized vertical-datum tag is rejected, never coerced.
+    raw = np.full((1, 2, 2), 100.0, dtype=np.float32)
+    with pytest.raises(Exception):
+        gis.prepare_dem(
+            {
+                "array": raw,
+                "height_system": "wgs84_banana",
+                "info": {
+                    "width": 2,
+                    "height": 2,
+                    "band_count": 1,
+                    "crs_authority": {"name": "EPSG", "code": "4326"},
+                    "bounds": (10.0, 50.0, 12.0, 52.0),
+                },
+            }
+        )

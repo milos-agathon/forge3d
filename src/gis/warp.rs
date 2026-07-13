@@ -624,6 +624,8 @@ pub(crate) fn operation_info(
 ) -> GisResult<RasterInfo> {
     let mut info = RasterInfo::new(source.path.clone().into(), width, height, source.band_count);
     info.dtype_per_band = vec![array.dtype().name().to_string(); source.band_count as usize];
+    // Resampling and horizontal reprojection do not change the vertical datum.
+    info.height_system = source.height_system.clone();
     if let Some(crs) = crs {
         info.crs_wkt = crs.wkt.clone();
         info.crs_authority = authority_map(&crs);
