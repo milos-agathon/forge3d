@@ -43,12 +43,22 @@ pub fn read_raster_info(path: impl AsRef<Path>) -> GisResult<RasterInfo> {
     validate_tiff_path(path)?;
     let file = File::open(path)?;
     let mut decoder = Decoder::new(BufReader::new(file))?;
-    let (width, height) = decoder.dimensions()?;
-    let band_count = sample_count(&mut decoder)?;
-    let mut info = RasterInfo::new(normalized_path(path), width, height, band_count);
+    raster_info_from_decoder(&mut decoder, normalized_path(path))
+}
 
-    info.dtype_per_band = dtype_per_band(&mut decoder, band_count)?;
-    info.nodata_per_band = nodata_per_band(&mut decoder, band_count)?;
+/// Build a `RasterInfo` from an already-open decoder over any `Read + Seek`
+/// source (a local file or a range-backed remote reader). Only the TIFF header
+/// and metadata are read here; no pixel data is decoded.
+pub(crate) fn raster_info_from_decoder<R: std::io::Read + std::io::Seek>(
+    decoder: &mut Decoder<R>,
+    path_label: PathBuf,
+) -> GisResult<RasterInfo> {
+    let (width, height) = decoder.dimensions()?;
+    let band_count = sample_count(decoder)?;
+    let mut info = RasterInfo::new(path_label, width, height, band_count);
+
+    info.dtype_per_band = dtype_per_band(decoder, band_count)?;
+    info.nodata_per_band = nodata_per_band(decoder, band_count)?;
     // MENSURA M-03: read back the persisted vertical datum, if any. An ABSENT
     // tag leaves the honest "unspecified" default; a PRESENT tag that fails to
     // decode or names an unknown height system is rejected — silently coercing
@@ -79,7 +89,7 @@ pub fn read_raster_info(path: impl AsRef<Path>) -> GisResult<RasterInfo> {
         ChunkType::Strip => "striped".to_string(),
         ChunkType::Tile => "tiled".to_string(),
     });
-    match compression_name(&mut decoder) {
+    match compression_name(decoder) {
         Ok(Some(compression)) => info.compression = Some(compression),
         Ok(None) | Err(_) => info.warnings.push(RasterWarning::new(
             WARNING_METADATA_UNAVAILABLE,
@@ -88,7 +98,7 @@ pub fn read_raster_info(path: impl AsRef<Path>) -> GisResult<RasterInfo> {
         )),
     }
 
-    if let Some(transform) = read_transform(&mut decoder)? {
+    if let Some(transform) = read_transform(decoder)? {
         if transform.is_rotated_or_sheared() {
             info.warnings.push(RasterWarning::new(
                 WARNING_ROTATED_OR_SHEARED,
@@ -107,7 +117,7 @@ pub fn read_raster_info(path: impl AsRef<Path>) -> GisResult<RasterInfo> {
         ));
     }
 
-    let crs = read_crs(&mut decoder)?;
+    let crs = read_crs(decoder)?;
     if let Some((wkt, authority)) = crs {
         info.crs_wkt = wkt;
         info.crs_authority = authority;
@@ -437,6 +447,141 @@ pub fn read_raster(
         nodata_per_band,
         warnings,
     })
+}
+
+/// Windowed read that decodes ONLY the strips overlapping `window`, over any
+/// `Read + Seek` source. This is what lets a remote range reader transfer just the
+/// bytes for the requested window. Supports striped, chunky-planar TIFFs only;
+/// tiled or planar-separate inputs return `BackendUnavailable` so the caller can
+/// fall back to a full read-and-slice.
+pub(crate) fn read_striped_window_from_decoder<R: std::io::Read + std::io::Seek>(
+    decoder: &mut Decoder<R>,
+    path_label: PathBuf,
+    window: PixelWindow,
+) -> GisResult<RasterReadResult> {
+    let info = raster_info_from_decoder(decoder, path_label)?;
+
+    if !matches!(decoder.get_chunk_type(), ChunkType::Strip) {
+        return Err(GisError::BackendUnavailable(
+            "backend_unavailable: windowed range read supports striped TIFFs only".to_string(),
+        ));
+    }
+    let planar = decoder
+        .find_tag_unsigned::<u16>(Tag::PlanarConfiguration)?
+        .unwrap_or(1);
+    if planar != 1 {
+        return Err(GisError::BackendUnavailable(
+            "backend_unavailable: windowed range read supports chunky planar only".to_string(),
+        ));
+    }
+
+    let window = validate_read_window(window, info.width, info.height)?;
+    let bands = info.band_count as usize;
+    let width = info.width as usize;
+    let (_chunk_w, rows_per_strip) = decoder.chunk_dimensions();
+    let rows_per_strip = rows_per_strip as usize;
+    if rows_per_strip == 0 {
+        return Err(GisError::InvalidRaster(
+            "invalid_raster: TIFF reports zero rows per strip".to_string(),
+        ));
+    }
+
+    let row_start = window.row_off as usize;
+    let row_end = row_start + window.height as usize; // exclusive
+    let first_strip = row_start / rows_per_strip;
+    let last_strip = (row_end - 1) / rows_per_strip;
+    let covered_start = first_strip * rows_per_strip;
+
+    let mut chunks: Vec<DecodingResult> = Vec::with_capacity(last_strip - first_strip + 1);
+    let mut covered_rows = 0usize;
+    for strip in first_strip..=last_strip {
+        let chunk = decoder.read_chunk(strip as u32).map_err(|err| {
+            GisError::InvalidRaster(format!("invalid_raster: strip {strip}: {err}"))
+        })?;
+        let (_data_w, data_height) = decoder.chunk_data_dimensions(strip as u32);
+        covered_rows += data_height as usize;
+        chunks.push(chunk);
+    }
+
+    // Assemble the overlapping strips into a partial full-width image, then slice
+    // the requested window out of it with the shared window copier.
+    let partial = strips_to_array(chunks, bands, covered_rows, width)?;
+    let local_window = PixelWindow {
+        col_off: window.col_off,
+        row_off: window.row_off - covered_start as i64,
+        width: window.width,
+        height: window.height,
+    };
+    let array = copy_window(&partial, &info.nodata_per_band, local_window)?;
+
+    let selected_bands: Vec<u16> = (1..=info.band_count).collect();
+    let window_transform = if info.transform.is_some() {
+        Some(crate::gis::affine::window_transform(&info, window)?)
+    } else {
+        None
+    };
+    let result_info = read_result_info(
+        &info,
+        &array,
+        &selected_bands,
+        Some(window),
+        window_transform,
+        info.nodata_per_band.clone(),
+    );
+    let warnings = result_info.warnings.clone();
+    Ok(RasterReadResult {
+        array,
+        info: result_info,
+        bands: selected_bands,
+        window: Some(window),
+        window_transform,
+        mask: None,
+        nodata_per_band: info.nodata_per_band.clone(),
+        warnings,
+    })
+}
+
+/// Concatenate same-dtype strip chunks (chunky/interleaved) into a band-first
+/// partial `RasterArray` of shape `(bands, rows, width)`.
+fn strips_to_array(
+    chunks: Vec<DecodingResult>,
+    bands: usize,
+    rows: usize,
+    width: usize,
+) -> GisResult<RasterArray> {
+    let shape = [bands, rows, width];
+    let mut iter = chunks.into_iter();
+    let first = iter
+        .next()
+        .ok_or_else(|| GisError::InvalidRaster("invalid_raster: no strips read".to_string()))?;
+    macro_rules! collect {
+        ($variant:ident, $data:expr) => {{
+            let mut all = $data;
+            for chunk in iter {
+                match chunk {
+                    DecodingResult::$variant(v) => all.extend(v),
+                    _ => {
+                        return Err(GisError::InvalidRaster(
+                            "invalid_raster: strips report mixed dtypes".to_string(),
+                        ))
+                    }
+                }
+            }
+            RasterArray::new(RasterData::$variant(deinterleave(all, bands)), &shape)
+        }};
+    }
+    match first {
+        DecodingResult::U8(data) => collect!(U8, data),
+        DecodingResult::U16(data) => collect!(U16, data),
+        DecodingResult::I16(data) => collect!(I16, data),
+        DecodingResult::U32(data) => collect!(U32, data),
+        DecodingResult::I32(data) => collect!(I32, data),
+        DecodingResult::F32(data) => collect!(F32, data),
+        DecodingResult::F64(data) => collect!(F64, data),
+        _ => Err(GisError::UnsupportedDType(
+            "unsupported_dtype: unsupported TIFF dtype for windowed read".to_string(),
+        )),
+    }
 }
 
 fn validate_bands(bands: Option<Vec<u16>>, band_count: u16) -> GisResult<Vec<u16>> {

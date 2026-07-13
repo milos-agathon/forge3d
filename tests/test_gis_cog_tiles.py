@@ -35,6 +35,56 @@ def _serve_bytes(body: bytes, *, content_type: str = "image/tiff"):
     return server, f"http://127.0.0.1:{server.server_address[1]}/data.tif"
 
 
+def _serve_range(body: bytes):
+    """Serve `body` over HTTP with Range support, counting total bytes served."""
+    served = {"bytes": 0, "requests": 0}
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_HEAD(self):  # noqa: N802
+            self.send_response(200)
+            self.send_header("content-type", "image/tiff")
+            self.send_header("content-length", str(len(body)))
+            self.send_header("accept-ranges", "bytes")
+            self.end_headers()
+
+        def do_GET(self):  # noqa: N802
+            served["requests"] += 1
+            rng = self.headers.get("Range")
+            if rng and rng.startswith("bytes="):
+                start_s, end_s = rng[len("bytes=") :].split("-")
+                start = int(start_s)
+                end = int(end_s) if end_s else len(body) - 1
+                end = min(end, len(body) - 1)
+                chunk = body[start : end + 1]
+                self.send_response(206)
+                self.send_header("content-type", "image/tiff")
+                self.send_header("content-range", f"bytes {start}-{end}/{len(body)}")
+                self.send_header("content-length", str(len(chunk)))
+                self.send_header("connection", "close")
+                self.end_headers()
+                served["bytes"] += len(chunk)
+                self.wfile.write(chunk)
+            else:
+                self.send_response(200)
+                self.send_header("content-type", "image/tiff")
+                self.send_header("content-length", str(len(body)))
+                self.send_header("connection", "close")
+                self.end_headers()
+                served["bytes"] += len(body)
+                self.wfile.write(body)
+
+        def log_message(self, *_args):
+            return
+
+    class _Server(socketserver.ThreadingTCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+
+    server = _Server(("127.0.0.1", 0), _Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}/data.tif", served
+
+
 pytestmark = pytest.mark.skipif(
     not NATIVE_AVAILABLE,
     reason="GIS COG/tile tests require the compiled _forge3d extension",
@@ -107,6 +157,35 @@ def test_read_cog_remote_unreachable_host_raises():
     # the feature ships; an unreachable host must raise (never a silent success).
     with pytest.raises(RuntimeError):
         gis.read_cog("http://127.0.0.1:1/data.tif")
+
+
+def test_read_cog_remote_windowed_read_streams_only_needed_bytes(tmp_path: Path):
+    # Multi-strip fixture (~5 strips of 512 rows each): a windowed remote read must
+    # fetch only the overlapping strip(s) via HTTP range requests, not the full file.
+    path = tmp_path / "multistrip.tif"
+    data = (np.arange(2400 * 512, dtype=np.float32) % 1000.0).reshape(2400, 512)
+    gis.write_raster(
+        path, data, crs="EPSG:4326", transform=(1.0, 0.0, 0.0, 0.0, -1.0, 2400.0)
+    )
+    body = path.read_bytes()
+    total = len(body)
+
+    window = (0, 0, 512, 20)  # col_off, row_off, width, height -> rows 0..20 (strip 0)
+    local = gis.read_cog(path, window=window)
+
+    server, url, served = _serve_range(body)
+    try:
+        remote = gis.read_cog(url, window=window)
+    finally:
+        server.shutdown()
+
+    np.testing.assert_array_equal(remote["array"], local["array"])
+    assert remote["window"] == window
+    assert remote["info"]["crs_authority"] == {"name": "EPSG", "code": "4326"}
+    # Range streaming: only strip 0 (+ the IFD) is fetched, far less than the whole file.
+    assert served["bytes"] < total // 2, (
+        f"windowed remote read transferred {served['bytes']} of {total} bytes"
+    )
 
 
 def test_read_cog_remote_overview_rejected_before_fetch():

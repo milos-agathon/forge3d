@@ -82,47 +82,73 @@ mod py {
             )
             .into());
         }
-        let mut remote_warnings: Vec<RasterWarning> = Vec::new();
-        // Remote COG: route through the shipped gis-remote fetch/cache path, then
-        // decode the cached file with the local TIFF reader. Cache-aware -- repeat
-        // reads of the same URL reuse the on-disk cache.
-        let read_path: PathBuf =
-            if path_or_url.starts_with("http://") || path_or_url.starts_with("https://") {
-                let cache_dir = remote_cog_cache_dir()?;
-                // Release the GIL across the blocking fetch so concurrent Python
-                // threads (and same-process test servers) can run.
-                let info = py.allow_threads(|| {
-                    crate::gis::remote::fetch_remote_geodata(
-                        &path_or_url,
-                        Some(&cache_dir),
-                        None,
-                        None,
-                    )
-                })?;
-                remote_warnings.push(RasterWarning::new(
-                    if info.from_cache { "cache_hit" } else { "cache_miss" },
-                    format!("read_cog fetched remote COG ({})", info.status),
-                    Some("path_or_url"),
-                ));
-                info.cache_path.ok_or_else(|| {
-                    GisError::Io("io: remote COG fetch produced no cache path".to_string())
-                })?
-            } else {
-                PathBuf::from(&path_or_url)
-            };
+        let pixel_window = window.map(|(col_off, row_off, width, height)| PixelWindow {
+            col_off,
+            row_off,
+            width,
+            height,
+        });
 
-        let result = raster_info::read_raster(
-            &read_path,
-            None,
-            window.map(|(col_off, row_off, width, height)| PixelWindow {
-                col_off,
-                row_off,
-                width,
-                height,
-            }),
-            false,
-        )?;
-        let mut warnings = remote_warnings;
+        // Remote + windowed: try an HTTP range read that fetches ONLY the strips
+        // overlapping the window (striped COGs). On any failure (tiled/unsupported
+        // input or transport error) fall through to the full fetch-and-slice path.
+        #[cfg(feature = "cog_streaming")]
+        if crate::gis::remote::is_remote_url(&path_or_url) {
+            if let Some(win) = pixel_window {
+                let streamed = py
+                    .allow_threads(|| crate::gis::cog_range::read_remote_window(&path_or_url, win));
+                if let Ok(result) = streamed {
+                    let warnings = vec![RasterWarning::new(
+                        "cache_miss",
+                        "read_cog streamed the remote COG window via HTTP range requests",
+                        Some("path_or_url"),
+                    )];
+                    return read_cog_result_to_py(py, &result, &warnings);
+                }
+            }
+        }
+
+        // Local read, or remote fall-back: fetch the whole object (remote, through
+        // the cache-aware gis-remote path) or open the local file, then decode and
+        // slice the window. The remote fall-back downloads the complete object.
+        let mut remote_warnings: Vec<RasterWarning> = Vec::new();
+        let read_path: PathBuf = if crate::gis::remote::is_remote_url(&path_or_url) {
+            let cache_dir = remote_cog_cache_dir()?;
+            // Release the GIL across the blocking fetch so concurrent Python
+            // threads (and same-process test servers) can run.
+            let info = py.allow_threads(|| {
+                crate::gis::remote::fetch_remote_geodata(&path_or_url, Some(&cache_dir), None, None)
+            })?;
+            remote_warnings.push(RasterWarning::new(
+                if info.from_cache {
+                    "cache_hit"
+                } else {
+                    "cache_miss"
+                },
+                format!(
+                    "read_cog downloaded the full remote COG (no range read; {}); \
+                     any window is applied after decode",
+                    info.status
+                ),
+                Some("path_or_url"),
+            ));
+            info.cache_path.ok_or_else(|| {
+                GisError::Io("io: remote COG fetch produced no cache path".to_string())
+            })?
+        } else {
+            PathBuf::from(&path_or_url)
+        };
+
+        let result = raster_info::read_raster(&read_path, None, pixel_window, false)?;
+        read_cog_result_to_py(py, &result, &remote_warnings)
+    }
+
+    fn read_cog_result_to_py(
+        py: Python<'_>,
+        result: &raster_info::RasterReadResult,
+        extra_warnings: &[RasterWarning],
+    ) -> PyResult<PyObject> {
+        let mut warnings = extra_warnings.to_vec();
         warnings.extend(result.warnings.iter().cloned());
         let dict = PyDict::new_bound(py);
         dict.set_item(

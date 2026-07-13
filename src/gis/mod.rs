@@ -1,4 +1,6 @@
 pub mod affine;
+#[cfg(feature = "cog_streaming")]
+pub(crate) mod cog_range;
 pub mod crs;
 pub mod domain;
 pub mod error;
