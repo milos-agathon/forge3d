@@ -133,6 +133,26 @@ impl BoundingVolume {
             && ndc.z >= -margin
             && ndc.z <= 1.0 + margin
     }
+
+    /// True unless this is a `Region` carrying a non-finite or out-of-range
+    /// coordinate. 3D-Tiles regions are `[west, south, east, north, minH,
+    /// maxH]` with west/east in [-π, π] and south/north in [-π/2, π/2] radians
+    /// (west > east is allowed for antimeridian crossings). Validating this at
+    /// tileset ingest keeps [`Self::center`]'s typed WGS84→ECEF conversion
+    /// panic-free on untrusted `tileset.json` data.
+    pub fn region_is_well_formed(&self) -> bool {
+        use core::f64::consts::{FRAC_PI_2, PI};
+        match self {
+            BoundingVolume::Region(r) => {
+                r.region.iter().all(|v| v.is_finite())
+                    && (-FRAC_PI_2..=FRAC_PI_2).contains(&r.region[1])
+                    && (-FRAC_PI_2..=FRAC_PI_2).contains(&r.region[3])
+                    && (-PI..=PI).contains(&r.region[0])
+                    && (-PI..=PI).contains(&r.region[2])
+            }
+            BoundingVolume::Box(_) | BoundingVolume::Sphere(_) => true,
+        }
+    }
 }
 
 /// Convert WGS84 geodetic coordinates (radians) to ECEF, full f64.
@@ -154,5 +174,32 @@ impl Default for BoundingVolume {
         Self::Sphere(BoundingSphere {
             sphere: [0.0, 0.0, 0.0, 1.0],
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn region(r: [f64; 6]) -> BoundingVolume {
+        BoundingVolume::Region(BoundingRegion { region: r })
+    }
+
+    #[test]
+    fn region_well_formedness_gates_the_ecef_center_conversion() {
+        // A valid WGS84 region (radians) is well-formed and centers finitely.
+        let ok = region([-0.1, -0.2, 0.1, 0.2, 0.0, 100.0]);
+        assert!(ok.region_is_well_formed());
+        assert!(ok.center().is_finite());
+
+        // Non-finite and out-of-range coordinates are rejected BEFORE center()
+        // would feed them to the typed WGS84->ECEF conversion and panic.
+        assert!(!region([f64::NAN, 0.0, 0.1, 0.2, 0.0, 1.0]).region_is_well_formed());
+        assert!(!region([0.0, 0.0, 0.1, 2.0, 0.0, 1.0]).region_is_well_formed()); // north > pi/2
+        assert!(!region([-4.0, 0.0, 0.1, 0.2, 0.0, 1.0]).region_is_well_formed()); // west < -pi
+        assert!(!region([0.0, 0.0, 0.1, 0.2, f64::INFINITY, 1.0]).region_is_well_formed());
+
+        // Box/Sphere volumes are always well-formed (no region coordinates).
+        assert!(BoundingVolume::default().region_is_well_formed());
     }
 }

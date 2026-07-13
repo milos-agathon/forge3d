@@ -302,47 +302,56 @@ pub fn reproject_raster(
         dst_bounds.top,
     ])?;
     let source_values = raster_to_f64(&loaded.array);
-    let mut out = vec![0.0; loaded.array.bands * loaded.array.height * loaded.array.width];
-    // MENSURA item 5: transform failures are counted, never silently
-    // absorbed. Out-of-extent samples remain legitimate nodata.
+    let bands = loaded.array.bands;
+    let height = loaded.array.height;
+    let width = loaded.array.width;
+    let plane = height * width;
+    let mut out = vec![0.0; bands * plane];
+    // MENSURA item 5: transform failures are counted, never silently absorbed.
+    // The CRS transform depends only on (row, col) — NOT the band — so it is
+    // computed and counted exactly ONCE per pixel. Counting inside the band
+    // loop would inflate `failure_count` by the band count (e.g. 3x for RGB),
+    // corrupting the TransformFailed.count contract. Out-of-extent samples
+    // remain legitimate per-band nodata.
     let mut failure_count: usize = 0;
     let mut first_pixel: Option<(usize, usize)> = None;
-    for band in 0..loaded.array.bands {
-        let fill = loaded
-            .info
-            .nodata_per_band
-            .get(band)
-            .copied()
-            .flatten()
-            .unwrap_or(0.0);
-        for row in 0..loaded.array.height {
-            for col in 0..loaded.array.width {
-                let (x, y) = dst_transform.apply(col as f64 + 0.5, row as f64 + 0.5);
-                let value = match transform_point(x, y, &dst_crs, &src_crs) {
-                    Ok((sx, sy)) => crate::gis::affine::inverse_apply(source_transform, sx, sy)
-                        .ok()
-                        .and_then(|(src_col, src_row)| {
-                            sample_band(
-                                &source_values,
-                                &loaded.array,
-                                band,
-                                src_col - 0.5,
-                                src_row - 0.5,
-                                method,
-                                loaded.info.nodata_per_band.get(band).copied().flatten(),
-                            )
-                        }),
-                    Err(_) => {
-                        failure_count += 1;
-                        if first_pixel.is_none() {
-                            first_pixel = Some((row, col));
-                        }
-                        None
+    let fills: Vec<f64> = (0..bands)
+        .map(|band| {
+            loaded
+                .info
+                .nodata_per_band
+                .get(band)
+                .copied()
+                .flatten()
+                .unwrap_or(0.0)
+        })
+        .collect();
+    for row in 0..height {
+        for col in 0..width {
+            let (x, y) = dst_transform.apply(col as f64 + 0.5, row as f64 + 0.5);
+            let src_rc = match transform_point(x, y, &dst_crs, &src_crs) {
+                Ok((sx, sy)) => crate::gis::affine::inverse_apply(source_transform, sx, sy).ok(),
+                Err(_) => {
+                    failure_count += 1;
+                    if first_pixel.is_none() {
+                        first_pixel = Some((row, col));
                     }
-                };
-                out[band * loaded.array.height * loaded.array.width
-                    + row * loaded.array.width
-                    + col] = value.unwrap_or(fill);
+                    None
+                }
+            };
+            for band in 0..bands {
+                let value = src_rc.and_then(|(src_col, src_row)| {
+                    sample_band(
+                        &source_values,
+                        &loaded.array,
+                        band,
+                        src_col - 0.5,
+                        src_row - 0.5,
+                        method,
+                        loaded.info.nodata_per_band.get(band).copied().flatten(),
+                    )
+                });
+                out[band * plane + row * width + col] = value.unwrap_or(fills[band]);
             }
         }
     }

@@ -166,3 +166,15 @@ def test_invalid_height_system_declaration_is_rejected():
                 },
             }
         )
+
+
+def test_raster_info_as_dict_includes_height_system(tmp_path):
+    # M-03: RasterInfo.as_dict() must match the op-result dict form and carry
+    # height_system (it previously omitted it, an asymmetry with
+    # raster_info_to_py_dict).
+    path = tmp_path / "plain.tif"
+    data = np.ones((1, 4, 4), dtype=np.float32)
+    gis.write_raster(str(path), data, crs="EPSG:4326", transform=(0.1, 0, 10, 0, -0.1, 52))
+    info = gis.read_raster_info(str(path))
+    d = info.as_dict()
+    assert d["height_system"] == "unspecified"

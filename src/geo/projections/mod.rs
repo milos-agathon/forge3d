@@ -140,15 +140,6 @@ pub(crate) fn lat_from_epsg_t(t: f64, e: f64) -> ProjResult<f64> {
     ))
 }
 
-/// Projected CRSs the built-in engine can dispatch by bare EPSG code.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum EpsgProjection {
-    /// Spherical Web Mercator (EPSG:3857, method 1024).
-    WebMercator,
-    /// WGS84 UTM zone (EPSG:326zz north / 327zz south, method 9807).
-    Utm { zone: u8, north: bool },
-}
-
 /// Explicit pure-Rust projection definition for callers that need a method
 /// without pretending forge3d ships a complete EPSG registry.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -182,22 +173,6 @@ impl ProjectionDefinition {
             Self::MercatorA(p) => p.inverse(easting, northing),
             Self::WebMercator => merc::web_mercator_inverse(easting, northing),
         }
-    }
-}
-
-/// Map an EPSG code to a supported built-in projection, if any.
-pub fn epsg_projection(code: u32) -> Option<EpsgProjection> {
-    match code {
-        3857 => Some(EpsgProjection::WebMercator),
-        32601..=32660 => Some(EpsgProjection::Utm {
-            zone: (code - 32600) as u8,
-            north: true,
-        }),
-        32701..=32760 => Some(EpsgProjection::Utm {
-            zone: (code - 32700) as u8,
-            north: false,
-        }),
-        _ => None,
     }
 }
 

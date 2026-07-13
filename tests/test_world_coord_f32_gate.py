@@ -1,11 +1,23 @@
 # tests/test_world_coord_f32_gate.py
-# MENSURA win 5 (CI-gated): the f64 -> f32 cliff exists in exactly ONE place.
+# MENSURA win 5 (CI-gated): the textual f64 -> f32 NARROWING cliff exists in
+# exactly ONE place.
 #
 # Source-level gate in the style of tests/test_allocation_gate.py: across the
 # world-coordinate surface of the tree, exactly one `as f32` cast applied to a
 # world coordinate exists — inside `Anchor::narrow`, the helper used only by
-# `Anchor::to_render_*` (src/camera/anchor.rs). Everything else must carry
-# world coordinates in f64 until they pass through the anchor.
+# `Anchor::to_render_*` (src/camera/anchor.rs).
+#
+# SCOPE — be precise about what this PROVES vs. what it does NOT:
+#   PROVES: no `as f32` token on a world-vocabulary source line survives
+#   outside Anchor::narrow, and Anchor::narrow is the SINGLE narrowing
+#   implementation.
+#   DOES NOT PROVE renderer-wide f64 anchoring. A world coordinate that is
+#   STORED as f32 / Vec3 / [f32;3] (via a glam f32 constructor, a PyO3 f32
+#   parameter, or a numpy f32 array) emits no `as f32` token and is therefore
+#   invisible to this textual gate. Giving every Scene / terrain / 3D-Tiles /
+#   point-cloud / vector / culling / picking / label path an f64 object origin
+#   is tracked as the remaining M-06 renderer-wide work and is NOT closed by
+#   this gate alone.
 # RELEVANT FILES: src/camera/anchor.rs, src/geo/units.rs, src/tiles3d/bounds.rs
 
 import re

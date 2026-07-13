@@ -413,6 +413,7 @@ impl RasterInfo {
         dict.set_item("tiling", self.tiling.clone())?;
         dict.set_item("compression", self.compression.clone())?;
         dict.set_item("is_georeferenced", self.is_georeferenced)?;
+        dict.set_item("height_system", self.height_system.clone())?;
         dict.set_item("warnings", warnings_to_py(py, &self.warnings)?)?;
         Ok(dict.into_py(py))
     }

@@ -159,7 +159,9 @@ pub(crate) fn dem_orthometric_to_ellipsoidal<'py>(
     bounds: (f64, f64, f64, f64),
 ) -> PyResult<Bound<'py, PyArray2<f64>>> {
     let (left, bottom, right, top) = bounds;
-    if !(right > left && top > bottom)
+    if !left.is_finite()
+        || !right.is_finite()
+        || !(right > left && top > bottom)
         || !(-90.0..=90.0).contains(&bottom)
         || !(-90.0..=90.0).contains(&top)
     {

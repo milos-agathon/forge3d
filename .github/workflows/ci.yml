@@ -102,10 +102,10 @@ jobs:
           sudo apt-get install -y libvulkan-dev
 
       - name: Run cargo check
-        run: cargo check --workspace --features default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings
+        run: cargo check --workspace --features default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings,geos-topology
 
       - name: Run cargo test (skip GPU-dependent tests)
-        run: cargo test --workspace --features default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile
+        run: cargo test --workspace --features default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings,geos-topology -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile
         env:
           RUST_TEST_THREADS: 1
 
@@ -113,7 +113,7 @@ jobs:
         # Executes rustdoc examples, including the five `compile_fail` proofs in
         # src/geo/units.rs that make unit/height/CRS/epoch mismatches and the raw
         # f64->f32 world-coordinate narrowing genuinely fail to compile.
-        run: cargo test --doc --workspace --features default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings
+        run: cargo test --doc --workspace --features default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings,geos-topology
 
       - name: Run cargo clippy
         run: cargo forge3d-clippy
@@ -381,7 +381,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build Rust docs
-        run: cargo doc --workspace --features default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings --no-deps
+        run: cargo doc --workspace --features default,async_readback,copc_laz,weighted-oit,enable-pbr,enable-ibl,enable-csm,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-render-bundles,enable-renderer-config,enable-memory-pools,enable-staging-rings,geos-topology --no-deps
 
       - name: Set up Python
         uses: actions/setup-python@v4
