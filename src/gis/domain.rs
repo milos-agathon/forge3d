@@ -31,6 +31,10 @@ mod py {
         Unspecified,
         OrthometricEgm96,
         Ellipsoidal,
+        /// Height above a nautical chart datum. No conversion to ellipsoidal is
+        /// shipped (that needs a tidal model), so it is carried but never
+        /// silently promoted; an Earth-fixed globe gate must reject it.
+        ChartDatum,
     }
 
     impl DemHeightSystem {
@@ -39,6 +43,7 @@ mod py {
                 "unspecified" => Ok(Self::Unspecified),
                 "orthometric_egm96" => Ok(Self::OrthometricEgm96),
                 "ellipsoidal" => Ok(Self::Ellipsoidal),
+                "chart_datum" => Ok(Self::ChartDatum),
                 _ => Err(GisError::InvalidArgument(format!(
                     "invalid_argument: unsupported height_system {value:?}"
                 ))),
@@ -50,6 +55,7 @@ mod py {
                 Self::Unspecified => "unspecified",
                 Self::OrthometricEgm96 => "orthometric_egm96",
                 Self::Ellipsoidal => "ellipsoidal",
+                Self::ChartDatum => "chart_datum",
             }
         }
     }
