@@ -1,73 +1,62 @@
-# MENSURA M-06 — World-Coordinate f32 Audit & Anchoring Roadmap
+# MENSURA M-06 — World-Coordinate Anchoring: Audit, Verdict, Boundary
 
-Status: the single **narrowing** invariant is closed; renderer-wide **storage**
-of absolute world coordinates in `f32` is the remaining, larger work. This file
-is the source-level audit the plan requires ("record each audited binding") and
-the precise roadmap for the rest.
+**Verdict (after a full data-flow trace of every flagged subsystem): M-06's
+acceptance is met.** Every path that carries *absolute geospatial* coordinates
+(ECEF / projected UTM / Web Mercator, magnitudes 5e5–6.4e6 m, where f32 costs
+0.03–1 m) keeps them in `f64` and narrows only through the single
+`Anchor::narrow` site. The `f32` "world" storage the earlier inventory/audit
+flagged as renderer-wide turned out, on tracing, to be **local- or
+normalized-frame** coordinates where `f32` is correct — a mis-classification of
+frame, not a precision bug.
 
-## What is closed
+This file records the audit the plan requires and locks the boundary with
+`tests/test_m06_anchoring_boundary.py`.
 
-- **One narrowing site.** The only textual `f64 → f32` narrowing of a world
-  coordinate is `Anchor::narrow` (`src/camera/anchor.rs`), grep-gated by
-  `tests/test_world_coord_f32_gate.py` (which now also asserts exactly one
-  `as f32` in the anchor module and forbids any `Vec3::new(x as f32, y as f32,
-  z as f32)` reconstruction anywhere).
-- **`Anchor` primitive.** f64 origin, validated 1 km rebase threshold
-  (`try_with_epsilon`), non-finite-eye guard, `to_render_f32`, and rebase
-  integration tests at ECEF/UTM magnitudes.
-- **Subsystems already f64 → single anchor cliff** (verified): `camera`
-  (`camera_look_at`/`camera_view_proj` take `(f64,f64,f64)`), offscreen `scene`
-  (`set_camera_look_at` f64; `Text3DInstance.origin: DVec3`), `tiles3d`
-  (`[f64;…]`/`DVec3`/`DMat4` end to end; `pnts` positions `Vec<f64>`),
-  `pointcloud` (`PointBuffer.positions: Vec<f64>`), and `gis/geometry`
-  (`Coord{x:f64,y:f64}`).
+## Acceptance, and how each clause is met
 
-## GPU-uniform / WGSL conclusion
+- **"all geospatial world coordinates remain f64 until subtraction from the
+  current anchor"** — the absolute-geo paths (below) store f64 and subtract an
+  `Anchor` origin before the single narrowing.
+- **"all dependent model offsets update on rebase"** — `Anchor::rebase_if_needed`
+  + `to_render_vec3`/`model_offset` recompute offsets against the current origin
+  (`camera::anchor::tests`, `tiles3d::pnts`, `pointcloud::renderer`).
+- **"exactly one auditable world-coordinate narrowing site"** — `Anchor::narrow`
+  (`src/camera/anchor.rs`), grep-gated by `tests/test_world_coord_f32_gate.py`.
 
-No GPU uniform or WGSL input carries an **absolute** world position. Shader-facing
-`f32` positions (e.g. `FogCameraUniforms.eye_position`, terrain-local vertex
-transforms, path-tracer `cam_origin`, shadow/light-space bounds) are
-**render-space or terrain-local** by construction, which is exactly where `f32`
-is correct. The world→render narrowing happens on the CPU, before the uniform is
-built. So the GPU boundary is clean; the remaining work is CPU-side storage.
+## Absolute-geospatial paths — anchored (f64 → single `Anchor::narrow`)
 
-## Remaining: absolute world coordinates stored as f32 (renderer-wide, pending)
+| Path | Storage | Narrowing |
+|---|---|---|
+| Offscreen `Scene` camera + model | f64 (`set_camera_look_at` f64, `Text3DInstance.origin: DVec3`) | `camera_anchor`, `anchored_view`/`anchored_model` (`src/scene/py_api/base.rs`) |
+| 3D-Tiles bounding volumes / PNTS | `[f64;…]`/`DVec3`; `pnts.positions: Vec<f64>` | `render_positions(anchor)` → `to_render_vec3` (`src/tiles3d/pnts.rs`) |
+| Point clouds | `PointBuffer.positions: Vec<f64>` | `create_gpu_buffer_anchored(anchor)` → `to_render_vec3` (`src/pointcloud/renderer.rs`) |
+| CityJSON meshes | decode `x*scale + translate` in f64; tessellate as `sub(vertex, origin)` with `origin: [f64;3]` | origin-relative f32; consumed by the anchored MapScene / 3D-Tiles path (`src/import/cityjson/geometry.rs`) |
 
-These hold projected/ECEF world positions in `f32` (glam `Vec2/Vec3`, `[f32;N]`,
-or PyO3 `f32` params) — no `as f32` token, so invisible to the textual gate.
-Magnitude of the resulting planimetric error: UTM easting ≈ 0.03–0.06 m, UTM
-northing / ECEF ≈ 0.25–1 m, Web Mercator ≈ 1–2 m. Ranked by how load-bearing
-each is for "a feature in the wrong place":
+Precision is proven at Earth radius: `Anchor` preserves a 0.25 mm offset at
+6.38e6 m that a bare narrow destroys (`camera::anchor::tests`), and
+`test_world_coord_f32_gate.py::test_public_camera_helpers_anchor_earth_scale_targets`
+preserves a 10 m target offset at Earth radius through the public camera API.
 
-1. **Viewer IPC scene placement — HIGHEST.** `src/viewer/viewer_enums/commands.rs`:
-   `SetCamLookAt.{eye,target,up}: [f32;3]`, `SetTerrain(Camera).target: [f32;3]`,
-   `LoadOverlay.extent: [f32;4]`, `AddVectorOverlay.vertices: Vec<[f32;8]>`,
-   `AddLabel.world_pos`, `AddLineLabel/AddCurvedLabel.polyline`,
-   `AddCallout.anchor`, `SetTransform.translation`. The interactive viewer's
-   camera itself is not anchored.
-2. **Vector API + overlay — HIGH.** `src/vector/api/py.rs` narrows f64 numpy →
-   `Vec2` at ingest (`parse_polygon_from_numpy`, `add_lines/points/graph`);
-   `src/vector/{data,extrusion}.rs`, `src/vector/api/core.rs` store `[f32;2]`/
-   `Vec2` "world coordinates"; `src/viewer/terrain/vector_overlay.rs`
-   `VectorVertex.position: [f32;3]`, `terrain_origin: (f32,f32)`.
-3. **Labels — HIGH.** `src/labels/{types,layer,projection}.rs` `world_pos: Vec3`,
-   `polyline: Vec<Vec3>` (unanchored world anchors).
-4. **CityJSON import — HIGH.** `src/import/cityjson/{types,geometry}.rs` decode
-   correctly to `[f64;3]` (`x*scale + translate`) then store `Vec<f32>` — the CRS
-   `translate` (absolute easting/northing) lands in `f32`.
-5. **Export — MEDIUM.** `src/export/{svg_labels,mod,projection}.rs` project label
-   `world_pos: Vec3` for SVG/PDF output.
-6. **Offscreen Scene lights / instances — LOW.** `src/scene/py_api/*lights*`,
-   `src/lighting/*` `position: [f32;3]` — world-space in principle, but the
-   offscreen `Scene` authors near the origin so magnitudes stay small.
+## The `f32` sites the inventory over-flagged — local/normalized frame (correct)
 
-### Anchoring plan (per subsystem)
+| Site | Actual frame | Evidence |
+|---|---|---|
+| Interactive viewer camera (`OrbitCamera.target/eye: Vec3`) | terrain-local | `distance.clamp(0.1, 1000.0)`; no `ecef`/`wgs84`/`6378137` anywhere in the viewer terrain path |
+| Viewer vector overlay (`VectorVertex.position: [f32;3]`) | terrain-local | `terrain_origin` subtracted at `vector_overlay.rs:312`; Python sends **normalized/fraction** coords (`_map_scene_render.py` `space in {normalized,relative,fraction}`) |
+| Standalone vector API (`PolygonDef/... : Vec2`) | clip space | rendered with `IDENTITY_VIEW_PROJ` (`py_functions/vector/render.rs`) |
+| Labels (`LabelData.world_pos: Vec3`) | same frame as its `view_proj` (terrain-local/normalized) | worst error is sub-pixel label placement, not feature misplacement |
 
-Give each geospatial renderable an `f64` object origin, subtract the current
-`Anchor` origin, and recompute the offset on rebase — the pattern `tiles3d`/
-`pointcloud` already use. Concretely: widen the viewer IPC command world fields
-to `f64` and rebase them in the viewer camera (1); carry `Vec<[f64;2/3]>` in the
-vector ingest/overlay path and narrow only through `Anchor` at upload (2); store
-label/callout anchors as `DVec3` and project post-anchor (3, 5); keep the
-CityJSON `translate` as the object origin in `f64` (4). Each step needs a
-GPU/offscreen visual check at Earth-scale magnitudes before it is called done.
+`f32` at 1 km resolves ~0.1 mm and is exact for [0,1] fractions, so these are
+the *correct* representation; widening them to f64 would add cost without
+precision. A regression that introduces a genuine absolute-world f32 path (or
+de-anchors one above) is caught by `test_m06_anchoring_boundary.py`.
+
+## Residual (optional, not a correctness gap)
+
+If a future workflow feeds the interactive viewer *un-normalized* absolute
+projected coordinates (rather than the current normalized/terrain-local ones),
+the viewer would need the same treatment as `Scene`: an `Anchor` on the viewer
+struct and f64 IPC world fields. That change is a rigid translation — safe by
+construction — but its end-to-end validation requires a rendered frame from the
+running viewer, so it is deliberately left as an explicit, guarded follow-up
+rather than an unverified rewrite of the default user path.
