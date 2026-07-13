@@ -40,10 +40,24 @@ impl Anchor {
     }
 
     pub fn with_epsilon(anchor_epsilon: f64) -> Self {
+        debug_assert!(
+            anchor_epsilon.is_finite() && anchor_epsilon > 0.0,
+            "anchor epsilon must be finite and positive; use try_with_epsilon at trust boundaries"
+        );
         Self {
             origin: DVec3::ZERO,
             anchor_epsilon,
         }
+    }
+
+    /// Checked epsilon constructor for trust boundaries: rejects a non-finite
+    /// or non-positive rebase threshold rather than silently accepting a
+    /// degenerate anchor that would never (or always) rebase.
+    pub fn try_with_epsilon(anchor_epsilon: f64) -> Option<Self> {
+        (anchor_epsilon.is_finite() && anchor_epsilon > 0.0).then_some(Self {
+            origin: DVec3::ZERO,
+            anchor_epsilon,
+        })
     }
 
     pub fn origin(&self) -> DVec3 {
@@ -58,6 +72,11 @@ impl Anchor {
     /// `anchor_epsilon` from the current origin. Returns true on rebase (the
     /// caller must then refresh every model offset derived from this anchor).
     pub fn rebase_if_needed(&mut self, eye: DVec3) -> bool {
+        // A non-finite camera position is an upstream bug; never poison the
+        // f64 anchor origin with it (that would silently NaN every offset).
+        if !eye.is_finite() {
+            return false;
+        }
         if (eye - self.origin).length() > self.anchor_epsilon {
             self.origin = eye;
             true
@@ -143,6 +162,58 @@ mod tests {
         assert_eq!(anchor.origin(), DVec3::ZERO);
         assert!(anchor.rebase_if_needed(DVec3::new(1_500.0, 0.0, 0.0)));
         assert_eq!(anchor.origin(), DVec3::new(1_500.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn try_with_epsilon_rejects_degenerate_thresholds() {
+        assert!(Anchor::try_with_epsilon(1_000.0).is_some());
+        assert!(Anchor::try_with_epsilon(0.0).is_none());
+        assert!(Anchor::try_with_epsilon(-5.0).is_none());
+        assert!(Anchor::try_with_epsilon(f64::NAN).is_none());
+        assert!(Anchor::try_with_epsilon(f64::INFINITY).is_none());
+    }
+
+    #[test]
+    fn rebase_ignores_non_finite_eye_and_keeps_origin_valid() {
+        let mut anchor = Anchor::new();
+        anchor.rebase_if_needed(DVec3::new(2_000.0, 0.0, 0.0));
+        let before = anchor.origin();
+        assert!(!anchor.rebase_if_needed(DVec3::new(f64::NAN, 0.0, 0.0)));
+        assert_eq!(anchor.origin(), before);
+        assert!(anchor.origin().is_finite());
+    }
+
+    #[test]
+    fn stationary_object_stays_accurate_across_a_rebase_at_ecef_scale() {
+        // A fixed ECEF object renders to its true camera-relative offset both
+        // before and after the camera crosses a 1 km rebase boundary, because
+        // the offset is recomputed against the (new) f64 origin each time.
+        let object = DVec3::new(6_378_137.0 + 3.0, 100.0, -50.0);
+        let mut anchor = Anchor::new();
+        anchor.rebase_if_needed(DVec3::new(6_378_137.0, 0.0, 0.0));
+        let before = anchor.to_render_vec3(object);
+        assert!((before.as_dvec3() - (object - anchor.origin())).length() < 1e-3);
+
+        assert!(anchor.rebase_if_needed(DVec3::new(6_378_137.0 + 1_500.0, 0.0, 0.0)));
+        let after = anchor.to_render_vec3(object);
+        assert!((after.as_dvec3() - (object - anchor.origin())).length() < 1e-3);
+    }
+
+    #[test]
+    fn repeated_kilometre_rebases_keep_a_nearby_point_submillimetre() {
+        // Walk the camera 10 km in ~1 km steps at ECEF scale; a point 2 m from
+        // the camera stays sub-mm accurate at every step (UTM/ECEF magnitudes).
+        let mut anchor = Anchor::new();
+        let mut cam = DVec3::new(6_378_137.0, 500_000.0, 0.0);
+        anchor.rebase_if_needed(cam);
+        for _ in 0..10 {
+            cam += DVec3::new(1_100.0, 0.0, 0.0);
+            anchor.rebase_if_needed(cam);
+            let near = cam + DVec3::new(2.0, -1.0, 0.5);
+            let rel = anchor.to_render_vec3(near);
+            let truth = near - anchor.origin();
+            assert!((rel.as_dvec3() - truth).length() < 1e-3, "drift too large");
+        }
     }
 
     #[test]
