@@ -1,12 +1,15 @@
 # python/forge3d/crs.py
-# CRS reprojection utilities with Rust proj / Python pyproj fallback
-# RELEVANT FILES: src/geo/mod.rs, src/geo/reproject.rs, python/forge3d/render.py
+# CRS reprojection utilities on the built-in pure-Rust MENSURA engine
+# RELEVANT FILES: src/gis/crs.rs, src/geo/projections/mod.rs, python/forge3d/render.py
 
 """
 CRS (Coordinate Reference System) utilities for forge3d.
 
 Provides reprojection of coordinates between different coordinate systems.
-Uses the native Rust proj library when available, with pyproj as fallback.
+Coordinate transforms use the built-in pure-Rust MENSURA projection engine
+(``forge3d._forge3d.CrsTransform``) exclusively; an unsupported CRS raises
+rather than silently falling back to pyproj. pyproj, if installed, is used
+only for WKT/EPSG metadata lookups, never as a hidden transform backend.
 
 Example:
     >>> from forge3d.crs import transform_coords, reproject_geom
@@ -20,7 +23,7 @@ Example:
 
 from __future__ import annotations
 
-from typing import Optional, Union, TYPE_CHECKING
+from typing import Any, Optional, Union, TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
@@ -46,19 +49,29 @@ except ImportError:
     HAS_PYPROJ_LEGACY = False
     pyproj = None  # type: ignore
 
-# Try to import native extension
+# The built-in pure-Rust MENSURA projection engine ships in the wheel and is
+# always available; the legacy optional `proj` feature is only a dev oracle.
 try:
     from forge3d._forge3d import proj_available as _native_proj_available
-    from forge3d._forge3d import reproject_coords as _native_reproject
     HAS_NATIVE_PROJ = _native_proj_available()
 except (ImportError, AttributeError):
     HAS_NATIVE_PROJ = False
-    _native_reproject = None
+
+
+def _crs_transform(from_crs, to_crs, *, always_xy: bool = True):
+    """Build a native pure-Rust CRS transformer, raising on unsupported pairs.
+
+    This is the single MENSURA transform entry point for `forge3d.crs`. No
+    pyproj fallback: an unsupported CRS raises InvalidCrs/BackendUnavailable.
+    """
+    from forge3d import _forge3d as _native
+
+    return _native.CrsTransform.from_crs(from_crs, to_crs, always_xy=always_xy)
 
 
 def proj_available() -> bool:
-    """Check if any CRS transformation backend is available."""
-    return HAS_NATIVE_PROJ or HAS_PYPROJ or HAS_PYPROJ_LEGACY
+    """CRS transformation is always available via the built-in pure-Rust engine."""
+    return True
 
 
 def transform_coords(
@@ -111,42 +124,18 @@ def transform_coords(
     if _crs_equal(from_crs, to_crs):
         return coords.copy()
 
-    # Try native Rust implementation first
-    if HAS_NATIVE_PROJ:
-        try:
-            coords_list = coords.tolist()
-            result = _native_reproject(coords_list, from_crs, to_crs)
-            return np.array(result, dtype=np.float64)
-        except Exception:
-            # Fall through to pyproj
-            pass
-
-    # Fallback to pyproj (modern API: pyproj >= 2.0)
-    if HAS_PYPROJ:
-        try:
-            transformer = pyproj.Transformer.from_crs(
-                from_crs, to_crs, always_xy=always_xy
-            )
-            x, y = transformer.transform(coords[:, 0], coords[:, 1])
-            return np.column_stack([x, y])
-        except Exception as e:
-            raise ValueError(f"Reprojection failed: {e}") from e
-
-    # Fallback to legacy pyproj API (pyproj < 2.0)
-    if HAS_PYPROJ_LEGACY:
-        try:
-            # Legacy API uses pyproj.Proj and pyproj.transform
-            src_proj = pyproj.Proj(init=from_crs) if from_crs.upper().startswith("EPSG:") else pyproj.Proj(from_crs)
-            dst_proj = pyproj.Proj(init=to_crs) if to_crs.upper().startswith("EPSG:") else pyproj.Proj(to_crs)
-            x, y = pyproj.transform(src_proj, dst_proj, coords[:, 0], coords[:, 1])
-            return np.column_stack([x, y])
-        except Exception as e:
-            raise ValueError(f"Reprojection failed (legacy API): {e}") from e
-
-    raise RuntimeError(
-        "No CRS transformation backend available. "
-        "Install pyproj (pip install pyproj) or build forge3d with proj feature."
-    )
+    # MENSURA: transform through the built-in pure-Rust engine only. There is
+    # no hidden pyproj fallback — an unsupported CRS pair raises a stable error
+    # (InvalidCrs at parse / BackendUnavailable at transform) rather than
+    # silently switching backends or returning unchanged coordinates. pyproj,
+    # if installed, is a differential-testing oracle, never a runtime path.
+    transformer = _crs_transform(from_crs, to_crs, always_xy=always_xy)
+    out = np.empty_like(coords)
+    for i in range(coords.shape[0]):
+        out[i, 0], out[i, 1] = transformer.transform_point(
+            float(coords[i, 0]), float(coords[i, 1])
+        )
+    return out
 
 
 def reproject_geom(
@@ -185,26 +174,19 @@ def reproject_geom(
     if _crs_equal(from_crs, to_crs):
         return geom
 
-    # Use pyproj transformer if available (modern API)
-    if HAS_PYPROJ:
-        transformer = pyproj.Transformer.from_crs(
-            from_crs, to_crs, always_xy=True
-        )
-        return shapely_ops.transform(transformer.transform, geom)
+    # MENSURA: reproject through the built-in pure-Rust engine only (no pyproj).
+    transformer = _crs_transform(from_crs, to_crs, always_xy=True)
 
-    # Use legacy pyproj API
-    if HAS_PYPROJ_LEGACY:
-        src_proj = pyproj.Proj(init=from_crs) if from_crs.upper().startswith("EPSG:") else pyproj.Proj(from_crs)
-        dst_proj = pyproj.Proj(init=to_crs) if to_crs.upper().startswith("EPSG:") else pyproj.Proj(to_crs)
-        def _transform_legacy(x, y):
-            return pyproj.transform(src_proj, dst_proj, x, y)
-        return shapely_ops.transform(_transform_legacy, geom)
+    def _transform(xs, ys):
+        rx: list[float] = []
+        ry: list[float] = []
+        for x, y in zip(xs, ys):
+            tx, ty = transformer.transform_point(float(x), float(y))
+            rx.append(tx)
+            ry.append(ty)
+        return rx, ry
 
-    # Fallback: extract coords, transform, reconstruct
-    # This only works for simple geometries
-    coords = np.array(geom.coords)
-    new_coords = transform_coords(coords, from_crs, to_crs)
-    return type(geom)(new_coords.tolist())
+    return shapely_ops.transform(_transform, geom)
 
 
 def parse_crs_from_wkt(wkt: str) -> Optional[str]:

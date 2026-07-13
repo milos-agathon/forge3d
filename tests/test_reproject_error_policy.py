@@ -89,3 +89,22 @@ def test_supported_reprojection_still_succeeds(tmp_path):
     result = gis.reproject_raster(str(path), "EPSG:3857", resampling="bilinear")
     assert result["info"]["crs_authority"]["code"] == "3857"
     assert not result["diagnostics"]
+
+
+def test_transform_failed_carries_structured_payload(tmp_path):
+    # MENSURA M-05: the raise path exposes a STABLE structured payload as
+    # exception attributes, so callers never parse the display text.
+    from forge3d._forge3d import TransformFailed
+
+    path = tmp_path / "plain.tif"
+    data = np.ones((1, 8, 8), dtype=np.float32)
+    transform = (0.01, 0.0, 13.0, 0.0, -0.01, 52.0)
+    gis.write_raster(str(path), data, crs="EPSG:4326", transform=transform)
+    with pytest.raises(TransformFailed) as excinfo:
+        gis.reproject_raster(str(path), "EPSG:4269", resampling="nearest")
+    exc = excinfo.value
+    assert exc.count == 64
+    assert tuple(exc.first_pixel) == (0, 0)
+    assert exc.src_crs == "EPSG:4326"
+    assert exc.dst_crs == "EPSG:4269"
+    assert exc.policy == "raise"

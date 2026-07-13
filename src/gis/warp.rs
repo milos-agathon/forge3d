@@ -351,11 +351,15 @@ pub fn reproject_raster(
         let (row, col) = first_pixel.expect("failure recorded");
         match on_transform_error {
             TransformErrorPolicy::Raise => {
-                return Err(GisError::TransformFailed(format!(
-                    "transform_failed: {failure_count} pixel(s) failed to transform \
-                     (first at row {row}, col {col}); pass on_transform_error='nodata' \
-                     to fill them with nodata instead"
-                )));
+                return Err(GisError::ReprojectTransformFailed {
+                    count: failure_count,
+                    first_pixel: (row, col),
+                    src_crs: crate::gis::crs::canonical_label(&src_crs)
+                        .unwrap_or_else(|_| "<unknown>".to_string()),
+                    dst_crs: crate::gis::crs::canonical_label(&dst_crs)
+                        .unwrap_or_else(|_| "<unknown>".to_string()),
+                    policy: "raise".to_string(),
+                });
             }
             TransformErrorPolicy::Nodata => {
                 diagnostics.push(RasterWarning::new(

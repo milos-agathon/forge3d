@@ -24,6 +24,16 @@ pub enum GisError {
     ResamplingRequired(String),
     UnsupportedResamplingMethod(String),
     TransformFailed(String),
+    /// A raster reprojection failed to transform one or more pixels. Carries a
+    /// structured, stable payload (count, first pixel, source/destination CRS,
+    /// policy) so Python callers read attributes instead of parsing text.
+    ReprojectTransformFailed {
+        count: usize,
+        first_pixel: (usize, usize),
+        src_crs: String,
+        dst_crs: String,
+        policy: String,
+    },
     BackendUnavailable(String),
     ShapeMismatch(String),
     UnsupportedCreationOption(String),
@@ -54,6 +64,7 @@ impl GisError {
             GisError::ResamplingRequired(_) => "resampling_required",
             GisError::UnsupportedResamplingMethod(_) => "unsupported_resampling_method",
             GisError::TransformFailed(_) => "TransformFailed",
+            GisError::ReprojectTransformFailed { .. } => "TransformFailed",
             GisError::BackendUnavailable(_) => "BackendUnavailable",
             GisError::ShapeMismatch(_) => "ShapeMismatch",
             GisError::UnsupportedCreationOption(_) => "UnsupportedCreationOption",
@@ -91,6 +102,17 @@ impl GisError {
             GisError::AlreadyExists(path) => {
                 format!("output path already exists: {}", path.display())
             }
+            GisError::ReprojectTransformFailed {
+                count,
+                first_pixel: (row, col),
+                src_crs,
+                dst_crs,
+                policy: _,
+            } => format!(
+                "transform_failed: {count} pixel(s) failed to transform from {src_crs} to \
+                 {dst_crs} (first at row {row}, col {col}); pass on_transform_error='nodata' \
+                 to fill them with nodata instead"
+            ),
         }
     }
 }
@@ -116,6 +138,16 @@ impl From<tiff::TiffError> for GisError {
 }
 
 #[cfg(feature = "extension-module")]
+pyo3::create_exception!(
+    _forge3d,
+    TransformFailed,
+    pyo3::exceptions::PyRuntimeError,
+    "Raised when raster reprojection cannot transform one or more coordinates. \
+     Exposes stable .count (int), .first_pixel ((row, col) tuple), .src_crs (str), \
+     .dst_crs (str), and .policy (str) attributes so callers never parse text."
+);
+
+#[cfg(feature = "extension-module")]
 impl From<GisError> for pyo3::PyErr {
     fn from(value: GisError) -> Self {
         use pyo3::exceptions::{
@@ -124,12 +156,44 @@ impl From<GisError> for pyo3::PyErr {
         };
 
         let message = value.to_string();
+        // Structured reprojection failure: raise the dedicated TransformFailed
+        // exception with attributes attached, not a bare RuntimeError.
+        if let GisError::ReprojectTransformFailed {
+            count,
+            first_pixel,
+            src_crs,
+            dst_crs,
+            policy,
+        } = &value
+        {
+            let (count, first_pixel, src_crs, dst_crs, policy) = (
+                *count,
+                *first_pixel,
+                src_crs.clone(),
+                dst_crs.clone(),
+                policy.clone(),
+            );
+            return pyo3::Python::with_gil(|py| {
+                use pyo3::types::PyAnyMethods;
+                let err = TransformFailed::new_err(message);
+                let obj = err.value_bound(py);
+                let _ = obj.setattr("count", count);
+                let _ = obj.setattr("first_pixel", first_pixel);
+                let _ = obj.setattr("src_crs", src_crs);
+                let _ = obj.setattr("dst_crs", dst_crs);
+                let _ = obj.setattr("policy", policy);
+                err
+            });
+        }
         match value {
             GisError::NotFound(_) => PyFileNotFoundError::new_err(message),
             GisError::AlreadyExists(_) => PyFileExistsError::new_err(message),
             GisError::Io(_) => PyOSError::new_err(message),
             GisError::UnsupportedDType(_) => PyTypeError::new_err(message),
-            GisError::InvalidRaster(_)
+            // ReprojectTransformFailed is handled by the early return above;
+            // this arm only satisfies exhaustiveness.
+            GisError::ReprojectTransformFailed { .. }
+            | GisError::InvalidRaster(_)
             | GisError::WriteFailed(_)
             | GisError::PostWriteValidationFailed(_)
             | GisError::BackendUnavailable(_)
