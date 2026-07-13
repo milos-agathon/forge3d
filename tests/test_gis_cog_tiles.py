@@ -85,6 +85,35 @@ def _serve_range(body: bytes):
     return server, f"http://127.0.0.1:{server.server_address[1]}/data.tif", served
 
 
+def _serve_no_range(body: bytes):
+    """Answer HEAD, but IGNORE the Range header and always return 200 full body."""
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_HEAD(self):  # noqa: N802
+            self.send_response(200)
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+
+        def do_GET(self):  # noqa: N802
+            self.send_response(200)
+            self.send_header("content-type", "image/tiff")
+            self.send_header("content-length", str(len(body)))
+            self.send_header("connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            return
+
+    class _Server(socketserver.ThreadingTCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+
+    server = _Server(("127.0.0.1", 0), _Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}/data.tif"
+
+
 pytestmark = pytest.mark.skipif(
     not NATIVE_AVAILABLE,
     reason="GIS COG/tile tests require the compiled _forge3d extension",
@@ -240,6 +269,28 @@ def test_read_cog_remote_windowed_range_dtypes_and_bands(tmp_path: Path, dtype):
 
     np.testing.assert_array_equal(remote["array"], local["array"])
     assert remote["array"].shape == (2, 40, 120)
+
+
+def test_read_cog_remote_windowed_falls_back_when_server_ignores_range(tmp_path: Path):
+    # A server that ignores Range (always 200 full body) must NOT corrupt the read:
+    # the range path rejects the non-206 response and read_cog falls back to a full
+    # fetch, still returning the correct window.
+    path = tmp_path / "ms.tif"
+    data = (np.arange(2400 * 512, dtype=np.float32) % 991.0).reshape(2400, 512)
+    gis.write_raster(
+        path, data, crs="EPSG:4326", transform=(1.0, 0.0, 0.0, 0.0, -1.0, 2400.0)
+    )
+    window = (0, 0, 512, 20)
+    local = gis.read_cog(path, window=window)
+
+    server, url = _serve_no_range(path.read_bytes())
+    try:
+        remote = gis.read_cog(url, window=window)
+    finally:
+        server.shutdown()
+
+    np.testing.assert_array_equal(remote["array"], local["array"])
+    assert remote["window"] == window
 
 
 def test_read_cog_remote_overview_rejected_before_fetch():

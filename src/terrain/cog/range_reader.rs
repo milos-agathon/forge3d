@@ -363,11 +363,14 @@ impl RangeReader {
             .send()
             .await?;
 
-        if !response.status().is_success()
-            && response.status() != reqwest::StatusCode::PARTIAL_CONTENT
-        {
+        // Require 206 Partial Content: a 200 OK means the server ignored the Range
+        // header and returned the WHOLE body, which would silently corrupt a
+        // mid-file read (returning file-start bytes for the requested offset).
+        // Erroring here lets read_cog fall back to a correct full fetch.
+        if response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
             return Err(CogError::HttpError(format!(
-                "Range request failed with status: {}",
+                "server did not honor the HTTP range request (status {}); \
+                 range streaming requires 206 Partial Content",
                 response.status()
             )));
         }
