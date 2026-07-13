@@ -1,0 +1,2570 @@
+[
+  {
+    "id": "arabic-00-00",
+    "text": "مرحبا",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 8.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          10
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 49,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 34,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 21,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 25,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 17,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 22,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 59,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 19,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-00-01",
+    "text": "مرحبا",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 10.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          10
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 49,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 34,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 21,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 25,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 17,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 22,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 59,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 19,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-00-02",
+    "text": "مرحبا",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          10
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 49,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 34,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 21,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 25,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 17,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 22,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 59,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 19,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-00-03",
+    "text": "مرحبا",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 16.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          10
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 49,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 34,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 21,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 25,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 17,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 22,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 59,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 19,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-00-04",
+    "text": "مرحبا",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 24.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          10
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 49,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 34,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 21,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 25,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 17,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 22,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 59,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 19,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-00-05",
+    "text": "مرحبا",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 32.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          10
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 49,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 34,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 21,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 25,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 17,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 22,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 59,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 19,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-01-00",
+    "text": "العالم",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 8.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          12
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 15,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 32,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 47,
+            "font_index": 0,
+            "cluster": 10,
+            "x_advance": 36,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-01-01",
+    "text": "العالم",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 10.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          12
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 15,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 32,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 47,
+            "font_index": 0,
+            "cluster": 10,
+            "x_advance": 36,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-01-02",
+    "text": "العالم",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          12
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 15,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 32,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 47,
+            "font_index": 0,
+            "cluster": 10,
+            "x_advance": 36,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-01-03",
+    "text": "العالم",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 16.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          12
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 15,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 32,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 47,
+            "font_index": 0,
+            "cluster": 10,
+            "x_advance": 36,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-01-04",
+    "text": "العالم",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 24.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          12
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 15,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 32,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 47,
+            "font_index": 0,
+            "cluster": 10,
+            "x_advance": 36,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-01-05",
+    "text": "العالم",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 32.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          12
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 4,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 15,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 32,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 47,
+            "font_index": 0,
+            "cluster": 10,
+            "x_advance": 36,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-02-00",
+    "text": "كتاب",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 8.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          8
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 37,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 26,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 24,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 58,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 8,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 64,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 59,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-02-01",
+    "text": "كتاب",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 10.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          8
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 37,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 26,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 24,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 58,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 8,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 64,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 59,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-02-02",
+    "text": "كتاب",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          8
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 37,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 26,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 24,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 58,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 8,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 64,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 59,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-02-03",
+    "text": "كتاب",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 16.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          8
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 37,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 26,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 24,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 58,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 8,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 64,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 59,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-02-04",
+    "text": "كتاب",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 24.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          8
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 37,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 26,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 24,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 58,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 8,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 64,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 59,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-02-05",
+    "text": "كتاب",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 32.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          8
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 37,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 26,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 24,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 58,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 8,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 64,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 59,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-03-00",
+    "text": "سلام",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 8.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          8
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 25,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 50,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 40,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 44,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 31,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-03-01",
+    "text": "سلام",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 10.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          8
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 25,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 50,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 40,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 44,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 31,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-03-02",
+    "text": "سلام",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          8
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 25,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 50,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 40,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 44,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 31,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-03-03",
+    "text": "سلام",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 16.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          8
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 25,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 50,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 40,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 44,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 31,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-03-04",
+    "text": "سلام",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 24.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          8
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 25,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 50,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 40,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 44,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 31,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-03-05",
+    "text": "سلام",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 32.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          8
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 25,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 50,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 40,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 44,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 31,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-04-00",
+    "text": "لغة",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 8.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 32,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 57,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 52,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 58,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-04-01",
+    "text": "لغة",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 10.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 32,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 57,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 52,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 58,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-04-02",
+    "text": "لغة",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 32,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 57,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 52,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 58,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-04-03",
+    "text": "لغة",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 16.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 32,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 57,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 52,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 58,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-04-04",
+    "text": "لغة",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 24.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 32,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 57,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 52,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 58,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-04-05",
+    "text": "لغة",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 32.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 42,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 32,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 57,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 52,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 58,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-05-00",
+    "text": "خريطة",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 8.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          10
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 17,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 57,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 21,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 25,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 60,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 28,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 45,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 52,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 58,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-05-01",
+    "text": "خريطة",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 10.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          10
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 17,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 57,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 21,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 25,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 60,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 28,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 45,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 52,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 58,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-05-02",
+    "text": "خريطة",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          10
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 17,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 57,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 21,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 25,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 60,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 28,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 45,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 52,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 58,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-05-03",
+    "text": "خريطة",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 16.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          10
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 17,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 57,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 21,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 25,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 60,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 28,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 45,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 52,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 58,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-05-04",
+    "text": "خريطة",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 24.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          10
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 17,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 57,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 21,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 25,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 60,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 28,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 45,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 52,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 58,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "arabic-05-05",
+    "text": "خريطة",
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 32.0,
+    "options": {
+      "script": "arab"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          10
+        ],
+        "direction": "rtl",
+        "script": "arab",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 17,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 57,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 21,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 25,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 19,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 60,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 0,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 28,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 45,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 52,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 58,
+            "font_index": 0,
+            "cluster": 8,
+            "x_advance": 0,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  }
+]

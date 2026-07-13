@@ -612,6 +612,7 @@ from .text_atlas import (
     save_atlas,
     validate_atlas_metrics,
 )
+from . import text as text
 
 # -----------------------------------------------------------------------------
 # Public API
@@ -620,6 +621,7 @@ __all__ = [
     # Version
     "__version__",
     "version",
+    "text",
     # Core rendering
     "Renderer",
     "PathTracer",
