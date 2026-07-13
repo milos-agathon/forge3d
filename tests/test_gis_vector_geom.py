@@ -437,3 +437,35 @@ def test_declared_projected_crs_polygon_is_not_dateline_split():
     geom = gis.union_geometries([poly])["geometry"]
     # Planar: no antimeridian semantics, so it stays a single Polygon.
     assert geom["type"] == "Polygon"
+
+
+@pytest.mark.parametrize(
+    "op",
+    [
+        lambda p: gis.union_geometries([p]),
+        lambda p: gis.buffer_geometry(p, 0.5),
+        lambda p: gis.simplify_geometry(p, 0.01),
+    ],
+    ids=["union", "buffer", "simplify"],
+)
+def test_topology_ops_split_dateline_crossing_polygon(op):
+    # MENSURA M-04: EVERY geographic topology op emits the split (small) geometry
+    # for a dateline-crossing polygon, with all longitudes in [-180, 180].
+    poly = {
+        "type": "Polygon",
+        "coordinates": [[[175, 5], [-175, 5], [-175, -5], [175, -5], [175, 5]]],
+        "info": {"crs_authority": {"name": "EPSG", "code": "4326"}},
+    }
+    geom = op(poly)["geometry"]
+    assert geom["type"] == "MultiPolygon"
+    xs = []
+
+    def collect(c):
+        if isinstance(c, (list, tuple)) and c and isinstance(c[0], (int, float)):
+            xs.append(c[0])
+        elif isinstance(c, (list, tuple)):
+            for x in c:
+                collect(x)
+
+    collect(geom["coordinates"])
+    assert xs and all(-180.01 <= x <= 180.01 for x in xs)

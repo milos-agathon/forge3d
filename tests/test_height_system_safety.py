@@ -221,3 +221,16 @@ def test_prepare_dem_accepts_chart_datum_without_promoting_it():
     )
     assert result["height_system"] == "chart_datum"
     assert float(np.asarray(result["array"])[0, 0, 0]) == 5.0  # unchanged
+
+
+def test_height_system_survives_full_and_windowed_read(tmp_path):
+    # M-03: the vertical datum tag is read back on both full and windowed
+    # read_raster (the windowed path clones the base RasterInfo).
+    path = tmp_path / "dem.tif"
+    data = np.ones((1, 8, 8), dtype=np.float32)
+    gis.write_raster(str(path), data, crs="EPSG:4326",
+                     transform=(0.1, 0, 10, 0, -0.1, 52), height_system="orthometric_egm96")
+    full = gis.read_raster(str(path))
+    assert full["info"]["height_system"] == "orthometric_egm96"
+    windowed = gis.read_raster(str(path), window=(1, 0, 4, 4))
+    assert windowed["info"]["height_system"] == "orthometric_egm96"
