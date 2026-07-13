@@ -37,21 +37,21 @@ fn fixture() -> Vec<u8> {
         push_u16(&mut bytes, value);
     }
     let urd_table = bytes.len();
-    for value in [0, 0, 1, 2] {
+    for value in [0, 0, 2, 2, 4] {
         push_u16(&mut bytes, value);
     }
     patch_u16(&mut bytes, arab_default, arab_default_table - arab_script);
     patch_u16(&mut bytes, urd_record, urd_table - arab_script);
 
     let features = bytes.len();
-    push_u16(&mut bytes, 3);
+    push_u16(&mut bytes, 5);
     let mut feature_records = Vec::new();
-    for tag in [b"rlig", b"liga", b"kern"] {
+    for tag in [b"rlig", b"liga", b"kern", b"locl", b"locl"] {
         bytes.extend_from_slice(tag);
         feature_records.push(bytes.len());
         push_u16(&mut bytes, 0);
     }
-    for (record, lookup) in feature_records.into_iter().zip([3, 7, 9]) {
+    for (record, lookup) in feature_records.into_iter().zip([3, 7, 9, 11, 13]) {
         let table = bytes.len();
         for value in [0, 1, lookup] {
             push_u16(&mut bytes, value);
@@ -60,8 +60,8 @@ fn fixture() -> Vec<u8> {
     }
 
     let lookups = bytes.len();
-    push_u16(&mut bytes, 10);
-    for _ in 0..10 {
+    push_u16(&mut bytes, 14);
+    for _ in 0..14 {
         push_u16(&mut bytes, 0);
     }
     patch_u16(&mut bytes, 4, scripts);
@@ -132,7 +132,35 @@ fn selected_language_uses_its_langsys_record() {
                 &[],
             )
             .unwrap(),
-        vec![3, 9]
+        vec![3, 9, 13]
+    );
+}
+
+#[test]
+fn language_does_not_append_first_global_locl_record() {
+    let bytes = fixture();
+    let table = LayoutTable::parse(&bytes).unwrap();
+    let language = Some(Tag::from_bytes(b"URD "));
+    let requested = [FeatureSetting::new(Tag::from_bytes(b"locl"), true)];
+    let enabled =
+        super::super::effective_features(&bytes, Tag::from_bytes(b"arab"), language, &requested)
+            .unwrap();
+    assert_eq!(
+        table
+            .selected_lookup_indices(Tag::from_bytes(b"arab"), language, &enabled)
+            .unwrap(),
+        vec![3, 9, 13, 7]
+    );
+
+    let requested = [FeatureSetting::new(Tag::from_bytes(b"locl"), false)];
+    let disabled =
+        super::super::effective_features(&bytes, Tag::from_bytes(b"arab"), language, &requested)
+            .unwrap();
+    assert_eq!(
+        table
+            .selected_lookup_indices(Tag::from_bytes(b"arab"), language, &disabled)
+            .unwrap(),
+        vec![3, 9, 7]
     );
 }
 
