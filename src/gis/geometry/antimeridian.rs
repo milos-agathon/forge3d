@@ -391,4 +391,169 @@ mod tests {
             Geometry::Point(c(-170.0, 5.0))
         );
     }
+
+    fn all_in_range(g: &Geometry) -> bool {
+        fn ring_ok(r: &[Coord]) -> bool {
+            r.iter()
+                .all(|p| p.x.abs() <= 180.0 + 1e-9 && p.y.abs() <= 90.0 + 1e-9)
+        }
+        match g {
+            Geometry::Empty => true,
+            Geometry::Point(p) => ring_ok(std::slice::from_ref(p)),
+            Geometry::MultiPoint(ps) | Geometry::LineString(ps) => ring_ok(ps),
+            Geometry::MultiLineString(ls) => ls.iter().all(|l| ring_ok(l)),
+            Geometry::Polygon(rs) => rs.iter().all(|r| ring_ok(r)),
+            Geometry::MultiPolygon(ps) => ps.iter().all(|rs| rs.iter().all(|r| ring_ok(r))),
+            Geometry::Collection(gs) => gs.iter().all(all_in_range),
+        }
+    }
+
+    #[test]
+    fn polygon_with_a_crossing_hole_splits_and_keeps_holes() {
+        // Outer 160..200 (crosses +180); an inner hole 165..195 also crossing.
+        let outer = vec![
+            c(160.0, 20.0),
+            c(-160.0, 20.0),
+            c(-160.0, -20.0),
+            c(160.0, -20.0),
+            c(160.0, 20.0),
+        ];
+        let hole = vec![
+            c(165.0, 10.0),
+            c(-165.0, 10.0),
+            c(-165.0, -10.0),
+            c(165.0, -10.0),
+            c(165.0, 10.0),
+        ];
+        let g = split_at_antimeridian(&Geometry::Polygon(vec![outer, hole]));
+        match g {
+            Geometry::MultiPolygon(polys) => {
+                assert_eq!(polys.len(), 2);
+                // Each side keeps its outer + one hole ring.
+                assert!(
+                    polys.iter().all(|p| p.len() == 2),
+                    "holes dropped: {polys:?}"
+                );
+                assert!(all_in_range(&Geometry::MultiPolygon(polys)));
+            }
+            other => panic!("expected MultiPolygon, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn multipolygon_flattens_crossing_and_non_crossing_parts() {
+        let crossing = vec![
+            c(170.0, 5.0),
+            c(-170.0, 5.0),
+            c(-170.0, -5.0),
+            c(170.0, -5.0),
+            c(170.0, 5.0),
+        ];
+        let plain = vec![
+            c(10.0, 5.0),
+            c(20.0, 5.0),
+            c(20.0, -5.0),
+            c(10.0, -5.0),
+            c(10.0, 5.0),
+        ];
+        let g = split_at_antimeridian(&Geometry::MultiPolygon(vec![vec![crossing], vec![plain]]));
+        match g {
+            // one crossing part -> 2 pieces, plus the untouched plain part = 3.
+            Geometry::MultiPolygon(polys) => {
+                assert_eq!(polys.len(), 3);
+                assert!(all_in_range(&Geometry::MultiPolygon(polys)));
+            }
+            other => panic!("expected MultiPolygon, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn collection_recurses_into_crossing_members() {
+        let poly = Geometry::Polygon(vec![vec![
+            c(175.0, 5.0),
+            c(-175.0, 5.0),
+            c(-175.0, -5.0),
+            c(175.0, -5.0),
+            c(175.0, 5.0),
+        ]]);
+        let line = Geometry::LineString(vec![c(178.0, 0.0), c(-178.0, 1.0)]);
+        let g = split_at_antimeridian(&Geometry::Collection(vec![poly, line]));
+        match g {
+            Geometry::Collection(items) => {
+                assert!(matches!(items[0], Geometry::MultiPolygon(_)));
+                assert!(matches!(items[1], Geometry::MultiLineString(_)));
+                assert!(all_in_range(&Geometry::Collection(items)));
+            }
+            other => panic!("expected Collection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pole_adjacent_crossing_polygon_splits_and_stays_in_range() {
+        // A high-latitude box 170..190 x 80..88 crossing the dateline near the pole.
+        let ring = vec![
+            c(170.0, 88.0),
+            c(-170.0, 88.0),
+            c(-170.0, 80.0),
+            c(170.0, 80.0),
+            c(170.0, 88.0),
+        ];
+        let g = split_at_antimeridian(&Geometry::Polygon(vec![ring]));
+        assert!(
+            matches!(g, Geometry::MultiPolygon(ref p) if p.len() == 2),
+            "got {g:?}"
+        );
+        assert!(all_in_range(&g));
+    }
+
+    #[test]
+    fn multilinestring_with_a_crossing_and_a_plain_line() {
+        let crossing = vec![c(175.0, 0.0), c(-175.0, 2.0)];
+        let plain = vec![c(0.0, 0.0), c(5.0, 0.0)];
+        let g = split_at_antimeridian(&Geometry::MultiLineString(vec![crossing, plain]));
+        match g {
+            Geometry::MultiLineString(parts) => {
+                assert_eq!(parts.len(), 3); // crossing -> 2, plain -> 1
+                assert!(all_in_range(&Geometry::MultiLineString(parts)));
+            }
+            other => panic!("expected MultiLineString, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn operands_on_opposite_360_sheets_normalize_to_the_same_range() {
+        // Same physical box authored at 175..185 and at -185..-175 must split to
+        // pieces occupying the identical [-180,180] longitudes.
+        let a = split_at_antimeridian(&Geometry::Polygon(vec![vec![
+            c(175.0, 5.0),
+            c(185.0, 5.0),
+            c(185.0, -5.0),
+            c(175.0, -5.0),
+            c(175.0, 5.0),
+        ]]));
+        let b = split_at_antimeridian(&Geometry::Polygon(vec![vec![
+            c(-185.0, 5.0),
+            c(-175.0, 5.0),
+            c(-175.0, -5.0),
+            c(-185.0, -5.0),
+            c(-185.0, 5.0),
+        ]]));
+        assert!(all_in_range(&a) && all_in_range(&b));
+        let span = |g: &Geometry| -> (f64, f64) {
+            let mut lo = f64::INFINITY;
+            let mut hi = f64::NEG_INFINITY;
+            if let Geometry::MultiPolygon(ps) = g {
+                for rs in ps {
+                    for r in rs {
+                        for p in r {
+                            lo = lo.min(p.x);
+                            hi = hi.max(p.x);
+                        }
+                    }
+                }
+            }
+            (lo, hi)
+        };
+        assert_eq!(span(&a), span(&b));
+    }
 }
