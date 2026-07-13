@@ -120,6 +120,34 @@ Status is based on executable behavior in the maturin wheel, not on whether a Py
 5. **P1 contract completion:** decide whether to implement broad vector drivers, rasterize merge semantics, boundary filtering/reprojection, live OSM, Terrarium fetching, and multidimensional grids. Until then keep them marked partial rather than adding more registered stubs.
 6. **P2/defer:** implement `warped_vrt_info` and broader thematic/derivative methods only when an actual recipe needs them.
 
+### Update — gis-operations worktree (2026-07-13)
+
+Landed here (each with a red→green test and verified in the shipped wheel):
+
+1. **P0 topology (item 1) — done.** `geos-topology` now ships in the maturin wheel;
+   union/buffer/clip/intersection/dissolve/simplify are available to wheel users.
+   `repair_geometry(make_valid)` is a faithful even-odd make-valid (a bowtie becomes
+   two triangles, area preserved) with `geometry_repaired`/`geometry_repair_changed_type`
+   diagnostics. `representative_point` returns a guaranteed-interior point for
+   Polygon/MultiPolygon via `geo::InteriorPoint`.
+2. **P0 rasterization (item 2) — core done.** `rasterize_vectors`/`geometry_mask`
+   bound each feature to its pixel window (fallback to full grid when the transform is
+   non-invertible), removing the O(features × grid) scan. `merge_alg` and per-geometry
+   `burn_values` remain absent (deferred, item 5).
+3. **P0 CRS/raster (item 3) — GIS side done.** One authoritative `crs::epsg_supported`
+   table now backs the GeoTIFF reader, writer, and transform dispatch, so every accepted
+   WGS84 UTM zone round-trips (32632 regression added). The default unsupported-pair
+   failure remains `TransformFailed{count, first_pixel}`.
+4. **P1 remote read_cog (item 4) — done.** `read_cog` routes http(s) through the shipped
+   gis-remote fetch/cache path (cache-aware) then decodes locally, with the GIL released
+   across the fetch.
+
+**Out of scope in this worktree (MENSURA, `13-mensura.md`):** completing the transform
+dispatch to reach LCC/AEA/stereographic/generic-TM by bare EPSG lives entirely in
+`src/geo/projections` (the `EpsgProjection` enum and `epsg_projection`), i.e. M-02.
+Optional PROJ routing (item 4) and multidimensional/GPKG/live-OSM/Terrarium-fetch
+backends (item 5) stay partial with honest errors; `warped_vrt_info` stays deferred (item 6).
+
 ## MENSURA Full-Implementation Plan
 
 The authoritative scope is [`docs/prompts/fable5-moonshots/13-mensura.md`](../prompts/fable5-moonshots/13-mensura.md). MENSURA is not complete merely because its modules or Python names exist. Completion requires all six measurable wins, the public GIS/renderer wiring that makes them load-bearing, and actual measured evidence from the shipped extension. The tasks below cover that full scope without expanding into a full EPSG registry, globe rendering, NTv2/NADCON grids, or a general `f64` renderer.
@@ -435,7 +463,7 @@ Proof sources:
 
 - [x] Add `src/gis/` module skeleton, Rust metadata/error types, thin PyO3 wrappers, stubs, and fixture tests.
 - [x] Implement local TIFF/GeoTIFF `read_raster_info`, `read_raster`, and `write_raster`.
-- [ ] Unify the GeoTIFF reader/writer CRS table so every accepted WGS84 UTM zone round-trips; add a non-zone-31 regression test.
+- [x] Unify the GeoTIFF reader/writer CRS table so every accepted WGS84 UTM zone round-trips; add a non-zone-31 regression test. (`crs::epsg_supported` shared by the reader, writer, and transform dispatch; 32632 round-trip test added.)
 - [ ] Add broader raster drivers only with a real backend and fixtures; current status remains TIFF-only.
 
 ### G-002b: Raster CRS, Transform, Alignment, And Reprojection
@@ -452,15 +480,15 @@ Proof sources:
 
 - [x] Add `vector.rs`, `rasterize.rs`, and `thematic.rs`, GeoJSON metadata/read/reprojection, explicit-grid masks/rasterization, nodata-aware thematic helpers, and fixture tests.
 - [x] Implement polygon topology operations behind `geos-topology` and test them in Cargo feature builds.
-- [ ] Ship `geos-topology` in maturin wheels and add wheel-level positive tests.
-- [ ] Implement real make-valid and polygon representative-point operations; both are currently registered stubs.
-- [ ] Close the shared rasterizer's O(features x grid) defect and then add missing merge/burn semantics.
+- [x] Ship `geos-topology` in maturin wheels and add wheel-level positive tests. (Added to `[tool.maturin] features`; wheel-level topology tests run under `FORGE3D_EXPECT_GEOS_TOPOLOGY=1`; no-silent-degradation gate (d) reconciled.)
+- [x] Implement real make-valid and polygon representative-point operations; both are currently registered stubs. (`make_valid` via even-odd boolean fill preserves a bowtie's area; `representative_point` via `geo::InteriorPoint`.)
+- [x] Close the shared rasterizer's O(features x grid) defect, then add missing merge/burn semantics. (Per-feature pixel-window bound landed; `merge_alg`/per-geometry `burn_values` still absent.)
 - [ ] Implement or explicitly defer non-GeoJSON vector drivers and `load_boundary` filtering/reprojection.
 
 ### Later: Domain Helpers And Remote Data
 
 - [x] Build explicit remote/cache, local COG, slippy-tile, OSM parsing, Terrarium decoding/cached mosaic, DEM/landcover/population/building, raster-like grid, and fixture-test subsets.
-- [ ] Wire remote COG reads to the shipped `cog_streaming` backend.
+- [x] Wire remote COG reads to the shipped remote backend. (`read_cog` routes http(s) through the gis-remote fetch/cache path, then decodes locally; live-server + unreachable-host tests added.)
 - [ ] Add explicit live OSM and Terrarium fetch policies; current helpers are cache-only.
 - [ ] Add GPKG/other vector, destination-CRS building, and NetCDF/HDF support only with real backends and fixtures.
 
