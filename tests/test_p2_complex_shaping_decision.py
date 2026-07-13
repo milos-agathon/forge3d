@@ -70,6 +70,9 @@ def test_arabic_script_shaping_is_accepted_with_native_joined_glyphs():
     assert plan.accepted[0].typography["glyph_ids"]
     assert plan.accepted[0].typography["direction"] == "rtl"
     assert plan.accepted[0].typography["render_mapping"] == "shaped_clusters"
+    assert plan.accepted[0].typography["compositor"] == "deferred_task_8"
+    assert plan.accepted[0].typography["shaped_runs"][0]["glyphs"]
+    assert plan.accepted[0].typography["font_indices"]
 
 
 def test_devanagari_is_supported_by_littera():
@@ -91,6 +94,64 @@ def test_devanagari_is_supported_by_littera():
 
     assert not plan.rejected
     assert plan.accepted[0].typography["shaping"] == "littera"
+
+
+@pytest.mark.parametrize(
+    ("text", "font"),
+    [
+        ("office", "NotoSans-subset.ttf"),
+        ("地图", "NotoSansSC-subset.ttf"),
+    ],
+)
+def test_valid_font_routes_every_script_through_littera(text, font):
+    plan = f3d.LabelPlan.compile(
+        labels=[{
+            "id": "label",
+            "text": text,
+            "geometry": {"type": "Point", "coordinates": [10, 10]},
+        }],
+        camera={},
+        viewport=(100, 100),
+        glyph_atlas={
+            "glyphs": list(text),
+            "font_path": str(ROOT / "assets/fonts" / font),
+        },
+    )
+    assert not plan.rejected
+    assert plan.accepted[0].typography["shaping"] == "littera"
+    assert plan.accepted[0].typography["glyph_ids"]
+
+
+def test_complex_missing_font_keeps_structured_reason():
+    plan = f3d.LabelPlan.compile(
+        labels=[{
+            "id": "label",
+            "text": "مرحبا",
+            "geometry": {"type": "Point", "coordinates": [10, 10]},
+        }],
+        camera={},
+        viewport=(100, 100),
+        glyph_atlas={"glyphs": list("مرحبا")},
+    )
+    assert plan.rejected[0].reason == "font_chain_required"
+    assert plan.rejected[0].details["diagnostics"][0]["reason"] == "font_chain_required"
+
+
+def test_label_plan_keeps_native_shaping_error_reason(tmp_path):
+    bad_font = tmp_path / "bad.ttf"
+    bad_font.write_bytes(b"not a font")
+    plan = f3d.LabelPlan.compile(
+        labels=[{
+            "id": "label",
+            "text": "مرحبا",
+            "geometry": {"type": "Point", "coordinates": [10, 10]},
+        }],
+        camera={},
+        viewport=(100, 100),
+        glyph_atlas={"glyphs": list("مرحبا"), "font_path": str(bad_font)},
+    )
+    assert plan.rejected[0].reason == "malformed_font"
+    assert plan.rejected[0].details["diagnostics"][0]["reason"] == "malformed_font"
 
 
 def test_unsupported_script_has_structured_diagnostics():

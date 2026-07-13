@@ -12,7 +12,8 @@ These files are deterministic test subsets of the Noto fonts published in the
 | `NotoSansSC-subset.ttf` | `ofl/notosanssc/NotoSansSC[wght].ttf` | `a366764f4a666e85ba791d0eef9bbda8eca4a96e70287037d6c81c6b90ff8190` |
 
 Downloaded from the `main` branch on 2026-07-13 and subset with fontTools
-4.58.5 using the exact strings in `tests/data/shaping/*.json`, retaining all
+4.58.5 using the complete character repertoire exercised by
+`tests/data/shaping/*.json`, retaining all
 layout features, recommended glyphs, `.notdef`, glyph names, and canonical
 Unicode cmaps. Lookup references outside LITTERA's required GSUB 1/2/3/4/6/7 surface
 and GPOS tables covered independently by Tasks 5/6 were removed. Each adjacent
