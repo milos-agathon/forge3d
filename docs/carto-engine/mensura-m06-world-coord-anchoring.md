@@ -1,23 +1,36 @@
 # MENSURA M-06 — World-Coordinate Anchoring: Audit, Verdict, Boundary
 
-**Verdict (partial — honest after a full data-flow trace).** The paths that
-carry *absolute geospatial* coordinates in **production** — offscreen `Scene`,
-3D-Tiles, point clouds, CityJSON (origin-relative) — keep them in `f64` and
-narrow only through the single `Anchor::narrow` site (this production half
-verified; it does not by itself satisfy M-06's renderer-*wide* acceptance).
-But the **interactive viewer is NOT anchored**: `set_look_at`
-(`src/viewer/camera_controller.rs`) stores an arbitrary `f32` orbit target with
-no magnitude limit, and the IPC camera/label/callout fields are `f32`
-(`request.rs`, `commands.rs`). Its terrain-local frame is a *convention*
-enforced Python-side (normalized/terrain-local overlay coords), **not** a Rust
-contract — a caller that pushes absolute projected coordinates through those f32
-IPC fields would lose 0.03–1 m of precision. So M-06 is **not** fully met; the
-un-anchored viewer path is the genuine residual (§ Residual below).
+**Verdict (partial — honest after a full data-flow trace; the camera contract is
+now enforced).** The paths that carry *absolute geospatial* coordinates in
+**production** — offscreen `Scene`, 3D-Tiles, point clouds, CityJSON
+(origin-relative) — keep them in `f64` and narrow only through the single
+`Anchor::narrow` site (this production half verified; it does not by itself
+satisfy M-06's renderer-*wide* acceptance).
+
+The **interactive viewer's camera is now a Rust-enforced local-frame contract**
+(option 1, done): `set_look_at` / `set_orbit_pose_target`
+(`src/viewer/camera_controller.rs`) and the terrain orbit target
+(`src/viewer/cmd/terrain_command.rs`) validate every eye/target component against
+`VIEWER_LOCAL_FRAME_MAX_COORD` (1e6 m) and **reject** an absolute geospatial
+coordinate without mutating camera state, rather than silently truncating it to
+`f32`. This replaces the former Python-side *convention* on the camera surface.
+It is verified two ways: the behavioural Rust unit tests
+(`camera_controller::tests`, 7 cases — reject ECEF/UTM/non-finite, no-mutation,
+inclusive boundary) **and** a live running-viewer demo (a valid terrain orbit
+target moves the render; an ECEF target is rejected so the rendered frame is
+byte-identical to the prior valid pose).
+
+What remains (**option 2, still open**): the viewer's *overlay / label /
+transform* IPC world fields are still `f32` (`request.rs`, `commands.rs`) and
+rely on the Python-side normalized/terrain-local convention. Fully anchoring
+those (widen to `f64` + a viewer `camera_anchor` + anchor-relative view matrix)
+is the residual (§ Residual below). So M-06 is **not** fully met — but the
+specific gap the audit named (an un-ceilinged `set_look_at`) is now closed.
 
 An earlier revision of this file over-claimed "acceptance met" by treating the
-viewer's *conventional* local frame as if it were *enforced*; that claim is
-retracted here. This file records the audit the plan requires and locks the
-verified half with `tests/test_m06_anchoring_boundary.py`.
+viewer's *conventional* local frame as if it were *enforced*; that claim was
+retracted, and this revision records the enforcement that has since been added.
+The camera contract is locked by `tests/test_m06_anchoring_boundary.py`.
 
 ## Acceptance, and how each clause is met
 

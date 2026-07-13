@@ -1,6 +1,25 @@
+use crate::viewer::camera_controller::{coord_within_local_frame, VIEWER_LOCAL_FRAME_MAX_COORD};
 use crate::viewer::terrain;
 use crate::viewer::viewer_enums::ViewerCmd;
 use crate::viewer::Viewer;
+
+/// Enforce the viewer's terrain-local-frame contract (MENSURA M-06) on a terrain
+/// orbit target: an absolute geospatial coordinate is dropped (the previous valid
+/// target is retained) rather than silently truncated to `f32`, mirroring the
+/// `set_look_at` contract on the object-scene camera.
+fn sanitize_terrain_target(target: Option<[f32; 3]>) -> Option<[f32; 3]> {
+    match target {
+        Some(t) if !coord_within_local_frame(glam::Vec3::from(t)) => {
+            eprintln!(
+                "[terrain] camera target {t:?} rejected: outside the viewer local frame \
+                 (|coord| <= {VIEWER_LOCAL_FRAME_MAX_COORD:.0e}); absolute projected/geodetic \
+                 coordinates must use the anchored offscreen Scene path, not the viewer IPC."
+            );
+            None
+        }
+        other => other,
+    }
+}
 
 pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
     match cmd {
@@ -50,7 +69,8 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             target,
         } => {
             if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
-                terrain_viewer.set_camera(*phi_deg, *theta_deg, *radius, *fov_deg, *target);
+                let target = sanitize_terrain_target(*target);
+                terrain_viewer.set_camera(*phi_deg, *theta_deg, *radius, *fov_deg, target);
                 println!(
                     "[terrain] Camera: phi={:.1}° theta={:.1}° r={:.1} fov={:.1}° target={:?}",
                     phi_deg, theta_deg, radius, fov_deg, target
@@ -139,8 +159,8 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                     if let Some(color) = water_color {
                         terrain.water_color = *color;
                     }
-                    if let Some(value) = target {
-                        terrain.cam_target = *value;
+                    if let Some(value) = sanitize_terrain_target(*target) {
+                        terrain.cam_target = value;
                     }
                 }
                 if let Some(params) = terrain_viewer.get_params() {
