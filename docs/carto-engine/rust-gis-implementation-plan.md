@@ -152,8 +152,9 @@ Landed here (each with a red→green test and verified in the shipped wheel):
 **Out of scope in this worktree (MENSURA, `13-mensura.md`):** completing the transform
 dispatch to reach LCC/AEA/stereographic/generic-TM by bare EPSG lives entirely in
 `src/geo/projections` (the `EpsgProjection` enum and `epsg_projection`), i.e. M-02.
-Optional PROJ routing (item 4) and multidimensional/GPKG/live-OSM/Terrarium-fetch
-backends (item 5) stay partial with honest errors; `warped_vrt_info` stays deferred (item 6).
+Multidimensional/GPKG/live-OSM/Terrarium-fetch backends (item 5) stay partial with honest
+errors; `warped_vrt_info` stays deferred (item 6). (There is deliberately no runtime PROJ
+routing — see the item-4 PROJ policy above: PROJ is a differential oracle only.)
 
 ## MENSURA Full-Implementation Plan
 
