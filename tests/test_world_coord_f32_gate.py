@@ -126,6 +126,41 @@ def test_legacy_truncation_sites_are_gone():
     )
 
 
+def test_single_narrowing_implementation_lives_only_in_anchor():
+    # M-06: keep exactly ONE sanctioned narrowing implementation. The camera
+    # anchor module must contain exactly one textual `as f32` (inside
+    # Anchor::narrow); a second narrowing helper added here fails immediately.
+    anchor = _strip_comments((ROOT / SANCTIONED[0]).read_text(encoding="utf-8"))
+    count = len(re.findall(r"\bas f32\b", anchor))
+    assert count == 1, (
+        f"{SANCTIONED[0]} must hold exactly one `as f32` (the sole narrowing "
+        f"implementation); found {count}"
+    )
+    assert "fn narrow(value: f64) -> f32" in anchor, (
+        "the sanctioned narrowing helper Anchor::narrow(value: f64) -> f32 moved"
+    )
+
+
+# A hidden helper that rebuilds a render Vec3 by narrowing three world
+# components — the exact pre-MENSURA cliff — must not reappear in ANY file.
+_TRIPLE_NARROW = re.compile(
+    r"Vec3::new\(\s*\w+ as f32\s*,\s*\w+ as f32\s*,\s*\w+ as f32\s*\)"
+)
+
+
+def test_no_file_rebuilds_a_render_vec3_from_three_narrowed_components():
+    for path in _gated_files():
+        rel = path.relative_to(ROOT).as_posix()
+        if rel == SANCTIONED[0]:
+            continue  # anchor narrows component-by-component via Self::narrow
+        text = _strip_comments(path.read_text(encoding="utf-8"))
+        match = _TRIPLE_NARROW.search(text)
+        assert match is None, (
+            f"{rel} rebuilds a render Vec3 from three narrowed scalars "
+            f"({match.group(0)!r}); route world coordinates through Anchor instead"
+        )
+
+
 def test_public_camera_helpers_anchor_earth_scale_targets():
     """Public camera matrices preserve a 10 m target offset at Earth radius."""
     import numpy as np
