@@ -188,6 +188,60 @@ def test_read_cog_remote_windowed_read_streams_only_needed_bytes(tmp_path: Path)
     )
 
 
+@pytest.mark.parametrize(
+    "window",
+    [
+        (0, 0, 512, 20),  # first strip, full width
+        (100, 500, 300, 40),  # spans strip 0 and strip 1, column offset
+        (50, 1030, 200, 30),  # middle strip (strip 2), column + row offset
+        (0, 2380, 512, 20),  # last (partial) strip
+    ],
+)
+def test_read_cog_remote_windowed_range_matches_local(tmp_path: Path, window):
+    # A range-streamed window must be byte-identical to the local windowed read
+    # across multi-strip spans, middle strips, column offsets, and the last strip.
+    path = tmp_path / "ms.tif"
+    data = (np.arange(2400 * 512, dtype=np.float32) % 997.0).reshape(2400, 512)
+    gis.write_raster(
+        path, data, crs="EPSG:4326", transform=(1.0, 0.0, 0.0, 0.0, -1.0, 2400.0)
+    )
+    local = gis.read_cog(path, window=window)
+
+    server, url, _served = _serve_range(path.read_bytes())
+    try:
+        remote = gis.read_cog(url, window=window)
+    finally:
+        server.shutdown()
+
+    np.testing.assert_array_equal(remote["array"], local["array"])
+    assert remote["window"] == window
+
+
+@pytest.mark.parametrize("dtype", [np.uint8, np.uint16, np.int16])
+def test_read_cog_remote_windowed_range_dtypes_and_bands(tmp_path: Path, dtype):
+    # Multi-band + non-float dtypes must assemble correctly through the strip path.
+    path = tmp_path / f"mb_{np.dtype(dtype).name}.tif"
+    band0 = (np.arange(3000 * 400) % 200).reshape(3000, 400).astype(dtype)
+    band1 = ((np.arange(3000 * 400) * 3) % 200).reshape(3000, 400).astype(dtype)
+    gis.write_raster(
+        path,
+        np.stack([band0, band1]),  # (bands, height, width)
+        crs="EPSG:4326",
+        transform=(1.0, 0.0, 0.0, 0.0, -1.0, 3000.0),
+    )
+    window = (10, 900, 120, 40)  # spans a strip boundary, offset in both axes
+    local = gis.read_cog(path, window=window)
+
+    server, url, _served = _serve_range(path.read_bytes())
+    try:
+        remote = gis.read_cog(url, window=window)
+    finally:
+        server.shutdown()
+
+    np.testing.assert_array_equal(remote["array"], local["array"])
+    assert remote["array"].shape == (2, 40, 120)
+
+
 def test_read_cog_remote_overview_rejected_before_fetch():
     # overview is validated before any download: the unsupported overview must be
     # rejected (metadata_unavailable) without ever contacting the host, so the
