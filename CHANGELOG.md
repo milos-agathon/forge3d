@@ -6,10 +6,13 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
-## [1.32.0] - 2026-07-11
+## [1.32.0] - 2026-07-14
 ### Added
 - Added signed render certificates with live GPU-pass timing and verified shader-source provenance across the production render surface.
 - Added CI gates for resource allocation ownership, negotiated capabilities, dead render structures, certificate coverage, clean-checkout fixtures, and determinism artifact attribution.
+- MENSURA: added a pure-Rust CRS/projection engine (Transverse Mercator, Lambert Conformal Conic 2SP, Albers Equal-Area, Mercator, Polar Stereographic, and geocentric) reached through a single dispatch table, an expanded ITRF Helmert datum-transform surface, Karney-geodesic distance/area, and EGM96 geoid-height lookups.
+- MENSURA: added a first-class `height_system` threaded through `RasterInfo` and DEM preparation (with chart-datum carry-through), a canonical antimeridian polygon splitter, and world-coordinate f32-narrowing anchoring guards.
+- MENSURA: added geodesy/CRS regression coverage — a projection oracle, dateline-splitter and height-system test matrices, per-method conformance residual evidence, and a compile-fail world-coordinate f32 source gate.
 
 ### Fixed
 - Refused software and hypervisor-virtualized adapters in deterministic mode so their hashes cannot masquerade as physical-hardware evidence; real hardware hashes remain pairwise and golden checked with zero-byte tolerance.
@@ -18,6 +21,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ### Changed
 - CENSOR render paths now report explicit degradations rather than silently claiming unavailable GPU timing or fallback behavior as successful execution.
+- MENSURA: `forge3d.gis.reproject_raster` and vector reprojection now raise structured errors (`InvalidCrs` at parse, `TransformFailed` / `BackendUnavailable` at transform) with per-pixel failure accounting, instead of silently returning an unchanged or all-nodata raster with a success status.
 - No migration is required; existing Python APIs remain compatible.
 
 ## [1.31.0] - 2026-07-09

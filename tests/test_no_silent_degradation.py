@@ -217,6 +217,9 @@ WHEEL_REQUIRED_FEATURES = {
     "copc_laz",
     "cog_streaming",
     "gis-remote",
+    # MENSURA ships real topology ops (pure-Rust `geo` crate) as a wheel
+    # feature; the public forge3d.gis topology surface requires it.
+    "geos-topology",
 }
 
 
@@ -234,13 +237,14 @@ def test_d_wheel_features_superset_and_proj_geos_are_diagnostic_bearing():
     missing = WHEEL_REQUIRED_FEATURES - maturin
     assert not missing, f"wheel omits features required by public APIs: {sorted(missing)}"
 
-    # proj / geos-topology are deliberately NOT shipped. Their Python surfaces
-    # must therefore be diagnostic-bearing (never a silent wrong-result fallback).
-    #
-    # proj: forge3d.crs.transform_coords, when native PROJ is compiled out,
-    # records a `feature_not_compiled`/`proj` degradation before using pyproj.
-    assert "proj" not in maturin and "geos-topology" not in maturin, (
-        "proj/geos-topology are expected to be compiled OUT of the wheel"
+    # proj is deliberately NOT shipped (native PROJ links a C library). Its
+    # Python surface must therefore be diagnostic-bearing (never a silent
+    # wrong-result fallback): forge3d.crs.transform_coords, when native PROJ is
+    # compiled out, records a `feature_not_compiled`/`proj` degradation before
+    # using pyproj. geos-topology IS shipped now (pure-Rust `geo` crate) and is
+    # asserted present via WHEEL_REQUIRED_FEATURES above.
+    assert "proj" not in maturin, (
+        "proj is expected to be compiled OUT of the wheel"
     )
 
     import forge3d.crs as crs
@@ -261,10 +265,10 @@ def test_d_wheel_features_superset_and_proj_geos_are_diagnostic_bearing():
         f"recorded={sorted(recorded)}"
     )
 
-    # geos-topology: the native topology ops are diagnostic-bearing by
-    # construction -- they return an explicit BackendUnavailable error rather
-    # than a silent success when the feature is absent. Assert the honest wiring
-    # exists in the Rust boundary (require_topology_backend gate).
+    # geos-topology: even though the wheel now ships it, the Rust boundary keeps
+    # an explicit require_topology_backend / BackendUnavailable gate so a minimal
+    # build (feature absent) returns an honest error instead of a silent wrong
+    # result. Assert that honest wiring still exists in the source.
     topo = (ROOT / "src" / "gis" / "geometry" / "topology.rs").read_text(encoding="utf-8")
     assert "require_topology_backend" in topo and "BackendUnavailable" in topo, (
         "geos-topology fallback is not visibly diagnostic-bearing in src/gis/geometry/topology.rs"
