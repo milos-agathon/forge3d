@@ -70,8 +70,16 @@ def _crs_transform(from_crs, to_crs, *, always_xy: bool = True):
 
 
 def proj_available() -> bool:
-    """CRS transformation is always available via the built-in pure-Rust engine."""
-    return True
+    """Report whether a general CRS transformation backend is available.
+
+    `transform_coords` needs a general backend (native PROJ or pyproj) for
+    arbitrary EPSG pairs; the built-in pure-Rust engine only covers the
+    curated MENSURA projection whitelist (used directly by `reproject_geom`
+    and the `forge3d.gis` reprojection paths). Returning honestly here keeps
+    the `skipif(not proj_available())`-guarded CRS tests correct on wheels
+    that ship without pyproj.
+    """
+    return HAS_NATIVE_PROJ or HAS_PYPROJ or HAS_PYPROJ_LEGACY
 
 
 def transform_coords(
