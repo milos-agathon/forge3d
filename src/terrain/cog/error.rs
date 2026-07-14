@@ -7,6 +7,13 @@ pub enum CogError {
     #[error("HTTP request failed: {0}")]
     HttpError(String),
 
+    /// A ranged HTTP response was returned but failed validation (missing,
+    /// malformed, mismatched, truncated, or oversized `Content-Range`/body).
+    /// Distinct from `HttpError` so callers can classify it as a
+    /// `invalid_range_response` fallback reason rather than a transport failure.
+    #[error("Invalid range response: {0}")]
+    InvalidRangeResponse(String),
+
     #[error("Invalid byte range: offset={offset}, length={length}, file_size={file_size}")]
     InvalidRange {
         offset: u64,

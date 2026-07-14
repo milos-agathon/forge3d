@@ -1,8 +1,9 @@
 //! P3.1: HTTP range request primitives for COG streaming.
 
+use super::content_range::parse_content_range;
 use super::error::CogError;
-use std::collections::{HashMap, VecDeque};
-use std::hash::{Hash, Hasher};
+use super::range_cache::{ByteCache, DiskCache};
+use super::range_stats::RangeReaderStats;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -16,171 +17,6 @@ pub struct RangeReader {
     byte_cache: Arc<Mutex<ByteCache>>,
     disk_cache: Option<Arc<Mutex<DiskCache>>>,
     stats: Arc<RangeReaderStats>,
-}
-
-/// Statistics for range reader operations.
-#[derive(Debug, Default)]
-pub struct RangeReaderStats {
-    pub requests: std::sync::atomic::AtomicU64,
-    pub bytes_fetched: std::sync::atomic::AtomicU64,
-    pub cache_hits: std::sync::atomic::AtomicU64,
-    cached_bytes: std::sync::atomic::AtomicU64,
-    disk_cached_bytes: std::sync::atomic::AtomicU64,
-    pub total_latency_ms: std::sync::atomic::AtomicU64,
-}
-
-struct ByteCache {
-    entries: HashMap<(u64, u64), Vec<u8>>,
-    lru: VecDeque<(u64, u64)>,
-    used_bytes: u64,
-    budget_bytes: u64,
-}
-
-struct DiskCache {
-    dir: PathBuf,
-    source_hash: u64,
-    budget_bytes: u64,
-    used_bytes: u64,
-}
-
-impl DiskCache {
-    fn new(dir: PathBuf, source: &str, budget_bytes: u64) -> Result<Self, CogError> {
-        std::fs::create_dir_all(&dir)?;
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        source.hash(&mut hasher);
-        let mut cache = Self {
-            dir,
-            source_hash: hasher.finish(),
-            budget_bytes,
-            used_bytes: 0,
-        };
-        cache.used_bytes = cache.scan_used_bytes()?;
-        cache.evict_to_budget(0)?;
-        Ok(cache)
-    }
-
-    fn get(&self, key: (u64, u64)) -> Option<Vec<u8>> {
-        std::fs::read(self.path_for(key)).ok()
-    }
-
-    fn insert(&mut self, key: (u64, u64), data: &[u8]) -> Result<(), CogError> {
-        let len = data.len() as u64;
-        if len > self.budget_bytes {
-            return Ok(());
-        }
-        self.evict_to_budget(len)?;
-        let path = self.path_for(key);
-        if let Ok(metadata) = std::fs::metadata(&path) {
-            self.used_bytes = self.used_bytes.saturating_sub(metadata.len());
-        }
-        std::fs::write(&path, data)?;
-        self.used_bytes += len;
-        Ok(())
-    }
-
-    fn path_for(&self, key: (u64, u64)) -> PathBuf {
-        self.dir.join(format!(
-            "{:016x}_{:016x}_{:016x}.bin",
-            self.source_hash, key.0, key.1
-        ))
-    }
-
-    fn scan_used_bytes(&self) -> Result<u64, CogError> {
-        let mut total = 0;
-        for entry in std::fs::read_dir(&self.dir)? {
-            let entry = entry?;
-            if entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with(&format!("{:016x}_", self.source_hash))
-            {
-                total += entry.metadata()?.len();
-            }
-        }
-        Ok(total)
-    }
-
-    fn evict_to_budget(&mut self, incoming_bytes: u64) -> Result<(), CogError> {
-        if self.used_bytes + incoming_bytes <= self.budget_bytes {
-            return Ok(());
-        }
-        let prefix = format!("{:016x}_", self.source_hash);
-        let mut files = Vec::new();
-        for entry in std::fs::read_dir(&self.dir)? {
-            let entry = entry?;
-            if !entry.file_name().to_string_lossy().starts_with(&prefix) {
-                continue;
-            }
-            let metadata = entry.metadata()?;
-            let modified = metadata.modified().ok();
-            files.push((entry.path(), metadata.len(), modified));
-        }
-        files.sort_by_key(|(_, _, modified)| *modified);
-
-        for (path, len, _) in files {
-            if self.used_bytes + incoming_bytes <= self.budget_bytes {
-                break;
-            }
-            if std::fs::remove_file(path).is_ok() {
-                self.used_bytes = self.used_bytes.saturating_sub(len);
-            }
-        }
-        Ok(())
-    }
-
-    fn budget_bytes(&self) -> u64 {
-        self.budget_bytes
-    }
-}
-
-impl ByteCache {
-    fn new(budget_bytes: u64) -> Self {
-        Self {
-            entries: HashMap::new(),
-            lru: VecDeque::new(),
-            used_bytes: 0,
-            budget_bytes,
-        }
-    }
-
-    fn get(&mut self, key: &(u64, u64)) -> Option<Vec<u8>> {
-        let data = self.entries.get(key)?.clone();
-        self.lru.retain(|k| k != key);
-        self.lru.push_back(*key);
-        Some(data)
-    }
-
-    fn insert(&mut self, key: (u64, u64), data: Vec<u8>) {
-        let len = data.len() as u64;
-        if len > self.budget_bytes {
-            return;
-        }
-        if let Some(old) = self.entries.remove(&key) {
-            self.used_bytes = self.used_bytes.saturating_sub(old.len() as u64);
-            self.lru.retain(|k| k != &key);
-        }
-        while self.used_bytes + len > self.budget_bytes {
-            let Some(old_key) = self.lru.pop_front() else {
-                break;
-            };
-            if let Some(old) = self.entries.remove(&old_key) {
-                self.used_bytes = self.used_bytes.saturating_sub(old.len() as u64);
-            }
-        }
-        self.entries.insert(key, data);
-        self.lru.push_back(key);
-        self.used_bytes += len;
-    }
-
-    fn clear(&mut self) {
-        self.entries.clear();
-        self.lru.clear();
-        self.used_bytes = 0;
-    }
-
-    fn budget_bytes(&self) -> u64 {
-        self.budget_bytes
-    }
 }
 
 impl RangeReader {
@@ -288,7 +124,19 @@ impl RangeReader {
 
     /// Read a byte range from the file.
     pub async fn read_range(&self, offset: u64, length: u64) -> Result<Vec<u8>, CogError> {
-        if offset + length > self.file_size {
+        // A zero-length read is the empty range by definition: return it without
+        // touching the cache or the network.
+        if length == 0 {
+            return Ok(Vec::new());
+        }
+        // Checked arithmetic: a range whose end overflows u64 or exceeds the
+        // known file size is invalid before any fetch is issued.
+        let end_exclusive = offset.checked_add(length).ok_or(CogError::InvalidRange {
+            offset,
+            length,
+            file_size: self.file_size,
+        })?;
+        if end_exclusive > self.file_size {
             return Err(CogError::InvalidRange {
                 offset,
                 length,
@@ -339,14 +187,14 @@ impl RangeReader {
             cache.insert(cache_key, data.clone());
             self.stats
                 .cached_bytes
-                .store(cache.used_bytes, std::sync::atomic::Ordering::Relaxed);
+                .store(cache.used_bytes(), std::sync::atomic::Ordering::Relaxed);
         }
         if let Some(disk_cache) = &self.disk_cache {
             if let Ok(mut cache) = disk_cache.lock() {
                 cache.insert(cache_key, &data)?;
                 self.stats
                     .disk_cached_bytes
-                    .store(cache.used_bytes, std::sync::atomic::Ordering::Relaxed);
+                    .store(cache.used_bytes(), std::sync::atomic::Ordering::Relaxed);
             }
         }
 
@@ -354,7 +202,10 @@ impl RangeReader {
     }
 
     async fn read_http_range(&self, offset: u64, length: u64) -> Result<Vec<u8>, CogError> {
-        let range_header = format!("bytes={}-{}", offset, offset + length - 1);
+        // `read_range` guarantees length >= 1 and offset + length <= file_size,
+        // so the inclusive end never underflows or exceeds the object.
+        let end = offset + length - 1;
+        let range_header = format!("bytes={}-{}", offset, end);
 
         let response = self
             .client
@@ -375,7 +226,41 @@ impl RangeReader {
             )));
         }
 
+        // Validate the partial response against exactly what we asked for. A
+        // proxy or misbehaving origin can return 206 with a different range, an
+        // unparseable/absent Content-Range, or a truncated/oversized body;
+        // accepting any of those would place the wrong bytes at the requested
+        // offset. Reject before the bytes can enter the cache or a decoder.
+        let content_range = response
+            .headers()
+            .get(reqwest::header::CONTENT_RANGE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string)
+            .ok_or_else(|| {
+                CogError::InvalidRangeResponse(
+                    "206 Partial Content response is missing a Content-Range header".to_string(),
+                )
+            })?;
+        let (start, resp_end, total) = parse_content_range(&content_range).ok_or_else(|| {
+            CogError::InvalidRangeResponse(format!(
+                "206 response has an unparseable Content-Range header: {content_range:?}"
+            ))
+        })?;
+        if start != offset || resp_end != end || total != self.file_size {
+            return Err(CogError::InvalidRangeResponse(format!(
+                "206 Content-Range bytes {start}-{resp_end}/{total} does not match the \
+                 requested bytes {offset}-{end}/{}",
+                self.file_size
+            )));
+        }
+
         let bytes = response.bytes().await?;
+        if bytes.len() as u64 != length {
+            return Err(CogError::InvalidRangeResponse(format!(
+                "206 response body is {} bytes, expected {length}",
+                bytes.len()
+            )));
+        }
         Ok(bytes.to_vec())
     }
 
@@ -427,41 +312,6 @@ impl RangeReader {
             self.stats
                 .cached_bytes
                 .store(0, std::sync::atomic::Ordering::Relaxed);
-        }
-    }
-}
-
-impl RangeReaderStats {
-    pub fn requests(&self) -> u64 {
-        self.requests.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    pub fn bytes_fetched(&self) -> u64 {
-        self.bytes_fetched
-            .load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    pub fn cache_hits(&self) -> u64 {
-        self.cache_hits.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    pub fn cached_bytes(&self) -> u64 {
-        self.cached_bytes.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    pub fn disk_cached_bytes(&self) -> u64 {
-        self.disk_cached_bytes
-            .load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    pub fn avg_latency_ms(&self) -> f64 {
-        let reqs = self.requests();
-        if reqs == 0 {
-            0.0
-        } else {
-            self.total_latency_ms
-                .load(std::sync::atomic::Ordering::Relaxed) as f64
-                / reqs as f64
         }
     }
 }
@@ -522,5 +372,24 @@ mod tests {
         assert!(reader.stats().disk_cached_bytes() <= 96);
         std::fs::remove_file(data_path).ok();
         std::fs::remove_dir_all(cache_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn zero_length_read_returns_empty_without_reading_the_file() {
+        // A zero-length range is empty by definition and must not fault, even at an
+        // offset past the end of the file.
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "forge3d-range-reader-zero-{}.bin",
+            std::process::id()
+        ));
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(&[1u8; 16])
+            .unwrap();
+        let reader = RangeReader::new_local(path.to_str().unwrap()).unwrap();
+        assert!(reader.read_range(0, 0).await.unwrap().is_empty());
+        assert!(reader.read_range(9999, 0).await.unwrap().is_empty());
+        std::fs::remove_file(path).ok();
     }
 }

@@ -5,9 +5,12 @@
 
 mod cache;
 mod cog_reader;
+mod content_range;
 mod error;
 mod ifd_parser;
+mod range_cache;
 mod range_reader;
+mod range_stats;
 
 #[cfg(feature = "extension-module")]
 pub mod py_bindings;

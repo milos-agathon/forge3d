@@ -9,6 +9,10 @@ pub mod osm;
 #[cfg(feature = "extension-module")]
 pub(crate) mod py_json;
 pub mod raster_info;
+pub(crate) mod raster_read;
+pub(crate) mod raster_tags;
+pub(crate) mod raster_values;
+pub(crate) mod raster_window;
 pub mod raster_write;
 pub mod rasterize;
 pub mod remote;

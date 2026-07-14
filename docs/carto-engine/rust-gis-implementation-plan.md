@@ -101,7 +101,7 @@ Status is based on executable behavior in the maturin wheel, not on whether a Py
 | `normalize_raster`, `classify_raster` | **Implemented subset** | Min-max normalization and explicit-bin classification work. Other planned normalization/classification methods remain absent. |
 | `fetch_remote_geodata`, `cache_geodata` | **Shipped** | `gis-remote` is in maturin features and explicit fetch/cache behavior is implemented. Network tests remain mocked/conditional by design. |
 | `fetch_vector` | **Partial** | Remote GeoJSON works through the explicit cache/fetch path. GPKG/WFS and other vector drivers do not. |
-| `read_cog` | **Local subset; remote range streaming for striped COGs (gis-operations)** | Local TIFF reads work only at overview 0. **UPDATE (gis-operations, 2026-07-13):** `overview` is validated before any fetch. A **windowed** HTTP(S) read of a **striped** COG now streams only the overlapping strips via HTTP range requests — `src/gis/cog_range.rs` wraps `RangeReader` in a `Read+Seek` cursor feeding `raster_info::read_striped_window_from_decoder` (window-selective strip decode). Measured: a 20-row window of a 4.9 MB / 5-strip file transfers ~1.07 MB (22%). Non-windowed reads, tiled COGs, and non-chunky-planar inputs fall back to a full fetch-to-cache decode (a diagnostic notes the full download); verifying tiled range reads needs a GDAL/rasterio-produced fixture, absent here. |
+| `read_cog` | **Local subset; remote range streaming for striped AND tiled COGs (gis-operations)** | Local TIFF reads work only at overview 0. **UPDATE (gis-operations, 2026-07-13):** `overview` is validated before any fetch. A **windowed** HTTP(S) read of a chunky-planar **striped or tiled** COG decodes only the overlapping strips/tiles — `src/gis/cog_range.rs` wraps `RangeReader` in a `Read+Seek` cursor feeding `raster_info::read_window_from_decoder` (window-selective strip/tile decode). Transport is 16 KiB **block-aligned** so revisited regions hit the byte cache instead of refetching overlapping windows; traffic is proportional to the intersecting chunk payloads rounded to block granularity (+ header/IFD). Measured on a 1024² 64-tile uncompressed fixture (2.1 MB): a 400×400 window transfers 22.7% of the object (1.19× the intersecting tile payload; the pre-fix unaligned cursor transferred 156%), a 40×40 window inside one tile 4.0%. `RangeReader` validates every 206 (strict RFC 9110 `Content-Range` grammar + body length) before caching. Only non-windowed reads, planar-separate TIFFs, chunk layouts the decoder can't assemble, and transport/range failures fall back to a full fetch-to-cache decode, tagged with a `range_fallback` reason (`unsupported_layout`/`range_not_supported`/`invalid_range_response`); fatal decode errors — including a corrupt TIFF header — propagate without any fallback download, and out-of-bounds windows raise without a full-object download (dimensions are established via metadata range requests first). Tiled range reads are verified with a hand-rolled (`struct`-only, no GDAL/rasterio) tiled-GeoTIFF fixture whose tests also lock `tiling == "tiled"` and the payload-proportional transfer bound. |
 | Slippy tiles | **Implemented subset** | WGS84/Web-Mercator tile indexing works with explicit antimeridian/latitude limits. Other input CRSs inherit the transform-backend limits. |
 | OSM: `parse_osm_features`, `query_osm_features`, `prepare_osm_scene` | **Parser shipped; query/scene cache-only** | Basic nodes and ways parse; relations are skipped with diagnostics. `query_osm_features` has no endpoint argument or `gis-remote` execution path and always raises without an injected `cache["osm_json"]`; `prepare_osm_scene` inherits that limitation. Add an explicit endpoint/fetch policy before calling either a query API. |
 | Terrarium | **Decode shipped; build cache-only** | RGB decode and cached tile mosaics work. `build_terrarium_dem` does not fetch missing tiles or consume a URL template despite the planned fetch/mosaic contract. |
@@ -118,7 +118,7 @@ Status is based on executable behavior in the maturin wheel, not on whether a Py
 3. **P0 CRS/raster correctness:** unify GeoTIFF CRS read/write support and complete the MENSURA transform dispatch. An optional internal support preflight may avoid wasted allocation, but the default public failure must remain `TransformFailed{count, first_pixel}` for parseable unsupported pairs.
 4. **P1 backend wiring.** Two independent items:
    - **PROJ policy (authoritative, resolves the earlier contradiction):** the built-in pure-Rust dispatcher is the *single runtime transform surface*. Optional PROJ (`src/geo/reproject.rs`, `#[cfg(feature = "proj")]`-only, omitted from the wheel) is used ONLY as a test-time differential oracle — it is NEVER a runtime or `pyproj` fallback (M-02). "Wiring GIS transforms to PROJ" therefore means *not having two transform surfaces*, not adding a runtime fallback; no runtime PROJ path is required or wanted, so there is nothing to implement here beyond keeping the built-in dispatcher authoritative.
-   - **Remote `read_cog`:** route it through a COG *range* reader when `cog_streaming` is enabled. Status: **implemented for striped COGs** — a windowed remote read streams only the overlapping strips via HTTP range requests (see the `read_cog` row). Tiled COGs and non-chunky-planar inputs fall back to a full fetch (a tiled fixture to verify tiled range reads needs GDAL/rasterio, absent here).
+   - **Remote `read_cog`:** route it through a COG *range* reader when `cog_streaming` is enabled. Status: **implemented for striped AND tiled COGs** — a windowed remote read decodes only the overlapping strips/tiles over block-aligned, cache-friendly range requests (see the `read_cog` row for measured transfer ratios). Non-windowed reads, planar-separate/unsupported chunk layouts, and transport/range failures fall back to a full fetch, each with an honest `range_fallback` reason; fatal decode errors propagate instead of falling back, and the 206 response is validated before use.
 5. **P1 contract completion:** decide whether to implement broad vector drivers, rasterize merge semantics, boundary filtering/reprojection, live OSM, Terrarium fetching, and multidimensional grids. Until then keep them marked partial rather than adding more registered stubs.
 6. **P2/defer:** implement `warped_vrt_info` and broader thematic/derivative methods only when an actual recipe needs them.
 
@@ -140,16 +140,25 @@ Landed here (each with a red→green test and verified in the shipped wheel):
    table now backs the GeoTIFF reader, writer, and transform dispatch, so every accepted
    WGS84 UTM zone round-trips (32632 regression added). The default unsupported-pair
    failure remains `TransformFailed{count, first_pixel}`.
-4. **P1 remote read_cog (item 4) — implemented (striped range streaming).** `read_cog`
+4. **P1 remote read_cog (item 4) — implemented (striped AND tiled range streaming).** `read_cog`
    validates `overview` before any fetch, releases the GIL across network I/O, and — for a
-   **windowed** read of a **striped** COG — streams only the strips overlapping the window
-   via HTTP range requests (`src/gis/cog_range.rs`: a `Read+Seek` cursor over `RangeReader`
-   feeds the window-selective `raster_info::read_striped_window_from_decoder`). Measured: a
-   20-row window of a 4.9 MB / 5-strip file transfers ~1.07 MB (22%), matching the local
-   windowed read. Non-windowed reads, tiled COGs, and non-chunky-planar inputs fall back to
-   the full fetch-to-cache path (diagnostic-noted). Verifying *tiled* range reads needs a
-   GDAL/rasterio-produced tiled fixture, which is absent locally, so tiled range support is
-   the remaining follow-up.
+   **windowed** read of a chunky-planar **striped or tiled** COG — streams only the strips or
+   tiles overlapping the window via HTTP range requests (`src/gis/cog_range.rs`: a `Read+Seek`
+   cursor over `RangeReader` feeds the window-selective `raster_info::read_window_from_decoder`,
+   which dispatches to a strip or tile assembler and crops with the shared `copy_window`).
+   Measured on a 1024² 64-tile uncompressed fixture: a 400×400 window transfers 22.7% of the
+   object (1.19× the intersecting tile payload), a 40×40 window inside one tile 4.0%; a 20-row
+   striped window ~22%; each matches the local windowed read byte-for-byte. `RangeReader`
+   now validates every 206 partial response (`Content-Range` start/end/total and body length)
+   before it can enter the byte cache or decoder; out-of-bounds windows raise `InvalidArgument`
+   without a full-object download (dimensions are established via metadata range requests first).
+   Only non-windowed reads, planar-separate TIFFs, photometric/band layouts the per-chunk decoder
+   cannot assemble, and transport/range failures (a server ignoring Range or answering with an
+   invalid 206) fall back to the full fetch-to-cache path, each tagged with a `range_fallback`
+   reason (`unsupported_layout`/`range_not_supported`/`invalid_range_response`)
+   kept distinct from the `cache_hit`/`cache_miss` code; a successful stream is tagged `range_read`.
+   Tiled range reads are verified against a hand-rolled (`struct`-only, no GDAL/rasterio)
+   tiled-GeoTIFF fixture.
 
 **Out of scope in this worktree (MENSURA, `13-mensura.md`):** completing the transform
 dispatch to reach LCC/AEA/stereographic/generic-TM by bare EPSG lives entirely in
@@ -500,8 +509,8 @@ Proof sources:
 
 - [x] Build explicit remote/cache, local COG, slippy-tile, OSM parsing, Terrarium decoding/cached mosaic, DEM/landcover/population/building, raster-like grid, and fixture-test subsets.
 - [x] Make remote `read_cog` work: route http(s) through the gis-remote fetch/cache path, decode locally, and validate `overview` before fetching. Live-server, unreachable-host, and overview-before-fetch tests added.
-- [x] Wire remote `read_cog` to a COG *range* reader (`cog_streaming`) for **striped** COGs: a windowed remote read fetches only the overlapping strips via HTTP range requests (`src/gis/cog_range.rs` + `raster_info::read_striped_window_from_decoder`; measured ~22% of a 4.9 MB file for a 20-row window). Tiled COGs / non-chunky-planar fall back to the full fetch.
-- [ ] Extend range streaming to **tiled** COGs (per-tile ranges). Blocked on a committed tiled-COG fixture to verify it (needs GDAL/rasterio; the in-repo writer only emits striped TIFFs).
+- [x] Wire remote `read_cog` to a COG *range* reader (`cog_streaming`) for **striped AND tiled** COGs: a windowed remote read fetches only the overlapping strips/tiles via HTTP range requests (`src/gis/cog_range.rs` + `raster_info::read_window_from_decoder`; measured on a 1024² tiled fixture: 22.7% of the object at 1.19× the intersecting tile payload for a 400×400 window, 4.0% for a 40×40 in-tile window, ~22% striped). `RangeReader` validates every 206 response before caching; range vs cache vs fallback diagnostics carry distinct truthful codes. Only non-windowed reads, planar-separate/unsupported chunk layouts, and transport/range failures (a server ignoring Range or answering with an invalid 206) fall back to the full fetch.
+- [x] Extend range streaming to **tiled** COGs (per-tile ranges), verified with a hand-rolled (`struct`-only, no GDAL/rasterio) tiled-GeoTIFF fixture — the in-repo writer only emits striped TIFFs, so the test constructs the tiled fixture directly.
 - [ ] Add explicit live OSM and Terrarium fetch policies; current helpers are cache-only.
 - [ ] Add GPKG/other vector, destination-CRS building, and NetCDF/HDF support only with real backends and fixtures.
 

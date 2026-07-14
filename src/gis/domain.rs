@@ -89,24 +89,15 @@ mod py {
             height,
         });
 
-        // Remote + windowed: try an HTTP range read that fetches ONLY the strips
-        // overlapping the window (striped COGs). On any failure (tiled/unsupported
-        // input or transport error) fall through to the full fetch-and-slice path.
-        #[cfg(feature = "cog_streaming")]
-        if crate::gis::remote::is_remote_url(&path_or_url) {
-            if let Some(win) = pixel_window {
-                let streamed = py
-                    .allow_threads(|| crate::gis::cog_range::read_remote_window(&path_or_url, win));
-                if let Ok(result) = streamed {
-                    let warnings = vec![RasterWarning::new(
-                        "cache_miss",
-                        "read_cog streamed the remote COG window via HTTP range requests",
-                        Some("path_or_url"),
-                    )];
-                    return read_cog_result_to_py(py, &result, &warnings);
-                }
-            }
-        }
+        // Remote + windowed: try an HTTP range read that fetches ONLY the
+        // strips/tiles overlapping the window. A streamed success returns here; a
+        // classified fallback continues to the full fetch (recording an honest
+        // reason); request-validation and fatal decode errors propagate WITHOUT
+        // any download.
+        let range_fallback_reason = match try_range_stream(py, &path_or_url, pixel_window)? {
+            RangeStep::Streamed(result) => return Ok(result),
+            RangeStep::FullFetch(reason) => reason,
+        };
 
         // Local read, or remote fall-back: fetch the whole object (remote, through
         // the cache-aware gis-remote path) or open the local file, then decode and
@@ -119,6 +110,8 @@ mod py {
             let info = py.allow_threads(|| {
                 crate::gis::remote::fetch_remote_geodata(&path_or_url, Some(&cache_dir), None, None)
             })?;
+            // Cache diagnostics describe the fetch of the full object. They stay
+            // distinct from the range diagnostics recorded below.
             remote_warnings.push(RasterWarning::new(
                 if info.from_cache {
                     "cache_hit"
@@ -126,7 +119,7 @@ mod py {
                     "cache_miss"
                 },
                 format!(
-                    "read_cog downloaded the full remote COG (no range read; {}); \
+                    "read_cog downloaded the full remote COG ({}); \
                      any window is applied after decode",
                     info.status
                 ),
@@ -139,8 +132,65 @@ mod py {
             PathBuf::from(&path_or_url)
         };
 
+        // If the full fetch happened because a range attempt failed, record why
+        // (a stable category), kept separate from the cache_hit/cache_miss code.
+        if let Some(reason) = range_fallback_reason {
+            remote_warnings.push(RasterWarning::new(
+                "range_fallback",
+                format!(
+                    "read_cog fell back to a full download because HTTP range streaming \
+                     was not usable ({reason})"
+                ),
+                Some("path_or_url"),
+            ));
+        }
+
         let result = raster_info::read_raster(&read_path, None, pixel_window, false)?;
         read_cog_result_to_py(py, &result, &remote_warnings)
+    }
+
+    /// Outcome of the optional range-streaming attempt: either a fully-built Python
+    /// result to return immediately, or a signal to do the full fetch (carrying the
+    /// fallback reason when a range attempt actually failed).
+    enum RangeStep {
+        Streamed(PyObject),
+        FullFetch(Option<&'static str>),
+    }
+
+    /// Try a range-backed windowed read for a remote COG. Local reads, non-windowed
+    /// reads, and builds without `cog_streaming` skip straight to `FullFetch(None)`.
+    /// Streamed successes carry only a `range_read` diagnostic (never a cache code);
+    /// fallbacks carry a stable reason; validation/fatal errors propagate.
+    fn try_range_stream(
+        py: Python<'_>,
+        path_or_url: &str,
+        window: Option<PixelWindow>,
+    ) -> PyResult<RangeStep> {
+        #[cfg(feature = "cog_streaming")]
+        if crate::gis::remote::is_remote_url(path_or_url) {
+            if let Some(win) = window {
+                use crate::gis::cog_range::{read_remote_window, RangeReadOutcome};
+                match py.allow_threads(|| read_remote_window(path_or_url, win))? {
+                    RangeReadOutcome::Streamed(result) => {
+                        let warnings = vec![RasterWarning::new(
+                            "range_read",
+                            "read_cog streamed the requested window from the remote COG using \
+                             HTTP range requests",
+                            Some("path_or_url"),
+                        )];
+                        return Ok(RangeStep::Streamed(read_cog_result_to_py(
+                            py, &result, &warnings,
+                        )?));
+                    }
+                    RangeReadOutcome::Fallback(reason) => {
+                        return Ok(RangeStep::FullFetch(Some(reason.reason())));
+                    }
+                }
+            }
+        }
+        // Feature off, local path, or non-windowed remote read: no range attempt.
+        let _ = (py, path_or_url, window);
+        Ok(RangeStep::FullFetch(None))
     }
 
     fn read_cog_result_to_py(

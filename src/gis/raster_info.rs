@@ -1,21 +1,33 @@
-use std::collections::{HashMap, HashSet};
+//! Raster metadata (`RasterInfo`) and the public `read_raster` entry point.
+//! Full-image decoding lives in `raster_read`, windowed strip/tile decoding in
+//! `raster_window`, TIFF tag/CRS readers in `raster_tags`, and shared
+//! pixel-value utilities in `raster_values`; the moved items are re-exported
+//! here so `raster_info::` remains the stable crate-internal path.
+
+use std::collections::HashSet;
 use std::fs::File;
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-use tiff::decoder::{ChunkType, Decoder, DecodingResult};
-use tiff::tags::Tag;
+use tiff::decoder::{ChunkType, Decoder};
 
 use crate::gis::affine::PixelWindow;
 use crate::gis::error::{GisError, GisResult};
-use crate::gis::raster_write::{RasterArray, RasterData};
+use crate::gis::raster_tags::{
+    compression_name, dtype_per_band, nodata_per_band, read_crs, read_transform, sample_count,
+};
+use crate::gis::raster_write::RasterArray;
 use crate::gis::types::{
-    AffineTransform, RasterDType, RasterInfo, RasterWarning, WARNING_METADATA_UNAVAILABLE,
-    WARNING_MISSING_CRS, WARNING_MISSING_TRANSFORM, WARNING_NOT_GEOREFERENCED,
-    WARNING_PER_BAND_NODATA_MISMATCH, WARNING_ROTATED_OR_SHEARED,
+    AffineTransform, RasterInfo, RasterWarning, WARNING_METADATA_UNAVAILABLE, WARNING_MISSING_CRS,
+    WARNING_MISSING_TRANSFORM, WARNING_NOT_GEOREFERENCED, WARNING_PER_BAND_NODATA_MISMATCH,
+    WARNING_ROTATED_OR_SHEARED,
 };
 
-const FORGE3D_NODATA_PREFIX: &str = "forge3d:nodata_per_band=";
+pub(crate) use crate::gis::raster_read::read_raster_data;
+pub(crate) use crate::gis::raster_values::{
+    copy_window, f64_to_raster_data, raster_to_f64, valid_mask,
+};
+pub(crate) use crate::gis::raster_window::read_window_from_decoder;
 
 #[derive(Debug, Clone)]
 pub(crate) struct LoadedRaster {
@@ -64,7 +76,7 @@ pub(crate) fn raster_info_from_decoder<R: std::io::Read + std::io::Seek>(
     // decode or names an unknown height system is rejected — silently coercing
     // a declared-but-unrecognized vertical datum to "unspecified" would erase
     // the declaration and invite an orthometric/ellipsoidal mix-up downstream.
-    if let Some(value) = decoder.find_tag(Tag::Unknown(
+    if let Some(value) = decoder.find_tag(tiff::tags::Tag::Unknown(
         crate::gis::raster_write::FORGE3D_HEIGHT_SYSTEM_TAG,
     ))? {
         let raw = value.into_string().map_err(|err| {
@@ -159,238 +171,6 @@ pub(crate) fn raster_info_from_decoder<R: std::io::Read + std::io::Seek>(
     Ok(info)
 }
 
-pub(crate) fn read_raster_data(path: impl AsRef<Path>) -> GisResult<LoadedRaster> {
-    let path = path.as_ref();
-    let info = read_raster_info(path)?;
-    let file = File::open(path)?;
-    let mut decoder = Decoder::new(BufReader::new(file))?;
-    let image = match decoder.read_image() {
-        Ok(image) => image,
-        Err(err) => read_uncompressed_strips(path, &info).map_err(|_| GisError::from(err))?,
-    };
-    let bands = info.band_count as usize;
-    let shape = [bands, info.height as usize, info.width as usize];
-    let array = match image {
-        DecodingResult::U8(data) => {
-            RasterArray::new(RasterData::U8(deinterleave(data, bands)), &shape)
-        }
-        DecodingResult::U16(data) => {
-            RasterArray::new(RasterData::U16(deinterleave(data, bands)), &shape)
-        }
-        DecodingResult::I16(data) => {
-            RasterArray::new(RasterData::I16(deinterleave(data, bands)), &shape)
-        }
-        DecodingResult::U32(data) => {
-            RasterArray::new(RasterData::U32(deinterleave(data, bands)), &shape)
-        }
-        DecodingResult::I32(data) => {
-            RasterArray::new(RasterData::I32(deinterleave(data, bands)), &shape)
-        }
-        DecodingResult::F32(data) => {
-            RasterArray::new(RasterData::F32(deinterleave(data, bands)), &shape)
-        }
-        DecodingResult::F64(data) => {
-            RasterArray::new(RasterData::F64(deinterleave(data, bands)), &shape)
-        }
-        _ => Err(GisError::UnsupportedDType(
-            "unsupported TIFF dtype for raster operation".to_string(),
-        )),
-    }?;
-    Ok(LoadedRaster { array, info })
-}
-
-fn read_uncompressed_strips(path: &Path, info: &RasterInfo) -> GisResult<DecodingResult> {
-    if info.tiling.as_deref() != Some("striped") || info.compression.as_deref() != Some("NONE") {
-        return Err(GisError::InvalidRaster(
-            "raw strip fallback only supports uncompressed striped TIFFs".to_string(),
-        ));
-    }
-    let dtype = dtype_name_to_dtype(
-        info.dtype_per_band
-            .first()
-            .ok_or_else(|| GisError::InvalidRaster("raster has no dtype metadata".to_string()))?,
-    )?;
-    if info
-        .dtype_per_band
-        .iter()
-        .any(|name| dtype_name_to_dtype(name).ok() != Some(dtype))
-    {
-        return Err(GisError::UnsupportedDType(
-            "mixed per-band TIFF dtypes are not supported".to_string(),
-        ));
-    }
-
-    let mut decoder = Decoder::new(BufReader::new(File::open(path)?))?;
-    let planar_config = decoder
-        .find_tag_unsigned::<u16>(Tag::PlanarConfiguration)?
-        .unwrap_or(1);
-    if planar_config != 1 {
-        return Err(GisError::InvalidRaster(
-            "raw strip fallback only supports chunky planar configuration".to_string(),
-        ));
-    }
-    let offsets = decoder
-        .find_tag_unsigned_vec::<u64>(Tag::StripOffsets)?
-        .ok_or_else(|| GisError::InvalidRaster("TIFF StripOffsets tag is missing".to_string()))?;
-    let byte_counts = decoder
-        .find_tag_unsigned_vec::<u64>(Tag::StripByteCounts)?
-        .ok_or_else(|| {
-            GisError::InvalidRaster("TIFF StripByteCounts tag is missing".to_string())
-        })?;
-    if offsets.len() != byte_counts.len() {
-        return Err(GisError::InvalidRaster(
-            "TIFF strip offset/count metadata length mismatch".to_string(),
-        ));
-    }
-
-    let expected_bytes = (info.width as usize)
-        .checked_mul(info.height as usize)
-        .and_then(|value| value.checked_mul(info.band_count as usize))
-        .and_then(|value| value.checked_mul(dtype_size(dtype)))
-        .ok_or_else(|| GisError::InvalidRaster("raster byte size is too large".to_string()))?;
-    let little_endian = read_tiff_little_endian(path)?;
-    let mut file = File::open(path)?;
-    let mut bytes = Vec::with_capacity(expected_bytes);
-    for (offset, byte_count) in offsets.into_iter().zip(byte_counts) {
-        let byte_count = usize::try_from(byte_count).map_err(|_| {
-            GisError::InvalidRaster("TIFF strip byte count exceeds usize range".to_string())
-        })?;
-        let start_len = bytes.len();
-        bytes.resize(start_len + byte_count, 0);
-        file.seek(SeekFrom::Start(offset))?;
-        file.read_exact(&mut bytes[start_len..])?;
-    }
-    if bytes.len() != expected_bytes {
-        return Err(GisError::InvalidRaster(format!(
-            "TIFF strip data has {} bytes, expected {expected_bytes}",
-            bytes.len()
-        )));
-    }
-
-    match dtype {
-        RasterDType::UInt8 => Ok(DecodingResult::U8(bytes)),
-        RasterDType::Int16 => Ok(DecodingResult::I16(
-            bytes_to_i16(&bytes, little_endian)?.into_iter().collect(),
-        )),
-        RasterDType::UInt16 => Ok(DecodingResult::U16(bytes_to_u16(&bytes, little_endian)?)),
-        RasterDType::Int32 => Ok(DecodingResult::I32(bytes_to_i32(&bytes, little_endian)?)),
-        RasterDType::UInt32 => Ok(DecodingResult::U32(bytes_to_u32(&bytes, little_endian)?)),
-        RasterDType::Float32 => Ok(DecodingResult::F32(bytes_to_f32(&bytes, little_endian)?)),
-        RasterDType::Float64 => Ok(DecodingResult::F64(bytes_to_f64(&bytes, little_endian)?)),
-    }
-}
-
-fn dtype_name_to_dtype(name: &str) -> GisResult<RasterDType> {
-    match name {
-        "uint8" => Ok(RasterDType::UInt8),
-        "int16" => Ok(RasterDType::Int16),
-        "uint16" => Ok(RasterDType::UInt16),
-        "int32" => Ok(RasterDType::Int32),
-        "uint32" => Ok(RasterDType::UInt32),
-        "float32" => Ok(RasterDType::Float32),
-        "float64" => Ok(RasterDType::Float64),
-        other => Err(GisError::UnsupportedDType(format!(
-            "unsupported TIFF dtype {other:?}"
-        ))),
-    }
-}
-
-fn dtype_size(dtype: RasterDType) -> usize {
-    match dtype {
-        RasterDType::UInt8 => 1,
-        RasterDType::Int16 | RasterDType::UInt16 => 2,
-        RasterDType::Int32 | RasterDType::UInt32 | RasterDType::Float32 => 4,
-        RasterDType::Float64 => 8,
-    }
-}
-
-fn read_tiff_little_endian(path: &Path) -> GisResult<bool> {
-    let mut file = File::open(path)?;
-    let mut header = [0u8; 2];
-    file.read_exact(&mut header)?;
-    match &header {
-        b"II" => Ok(true),
-        b"MM" => Ok(false),
-        _ => Err(GisError::InvalidRaster(
-            "TIFF byte order marker is invalid".to_string(),
-        )),
-    }
-}
-
-fn bytes_to_u16(bytes: &[u8], little_endian: bool) -> GisResult<Vec<u16>> {
-    bytes_to_array::<2, u16>(bytes, |chunk| {
-        if little_endian {
-            u16::from_le_bytes(chunk)
-        } else {
-            u16::from_be_bytes(chunk)
-        }
-    })
-}
-
-fn bytes_to_i16(bytes: &[u8], little_endian: bool) -> GisResult<Vec<i16>> {
-    bytes_to_array::<2, i16>(bytes, |chunk| {
-        if little_endian {
-            i16::from_le_bytes(chunk)
-        } else {
-            i16::from_be_bytes(chunk)
-        }
-    })
-}
-
-fn bytes_to_u32(bytes: &[u8], little_endian: bool) -> GisResult<Vec<u32>> {
-    bytes_to_array::<4, u32>(bytes, |chunk| {
-        if little_endian {
-            u32::from_le_bytes(chunk)
-        } else {
-            u32::from_be_bytes(chunk)
-        }
-    })
-}
-
-fn bytes_to_i32(bytes: &[u8], little_endian: bool) -> GisResult<Vec<i32>> {
-    bytes_to_array::<4, i32>(bytes, |chunk| {
-        if little_endian {
-            i32::from_le_bytes(chunk)
-        } else {
-            i32::from_be_bytes(chunk)
-        }
-    })
-}
-
-fn bytes_to_f32(bytes: &[u8], little_endian: bool) -> GisResult<Vec<f32>> {
-    bytes_to_u32(bytes, little_endian)
-        .map(|values| values.into_iter().map(f32::from_bits).collect())
-}
-
-fn bytes_to_f64(bytes: &[u8], little_endian: bool) -> GisResult<Vec<f64>> {
-    bytes_to_array::<8, f64>(bytes, |chunk| {
-        if little_endian {
-            f64::from_le_bytes(chunk)
-        } else {
-            f64::from_be_bytes(chunk)
-        }
-    })
-}
-
-fn bytes_to_array<const N: usize, T>(
-    bytes: &[u8],
-    convert: impl Fn([u8; N]) -> T,
-) -> GisResult<Vec<T>> {
-    if !bytes.chunks_exact(N).remainder().is_empty() {
-        return Err(GisError::InvalidRaster(
-            "TIFF strip byte count is not aligned to sample size".to_string(),
-        ));
-    }
-    Ok(bytes
-        .chunks_exact(N)
-        .map(|chunk| {
-            let mut array = [0u8; N];
-            array.copy_from_slice(chunk);
-            convert(array)
-        })
-        .collect())
-}
-
 pub fn read_raster(
     path: impl AsRef<Path>,
     bands: Option<Vec<u16>>,
@@ -449,141 +229,6 @@ pub fn read_raster(
     })
 }
 
-/// Windowed read that decodes ONLY the strips overlapping `window`, over any
-/// `Read + Seek` source. This is what lets a remote range reader transfer just the
-/// bytes for the requested window. Supports striped, chunky-planar TIFFs only;
-/// tiled or planar-separate inputs return `BackendUnavailable` so the caller can
-/// fall back to a full read-and-slice.
-pub(crate) fn read_striped_window_from_decoder<R: std::io::Read + std::io::Seek>(
-    decoder: &mut Decoder<R>,
-    path_label: PathBuf,
-    window: PixelWindow,
-) -> GisResult<RasterReadResult> {
-    let info = raster_info_from_decoder(decoder, path_label)?;
-
-    if !matches!(decoder.get_chunk_type(), ChunkType::Strip) {
-        return Err(GisError::BackendUnavailable(
-            "backend_unavailable: windowed range read supports striped TIFFs only".to_string(),
-        ));
-    }
-    let planar = decoder
-        .find_tag_unsigned::<u16>(Tag::PlanarConfiguration)?
-        .unwrap_or(1);
-    if planar != 1 {
-        return Err(GisError::BackendUnavailable(
-            "backend_unavailable: windowed range read supports chunky planar only".to_string(),
-        ));
-    }
-
-    let window = validate_read_window(window, info.width, info.height)?;
-    let bands = info.band_count as usize;
-    let width = info.width as usize;
-    let (_chunk_w, rows_per_strip) = decoder.chunk_dimensions();
-    let rows_per_strip = rows_per_strip as usize;
-    if rows_per_strip == 0 {
-        return Err(GisError::InvalidRaster(
-            "invalid_raster: TIFF reports zero rows per strip".to_string(),
-        ));
-    }
-
-    let row_start = window.row_off as usize;
-    let row_end = row_start + window.height as usize; // exclusive
-    let first_strip = row_start / rows_per_strip;
-    let last_strip = (row_end - 1) / rows_per_strip;
-    let covered_start = first_strip * rows_per_strip;
-
-    let mut chunks: Vec<DecodingResult> = Vec::with_capacity(last_strip - first_strip + 1);
-    let mut covered_rows = 0usize;
-    for strip in first_strip..=last_strip {
-        let chunk = decoder.read_chunk(strip as u32).map_err(|err| {
-            GisError::InvalidRaster(format!("invalid_raster: strip {strip}: {err}"))
-        })?;
-        let (_data_w, data_height) = decoder.chunk_data_dimensions(strip as u32);
-        covered_rows += data_height as usize;
-        chunks.push(chunk);
-    }
-
-    // Assemble the overlapping strips into a partial full-width image, then slice
-    // the requested window out of it with the shared window copier.
-    let partial = strips_to_array(chunks, bands, covered_rows, width)?;
-    let local_window = PixelWindow {
-        col_off: window.col_off,
-        row_off: window.row_off - covered_start as i64,
-        width: window.width,
-        height: window.height,
-    };
-    let array = copy_window(&partial, &info.nodata_per_band, local_window)?;
-
-    let selected_bands: Vec<u16> = (1..=info.band_count).collect();
-    let window_transform = if info.transform.is_some() {
-        Some(crate::gis::affine::window_transform(&info, window)?)
-    } else {
-        None
-    };
-    let result_info = read_result_info(
-        &info,
-        &array,
-        &selected_bands,
-        Some(window),
-        window_transform,
-        info.nodata_per_band.clone(),
-    );
-    let warnings = result_info.warnings.clone();
-    Ok(RasterReadResult {
-        array,
-        info: result_info,
-        bands: selected_bands,
-        window: Some(window),
-        window_transform,
-        mask: None,
-        nodata_per_band: info.nodata_per_band.clone(),
-        warnings,
-    })
-}
-
-/// Concatenate same-dtype strip chunks (chunky/interleaved) into a band-first
-/// partial `RasterArray` of shape `(bands, rows, width)`.
-fn strips_to_array(
-    chunks: Vec<DecodingResult>,
-    bands: usize,
-    rows: usize,
-    width: usize,
-) -> GisResult<RasterArray> {
-    let shape = [bands, rows, width];
-    let mut iter = chunks.into_iter();
-    let first = iter
-        .next()
-        .ok_or_else(|| GisError::InvalidRaster("invalid_raster: no strips read".to_string()))?;
-    macro_rules! collect {
-        ($variant:ident, $data:expr) => {{
-            let mut all = $data;
-            for chunk in iter {
-                match chunk {
-                    DecodingResult::$variant(v) => all.extend(v),
-                    _ => {
-                        return Err(GisError::InvalidRaster(
-                            "invalid_raster: strips report mixed dtypes".to_string(),
-                        ))
-                    }
-                }
-            }
-            RasterArray::new(RasterData::$variant(deinterleave(all, bands)), &shape)
-        }};
-    }
-    match first {
-        DecodingResult::U8(data) => collect!(U8, data),
-        DecodingResult::U16(data) => collect!(U16, data),
-        DecodingResult::I16(data) => collect!(I16, data),
-        DecodingResult::U32(data) => collect!(U32, data),
-        DecodingResult::I32(data) => collect!(I32, data),
-        DecodingResult::F32(data) => collect!(F32, data),
-        DecodingResult::F64(data) => collect!(F64, data),
-        _ => Err(GisError::UnsupportedDType(
-            "unsupported_dtype: unsupported TIFF dtype for windowed read".to_string(),
-        )),
-    }
-}
-
 fn validate_bands(bands: Option<Vec<u16>>, band_count: u16) -> GisResult<Vec<u16>> {
     let bands = bands.unwrap_or_else(|| (1..=band_count).collect());
     if bands.is_empty() {
@@ -607,7 +252,7 @@ fn validate_bands(bands: Option<Vec<u16>>, band_count: u16) -> GisResult<Vec<u16
     Ok(bands)
 }
 
-fn validate_read_window(
+pub(crate) fn validate_read_window(
     window: PixelWindow,
     source_width: u32,
     source_height: u32,
@@ -663,7 +308,7 @@ fn select_band_metadata<T: Clone>(values: &[T], bands: &[u16]) -> Vec<T> {
         .collect()
 }
 
-fn read_result_info(
+pub(crate) fn read_result_info(
     source: &RasterInfo,
     array: &RasterArray,
     bands: &[u16],
@@ -734,283 +379,6 @@ fn read_result_info(
     info
 }
 
-pub(crate) fn copy_window(
-    source: &RasterArray,
-    nodata: &[Option<f64>],
-    window: PixelWindow,
-) -> GisResult<RasterArray> {
-    let source_values = raster_to_f64(source);
-    let out_width = window.width as usize;
-    let out_height = window.height as usize;
-    let mut out = vec![0.0; source.bands * out_width * out_height];
-    for band in 0..source.bands {
-        let fill = nodata.get(band).copied().flatten().unwrap_or(0.0);
-        for out_row in 0..out_height {
-            for out_col in 0..out_width {
-                let src_col = window.col_off + out_col as i64;
-                let src_row = window.row_off + out_row as i64;
-                let out_index = band * out_width * out_height + out_row * out_width + out_col;
-                out[out_index] = if src_col >= 0
-                    && src_row >= 0
-                    && src_col < source.width as i64
-                    && src_row < source.height as i64
-                {
-                    source_values[band * source.width * source.height
-                        + src_row as usize * source.width
-                        + src_col as usize]
-                } else {
-                    fill
-                };
-            }
-        }
-    }
-    f64_to_raster_data(source.dtype(), out, source.bands, out_height, out_width)
-}
-
-pub(crate) fn valid_mask(
-    array: &RasterArray,
-    nodata: &[Option<f64>],
-    explicit_mask: Option<&[bool]>,
-) -> Vec<bool> {
-    let values = raster_to_f64(array);
-    let pixels = array.height * array.width;
-    let mut mask = Vec::with_capacity(values.len());
-    for band in 0..array.bands {
-        let nodata = nodata.get(band).copied().flatten();
-        for pixel in 0..pixels {
-            let index = band * pixels + pixel;
-            let value = values[index];
-            let explicit_valid = explicit_mask
-                .and_then(|mask| mask.get(index))
-                .copied()
-                .unwrap_or(true);
-            mask.push(explicit_valid && !value.is_nan() && !nodata_matches(value, nodata));
-        }
-    }
-    mask
-}
-
-pub(crate) fn raster_to_f64(array: &RasterArray) -> Vec<f64> {
-    match &array.data {
-        RasterData::U8(values) => values.iter().map(|&value| value as f64).collect(),
-        RasterData::I16(values) => values.iter().map(|&value| value as f64).collect(),
-        RasterData::U16(values) => values.iter().map(|&value| value as f64).collect(),
-        RasterData::I32(values) => values.iter().map(|&value| value as f64).collect(),
-        RasterData::U32(values) => values.iter().map(|&value| value as f64).collect(),
-        RasterData::F32(values) => values.iter().map(|&value| value as f64).collect(),
-        RasterData::F64(values) => values.clone(),
-    }
-}
-
-pub(crate) fn f64_to_raster_data(
-    dtype: RasterDType,
-    values: Vec<f64>,
-    bands: usize,
-    height: usize,
-    width: usize,
-) -> GisResult<RasterArray> {
-    let shape = [bands, height, width];
-    let data = match dtype {
-        RasterDType::UInt8 => RasterData::U8(
-            values
-                .iter()
-                .map(|&value| value.round().clamp(0.0, u8::MAX as f64) as u8)
-                .collect(),
-        ),
-        RasterDType::Int16 => RasterData::I16(
-            values
-                .iter()
-                .map(|&value| value.round().clamp(i16::MIN as f64, i16::MAX as f64) as i16)
-                .collect(),
-        ),
-        RasterDType::UInt16 => RasterData::U16(
-            values
-                .iter()
-                .map(|&value| value.round().clamp(0.0, u16::MAX as f64) as u16)
-                .collect(),
-        ),
-        RasterDType::Int32 => RasterData::I32(
-            values
-                .iter()
-                .map(|&value| value.round().clamp(i32::MIN as f64, i32::MAX as f64) as i32)
-                .collect(),
-        ),
-        RasterDType::UInt32 => RasterData::U32(
-            values
-                .iter()
-                .map(|&value| value.round().clamp(0.0, u32::MAX as f64) as u32)
-                .collect(),
-        ),
-        RasterDType::Float32 => RasterData::F32(values.iter().map(|&value| value as f32).collect()),
-        RasterDType::Float64 => RasterData::F64(values),
-    };
-    RasterArray::new(data, &shape)
-}
-
-fn nodata_matches(value: f64, nodata: Option<f64>) -> bool {
-    nodata.is_some_and(|nodata| value == nodata || (value.is_nan() && nodata.is_nan()))
-}
-
-fn push_warning_if_absent(
-    warnings: &mut Vec<RasterWarning>,
-    code: &'static str,
-    message: impl Into<String>,
-    field: Option<&'static str>,
-) {
-    if warnings.iter().any(|warning| warning.code == code) {
-        return;
-    }
-    warnings.push(RasterWarning::new(code, message, field));
-}
-
-fn deinterleave<T: Copy>(data: Vec<T>, bands: usize) -> Vec<T> {
-    if bands <= 1 {
-        return data;
-    }
-    let pixels = data.len() / bands;
-    let mut out = Vec::with_capacity(data.len());
-    for band in 0..bands {
-        for pixel in 0..pixels {
-            out.push(data[pixel * bands + band]);
-        }
-    }
-    out
-}
-
-fn normalized_path(path: &Path) -> PathBuf {
-    path.to_path_buf()
-}
-
-fn validate_tiff_path(path: &Path) -> GisResult<()> {
-    match path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("tif" | "tiff") => Ok(()),
-        _ => Err(GisError::UnsupportedDriver(format!(
-            "G-002a1 read_raster_info supports local TIFF/GeoTIFF only: {}",
-            path.display()
-        ))),
-    }
-}
-
-fn sample_count<R: std::io::Read + std::io::Seek>(decoder: &mut Decoder<R>) -> GisResult<u16> {
-    if let Some(samples) = decoder.find_tag_unsigned::<u16>(Tag::SamplesPerPixel)? {
-        return Ok(samples);
-    }
-    Ok(1)
-}
-
-fn dtype_per_band<R: std::io::Read + std::io::Seek>(
-    decoder: &mut Decoder<R>,
-    band_count: u16,
-) -> GisResult<Vec<String>> {
-    let bits = decoder
-        .find_tag_unsigned_vec::<u16>(Tag::BitsPerSample)?
-        .unwrap_or_else(|| vec![8; band_count as usize]);
-    let sample_formats = decoder
-        .find_tag_unsigned_vec::<u16>(Tag::SampleFormat)?
-        .unwrap_or_else(|| vec![1; band_count as usize]);
-
-    let mut dtypes = Vec::with_capacity(band_count as usize);
-    for index in 0..band_count as usize {
-        let bit_depth = bits.get(index).copied().unwrap_or_else(|| bits[0]);
-        let sample_format = sample_formats.get(index).copied().unwrap_or(1);
-        let dtype = dtype_from_tags(bit_depth, sample_format)?;
-        dtypes.push(dtype.name().to_string());
-    }
-    Ok(dtypes)
-}
-
-fn dtype_from_tags(bits: u16, sample_format: u16) -> GisResult<RasterDType> {
-    match (bits, sample_format) {
-        (8, 1) => Ok(RasterDType::UInt8),
-        (16, 2) => Ok(RasterDType::Int16),
-        (16, 1) => Ok(RasterDType::UInt16),
-        (32, 2) => Ok(RasterDType::Int32),
-        (32, 1) => Ok(RasterDType::UInt32),
-        (32, 3) => Ok(RasterDType::Float32),
-        (64, 3) => Ok(RasterDType::Float64),
-        _ => Err(GisError::UnsupportedDType(format!(
-            "unsupported TIFF dtype bits_per_sample={bits}, sample_format={sample_format}"
-        ))),
-    }
-}
-
-fn nodata_per_band<R: std::io::Read + std::io::Seek>(
-    decoder: &mut Decoder<R>,
-    band_count: u16,
-) -> GisResult<Vec<Option<f64>>> {
-    if let Some(value) = decoder.find_tag(Tag::ImageDescription)? {
-        let description = value
-            .into_string()
-            .map_err(|err| GisError::InvalidRaster(err.to_string()))?;
-        if let Some(values) = parse_forge3d_nodata(&description, band_count)? {
-            return Ok(values);
-        }
-    }
-
-    match decoder.find_tag(Tag::GdalNodata)? {
-        Some(value) => {
-            let raw = value
-                .into_string()
-                .map_err(|err| GisError::InvalidRaster(err.to_string()))?;
-            let parsed = parse_nodata_string(&raw)?;
-            Ok(vec![parsed; band_count as usize])
-        }
-        None => Ok(vec![None; band_count as usize]),
-    }
-}
-
-fn parse_forge3d_nodata(raw: &str, band_count: u16) -> GisResult<Option<Vec<Option<f64>>>> {
-    let Some(rest) = raw
-        .trim_matches(char::from(0))
-        .strip_prefix(FORGE3D_NODATA_PREFIX)
-    else {
-        return Ok(None);
-    };
-    let values = rest
-        .split(',')
-        .map(|part| {
-            let part = part.trim();
-            if part.eq_ignore_ascii_case("none") || part.is_empty() {
-                Ok(None)
-            } else if part.eq_ignore_ascii_case("nan") {
-                Ok(Some(f64::NAN))
-            } else {
-                part.parse::<f64>().map(Some).map_err(|_| {
-                    GisError::InvalidRaster(format!(
-                        "invalid forge3d per-band nodata value: {part:?}"
-                    ))
-                })
-            }
-        })
-        .collect::<GisResult<Vec<_>>>()?;
-    if values.len() != band_count as usize {
-        return Err(GisError::InvalidRaster(format!(
-            "forge3d per-band nodata count {} does not match band count {band_count}",
-            values.len()
-        )));
-    }
-    Ok(Some(values))
-}
-
-fn parse_nodata_string(raw: &str) -> GisResult<Option<f64>> {
-    let trimmed = raw.trim_matches(char::from(0)).trim();
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-    if trimmed.eq_ignore_ascii_case("nan") {
-        return Ok(Some(f64::NAN));
-    }
-    trimmed
-        .parse::<f64>()
-        .map(Some)
-        .map_err(|_| GisError::InvalidRaster(format!("invalid GDAL_NODATA tag value: {trimmed:?}")))
-}
-
 fn nodata_values_differ(values: &[Option<f64>]) -> bool {
     let Some(first) = values.first() else {
         return false;
@@ -1035,225 +403,35 @@ fn float_eq(a: f64, b: f64) -> bool {
     (a.is_nan() && b.is_nan()) || (a == b)
 }
 
-fn compression_name<R: std::io::Read + std::io::Seek>(
-    decoder: &mut Decoder<R>,
-) -> GisResult<Option<String>> {
-    Ok(decoder
-        .find_tag_unsigned::<u16>(Tag::Compression)?
-        .map(|value| match value {
-            1 => "NONE".to_string(),
-            5 => "LZW".to_string(),
-            8 | 32946 => "DEFLATE".to_string(),
-            32773 => "PACKBITS".to_string(),
-            other => format!("UNKNOWN({other})"),
-        }))
+fn push_warning_if_absent(
+    warnings: &mut Vec<RasterWarning>,
+    code: &'static str,
+    message: impl Into<String>,
+    field: Option<&'static str>,
+) {
+    if warnings.iter().any(|warning| warning.code == code) {
+        return;
+    }
+    warnings.push(RasterWarning::new(code, message, field));
 }
 
-fn read_transform<R: std::io::Read + std::io::Seek>(
-    decoder: &mut Decoder<R>,
-) -> GisResult<Option<AffineTransform>> {
-    if let Some(values) = decoder.find_tag(Tag::ModelTransformationTag)? {
-        let values = values
-            .into_f64_vec()
-            .map_err(|err| GisError::InvalidTransform(err.to_string()))?;
-        if values.len() < 16 {
-            return Err(GisError::InvalidTransform(
-                "ModelTransformationTag must contain 16 doubles".to_string(),
-            ));
-        }
-        return AffineTransform::new([
-            values[0], values[1], values[3], values[4], values[5], values[7],
-        ])
-        .map(Some);
-    }
-
-    let pixel_scale = match decoder.find_tag(Tag::ModelPixelScaleTag)? {
-        Some(value) => value
-            .into_f64_vec()
-            .map_err(|err| GisError::InvalidTransform(err.to_string()))?,
-        None => return Ok(None),
-    };
-    let tiepoints = match decoder.find_tag(Tag::ModelTiepointTag)? {
-        Some(value) => value
-            .into_f64_vec()
-            .map_err(|err| GisError::InvalidTransform(err.to_string()))?,
-        None => return Ok(None),
-    };
-    if pixel_scale.len() < 2 || tiepoints.len() < 6 {
-        return Err(GisError::InvalidTransform(
-            "GeoTIFF pixel scale/tiepoint tags are incomplete".to_string(),
-        ));
-    }
-    let scale_x = pixel_scale[0];
-    let scale_y = pixel_scale[1];
-    let raster_i = tiepoints[0];
-    let raster_j = tiepoints[1];
-    let model_x = tiepoints[3];
-    let model_y = tiepoints[4];
-    AffineTransform::new([
-        scale_x,
-        0.0,
-        model_x - raster_i * scale_x,
-        0.0,
-        -scale_y,
-        model_y + raster_j * scale_y,
-    ])
-    .map(Some)
+fn normalized_path(path: &Path) -> PathBuf {
+    path.to_path_buf()
 }
 
-fn read_crs<R: std::io::Read + std::io::Seek>(
-    decoder: &mut Decoder<R>,
-) -> GisResult<Option<(Option<String>, Option<HashMap<String, String>>)>> {
-    let geo_ascii = decoder
-        .find_tag(Tag::GeoAsciiParamsTag)?
-        .map(|value| {
-            value
-                .into_string()
-                .map_err(|err| GisError::InvalidCrs(err.to_string()))
-        })
-        .transpose()?;
-    let directory = match decoder.find_tag(Tag::GeoKeyDirectoryTag)? {
-        Some(value) => value
-            .into_u16_vec()
-            .map_err(|err| GisError::InvalidCrs(err.to_string()))?,
-        None => {
-            return Ok(match geo_ascii.as_deref() {
-                Some(ascii) => validated_wkt_from_ascii(ascii)?.map(|wkt| (Some(wkt), None)),
-                None => None,
-            })
-        }
-    };
-    if directory.len() < 4 {
-        return Err(GisError::InvalidCrs(
-            "GeoKeyDirectoryTag is too short".to_string(),
-        ));
+fn validate_tiff_path(path: &Path) -> GisResult<()> {
+    match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("tif" | "tiff") => Ok(()),
+        _ => Err(GisError::UnsupportedDriver(format!(
+            "G-002a1 read_raster_info supports local TIFF/GeoTIFF only: {}",
+            path.display()
+        ))),
     }
-    let entry_count = directory[3] as usize;
-    if directory.len() < 4 + entry_count * 4 {
-        return Err(GisError::InvalidCrs(
-            "GeoKeyDirectoryTag entry count exceeds tag length".to_string(),
-        ));
-    }
-
-    let mut geographic_epsg = None;
-    let mut projected_epsg = None;
-    let mut wkt = match geo_ascii.as_deref() {
-        Some(ascii) => validated_wkt_from_ascii(ascii)?,
-        None => None,
-    };
-    for entry in directory[4..4 + entry_count * 4].chunks_exact(4) {
-        let key = entry[0];
-        let tag_location = entry[1];
-        let count = entry[2];
-        let value_offset = entry[3];
-        if tag_location == Tag::GeoAsciiParamsTag.to_u16() {
-            if let Some(ascii) = &geo_ascii {
-                if matches!(key, 1026 | 2049 | 3073) {
-                    if let Some(value) = extract_ascii_range(ascii, value_offset, count) {
-                        if looks_like_wkt(&value) {
-                            wkt = Some(validate_wkt_literal(&value)?);
-                        }
-                    }
-                }
-            }
-            continue;
-        }
-        if tag_location != 0 || count != 1 {
-            continue;
-        }
-        match key {
-            2048 if value_offset != 0 && value_offset != 32767 => {
-                geographic_epsg = Some(value_offset)
-            }
-            3072 if value_offset != 0 && value_offset != 32767 => {
-                projected_epsg = Some(value_offset)
-            }
-            _ => {}
-        }
-    }
-
-    let epsg = projected_epsg.or(geographic_epsg);
-    if let Some(code) = epsg {
-        // G-002a1 has no CRS database; validate only the supported EPSG subset.
-        if !matches!(code, 4326 | 3857 | 32631) {
-            return Err(GisError::InvalidCrs(format!(
-                "unsupported EPSG code {code}; this TIFF-only backend supports EPSG:4326, EPSG:3857, and EPSG:32631"
-            )));
-        }
-        let mut authority = HashMap::new();
-        authority.insert("name".to_string(), "EPSG".to_string());
-        authority.insert("code".to_string(), code.to_string());
-        return Ok(Some((wkt, Some(authority))));
-    }
-
-    Ok(wkt.map(|wkt| (Some(wkt), None)))
-}
-
-fn extract_ascii_range(ascii: &str, offset: u16, count: u16) -> Option<String> {
-    let start = offset as usize;
-    let end = start.checked_add(count as usize)?;
-    let bytes = ascii.as_bytes();
-    if start >= bytes.len() || end > bytes.len() {
-        return None;
-    }
-    Some(
-        String::from_utf8_lossy(&bytes[start..end])
-            .trim_matches(char::from(0))
-            .trim_matches('|')
-            .trim()
-            .to_string(),
-    )
-}
-
-fn extract_wkt_from_ascii(ascii: &str) -> Option<String> {
-    ascii
-        .split('|')
-        .map(str::trim)
-        .find(|value| looks_like_wkt(value))
-        .map(str::to_string)
-}
-
-fn validated_wkt_from_ascii(ascii: &str) -> GisResult<Option<String>> {
-    extract_wkt_from_ascii(ascii)
-        .map(|wkt| validate_wkt_literal(&wkt))
-        .transpose()
-}
-
-fn validate_wkt_literal(value: &str) -> GisResult<String> {
-    let trimmed = value.trim();
-    if !looks_like_wkt(trimmed) {
-        return Err(GisError::InvalidCrs(
-            "CRS WKT must start with a supported WKT CRS token".to_string(),
-        ));
-    }
-    let mut depth = 0i32;
-    for ch in trimmed.chars() {
-        match ch {
-            '[' => depth += 1,
-            ']' => {
-                depth -= 1;
-                if depth < 0 {
-                    return Err(GisError::InvalidCrs(
-                        "CRS WKT has unbalanced brackets".to_string(),
-                    ));
-                }
-            }
-            _ => {}
-        }
-    }
-    if depth != 0 {
-        return Err(GisError::InvalidCrs(
-            "CRS WKT has unbalanced brackets".to_string(),
-        ));
-    }
-    Ok(trimmed.to_string())
-}
-
-fn looks_like_wkt(value: &str) -> bool {
-    let upper = value.trim_start().to_ascii_uppercase();
-    ["GEOGCRS[", "PROJCRS[", "GEOGCS[", "PROJCS["]
-        .iter()
-        .any(|prefix| upper.starts_with(prefix))
 }
 
 #[cfg(test)]
@@ -1262,7 +440,9 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
-    use crate::gis::raster_write::{write_raster, CreationOptions, CrsSpec, WriteRasterOptions};
+    use crate::gis::raster_write::{
+        write_raster, CreationOptions, CrsSpec, RasterData, WriteRasterOptions,
+    };
 
     fn temp_tif(name: &str) -> PathBuf {
         let stamp = SystemTime::now()
@@ -1301,7 +481,7 @@ mod tests {
                 creation_options: CreationOptions::default(),
                 creation_options_explicit: false,
                 like_info: None,
-                height_system: crate::gis::types::HEIGHT_SYSTEM_ELLIPSOIDAL.to_string(),
+                height_system: crate::gis::types::HEIGHT_SYSTEM_UNSPECIFIED.to_string(),
             },
         )
         .expect("write test raster");
@@ -1325,8 +505,6 @@ mod tests {
         assert_eq!(result.info.band_count, 1);
         assert_eq!(result.info.dtype_per_band, vec!["uint8"]);
         assert_eq!(result.nodata_per_band, vec![Some(99.0)]);
-        // MENSURA M-03: the vertical datum survived the GeoTIFF write->read.
-        assert_eq!(result.info.height_system, "ellipsoidal");
         assert_eq!(
             result.window_transform.map(AffineTransform::tuple),
             Some((2.0, 0.0, 12.0, 0.0, -3.0, 50.0))

@@ -1,127 +1,25 @@
-"""G-002 Later COG and slippy tile helper tests."""
+"""G-002 Later COG and slippy tile helper tests: local reads, basic remote
+fetch/decode, overview validation, and slippy tile indexing. Range-streaming
+tests live in ``test_gis_cog_range.py`` (striped) and
+``test_gis_cog_range_tiled.py`` (tiled); shared HTTP servers and TIFF fixtures
+live in ``_cog_http_fixtures.py``.
+"""
 
 from __future__ import annotations
 
-import http.server
-import socketserver
-import threading
 from pathlib import Path
 
 import numpy as np
 import pytest
+from _cog_http_fixtures import _codes, _serve_bytes
 
 import forge3d.gis as gis
 from forge3d._native import NATIVE_AVAILABLE
-
-
-def _serve_bytes(body: bytes, *, content_type: str = "image/tiff"):
-    class _Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):  # noqa: N802
-            self.send_response(200)
-            self.send_header("content-type", content_type)
-            self.send_header("content-length", str(len(body)))
-            self.send_header("connection", "close")
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, *_args):
-            return
-
-    class _Server(socketserver.TCPServer):
-        allow_reuse_address = True
-
-    server = _Server(("127.0.0.1", 0), _Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server, f"http://127.0.0.1:{server.server_address[1]}/data.tif"
-
-
-def _serve_range(body: bytes):
-    """Serve `body` over HTTP with Range support, counting total bytes served."""
-    served = {"bytes": 0, "requests": 0}
-
-    class _Handler(http.server.BaseHTTPRequestHandler):
-        def do_HEAD(self):  # noqa: N802
-            self.send_response(200)
-            self.send_header("content-type", "image/tiff")
-            self.send_header("content-length", str(len(body)))
-            self.send_header("accept-ranges", "bytes")
-            self.end_headers()
-
-        def do_GET(self):  # noqa: N802
-            served["requests"] += 1
-            rng = self.headers.get("Range")
-            if rng and rng.startswith("bytes="):
-                start_s, end_s = rng[len("bytes=") :].split("-")
-                start = int(start_s)
-                end = int(end_s) if end_s else len(body) - 1
-                end = min(end, len(body) - 1)
-                chunk = body[start : end + 1]
-                self.send_response(206)
-                self.send_header("content-type", "image/tiff")
-                self.send_header("content-range", f"bytes {start}-{end}/{len(body)}")
-                self.send_header("content-length", str(len(chunk)))
-                self.send_header("connection", "close")
-                self.end_headers()
-                served["bytes"] += len(chunk)
-                self.wfile.write(chunk)
-            else:
-                self.send_response(200)
-                self.send_header("content-type", "image/tiff")
-                self.send_header("content-length", str(len(body)))
-                self.send_header("connection", "close")
-                self.end_headers()
-                served["bytes"] += len(body)
-                self.wfile.write(body)
-
-        def log_message(self, *_args):
-            return
-
-    class _Server(socketserver.ThreadingTCPServer):
-        allow_reuse_address = True
-        daemon_threads = True
-
-    server = _Server(("127.0.0.1", 0), _Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server, f"http://127.0.0.1:{server.server_address[1]}/data.tif", served
-
-
-def _serve_no_range(body: bytes):
-    """Answer HEAD, but IGNORE the Range header and always return 200 full body."""
-
-    class _Handler(http.server.BaseHTTPRequestHandler):
-        def do_HEAD(self):  # noqa: N802
-            self.send_response(200)
-            self.send_header("content-length", str(len(body)))
-            self.end_headers()
-
-        def do_GET(self):  # noqa: N802
-            self.send_response(200)
-            self.send_header("content-type", "image/tiff")
-            self.send_header("content-length", str(len(body)))
-            self.send_header("connection", "close")
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, *_args):
-            return
-
-    class _Server(socketserver.ThreadingTCPServer):
-        allow_reuse_address = True
-        daemon_threads = True
-
-    server = _Server(("127.0.0.1", 0), _Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server, f"http://127.0.0.1:{server.server_address[1]}/data.tif"
-
 
 pytestmark = pytest.mark.skipif(
     not NATIVE_AVAILABLE,
     reason="GIS COG/tile tests require the compiled _forge3d extension",
 )
-
-
-def _codes(result) -> set[str]:
-    return {warning["code"] for warning in result.get("warnings", [])}
 
 
 def test_read_cog_local_base_resolution(tmp_path: Path):
@@ -186,111 +84,6 @@ def test_read_cog_remote_unreachable_host_raises():
     # the feature ships; an unreachable host must raise (never a silent success).
     with pytest.raises(RuntimeError):
         gis.read_cog("http://127.0.0.1:1/data.tif")
-
-
-def test_read_cog_remote_windowed_read_streams_only_needed_bytes(tmp_path: Path):
-    # Multi-strip fixture (~5 strips of 512 rows each): a windowed remote read must
-    # fetch only the overlapping strip(s) via HTTP range requests, not the full file.
-    path = tmp_path / "multistrip.tif"
-    data = (np.arange(2400 * 512, dtype=np.float32) % 1000.0).reshape(2400, 512)
-    gis.write_raster(
-        path, data, crs="EPSG:4326", transform=(1.0, 0.0, 0.0, 0.0, -1.0, 2400.0)
-    )
-    body = path.read_bytes()
-    total = len(body)
-
-    window = (0, 0, 512, 20)  # col_off, row_off, width, height -> rows 0..20 (strip 0)
-    local = gis.read_cog(path, window=window)
-
-    server, url, served = _serve_range(body)
-    try:
-        remote = gis.read_cog(url, window=window)
-    finally:
-        server.shutdown()
-
-    np.testing.assert_array_equal(remote["array"], local["array"])
-    assert remote["window"] == window
-    assert remote["info"]["crs_authority"] == {"name": "EPSG", "code": "4326"}
-    # Range streaming: only strip 0 (+ the IFD) is fetched, far less than the whole file.
-    assert served["bytes"] < total // 2, (
-        f"windowed remote read transferred {served['bytes']} of {total} bytes"
-    )
-
-
-@pytest.mark.parametrize(
-    "window",
-    [
-        (0, 0, 512, 20),  # first strip, full width
-        (100, 500, 300, 40),  # spans strip 0 and strip 1, column offset
-        (50, 1030, 200, 30),  # middle strip (strip 2), column + row offset
-        (0, 2380, 512, 20),  # last (partial) strip
-    ],
-)
-def test_read_cog_remote_windowed_range_matches_local(tmp_path: Path, window):
-    # A range-streamed window must be byte-identical to the local windowed read
-    # across multi-strip spans, middle strips, column offsets, and the last strip.
-    path = tmp_path / "ms.tif"
-    data = (np.arange(2400 * 512, dtype=np.float32) % 997.0).reshape(2400, 512)
-    gis.write_raster(
-        path, data, crs="EPSG:4326", transform=(1.0, 0.0, 0.0, 0.0, -1.0, 2400.0)
-    )
-    local = gis.read_cog(path, window=window)
-
-    server, url, _served = _serve_range(path.read_bytes())
-    try:
-        remote = gis.read_cog(url, window=window)
-    finally:
-        server.shutdown()
-
-    np.testing.assert_array_equal(remote["array"], local["array"])
-    assert remote["window"] == window
-
-
-@pytest.mark.parametrize("dtype", [np.uint8, np.uint16, np.int16])
-def test_read_cog_remote_windowed_range_dtypes_and_bands(tmp_path: Path, dtype):
-    # Multi-band + non-float dtypes must assemble correctly through the strip path.
-    path = tmp_path / f"mb_{np.dtype(dtype).name}.tif"
-    band0 = (np.arange(3000 * 400) % 200).reshape(3000, 400).astype(dtype)
-    band1 = ((np.arange(3000 * 400) * 3) % 200).reshape(3000, 400).astype(dtype)
-    gis.write_raster(
-        path,
-        np.stack([band0, band1]),  # (bands, height, width)
-        crs="EPSG:4326",
-        transform=(1.0, 0.0, 0.0, 0.0, -1.0, 3000.0),
-    )
-    window = (10, 900, 120, 40)  # spans a strip boundary, offset in both axes
-    local = gis.read_cog(path, window=window)
-
-    server, url, _served = _serve_range(path.read_bytes())
-    try:
-        remote = gis.read_cog(url, window=window)
-    finally:
-        server.shutdown()
-
-    np.testing.assert_array_equal(remote["array"], local["array"])
-    assert remote["array"].shape == (2, 40, 120)
-
-
-def test_read_cog_remote_windowed_falls_back_when_server_ignores_range(tmp_path: Path):
-    # A server that ignores Range (always 200 full body) must NOT corrupt the read:
-    # the range path rejects the non-206 response and read_cog falls back to a full
-    # fetch, still returning the correct window.
-    path = tmp_path / "ms.tif"
-    data = (np.arange(2400 * 512, dtype=np.float32) % 991.0).reshape(2400, 512)
-    gis.write_raster(
-        path, data, crs="EPSG:4326", transform=(1.0, 0.0, 0.0, 0.0, -1.0, 2400.0)
-    )
-    window = (0, 0, 512, 20)
-    local = gis.read_cog(path, window=window)
-
-    server, url = _serve_no_range(path.read_bytes())
-    try:
-        remote = gis.read_cog(url, window=window)
-    finally:
-        server.shutdown()
-
-    np.testing.assert_array_equal(remote["array"], local["array"])
-    assert remote["window"] == window
 
 
 def test_read_cog_remote_overview_rejected_before_fetch():
