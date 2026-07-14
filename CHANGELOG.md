@@ -6,6 +6,20 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.33.0] - 2026-07-14
+### Added
+- Windowed remote `read_cog` now streams over HTTP range requests for chunky-planar **striped and tiled** COGs, fetching only the strips or tiles that overlap the requested window instead of downloading the whole object (`src/gis/cog_range.rs` wraps `RangeReader` in a `Read+Seek` cursor feeding a window-selective strip/tile decoder). Measured on a 1024² 64-tile fixture: a 400×400 window transfers ~22.7% of the object (1.19× the intersecting tile payload); a 40×40 in-tile window ~4.0%.
+- Added honest, distinct diagnostics for the remote COG path: `range_read` for a streamed window, `range_fallback` (with `unsupported_layout`/`range_not_supported`/`invalid_range_response` reasons) for a full-object fallback, and `cache_hit`/`cache_miss` for the fetch cache.
+
+### Fixed
+- `RangeReader` validates every HTTP 206 partial response — `Content-Range` start/end/total and body length — before the bytes may enter the byte cache or a decoder, and accepts case-varied `bytes` range-unit names per RFC 9110 §14.1.
+- Out-of-bounds windows raise `InvalidArgument` after dimensions are established via metadata range requests, without ever triggering a full-object download — including on layouts the windowed decoder cannot assemble.
+- A server that ignores `Range` or returns an invalid 206 falls back to a correct full fetch-to-cache decode rather than corrupting the read; fatal decode errors (e.g. a corrupt TIFF header) propagate without any fallback download.
+
+### Changed
+- Bumped the package and PyPI version to `1.33.0`.
+- Split the raster reader (`raster_info.rs` into `raster_read`/`raster_tags`/`raster_values`/`raster_window`) and the COG range reader (`range_reader.rs` into `range_cache`/`range_stats`/`content_range`) to honor the repository's module-size guideline.
+
 ## [1.32.0] - 2026-07-14
 ### Added
 - Added signed render certificates with live GPU-pass timing and verified shader-source provenance across the production render surface.
