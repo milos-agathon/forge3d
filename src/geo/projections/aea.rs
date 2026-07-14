@@ -89,11 +89,15 @@ impl AlbersEqualArea {
         let q = (k.c - (rho * k.n / self.ellipsoid.a).powi(2)) / k.n;
         // Newton-invert α(φ) = q; α is monotone with a well-behaved derivative.
         let mut lat = (q / 2.0).clamp(-1.0, 1.0).asin();
-        for _ in 0..25 {
+        for _ in 0..30 {
             let delta = (q - q_of(lat, e)) / dq_dlat(lat, e);
             lat += delta;
-            // 1e-15 rad ≈ 6 picometres; below one f64 ulp of a latitude.
-            if delta.abs() < 1e-15 {
+            // 1e-12 rad ≈ 6 µm on the ellipsoid — three orders of magnitude below
+            // the 1 mm conformance gate, and (unlike a picometre threshold) it is
+            // ACHIEVABLE: one f64 ulp of a mid-latitude in radians is ~2e-16, so a
+            // tighter target would oscillate at the ulp level and spuriously report
+            // non-convergence for a fully-converged inverse.
+            if delta.abs() < 1e-12 {
                 let lon = self.lon_f_deg + (theta / k.n).to_degrees();
                 return Ok((lon, lat.to_degrees()));
             }
@@ -190,5 +194,36 @@ mod tests {
             .inverse(1_408_623.1932102717, 1_507_641.488309818)
             .unwrap();
         assert!((lon2 - lon).abs() < 9e-9 && (lat2 - lat).abs() < 9e-9);
+    }
+
+    #[test]
+    fn conus_albers_inverse_converges_near_standard_parallel() {
+        // EPSG:5070 (NAD83 / Conus Albers, GRS80). The Newton inverse must
+        // converge for valid CONUS points near the second standard parallel
+        // (45.5°) rather than exhaust its iteration budget on an unachievable
+        // sub-ulp tolerance — the 10k-point PROJ oracle (MENSURA M-02) hit this.
+        let aea = AlbersEqualArea {
+            ellipsoid: GRS80,
+            lat_f_deg: 23.0,
+            lon_f_deg: -96.0,
+            lat1_deg: 29.5,
+            lat2_deg: 45.5,
+            easting_f: 0.0,
+            northing_f: 0.0,
+        };
+        for &(lon, lat) in &[
+            (-89.34265560515016, 45.38968578597251),
+            (-96.0, 45.5),
+            (-75.0, 45.4),
+            (-119.0, 45.6),
+            (-100.0, 49.0),
+        ] {
+            let (e, n) = aea.forward(lon, lat).unwrap();
+            let (lon2, lat2) = aea.inverse(e, n).unwrap();
+            assert!(
+                (lon2 - lon).abs() < 1e-9 && (lat2 - lat).abs() < 1e-9,
+                "roundtrip ({lon},{lat}) -> ({lon2},{lat2})"
+            );
+        }
     }
 }

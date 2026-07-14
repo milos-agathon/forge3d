@@ -41,34 +41,27 @@ pub(super) fn geodesic_polygon_perimeter(rings: &[Vec<Coord>]) -> f64 {
     rings.iter().map(|ring| geodesic_line_length(ring)).sum()
 }
 
-/// True when every coordinate is plausibly geographic lon/lat degrees.
-pub(super) fn looks_geographic(geometries: &[Geometry]) -> bool {
-    fn coords_ok(points: &[Coord]) -> bool {
-        points
-            .iter()
-            .all(|c| c.x.abs() <= 180.0 + 1e-9 && c.y.abs() <= 90.0 + 1e-9)
+/// Karney geodesic distance between two WGS84 lon/lat coordinates, metres.
+pub(super) fn geodesic_distance(left: Coord, right: Coord) -> f64 {
+    WGS84_GEODESIC.inverse(left.y, left.x, right.y, right.x).s12
+}
+
+/// Point `distance_m` metres along the geodesic from `from` toward `to`
+/// (inverse problem for the departure azimuth, then the direct problem).
+pub(super) fn geodesic_point_along(from: Coord, to: Coord, distance_m: f64) -> Coord {
+    let inverse = WGS84_GEODESIC.inverse(from.y, from.x, to.y, to.x);
+    let direct = WGS84_GEODESIC.direct(from.y, from.x, inverse.azi1, distance_m);
+    Coord {
+        x: direct.lon2,
+        y: direct.lat2,
     }
-    fn geometry_ok(geometry: &Geometry) -> bool {
-        match geometry {
-            Geometry::Empty => true,
-            Geometry::Point(p) => coords_ok(core::slice::from_ref(p)),
-            Geometry::MultiPoint(ps) | Geometry::LineString(ps) => coords_ok(ps),
-            Geometry::MultiLineString(lines) => lines.iter().all(|l| coords_ok(l)),
-            Geometry::Polygon(rings) => rings.iter().all(|r| coords_ok(r)),
-            Geometry::MultiPolygon(polys) => {
-                polys.iter().all(|rings| rings.iter().all(|r| coords_ok(r)))
-            }
-            Geometry::Collection(items) => items.iter().all(geometry_ok),
-        }
-    }
-    geometries.iter().all(geometry_ok)
 }
 
 /// Unwrap antimeridian-crossing sequences: whenever consecutive longitudes
 /// jump by more than 180°, shift subsequent points by ±360° so the sequence
 /// is continuous (179 → -179 becomes 179 → 181). Returns true if anything
-/// changed. Only meaningful for geographic coordinates — gate on
-/// `looks_geographic` first.
+/// changed. Only meaningful for geographic (WGS84 lon/lat) coordinates — the
+/// caller decides that from an explicit CRS, never from coordinate ranges.
 pub(super) fn unwrap_dateline(geometries: &mut [Geometry]) -> bool {
     fn unwrap_points(points: &mut [Coord]) -> bool {
         let mut offset = 0.0f64;
@@ -124,39 +117,98 @@ pub(super) fn unwrap_dateline(geometries: &mut [Geometry]) -> bool {
     changed
 }
 
-/// Shift every vertex longitude of a geometry by `delta` degrees (used to
-/// align two dateline-unwrapped operands onto the same 360° sheet).
-pub(super) fn shift_geometry_lons(geometry: &mut Geometry, delta: f64) {
-    fn shift_points(points: &mut [Coord], delta: f64) {
+/// Apply `f` to every vertex longitude of a geometry in place. The single
+/// recursive traversal shared by every whole-geometry longitude rewrite.
+fn for_each_lon(geometry: &mut Geometry, f: &mut impl FnMut(&mut f64)) {
+    fn points(points: &mut [Coord], f: &mut impl FnMut(&mut f64)) {
         for p in points {
-            p.x += delta;
+            f(&mut p.x);
         }
     }
     match geometry {
         Geometry::Empty => {}
-        Geometry::Point(p) => p.x += delta,
-        Geometry::MultiPoint(ps) | Geometry::LineString(ps) => shift_points(ps, delta),
-        Geometry::MultiLineString(lines) => lines.iter_mut().for_each(|l| shift_points(l, delta)),
-        Geometry::Polygon(rings) => rings.iter_mut().for_each(|r| shift_points(r, delta)),
-        Geometry::MultiPolygon(polys) => polys
-            .iter_mut()
-            .for_each(|rings| rings.iter_mut().for_each(|r| shift_points(r, delta))),
-        Geometry::Collection(items) => items.iter_mut().for_each(|g| shift_geometry_lons(g, delta)),
+        Geometry::Point(p) => f(&mut p.x),
+        Geometry::MultiPoint(ps) | Geometry::LineString(ps) => points(ps, f),
+        Geometry::MultiLineString(lines) | Geometry::Polygon(lines) => {
+            for line in lines {
+                points(line, f);
+            }
+        }
+        Geometry::MultiPolygon(polys) => {
+            for rings in polys {
+                for ring in rings {
+                    points(ring, f);
+                }
+            }
+        }
+        Geometry::Collection(items) => {
+            for item in items {
+                for_each_lon(item, f);
+            }
+        }
     }
 }
 
-/// First vertex longitude of a geometry, if it has one.
-pub(super) fn first_lon(geometry: &Geometry) -> Option<f64> {
+/// Wrap every vertex longitude of a geometry back into (-180, 180] in place.
+/// Used to return a continuous-sheet union result to authored coordinates so a
+/// downstream pair-unwrap can re-detect (and split) an antimeridian crossing
+/// instead of receiving an already-split, multi-sheet mask.
+pub(super) fn wrap_geometry_lons(geometry: &mut Geometry) {
+    for_each_lon(geometry, &mut |x| *x = wrap_lon(*x));
+}
+
+/// Mean outer-ring longitude of one polygonal part.
+fn part_mean_lon(rings: &[Vec<Coord>]) -> Option<f64> {
+    let outer = rings.first()?;
+    if outer.is_empty() {
+        return None;
+    }
+    Some(outer.iter().map(|c| c.x).sum::<f64>() / outer.len() as f64)
+}
+
+/// Mean outer-ring longitude of the first polygonal part of a geometry — the
+/// reference sheet for `align_parts_to_sheet`.
+pub(super) fn first_part_mean_lon(geometry: &Geometry) -> Option<f64> {
     match geometry {
-        Geometry::Empty => None,
-        Geometry::Point(p) => Some(p.x),
-        Geometry::MultiPoint(ps) | Geometry::LineString(ps) => ps.first().map(|c| c.x),
-        Geometry::MultiLineString(lines) => lines.iter().find_map(|l| l.first().map(|c| c.x)),
-        Geometry::Polygon(rings) => rings.iter().find_map(|r| r.first().map(|c| c.x)),
-        Geometry::MultiPolygon(polys) => polys
-            .iter()
-            .find_map(|rings| rings.iter().find_map(|r| r.first().map(|c| c.x))),
-        Geometry::Collection(items) => items.iter().find_map(first_lon),
+        Geometry::Polygon(rings) => part_mean_lon(rings),
+        Geometry::MultiPolygon(polys) => polys.iter().find_map(|rings| part_mean_lon(rings)),
+        _ => None,
+    }
+}
+
+/// Shift each polygonal part of `geometry` by the 360°-multiple that brings
+/// its mean outer-ring longitude within 180° of `reference`, so both operands
+/// of a geographic topology op share one continuous longitude sheet. A
+/// whole-geometry shift is not enough: a MultiPolygon that was previously
+/// split at the antimeridian has parts on OPPOSITE sheets, and aligning only
+/// by its first vertex strands the other part 360° away, silently dropping it
+/// from the intersection. Returns true if any part moved.
+pub(super) fn align_parts_to_sheet(geometry: &mut Geometry, reference: f64) -> bool {
+    fn align_part(rings: &mut [Vec<Coord>], reference: f64) -> bool {
+        let Some(mean) = part_mean_lon(rings) else {
+            return false;
+        };
+        let delta = 360.0 * ((reference - mean) / 360.0).round();
+        if delta == 0.0 {
+            return false;
+        }
+        for ring in rings {
+            for p in ring.iter_mut() {
+                p.x += delta;
+            }
+        }
+        true
+    }
+    match geometry {
+        Geometry::Polygon(rings) => align_part(rings, reference),
+        Geometry::MultiPolygon(polys) => {
+            let mut changed = false;
+            for rings in polys {
+                changed |= align_part(rings, reference);
+            }
+            changed
+        }
+        _ => false,
     }
 }
 

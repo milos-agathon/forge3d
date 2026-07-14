@@ -1,6 +1,8 @@
 use crate::gis::error::{GisError, GisResult};
 
-use super::math::{distance, line_length};
+use super::math::{
+    distance, geodesic_distance, geodesic_line_length, geodesic_point_along, line_length,
+};
 use super::model::{
     empty_geometry_error, polygon_topology_error, Coord, Geometry, EPSILON, INVALID_ARGUMENT,
     INVALID_GEOMETRY, UNSUPPORTED_GEOMETRY_TYPE,
@@ -21,27 +23,30 @@ pub(super) fn validate_distance(distance: f64) -> GisResult<()> {
     Ok(())
 }
 
-pub(super) fn representative_for_geometry(geometry: &Geometry) -> GisResult<Coord> {
+pub(super) fn representative_for_geometry(
+    geometry: &Geometry,
+    geographic: bool,
+) -> GisResult<Coord> {
     match geometry {
         Geometry::Empty => Err(empty_geometry_error()),
         Geometry::Point(point) => Ok(*point),
         Geometry::MultiPoint(points) => points.first().copied().ok_or_else(empty_geometry_error),
         Geometry::LineString(points) => {
             validate_geometry_or_error(geometry)?;
-            representative_for_lines(std::slice::from_ref(points))
+            representative_for_lines(std::slice::from_ref(points), geographic)
         }
         Geometry::MultiLineString(lines) => {
             validate_geometry_or_error(geometry)?;
-            representative_for_lines(lines)
+            representative_for_lines(lines, geographic)
         }
         Geometry::Polygon(_) | Geometry::MultiPolygon(_) => {
             Err(polygon_topology_error("polygon representative_point"))
         }
-        Geometry::Collection(geometries) => representative_for_collection(geometries),
+        Geometry::Collection(geometries) => representative_for_collection(geometries, geographic),
     }
 }
 
-fn representative_for_collection(geometries: &[Geometry]) -> GisResult<Coord> {
+fn representative_for_collection(geometries: &[Geometry], geographic: bool) -> GisResult<Coord> {
     if geometries
         .iter()
         .any(|geometry| !geometry.is_empty() && geometry.is_polygonal())
@@ -59,23 +64,23 @@ fn representative_for_collection(geometries: &[Geometry]) -> GisResult<Coord> {
                 | Geometry::LineString(_)
                 | Geometry::MultiLineString(_)
         ) {
-            return representative_for_geometry(geometry);
+            return representative_for_geometry(geometry, geographic);
         }
         if let Geometry::Collection(_) = geometry {
-            return representative_for_geometry(geometry);
+            return representative_for_geometry(geometry, geographic);
         }
     }
     Err(empty_geometry_error())
 }
 
-fn representative_for_lines(lines: &[Vec<Coord>]) -> GisResult<Coord> {
-    let total = total_line_length(lines);
+fn representative_for_lines(lines: &[Vec<Coord>], geographic: bool) -> GisResult<Coord> {
+    let total = total_line_length(lines, geographic);
     if total <= EPSILON {
         return Err(GisError::InvalidGeometry(format!(
             "{INVALID_GEOMETRY}: line length must be positive"
         )));
     }
-    interpolate_lines(lines, total * 0.5)
+    interpolate_lines(lines, total * 0.5, geographic)
 }
 
 pub(super) fn lines_for_interpolation(geometry: &Geometry) -> GisResult<Vec<Vec<Coord>>> {
@@ -112,11 +117,22 @@ pub(super) fn normalized_target_distance(
     }
 }
 
-pub(super) fn total_line_length(lines: &[Vec<Coord>]) -> f64 {
-    lines.iter().map(|line| line_length(line)).sum()
+/// Total length of the line set. MENSURA M-04: geographic (EPSG:4326) lines
+/// measure in Karney geodesic metres, never Euclidean degrees; planar lines
+/// measure in CRS units.
+pub(super) fn total_line_length(lines: &[Vec<Coord>], geographic: bool) -> f64 {
+    if geographic {
+        lines.iter().map(|line| geodesic_line_length(line)).sum()
+    } else {
+        lines.iter().map(|line| line_length(line)).sum()
+    }
 }
 
-pub(super) fn interpolate_lines(lines: &[Vec<Coord>], distance_along: f64) -> GisResult<Coord> {
+pub(super) fn interpolate_lines(
+    lines: &[Vec<Coord>],
+    distance_along: f64,
+    geographic: bool,
+) -> GisResult<Coord> {
     let mut first = None;
     let mut last = None;
     for line in lines {
@@ -130,18 +146,31 @@ pub(super) fn interpolate_lines(lines: &[Vec<Coord>], distance_along: f64) -> Gi
     if distance_along <= EPSILON {
         return first.ok_or_else(empty_geometry_error);
     }
-    let total = total_line_length(lines);
+    let total = total_line_length(lines, geographic);
     if distance_along >= total - EPSILON {
         return last.ok_or_else(empty_geometry_error);
     }
     let mut traversed = 0.0;
     for line in lines {
         for segment in line.windows(2) {
-            let segment_length = distance(segment[0], segment[1]);
+            let segment_length = if geographic {
+                geodesic_distance(segment[0], segment[1])
+            } else {
+                distance(segment[0], segment[1])
+            };
             if segment_length <= EPSILON {
                 continue;
             }
             if traversed + segment_length >= distance_along {
+                if geographic {
+                    // Solve the direct geodesic problem for the point the
+                    // remaining metres along this segment's departure azimuth.
+                    return Ok(geodesic_point_along(
+                        segment[0],
+                        segment[1],
+                        distance_along - traversed,
+                    ));
+                }
                 let t = (distance_along - traversed) / segment_length;
                 return Ok(Coord {
                     x: segment[0].x + (segment[1].x - segment[0].x) * t,

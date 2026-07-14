@@ -81,6 +81,48 @@ pub fn epsg_code(spec: &CrsSpec) -> Option<u32> {
     None
 }
 
+/// Kind of an EPSG CRS for geographic-versus-planar dispatch. `CrsSpec`
+/// parsing admits the whole EPSG 4000-4999 block plus the curated projection
+/// table, and that block is NOT homogeneous: alongside geographic 2D CRSs it
+/// contains projected members (4087/4088 World Equidistant Cylindrical, the
+/// CGCS2000/Xian80 Gauss-Kruger zones, ...) and geocentric/3D members
+/// (4978 WGS84 geocentric, 4936 ETRS89 geocentric, ...). Classification is
+/// therefore an explicit curated table, never a numeric-range heuristic; a
+/// code the table does not know is `Unclassified` and callers must raise a
+/// stable error rather than guess.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EpsgCrsKind {
+    /// EPSG:4326 — the one geographic CRS with geodesic/dateline support.
+    GeographicWgs84,
+    /// A known geographic (degree-axis) CRS other than EPSG:4326.
+    Geographic,
+    /// A known geocentric (3D Cartesian) CRS; meaningless for 2D geometry.
+    Geocentric,
+    /// A known projected CRS (planar, CRS units).
+    Projected,
+    /// Parseable but not in the curated classification table.
+    Unclassified,
+}
+
+pub(crate) fn epsg_crs_kind(code: u32) -> EpsgCrsKind {
+    match code {
+        4326 => EpsgCrsKind::GeographicWgs84,
+        // Projected members of the 4000-4999 parse block.
+        4087 | 4088 => EpsgCrsKind::Projected,
+        // Geocentric members of the parse block (WGS84 and ETRS89).
+        4936 | 4978 => EpsgCrsKind::Geocentric,
+        // Curated common geographic CRSs: RGF93, ED50, ETRS89, NAD27, NAD83,
+        // OSGB36, GDA94, CGCS2000, JGD2000, NAD83(CSRS), SIRGAS2000,
+        // NAD83(NSRS2007), ETRS89 3D, WGS84 3D.
+        4171 | 4230 | 4258 | 4267 | 4269 | 4277 | 4283 | 4490 | 4612 | 4617 | 4674 | 4759
+        | 4937 | 4979 => EpsgCrsKind::Geographic,
+        code if crate::geo::projections::epsg_projection_definition(code).is_some() => {
+            EpsgCrsKind::Projected
+        }
+        _ => EpsgCrsKind::Unclassified,
+    }
+}
+
 pub fn canonical_label(spec: &CrsSpec) -> GisResult<String> {
     if let Some(projection) = spec.projection {
         return Ok(format!("forge3d:{projection:?}"));

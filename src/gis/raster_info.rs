@@ -49,17 +49,30 @@ pub fn read_raster_info(path: impl AsRef<Path>) -> GisResult<RasterInfo> {
 
     info.dtype_per_band = dtype_per_band(&mut decoder, band_count)?;
     info.nodata_per_band = nodata_per_band(&mut decoder, band_count)?;
-    // MENSURA M-03: read back the persisted vertical datum, if any. An absent
-    // or unrecognized tag leaves the "unspecified" default intact.
+    // MENSURA M-03: read back the persisted vertical datum, if any. An ABSENT
+    // tag leaves the honest "unspecified" default; a PRESENT tag that fails to
+    // decode or names an unknown height system is rejected — silently coercing
+    // a declared-but-unrecognized vertical datum to "unspecified" would erase
+    // the declaration and invite an orthometric/ellipsoidal mix-up downstream.
     if let Some(value) = decoder.find_tag(Tag::Unknown(
         crate::gis::raster_write::FORGE3D_HEIGHT_SYSTEM_TAG,
     ))? {
-        if let Ok(raw) = value.into_string() {
-            let tag = raw.trim_matches(char::from(0)).trim();
-            if crate::gis::types::is_valid_height_system(tag) {
-                info.height_system = tag.to_string();
-            }
+        let raw = value.into_string().map_err(|err| {
+            GisError::InvalidRaster(format!(
+                "invalid_height_system: persisted height-system tag {} is not a readable \
+                 ASCII value: {err}",
+                crate::gis::raster_write::FORGE3D_HEIGHT_SYSTEM_TAG
+            ))
+        })?;
+        let tag = raw.trim_matches(char::from(0)).trim();
+        if !crate::gis::types::is_valid_height_system(tag) {
+            return Err(GisError::InvalidRaster(format!(
+                "invalid_height_system: persisted height-system tag value {tag:?} is not a \
+                 recognized vertical datum; expected one of unspecified, ellipsoidal, \
+                 orthometric_egm96, chart_datum"
+            )));
         }
+        info.height_system = tag.to_string();
     }
     info.block_size = Some(vec![decoder.chunk_dimensions(); band_count as usize]);
     info.tiling = Some(match decoder.get_chunk_type() {

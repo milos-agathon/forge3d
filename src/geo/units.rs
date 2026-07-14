@@ -7,9 +7,12 @@
 //! is `crate::camera::anchor::Anchor::to_render_f32` — a grep-gated invariant
 //! (tests/test_world_coord_f32_gate.py).
 //!
-//! Same-tag arithmetic compiles (this example also proves the imports used
-//! by the `compile_fail` blocks below are valid, so those blocks fail for
-//! the right reason):
+//! Same-tag arithmetic compiles (this example also proves the imports and the
+//! public validated constructors used by the `compile_fail` blocks below are
+//! valid, so those blocks fail for the right reason — the type mismatch, not a
+//! visibility error). The unchecked `geographic`/`ecef` constructors are
+//! crate-private; the public surface builds coordinates through
+//! `try_geographic`/`try_ecef`:
 //!
 //! ```
 //! use forge3d::geo::units::{Angle, Coord, Degree, Ecef, Height, Itrf2014, Length, Metre, Wgs84};
@@ -17,8 +20,8 @@
 //! assert_eq!(d.value(), 2.5);
 //! let a = Angle::<Degree>::new(1.5);
 //! let h = Height::<forge3d::geo::units::Ellipsoidal>::new(10.0);
-//! let c = Coord::<Wgs84, Itrf2014>::geographic(a, Angle::new(52.5), h);
-//! let e = Coord::<Ecef, Itrf2014>::ecef(4.0e6, 1.0e6, 4.8e6);
+//! let c = Coord::<Wgs84, Itrf2014>::try_geographic(a, Angle::new(52.5), h).unwrap();
+//! let e = Coord::<Ecef, Itrf2014>::try_ecef(4.0e6, 1.0e6, 4.8e6).unwrap();
 //! let off = e - e;
 //! assert_eq!((off.dx, off.dy, off.dz), (0.0, 0.0, 0.0));
 //! let _ = (c.lon(), c.lat(), c.height());
@@ -50,10 +53,10 @@
 //!
 //! ```compile_fail
 //! use forge3d::geo::units::{Angle, Coord, Height, Itrf2000, Itrf2014, Wgs84};
-//! let a = Coord::<Wgs84, Itrf2014>::geographic(
-//!     Angle::new(13.4), Angle::new(52.5), Height::new(0.0));
-//! let b = Coord::<Wgs84, Itrf2000>::geographic(
-//!     Angle::new(13.4), Angle::new(52.5), Height::new(0.0));
+//! let a = Coord::<Wgs84, Itrf2014>::try_geographic(
+//!     Angle::new(13.4), Angle::new(52.5), Height::new(0.0)).unwrap();
+//! let b = Coord::<Wgs84, Itrf2000>::try_geographic(
+//!     Angle::new(13.4), Angle::new(52.5), Height::new(0.0)).unwrap();
 //! let _ = a - b; // ERROR: reference epochs differ
 //! ```
 //!
@@ -61,9 +64,9 @@
 //!
 //! ```compile_fail
 //! use forge3d::geo::units::{Angle, Coord, Ecef, Height, Itrf2014, Wgs84};
-//! let a = Coord::<Wgs84, Itrf2014>::geographic(
-//!     Angle::new(13.4), Angle::new(52.5), Height::new(0.0));
-//! let b = Coord::<Ecef, Itrf2014>::ecef(4.0e6, 1.0e6, 4.8e6);
+//! let a = Coord::<Wgs84, Itrf2014>::try_geographic(
+//!     Angle::new(13.4), Angle::new(52.5), Height::new(0.0)).unwrap();
+//! let b = Coord::<Ecef, Itrf2014>::try_ecef(4.0e6, 1.0e6, 4.8e6).unwrap();
 //! let _ = a - b; // ERROR: CRS tags differ
 //! ```
 //!
@@ -72,9 +75,21 @@
 //!
 //! ```compile_fail
 //! use forge3d::geo::units::{Angle, Coord, Height, Itrf2014, Wgs84};
-//! let c = Coord::<Wgs84, Itrf2014>::geographic(
-//!     Angle::new(13.4), Angle::new(52.5), Height::new(0.0));
+//! let c = Coord::<Wgs84, Itrf2014>::try_geographic(
+//!     Angle::new(13.4), Angle::new(52.5), Height::new(0.0)).unwrap();
 //! let _ = c.lon() as f32; // ERROR: `Angle<Degree>` is not a primitive
+//! ```
+//!
+//! The unchecked `geographic`/`ecef` fast paths are crate-private, so a
+//! downstream crate cannot bypass validation to construct a non-finite or
+//! otherwise invalid typed coordinate — the only public path is `try_geographic`
+//! / `try_ecef`, which reject bad input:
+//!
+//! ```compile_fail
+//! use forge3d::geo::units::{Angle, Coord, Height, Itrf2014, Wgs84};
+//! // ERROR: `geographic` is private outside the `forge3d` crate.
+//! let _ = Coord::<Wgs84, Itrf2014>::geographic(
+//!     Angle::new(f64::NAN), Angle::new(52.5), Height::new(0.0));
 //! ```
 use core::marker::PhantomData;
 use core::ops::{Add, Div, Mul, Neg, Sub};
@@ -456,11 +471,16 @@ impl<C: GeographicCrs, E: EpochTag> Coord<C, E> {
     /// Build a geographic coordinate from typed lon/lat/height.
     ///
     /// This constructor does not validate its inputs (it stays `const`-friendly
-    /// and is used by internal fast paths). At a trust boundary — anywhere a
-    /// caller-supplied or file-derived triple first enters the type system —
-    /// use [`Coord::try_geographic`], which rejects non-finite values and
-    /// out-of-range latitudes before any numerical work.
-    pub fn geographic(lon: Angle<Degree>, lat: Angle<Degree>, h: Height<Ellipsoidal>) -> Self {
+    /// and is used by internal fast paths). It is **crate-private**: every public
+    /// trust boundary must go through [`Coord::try_geographic`], which rejects
+    /// non-finite values and out-of-range latitudes before any numerical work, so
+    /// no non-finite/invalid typed coordinate can be constructed from outside the
+    /// crate.
+    pub(crate) fn geographic(
+        lon: Angle<Degree>,
+        lat: Angle<Degree>,
+        h: Height<Ellipsoidal>,
+    ) -> Self {
         Self {
             x: lon.value(),
             y: lat.value(),
@@ -506,7 +526,11 @@ impl<C: GeographicCrs, E: EpochTag> Coord<C, E> {
 
 impl<E: EpochTag> Coord<Ecef, E> {
     /// Build a geocentric coordinate from raw ECEF metres.
-    pub fn ecef(x: f64, y: f64, z: f64) -> Self {
+    ///
+    /// **Crate-private** unchecked fast path: every public trust boundary must go
+    /// through [`Coord::try_ecef`], which rejects non-finite components before any
+    /// numerical work.
+    pub(crate) fn ecef(x: f64, y: f64, z: f64) -> Self {
         Self {
             x,
             y,

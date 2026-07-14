@@ -210,10 +210,18 @@ def measure_geometries(
 ) -> dict[str, Any]: ...
 
 
-def geometry_centroid(geometry: dict[str, Any]) -> dict[str, Any]: ...
+def geometry_centroid(
+    geometry: dict[str, Any],
+    *,
+    crs: str | int | dict[str, Any] | None = ...,
+) -> dict[str, Any]: ...
 
 
-def representative_point(geometry: dict[str, Any]) -> dict[str, Any]: ...
+def representative_point(
+    geometry: dict[str, Any],
+    *,
+    crs: str | int | dict[str, Any] | None = ...,
+) -> dict[str, Any]: ...
 
 
 def interpolate_line(
@@ -221,10 +229,15 @@ def interpolate_line(
     distance: float,
     *,
     normalized: bool = ...,
+    crs: str | int | dict[str, Any] | None = ...,
 ) -> dict[str, Any]: ...
 
 
-def union_geometries(geometries: list[dict[str, Any]] | tuple[dict[str, Any], ...]) -> dict[str, Any]: ...
+def union_geometries(
+    geometries: list[dict[str, Any]] | tuple[dict[str, Any], ...] | dict[str, Any],
+    *,
+    crs: str | int | dict[str, Any] | None = ...,
+) -> dict[str, Any]: ...
 
 
 def dissolve_vector(
@@ -239,6 +252,7 @@ def buffer_geometry(
     distance: float,
     *,
     quad_segs: int = ...,
+    crs: str | int | dict[str, Any] | None = ...,
 ) -> dict[str, Any]: ...
 
 
@@ -263,6 +277,7 @@ def simplify_geometry(
     tolerance: float,
     *,
     preserve_topology: bool = ...,
+    crs: str | int | dict[str, Any] | None = ...,
 ) -> dict[str, Any]: ...
 
 

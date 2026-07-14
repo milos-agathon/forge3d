@@ -120,7 +120,7 @@ def test_dateline_polygon_regression_179_to_minus_179():
     # 2°x1° patch (~2.46e10 m²), NOT the 358°-wide world-spanning complement.
     assert abs(result["area"] - 2.0 * 1.2308e10) < 4e8, result["area"]
 
-    centroid = gis.geometry_centroid(polygon)
+    centroid = gis.geometry_centroid(polygon, crs=4326)
     lon, lat = centroid["geometry"]["coordinates"]
     assert abs(lon) > 179.0, f"centroid lon must sit at the dateline, got {lon}"
     assert abs(lat - 0.5) < 1e-9
