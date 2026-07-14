@@ -258,7 +258,12 @@ jobs:
       - name: Install wheel and test dependencies
         run: |
           python scripts/install_compatible_wheel.py dist
-          pip install pytest numpy pillow mypy
+          # pyproj/rasterio back the mensura CRS-reproject and MapScene alignment
+          # tests in the default lane (the documented pyproj fallback path when the
+          # native `proj` feature is not compiled into the wheel). Other lanes
+          # already install pyproj; the default lane runs the WHOLE tests/ tree, so
+          # it needs both to exercise those paths instead of erroring on import.
+          pip install pytest numpy pillow mypy pyproj rasterio
 
       - name: Install system fonts (Linux)
         if: runner.os == 'Linux'
