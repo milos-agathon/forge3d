@@ -391,7 +391,9 @@ impl Viewer {
 
         let eye = Vec3::new(-1.4, 1.1, -2.4);
         let target = Vec3::new(0.0, 1.0, 0.0);
-        self.camera.set_look_at(eye, target, Vec3::Y);
+        self.camera
+            .set_look_at(eye, target, Vec3::Y)
+            .expect("P51 Cornell scene camera coords are within the viewer local frame");
 
         Ok(prev)
     }
@@ -405,6 +407,7 @@ impl Viewer {
         self.viz_mode = prev.viz_mode;
         self.gi_viz_mode = prev.gi_viz_mode;
         self.camera
-            .set_look_at(prev.camera_eye, prev.camera_target, Vec3::Y);
+            .set_look_at(prev.camera_eye, prev.camera_target, Vec3::Y)
+            .expect("restored Cornell camera coords are within the viewer local frame");
     }
 }

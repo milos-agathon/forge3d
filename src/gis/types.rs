@@ -244,7 +244,34 @@ pub struct RasterInfo {
     pub tiling: Option<String>,
     pub compression: Option<String>,
     pub is_georeferenced: bool,
+    /// MENSURA M-03: vertical datum of the pixel values. Starts `"unspecified"`
+    /// and is only set from an explicit caller declaration or a producer that
+    /// knows its datum (e.g. Terrarium). NEVER inferred from a horizontal CRS.
+    /// One of [`HEIGHT_SYSTEM_UNSPECIFIED`], [`HEIGHT_SYSTEM_ELLIPSOIDAL`],
+    /// [`HEIGHT_SYSTEM_ORTHOMETRIC_EGM96`], [`HEIGHT_SYSTEM_CHART_DATUM`].
+    pub height_system: String,
     pub warnings: Vec<RasterWarning>,
+}
+
+/// Vertical datum is unknown; must be declared before entering an Earth-fixed
+/// render path (ECEF / 3D Tiles).
+pub const HEIGHT_SYSTEM_UNSPECIFIED: &str = "unspecified";
+/// Height above the reference ellipsoid (what ECEF math requires).
+pub const HEIGHT_SYSTEM_ELLIPSOIDAL: &str = "ellipsoidal";
+/// Height above the EGM96 geoid (typical DEM encoding).
+pub const HEIGHT_SYSTEM_ORTHOMETRIC_EGM96: &str = "orthometric_egm96";
+/// Height above a nautical chart datum.
+pub const HEIGHT_SYSTEM_CHART_DATUM: &str = "chart_datum";
+
+/// True if `value` is a recognized height-system tag.
+pub fn is_valid_height_system(value: &str) -> bool {
+    matches!(
+        value,
+        HEIGHT_SYSTEM_UNSPECIFIED
+            | HEIGHT_SYSTEM_ELLIPSOIDAL
+            | HEIGHT_SYSTEM_ORTHOMETRIC_EGM96
+            | HEIGHT_SYSTEM_CHART_DATUM
+    )
 }
 
 impl RasterInfo {
@@ -266,6 +293,7 @@ impl RasterInfo {
             tiling: None,
             compression: None,
             is_georeferenced: false,
+            height_system: HEIGHT_SYSTEM_UNSPECIFIED.to_string(),
             warnings: Vec::new(),
         }
     }
@@ -355,6 +383,11 @@ impl RasterInfo {
     }
 
     #[getter]
+    fn height_system(&self) -> String {
+        self.height_system.clone()
+    }
+
+    #[getter]
     fn warnings<'py>(&self, py: pyo3::Python<'py>) -> pyo3::PyResult<pyo3::PyObject> {
         warnings_to_py(py, &self.warnings)
     }
@@ -380,6 +413,7 @@ impl RasterInfo {
         dict.set_item("tiling", self.tiling.clone())?;
         dict.set_item("compression", self.compression.clone())?;
         dict.set_item("is_georeferenced", self.is_georeferenced)?;
+        dict.set_item("height_system", self.height_system.clone())?;
         dict.set_item("warnings", warnings_to_py(py, &self.warnings)?)?;
         Ok(dict.into_py(py))
     }

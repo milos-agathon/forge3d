@@ -118,7 +118,9 @@ impl Viewer {
 
         let eye = glam::Vec3::new(preset.camera_distance, preset.camera_height, 0.0);
         let target = glam::Vec3::new(0.0, preset.camera_height * 0.5, 0.0);
-        self.camera.set_look_at(eye, target, glam::Vec3::Y);
+        self.camera
+            .set_look_at(eye, target, glam::Vec3::Y)
+            .expect("SSR preset camera coords are within the viewer local frame");
 
         Ok(())
     }

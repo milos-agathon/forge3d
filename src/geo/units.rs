@@ -7,9 +7,12 @@
 //! is `crate::camera::anchor::Anchor::to_render_f32` — a grep-gated invariant
 //! (tests/test_world_coord_f32_gate.py).
 //!
-//! Same-tag arithmetic compiles (this example also proves the imports used
-//! by the `compile_fail` blocks below are valid, so those blocks fail for
-//! the right reason):
+//! Same-tag arithmetic compiles (this example also proves the imports and the
+//! public validated constructors used by the `compile_fail` blocks below are
+//! valid, so those blocks fail for the right reason — the type mismatch, not a
+//! visibility error). The unchecked `geographic`/`ecef` constructors are
+//! crate-private; the public surface builds coordinates through
+//! `try_geographic`/`try_ecef`:
 //!
 //! ```
 //! use forge3d::geo::units::{Angle, Coord, Degree, Ecef, Height, Itrf2014, Length, Metre, Wgs84};
@@ -17,8 +20,8 @@
 //! assert_eq!(d.value(), 2.5);
 //! let a = Angle::<Degree>::new(1.5);
 //! let h = Height::<forge3d::geo::units::Ellipsoidal>::new(10.0);
-//! let c = Coord::<Wgs84, Itrf2014>::geographic(a, Angle::new(52.5), h);
-//! let e = Coord::<Ecef, Itrf2014>::ecef(4.0e6, 1.0e6, 4.8e6);
+//! let c = Coord::<Wgs84, Itrf2014>::try_geographic(a, Angle::new(52.5), h).unwrap();
+//! let e = Coord::<Ecef, Itrf2014>::try_ecef(4.0e6, 1.0e6, 4.8e6).unwrap();
 //! let off = e - e;
 //! assert_eq!((off.dx, off.dy, off.dz), (0.0, 0.0, 0.0));
 //! let _ = (c.lon(), c.lat(), c.height());
@@ -50,10 +53,10 @@
 //!
 //! ```compile_fail
 //! use forge3d::geo::units::{Angle, Coord, Height, Itrf2000, Itrf2014, Wgs84};
-//! let a = Coord::<Wgs84, Itrf2014>::geographic(
-//!     Angle::new(13.4), Angle::new(52.5), Height::new(0.0));
-//! let b = Coord::<Wgs84, Itrf2000>::geographic(
-//!     Angle::new(13.4), Angle::new(52.5), Height::new(0.0));
+//! let a = Coord::<Wgs84, Itrf2014>::try_geographic(
+//!     Angle::new(13.4), Angle::new(52.5), Height::new(0.0)).unwrap();
+//! let b = Coord::<Wgs84, Itrf2000>::try_geographic(
+//!     Angle::new(13.4), Angle::new(52.5), Height::new(0.0)).unwrap();
 //! let _ = a - b; // ERROR: reference epochs differ
 //! ```
 //!
@@ -61,9 +64,9 @@
 //!
 //! ```compile_fail
 //! use forge3d::geo::units::{Angle, Coord, Ecef, Height, Itrf2014, Wgs84};
-//! let a = Coord::<Wgs84, Itrf2014>::geographic(
-//!     Angle::new(13.4), Angle::new(52.5), Height::new(0.0));
-//! let b = Coord::<Ecef, Itrf2014>::ecef(4.0e6, 1.0e6, 4.8e6);
+//! let a = Coord::<Wgs84, Itrf2014>::try_geographic(
+//!     Angle::new(13.4), Angle::new(52.5), Height::new(0.0)).unwrap();
+//! let b = Coord::<Ecef, Itrf2014>::try_ecef(4.0e6, 1.0e6, 4.8e6).unwrap();
 //! let _ = a - b; // ERROR: CRS tags differ
 //! ```
 //!
@@ -72,9 +75,21 @@
 //!
 //! ```compile_fail
 //! use forge3d::geo::units::{Angle, Coord, Height, Itrf2014, Wgs84};
-//! let c = Coord::<Wgs84, Itrf2014>::geographic(
-//!     Angle::new(13.4), Angle::new(52.5), Height::new(0.0));
+//! let c = Coord::<Wgs84, Itrf2014>::try_geographic(
+//!     Angle::new(13.4), Angle::new(52.5), Height::new(0.0)).unwrap();
 //! let _ = c.lon() as f32; // ERROR: `Angle<Degree>` is not a primitive
+//! ```
+//!
+//! The unchecked `geographic`/`ecef` fast paths are crate-private, so a
+//! downstream crate cannot bypass validation to construct a non-finite or
+//! otherwise invalid typed coordinate — the only public path is `try_geographic`
+//! / `try_ecef`, which reject bad input:
+//!
+//! ```compile_fail
+//! use forge3d::geo::units::{Angle, Coord, Height, Itrf2014, Wgs84};
+//! // ERROR: `geographic` is private outside the `forge3d` crate.
+//! let _ = Coord::<Wgs84, Itrf2014>::geographic(
+//!     Angle::new(f64::NAN), Angle::new(52.5), Height::new(0.0));
 //! ```
 use core::marker::PhantomData;
 use core::ops::{Add, Div, Mul, Neg, Sub};
@@ -454,7 +469,18 @@ pub struct Coord<C: CrsTag, E: EpochTag> {
 
 impl<C: GeographicCrs, E: EpochTag> Coord<C, E> {
     /// Build a geographic coordinate from typed lon/lat/height.
-    pub fn geographic(lon: Angle<Degree>, lat: Angle<Degree>, h: Height<Ellipsoidal>) -> Self {
+    ///
+    /// This constructor does not validate its inputs (it stays `const`-friendly
+    /// and is used by internal fast paths). It is **crate-private**: every public
+    /// trust boundary must go through [`Coord::try_geographic`], which rejects
+    /// non-finite values and out-of-range latitudes before any numerical work, so
+    /// no non-finite/invalid typed coordinate can be constructed from outside the
+    /// crate.
+    pub(crate) fn geographic(
+        lon: Angle<Degree>,
+        lat: Angle<Degree>,
+        h: Height<Ellipsoidal>,
+    ) -> Self {
         Self {
             x: lon.value(),
             y: lat.value(),
@@ -462,6 +488,30 @@ impl<C: GeographicCrs, E: EpochTag> Coord<C, E> {
             _crs: PhantomData,
             _epoch: PhantomData,
         }
+    }
+
+    /// Validated geographic constructor for trust boundaries: rejects
+    /// non-finite longitude/latitude/height and latitudes outside [-90, 90].
+    /// Longitude is not wrapped here (that is a topology decision made later);
+    /// it is only required to be finite.
+    pub fn try_geographic(
+        lon: Angle<Degree>,
+        lat: Angle<Degree>,
+        h: Height<Ellipsoidal>,
+    ) -> Result<Self, GeoInputError> {
+        if !lon.value().is_finite() {
+            return Err(GeoInputError::NotFinite("longitude"));
+        }
+        if !lat.value().is_finite() {
+            return Err(GeoInputError::NotFinite("latitude"));
+        }
+        if !h.metres().is_finite() {
+            return Err(GeoInputError::NotFinite("height"));
+        }
+        if lat.value().abs() > 90.0 {
+            return Err(GeoInputError::LatitudeOutOfRange(lat.value()));
+        }
+        Ok(Self::geographic(lon, lat, h))
     }
     pub fn lon(&self) -> Angle<Degree> {
         Angle::new(self.x)
@@ -476,7 +526,11 @@ impl<C: GeographicCrs, E: EpochTag> Coord<C, E> {
 
 impl<E: EpochTag> Coord<Ecef, E> {
     /// Build a geocentric coordinate from raw ECEF metres.
-    pub fn ecef(x: f64, y: f64, z: f64) -> Self {
+    ///
+    /// **Crate-private** unchecked fast path: every public trust boundary must go
+    /// through [`Coord::try_ecef`], which rejects non-finite components before any
+    /// numerical work.
+    pub(crate) fn ecef(x: f64, y: f64, z: f64) -> Self {
         Self {
             x,
             y,
@@ -484,6 +538,15 @@ impl<E: EpochTag> Coord<Ecef, E> {
             _crs: PhantomData,
             _epoch: PhantomData,
         }
+    }
+
+    /// Validated geocentric constructor for trust boundaries: rejects
+    /// non-finite ECEF components before any numerical work.
+    pub fn try_ecef(x: f64, y: f64, z: f64) -> Result<Self, GeoInputError> {
+        if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+            return Err(GeoInputError::NotFinite("ecef component"));
+        }
+        Ok(Self::ecef(x, y, z))
     }
     pub fn x(&self) -> Length<Metre> {
         Length::new(self.x)
@@ -540,6 +603,41 @@ impl<C: CrsTag, E: EpochTag> Sub for Coord<C, E> {
 // Datum / epoch transforms (WGS84 ↔ ITRF-family Helmert path only)
 // ---------------------------------------------------------------------------
 
+/// Error raised by the validated (`try_*`) geodetic constructors and
+/// transforms when an input is unfit for numerical work.
+#[derive(thiserror::Error, Debug, Clone, PartialEq)]
+pub enum GeoInputError {
+    /// A required scalar was NaN or infinite.
+    #[error("non-finite {0}")]
+    NotFinite(&'static str),
+    /// A latitude fell outside the closed interval [-90, 90] degrees.
+    #[error("latitude {0} out of range [-90, 90]")]
+    LatitudeOutOfRange(f64),
+    /// A Helmert parameter was NaN or infinite.
+    #[error("non-finite Helmert parameter")]
+    NonFiniteHelmert,
+    /// A coordinate epoch (decimal year) differed from the frame's reference
+    /// epoch, and no station-velocity model is shipped to bridge the gap.
+    #[error("coordinate epoch {got} unsupported: shipped ITRF Helmerts are velocity-free and valid only at reference epoch {reference}")]
+    NonReferenceEpoch { got: f64, reference: f64 },
+}
+
+/// Reference epoch (decimal year) at which the shipped ITRF Helmert parameters
+/// are defined (Altamimi et al. 2016, *ITRF2014: A new release of the
+/// International Terrestrial Reference Frame*, J. Geophys. Res., Table 1).
+///
+/// Frame realization and coordinate epoch are distinct concepts. The
+/// [`EpochTag`] type parameter on a [`Coord`] names the *frame realization*
+/// (ITRF2000 / ITRF2008 / ITRF2014). The *coordinate epoch* — the time of
+/// observation at which a station's position is expressed — is a separate
+/// scalar. The 7-parameter Helmerts shipped here are velocity-free: they are
+/// exact at [`ITRF_REFERENCE_EPOCH`] and ignore tectonic plate motion (up to a
+/// few cm/decade) at any other coordinate epoch. forge3d ships no
+/// station-velocity/plate-motion model, so a transform requested at a
+/// non-reference coordinate epoch is rejected rather than silently applied
+/// (see [`epoch_transform_at`]); it is never treated as an identity.
+pub const ITRF_REFERENCE_EPOCH: f64 = 2010.0;
+
 /// A 7-parameter Helmert transform (position-vector convention, small angles).
 /// Translations in metres, rotations in radians, `scale_ppb` in parts-per-billion.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -586,6 +684,17 @@ impl Helmert {
             scale_ppb: -self.scale_ppb,
         }
     }
+
+    /// True when every parameter is finite (guard before numerical use).
+    pub fn is_finite(&self) -> bool {
+        self.tx.is_finite()
+            && self.ty.is_finite()
+            && self.tz.is_finite()
+            && self.rx.is_finite()
+            && self.ry.is_finite()
+            && self.rz.is_finite()
+            && self.scale_ppb.is_finite()
+    }
 }
 
 /// A typed datum/epoch transform: the only sanctioned way to move a `Coord`
@@ -595,28 +704,72 @@ pub trait DatumTransform<From: EpochTag, To: EpochTag> {
     fn helmert(&self) -> Helmert;
 }
 
-/// ITRF2000 → ITRF2014 Helmert (IERS/IGN published values at epoch 2010.0;
-/// ITRF2014 Transformation Parameters, Altamimi et al. 2016, Table 1,
-/// sign-inverted from the published ITRF2014→ITRF2000 direction):
-/// T = (-0.7, -1.2, 26.1) mm, D = -2.12 ppb, R = (0, 0, 0) mas.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Itrf2000ToItrf2014;
+// The four published directions below all derive from a single authoritative
+// row of Altamimi et al. 2016, Table 1 (ITRF2014 → ITRFyyyy at epoch 2010.0,
+// units: mm / ppb / mas, rotations zero for these pairs). Reverse directions
+// are the negated parameters (exact here because all rotations are zero).
+//
+//   ITRF2014 → ITRF2008 : T = ( 1.6,  1.9,  2.4) mm, D = -0.02 ppb
+//   ITRF2014 → ITRF2000 : T = ( 0.7,  1.2, -26.1) mm, D =  2.12 ppb
 
-impl DatumTransform<Itrf2000, Itrf2014> for Itrf2000ToItrf2014 {
+/// ITRF2014 → ITRF2008 Helmert (Altamimi et al. 2016, Table 1, epoch 2010.0).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Itrf2014ToItrf2008;
+impl DatumTransform<Itrf2014, Itrf2008> for Itrf2014ToItrf2008 {
     fn helmert(&self) -> Helmert {
         Helmert {
-            tx: -0.7e-3,
-            ty: -1.2e-3,
-            tz: 26.1e-3,
+            tx: 1.6e-3,
+            ty: 1.9e-3,
+            tz: 2.4e-3,
             rx: 0.0,
             ry: 0.0,
             rz: 0.0,
-            scale_ppb: -2.12,
+            scale_ppb: -0.02,
         }
     }
 }
 
-/// Move a geocentric coordinate between epochs through a typed transform.
+/// ITRF2008 → ITRF2014 Helmert (reverse of [`Itrf2014ToItrf2008`]).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Itrf2008ToItrf2014;
+impl DatumTransform<Itrf2008, Itrf2014> for Itrf2008ToItrf2014 {
+    fn helmert(&self) -> Helmert {
+        Itrf2014ToItrf2008.helmert().inverse()
+    }
+}
+
+/// ITRF2014 → ITRF2000 Helmert (Altamimi et al. 2016, Table 1, epoch 2010.0).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Itrf2014ToItrf2000;
+impl DatumTransform<Itrf2014, Itrf2000> for Itrf2014ToItrf2000 {
+    fn helmert(&self) -> Helmert {
+        Helmert {
+            tx: 0.7e-3,
+            ty: 1.2e-3,
+            tz: -26.1e-3,
+            rx: 0.0,
+            ry: 0.0,
+            rz: 0.0,
+            scale_ppb: 2.12,
+        }
+    }
+}
+
+/// ITRF2000 → ITRF2014 Helmert (reverse of [`Itrf2014ToItrf2000`]; equal to the
+/// IERS/IGN published ITRF2000→ITRF2014 direction, T = (-0.7, -1.2, 26.1) mm,
+/// D = -2.12 ppb, R = 0).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Itrf2000ToItrf2014;
+impl DatumTransform<Itrf2000, Itrf2014> for Itrf2000ToItrf2014 {
+    fn helmert(&self) -> Helmert {
+        Itrf2014ToItrf2000.helmert().inverse()
+    }
+}
+
+/// Move a geocentric coordinate between frame realizations through a typed
+/// transform. This applies the velocity-free Helmert unconditionally; it is
+/// only correct at [`ITRF_REFERENCE_EPOCH`]. Prefer [`epoch_transform_at`] at a
+/// trust boundary, which validates the coordinate epoch and inputs.
 pub fn epoch_transform<From, To, T>(coord: Coord<Ecef, From>, transform: &T) -> Coord<Ecef, To>
 where
     From: EpochTag,
@@ -624,6 +777,42 @@ where
     T: DatumTransform<From, To>,
 {
     Coord::from_raw(transform.helmert().apply(coord.raw()))
+}
+
+/// Validated frame-realization transform at an explicit coordinate epoch.
+///
+/// Rejects non-finite coordinates or Helmert parameters, and — because no
+/// station-velocity model is shipped — rejects any `coordinate_epoch` that is
+/// not [`ITRF_REFERENCE_EPOCH`] instead of silently ignoring plate motion. This
+/// makes an unsupported epoch an explicit error, never an identity.
+pub fn epoch_transform_at<From, To, T>(
+    coord: Coord<Ecef, From>,
+    transform: &T,
+    coordinate_epoch: f64,
+) -> Result<Coord<Ecef, To>, GeoInputError>
+where
+    From: EpochTag,
+    To: EpochTag,
+    T: DatumTransform<From, To>,
+{
+    if !coordinate_epoch.is_finite() {
+        return Err(GeoInputError::NotFinite("coordinate epoch"));
+    }
+    if (coordinate_epoch - ITRF_REFERENCE_EPOCH).abs() > f64::EPSILON {
+        return Err(GeoInputError::NonReferenceEpoch {
+            got: coordinate_epoch,
+            reference: ITRF_REFERENCE_EPOCH,
+        });
+    }
+    let raw = coord.raw();
+    if !raw.x.is_finite() || !raw.y.is_finite() || !raw.z.is_finite() {
+        return Err(GeoInputError::NotFinite("ecef component"));
+    }
+    let helmert = transform.helmert();
+    if !helmert.is_finite() {
+        return Err(GeoInputError::NonFiniteHelmert);
+    }
+    Ok(Coord::from_raw(helmert.apply(raw)))
 }
 
 #[cfg(test)]
@@ -675,5 +864,102 @@ mod tests {
         // ΔZ = tz + (scale − 1)·Z = 26.1 mm − 2.12 ppb × 4.919e6 m.
         let expected = 0.0261 - 2.12e-9 * 4_919_474.910;
         assert!((c2014.z().value() - c2000.raw().z - expected).abs() < 1e-9);
+    }
+
+    // A representative geocentric point (Potsdam-ish) used across round trips.
+    const P: DVec3 = DVec3::new(3_800_641.0, 882_005.0, 5_028_791.0);
+
+    #[test]
+    fn every_shipped_itrf_direction_round_trips_below_a_tenth_of_a_millimetre() {
+        // 2014 → 2008 → 2014
+        let a = Coord::<Ecef, Itrf2014>::ecef(P.x, P.y, P.z);
+        let b: Coord<Ecef, Itrf2008> = epoch_transform(a, &Itrf2014ToItrf2008);
+        let c: Coord<Ecef, Itrf2014> = epoch_transform(b, &Itrf2008ToItrf2014);
+        assert!((c.raw() - a.raw()).length() < 1e-4);
+        // 2014 → 2000 → 2014
+        let d: Coord<Ecef, Itrf2000> = epoch_transform(a, &Itrf2014ToItrf2000);
+        let e: Coord<Ecef, Itrf2014> = epoch_transform(d, &Itrf2000ToItrf2014);
+        assert!((e.raw() - a.raw()).length() < 1e-4);
+    }
+
+    #[test]
+    fn reverse_transforms_are_exact_inverses_of_forward() {
+        assert_eq!(
+            Itrf2008ToItrf2014.helmert(),
+            Itrf2014ToItrf2008.helmert().inverse()
+        );
+        assert_eq!(
+            Itrf2000ToItrf2014.helmert(),
+            Itrf2014ToItrf2000.helmert().inverse()
+        );
+    }
+
+    #[test]
+    fn itrf2014_to_itrf2008_matches_published_translation() {
+        // Pure translation dominates at these magnitudes: ΔX ≈ 1.6 mm, etc.
+        let a = Coord::<Ecef, Itrf2014>::ecef(P.x, P.y, P.z);
+        let b: Coord<Ecef, Itrf2008> = epoch_transform(a, &Itrf2014ToItrf2008);
+        let off = b.raw() - a.raw();
+        // Translation + scale only; scale term ~ -0.02 ppb × 6.4e6 m ≈ -0.13 mm.
+        assert!((off.x - (1.6e-3 - 0.02e-9 * P.x)).abs() < 1e-9);
+        assert!((off.z - (2.4e-3 - 0.02e-9 * P.z)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn try_geographic_rejects_bad_inputs_and_accepts_good_ones() {
+        let ok = Coord::<Wgs84, Itrf2014>::try_geographic(
+            Angle::new(13.4),
+            Angle::new(52.5),
+            Height::new(38.0),
+        );
+        assert!(ok.is_ok());
+        assert_eq!(
+            Coord::<Wgs84, Itrf2014>::try_geographic(
+                Angle::new(f64::NAN),
+                Angle::new(52.5),
+                Height::new(0.0)
+            ),
+            Err(GeoInputError::NotFinite("longitude"))
+        );
+        assert!(matches!(
+            Coord::<Wgs84, Itrf2014>::try_geographic(
+                Angle::new(13.4),
+                Angle::new(95.0),
+                Height::new(0.0)
+            ),
+            Err(GeoInputError::LatitudeOutOfRange(_))
+        ));
+        assert_eq!(
+            Coord::<Wgs84, Itrf2014>::try_geographic(
+                Angle::new(13.4),
+                Angle::new(52.5),
+                Height::new(f64::INFINITY)
+            ),
+            Err(GeoInputError::NotFinite("height"))
+        );
+    }
+
+    #[test]
+    fn try_ecef_rejects_non_finite() {
+        assert!(Coord::<Ecef, Itrf2014>::try_ecef(P.x, P.y, P.z).is_ok());
+        assert_eq!(
+            Coord::<Ecef, Itrf2014>::try_ecef(P.x, f64::NAN, P.z),
+            Err(GeoInputError::NotFinite("ecef component"))
+        );
+    }
+
+    #[test]
+    fn epoch_transform_at_rejects_non_reference_epoch() {
+        let a = Coord::<Ecef, Itrf2000>::ecef(P.x, P.y, P.z);
+        // At the reference epoch it matches the unchecked transform.
+        let checked: Coord<Ecef, Itrf2014> =
+            epoch_transform_at(a, &Itrf2000ToItrf2014, ITRF_REFERENCE_EPOCH).unwrap();
+        let unchecked: Coord<Ecef, Itrf2014> = epoch_transform(a, &Itrf2000ToItrf2014);
+        assert_eq!(checked.raw(), unchecked.raw());
+        // At any other coordinate epoch it refuses rather than ignoring drift.
+        assert!(matches!(
+            epoch_transform_at::<Itrf2000, Itrf2014, _>(a, &Itrf2000ToItrf2014, 2020.0),
+            Err(GeoInputError::NonReferenceEpoch { .. })
+        ));
     }
 }

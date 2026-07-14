@@ -102,6 +102,7 @@ pub fn assign_crs(path: impl AsRef<Path>, crs: CrsSpec, overwrite: bool) -> GisR
         creation_options: Default::default(),
         creation_options_explicit: false,
         like_info: None,
+        height_system: loaded.info.height_system.clone(),
     };
     let mut info = write_raster(path, loaded.array, options)?;
     info.warnings.push(RasterWarning::new(
@@ -302,47 +303,56 @@ pub fn reproject_raster(
         dst_bounds.top,
     ])?;
     let source_values = raster_to_f64(&loaded.array);
-    let mut out = vec![0.0; loaded.array.bands * loaded.array.height * loaded.array.width];
-    // MENSURA item 5: transform failures are counted, never silently
-    // absorbed. Out-of-extent samples remain legitimate nodata.
+    let bands = loaded.array.bands;
+    let height = loaded.array.height;
+    let width = loaded.array.width;
+    let plane = height * width;
+    let mut out = vec![0.0; bands * plane];
+    // MENSURA item 5: transform failures are counted, never silently absorbed.
+    // The CRS transform depends only on (row, col) — NOT the band — so it is
+    // computed and counted exactly ONCE per pixel. Counting inside the band
+    // loop would inflate `failure_count` by the band count (e.g. 3x for RGB),
+    // corrupting the TransformFailed.count contract. Out-of-extent samples
+    // remain legitimate per-band nodata.
     let mut failure_count: usize = 0;
     let mut first_pixel: Option<(usize, usize)> = None;
-    for band in 0..loaded.array.bands {
-        let fill = loaded
-            .info
-            .nodata_per_band
-            .get(band)
-            .copied()
-            .flatten()
-            .unwrap_or(0.0);
-        for row in 0..loaded.array.height {
-            for col in 0..loaded.array.width {
-                let (x, y) = dst_transform.apply(col as f64 + 0.5, row as f64 + 0.5);
-                let value = match transform_point(x, y, &dst_crs, &src_crs) {
-                    Ok((sx, sy)) => crate::gis::affine::inverse_apply(source_transform, sx, sy)
-                        .ok()
-                        .and_then(|(src_col, src_row)| {
-                            sample_band(
-                                &source_values,
-                                &loaded.array,
-                                band,
-                                src_col - 0.5,
-                                src_row - 0.5,
-                                method,
-                                loaded.info.nodata_per_band.get(band).copied().flatten(),
-                            )
-                        }),
-                    Err(_) => {
-                        failure_count += 1;
-                        if first_pixel.is_none() {
-                            first_pixel = Some((row, col));
-                        }
-                        None
+    let fills: Vec<f64> = (0..bands)
+        .map(|band| {
+            loaded
+                .info
+                .nodata_per_band
+                .get(band)
+                .copied()
+                .flatten()
+                .unwrap_or(0.0)
+        })
+        .collect();
+    for row in 0..height {
+        for col in 0..width {
+            let (x, y) = dst_transform.apply(col as f64 + 0.5, row as f64 + 0.5);
+            let src_rc = match transform_point(x, y, &dst_crs, &src_crs) {
+                Ok((sx, sy)) => crate::gis::affine::inverse_apply(source_transform, sx, sy).ok(),
+                Err(_) => {
+                    failure_count += 1;
+                    if first_pixel.is_none() {
+                        first_pixel = Some((row, col));
                     }
-                };
-                out[band * loaded.array.height * loaded.array.width
-                    + row * loaded.array.width
-                    + col] = value.unwrap_or(fill);
+                    None
+                }
+            };
+            for band in 0..bands {
+                let value = src_rc.and_then(|(src_col, src_row)| {
+                    sample_band(
+                        &source_values,
+                        &loaded.array,
+                        band,
+                        src_col - 0.5,
+                        src_row - 0.5,
+                        method,
+                        loaded.info.nodata_per_band.get(band).copied().flatten(),
+                    )
+                });
+                out[band * plane + row * width + col] = value.unwrap_or(fills[band]);
             }
         }
     }
@@ -351,11 +361,15 @@ pub fn reproject_raster(
         let (row, col) = first_pixel.expect("failure recorded");
         match on_transform_error {
             TransformErrorPolicy::Raise => {
-                return Err(GisError::TransformFailed(format!(
-                    "transform_failed: {failure_count} pixel(s) failed to transform \
-                     (first at row {row}, col {col}); pass on_transform_error='nodata' \
-                     to fill them with nodata instead"
-                )));
+                return Err(GisError::ReprojectTransformFailed {
+                    count: failure_count,
+                    first_pixel: (row, col),
+                    src_crs: crate::gis::crs::canonical_label(&src_crs)
+                        .unwrap_or_else(|_| "<unknown>".to_string()),
+                    dst_crs: crate::gis::crs::canonical_label(&dst_crs)
+                        .unwrap_or_else(|_| "<unknown>".to_string()),
+                    policy: "raise".to_string(),
+                });
             }
             TransformErrorPolicy::Nodata => {
                 diagnostics.push(RasterWarning::new(
@@ -620,6 +634,8 @@ pub(crate) fn operation_info(
 ) -> GisResult<RasterInfo> {
     let mut info = RasterInfo::new(source.path.clone().into(), width, height, source.band_count);
     info.dtype_per_band = vec![array.dtype().name().to_string(); source.band_count as usize];
+    // Resampling and horizontal reprojection do not change the vertical datum.
+    info.height_system = source.height_system.clone();
     if let Some(crs) = crs {
         info.crs_wkt = crs.wkt.clone();
         info.crs_authority = authority_map(&crs);

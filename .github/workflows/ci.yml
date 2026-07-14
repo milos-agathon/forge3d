@@ -119,6 +119,12 @@ jobs:
         env:
           RUST_TEST_THREADS: 1
 
+      - name: Run doctests (proves the MENSURA compile_fail contracts)
+        # Executes rustdoc examples, including the five `compile_fail` proofs in
+        # src/geo/units.rs that make unit/height/CRS/epoch mismatches and the raw
+        # f64->f32 world-coordinate narrowing genuinely fail to compile.
+        run: cargo test --doc --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings
+
       - name: Run cargo clippy
         run: cargo forge3d-clippy
 

@@ -161,7 +161,7 @@ def geometry_measure(
     *,
     crs: str | int | dict[str, Any],
     metrics: tuple[str, ...] | list[str] = ("area", "length"),
-):
+) -> dict[str, Any]:
     """Measure area and length for a GeoJSON-like geometry object.
 
     The CRS is mandatory (MENSURA): EPSG:4326 coordinates are measured with
@@ -182,14 +182,30 @@ def measure_geometries(
     return geometry_measure(geometry, crs=crs, metrics=metrics)
 
 
-def geometry_centroid(geometry: dict[str, Any]):
-    """Return the planar centroid for a GeoJSON-like geometry object."""
-    return _require_native().geometry_centroid(geometry)
+def geometry_centroid(
+    geometry: dict[str, Any],
+    *,
+    crs: str | int | dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the centroid for a GeoJSON-like geometry object.
+
+    ``crs`` selects geographic (EPSG:4326, with antimeridian handling) versus
+    planar handling. It is required unless the input carries embedded CRS
+    metadata; coordinate ranges are never used to infer it.
+    """
+    return _require_native().geometry_centroid(geometry, crs=crs)
 
 
-def representative_point(geometry: dict[str, Any]):
-    """Return a representative point for a GeoJSON-like geometry object."""
-    return _require_native().representative_point(geometry)
+def representative_point(
+    geometry: dict[str, Any],
+    *,
+    crs: str | int | dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return a representative point for a GeoJSON-like geometry object.
+
+    See :func:`geometry_centroid` for the ``crs`` contract.
+    """
+    return _require_native().representative_point(geometry, crs=crs)
 
 
 def interpolate_line(
@@ -197,18 +213,35 @@ def interpolate_line(
     distance: float,
     *,
     normalized: bool = False,
-):
-    """Interpolate a point along a LineString or MultiLineString."""
+    crs: str | int | dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Interpolate a point along a LineString or MultiLineString.
+
+    See :func:`geometry_centroid` for the ``crs`` contract. Under EPSG:4326
+    ``distance`` is geodesic metres along the line (never degrees); under a
+    projected CRS it is planar CRS units. ``normalized=True`` distances are a
+    unitless fraction of the total length in either mode.
+    """
     return _require_native().interpolate_line(
         geometry,
         distance,
         normalized=normalized,
+        crs=crs,
     )
 
 
-def union_geometries(geometries):
-    """Union GeoJSON-like geometries through the native topology backend."""
-    return _require_native().union_geometries(geometries)
+def union_geometries(
+    geometries: list[dict[str, Any]] | tuple[dict[str, Any], ...] | dict[str, Any],
+    *,
+    crs: str | int | dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Union GeoJSON-like geometries through the native topology backend.
+
+    Accepts a sequence of geometries/Features or a single FeatureCollection.
+    See :func:`geometry_centroid` for the ``crs`` contract; items declaring
+    conflicting embedded CRSs raise ``crs_mismatch``.
+    """
+    return _require_native().union_geometries(geometries, crs=crs)
 
 
 def dissolve_vector(source: os.PathLike[str] | str | dict[str, Any], *, by=None):
@@ -216,9 +249,20 @@ def dissolve_vector(source: os.PathLike[str] | str | dict[str, Any], *, by=None)
     return _require_native().dissolve_vector(_path_or_self(source), by=by)
 
 
-def buffer_geometry(geometry: dict[str, Any], distance: float, *, quad_segs: int = 8):
-    """Buffer a GeoJSON-like geometry through the native topology backend."""
-    return _require_native().buffer_geometry(geometry, distance, quad_segs=quad_segs)
+def buffer_geometry(
+    geometry: dict[str, Any],
+    distance: float,
+    *,
+    quad_segs: int = 8,
+    crs: str | int | dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Buffer a GeoJSON-like geometry through the native topology backend.
+
+    See :func:`geometry_centroid` for the ``crs`` contract.
+    """
+    return _require_native().buffer_geometry(
+        geometry, distance, quad_segs=quad_segs, crs=crs
+    )
 
 
 def clip_vector(
@@ -254,12 +298,17 @@ def simplify_geometry(
     tolerance: float,
     *,
     preserve_topology: bool = True,
-):
-    """Simplify a GeoJSON-like geometry through the native topology backend."""
+    crs: str | int | dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Simplify a GeoJSON-like geometry through the native topology backend.
+
+    See :func:`geometry_centroid` for the ``crs`` contract.
+    """
     return _require_native().simplify_geometry(
         geometry,
         tolerance,
         preserve_topology=preserve_topology,
+        crs=crs,
     )
 
 
@@ -394,11 +443,17 @@ def write_raster(
     creation_options: dict[str, Any] | None = None,
     like_path: os.PathLike[str] | str | None = None,
     like_info: Any | None = None,
+    height_system: str | None = None,
 ):
     """Write a local GeoTIFF and return reopened metadata.
 
     Accepted array shapes are (height, width) and band-first
     (bands, height, width). HWC arrays are not a separate G-002a1 mode.
+
+    ``height_system`` (MENSURA) persists the vertical datum
+    ("ellipsoidal" / "orthometric_egm96" / "chart_datum") as a private GeoTIFF
+    tag so it survives a write->read round trip; the default inherits from
+    ``like_info`` or stays "unspecified".
     """
     like_path_value = None if like_path is None else os.fspath(like_path)
     return _require_native().write_raster(
@@ -412,6 +467,7 @@ def write_raster(
         creation_options=creation_options,
         like_path=like_path_value,
         like_info=like_info,
+        height_system=height_system,
     )
 
 

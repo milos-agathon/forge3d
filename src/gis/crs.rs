@@ -81,6 +81,48 @@ pub fn epsg_code(spec: &CrsSpec) -> Option<u32> {
     None
 }
 
+/// Kind of an EPSG CRS for geographic-versus-planar dispatch. `CrsSpec`
+/// parsing admits the whole EPSG 4000-4999 block plus the curated projection
+/// table, and that block is NOT homogeneous: alongside geographic 2D CRSs it
+/// contains projected members (4087/4088 World Equidistant Cylindrical, the
+/// CGCS2000/Xian80 Gauss-Kruger zones, ...) and geocentric/3D members
+/// (4978 WGS84 geocentric, 4936 ETRS89 geocentric, ...). Classification is
+/// therefore an explicit curated table, never a numeric-range heuristic; a
+/// code the table does not know is `Unclassified` and callers must raise a
+/// stable error rather than guess.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EpsgCrsKind {
+    /// EPSG:4326 — the one geographic CRS with geodesic/dateline support.
+    GeographicWgs84,
+    /// A known geographic (degree-axis) CRS other than EPSG:4326.
+    Geographic,
+    /// A known geocentric (3D Cartesian) CRS; meaningless for 2D geometry.
+    Geocentric,
+    /// A known projected CRS (planar, CRS units).
+    Projected,
+    /// Parseable but not in the curated classification table.
+    Unclassified,
+}
+
+pub(crate) fn epsg_crs_kind(code: u32) -> EpsgCrsKind {
+    match code {
+        4326 => EpsgCrsKind::GeographicWgs84,
+        // Projected members of the 4000-4999 parse block.
+        4087 | 4088 => EpsgCrsKind::Projected,
+        // Geocentric members of the parse block (WGS84 and ETRS89).
+        4936 | 4978 => EpsgCrsKind::Geocentric,
+        // Curated common geographic CRSs: RGF93, ED50, ETRS89, NAD27, NAD83,
+        // OSGB36, GDA94, CGCS2000, JGD2000, NAD83(CSRS), SIRGAS2000,
+        // NAD83(NSRS2007), ETRS89 3D, WGS84 3D.
+        4171 | 4230 | 4258 | 4267 | 4269 | 4277 | 4283 | 4490 | 4612 | 4617 | 4674 | 4759
+        | 4937 | 4979 => EpsgCrsKind::Geographic,
+        code if crate::geo::projections::epsg_projection_definition(code).is_some() => {
+            EpsgCrsKind::Projected
+        }
+        _ => EpsgCrsKind::Unclassified,
+    }
+}
+
 pub fn canonical_label(spec: &CrsSpec) -> GisResult<String> {
     if let Some(projection) = spec.projection {
         return Ok(format!("forge3d:{projection:?}"));
@@ -150,7 +192,7 @@ pub fn transform_bounds_densified(
 /// Check whether a CRS pair is dispatchable by the built-in engine without
 /// evaluating any coordinate.
 pub fn transform_pair_supported(src: &CrsSpec, dst: &CrsSpec) -> GisResult<()> {
-    use crate::geo::projections::epsg_projection;
+    use crate::geo::projections::epsg_projection_definition;
     if crs_equal(src, dst) {
         return Ok(());
     }
@@ -164,7 +206,7 @@ pub fn transform_pair_supported(src: &CrsSpec, dst: &CrsSpec) -> GisResult<()> {
     if is_geocentric_pair {
         return Ok(());
     }
-    let ok = |code: u32| code == 4326 || epsg_projection(code).is_some();
+    let ok = |code: u32| code == 4326 || epsg_projection_definition(code).is_some();
     match (epsg_code(src), epsg_code(dst)) {
         (Some(s), Some(d)) if ok(s) && ok(d) => Ok(()),
         _ => Err(GisError::BackendUnavailable(format!(
@@ -211,11 +253,12 @@ pub fn transform_point3(
 }
 
 /// Dispatch a coordinate through the built-in pure-Rust projection engine
-/// (src/geo/projections). Supported EPSG codes: 4326, 3857, and the WGS84 UTM
-/// zones 326zz/327zz. Anything else is an explicit `BackendUnavailable` — the
-/// engine never silently passes coordinates through.
+/// (src/geo/projections) via the authoritative `epsg_projection_definition`
+/// table (4326 geographic, plus 3857, WGS84 UTM zones, 3395, 2154, 5070, 5041,
+/// and 5042), or an explicit `CrsSpec.projection`. Anything else is an explicit
+/// `BackendUnavailable` — the engine never silently passes coordinates through.
 pub fn transform_point(x: f64, y: f64, src: &CrsSpec, dst: &CrsSpec) -> GisResult<(f64, f64)> {
-    use crate::geo::projections::{epsg_forward, epsg_inverse, epsg_projection, ProjError};
+    use crate::geo::projections::{epsg_projection_definition, ProjError, ProjectionDefinition};
 
     if !x.is_finite() || !y.is_finite() {
         return Err(GisError::TransformFailed(
@@ -239,26 +282,25 @@ pub fn transform_point(x: f64, y: f64, src: &CrsSpec, dst: &CrsSpec) -> GisResul
         }
     };
     let (src_code, dst_code) = (epsg_code(src), epsg_code(dst));
+    // An explicit projection definition on the CrsSpec wins; otherwise resolve
+    // the EPSG code through the one authoritative projection table. 4326 stays
+    // geographic (a `None` here, handled by the passthrough branch below).
+    let resolve = |spec: &CrsSpec, code: Option<u32>| -> Option<ProjectionDefinition> {
+        spec.projection
+            .or_else(|| code.and_then(epsg_projection_definition))
+    };
     // Route through geographic WGS84: src → 4326 → dst.
-    let (lon, lat) = if let Some(projection) = src.projection {
+    let (lon, lat) = if let Some(projection) = resolve(src, src_code) {
         projection.inverse(x, y).map_err(map_err)?
     } else if src_code == Some(4326) {
         (x, y)
-    } else if let Some(code) = src_code.filter(|code| epsg_projection(*code).is_some()) {
-        epsg_inverse(code, x, y)
-            .expect("code checked supported")
-            .map_err(map_err)?
     } else {
         return unsupported(src, dst);
     };
-    if let Some(projection) = dst.projection {
+    if let Some(projection) = resolve(dst, dst_code) {
         projection.forward(lon, lat).map_err(map_err)
     } else if dst_code == Some(4326) {
         Ok((lon, lat))
-    } else if let Some(code) = dst_code.filter(|code| epsg_projection(*code).is_some()) {
-        epsg_forward(code, lon, lat)
-            .expect("code checked supported")
-            .map_err(map_err)
     } else {
         unsupported(src, dst)
     }
@@ -397,5 +439,155 @@ impl CrsTransform {
             canonical_label(&self.dst)?,
             self.axis_order_policy
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spec(code: &str) -> CrsSpec {
+        CrsSpec::from_string(code.to_string()).expect("valid CRS code")
+    }
+
+    /// Forward WGS84 lon/lat into `code`, inverse back, return recovered lon/lat.
+    fn round_trip(code: &str, lon: f64, lat: f64) -> (f64, f64) {
+        let wgs84 = spec("EPSG:4326");
+        let proj = spec(code);
+        let (e, n) = transform_point(lon, lat, &wgs84, &proj).expect("forward");
+        transform_point(e, n, &proj, &wgs84).expect("inverse")
+    }
+
+    #[test]
+    fn every_curated_projection_is_reachable_by_epsg_code_and_round_trips() {
+        // (code, interior lon, interior lat)
+        let cases = [
+            ("EPSG:3857", 12.5, 41.9),   // Web Mercator (Rome)
+            ("EPSG:32633", 15.0, 45.0),  // UTM 33N
+            ("EPSG:32733", 15.0, -30.0), // UTM 33S (southern false northing)
+            ("EPSG:3395", 10.0, 45.0),   // World Mercator (variant A)
+            ("EPSG:2154", 2.5, 47.0),    // Lambert-93 (LCC 2SP, France)
+            ("EPSG:5070", -96.0, 38.0),  // Conus Albers (AEA)
+            ("EPSG:5041", 30.0, 85.0),   // UPS North (Polar Stereographic A)
+            ("EPSG:5042", 30.0, -85.0),  // UPS South (Polar Stereographic A)
+        ];
+        for (code, lon, lat) in cases {
+            let (rlon, rlat) = round_trip(code, lon, lat);
+            let residual = (rlon - lon).abs().max((rlat - lat).abs());
+            assert!(
+                residual < 1e-9,
+                "{code} round-trip residual {residual:.3e} deg exceeds 1e-9"
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_epsg_pair_raises_rather_than_passing_through() {
+        // EPSG:4269 (NAD83 geographic) parses (4000-4999) but has no built-in
+        // path to a projected CRS: it must raise, never pass coordinates through.
+        let src = spec("EPSG:4326");
+        let dst = spec("EPSG:4269");
+        assert!(matches!(
+            transform_point(1.0, 2.0, &src, &dst),
+            Err(GisError::BackendUnavailable(_))
+        ));
+    }
+
+    #[test]
+    fn non_finite_input_is_rejected() {
+        let src = spec("EPSG:4326");
+        let dst = spec("EPSG:3857");
+        assert!(transform_point(f64::NAN, 2.0, &src, &dst).is_err());
+    }
+
+    #[test]
+    fn identity_transform_returns_input() {
+        let s = spec("EPSG:3857");
+        assert_eq!(
+            transform_point(100.0, 200.0, &s, &s).unwrap(),
+            (100.0, 200.0)
+        );
+    }
+
+    #[test]
+    fn projection_domain_edges_are_handled() {
+        let wgs84 = spec("EPSG:4326");
+        // North pole -> UPS North (Polar Stereographic A) maps to the false
+        // origin (2e6, 2e6), and inverts back to lat = 90.
+        let ups_n = spec("EPSG:5041");
+        let (e, n) = transform_point(0.0, 90.0, &wgs84, &ups_n).expect("pole forward");
+        assert!((e - 2_000_000.0).abs() < 1e-3, "pole easting {e}");
+        assert!((n - 2_000_000.0).abs() < 1e-3, "pole northing {n}");
+        let (_lon, lat) = transform_point(e, n, &ups_n, &wgs84).expect("pole inverse");
+        assert!((lat - 90.0).abs() < 1e-9, "recovered pole lat {lat}");
+
+        // UTM 33N central meridian (lon 15) at the equator sits at the false
+        // easting with zero northing.
+        let utm33n = spec("EPSG:32633");
+        let (e, n) = transform_point(15.0, 0.0, &wgs84, &utm33n).expect("cm forward");
+        assert!(
+            (e - 500_000.0).abs() < 1e-3 && n.abs() < 1e-3,
+            "cm ({e},{n})"
+        );
+
+        // Southern UTM carries the 10,000,000 m false northing.
+        let utm33s = spec("EPSG:32733");
+        let (_e, n) = transform_point(15.0, -0.001, &wgs84, &utm33s).expect("south forward");
+        assert!(n > 9_999_000.0, "southern false northing {n}");
+
+        // Non-finite input is rejected, never projected.
+        assert!(transform_point(f64::INFINITY, 0.0, &wgs84, &utm33n).is_err());
+        assert!(transform_point(0.0, f64::NAN, &wgs84, &utm33n).is_err());
+
+        // An out-of-zone longitude (30 deg from the central meridian) still
+        // yields a finite, distorted result rather than NaN or a panic.
+        let (e, n) = transform_point(45.0, 10.0, &wgs84, &utm33n).expect("out-of-zone");
+        assert!(e.is_finite() && n.is_finite(), "out-of-zone ({e},{n})");
+    }
+
+    #[test]
+    fn projection_roundtrip_residual_per_method_is_far_under_1mm() {
+        // MENSURA M-02 evidence: forward then inverse over an interior grid for
+        // every curated method, reporting the worst closure residual PER METHOD
+        // in millimetres. This is self-consistency, not external G7-2
+        // conformance (the kernels' own worked-example unit tests assert that,
+        // bounded by the published reference precision); it proves each method
+        // is internally consistent orders of magnitude below 1 mm.
+        const DEG_TO_M: f64 = 111_320.0; // nominal metres/degree
+                                         // (code, centre lon, centre lat, lon span, lat span)
+        let cases: &[(&str, f64, f64, f64, f64)] = &[
+            ("EPSG:3857", 0.0, 0.0, 300.0, 140.0),
+            ("EPSG:32633", 15.0, 0.0, 6.0, 160.0),
+            ("EPSG:3395", 0.0, 0.0, 300.0, 140.0),
+            ("EPSG:2154", 3.0, 46.5, 10.0, 8.0),
+            ("EPSG:5070", -96.0, 38.0, 50.0, 20.0),
+            ("EPSG:5041", 0.0, 85.0, 300.0, 8.0),
+            ("EPSG:5042", 0.0, -85.0, 300.0, 8.0),
+        ];
+        let wgs84 = spec("EPSG:4326");
+        for (code, lon0, lat0, dlon, dlat) in cases {
+            let proj = spec(code);
+            let mut worst_mm = 0.0f64;
+            for i in 0..=6 {
+                for j in 0..=6 {
+                    let lon = lon0 - dlon / 2.0 + dlon * i as f64 / 6.0;
+                    let lat = lat0 - dlat / 2.0 + dlat * j as f64 / 6.0;
+                    if lat.abs() > 89.5 {
+                        continue;
+                    }
+                    if let Ok((e, n)) = transform_point(lon, lat, &wgs84, &proj) {
+                        if let Ok((rlon, rlat)) = transform_point(e, n, &proj, &wgs84) {
+                            let dm = (rlon - lon).abs().max((rlat - lat).abs()) * DEG_TO_M * 1000.0;
+                            worst_mm = worst_mm.max(dm);
+                        }
+                    }
+                }
+            }
+            println!("{code}: worst round-trip residual {worst_mm:.6e} mm");
+            assert!(
+                worst_mm < 1.0,
+                "{code} round-trip residual {worst_mm} mm exceeds 1 mm"
+            );
+        }
     }
 }

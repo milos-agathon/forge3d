@@ -6,6 +6,68 @@
 use glam::{Mat4, Vec3};
 use std::f32::consts::PI;
 
+/// Maximum absolute value any camera world-coordinate component may take in the
+/// interactive viewer's **terrain-local frame** (MENSURA M-06 contract).
+///
+/// The viewer renders in a local frame: terrain vertices are pixel-index scaled
+/// (grid capped at 2048), the orbit target sits at the terrain centre, and the
+/// orbit radius is at most a few thousand units. Even under extreme vertical
+/// exaggeration a legitimate coordinate stays well under ~2e5. Absolute
+/// *geospatial* coordinates are orders of magnitude larger — UTM northings and
+/// Web-Mercator / ECEF magnitudes run ~1.6e5..6.4e6 m, exactly where the
+/// single-precision cliff (~0.5 m quantization at Earth radius) corrupts
+/// placement. Such coordinates must go through the anchored offscreen `Scene`
+/// path (`Anchor::narrow`), never the viewer IPC. This bound turns the former
+/// Python-side *convention* into a Rust-enforced contract: values beyond it are
+/// rejected rather than silently truncated to `f32`.
+pub const VIEWER_LOCAL_FRAME_MAX_COORD: f32 = 1.0e6;
+
+/// Which world-coordinate a [`CameraFrameError`] refers to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoordRole {
+    Eye,
+    Target,
+}
+
+/// Why a camera world-coordinate was rejected by the viewer's local-frame contract.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CameraFrameError {
+    /// A component was NaN or infinite.
+    NonFinite { role: CoordRole },
+    /// A component exceeded [`VIEWER_LOCAL_FRAME_MAX_COORD`] in magnitude — i.e.
+    /// an absolute geospatial coordinate was pushed through the local viewer frame.
+    OutOfLocalFrame {
+        role: CoordRole,
+        value: f32,
+        max: f32,
+    },
+}
+
+/// Reject non-finite or out-of-local-frame world coordinates (M-06 contract).
+fn validate_local_frame(role: CoordRole, v: Vec3) -> Result<(), CameraFrameError> {
+    for c in [v.x, v.y, v.z] {
+        if !c.is_finite() {
+            return Err(CameraFrameError::NonFinite { role });
+        }
+        if c.abs() > VIEWER_LOCAL_FRAME_MAX_COORD {
+            return Err(CameraFrameError::OutOfLocalFrame {
+                role,
+                value: c,
+                max: VIEWER_LOCAL_FRAME_MAX_COORD,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// True when `v` is finite and within the viewer's terrain-local frame
+/// ([`VIEWER_LOCAL_FRAME_MAX_COORD`]). Shared with the terrain camera handler so
+/// the local-frame contract is enforced on *every* camera world-coordinate entry
+/// (the terrain orbit target as well as `set_look_at`), not just one of them.
+pub fn coord_within_local_frame(v: Vec3) -> bool {
+    validate_local_frame(CoordRole::Target, v).is_ok()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CameraMode {
     Orbit,
@@ -226,8 +288,19 @@ impl CameraController {
         }
     }
 
-    /// Force orbit camera to a specific pose (target, distance, yaw, pitch)
-    pub fn set_orbit_pose_target(&mut self, target: Vec3, distance: f32, yaw: f32, pitch: f32) {
+    /// Force orbit camera to a specific pose (target, distance, yaw, pitch).
+    ///
+    /// Enforces the viewer's terrain-local-frame contract on `target`
+    /// ([`VIEWER_LOCAL_FRAME_MAX_COORD`]): an absolute geospatial coordinate is
+    /// rejected with [`CameraFrameError`] and no state is mutated.
+    pub fn set_orbit_pose_target(
+        &mut self,
+        target: Vec3,
+        distance: f32,
+        yaw: f32,
+        pitch: f32,
+    ) -> Result<(), CameraFrameError> {
+        validate_local_frame(CoordRole::Target, target)?;
         self.mode = CameraMode::Orbit;
         self.orbit.target = target;
         self.orbit.distance = distance.max(0.01);
@@ -238,10 +311,25 @@ impl CameraController {
         );
         self.orbit.pitch = p;
         self.orbit.yaw = yaw;
+        Ok(())
     }
 
-    /// Set camera from eye/target/up; updates both orbit and FPS states and switches to Orbit mode
-    pub fn set_look_at(&mut self, eye: Vec3, target: Vec3, up: Vec3) {
+    /// Set camera from eye/target/up; updates both orbit and FPS states and switches to Orbit mode.
+    ///
+    /// Enforces the viewer's terrain-local-frame contract: `eye` and `target`
+    /// must be finite and within [`VIEWER_LOCAL_FRAME_MAX_COORD`]. An absolute
+    /// projected/geodetic coordinate is rejected with [`CameraFrameError`] and
+    /// **no state is mutated** — the previous valid pose is retained. Such
+    /// coordinates belong on the anchored offscreen `Scene` path, not the viewer.
+    pub fn set_look_at(
+        &mut self,
+        eye: Vec3,
+        target: Vec3,
+        up: Vec3,
+    ) -> Result<(), CameraFrameError> {
+        validate_local_frame(CoordRole::Eye, eye)?;
+        validate_local_frame(CoordRole::Target, target)?;
+
         let forward = (target - eye).normalize();
         let pitch = forward.y.asin();
         let yaw = forward.z.atan2(forward.x);
@@ -264,11 +352,131 @@ impl CameraController {
         self.fps.yaw = yaw;
         self.fps.pitch = pitch;
         self.fps.up = self.orbit.up;
+        Ok(())
     }
 }
 
 impl Default for CameraController {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_look_at_accepts_local_frame_and_applies_pose() {
+        let mut c = CameraController::new();
+        let target = Vec3::new(128.0, 20.0, 128.0); // terrain-centre scale
+        let eye = Vec3::new(128.0, 300.0, 500.0);
+        assert!(c.set_look_at(eye, target, Vec3::Y).is_ok());
+        assert_eq!(c.orbit.target, target);
+        assert_eq!(c.mode, CameraMode::Orbit);
+    }
+
+    #[test]
+    fn set_look_at_rejects_ecef_magnitude_target_without_mutating() {
+        let mut c = CameraController::new();
+        c.set_look_at(
+            Vec3::new(0.0, 10.0, 20.0),
+            Vec3::new(1.0, 2.0, 3.0),
+            Vec3::Y,
+        )
+        .unwrap();
+        let before = c.orbit.target;
+        // ECEF magnitude (~6.38e6 m): the exact f32 cliff MENSURA targets.
+        let err = c.set_look_at(
+            Vec3::new(0.0, 10.0, 20.0),
+            Vec3::new(4.2e6, 1.7e6, 4.6e6),
+            Vec3::Y,
+        );
+        assert!(matches!(
+            err,
+            Err(CameraFrameError::OutOfLocalFrame {
+                role: CoordRole::Target,
+                ..
+            })
+        ));
+        assert_eq!(
+            c.orbit.target, before,
+            "a rejected look_at must not move the camera"
+        );
+    }
+
+    #[test]
+    fn set_look_at_rejects_utm_northing_eye() {
+        let mut c = CameraController::new();
+        // UTM northing ~5.5e6 m in the eye position.
+        let err = c.set_look_at(Vec3::new(5.0e5, 5.5e6, 0.0), Vec3::ZERO, Vec3::Y);
+        assert!(matches!(
+            err,
+            Err(CameraFrameError::OutOfLocalFrame {
+                role: CoordRole::Eye,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn set_look_at_rejects_non_finite() {
+        let mut c = CameraController::new();
+        assert!(matches!(
+            c.set_look_at(
+                Vec3::new(0.0, 1.0, 2.0),
+                Vec3::new(f32::NAN, 0.0, 0.0),
+                Vec3::Y
+            ),
+            Err(CameraFrameError::NonFinite {
+                role: CoordRole::Target
+            })
+        ));
+        assert!(matches!(
+            c.set_look_at(Vec3::new(f32::INFINITY, 0.0, 0.0), Vec3::ZERO, Vec3::Y),
+            Err(CameraFrameError::NonFinite {
+                role: CoordRole::Eye
+            })
+        ));
+    }
+
+    #[test]
+    fn local_frame_bound_is_inclusive_at_max_and_rejects_just_beyond() {
+        let mut c = CameraController::new();
+        let m = VIEWER_LOCAL_FRAME_MAX_COORD;
+        assert!(c
+            .set_look_at(Vec3::ZERO, Vec3::new(m, 0.0, 0.0), Vec3::Y)
+            .is_ok());
+        // The next representable f32 above the max must be rejected.
+        let beyond = f32::from_bits(m.to_bits() + 1);
+        assert!(beyond > m);
+        assert!(matches!(
+            c.set_look_at(Vec3::ZERO, Vec3::new(beyond, 0.0, 0.0), Vec3::Y),
+            Err(CameraFrameError::OutOfLocalFrame { .. })
+        ));
+    }
+
+    #[test]
+    fn coord_within_local_frame_separates_local_from_absolute() {
+        assert!(coord_within_local_frame(Vec3::new(128.0, 20.0, 128.0)));
+        assert!(coord_within_local_frame(Vec3::new(2048.0, 5000.0, -2048.0)));
+        assert!(!coord_within_local_frame(Vec3::new(0.0, 0.0, 6.4e6))); // ECEF
+        assert!(!coord_within_local_frame(Vec3::new(5.0e5, 5.5e6, 0.0))); // UTM northing
+        assert!(!coord_within_local_frame(Vec3::new(f32::NAN, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn set_orbit_pose_target_enforces_the_same_contract() {
+        let mut c = CameraController::new();
+        assert!(c
+            .set_orbit_pose_target(Vec3::new(100.0, 5.0, 100.0), 400.0, 0.3, -0.4)
+            .is_ok());
+        assert!(matches!(
+            c.set_orbit_pose_target(Vec3::new(0.0, 0.0, 6.4e6), 400.0, 0.0, 0.0),
+            Err(CameraFrameError::OutOfLocalFrame {
+                role: CoordRole::Target,
+                ..
+            })
+        ));
     }
 }

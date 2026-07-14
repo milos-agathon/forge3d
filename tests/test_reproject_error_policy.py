@@ -62,7 +62,7 @@ def test_unsupported_crs_pair_raises_not_nodata_success(tmp_path):
     transform = (0.01, 0.0, 13.0, 0.0, -0.01, 52.0)
     gis.write_raster(str(path), data, crs="EPSG:4326", transform=transform)
     with pytest.raises(Exception) as excinfo:
-        gis.reproject_raster(str(path), "EPSG:2154", resampling="nearest")
+        gis.reproject_raster(str(path), "EPSG:27700", resampling="nearest")
     message = str(excinfo.value)
     assert "InvalidCrs" in message or "BackendUnavailable" in message
     # A parseable-but-untransformable pair reaches the per-pixel policy.
@@ -89,3 +89,37 @@ def test_supported_reprojection_still_succeeds(tmp_path):
     result = gis.reproject_raster(str(path), "EPSG:3857", resampling="bilinear")
     assert result["info"]["crs_authority"]["code"] == "3857"
     assert not result["diagnostics"]
+
+
+def test_transform_failed_carries_structured_payload(tmp_path):
+    # MENSURA M-05: the raise path exposes a STABLE structured payload as
+    # exception attributes, so callers never parse the display text.
+    from forge3d._forge3d import TransformFailed
+
+    path = tmp_path / "plain.tif"
+    data = np.ones((1, 8, 8), dtype=np.float32)
+    transform = (0.01, 0.0, 13.0, 0.0, -0.01, 52.0)
+    gis.write_raster(str(path), data, crs="EPSG:4326", transform=transform)
+    with pytest.raises(TransformFailed) as excinfo:
+        gis.reproject_raster(str(path), "EPSG:4269", resampling="nearest")
+    exc = excinfo.value
+    assert exc.count == 64
+    assert tuple(exc.first_pixel) == (0, 0)
+    assert exc.src_crs == "EPSG:4326"
+    assert exc.dst_crs == "EPSG:4269"
+    assert exc.policy == "raise"
+
+
+def test_transform_failed_count_is_per_pixel_not_per_band(tmp_path):
+    # MENSURA M-05 band-count fix: a failed pixel in a MULTIBAND raster is
+    # counted ONCE, not once per band. A 3-band 8x8 all-failing reprojection
+    # must report 64 failed pixels, never 3*64 = 192.
+    from forge3d._forge3d import TransformFailed
+
+    path = tmp_path / "rgb.tif"
+    data = np.ones((3, 8, 8), dtype=np.float32)
+    transform = (0.01, 0.0, 13.0, 0.0, -0.01, 52.0)
+    gis.write_raster(str(path), data, crs="EPSG:4326", transform=transform)
+    with pytest.raises(TransformFailed) as excinfo:
+        gis.reproject_raster(str(path), "EPSG:4269", resampling="nearest")
+    assert excinfo.value.count == 64, f"expected 64 per-pixel failures, got {excinfo.value.count}"

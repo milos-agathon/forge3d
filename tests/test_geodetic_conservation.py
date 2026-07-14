@@ -94,7 +94,7 @@ def test_unsupported_crs_still_raises_not_passthrough():
     # the TIFF backend does not know, BackendUnavailable at transform for
     # parseable-but-untransformable pairs) — never a silent passthrough.
     with pytest.raises(Exception) as excinfo:
-        gis.create_crs_transformer(4326, 2154)
+        gis.create_crs_transformer(4326, 27700)  # OSGB36: outside the curated table
     message = str(excinfo.value)
     assert "InvalidCrs" in message or "BackendUnavailable" in message
 

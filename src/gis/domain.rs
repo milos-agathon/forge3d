@@ -31,6 +31,10 @@ mod py {
         Unspecified,
         OrthometricEgm96,
         Ellipsoidal,
+        /// Height above a nautical chart datum. No conversion to ellipsoidal is
+        /// shipped (that needs a tidal model), so it is carried but never
+        /// silently promoted; an Earth-fixed globe gate must reject it.
+        ChartDatum,
     }
 
     impl DemHeightSystem {
@@ -39,6 +43,7 @@ mod py {
                 "unspecified" => Ok(Self::Unspecified),
                 "orthometric_egm96" => Ok(Self::OrthometricEgm96),
                 "ellipsoidal" => Ok(Self::Ellipsoidal),
+                "chart_datum" => Ok(Self::ChartDatum),
                 _ => Err(GisError::InvalidArgument(format!(
                     "invalid_argument: unsupported height_system {value:?}"
                 ))),
@@ -50,6 +55,7 @@ mod py {
                 Self::Unspecified => "unspecified",
                 Self::OrthometricEgm96 => "orthometric_egm96",
                 Self::Ellipsoidal => "ellipsoidal",
+                Self::ChartDatum => "chart_datum",
             }
         }
     }
@@ -362,6 +368,10 @@ mod py {
         }
         .to_string()];
         info.nodata_per_band = nodata_per_band.clone();
+        // Persist the authoritative (post-conversion) vertical datum onto the
+        // returned RasterInfo, not only the sidecar dict key, so it survives
+        // being fed back into read/resample/reproject/align.
+        info.height_system = source.height_system.as_str().to_string();
         let dict = PyDict::new_bound(py);
         dict.set_item("array", super::super::raster_array_to_py(py, &array)?)?;
         dict.set_item("info", super::super::raster_info_to_py_dict(py, &info)?)?;
@@ -935,6 +945,17 @@ mod py {
             .unwrap_or_else(|| vec![None; band_count as usize]);
         info.is_georeferenced =
             info.transform.is_some() && (info.crs_wkt.is_some() || info.crs_authority.is_some());
+        // MENSURA M-03: read a supported vertical-datum tag when present; reject
+        // an unrecognized one; otherwise retain "unspecified". Never inferred.
+        if let Some(hs) = optional_extract::<String>(dict.get_item("height_system")?)? {
+            if !crate::gis::types::is_valid_height_system(&hs) {
+                return Err(GisError::InvalidArgument(format!(
+                    "invalid_argument: unsupported height_system {hs:?}"
+                ))
+                .into());
+            }
+            info.height_system = hs;
+        }
         Ok(info)
     }
 

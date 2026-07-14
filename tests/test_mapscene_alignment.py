@@ -67,7 +67,9 @@ def test_mapscene_target_crs_reprojects_inline_vector_features() -> None:
     assert scene.recipe.target_crs == "EPSG:3857"
     assert layer.crs == "EPSG:3857"
     assert layer.metadata["source_crs"] == "EPSG:4326"
-    assert coords[0] == pytest.approx([0.0, 0.0])
+    # (0,0) -> Web Mercator is (0,0); the pure-Rust engine leaves a ~0.7 nm
+    # float artifact (tan(pi/4) != 1), far inside MENSURA's 1 mm conformance bar.
+    assert coords[0] == pytest.approx([0.0, 0.0], abs=1.0e-6)
     assert coords[1][0] == pytest.approx(111319.49, rel=1.0e-4)
     assert "crs_mismatch" not in codes
     assert "alignment_transform_applied" in codes

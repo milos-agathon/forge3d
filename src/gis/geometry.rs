@@ -3,7 +3,9 @@ use serde_json::{json, Map, Value};
 use crate::gis::error::{GisError, GisResult};
 use crate::gis::types::RasterWarning;
 
+mod antimeridian;
 mod centroid;
+mod crs_resolve;
 mod line_ops;
 mod math;
 mod measure;
@@ -15,11 +17,15 @@ pub(crate) mod topology;
 mod validate;
 
 use centroid::centroid_for_geometries;
+pub(crate) use crs_resolve::geographic_from_spec;
+pub use crs_resolve::measure_mode_for_crs;
+use crs_resolve::{dateline_normalized, embedded_crs_spec, resolve_geographic};
 use line_ops::{
     interpolate_lines, lines_for_interpolation, normalized_target_distance,
     representative_for_geometry, total_line_length, validate_distance,
 };
-use math::{looks_geographic, unwrap_dateline, wrap_geometry_lons};
+
+use crate::gis::raster_write::CrsSpec;
 pub use measure::MeasureMode;
 use measure::{measure_geometries, validate_metric_names};
 use model::{
@@ -29,25 +35,6 @@ use model::{
 };
 use parse::normalize_input;
 
-/// MENSURA dateline handling for the topology path: unwrap geographic
-/// antimeridian-crossing inputs so planar topology runs on continuous
-/// longitudes. Returns the (possibly unwrapped) geometries and whether the
-/// operation's output longitudes must be wrapped back.
-fn declared_wgs84(crs: Option<&Value>) -> Option<bool> {
-    let authority = crs?.get("authority")?;
-    let code = authority.get("code")?;
-    Some(code.as_str().is_some_and(|code| code == "4326") || code.as_u64() == Some(4326))
-}
-
-fn geographic_for_input(input: &NormalizedInput) -> bool {
-    declared_wgs84(input.crs.as_ref()).unwrap_or_else(|| looks_geographic(&input.geometries))
-}
-
-fn dateline_normalized(geometries: &[Geometry], geographic: bool) -> (Vec<Geometry>, bool) {
-    let mut out = geometries.to_vec();
-    let unwrapped = geographic && unwrap_dateline(&mut out);
-    (out, unwrapped)
-}
 use topology::{
     buffer_topology, intersection_polygonal, require_topology_backend, simplify_topology,
     union_polygonal,
@@ -76,29 +63,6 @@ pub fn repair_geometry(source: &Value, method: &str) -> GisResult<Value> {
     }
     require_topology_backend("make_valid")?;
     unreachable!("topology backend is not wired in C4.0")
-}
-
-/// Resolve the measurement mode for a CRS. Geographic coordinates are only
-/// measured geodesically (metres / m²) and only for WGS84; any other
-/// geographic CRS raises rather than silently returning square degrees.
-pub fn measure_mode_for_crs(spec: &crate::gis::raster_write::CrsSpec) -> GisResult<MeasureMode> {
-    match crate::gis::crs::epsg_code(spec) {
-        Some(4326) => Ok(MeasureMode::GeodesicWgs84),
-        // The EPSG 4000-4999 block (and 4979) is the geographic-CRS family:
-        // planar math there would report degrees as metres.
-        Some(code) if (4000..5000).contains(&code) || code == 4979 => {
-            Err(GisError::InvalidCrs(format!(
-                "invalid_crs: geometry_measure supports geodesic measurement only on EPSG:4326; \
-                 geographic CRS EPSG:{code} would yield degree-based lengths/areas"
-            )))
-        }
-        Some(_) => Ok(MeasureMode::Planar),
-        None => Err(GisError::InvalidCrs(
-            "invalid_crs: geometry_measure requires an EPSG-identified CRS to determine \
-             measurement units"
-                .to_string(),
-        )),
-    }
 }
 
 pub fn geometry_measure(source: &Value, metrics: &[String], mode: MeasureMode) -> GisResult<Value> {
@@ -148,10 +112,11 @@ pub fn geometry_measure(source: &Value, metrics: &[String], mode: MeasureMode) -
     Ok(Value::Object(out))
 }
 
-pub fn geometry_centroid(source: &Value) -> GisResult<Value> {
+pub fn geometry_centroid(source: &Value, crs: Option<CrsSpec>) -> GisResult<Value> {
     let input = normalize_input(source, true)?;
     validate_input_or_error(&input)?;
-    let centroid = centroid_for_geometries(&input.geometries, geographic_for_input(&input))?;
+    let geographic = resolve_geographic(&input, crs.as_ref())?;
+    let centroid = centroid_for_geometries(&input.geometries, geographic)?;
     let operation = operation_value(
         "geometry_centroid",
         &input.input_geometry_type,
@@ -168,7 +133,7 @@ pub fn geometry_centroid(source: &Value) -> GisResult<Value> {
     }))
 }
 
-pub fn representative_point(source: &Value) -> GisResult<Value> {
+pub fn representative_point(source: &Value, crs: Option<CrsSpec>) -> GisResult<Value> {
     let input = normalize_input(source, false)?;
     if input.input_geometry_type == "FeatureCollection" {
         return Err(GisError::InvalidGeometry(format!(
@@ -179,10 +144,13 @@ pub fn representative_point(source: &Value) -> GisResult<Value> {
         .geometries
         .first()
         .ok_or_else(model::empty_geometry_error)?;
-    let geographic = geographic_for_input(&input);
-    let (geometries, wrapped) = dateline_normalized(core::slice::from_ref(geometry), geographic);
-    let mut point = representative_for_geometry(&geometries[0])?;
-    if wrapped {
+    let geographic = resolve_geographic(&input, crs.as_ref())?;
+    let (geometries, _) = dateline_normalized(core::slice::from_ref(geometry), geographic);
+    let mut point = representative_for_geometry(&geometries[0], geographic)?;
+    if geographic {
+        // Canonical output contract: geographic longitudes always land in
+        // (-180, 180], even when the input was authored on one continuous
+        // sheet (e.g. 175..185) and never needed unwrapping.
         point.x = math::wrap_lon(point.x);
     }
     let operation = operation_value(
@@ -201,7 +169,12 @@ pub fn representative_point(source: &Value) -> GisResult<Value> {
     }))
 }
 
-pub fn interpolate_line(source: &Value, distance: f64, normalized: bool) -> GisResult<Value> {
+pub fn interpolate_line(
+    source: &Value,
+    distance: f64,
+    normalized: bool,
+    crs: Option<CrsSpec>,
+) -> GisResult<Value> {
     validate_distance(distance)?;
     let input = normalize_input(source, false)?;
     if input.input_geometry_type == "FeatureCollection" {
@@ -214,10 +187,13 @@ pub fn interpolate_line(source: &Value, distance: f64, normalized: bool) -> GisR
         .first()
         .ok_or_else(model::empty_geometry_error)?;
     validate::validate_geometry_or_error(geometry)?;
-    let geographic = geographic_for_input(&input);
-    let (geometries, wrapped) = dateline_normalized(core::slice::from_ref(geometry), geographic);
+    let geographic = resolve_geographic(&input, crs.as_ref())?;
+    let (geometries, _) = dateline_normalized(core::slice::from_ref(geometry), geographic);
     let lines = lines_for_interpolation(&geometries[0])?;
-    let total = total_line_length(&lines);
+    // MENSURA M-04: with a geographic CRS, `total` and `distance` are geodesic
+    // metres; with a projected CRS they are planar CRS units. Degrees are
+    // never a distance unit.
+    let total = total_line_length(&lines, geographic);
     if total <= EPSILON {
         return Err(GisError::InvalidGeometry(format!(
             "{}: line length must be positive",
@@ -225,8 +201,9 @@ pub fn interpolate_line(source: &Value, distance: f64, normalized: bool) -> GisR
         )));
     }
     let target = normalized_target_distance(distance, normalized, total)?;
-    let mut point = interpolate_lines(&lines, target)?;
-    if wrapped {
+    let mut point = interpolate_lines(&lines, target, geographic)?;
+    if geographic {
+        // Canonical output contract: see `representative_point`.
         point.x = math::wrap_lon(point.x);
     }
     let operation = operation_value(
@@ -247,7 +224,7 @@ pub fn interpolate_line(source: &Value, distance: f64, normalized: bool) -> GisR
     }))
 }
 
-pub fn union_geometries(source: &Value) -> GisResult<Value> {
+pub fn union_geometries(source: &Value, crs: Option<CrsSpec>) -> GisResult<Value> {
     let input = normalize_union_input(source)?;
     if input.input_count == 0 {
         let warnings = vec![RasterWarning::new(
@@ -270,11 +247,14 @@ pub fn union_geometries(source: &Value) -> GisResult<Value> {
         }));
     }
     validate_input_or_error(&input)?;
-    let (geometries, wrapped) =
-        dateline_normalized(&input.geometries, geographic_for_input(&input));
+    let geographic = resolve_geographic(&input, crs.as_ref())?;
+    let (geometries, _) = dateline_normalized(&input.geometries, geographic);
     let mut geometry = union_polygonal(&geometries)?;
-    if wrapped {
-        wrap_geometry_lons(&mut geometry);
+    if geographic {
+        // Canonical ±180 contract: EVERY geographic output is split at the
+        // antimeridian with longitudes wrapped into (-180, 180], including
+        // same-sheet inputs (175..185) that never needed unwrapping.
+        geometry = antimeridian::split_at_antimeridian(&geometry);
     }
     let output_geometry_type = geometry.geometry_type();
     let type_changed = output_geometry_type != input.input_geometry_type;
@@ -305,7 +285,12 @@ pub fn union_geometries(source: &Value) -> GisResult<Value> {
     }))
 }
 
-pub fn buffer_geometry(source: &Value, distance: f64, quad_segs: i64) -> GisResult<Value> {
+pub fn buffer_geometry(
+    source: &Value,
+    distance: f64,
+    quad_segs: i64,
+    crs: Option<CrsSpec>,
+) -> GisResult<Value> {
     if !distance.is_finite() {
         return Err(GisError::InvalidArgument(format!(
             "{INVALID_ARGUMENT}: buffer distance must be finite"
@@ -324,17 +309,27 @@ pub fn buffer_geometry(source: &Value, distance: f64, quad_segs: i64) -> GisResu
         .first()
         .ok_or_else(model::empty_geometry_error)?;
 
+    let geographic = resolve_geographic(&input, crs.as_ref())?;
+
+    // Zero-distance polygonal buffering is an identity for the shape, but it
+    // still honours the full CRS contract: the CRS must resolve (missing_crs
+    // otherwise) and a geographic dateline crossing is split like any other
+    // topology output.
     if distance == 0.0 && matches!(geometry, Geometry::Polygon(_) | Geometry::MultiPolygon(_)) {
-        return buffer_geometry_output(&input, geometry.clone(), false);
+        let (mut geometries, _) = dateline_normalized(core::slice::from_ref(geometry), geographic);
+        let mut output = geometries.remove(0);
+        if geographic {
+            // Canonical ±180 contract (see `union_geometries`).
+            output = antimeridian::split_at_antimeridian(&output);
+        }
+        let changed = &output != geometry;
+        return buffer_geometry_output(&input, output, changed);
     }
 
-    let (geometries, wrapped) = dateline_normalized(
-        core::slice::from_ref(geometry),
-        geographic_for_input(&input),
-    );
+    let (geometries, _) = dateline_normalized(core::slice::from_ref(geometry), geographic);
     let mut output = buffer_topology(&geometries[0], distance, quad_segs as usize)?;
-    if wrapped {
-        wrap_geometry_lons(&mut output);
+    if geographic {
+        output = antimeridian::split_at_antimeridian(&output);
     }
     buffer_geometry_output(&input, output, true)
 }
@@ -343,6 +338,7 @@ pub fn simplify_geometry(
     source: &Value,
     tolerance: f64,
     preserve_topology: bool,
+    crs: Option<CrsSpec>,
 ) -> GisResult<Value> {
     if !tolerance.is_finite() || tolerance < 0.0 {
         return Err(GisError::InvalidArgument(format!(
@@ -356,44 +352,60 @@ pub fn simplify_geometry(
         .geometries
         .first()
         .ok_or_else(model::empty_geometry_error)?;
-    let (geometries, wrapped) = dateline_normalized(
-        core::slice::from_ref(geometry),
-        geographic_for_input(&input),
-    );
+    let geographic = resolve_geographic(&input, crs.as_ref())?;
+    let (geometries, _) = dateline_normalized(core::slice::from_ref(geometry), geographic);
     let mut output = simplify_topology(&geometries[0], tolerance, preserve_topology)?;
-    if wrapped {
-        wrap_geometry_lons(&mut output);
+    if geographic {
+        // Canonical ±180 contract (see `union_geometries`).
+        output = antimeridian::split_at_antimeridian(&output);
     }
     simplify_geometry_output(&input, output, &input.crs)
 }
 
-pub(crate) fn prepare_polygonal_clip_mask(source: &Value) -> GisResult<PolygonalClipMask> {
+pub(crate) fn prepare_polygonal_clip_mask(
+    source: &Value,
+    geographic: bool,
+) -> GisResult<PolygonalClipMask> {
     let input = normalize_input(source, true)?;
     validate_input_or_error(&input)?;
     for geometry in &input.geometries {
         require_polygonal_geometry(geometry, "clip_vector")?;
     }
-    let (geometries, wrapped) =
-        dateline_normalized(&input.geometries, geographic_for_input(&input));
-    let mut geometry = if geometries.len() == 1 {
-        geometries[0].clone()
+    // Build the clip mask WITHOUT antimeridian splitting here. The per-feature
+    // intersection (`intersect_polygonal_geometry_values_for_operation`) unwraps
+    // the (source, mask) PAIR onto one continuous longitude sheet and splits the
+    // completed result exactly once at the output boundary. Pre-splitting the
+    // mask stranded its two dateline pieces on opposite 360° sheets, so the
+    // intersection dropped whichever piece missed the source's sheet — the west
+    // half of a dateline-crossing clip was silently lost (MENSURA M-04).
+    let geometry = if input.geometries.len() == 1 {
+        // Single clip polygon: hand it to the intersection in its authored
+        // (wrapped) coordinates so the pair-unwrap can re-detect the crossing.
+        input.geometries[0].clone()
     } else {
-        union_polygonal(&geometries)?
+        // Multiple clip polygons must be unioned on a continuous sheet; wrap the
+        // completed union back to authored coordinates so the intersection still
+        // sees (and splits, exactly once) any antimeridian crossing.
+        let (geometries, _) = dateline_normalized(&input.geometries, geographic);
+        let mut unioned = union_polygonal(&geometries)?;
+        if geographic {
+            math::wrap_geometry_lons(&mut unioned);
+        }
+        unioned
     };
-    if wrapped {
-        wrap_geometry_lons(&mut geometry);
-    }
     Ok(PolygonalClipMask { geometry })
 }
 
 pub(crate) fn clip_polygonal_geometry_value(
     source: &Value,
     mask: &PolygonalClipMask,
+    geographic: bool,
 ) -> GisResult<Option<Value>> {
     intersect_polygonal_geometry_values_for_operation(
         source,
         &geometry_value(&mask.geometry)?,
         "clip_vector",
+        geographic,
     )
 }
 
@@ -410,17 +422,12 @@ pub(crate) fn validate_polygonal_geometry_value(source: &Value, operation: &str)
 pub(crate) fn union_polygonal_geometry_values(
     sources: &[Value],
     operation: &str,
+    geographic: bool,
 ) -> GisResult<Option<Value>> {
     let mut geometries = Vec::with_capacity(sources.len());
-    let mut declared_geographic = true;
-    let mut has_declared_crs = false;
     for source in sources {
         let input = normalize_input(source, false)?;
         validate_input_or_error(&input)?;
-        if let Some(is_wgs84) = declared_wgs84(input.crs.as_ref()) {
-            has_declared_crs = true;
-            declared_geographic &= is_wgs84;
-        }
         let geometry = input
             .geometries
             .first()
@@ -428,15 +435,11 @@ pub(crate) fn union_polygonal_geometry_values(
         require_polygonal_geometry(geometry, operation)?;
         geometries.push(geometry.clone());
     }
-    let geographic = if has_declared_crs {
-        declared_geographic
-    } else {
-        looks_geographic(&geometries)
-    };
-    let (geometries, wrapped) = dateline_normalized(&geometries, geographic);
+    let (geometries, _) = dateline_normalized(&geometries, geographic);
     let mut output = union_polygonal(&geometries)?;
-    if wrapped {
-        wrap_geometry_lons(&mut output);
+    if geographic {
+        // Canonical ±180 contract (see `union_geometries`).
+        output = antimeridian::split_at_antimeridian(&output);
     }
     if output.is_empty() {
         Ok(None)
@@ -448,14 +451,16 @@ pub(crate) fn union_polygonal_geometry_values(
 pub(crate) fn intersect_polygonal_geometry_values(
     left: &Value,
     right: &Value,
+    geographic: bool,
 ) -> GisResult<Option<Value>> {
-    intersect_polygonal_geometry_values_for_operation(left, right, "intersect_vectors")
+    intersect_polygonal_geometry_values_for_operation(left, right, "intersect_vectors", geographic)
 }
 
 fn intersect_polygonal_geometry_values_for_operation(
     left: &Value,
     right: &Value,
     operation: &str,
+    geographic: bool,
 ) -> GisResult<Option<Value>> {
     let left_input = normalize_input(left, false)?;
     validate_input_or_error(&left_input)?;
@@ -473,29 +478,25 @@ fn intersect_polygonal_geometry_values_for_operation(
         .ok_or_else(model::empty_geometry_error)?;
     require_polygonal_geometry(right_geometry, operation)?;
 
-    // Unwrap the pair, then align both operands onto the same 360° sheet
-    // (independent unwrapping can leave one around +180 and the other -180).
+    // Unwrap the pair, then align every polygonal PART of both operands onto
+    // the left operand's 360° sheet. Per-part alignment (not a whole-operand
+    // shift) is required: a MultiPolygon that was previously split at the
+    // antimeridian carries parts on opposite sheets, and operands authored on
+    // different sheets (175..185 vs -185..-175) must still intersect.
     let both = [left_geometry.clone(), right_geometry.clone()];
-    let geographic = match (
-        declared_wgs84(left_input.crs.as_ref()),
-        declared_wgs84(right_input.crs.as_ref()),
-    ) {
-        (Some(left), Some(right)) => left && right,
-        _ => looks_geographic(&both),
-    };
-    let (mut both, wrapped) = dateline_normalized(&both, geographic);
-    if wrapped {
-        if let (Some(l0), Some(r0)) = (math::first_lon(&both[0]), math::first_lon(&both[1])) {
-            if r0 - l0 > 180.0 {
-                math::shift_geometry_lons(&mut both[1], -360.0);
-            } else if r0 - l0 < -180.0 {
-                math::shift_geometry_lons(&mut both[1], 360.0);
-            }
+    let (mut both, _) = dateline_normalized(&both, geographic);
+    if geographic {
+        if let Some(reference) = math::first_part_mean_lon(&both[0]) {
+            math::align_parts_to_sheet(&mut both[0], reference);
+            math::align_parts_to_sheet(&mut both[1], reference);
         }
     }
     let mut output = intersection_polygonal(&both[0], &both[1], operation)?;
-    if wrapped {
-        wrap_geometry_lons(&mut output);
+    if geographic {
+        // Canonical ±180 contract: split unconditionally — two operands on
+        // the SAME non-canonical sheet (both 175..185) need neither unwrap
+        // nor sheet alignment, yet their result still crosses ±180.
+        output = antimeridian::split_at_antimeridian(&output);
     }
     if output.is_empty() {
         Ok(None)
@@ -629,15 +630,33 @@ fn require_polygonal_geometry(geometry: &Geometry, operation: &str) -> GisResult
 fn normalize_union_input(source: &Value) -> GisResult<NormalizedInput> {
     if let Some(items) = source.as_array() {
         let mut geometries = Vec::with_capacity(items.len());
+        // Carry the items' embedded CRS metadata into `resolve_geographic`.
+        // Mixed-CRS input is ill-defined, so every declared CRS must agree —
+        // two items declaring different CRSs raise `crs_mismatch` rather than
+        // silently unioning under the first declaration. An explicit `crs=`
+        // arg (if supplied) must still be compatible with the shared one.
+        let mut crs: Option<Value> = None;
+        let mut crs_spec: Option<CrsSpec> = None;
         for item in items {
             let input = normalize_input(item, false)?;
+            if let Some(value) = &input.crs {
+                let spec = embedded_crs_spec(value)?;
+                crs_spec = crate::gis::vector::compatible_metadata_crs(
+                    crs_spec.take(),
+                    spec,
+                    "union_geometries",
+                )?;
+                if crs.is_none() {
+                    crs = Some(value.clone());
+                }
+            }
             geometries.extend(input.geometries);
         }
         return Ok(NormalizedInput {
             input_geometry_type: common_geometry_type(&geometries),
             input_count: items.len(),
             geometries,
-            crs: None,
+            crs,
         });
     }
     if source.get("type").and_then(Value::as_str) == Some("FeatureCollection") {
@@ -649,6 +668,9 @@ fn normalize_union_input(source: &Value) -> GisResult<NormalizedInput> {
                     "{INVALID_ARGUMENT}: FeatureCollection requires a features array"
                 ))
             })?;
+        // `normalize_input` enforces the same mixed-CRS contract on the
+        // FeatureCollection path: collection-level and per-feature CRS
+        // metadata must all agree or it raises `crs_mismatch`.
         let mut input = normalize_input(source, true)?;
         input.input_geometry_type = common_geometry_type(&input.geometries);
         input.input_count = features.len();
@@ -731,117 +753,4 @@ pub use py::{
 };
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn polygon_area_length_and_centroid_are_planar() {
-        let geometry = json!({
-            "type": "Polygon",
-            "coordinates": [[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]]
-        });
-
-        let measure = geometry_measure(
-            &geometry,
-            &["area".to_string(), "length".to_string()],
-            MeasureMode::Planar,
-        )
-        .expect("measurement succeeds");
-        let centroid = geometry_centroid(&geometry).expect("centroid succeeds");
-
-        assert_eq!(measure["area"], json!(1.0));
-        assert_eq!(measure["length"], json!(4.0));
-        assert_eq!(centroid["geometry"]["coordinates"], json!([0.5, 0.5]));
-    }
-
-    #[test]
-    fn geodesic_measure_returns_metres_not_degrees() {
-        // 1°×1° quad at the equator: ~1.2308e10 m² and ~443 km perimeter.
-        let geometry = json!({
-            "type": "Polygon",
-            "coordinates": [[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]]
-        });
-        let measure = geometry_measure(
-            &geometry,
-            &["area".to_string(), "length".to_string()],
-            MeasureMode::GeodesicWgs84,
-        )
-        .expect("measurement succeeds");
-        let area = measure["area"].as_f64().unwrap();
-        let length = measure["length"].as_f64().unwrap();
-        assert!((area - 1.2308e10).abs() < 2e8, "area = {area}");
-        assert!((length - 443_770.0).abs() < 2_000.0, "length = {length}");
-        assert_eq!(measure["units"], json!("metres_geodesic_wgs84"));
-    }
-
-    #[test]
-    fn dateline_polygon_measures_and_centroids_locally() {
-        // Regression (MENSURA item 4): a polygon spanning 179° → -179° must
-        // behave as a 2°-wide patch, not the 358°-wide complement.
-        let geometry = json!({
-            "type": "Polygon",
-            "coordinates": [[[179.0, 0.0], [-179.0, 0.0], [-179.0, 1.0], [179.0, 1.0], [179.0, 0.0]]]
-        });
-        let measure =
-            geometry_measure(&geometry, &["area".to_string()], MeasureMode::GeodesicWgs84)
-                .expect("measurement succeeds");
-        let area = measure["area"].as_f64().unwrap();
-        assert!((area - 2.0 * 1.2308e10).abs() < 4e8, "area = {area}");
-
-        let centroid = geometry_centroid(&geometry).expect("centroid succeeds");
-        let lon = centroid["geometry"]["coordinates"][0].as_f64().unwrap();
-        let lat = centroid["geometry"]["coordinates"][1].as_f64().unwrap();
-        assert!(
-            lon.abs() > 179.0,
-            "centroid lon must sit at the dateline, got {lon}"
-        );
-        assert!((lat - 0.5).abs() < 1e-9, "centroid lat = {lat}");
-    }
-
-    #[test]
-    fn measure_mode_rejects_non_wgs84_geographic_crs() {
-        let wgs84 = crate::gis::raster_write::CrsSpec::from_string("EPSG:4326".to_string())
-            .expect("crs parses");
-        assert_eq!(
-            measure_mode_for_crs(&wgs84).unwrap(),
-            MeasureMode::GeodesicWgs84
-        );
-        let utm = crate::gis::raster_write::CrsSpec::from_string("EPSG:32633".to_string())
-            .expect("crs parses");
-        assert_eq!(measure_mode_for_crs(&utm).unwrap(), MeasureMode::Planar);
-        let nad83 = crate::gis::raster_write::CrsSpec::from_string("EPSG:4269".to_string())
-            .expect("crs parses");
-        assert!(measure_mode_for_crs(&nad83).is_err());
-    }
-
-    #[test]
-    fn bowtie_polygon_is_invalid() {
-        let geometry = json!({
-            "type": "Polygon",
-            "coordinates": [[[0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 0.0], [0.0, 0.0]]]
-        });
-
-        let result = validate_geometry(&geometry).expect("validation returns a result");
-
-        assert_eq!(result["valid"], json!(false));
-        assert!(result["reason"]
-            .as_str()
-            .unwrap()
-            .contains(model::INVALID_GEOMETRY));
-    }
-
-    #[test]
-    fn multiline_interpolation_is_cumulative() {
-        let geometry = json!({
-            "type": "MultiLineString",
-            "coordinates": [
-                [[0.0, 0.0], [2.0, 0.0]],
-                [[2.0, 0.0], [2.0, 2.0]]
-            ]
-        });
-
-        let result = interpolate_line(&geometry, 3.0, false).expect("interpolation succeeds");
-
-        assert_eq!(result["geometry"]["coordinates"], json!([2.0, 1.0]));
-    }
-}
+mod tests;

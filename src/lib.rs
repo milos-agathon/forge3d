@@ -228,6 +228,12 @@ fn _forge3d(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         "DegradedCapability",
         _py.get_type_bound::<crate::core::error::DegradedCapability>(),
     )?;
+    // MENSURA M-05: structured raster-reprojection failure with stable
+    // .count/.first_pixel/.src_crs/.dst_crs/.policy attributes.
+    m.add(
+        "TransformFailed",
+        _py.get_type_bound::<crate::gis::error::TransformFailed>(),
+    )?;
     py_module::register_py_functions(m)?;
     py_module::register_py_classes(m)?;
     Ok(())

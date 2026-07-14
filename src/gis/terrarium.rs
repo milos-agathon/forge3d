@@ -266,6 +266,9 @@ mod py {
         ));
         info.nodata_per_band = vec![None];
         info.is_georeferenced = true;
+        // Terrarium tiles encode orthometric (EGM96-ish) elevations; persist it
+        // on the RasterInfo, not only the sidecar dict key.
+        info.height_system = crate::gis::terrarium::TERRARIUM_HEIGHT_SYSTEM.to_string();
         info
     }
 

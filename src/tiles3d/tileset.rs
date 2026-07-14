@@ -1,7 +1,7 @@
 //! Tileset parsing and management for 3D Tiles
 
 use super::bounds::BoundingVolume;
-use super::error::Tiles3dResult;
+use super::error::{Tiles3dError, Tiles3dResult};
 use super::tile::{Tile, TileRefine};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -54,12 +54,30 @@ pub struct Tileset {
     pub json: TilesetJson,
 }
 
+/// Reject a tileset whose bounding-volume regions carry non-finite or
+/// out-of-range coordinates BEFORE any traversal touches them, so the typed
+/// WGS84→ECEF conversion in `BoundingVolume::center` cannot panic on untrusted
+/// `tileset.json` input. Malformed data becomes a recoverable
+/// `Tiles3dError::InvalidTileset`, never a process abort.
+fn validate_tile_regions(tile: &Tile) -> Tiles3dResult<()> {
+    if !tile.bounding_volume.region_is_well_formed() {
+        return Err(Tiles3dError::InvalidTileset(
+            "bounding volume region has a non-finite or out-of-range coordinate".to_string(),
+        ));
+    }
+    for child in &tile.children {
+        validate_tile_regions(child)?;
+    }
+    Ok(())
+}
+
 impl Tileset {
     /// Load a tileset from a file path
     pub fn load<P: AsRef<Path>>(path: P) -> Tiles3dResult<Self> {
         let path = path.as_ref();
         let content = std::fs::read_to_string(path)?;
         let json: TilesetJson = serde_json::from_str(&content)?;
+        validate_tile_regions(&json.root)?;
 
         let base_path = path
             .parent()
@@ -72,6 +90,7 @@ impl Tileset {
     /// Load a tileset from JSON string with a base path
     pub fn from_json(json_str: &str, base_path: PathBuf) -> Tiles3dResult<Self> {
         let json: TilesetJson = serde_json::from_str(json_str)?;
+        validate_tile_regions(&json.root)?;
         Ok(Self { base_path, json })
     }
 

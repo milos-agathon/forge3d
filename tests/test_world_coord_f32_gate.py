@@ -1,11 +1,23 @@
 # tests/test_world_coord_f32_gate.py
-# MENSURA win 5 (CI-gated): the f64 -> f32 cliff exists in exactly ONE place.
+# MENSURA win 5 (CI-gated): the textual f64 -> f32 NARROWING cliff exists in
+# exactly ONE place.
 #
 # Source-level gate in the style of tests/test_allocation_gate.py: across the
 # world-coordinate surface of the tree, exactly one `as f32` cast applied to a
 # world coordinate exists — inside `Anchor::narrow`, the helper used only by
-# `Anchor::to_render_*` (src/camera/anchor.rs). Everything else must carry
-# world coordinates in f64 until they pass through the anchor.
+# `Anchor::to_render_*` (src/camera/anchor.rs).
+#
+# SCOPE — be precise about what this PROVES vs. what it does NOT:
+#   PROVES: no `as f32` token on a world-vocabulary source line survives
+#   outside Anchor::narrow, and Anchor::narrow is the SINGLE narrowing
+#   implementation.
+#   DOES NOT PROVE renderer-wide f64 anchoring. A world coordinate that is
+#   STORED as f32 / Vec3 / [f32;3] (via a glam f32 constructor, a PyO3 f32
+#   parameter, or a numpy f32 array) emits no `as f32` token and is therefore
+#   invisible to this textual gate. Giving every Scene / terrain / 3D-Tiles /
+#   point-cloud / vector / culling / picking / label path an f64 object origin
+#   is tracked as the remaining M-06 renderer-wide work and is NOT closed by
+#   this gate alone.
 # RELEVANT FILES: src/camera/anchor.rs, src/geo/units.rs, src/tiles3d/bounds.rs
 
 import re
@@ -124,6 +136,41 @@ def test_legacy_truncation_sites_are_gone():
     assert "eye: (f32, f32, f32)" not in base, (
         "set_camera_look_at must accept f64 world coordinates"
     )
+
+
+def test_single_narrowing_implementation_lives_only_in_anchor():
+    # M-06: keep exactly ONE sanctioned narrowing implementation. The camera
+    # anchor module must contain exactly one textual `as f32` (inside
+    # Anchor::narrow); a second narrowing helper added here fails immediately.
+    anchor = _strip_comments((ROOT / SANCTIONED[0]).read_text(encoding="utf-8"))
+    count = len(re.findall(r"\bas f32\b", anchor))
+    assert count == 1, (
+        f"{SANCTIONED[0]} must hold exactly one `as f32` (the sole narrowing "
+        f"implementation); found {count}"
+    )
+    assert "fn narrow(value: f64) -> f32" in anchor, (
+        "the sanctioned narrowing helper Anchor::narrow(value: f64) -> f32 moved"
+    )
+
+
+# A hidden helper that rebuilds a render Vec3 by narrowing three world
+# components — the exact pre-MENSURA cliff — must not reappear in ANY file.
+_TRIPLE_NARROW = re.compile(
+    r"Vec3::new\(\s*\w+ as f32\s*,\s*\w+ as f32\s*,\s*\w+ as f32\s*\)"
+)
+
+
+def test_no_file_rebuilds_a_render_vec3_from_three_narrowed_components():
+    for path in _gated_files():
+        rel = path.relative_to(ROOT).as_posix()
+        if rel == SANCTIONED[0]:
+            continue  # anchor narrows component-by-component via Self::narrow
+        text = _strip_comments(path.read_text(encoding="utf-8"))
+        match = _TRIPLE_NARROW.search(text)
+        assert match is None, (
+            f"{rel} rebuilds a render Vec3 from three narrowed scalars "
+            f"({match.group(0)!r}); route world coordinates through Anchor instead"
+        )
 
 
 def test_public_camera_helpers_anchor_earth_scale_targets():

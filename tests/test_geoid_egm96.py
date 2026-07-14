@@ -6,9 +6,11 @@
 # RELEVANT FILES: src/geo/geoid.rs, assets/geoid/egm96_n120.bin,
 #                 tests/data/egm96_test_values.txt
 
+import math
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 import forge3d
 
@@ -80,3 +82,60 @@ def test_scalar_height_conversions_are_exact_inverses():
     assert abs(ell - (h + n)) < 1e-12
     back = forge3d.ellipsoidal_to_orthometric(ell, lat, lon)
     assert abs(back - h) < 1e-12
+
+
+# --- MENSURA M-03: EGM96 boundary cases -------------------------------------
+
+
+def test_egm96_poles_and_equator_are_finite():
+    # The poles and the equator evaluate to finite undulations (no NaN/Inf).
+    for lat in (90.0, -90.0, 0.0):
+        assert math.isfinite(forge3d.geoid_undulation(lat, 0.0))
+
+
+def test_egm96_pole_undulation_is_longitude_independent():
+    # At a geographic pole the point is a single location, so the synthesized
+    # undulation must not depend on the (degenerate) longitude.
+    north = forge3d.geoid_undulation(90.0, 0.0)
+    south = forge3d.geoid_undulation(-90.0, 0.0)
+    for lon in (0.0, 42.0, 137.5, -168.0, 360.0):
+        assert forge3d.geoid_undulation(90.0, lon) == pytest.approx(north, abs=1e-9)
+        assert forge3d.geoid_undulation(-90.0, lon) == pytest.approx(south, abs=1e-9)
+
+
+def test_egm96_longitude_wrap_equivalence():
+    # 0 and 360 (and -179 and 181) name the same meridian; the geoid is periodic
+    # in longitude to floating-point precision.
+    for lat in (0.0, 37.5, -48.25, 64.0):
+        assert forge3d.geoid_undulation(lat, 0.0) == pytest.approx(
+            forge3d.geoid_undulation(lat, 360.0), abs=1e-9
+        )
+        assert forge3d.geoid_undulation(lat, -179.0) == pytest.approx(
+            forge3d.geoid_undulation(lat, 181.0), abs=1e-9
+        )
+
+
+@pytest.mark.parametrize(
+    "lat,lon",
+    [(90.0001, 0.0), (-90.5, 0.0), (120.0, 0.0), (-181.0, 0.0)],
+)
+def test_egm96_latitude_out_of_range_raises(lat, lon):
+    # Latitudes outside [-90, 90] are rejected at the Python boundary rather than
+    # silently synthesizing a nonsense value.
+    with pytest.raises(ValueError):
+        forge3d.geoid_undulation(lat, lon)
+
+
+@pytest.mark.parametrize(
+    "lat,lon",
+    [
+        (float("nan"), 0.0),
+        (0.0, float("nan")),
+        (float("inf"), 0.0),
+        (0.0, float("inf")),
+        (0.0, float("-inf")),
+    ],
+)
+def test_egm96_non_finite_inputs_raise(lat, lon):
+    with pytest.raises(ValueError):
+        forge3d.geoid_undulation(lat, lon)

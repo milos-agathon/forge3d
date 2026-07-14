@@ -140,15 +140,6 @@ pub(crate) fn lat_from_epsg_t(t: f64, e: f64) -> ProjResult<f64> {
     ))
 }
 
-/// Projected CRSs the built-in engine can dispatch by bare EPSG code.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum EpsgProjection {
-    /// Spherical Web Mercator (EPSG:3857, method 1024).
-    WebMercator,
-    /// WGS84 UTM zone (EPSG:326zz north / 327zz south, method 9807).
-    Utm { zone: u8, north: bool },
-}
-
 /// Explicit pure-Rust projection definition for callers that need a method
 /// without pretending forge3d ships a complete EPSG registry.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -185,22 +176,6 @@ impl ProjectionDefinition {
     }
 }
 
-/// Map an EPSG code to a supported built-in projection, if any.
-pub fn epsg_projection(code: u32) -> Option<EpsgProjection> {
-    match code {
-        3857 => Some(EpsgProjection::WebMercator),
-        32601..=32660 => Some(EpsgProjection::Utm {
-            zone: (code - 32600) as u8,
-            north: true,
-        }),
-        32701..=32760 => Some(EpsgProjection::Utm {
-            zone: (code - 32700) as u8,
-            north: false,
-        }),
-        _ => None,
-    }
-}
-
 fn utm(zone: u8, north: bool) -> tmerc::TransverseMercator {
     tmerc::TransverseMercator {
         ellipsoid: WGS84,
@@ -212,20 +187,91 @@ fn utm(zone: u8, north: bool) -> tmerc::TransverseMercator {
     }
 }
 
-/// Forward-project WGS84 lon/lat degrees into a supported EPSG projected CRS.
-pub fn epsg_forward(code: u32, lon_deg: f64, lat_deg: f64) -> Option<ProjResult<(f64, f64)>> {
-    Some(match epsg_projection(code)? {
-        EpsgProjection::WebMercator => merc::web_mercator_forward(lon_deg, lat_deg),
-        EpsgProjection::Utm { zone, north } => utm(zone, north).forward(lon_deg, lat_deg),
+/// Resolve an EPSG code to a fully-parameterized built-in [`ProjectionDefinition`].
+///
+/// This is the single authoritative EPSG → projection table consumed by
+/// `src/gis/crs.rs`. It is a deliberately small *curated* set — one or a few
+/// authoritative codes per method — not a claim to ship the full EPSG registry.
+/// Every entry uses the WGS84/GRS80 datum family; ETRS89/RGF93/NAD83 codes are
+/// treated as WGS84-equivalent within their published alignment, because
+/// MENSURA ships no NTv2/NADCON grid shift. Unknown codes return `None`, and
+/// the caller raises rather than passing coordinates through.
+///
+/// | EPSG | CRS | Method |
+/// |------|-----|--------|
+/// | 3857 | WGS 84 / Pseudo-Mercator | Web Mercator (1024) |
+/// | 326zz / 327zz | WGS 84 / UTM zone N/S | Transverse Mercator (9807) |
+/// | 3395 | WGS 84 / World Mercator | Mercator variant A (9804) |
+/// | 2154 | RGF93 / Lambert-93 | Lambert Conic Conformal 2SP (9802) |
+/// | 5070 | NAD83 / Conus Albers | Albers Equal Area (9822) |
+/// | 5041 | WGS 84 / UPS North | Polar Stereographic variant A (9810) |
+/// | 5042 | WGS 84 / UPS South | Polar Stereographic variant A (9810) |
+pub fn epsg_projection_definition(code: u32) -> Option<ProjectionDefinition> {
+    use ProjectionDefinition as P;
+    Some(match code {
+        3857 => P::WebMercator,
+        32601..=32660 => P::TransverseMercator(utm((code - 32600) as u8, true)),
+        32701..=32760 => P::TransverseMercator(utm((code - 32700) as u8, false)),
+        // WGS 84 / World Mercator — Mercator variant A (EPSG method 9804).
+        3395 => P::MercatorA(merc::MercatorA {
+            ellipsoid: WGS84,
+            lon0_deg: 0.0,
+            k0: 1.0,
+            false_easting: 0.0,
+            false_northing: 0.0,
+        }),
+        // RGF93 / Lambert-93 — Lambert Conic Conformal 2SP (EPSG method 9802).
+        2154 => P::LambertConformal2Sp(lcc::LambertConformal2Sp {
+            ellipsoid: GRS80,
+            lat_f_deg: 46.5,
+            lon_f_deg: 3.0,
+            lat1_deg: 49.0,
+            lat2_deg: 44.0,
+            easting_f: 700_000.0,
+            northing_f: 6_600_000.0,
+        }),
+        // NAD83 / Conus Albers — Albers Equal Area (EPSG method 9822).
+        5070 => P::AlbersEqualArea(aea::AlbersEqualArea {
+            ellipsoid: GRS80,
+            lat_f_deg: 23.0,
+            lon_f_deg: -96.0,
+            lat1_deg: 29.5,
+            lat2_deg: 45.5,
+            easting_f: 0.0,
+            northing_f: 0.0,
+        }),
+        // WGS 84 / UPS North — Polar Stereographic variant A (EPSG method 9810).
+        5041 => P::PolarStereographicA(stere::PolarStereographicA {
+            ellipsoid: WGS84,
+            lat0_deg: 90.0,
+            lon0_deg: 0.0,
+            k0: 0.994,
+            false_easting: 2_000_000.0,
+            false_northing: 2_000_000.0,
+        }),
+        // WGS 84 / UPS South — Polar Stereographic variant A (EPSG method 9810).
+        5042 => P::PolarStereographicA(stere::PolarStereographicA {
+            ellipsoid: WGS84,
+            lat0_deg: -90.0,
+            lon0_deg: 0.0,
+            k0: 0.994,
+            false_easting: 2_000_000.0,
+            false_northing: 2_000_000.0,
+        }),
+        _ => return None,
     })
 }
 
+/// Forward-project WGS84 lon/lat degrees into a supported EPSG projected CRS.
+/// Delegates to the authoritative [`epsg_projection_definition`] table.
+pub fn epsg_forward(code: u32, lon_deg: f64, lat_deg: f64) -> Option<ProjResult<(f64, f64)>> {
+    Some(epsg_projection_definition(code)?.forward(lon_deg, lat_deg))
+}
+
 /// Inverse-project a supported EPSG projected CRS back to WGS84 lon/lat degrees.
+/// Delegates to the authoritative [`epsg_projection_definition`] table.
 pub fn epsg_inverse(code: u32, easting: f64, northing: f64) -> Option<ProjResult<(f64, f64)>> {
-    Some(match epsg_projection(code)? {
-        EpsgProjection::WebMercator => merc::web_mercator_inverse(easting, northing),
-        EpsgProjection::Utm { zone, north } => utm(zone, north).inverse(easting, northing),
-    })
+    Some(epsg_projection_definition(code)?.inverse(easting, northing))
 }
 
 #[cfg(test)]

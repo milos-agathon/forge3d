@@ -33,6 +33,13 @@ C4_APIS = (
 )
 
 
+# MENSURA M-04: geometry ops resolve geographic-vs-planar from an explicit CRS,
+# never from coordinate ranges. These fixtures stay CRS-less (some are used as
+# clip geometries that must be able to trigger a missing_crs error); geometry-op
+# call sites pass crs=WGS84_CRS explicitly.
+WGS84_CRS = "EPSG:4326"
+
+
 def _unit_square():
     return {
         "type": "Polygon",
@@ -119,7 +126,7 @@ def _feature(geometry, properties=None):
 
 def _has_topology_backend() -> bool:
     try:
-        gis.union_geometries([_unit_square()])
+        gis.union_geometries([_unit_square()], crs="EPSG:4326")
     except RuntimeError as exc:
         if "backend_unavailable" in str(exc) and "geos-topology" in str(exc):
             return False
@@ -295,7 +302,9 @@ def test_no_python_gis_backend_libraries_in_overlay_wrapper():
 def test_union_geometries_overlapping_squares_with_topology_backend():
     _require_topology_backend()
 
-    result = gis.union_geometries([_unit_square(), _shifted_square(0.5, 0.0)])
+    result = gis.union_geometries(
+        [_unit_square(), _shifted_square(0.5, 0.0)], crs=WGS84_CRS
+    )
 
     assert result["geometry"]["type"] == "Polygon"
     assert _geometry_area(result["geometry"]) == pytest.approx(1.5)
@@ -307,7 +316,9 @@ def test_union_geometries_overlapping_squares_with_topology_backend():
 def test_union_geometries_disjoint_polygons_report_type_change():
     _require_topology_backend()
 
-    result = gis.union_geometries([_unit_square(), _shifted_square(2.0, 0.0)])
+    result = gis.union_geometries(
+        [_unit_square(), _shifted_square(2.0, 0.0)], crs=WGS84_CRS
+    )
 
     assert result["geometry"]["type"] in {"MultiPolygon", "GeometryCollection"}
     assert _geometry_area(result["geometry"]) == pytest.approx(2.0)
@@ -318,10 +329,13 @@ def test_union_geometries_disjoint_polygons_report_type_change():
 def test_union_geometries_feature_inputs_use_geometry_only():
     _require_topology_backend()
 
-    result = gis.union_geometries([
-        _feature(_unit_square()),
-        _feature(_shifted_square(0.5, 0.0)),
-    ])
+    result = gis.union_geometries(
+        [
+            _feature(_unit_square()),
+            _feature(_shifted_square(0.5, 0.0)),
+        ],
+        crs=WGS84_CRS,
+    )
 
     assert result["geometry"]["type"] == "Polygon"
     assert _geometry_area(result["geometry"]) == pytest.approx(1.5)
@@ -337,7 +351,7 @@ def test_union_geometries_feature_collection_shorthand():
         ],
     }
 
-    result = gis.union_geometries(collection)
+    result = gis.union_geometries(collection, crs=WGS84_CRS)
 
     assert result["geometry"]["type"] == "Polygon"
     assert _geometry_area(result["geometry"]) == pytest.approx(1.5)
@@ -360,7 +374,9 @@ def test_union_geometries_rejects_unsupported_type_with_topology_backend():
     _require_topology_backend()
 
     with pytest.raises(ValueError, match="unsupported_geometry_type"):
-        gis.union_geometries([{"type": "Point", "coordinates": [0.0, 0.0]}])
+        gis.union_geometries(
+            [{"type": "Point", "coordinates": [0.0, 0.0]}], crs=WGS84_CRS
+        )
 
 
 def test_union_geometries_empty_input_stays_empty_with_topology_backend():
@@ -379,7 +395,7 @@ def test_union_geometries_optional_shapely_reference_area():
 
     left = _unit_square()
     right = _shifted_square(0.5, 0.0)
-    result = gis.union_geometries([left, right])
+    result = gis.union_geometries([left, right], crs=WGS84_CRS)
     expected = shapely_ops.unary_union([
         shapely_geometry.shape(left),
         shapely_geometry.shape(right),
@@ -391,7 +407,7 @@ def test_union_geometries_optional_shapely_reference_area():
 def test_buffer_geometry_point_with_topology_backend_returns_polygonal():
     _require_topology_backend()
 
-    result = gis.buffer_geometry(_point(), 1.0, quad_segs=4)
+    result = gis.buffer_geometry(_point(), 1.0, quad_segs=4, crs=WGS84_CRS)
 
     assert result["geometry"]["type"] in {"Polygon", "MultiPolygon"}
     assert _geometry_area(result["geometry"]) > 2.0
@@ -407,7 +423,7 @@ def test_buffer_geometry_point_with_topology_backend_returns_polygonal():
 def test_buffer_geometry_polygon_positive_increases_area_and_bounds():
     _require_topology_backend()
 
-    result = gis.buffer_geometry(_unit_square(), 0.25, quad_segs=8)
+    result = gis.buffer_geometry(_unit_square(), 0.25, quad_segs=8, crs=WGS84_CRS)
     bounds = _geometry_bounds(result["geometry"])
 
     assert _geometry_area(result["geometry"]) > _geometry_area(_unit_square())
@@ -420,7 +436,7 @@ def test_buffer_geometry_polygon_positive_increases_area_and_bounds():
 def test_buffer_geometry_zero_distance_valid_polygon_is_deterministic():
     _require_topology_backend()
 
-    result = gis.buffer_geometry(_unit_square(), 0.0)
+    result = gis.buffer_geometry(_unit_square(), 0.0, crs=WGS84_CRS)
 
     assert result["geometry"]["type"] == "Polygon"
     assert _geometry_area(result["geometry"]) == pytest.approx(1.0)
@@ -428,10 +444,25 @@ def test_buffer_geometry_zero_distance_valid_polygon_is_deterministic():
     assert result["operation"]["warnings"] == []
 
 
+def test_buffer_geometry_zero_distance_still_splits_dateline_crossing():
+    # The zero-distance identity shortcut still honours the geographic
+    # dateline contract: a crossing polygon under EPSG:4326 comes back split.
+    _require_topology_backend()
+    poly = {
+        "type": "Polygon",
+        "coordinates": [[[170, 10], [-170, 10], [-170, -10], [170, -10], [170, 10]]],
+    }
+
+    result = gis.buffer_geometry(poly, 0.0, crs=WGS84_CRS)
+
+    assert result["geometry"]["type"] == "MultiPolygon"
+    assert len(result["geometry"]["coordinates"]) == 2
+
+
 def test_buffer_geometry_negative_point_returns_empty_output():
     _require_topology_backend()
 
-    result = gis.buffer_geometry(_point(), -1.0)
+    result = gis.buffer_geometry(_point(), -1.0, crs=WGS84_CRS)
 
     assert result["geometry"] is None
     assert result["operation"]["output_geometry_type"] is None
@@ -443,7 +474,7 @@ def test_buffer_geometry_negative_point_returns_empty_output():
 def test_buffer_geometry_feature_input_uses_geometry_only():
     _require_topology_backend()
 
-    result = gis.buffer_geometry(_feature(_point()), 1.0)
+    result = gis.buffer_geometry(_feature(_point()), 1.0, crs=WGS84_CRS)
 
     assert result["geometry"]["type"] in {"Polygon", "MultiPolygon"}
     assert result["operation"]["input_geometry_type"] == "Point"
@@ -478,7 +509,7 @@ def test_buffer_geometry_optional_shapely_reference_area():
     _require_topology_backend()
     shapely_geometry = pytest.importorskip("shapely.geometry")
 
-    result = gis.buffer_geometry(_unit_square(), 0.25, quad_segs=8)
+    result = gis.buffer_geometry(_unit_square(), 0.25, quad_segs=8, crs=WGS84_CRS)
     source = shapely_geometry.shape(_unit_square())
     try:
         expected = source.buffer(0.25, quad_segs=8)
@@ -838,7 +869,7 @@ def test_simplify_geometry_linestring_reduces_points_and_preserves_endpoints():
     _require_topology_backend()
     source = _zigzag_line()
 
-    result = gis.simplify_geometry(source, 0.05, preserve_topology=False)
+    result = gis.simplify_geometry(source, 0.05, preserve_topology=False, crs=WGS84_CRS)
 
     assert result["geometry"]["type"] == "LineString"
     assert len(result["geometry"]["coordinates"]) < len(source["coordinates"])
@@ -869,7 +900,7 @@ def test_simplify_geometry_polygon_preserve_topology_stays_valid():
         ],
     }
 
-    result = gis.simplify_geometry(polygon, 0.05, preserve_topology=True)
+    result = gis.simplify_geometry(polygon, 0.05, preserve_topology=True, crs=WGS84_CRS)
 
     assert result["geometry"]["type"] == "Polygon"
     assert gis.validate_geometry(result["geometry"])["valid"] is True
@@ -888,7 +919,7 @@ def test_simplify_geometry_polygon_preserve_topology_stays_valid():
 def test_simplify_geometry_preserve_false_supported_types(geometry):
     _require_topology_backend()
 
-    result = gis.simplify_geometry(geometry, 0.01, preserve_topology=False)
+    result = gis.simplify_geometry(geometry, 0.01, preserve_topology=False, crs=WGS84_CRS)
 
     assert result["geometry"] is not None
     assert result["geometry"]["type"] == geometry["type"]
@@ -899,7 +930,7 @@ def test_simplify_geometry_zero_tolerance_is_deterministic():
     _require_topology_backend()
     source = _zigzag_line()
 
-    result = gis.simplify_geometry(source, 0.0, preserve_topology=True)
+    result = gis.simplify_geometry(source, 0.0, preserve_topology=True, crs=WGS84_CRS)
 
     assert result["geometry"] == source
     assert result["operation"]["changed"] is False
@@ -909,7 +940,9 @@ def test_simplify_geometry_zero_tolerance_is_deterministic():
 def test_simplify_geometry_feature_input_uses_geometry_only():
     _require_topology_backend()
 
-    result = gis.simplify_geometry(_feature(_zigzag_line(), {"ignored": True}), 0.05)
+    result = gis.simplify_geometry(
+        _feature(_zigzag_line(), {"ignored": True}), 0.05, crs=WGS84_CRS
+    )
 
     assert result["geometry"]["type"] == "LineString"
     assert "properties" not in result["geometry"]
@@ -933,9 +966,9 @@ def test_simplify_geometry_rejects_unsupported_inputs():
     _require_topology_backend()
 
     with pytest.raises(ValueError, match="unsupported_geometry_type"):
-        gis.simplify_geometry(_point(), 0.1)
+        gis.simplify_geometry(_point(), 0.1, crs=WGS84_CRS)
     with pytest.raises(ValueError, match="unsupported_geometry_type"):
-        gis.simplify_geometry(_feature_collection(), 0.1)
+        gis.simplify_geometry(_feature_collection(), 0.1, crs=WGS84_CRS)
 
 
 def test_dissolve_vector_all_returns_one_feature_with_empty_properties():

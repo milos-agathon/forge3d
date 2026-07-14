@@ -15,13 +15,15 @@ pub(super) fn centroid_for_geometries(
     // lon/lat degrees AND an antimeridian jump actually exists.
     if geographic {
         let mut unwrapped = geometries.to_vec();
-        if unwrap_dateline(&mut unwrapped) {
-            let centroid = centroid_for_unwrapped(&unwrapped)?;
-            return Ok(Coord {
-                x: wrap_lon(centroid.x),
-                y: centroid.y,
-            });
-        }
+        unwrap_dateline(&mut unwrapped);
+        let centroid = centroid_for_unwrapped(&unwrapped)?;
+        // Canonical output contract: the longitude is wrapped into
+        // (-180, 180] even when no unwrap was needed, so a same-sheet input
+        // (e.g. 175..185) still yields a canonical centroid.
+        return Ok(Coord {
+            x: wrap_lon(centroid.x),
+            y: centroid.y,
+        });
     }
     centroid_for_unwrapped(geometries)
 }

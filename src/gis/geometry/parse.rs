@@ -36,11 +36,19 @@ pub(super) fn normalize_input(
             for feature in features {
                 geometries.push(parse_feature_geometry(feature)?);
             }
+            // Feature-level CRS metadata participates in resolution: every
+            // declared CRS (collection-level and per-feature) must agree, so a
+            // mixed-CRS FeatureCollection raises `crs_mismatch` instead of
+            // operating under the collection-level declaration alone.
+            let crs = super::crs_resolve::merged_feature_collection_crs(
+                extract_crs_metadata(source),
+                features.iter().filter_map(extract_crs_metadata),
+            )?;
             Ok(NormalizedInput {
                 geometries,
                 input_geometry_type: "FeatureCollection".to_string(),
                 input_count: features.len(),
-                crs: extract_crs_metadata(source),
+                crs,
             })
         }
         Some("Feature") => {

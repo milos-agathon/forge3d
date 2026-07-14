@@ -292,10 +292,18 @@ pub fn dissolve_vector(source: &Value, by: Option<Vec<String>>) -> GisResult<Val
     }
     crate::gis::geometry::topology::require_topology_backend("dissolve_vector")?;
 
+    // MENSURA M-04: geographic-vs-planar comes from the source CRS metadata, never
+    // from coordinate ranges. A missing CRS (already surfaced as a `missing_crs`
+    // warning above) defaults to planar rather than guessing geographic.
+    let geographic = match &source.crs {
+        Some(spec) => crate::gis::geometry::geographic_from_spec(spec)?,
+        None => false,
+    };
     let mut warnings = source.warnings.clone();
     let mut features = Vec::with_capacity(groups.len());
     for group in groups.into_values() {
-        let Some(geometry) = union_polygonal_geometry_values(&group.geometries, "dissolve_vector")?
+        let Some(geometry) =
+            union_polygonal_geometry_values(&group.geometries, "dissolve_vector", geographic)?
         else {
             continue;
         };
@@ -349,13 +357,18 @@ pub fn clip_vector(
         return clip_result_value(&source, Vec::new(), warnings, false);
     }
 
-    let mask = prepare_polygonal_clip_mask(clip_geometry)?;
+    // MENSURA M-04: geographic-vs-planar comes from the (validated, equal) source
+    // and clip CRS — never from coordinate ranges. EPSG:4326 enables antimeridian
+    // handling; a projected CRS forces planar clipping.
+    let geographic = crate::gis::geometry::geographic_from_spec(&source.crs)?;
+    let mask = prepare_polygonal_clip_mask(clip_geometry, geographic)?;
     let mut out_features = Vec::new();
     for feature in &source.features {
         let geometry = feature.get("geometry").ok_or_else(|| {
             GisError::InvalidGeometry("invalid_geometry: Feature requires geometry".to_string())
         })?;
-        if let Some(clipped_geometry) = clip_polygonal_geometry_value(geometry, &mask)? {
+        if let Some(clipped_geometry) = clip_polygonal_geometry_value(geometry, &mask, geographic)?
+        {
             out_features.push(clipped_feature(feature, clipped_geometry)?);
         }
     }
@@ -397,13 +410,16 @@ pub fn intersect_vectors(left: &Value, right: &Value, suffixes: (&str, &str)) ->
     }
     crate::gis::geometry::topology::require_topology_backend("intersect_vectors")?;
 
+    // MENSURA M-04: the (validated, equal) left/right CRS decides geographic vs
+    // planar; coordinate ranges are never consulted.
+    let geographic = crate::gis::geometry::geographic_from_spec(&left.crs)?;
     let mut out_features = Vec::new();
     for left_feature in &left.features {
         let left_geometry = feature_geometry(left_feature)?;
         for right_feature in &right.features {
             let right_geometry = feature_geometry(right_feature)?;
             if let Some(geometry) =
-                intersect_polygonal_geometry_values(left_geometry, right_geometry)?
+                intersect_polygonal_geometry_values(left_geometry, right_geometry, geographic)?
             {
                 out_features.push(intersection_feature(
                     left_feature,
@@ -472,7 +488,13 @@ pub fn load_boundary(
             .iter()
             .map(|feature| feature_geometry(feature).cloned())
             .collect::<GisResult<Vec<_>>>()?;
-        union_polygonal_geometry_values(&geometries, "load_boundary")?
+        // MENSURA M-04: geographic-vs-planar from the loaded CRS metadata (planar
+        // when the source declares none), never from coordinate ranges.
+        let geographic = match crs_spec_from_vector_info(&source.info)? {
+            Some(spec) => crate::gis::geometry::geographic_from_spec(&spec)?,
+            None => false,
+        };
+        union_polygonal_geometry_values(&geometries, "load_boundary", geographic)?
     };
 
     if let Some(geometry) = geometry.as_ref() {
@@ -732,7 +754,17 @@ fn crs_spec_from_json_value(value: &Value) -> GisResult<Option<CrsSpec>> {
 }
 
 pub(crate) fn crs_spec_from_info_json(info: &Value) -> GisResult<Option<CrsSpec>> {
-    if let Some(authority) = info.get("crs_authority").and_then(Value::as_object) {
+    crs_spec_from_authority_wkt(info.get("crs_authority"), info.get("crs_wkt"))
+}
+
+/// Parse `{name, code}` authority and/or WKT metadata values into a `CrsSpec`,
+/// regardless of which JSON layout carried them (`VectorInfo`'s
+/// `crs_authority`/`crs_wkt` or a geometry operation's `authority`/`wkt`).
+pub(crate) fn crs_spec_from_authority_wkt(
+    authority: Option<&Value>,
+    wkt: Option<&Value>,
+) -> GisResult<Option<CrsSpec>> {
+    if let Some(authority) = authority.and_then(Value::as_object) {
         if let (Some(name), Some(code)) = (
             authority.get("name").and_then(json_value_string),
             authority.get("code").and_then(json_value_string),
@@ -740,7 +772,7 @@ pub(crate) fn crs_spec_from_info_json(info: &Value) -> GisResult<Option<CrsSpec>
             return CrsSpec::from_parts(Some(name), Some(code), None).map(Some);
         }
     }
-    if let Some(wkt) = info.get("crs_wkt").and_then(Value::as_str) {
+    if let Some(wkt) = wkt.and_then(Value::as_str) {
         if !wkt.trim().is_empty() {
             return CrsSpec::from_parts(None, None, Some(wkt.to_string())).map(Some);
         }

@@ -90,8 +90,15 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             let eye = glam::Vec3::from(*eye);
             let target = glam::Vec3::from(*target);
             let up = glam::Vec3::from(*up);
-            viewer.camera.set_look_at(eye, target, up);
-            println!("Camera: eye={:?} target={:?} up={:?}", eye, target, up);
+            match viewer.camera.set_look_at(eye, target, up) {
+                Ok(()) => println!("Camera: eye={:?} target={:?} up={:?}", eye, target, up),
+                Err(err) => eprintln!(
+                    "SetCamLookAt rejected ({err:?}): the interactive viewer renders in a \
+                     terrain-local frame (|coord| <= {:.0e}); absolute projected/geodetic \
+                     coordinates must use the anchored offscreen Scene path, not the viewer IPC.",
+                    crate::viewer::camera_controller::VIEWER_LOCAL_FRAME_MAX_COORD
+                ),
+            }
             true
         }
         ViewerCmd::SetSize(w, h) => {

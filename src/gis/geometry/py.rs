@@ -52,63 +52,90 @@ pub fn measure_geometries_py(
     geometry_measure_py(py, geometry, crs, metrics)
 }
 
-#[pyfunction(name = "geometry_centroid")]
-pub fn geometry_centroid_py(py: Python<'_>, geometry: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+#[pyfunction(name = "geometry_centroid", signature = (geometry, *, crs = None))]
+pub fn geometry_centroid_py(
+    py: Python<'_>,
+    geometry: &Bound<'_, PyAny>,
+    crs: Option<&Bound<'_, PyAny>>,
+) -> PyResult<PyObject> {
     let source = py_to_json_strict(geometry)?;
-    let result = super::geometry_centroid(&source)?;
+    let spec = crate::gis::extract_crs(crs)?;
+    let result = super::geometry_centroid(&source, spec)?;
     json_to_py(py, &result)
 }
 
-#[pyfunction(name = "representative_point")]
-pub fn representative_point_py(py: Python<'_>, geometry: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+#[pyfunction(name = "representative_point", signature = (geometry, *, crs = None))]
+pub fn representative_point_py(
+    py: Python<'_>,
+    geometry: &Bound<'_, PyAny>,
+    crs: Option<&Bound<'_, PyAny>>,
+) -> PyResult<PyObject> {
     let source = py_to_json_strict(geometry)?;
-    let result = super::representative_point(&source)?;
+    let spec = crate::gis::extract_crs(crs)?;
+    let result = super::representative_point(&source, spec)?;
     json_to_py(py, &result)
 }
 
-#[pyfunction(name = "interpolate_line", signature = (geometry, distance, *, normalized = false))]
+#[pyfunction(
+    name = "interpolate_line",
+    signature = (geometry, distance, *, normalized = false, crs = None)
+)]
 pub fn interpolate_line_py(
     py: Python<'_>,
     geometry: &Bound<'_, PyAny>,
     distance: f64,
     normalized: bool,
+    crs: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<PyObject> {
     let source = py_to_json_strict(geometry)?;
-    let result = super::interpolate_line(&source, distance, normalized)?;
+    let spec = crate::gis::extract_crs(crs)?;
+    let result = super::interpolate_line(&source, distance, normalized, spec)?;
     json_to_py(py, &result)
 }
 
-#[pyfunction(name = "union_geometries")]
-pub fn union_geometries_py(py: Python<'_>, geometries: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+#[pyfunction(name = "union_geometries", signature = (geometries, *, crs = None))]
+pub fn union_geometries_py(
+    py: Python<'_>,
+    geometries: &Bound<'_, PyAny>,
+    crs: Option<&Bound<'_, PyAny>>,
+) -> PyResult<PyObject> {
     let source = py_to_json_strict(geometries)?;
-    let result = super::union_geometries(&source)?;
+    let spec = crate::gis::extract_crs(crs)?;
+    let result = super::union_geometries(&source, spec)?;
     json_to_py(py, &result)
 }
 
-#[pyfunction(name = "buffer_geometry", signature = (geometry, distance, *, quad_segs = 8))]
+#[pyfunction(
+    name = "buffer_geometry",
+    signature = (geometry, distance, *, quad_segs = 8, crs = None)
+)]
 pub fn buffer_geometry_py(
     py: Python<'_>,
     geometry: &Bound<'_, PyAny>,
     distance: f64,
     quad_segs: i64,
+    crs: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<PyObject> {
     let source = py_to_json_strict(geometry)?;
-    let result = super::buffer_geometry(&source, distance, quad_segs)?;
+    let spec = crate::gis::extract_crs(crs)?;
+    let result = super::buffer_geometry(&source, distance, quad_segs, spec)?;
     json_to_py(py, &result)
 }
 
 #[pyfunction(
     name = "simplify_geometry",
-    signature = (geometry, tolerance, *, preserve_topology = true)
+    signature = (geometry, tolerance, *, preserve_topology = true, crs = None)
 )]
 pub fn simplify_geometry_py(
     py: Python<'_>,
     geometry: &Bound<'_, PyAny>,
     tolerance: f64,
     preserve_topology: bool,
+    crs: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<PyObject> {
     let source = py_to_json_strict(geometry)?;
-    let result = super::simplify_geometry(&source, tolerance, preserve_topology)?;
+    let spec = crate::gis::extract_crs(crs)?;
+    let result = super::simplify_geometry(&source, tolerance, preserve_topology, spec)?;
     json_to_py(py, &result)
 }
 
