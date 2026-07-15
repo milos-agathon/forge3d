@@ -164,7 +164,6 @@ impl ViewerTerrainScene {
         let terrain = self.terrain.as_ref().unwrap();
         let uniforms = TerrainUniforms {
             view_proj: view_proj.to_cols_array_2d(),
-            render_origin_span,
             sun_dir: [sun_dir.x, sun_dir.y, sun_dir.z, 0.0],
             terrain_params: [domain.0, h_range, terrain_width, shader_z_scale],
             lighting: [
@@ -185,6 +184,8 @@ impl ViewerTerrainScene {
                 terrain.water_color[2],
                 0.0,
             ],
+            render_origin_xz: [render_origin_span[0], render_origin_span[1]],
+            render_span_xz: [render_origin_span[2], render_origin_span[3]],
         };
         self.queue.write_buffer(
             &terrain.uniform_buffer,
@@ -230,7 +231,6 @@ impl ViewerTerrainScene {
             }
             let pbr_uniforms = TerrainPbrUniforms {
                 view_proj: view_proj.to_cols_array_2d(),
-                render_origin_span,
                 sun_dir: [sun_dir.x, sun_dir.y, sun_dir.z, 0.0],
                 terrain_params: [domain.0, domain.1 - domain.0, terrain_width, z_scale],
                 lighting: [sun_intensity, ambient, shadow_intensity, water_level],
@@ -274,6 +274,8 @@ impl ViewerTerrainScene {
                         0.0
                     },
                 ],
+                render_origin_xz: [render_origin_span[0], render_origin_span[1]],
+                render_span_xz: [render_origin_span[2], render_origin_span[3]],
             };
             eprintln!(
                 "[DEBUG render_to_texture] overlay_params: enabled={}, opacity={}, blend={}, solid={}",

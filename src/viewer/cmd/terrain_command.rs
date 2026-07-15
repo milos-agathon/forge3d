@@ -6,39 +6,47 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
     match cmd {
         ViewerCmd::LoadTerrain(path) => {
             println!("[XYZZY_TERRAIN] LoadTerrain handler entry, path={}", path);
+            if let Err(err) = terrain::ViewerTerrainScene::preflight_terrain_path(path) {
+                eprintln!("[terrain] rejected before scene/resource mutation: {err}");
+                viewer.reject_command(format!(
+                    "terrain_metadata_preflight_rejected: path={path} error={err} unchanged_state=true"
+                ));
+                return true;
+            }
             if viewer.terrain_viewer.is_none() {
-                eprintln!("[DEBUG LoadTerrain] Creating new terrain_viewer");
-                match terrain::ViewerTerrainScene::new(
+                eprintln!("[DEBUG LoadTerrain] Staging new terrain_viewer");
+                let mut candidate = match terrain::ViewerTerrainScene::new(
                     std::sync::Arc::clone(&viewer.device),
                     std::sync::Arc::clone(&viewer.queue),
                     viewer.config.format,
                 ) {
-                    Ok(scene) => {
-                        viewer.terrain_viewer = Some(scene);
-                        eprintln!("[DEBUG LoadTerrain] terrain_viewer created successfully");
-                    }
+                    Ok(scene) => scene,
                     Err(e) => {
                         eprintln!("[terrain] Failed to create viewer: {}", e);
+                        viewer.reject_command(format!("terrain_scene_construction_failed: {e}"));
                         return true;
                     }
+                };
+                if let Err(error) = candidate.load_terrain(path) {
+                    viewer.reject_command(format!(
+                        "terrain_execution_failed: path={path} error={error} unchanged_state=true"
+                    ));
+                    return true;
                 }
+                viewer.terrain_viewer = Some(candidate);
+                println!("[terrain] Loaded: {}", path);
+                eprintln!("[DEBUG LoadTerrain] staged terrain_viewer published");
             } else {
                 eprintln!("[DEBUG LoadTerrain] terrain_viewer already exists");
-            }
-            if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
-                match terrain_viewer.load_terrain(path) {
-                    Ok(()) => {
-                        println!("[terrain] Loaded: {}", path);
-                        eprintln!(
-                            "[DEBUG LoadTerrain] terrain_viewer has_terrain={}",
-                            terrain_viewer.has_terrain()
-                        );
+                if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
+                    if let Err(error) = terrain_viewer.load_terrain(path) {
+                        viewer.reject_command(format!(
+                            "terrain_execution_failed: path={path} error={error} unchanged_state=true"
+                        ));
+                        return true;
                     }
-                    Err(e) => eprintln!("[terrain] Failed to load {}: {}", path, e),
+                    println!("[terrain] Loaded: {}", path);
                 }
-            }
-            if let Err(err) = viewer.reapply_scene_review_state() {
-                eprintln!("[scene_review] failed to reapply after terrain load: {err}");
             }
             true
         }
@@ -50,16 +58,27 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             target,
         } => {
             let anchor = viewer.camera_anchor;
-            if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
+            let outcome = if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
                 match terrain_viewer
                     .set_camera(*phi_deg, *theta_deg, *radius, *fov_deg, *target, &anchor)
                 {
-                    Ok(()) => println!(
-                        "[terrain] Camera: phi={:.1}° theta={:.1}° r={:.1} fov={:.1}° target={:?}",
-                        phi_deg, theta_deg, radius, fov_deg, target
-                    ),
-                    Err(err) => eprintln!("[terrain] camera rejected transactionally: {err}"),
+                    Ok(()) => {
+                        println!(
+                            "[terrain] Camera: phi={:.1}° theta={:.1}° r={:.1} fov={:.1}° target={:?}",
+                            phi_deg, theta_deg, radius, fov_deg, target
+                        );
+                        Ok(())
+                    }
+                    Err(err) => {
+                        eprintln!("[terrain] camera rejected transactionally: {err}");
+                        Err(err.to_string())
+                    }
                 }
+            } else {
+                Err("terrain camera requires a loaded terrain".to_string())
+            };
+            if let Err(error) = outcome {
+                viewer.reject_command(error);
             }
             true
         }
@@ -177,6 +196,10 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                             .is_err()
                     {
                         eprintln!("[terrain] SetTerrain rejected transactionally");
+                        viewer.command_error = Some(
+                            "terrain_state_rejected: invalid finite/residual contract unchanged_state=true"
+                                .to_string(),
+                        );
                         return true;
                     }
 

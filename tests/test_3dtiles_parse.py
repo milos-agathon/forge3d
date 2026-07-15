@@ -13,13 +13,21 @@ import numpy as np
 from forge3d.tiles3d import (
     load_tileset,
     Tile,
+    TileContent,
     BoundingVolume,
     _parse_bounding_volume,
     _parse_tile,
     decode_b3dm,
     decode_pnts,
+    Tiles3dRenderer,
+    Tileset,
 )
 from forge3d._native import NATIVE_AVAILABLE, get_native_module
+from forge3d.map_scene import (
+    _pick_tiles3d_projected,
+    _project_tiles3d_perspective,
+    _transform_tiles3d_positions,
+)
 
 
 def _pad4(data: bytes, fill: bytes = b" ") -> bytes:
@@ -107,6 +115,56 @@ def _minimal_pnts_points() -> bytes:
             struct.pack("<IIIIII", 1, byte_length, len(feature_table), len(feature_binary), 0, 0),
             feature_table,
             feature_binary,
+        ]
+    )
+
+
+def _pnts_with_rtc(center_x: float = 6_378_137.0) -> bytes:
+    positions = struct.pack("<6f", 0.0, 0.0, 0.0, 0.001, 0.0, 0.0)
+    feature_table = _pad4(
+        json.dumps(
+            {
+                "POINTS_LENGTH": 2,
+                "POSITION": {"byteOffset": 0},
+                "RTC_CENTER": [center_x, 0.0, 0.0],
+            },
+            separators=(",", ":"),
+        ).encode("utf-8"),
+        b" ",
+    )
+    byte_length = 28 + len(feature_table) + len(positions)
+    return b"".join(
+        [
+            b"pnts",
+            struct.pack("<IIIIII", 1, byte_length, len(feature_table), len(positions), 0, 0),
+            feature_table,
+            positions,
+        ]
+    )
+
+
+def _pnts_quantized_with_rtc() -> bytes:
+    positions = struct.pack("<6H", 0, 0, 0, 1, 0, 0)
+    feature_table = _pad4(
+        json.dumps(
+            {
+                "POINTS_LENGTH": 2,
+                "POSITION_QUANTIZED": {"byteOffset": 0},
+                "QUANTIZED_VOLUME_OFFSET": [10.0, 0.0, 0.0],
+                "QUANTIZED_VOLUME_SCALE": [65.535, 1.0, 1.0],
+                "RTC_CENTER": [6_378_137.0, 0.0, 0.0],
+            },
+            separators=(",", ":"),
+        ).encode("utf-8"),
+        b" ",
+    )
+    byte_length = 28 + len(feature_table) + len(positions)
+    return b"".join(
+        [
+            b"pnts",
+            struct.pack("<IIIIII", 1, byte_length, len(feature_table), len(positions), 0, 0),
+            feature_table,
+            positions,
         ]
     )
 
@@ -290,6 +348,39 @@ class TestTilesetParsing:
             
             assert resolved == Path(tmpdir) / "tiles/tile.b3dm"
 
+    def test_nested_parent_and_tile_transforms_are_composed_in_f64(self, tmp_path):
+        translate = lambda x: [
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            x, 0.0, 0.0, 1.0,
+        ]
+        root = Tile(
+            bounding_volume=BoundingVolume("sphere", [0.0, 0.0, 0.0, 100.0]),
+            geometric_error=0.0,
+            transform=translate(6_378_137.0),
+            children=[
+                Tile(
+                    bounding_volume=BoundingVolume("sphere", [0.0, 0.0, 0.0, 1.0]),
+                    geometric_error=0.0,
+                    content=TileContent("a.pnts"),
+                    transform=translate(10.0),
+                ),
+                Tile(
+                    bounding_volume=BoundingVolume("sphere", [0.0, 0.0, 0.0, 1.0]),
+                    geometric_error=0.0,
+                    content=TileContent("b.pnts"),
+                    transform=translate(20.0),
+                ),
+            ],
+        )
+        tileset = Tileset(tmp_path, "1.1", 0.0, root)
+        visible = Tiles3dRenderer(sse_threshold=16.0).get_visible_tiles(
+            tileset, (6_378_137.0, 0.0, 10.0)
+        )
+        translations = sorted(float(tile.world_transform[0, 3]) for tile in visible)
+        assert translations == [6_378_147.0, 6_378_157.0]
+
 
 class TestB3dmDecode:
     def test_decode_b3dm_uses_native_geometry_extraction(self):
@@ -313,6 +404,87 @@ class TestPntsDecode:
         assert decoded["positions"].shape == (2, 3)
         assert decoded["colors"].shape == (2, 3)
         np.testing.assert_array_equal(decoded["colors"][0], np.array([255, 0, 0], dtype=np.uint8))
+
+    @pytest.mark.skipif(not NATIVE_AVAILABLE, reason="native extension unavailable")
+    def test_rtc_center_is_applied_in_f64_and_relative_positions_remain_available(self):
+        decoded = decode_pnts(_pnts_with_rtc())
+        assert decoded["positions"].dtype == np.float64
+        assert decoded["relative_positions"].dtype == np.float64
+        assert decoded["positions"][0, 0] == 6_378_137.0
+        assert abs(decoded["positions"][1, 0] - 6_378_137.001) < 1e-9
+        assert tuple(decoded["rtc_center"]) == (6_378_137.0, 0.0, 0.0)
+        second = decode_pnts(_pnts_with_rtc(6_378_157.0))
+        assert tuple(second["rtc_center"]) == (6_378_157.0, 0.0, 0.0)
+        assert second["positions"][0, 0] - decoded["positions"][0, 0] == 20.0
+
+    @pytest.mark.skipif(not NATIVE_AVAILABLE, reason="native extension unavailable")
+    def test_quantized_offset_scale_and_rtc_compose_in_f64(self):
+        decoded = decode_pnts(_pnts_quantized_with_rtc())
+        assert decoded["positions"].dtype == np.float64
+        assert decoded["positions"][0, 0] == 6_378_147.0
+        assert decoded["positions"][1, 0] - decoded["positions"][0, 0] == pytest.approx(
+            0.001, abs=1e-9
+        )
+
+
+def test_shared_tiles3d_projection_culling_and_picking_are_rebase_invariant():
+    earth = np.array([6_378_137.0, 2_000_000.0, -1_000_000.0], dtype=np.float64)
+    local = np.array(
+        [[0.0, 0.0, 0.0], [0.001, 0.0, 0.0], [10.0, 0.0, 0.0]],
+        dtype=np.float64,
+    )
+    transform = np.eye(4, dtype=np.float64)
+    transform[:3, 3] = earth
+    world = _transform_tiles3d_positions(local, transform.reshape(16, order="F"))
+    camera = {
+        "camera_position": (earth + np.array([0.0, 0.0, 50.0])).tolist(),
+        "camera_target": earth.tolist(),
+        "camera_up": [0.0, 1.0, 0.0],
+        "fov_y_deg": 45.0,
+    }
+    projected = np.asarray(_project_tiles3d_perspective(world, camera, 640, 400))
+    assert np.isfinite(projected).all()
+    assert projected[0, 0] != projected[1, 0]
+
+    picked = _pick_tiles3d_projected(
+        world,
+        camera,
+        640,
+        400,
+        tuple(projected[1]),
+        tolerance_ndc=1.0e-4,
+    )
+    assert picked == 1
+    assert world[picked, 0] - earth[0] == pytest.approx(0.001, abs=1e-9)
+
+    rigid = np.array([1_500.0, -750.0, 300.0], dtype=np.float64)
+    shifted_camera = dict(camera)
+    shifted_camera["camera_position"] = (
+        np.asarray(camera["camera_position"], dtype=np.float64) + rigid
+    ).tolist()
+    shifted_camera["camera_target"] = (
+        np.asarray(camera["camera_target"], dtype=np.float64) + rigid
+    ).tolist()
+    shifted = np.asarray(
+        _project_tiles3d_perspective(world + rigid, shifted_camera, 640, 400)
+    )
+    np.testing.assert_allclose(shifted, projected, rtol=0.0, atol=1e-12)
+    assert (
+        _pick_tiles3d_projected(
+            world + rigid,
+            shifted_camera,
+            640,
+            400,
+            tuple(shifted[1]),
+            tolerance_ndc=1.0e-4,
+        )
+        == picked
+    )
+
+    behind = earth + np.array([0.0, 0.0, 100.0])
+    culled = np.asarray(_project_tiles3d_perspective([behind], camera, 640, 400))
+    assert np.isnan(culled).all()
+    assert _pick_tiles3d_projected([behind], camera, 640, 400, (0.0, 0.0)) is None
 
 
 class TestTileMetrics:

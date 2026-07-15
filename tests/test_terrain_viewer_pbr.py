@@ -379,11 +379,10 @@ class TestTerrainViewerPbr:
             print(f"[test] Legacy hash: {legacy_hash}")
             print(f"[test] PBR hash:    {pbr_hash}")
             
-            # PBR should produce different output
-            # Note: This test may fail if PBR pipeline isn't rendering yet
-            # In that case, the hashes will be equal
-            if legacy_hash == pbr_hash:
-                pytest.xfail("PBR output identical to legacy - pipeline may not be fully wired")
+            assert legacy_hash != pbr_hash, (
+                "PBR output is identical to legacy output; the PBR pipeline "
+                "did not produce an observable result"
+            )
 
     def test_pbr_exposure_affects_output(self, viewer_context):
         """Test that changing exposure produces different output."""
@@ -428,8 +427,9 @@ class TestTerrainViewerPbr:
             print(f"[test] Exposure 0.5 hash: {exp1_hash}")
             print(f"[test] Exposure 2.0 hash: {exp2_hash}")
             
-            if exp1_hash == exp2_hash:
-                pytest.xfail("Exposure change didn't affect output - config may not be wired")
+            assert exp1_hash != exp2_hash, (
+                "PBR exposure 0.5 and 2.0 produced identical output"
+            )
 
     @pytest.mark.skipif(not HAS_PIL, reason="Requires Pillow")
     def test_hdr_path_changes_indirect_lighting(self, viewer_context):

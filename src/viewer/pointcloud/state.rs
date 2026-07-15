@@ -14,6 +14,9 @@ pub struct PointCloudState {
     pub bind_group: wgpu::BindGroup,
     pub pipeline: wgpu::RenderPipeline,
     pub point_count: usize,
+    /// Number of instances surviving the most recent frame frustum cull.
+    pub visible_point_count: usize,
+    visible_source_indices: Vec<usize>,
     pub point_size: f32,
     pub visible: bool,
     pub color_mode: ColorMode,
@@ -151,6 +154,8 @@ impl PointCloudState {
             bind_group,
             pipeline,
             point_count: 0,
+            visible_point_count: 0,
+            visible_source_indices: Vec::new(),
             point_size: 2.0,
             visible: true,
             color_mode: ColorMode::Elevation,
@@ -166,19 +171,56 @@ impl PointCloudState {
         })
     }
 
-    pub fn handle_mouse_drag(&mut self, dx: f32, dy: f32) {
+    fn validate_camera_state(
+        &self,
+        anchor: &crate::camera::Anchor,
+    ) -> Result<(), crate::viewer::camera_controller::CameraFrameError> {
+        let (eye, target, _, _) = self.camera_pose_world();
+        crate::viewer::camera_controller::validate_camera_pose(anchor, self.center, eye, target)
+            .map(|_| ())
+    }
+
+    pub fn handle_mouse_drag(
+        &mut self,
+        anchor: &crate::camera::Anchor,
+        dx: f32,
+        dy: f32,
+    ) -> Result<(), crate::viewer::camera_controller::CameraFrameError> {
+        let old = (self.cam_phi, self.cam_theta);
         let sensitivity = 0.005;
         self.cam_phi += dx * sensitivity;
         self.cam_theta = (self.cam_theta - dy * sensitivity).clamp(0.1, 1.5);
+        if let Err(error) = self.validate_camera_state(anchor) {
+            (self.cam_phi, self.cam_theta) = old;
+            return Err(error);
+        }
+        Ok(())
     }
 
-    pub fn handle_scroll(&mut self, delta: f32) {
+    pub fn handle_scroll(
+        &mut self,
+        anchor: &crate::camera::Anchor,
+        delta: f32,
+    ) -> Result<(), crate::viewer::camera_controller::CameraFrameError> {
+        let old = self.cam_radius;
         let zoom_speed = 0.1;
         self.cam_radius *= 1.0 - delta * zoom_speed;
         self.cam_radius = self.cam_radius.clamp(0.1, 100.0);
+        if let Err(error) = self.validate_camera_state(anchor) {
+            self.cam_radius = old;
+            return Err(error);
+        }
+        Ok(())
     }
 
-    pub fn handle_keys(&mut self, forward: f32, right: f32, up: f32) {
+    pub fn handle_keys(
+        &mut self,
+        anchor: &crate::camera::Anchor,
+        forward: f32,
+        right: f32,
+        up: f32,
+    ) -> Result<(), crate::viewer::camera_controller::CameraFrameError> {
+        let old = (self.cam_phi, self.cam_theta, self.cam_radius);
         let rotate_speed = 0.02;
         let zoom_speed = 0.02;
 
@@ -186,6 +228,11 @@ impl PointCloudState {
         self.cam_theta = (self.cam_theta + forward * rotate_speed).clamp(0.1, 1.5);
         self.cam_radius *= 1.0 - up * zoom_speed;
         self.cam_radius = self.cam_radius.clamp(0.1, 100.0);
+        if let Err(error) = self.validate_camera_state(anchor) {
+            (self.cam_phi, self.cam_theta, self.cam_radius) = old;
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub fn load_from_file(
@@ -233,8 +280,7 @@ impl PointCloudState {
             )
             .map_err(|err| err.to_string())?;
         }
-        let extent_render = crate::camera::Anchor::new()
-            .to_render_direction(max - min)
+        let extent_render = crate::camera::Anchor::direction_to_render(max - min)
             .max_element()
             .max(100.0);
 
@@ -280,6 +326,8 @@ impl PointCloudState {
         self.center = center;
         self.extent_render = extent_render;
         self.point_count = points.len();
+        self.visible_point_count = points.len();
+        self.visible_source_indices = (0..points.len()).collect();
         self.color_mode = color_mode;
         self.source_points = points;
         self.points = render_points;
@@ -288,38 +336,112 @@ impl PointCloudState {
         Ok(())
     }
 
+    fn packed_point(point: &PointSource3D, anchor: &crate::camera::Anchor) -> PointInstance3D {
+        PointInstance3D {
+            position: anchor.to_render_vec3(point.position).to_array(),
+            elevation_norm: point.elevation_norm,
+            rgb: point.rgb,
+            intensity: point.intensity,
+            size: point.size,
+            _pad: [0.0; 3],
+        }
+    }
+
     fn pack_for_anchor(&mut self, anchor: &crate::camera::Anchor) {
-        self.points = self
-            .source_points
-            .iter()
-            .map(|point| PointInstance3D {
-                position: anchor.to_render_vec3(point.position).to_array(),
-                elevation_norm: point.elevation_norm,
-                rgb: point.rgb,
-                intensity: point.intensity,
-                size: point.size,
-                _pad: [0.0; 3],
-            })
-            .collect();
+        debug_assert!(self.points.capacity() >= self.source_points.len());
+        debug_assert!(self.visible_source_indices.capacity() >= self.source_points.len());
+        self.points.clear();
+        self.visible_source_indices.clear();
+        for (index, point) in self.source_points.iter().enumerate() {
+            self.points.push(Self::packed_point(point, anchor));
+            self.visible_source_indices.push(index);
+        }
+        self.visible_point_count = self.points.len();
     }
 
     /// Repack into the existing COPY_DST instance buffer. Routine rebases do
     /// not allocate or replace GPU resources.
-    pub fn repack_for_anchor(
+    pub fn repack_for_anchor(&mut self, queue: &wgpu::Queue, anchor: &crate::camera::Anchor) {
+        if self.source_points.is_empty() {
+            return;
+        }
+        assert!(
+            self.instance_buffer.is_some(),
+            "point-cloud invariant: non-empty source owns an instance buffer"
+        );
+        self.pack_for_anchor(anchor);
+        let buffer = self.instance_buffer.as_ref().expect("invariant checked");
+        queue.write_buffer(buffer, 0, bytemuck::cast_slice(&self.points));
+    }
+
+    /// Compact the anchor-packed cache in-place to points inside the current
+    /// wgpu clip volume. The backing allocation and GPU buffer stay unchanged.
+    pub fn prepare_visible(
         &mut self,
         queue: &wgpu::Queue,
         anchor: &crate::camera::Anchor,
-    ) -> Result<(), String> {
-        if self.source_points.is_empty() {
-            return Ok(());
+        view_proj: glam::Mat4,
+    ) {
+        debug_assert!(self.points.capacity() >= self.source_points.len());
+        debug_assert!(self.visible_source_indices.capacity() >= self.source_points.len());
+        self.points.clear();
+        self.visible_source_indices.clear();
+        for (index, point) in self.source_points.iter().enumerate() {
+            let packed = Self::packed_point(point, anchor);
+            let clip = view_proj * glam::Vec3::from(packed.position).extend(1.0);
+            if clip.w > 0.0
+                && clip.x.abs() <= clip.w
+                && clip.y.abs() <= clip.w
+                && clip.z >= 0.0
+                && clip.z <= clip.w
+            {
+                self.points.push(packed);
+                self.visible_source_indices.push(index);
+            }
         }
-        self.pack_for_anchor(anchor);
-        let buffer = self
-            .instance_buffer
+        self.visible_point_count = self.points.len();
+        if let Some(buffer) = self.instance_buffer.as_ref() {
+            if !self.points.is_empty() {
+                queue.write_buffer(buffer, 0, bytemuck::cast_slice(&self.points));
+            }
+        }
+    }
+
+    /// CPU point pick over the same cull result and anchor-packed positions
+    /// consumed by the renderer. The returned world coordinate is the exact
+    /// source f64 value, not a widened render-space value.
+    pub fn pick_ray(&self, ray: &crate::picking::Ray) -> Option<(usize, f32, DVec3)> {
+        let origin = glam::Vec3::from(ray.origin);
+        let direction = glam::Vec3::from(ray.direction).normalize_or_zero();
+        if direction == glam::Vec3::ZERO {
+            return None;
+        }
+        let radius = (self.extent_render * 0.002).max(0.01);
+        self.points
+            .iter()
+            .zip(self.visible_source_indices.iter().copied())
+            .take(self.visible_point_count)
+            .filter_map(|(point, source_index)| {
+                let delta = glam::Vec3::from(point.position) - origin;
+                let t = delta.dot(direction);
+                if t < 0.0 || (delta - direction * t).length() > radius {
+                    return None;
+                }
+                Some((source_index, t, self.source_points[source_index].position))
+            })
+            .min_by(|left, right| left.1.total_cmp(&right.1))
+    }
+
+    pub fn instance_buffer_bytes(&self) -> u64 {
+        self.instance_buffer
             .as_ref()
-            .ok_or_else(|| "point-cloud instance buffer is missing".to_string())?;
-        queue.write_buffer(buffer, 0, bytemuck::cast_slice(&self.points));
-        Ok(())
+            .map_or(0, |buffer| buffer.size())
+    }
+
+    pub fn instance_buffer_id(&self) -> u64 {
+        self.instance_buffer
+            .as_ref()
+            .map_or(0, TrackedBuffer::ledger_id)
     }
 
     pub fn camera_pose_world(&self) -> (DVec3, DVec3, f32, f32) {
@@ -367,7 +489,7 @@ impl PointCloudState {
         render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(0, &self.bind_group, &[]);
         render_pass.set_vertex_buffer(0, instance_buffer.slice(..));
-        render_pass.draw(0..4, 0..self.point_count as u32);
+        render_pass.draw(0..4, 0..self.visible_point_count as u32);
     }
 
     pub fn set_point_size(&mut self, size: f32) {
@@ -378,10 +500,72 @@ impl PointCloudState {
         self.visible = visible;
     }
 
+    /// Validate the complete prospective point-cloud state before publishing
+    /// any field. This keeps invalid camera/parameter commands transactional.
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_set_params(
+        &mut self,
+        anchor: &crate::camera::Anchor,
+        owns_frame: bool,
+        point_size: Option<f32>,
+        visible: Option<bool>,
+        color_mode: Option<&str>,
+        phi: Option<f32>,
+        theta: Option<f32>,
+        radius: Option<f32>,
+    ) -> Result<(), String> {
+        let next_point_size = point_size.unwrap_or(self.point_size);
+        let next_phi = phi.unwrap_or(self.cam_phi);
+        let next_theta = theta.unwrap_or(self.cam_theta).clamp(0.1, 1.5);
+        let next_radius = radius.unwrap_or(self.cam_radius).clamp(0.1, 100.0);
+        if ![next_point_size, next_phi, next_theta, next_radius]
+            .into_iter()
+            .all(f32::is_finite)
+            || next_point_size <= 0.0
+        {
+            return Err("invalid point-cloud parameter".to_string());
+        }
+
+        let extent = self.extent_render.max(100.0);
+        let orbit_radius = extent * 2.0 * next_radius;
+        let prospective_eye = self.center
+            + DVec3::new(
+                f64::from(orbit_radius * next_theta.cos() * next_phi.cos()),
+                f64::from(orbit_radius * next_theta.sin()),
+                f64::from(orbit_radius * next_theta.cos() * next_phi.sin()),
+            );
+        let rebase_focus = if owns_frame && visible.unwrap_or(self.visible) {
+            self.center
+        } else {
+            anchor.origin()
+        };
+        let validation_anchor =
+            crate::viewer::camera_controller::prospective_anchor(anchor, rebase_focus);
+        crate::viewer::camera_controller::validate_camera_pose(
+            &validation_anchor,
+            self.center,
+            prospective_eye,
+            self.center,
+        )
+        .map_err(|error| error.to_string())?;
+
+        self.point_size = next_point_size.clamp(0.5, 50.0);
+        self.cam_phi = next_phi;
+        self.cam_theta = next_theta;
+        self.cam_radius = next_radius;
+        self.visible = visible.unwrap_or(self.visible);
+        if let Some(mode) = color_mode {
+            self.color_mode = ColorMode::from_str(mode);
+        }
+        Ok(())
+    }
+
     pub fn clear(&mut self) {
         self.source_points.clear();
         self.points.clear();
         self.instance_buffer = None;
         self.point_count = 0;
+        self.visible_point_count = 0;
+        self.visible_source_indices.clear();
     }
 }

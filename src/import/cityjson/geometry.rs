@@ -49,16 +49,15 @@ pub(super) fn compute_normals(positions: &[f64], indices: &[u32]) -> Vec<f32> {
         ];
 
         for &idx in tri {
-            let base = idx as usize * 3;
-            if base + 2 < normals.len() {
-                normals[idx as usize][0] += n[0];
-                normals[idx as usize][1] += n[1];
-                normals[idx as usize][2] += n[2];
+            let idx = idx as usize;
+            if idx < normals.len() {
+                normals[idx][0] += n[0];
+                normals[idx][1] += n[1];
+                normals[idx][2] += n[2];
             }
         }
     }
 
-    let anchor = crate::camera::Anchor::new();
     normals
         .into_iter()
         .flat_map(|normal| {
@@ -68,7 +67,7 @@ pub(super) fn compute_normals(positions: &[f64], indices: &[u32]) -> Vec<f32> {
             } else {
                 glam::DVec3::Z
             };
-            anchor.to_render_direction(normal).to_array()
+            crate::camera::Anchor::direction_to_render(normal).to_array()
         })
         .collect()
 }
@@ -248,8 +247,8 @@ impl SurfaceProjection {
     }
 
     fn project(&self, point: [f64; 3]) -> [f32; 2] {
-        let local = crate::camera::Anchor::new()
-            .to_render_direction(glam::DVec3::from(sub(point, self.origin)));
+        let local =
+            crate::camera::Anchor::direction_to_render(glam::DVec3::from(sub(point, self.origin)));
         match self.drop_axis {
             0 => [local.y, local.z],
             1 => [local.x, local.z],

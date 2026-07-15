@@ -1,21 +1,22 @@
-"""Fail-closed source gate for f64 world-coordinate narrowing.
+"""Fail-closed inventory for every Rust narrowing primitive.
 
-The scanner normalizes comments and whitespace, records every occurrence, and
-recognizes cast-before-subtract forms that the original line/vocabulary gate
-missed (`as_vec3`, indexed component casts, and multiline expressions).
+The inventory is deliberately name-agnostic: every ``as f32``, ``.as_vec*()``,
+and f64/DVec-to-f32/Vec helper is occurrence-locked across production Rust.
+Separate positive contracts prove that each viewer world-position route calls
+the active Anchor inside the producing function.
 """
 
+import hashlib
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SANCTIONED = "src/camera/anchor.rs"
 
-WORLD_WORD = (
-    r"(?:world(?:_position|_pos|_coord)?|object_(?:origin|translation)|"
-    r"origin|target|eye|translation|ecef|longitude|latitude|"
-    r"vertex(?:_position|_pos|_coord)?|point(?:_position|_pos|_coord)?|coord|abs)"
-)
+# Updated only after reviewing the complete inventory printed by a failure.
+# The digest includes (file, function, operation, ordinal, normalized statement).
+EXPECTED_CONVERSION_COUNT = 1245
+EXPECTED_CONVERSION_SHA256 = "f0b8c1b1e1807db6874484045a5ff04c10e86b0ff32d0b1d48fca75cdab4db79"
 
 
 def _strip_comments_and_strings(text: str) -> str:
@@ -26,72 +27,161 @@ def _strip_comments_and_strings(text: str) -> str:
     return pattern.sub(lambda match: " " * len(match.group(0)), text)
 
 
-def _normalize(text: str) -> str:
-    return re.sub(r"\s+", " ", _strip_comments_and_strings(text))
+def _remove_cfg_test_modules(text: str) -> str:
+    text = _strip_comments_and_strings(text)
+    marker = re.compile(r"#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]\s*mod\s+\w+\s*\{")
+    while match := marker.search(text):
+        depth = 1
+        cursor = match.end()
+        while cursor < len(text) and depth:
+            depth += (text[cursor] == "{") - (text[cursor] == "}")
+            cursor += 1
+        text = text[: match.start()] + " " * (cursor - match.start()) + text[cursor:]
+    return text
 
 
-def _forbidden_narrowings(text: str) -> list[str]:
-    normalized = _normalize(text)
-    patterns = [
-        rf"\b{WORLD_WORD}\b(?:\s*\.\s*[xyzw]|\s*\[[^\]]+\])?\s*\.as_vec[234]\s*\(\s*\)",
-        rf"\b{WORLD_WORD}\b(?:\s*\.\s*[xyzw]|\s*\[[^\]]+\])?\s+as\s+f32\b",
-        r"\b(?:DVec[234]|DMat[234])\b[^;{}]*?\.as_vec[234]\s*\(\s*\)",
-    ]
-    findings = []
-    for pattern in patterns:
-        findings.extend(match.group(0) for match in re.finditer(pattern, normalized, re.I))
-    return findings
+def _function_spans(text: str):
+    spans = []
+    for match in re.finditer(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)[^;{]*\{", text, re.S):
+        depth = 1
+        cursor = match.end()
+        while cursor < len(text) and depth:
+            depth += (text[cursor] == "{") - (text[cursor] == "}")
+            cursor += 1
+        spans.append((match.start(), cursor, match.group(1)))
+    return spans
 
 
-def _rust_files():
-    return sorted((ROOT / "src").rglob("*.rs"))
+def _function_name(spans, position: int) -> str:
+    return next(
+        (name for start, end, name in spans if start <= position < end),
+        "<module>",
+    )
 
 
-def test_single_narrowing_implementation_lives_only_in_anchor():
+def _statement(text: str, position: int) -> str:
+    start = max(text.rfind(";", 0, position), text.rfind("{", 0, position)) + 1
+    end_candidates = [candidate for candidate in (text.find(";", position), text.find("}", position)) if candidate >= 0]
+    end = min(end_candidates, default=min(len(text), position + 160))
+    return re.sub(r"\s+", " ", text[start:end]).strip()
+
+
+CONVERSION_PATTERNS = {
+    "as_f32": re.compile(r"\bas\s+f32\b"),
+    "as_vec": re.compile(r"\.\s*as_vec[234]\s*\(\s*\)"),
+    "f64_helper": re.compile(
+        r"\bfn\s+[A-Za-z_][A-Za-z0-9_]*\s*(?:<[^>{}]*>)?\s*\([^)]*(?:f64|DVec[234]|DMat[234])[^)]*\)\s*"
+        r"(?:->\s*(?:f32|Vec[234]|\[\s*f32|Vec\s*<\s*f32))",
+        re.S,
+    ),
+}
+
+
+def _conversion_inventory_text(rel: str, raw: str):
+    text = _remove_cfg_test_modules(raw)
+    spans = _function_spans(text)
+    matches = []
+    for operation, pattern in CONVERSION_PATTERNS.items():
+        matches.extend((match.start(), operation) for match in pattern.finditer(text))
+    counters = {}
     sites = []
-    for path in _rust_files():
-        text = _strip_comments_and_strings(path.read_text(encoding="utf-8"))
-        for match in re.finditer(r"\bas\s+f32\b", text):
-            sites.append((path.relative_to(ROOT).as_posix(), match.start()))
-    anchor = _strip_comments_and_strings(_read(SANCTIONED))
-    assert len(re.findall(r"\bas\s+f32\b", anchor)) == 1
-    assert "fn narrow(value: f64) -> f32" in anchor
-    assert (SANCTIONED, anchor.index("as f32")) in sites
+    for position, operation in sorted(matches):
+        function = _function_name(spans, position)
+        key = (function, operation)
+        counters[key] = counters.get(key, 0) + 1
+        sites.append(
+            (
+                rel,
+                function,
+                operation,
+                counters[key],
+                _statement(text, position),
+            )
+        )
+    return sites
+
+
+def conversion_inventory():
+    sites = []
+    for path in sorted((ROOT / "src").rglob("*.rs")):
+        rel = path.relative_to(ROOT).as_posix()
+        sites.extend(_conversion_inventory_text(rel, path.read_text(encoding="utf-8")))
+    return sites
+
+
+def _inventory_digest(sites) -> str:
+    payload = "\n".join("\t".join(map(str, site)) for site in sites)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
-def test_no_world_coordinate_bypasses_anchor_narrowing():
-    findings = []
-    for path in _rust_files():
-        rel = path.relative_to(ROOT).as_posix()
-        if rel == SANCTIONED:
-            continue
-        for finding in _forbidden_narrowings(path.read_text(encoding="utf-8")):
-            # Physical mouse positions are f64 screen pixels, not world coordinates.
-            if rel == "src/viewer/input/viewer_input.rs" and finding in {
-                "position.x as f32",
-                "position.y as f32",
-            }:
-                continue
-            # Elevation is normalized to a unitless color ramp value here.
-            if rel == "src/viewer/pointcloud/load.rs" and "point.z" in finding:
-                continue
-            findings.append((rel, finding))
-    assert not findings, f"world-coordinate f64->f32 bypasses: {findings}"
+def _function_body(rel: str, function: str) -> str:
+    text = _remove_cfg_test_modules(_read(rel))
+    for start, end, name in _function_spans(text):
+        if name == function:
+            return text[start:end]
+    raise AssertionError(f"missing function {rel}::{function}")
 
 
-def test_scanner_rejects_previously_demonstrated_bypasses():
+def test_exact_production_conversion_inventory_is_frozen():
+    sites = conversion_inventory()
+    digest = _inventory_digest(sites)
+    assert (len(sites), digest) == (
+        EXPECTED_CONVERSION_COUNT,
+        EXPECTED_CONVERSION_SHA256,
+    ), f"conversion inventory changed: count={len(sites)} sha256={digest}\n" + "\n".join(
+        repr(site) for site in sites
+    )
+
+
+def test_all_required_rejecting_probes_change_the_inventory():
     probes = [
-        "let q = world_position.as_vec3();",
-        "let q = DVec3::new(1.0, 2.0, 3.0).as_vec3();",
-        "let abs = [1.0_f64, 2.0, 3.0]; let q = [abs[0] as f32, abs[1] as f32, abs[2] as f32];",
-        "let q = [world_coord[0]\n as f32, world_coord[1] as f32, world_coord[2] as f32];",
+        "v as f32",
+        "coords[0] as f32",
+        "position.as_vec3()",
+        "coords.map(|v| v as f32)",
+        "point.to_array().map(|v| v as f32)",
+        "fn narrow(v: f64) -> f32 { v as f32 }",
+        "macro_rules! narrow { ($v:expr) => { $v as f32 } }",
+        "fn bad(v: f64, origin: f64) -> f32 { v as f32 - origin as f32 }",
     ]
     for probe in probes:
-        assert _forbidden_narrowings(probe), f"scanner missed bypass: {probe}"
+        assert _conversion_inventory_text("probe.rs", probe), f"scanner missed {probe}"
+
+
+def test_anchor_narrow_is_the_only_world_conversion_implementation():
+    anchor = _remove_cfg_test_modules(_read(SANCTIONED))
+    narrow = _function_body(SANCTIONED, "narrow")
+    assert len(re.findall(r"\bas\s+f32\b", narrow)) == 1
+    assert "value as f32" in re.sub(r"\s+", " ", narrow)
+    assert anchor.count("Self::narrow(") == 6
+
+    position = _function_body(SANCTIONED, "to_render_vec3")
+    assert "p - self.origin" in re.sub(r"\s+", " ", position)
+    assert position.count("Self::narrow(") == 3
+    direction = _function_body(SANCTIONED, "direction_to_render")
+    assert direction.count("Self::narrow(") == 3
+
+
+def test_each_viewer_world_route_calls_its_active_anchor_in_the_same_function():
+    routes = {
+        ("src/viewer/viewer_types.rs", "view"): "self.anchor.view_look_at(",
+        ("src/viewer/viewer_types.rs", "render_eye"): "self.anchor.to_render_vec3(",
+        ("src/viewer/render/main_loop/frame_anchor.rs", "anchored_object_model"): "frame.anchor.model_offset(",
+        ("src/viewer/pointcloud/state.rs", "packed_point"): "anchor.to_render_vec3(",
+        ("src/viewer/terrain/vector_overlay.rs", "repack_source_vertices"): "anchor.to_render_vec3(",
+        ("src/labels/mod.rs", "update_with_camera_anchored"): "anchor.to_render_vec3(",
+        ("src/viewer/terrain/render/screen/setup.rs", "build_screen_render_state"): "frame.anchor.to_render_vec3(",
+        ("src/viewer/terrain/render/offscreen/setup.rs", "build_snapshot_render_state"): "frame.anchor.to_render_vec3(",
+        ("src/viewer/input/viewer_input.rs", "pick_at_screen"): ".to_world_from_render_f64(",
+    }
+    for (rel, function), required_call in routes.items():
+        body = re.sub(r"\s+", "", _function_body(rel, function))
+        normalized_call = re.sub(r"\s+", "", required_call)
+        assert normalized_call in body, f"{rel}::{function} lacks {required_call}"
 
 
 def test_cityjson_and_viewer_absolute_storage_types_are_explicitly_f64():

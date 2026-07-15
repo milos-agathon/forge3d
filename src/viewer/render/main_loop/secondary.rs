@@ -269,11 +269,13 @@ impl Viewer {
         }
 
         // P5: Render point cloud (after terrain, before labels)
-        if let Some(ref pc) = self.point_cloud {
-            if pc.visible && pc.point_count > 0 && pc.instance_buffer.is_some() {
-                let frame = self.current_frame_camera();
-                let view_proj = frame.view_projection(self.config.width, self.config.height);
-
+        if self.point_cloud_active() {
+            let frame = self.current_frame_camera();
+            let view_proj = frame.view_projection(self.config.width, self.config.height);
+            if let Some(pc) = self.point_cloud.as_mut() {
+                pc.prepare_visible(&self.queue, &frame.anchor, view_proj);
+            }
+            if let Some(ref pc) = self.point_cloud {
                 // Simple render pass - clear to dark background for point cloud
                 {
                     let mut pc_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

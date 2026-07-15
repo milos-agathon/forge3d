@@ -115,7 +115,12 @@ impl Tiles3dRenderer {
         let content = self.load_content_from_path(&path)?;
         let byte_size = estimate_content_size(&content);
 
-        self.ensure_cache_space(byte_size);
+        if !self.ensure_cache_space(byte_size) {
+            return Err(Tiles3dError::CacheBudget {
+                needed: byte_size,
+                budget: self.cache_budget,
+            });
+        }
 
         self.cache.insert(
             uri.to_string(),
@@ -165,7 +170,10 @@ impl Tiles3dRenderer {
         }
     }
 
-    fn ensure_cache_space(&mut self, needed: usize) {
+    fn ensure_cache_space(&mut self, needed: usize) -> bool {
+        if needed > self.cache_budget {
+            return false;
+        }
         while self.cache_used + needed > self.cache_budget && !self.cache.is_empty() {
             let oldest = self
                 .cache
@@ -179,6 +187,7 @@ impl Tiles3dRenderer {
                 }
             }
         }
+        self.cache_used + needed <= self.cache_budget
     }
 
     pub fn cache_stats(&self) -> CacheStats {
@@ -206,9 +215,11 @@ fn estimate_content_size(content: &TileContent) -> usize {
                 + m.indices.len() * 4
         }
         TileContent::Points(p) => {
-            p.positions.len() * 4
-                + p.colors.as_ref().map_or(0, |c| c.len())
-                + p.normals.as_ref().map_or(0, |n| n.len() * 4)
+            p.positions.len() * std::mem::size_of::<f64>()
+                + p.colors.as_ref().map_or(0, Vec::len)
+                + p.normals
+                    .as_ref()
+                    .map_or(0, |n| n.len() * std::mem::size_of::<f32>())
         }
     }
 }
@@ -438,5 +449,36 @@ impl Tiles3dRenderer {
 
         let owned: Vec<BuildingGeom> = visible.into_iter().cloned().collect();
         BuildingRenderData::from_buildings(&owned)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{estimate_content_size, PointData, TileContent, Tiles3dRenderer};
+
+    #[test]
+    fn point_cache_accounts_f64_positions_exactly() {
+        let content = TileContent::Points(PointData {
+            positions: vec![0.0; 6],
+            colors: Some(vec![0; 8]),
+            normals: Some(vec![0.0; 6]),
+        });
+        assert_eq!(
+            estimate_content_size(&content),
+            6 * std::mem::size_of::<f64>() + 8 + 6 * std::mem::size_of::<f32>()
+        );
+    }
+
+    #[test]
+    fn f64_point_positions_define_the_cache_budget_boundary() {
+        let content = TileContent::Points(PointData {
+            positions: vec![0.0; 6],
+            colors: None,
+            normals: None,
+        });
+        let required = estimate_content_size(&content);
+        assert_eq!(required, 48);
+        assert!(Tiles3dRenderer::with_cache_budget(required).ensure_cache_space(required));
+        assert!(!Tiles3dRenderer::with_cache_budget(required - 1).ensure_cache_space(required));
     }
 }

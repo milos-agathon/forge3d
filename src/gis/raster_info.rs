@@ -159,11 +159,14 @@ pub(crate) fn raster_info_from_decoder<R: std::io::Read + std::io::Seek>(
         ));
     }
 
-    info.is_georeferenced = has_crs && info.transform.is_some();
+    // A valid affine transform without CRS is still a usable, unlabeled
+    // Cartesian world transform. CRS presence describes authority metadata;
+    // it is not required for coordinate anchoring.
+    info.is_georeferenced = info.transform.is_some();
     if !info.is_georeferenced {
         info.warnings.push(RasterWarning::new(
             WARNING_NOT_GEOREFERENCED,
-            "raster is not fully georeferenced",
+            "raster has no valid affine transform",
             None,
         ));
     }

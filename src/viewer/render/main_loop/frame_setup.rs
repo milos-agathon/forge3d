@@ -78,23 +78,8 @@ impl Viewer {
 
         // Update labels with current camera (before any rendering)
         // Use terrain camera if terrain is loaded, otherwise use viewer camera
-        {
-            // Gather selected IDs for highlighting (labels use u64 IDs, picking uses u32)
-            let selected_u32 = self.unified_picking.selection_manager().get_selection();
-            let selected_ids: std::collections::HashSet<u64> =
-                selected_u32.iter().map(|&id| id as u64).collect();
-
-            let frame = self.current_frame_camera();
-            let view_proj = frame.view_projection(self.config.width, self.config.height);
-            let camera_pos = Some(frame.render_eye());
-
-            self.label_manager.update_with_camera_anchored(
-                view_proj,
-                camera_pos,
-                Some(&selected_ids),
-                &frame.anchor,
-            );
-        }
+        let frame = self.current_frame_camera();
+        self.update_labels_for_frame(frame);
 
         // Render sky background (compute) before opaques
         if self.sky_enabled {

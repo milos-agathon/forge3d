@@ -39,16 +39,26 @@ impl OverlayStack {
         blend_mode: BlendMode,
         z_order: i32,
     ) -> Result<u32, String> {
+        let config = Self::load_image_config(name, path, extent, opacity, blend_mode, z_order)?;
+        Ok(self.add_layer_config(config))
+    }
+
+    pub(crate) fn load_image_config(
+        name: &str,
+        path: &std::path::Path,
+        extent: Option<[f32; 4]>,
+        opacity: f32,
+        blend_mode: BlendMode,
+        z_order: i32,
+    ) -> Result<OverlayLayer, String> {
         let img = image::open(path)
-            .map_err(|e| format!("Failed to load overlay image '{}': {}", path.display(), e))?;
+            .map_err(|e| format!("Failed to load overlay image '{}': {e}", path.display()))?;
         let rgba_img = img.to_rgba8();
         let (width, height) = rgba_img.dimensions();
-        let rgba = rgba_img.into_raw();
-
-        let config = OverlayLayer {
+        Ok(OverlayLayer {
             name: name.to_string(),
             data: OverlayData::Raster {
-                rgba: rgba.clone(),
+                rgba: rgba_img.into_raw(),
                 width,
                 height,
             },
@@ -57,9 +67,51 @@ impl OverlayStack {
             blend_mode,
             visible: true,
             z_order,
-        };
+        })
+    }
 
-        Ok(self.add_layer_internal(config, &rgba, width, height))
+    fn add_layer_config(&mut self, config: OverlayLayer) -> u32 {
+        let id = self.next_id;
+        self.next_id = self.next_id.saturating_add(1);
+        let (width, height) = match &config.data {
+            OverlayData::Raster { width, height, .. } => (*width, *height),
+        };
+        self.layers.push(OverlayLayerGpu { id, config });
+        self.dirty = true;
+        println!(
+            "[overlay] Added layer '{}' (id={}, {}x{})",
+            self.layers.last().unwrap().config.name,
+            id,
+            width,
+            height
+        );
+        id
+    }
+
+    /// Build a detached full-stack candidate, retaining unmanaged layers and
+    /// replacing only the requested managed IDs. The live allocator and
+    /// composite remain untouched until the caller swaps this candidate.
+    pub(crate) fn stage_replacement(
+        &self,
+        removed_ids: &[u32],
+        additions: Vec<OverlayLayer>,
+    ) -> (Self, Vec<u32>) {
+        let mut candidate = Self::new(self.device.clone(), self.queue.clone());
+        candidate.next_id = self.next_id;
+        candidate.layers = self
+            .layers
+            .iter()
+            .filter(|layer| !removed_ids.contains(&layer.id))
+            .map(|layer| OverlayLayerGpu {
+                id: layer.id,
+                config: layer.config.clone(),
+            })
+            .collect();
+        let ids = additions
+            .into_iter()
+            .map(|config| candidate.add_layer_config(config))
+            .collect();
+        (candidate, ids)
     }
 
     /// Remove an overlay by ID. Returns true if found and removed.
@@ -126,31 +178,5 @@ impl OverlayStack {
     /// Get the overlay sampler
     pub fn sampler(&self) -> &wgpu::Sampler {
         &self.sampler
-    }
-
-    fn add_layer_internal(
-        &mut self,
-        config: OverlayLayer,
-        _rgba: &[u8],
-        width: u32,
-        height: u32,
-    ) -> u32 {
-        let id = self.next_id;
-        self.next_id += 1;
-
-        let layer_gpu = OverlayLayerGpu { id, config };
-
-        self.layers.push(layer_gpu);
-        self.dirty = true;
-
-        println!(
-            "[overlay] Added layer '{}' (id={}, {}x{})",
-            self.layers.last().unwrap().config.name,
-            id,
-            width,
-            height
-        );
-
-        id
     }
 }

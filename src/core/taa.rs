@@ -45,6 +45,13 @@ impl Default for TaaSettings {
     }
 }
 
+fn settings_for_history_state(mut settings: TaaSettings, history_valid: bool) -> TaaSettings {
+    if !history_valid {
+        settings.history_weight = 0.0;
+    }
+    settings
+}
+
 /// TAA renderer with history buffer management
 pub struct TaaRenderer {
     settings: TaaSettings,
@@ -273,6 +280,12 @@ impl TaaRenderer {
         self.enabled
     }
 
+    /// False for the first enabled frame after construction, enable, resize,
+    /// or explicit invalidation. That frame is current-only.
+    pub fn history_valid(&self) -> bool {
+        !self.first_frame
+    }
+
     /// Invalidate temporal contents without reallocating GPU resources.
     pub fn reset_history(&mut self) {
         self.read_index = 0;
@@ -297,6 +310,14 @@ impl TaaRenderer {
 
     pub fn history_weight(&self) -> f32 {
         self.settings.history_weight
+    }
+
+    /// Stable allocation-ledger identities for the two ping-pong histories.
+    pub fn history_allocation_ids(&self) -> [u64; 2] {
+        [
+            self.history_textures[0].ledger_id(),
+            self.history_textures[1].ledger_id(),
+        ]
     }
 
     /// Get current history view (read)
@@ -364,11 +385,14 @@ impl TaaRenderer {
             return false;
         }
 
-        // Update settings buffer
+        // A reset is provenance invalidation, not merely an index rewind. The
+        // first post-reset frame must be current-only and populates history for
+        // the next frame.
+        let frame_settings = settings_for_history_state(self.settings, !self.first_frame);
         queue.write_buffer(
             &self.settings_buffer,
             0,
-            bytemuck::cast_slice(&[self.settings]),
+            bytemuck::cast_slice(&[frame_settings]),
         );
 
         let write_index = 1 - self.read_index;
@@ -428,5 +452,26 @@ impl TaaRenderer {
         self.first_frame = false;
 
         true
+    }
+}
+
+#[cfg(test)]
+mod history_tests {
+    use super::*;
+
+    #[test]
+    fn invalid_history_forces_current_only_then_valid_history_reuses_weight() {
+        let settings = TaaSettings {
+            history_weight: 0.93,
+            ..TaaSettings::default()
+        };
+        assert_eq!(
+            settings_for_history_state(settings, false).history_weight,
+            0.0
+        );
+        assert_eq!(
+            settings_for_history_state(settings, true).history_weight,
+            0.93
+        );
     }
 }

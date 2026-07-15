@@ -244,7 +244,7 @@ impl ViewerTerrainScene {
                             ty: wgpu::BindingType::Buffer {
                                 ty: wgpu::BufferBindingType::Uniform,
                                 has_dynamic_offset: false,
-                                min_binding_size: None,
+                                min_binding_size: wgpu::BufferSize::new(128),
                             },
                             count: None,
                         },
@@ -409,13 +409,29 @@ impl ViewerTerrainScene {
             None => return,
         };
 
+        let revision = terrain.revision;
+        let bind_groups = self.build_shadow_bind_groups_for(terrain);
+        if bind_groups.is_empty() {
+            return;
+        }
+        self.shadow_bind_groups = bind_groups;
+        self.shadow_bind_group_revision = revision;
+    }
+
+    /// Build the complete shadow binding set against a candidate terrain.
+    /// Callers may stage this before replacing `self.terrain`, so the old
+    /// texture owner and its bind groups stay alive until the atomic swap.
+    pub(super) fn build_shadow_bind_groups_for(
+        &self,
+        terrain: &ViewerTerrainData,
+    ) -> Vec<wgpu::BindGroup> {
         let csm = match self.csm_renderer.as_ref() {
             Some(c) => c,
-            None => return,
+            None => return Vec::new(),
         };
 
         if self.shadow_pipeline.is_none() || self.shadow_uniform_buffers.is_empty() {
-            return;
+            return Vec::new();
         }
 
         let cascade_count = csm.config.cascade_count as usize;
@@ -432,7 +448,7 @@ impl ViewerTerrainScene {
                             ty: wgpu::BindingType::Buffer {
                                 ty: wgpu::BufferBindingType::Uniform,
                                 has_dynamic_offset: false,
-                                min_binding_size: None,
+                                min_binding_size: wgpu::BufferSize::new(128),
                             },
                             count: None,
                         },
@@ -464,7 +480,7 @@ impl ViewerTerrainScene {
             ..Default::default()
         });
 
-        self.shadow_bind_groups.clear();
+        let mut bind_groups = Vec::with_capacity(cascade_count);
         for i in 0..cascade_count {
             if i >= self.shadow_uniform_buffers.len() {
                 break;
@@ -487,8 +503,9 @@ impl ViewerTerrainScene {
                     },
                 ],
             });
-            self.shadow_bind_groups.push(bind_group);
+            bind_groups.push(bind_group);
         }
+        bind_groups
     }
 
     /// P0.1/M1: Initialize WBOIT resources for given dimensions

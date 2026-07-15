@@ -194,6 +194,17 @@ impl UnifiedPickingSystem {
         self.layer_bvhs.get(&layer_id)
     }
 
+    pub fn cpu_bvh_bytes(&self) -> u64 {
+        self.layer_bvhs
+            .values()
+            .map(|layer| {
+                layer.cpu_nodes.capacity() * std::mem::size_of::<BvhNode>()
+                    + layer.cpu_triangles.capacity() * std::mem::size_of::<Triangle>()
+                    + layer.cpu_feature_ids.capacity() * std::mem::size_of::<u32>()
+            })
+            .sum::<usize>() as u64
+    }
+
     /// Set feature attributes
     pub fn set_feature_attributes(
         &mut self,

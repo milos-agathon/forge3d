@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 
 import forge3d as f3d
 from forge3d import presets
 from forge3d.config import load_renderer_config
+from forge3d.map_scene import _native_ibl_path
 
 
 def _terrain() -> f3d.TerrainSource:
@@ -60,6 +63,25 @@ def test_mapscene_resolves_named_lighting_preset_into_recipe_fields() -> None:
     report = scene.validate()
     assert report.status == "ok"
     assert report.supported_features["mapscene.presets"] == "supported"
+
+
+def test_mapscene_builtin_ibl_is_hermetic_when_optional_demo_assets_exist() -> None:
+    scene = f3d.MapScene(
+        terrain=_terrain(),
+        lighting=f3d.LightingPreset(name="rainier_showcase"),
+        output=f3d.OutputSpec(width=64, height=64, path="out.png"),
+    )
+
+    path, cleanup = _native_ibl_path(scene.recipe)
+
+    assert cleanup is False
+    assert Path(path).name == "forge3d-clear-sky-v1.hdr"
+    assert Path(path).read_bytes() == (
+        b"#?RADIANCE\n"
+        b"FORMAT=32-bit_rle_rgbe\n\n"
+        b"-Y 2 +X 2\n"
+        + bytes([180, 190, 205, 128]) * 4
+    )
 
 
 def test_mapscene_lighting_preset_overrides_are_recorded_as_info() -> None:

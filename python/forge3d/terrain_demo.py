@@ -94,18 +94,25 @@ def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
-def _builtin_ibl_path(name: Any) -> Path | None:
+def _builtin_ibl_path(name: Any, *, prefer_local_assets: bool = True) -> Path | None:
+    """Resolve a named demo IBL.
+
+    ``prefer_local_assets=False`` selects the packaged deterministic fallback
+    even when optional, untracked high-resolution demo assets exist in a
+    checkout. Signed MapScene recipes use that hermetic mode.
+    """
     key = _normalize_preset_name(str(name or ""))
     if key not in {"clearsky", "clear"}:
         return None
-    root = Path(__file__).resolve().parents[2]
-    for relative in (
-        Path("assets") / "hdri" / "venice_sunrise_4k.hdr",
-        Path("assets") / "hdri" / "brown_photostudio_02_4k.hdr",
-    ):
-        candidate = root / relative
-        if candidate.exists():
-            return candidate
+    if prefer_local_assets:
+        root = Path(__file__).resolve().parents[2]
+        for relative in (
+            Path("assets") / "hdri" / "venice_sunrise_4k.hdr",
+            Path("assets") / "hdri" / "brown_photostudio_02_4k.hdr",
+        ):
+            candidate = root / relative
+            if candidate.exists():
+                return candidate
 
     # The named source is a real built-in, not an optional local asset. Keep a
     # tiny deterministic Radiance environment available in clean installations.

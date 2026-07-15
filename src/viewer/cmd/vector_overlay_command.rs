@@ -3,6 +3,15 @@ use crate::viewer::Viewer;
 
 pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
     match cmd {
+        ViewerCmd::PickAt { x, y, shift, ctrl } => {
+            let count = viewer.pick_at_screen(*x, *y, *shift, *ctrl);
+            println!("[picking] IPC pick at ({x}, {y}) produced {count} results");
+            true
+        }
+        ViewerCmd::UpdateLabels => {
+            viewer.update_labels();
+            true
+        }
         ViewerCmd::AddVectorOverlay {
             id,
             name,
@@ -23,9 +32,24 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 .collect::<Vec<_>>();
             if let Err(err) = viewer.validate_content_points(world_points.iter().copied()) {
                 eprintln!("[vector_overlay] rejected '{name}': {err}");
+                viewer.reject_command(format!(
+                    "vector_overlay_rejected: name={name} {err} unchanged_state=true"
+                ));
                 return true;
             }
             let frame = viewer.prospective_frame_camera();
+            let vector_deltas = if let [first, second, ..] = vertices.as_slice() {
+                let first_world = glam::DVec3::from(first.position);
+                let second_world = glam::DVec3::from(second.position);
+                Some((
+                    (second_world - first_world).to_array(),
+                    (frame.anchor.to_render_vec3(second_world)
+                        - frame.anchor.to_render_vec3(first_world))
+                    .to_array(),
+                ))
+            } else {
+                None
+            };
             if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
                 use crate::viewer::terrain::vector_overlay::{
                     OverlayPrimitive, VectorOverlayLayer, VectorSourceVertex,
@@ -60,9 +84,16 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                     Ok(id) => id,
                     Err(e) => {
                         eprintln!("[vector_overlay] failed to add '{}': {e}", name);
+                        viewer.command_error = Some(format!(
+                            "vector_overlay_execution_failed: name={name} error={e}"
+                        ));
                         return true;
                     }
                 };
+                if let Some((source_delta, packed_delta)) = vector_deltas {
+                    viewer.last_vector_source_delta = source_delta;
+                    viewer.last_vector_packed_delta = packed_delta;
+                }
                 println!(
                     "[vector_overlay] Added '{}' with {} vertices (id={})",
                     name,
@@ -87,6 +118,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 }
             } else {
                 eprintln!("[vector_overlay] No terrain loaded - load terrain first");
+                viewer.reject_command("vector overlay requires loaded terrain");
             }
             true
         }

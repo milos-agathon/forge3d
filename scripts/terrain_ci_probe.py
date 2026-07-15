@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -62,14 +63,29 @@ def _build_overlay():
     return f3d.OverlayLayer.from_colormap1d(cmap, strength=1.0)
 
 
-def _adapter_is_ci_safe(probe: dict) -> bool:
+def _adapter_is_ci_safe(
+    probe: dict,
+    *,
+    required_backend: str | None = None,
+    require_nvidia: bool = False,
+) -> bool:
     if probe.get("status") != "ok":
         return False
     device_type = str(probe.get("device_type", "")).lower()
     if device_type not in HARDWARE_DEVICE_TYPES:
         return False
     name = str(probe.get("name", "")).lower()
-    return not any(token in name for token in SOFTWARE_ADAPTER_TOKENS)
+    if any(token in name for token in SOFTWARE_ADAPTER_TOKENS):
+        return False
+    if required_backend is not None and str(probe.get("backend", "")).lower() != required_backend.lower():
+        return False
+    if require_nvidia:
+        vendor = int(probe.get("vendor", 0))
+        if device_type != "discretegpu":
+            return False
+        if vendor != 0x10DE and "nvidia" not in name:
+            return False
+    return True
 
 
 def _build_params(*, with_aov: bool) -> object:
@@ -142,11 +158,24 @@ def _smoke_render(mode: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("terrain", "terrain-aov"), required=True)
+    parser.add_argument("--json", type=Path, help="write exact adapter/probe evidence")
+    parser.add_argument(
+        "--require-nvidia-vulkan",
+        action="store_true",
+        help="fail unless the selected adapter is physical NVIDIA on Vulkan",
+    )
     args = parser.parse_args()
 
     backend = os.environ.get("WGPU_BACKEND")
     probe = f3d.device_probe(backend)
     print(f"terrain-ci-probe backend={backend!r} probe={probe}")
+    if args.json is not None:
+        args.json.parent.mkdir(parents=True, exist_ok=True)
+        args.json.write_text(
+            json.dumps({"requested_backend": backend, "probe": probe}, indent=2, sort_keys=True)
+            + "\n",
+            encoding="utf-8",
+        )
 
     # Exit-code contract (CENSOR audit F-10). CI must not conflate "this
     # runner has no usable GPU" with "the renderer is broken":
@@ -155,7 +184,12 @@ def main() -> int:
     #       record an ABSENT marker and succeed.
     #   3 = CRASH: a CI-safe adapter is present but the terrain smoke render
     #       raised — a renderer defect that must FAIL the golden job.
-    if not _adapter_is_ci_safe(probe):
+    required_backend = "vulkan" if args.require_nvidia_vulkan else None
+    if not _adapter_is_ci_safe(
+        probe,
+        required_backend=required_backend,
+        require_nvidia=args.require_nvidia_vulkan,
+    ):
         print("terrain-ci-probe: ABSENT — no CI-safe hardware adapter on this runner.")
         return 2
 

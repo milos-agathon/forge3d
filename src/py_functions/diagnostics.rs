@@ -295,11 +295,30 @@ pub(crate) fn request_host_visible_allocation_for_test(bytes: u64, label: &str) 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 pub(crate) fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {
+    let requested_backend = match backend.as_deref().map(|s| s.to_ascii_lowercase()) {
+        Some(ref s) if s == "metal" => Some(wgpu::Backend::Metal),
+        Some(ref s) if s == "vulkan" => Some(wgpu::Backend::Vulkan),
+        Some(ref s) if s == "dx12" => Some(wgpu::Backend::Dx12),
+        Some(ref s) if s == "gl" => Some(wgpu::Backend::Gl),
+        Some(ref s) if s == "webgpu" => Some(wgpu::Backend::BrowserWebGpu),
+        Some(s) => {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "unrecognized GPU backend {s:?}; expected vulkan|dx12|metal|gl|webgpu"
+            )))
+        }
+        None => None,
+    };
     let requested_webgpu = backend
         .as_deref()
         .is_some_and(|name| name.eq_ignore_ascii_case("webgpu"));
     if !requested_webgpu {
         if let Some((info, software_fallback)) = crate::core::gpu::active_adapter_info() {
+            if requested_backend.is_some_and(|expected| info.backend != expected) {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "pre-initialized adapter backend {:?} is incompatible with requested backend {:?}",
+                    info.backend, requested_backend
+                )));
+            }
             let d = PyDict::new_bound(py);
             d.set_item("status", "ok")?;
             d.set_item("name", info.name)?;
@@ -307,6 +326,8 @@ pub(crate) fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<
             d.set_item("device", info.device)?;
             d.set_item("device_type", format!("{:?}", info.device_type))?;
             d.set_item("backend", format!("{:?}", info.backend))?;
+            d.set_item("driver", info.driver)?;
+            d.set_item("driver_info", info.driver_info)?;
             d.set_item("software_fallback", software_fallback)?;
             return Ok(d.into_py(py));
         }
@@ -338,6 +359,8 @@ pub(crate) fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<
         d.set_item("device", info.device)?;
         d.set_item("device_type", format!("{:?}", info.device_type))?;
         d.set_item("backend", format!("{:?}", info.backend))?;
+        d.set_item("driver", info.driver)?;
+        d.set_item("driver_info", info.driver_info)?;
         d.set_item(
             "software_fallback",
             info.device_type == wgpu::DeviceType::Cpu,

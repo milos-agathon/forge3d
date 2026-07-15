@@ -93,7 +93,10 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 .set_look_at(&viewer.camera_anchor, eye, target, up)
             {
                 Ok(()) => println!("Camera: eye={:?} target={:?} up={:?}", eye, target, up),
-                Err(err) => eprintln!("SetCamLookAt rejected: {err}"),
+                Err(err) => {
+                    eprintln!("SetCamLookAt rejected: {err}");
+                    viewer.reject_command(format!("camera_rejected: {err} unchanged_state=true"));
+                }
             }
             true
         }
@@ -122,6 +125,9 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 || !candidate_scale.is_finite()
             {
                 eprintln!("[viewer] SetTransform rejected transactionally");
+                viewer.reject_command(
+                    "object_transform_rejected: invalid finite/residual contract unchanged_state=true",
+                );
                 return true;
             }
             viewer.object_translation = candidate_translation;

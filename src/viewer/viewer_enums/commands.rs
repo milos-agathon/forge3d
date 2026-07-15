@@ -148,7 +148,8 @@ pub enum ViewerCmd {
     SetSceneReviewState { state: ViewerSceneReviewStateConfig },
     ApplySceneVariant { variant_id: String },
     SetReviewLayerVisible { layer_id: String, visible: bool },
-    PollPickEvents, SetLassoMode { enabled: bool }, GetLassoState, ClearSelection,
+    PickAt { x: u32, y: u32, shift: bool, ctrl: bool }, PollPickEvents,
+    UpdateLabels, SetLassoMode { enabled: bool }, GetLassoState, ClearSelection,
     SetOitEnabled { enabled: bool, mode: String }, GetOitMode, SetTaaEnabled { enabled: bool }, GetTaaStatus,
     SetTaaParams { history_weight: Option<f32>, jitter_scale: Option<f32>, enable_jitter: Option<bool> },
 }

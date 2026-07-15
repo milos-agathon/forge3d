@@ -361,12 +361,12 @@ pub fn repack_source_vertices(
             if let Some(terrain) = terrain {
                 let u = (world.x - terrain.world_origin_xz.x) / terrain.world_span_xz.x;
                 let v = (world.z - terrain.world_origin_xz.y) / terrain.world_span_xz.y;
-                let uv = crate::camera::Anchor::new().to_render_direction(DVec3::new(u, v, 0.0));
+                let uv = crate::camera::Anchor::direction_to_render(DVec3::new(u, v, 0.0));
                 let height =
                     sample_heightmap_bilinear(&terrain.heightmap, terrain.dimensions, uv.x, uv.y);
                 world.y +=
                     f64::from((height - terrain.domain.0) * terrain.z_scale + layer.drape_offset);
-                let span = crate::camera::Anchor::new().to_render_direction(DVec3::new(
+                let span = crate::camera::Anchor::direction_to_render(DVec3::new(
                     terrain.world_span_xz.x,
                     terrain.world_span_xz.y,
                     0.0,

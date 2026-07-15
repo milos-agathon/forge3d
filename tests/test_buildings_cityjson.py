@@ -8,6 +8,7 @@ import json
 import tempfile
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 pytestmark = pytest.mark.usefixtures("pro_license")
@@ -83,6 +84,49 @@ def test_cityjson_simple_cube():
                 assert b.height == 5.0
     finally:
         cityjson_path.unlink()
+
+
+def test_public_cityjson_helper_keeps_earth_scale_submillimetre_vertices_f64(tmp_path):
+    """World vertices narrow only after an anchor-relative render packing step."""
+    from forge3d.buildings import add_buildings_cityjson
+
+    cityjson = {
+        "type": "CityJSON",
+        "version": "1.1",
+        "transform": {
+            "scale": [0.00025, 1.0, 1.0],
+            "translate": [6_378_137.0, 0.0, 0.0],
+        },
+        "vertices": [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        "CityObjects": {
+            "precision": {
+                "type": "Building",
+                "geometry": [
+                    {
+                        "type": "Solid",
+                        "lod": "1",
+                        "boundaries": [
+                            [
+                                [[0, 1, 2]],
+                                [[0, 3, 1]],
+                                [[0, 2, 3]],
+                                [[1, 3, 2]],
+                            ]
+                        ],
+                    }
+                ],
+            }
+        },
+    }
+    path = tmp_path / "precision.city.json"
+    path.write_text(json.dumps(cityjson), encoding="utf-8")
+
+    layer = add_buildings_cityjson(path)
+    positions = layer.buildings[0].positions.reshape((-1, 3))
+    assert positions.dtype == np.float64
+    xs = np.unique(positions[:, 0])
+    assert np.any(xs == 6_378_137.0)
+    assert np.any(xs == 6_378_137.000_25)
 
 
 def test_cityjson_with_crs():

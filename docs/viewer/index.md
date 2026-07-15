@@ -42,8 +42,18 @@ previewable source data via `src=`.
 | Load raster overlay | `load_overlay()` |
 | Load point cloud | `load_point_cloud()` |
 | Tune point-cloud display | `set_point_cloud_params()` |
+| Pick the rendered frame | `pick_at()` |
+| Recompute labels for the frozen frame | `update_labels()` |
 | Save an image | `snapshot()` |
 | Send unsupported or advanced commands | `send_ipc()` |
+
+Public coordinate contracts are exported as `forge3d.WorldPosition` (three
+finite f64 world coordinates), `forge3d.VectorOverlayVertex` (XYZ, normalized
+RGBA, and a u32 feature ID: exactly eight lanes), and
+`forge3d.NormalizedExtent` (`u0, v0, u1, v1` in `[0, 1]` with positive span).
+The viewer keeps world positions as f64 until the frame anchor is subtracted.
+Every pick result reports an absolute f64 viewer-world
+`(X, display Y, Z)` position, never an anchor-relative render coordinate.
 
 The examples in `terrain_viewer_interactive.py`, `swiss_terrain_landcover_viewer.py`,
 `pointcloud_viewer_interactive.py`, `terrain_camera_rigs_demo.py`, and
@@ -57,7 +67,7 @@ that do not have convenience wrappers yet, such as:
 
 - custom vector overlays
 - label placement and typography
-- picking and lasso selection
+- lasso selection and lower-level pick-event polling
 - bundle and review-layer commands
 - lower-level terrain effect toggles used by some examples
 
@@ -70,9 +80,9 @@ with f3d.open_viewer_async(terrain_path=f3d.mini_dem_path()) as viewer:
             "cmd": "add_vector_overlay",
             "name": "ridge-line",
             "vertices": [
-                [0.0, 0.0, 0.0, 0.95, 0.3, 0.2, 1.0],
-                [50.0, 20.0, 0.0, 0.95, 0.3, 0.2, 1.0],
-                [90.0, 35.0, 0.0, 0.95, 0.3, 0.2, 1.0],
+                [0.0, 0.0, 0.0, 0.95, 0.3, 0.2, 1.0, 16_777_217],
+                [50.0, 20.0, 0.0, 0.95, 0.3, 0.2, 1.0, 16_777_217],
+                [90.0, 35.0, 0.0, 0.95, 0.3, 0.2, 1.0, 16_777_217],
             ],
             "indices": [0, 1, 1, 2],
             "primitive": "lines",

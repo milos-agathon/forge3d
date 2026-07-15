@@ -565,8 +565,18 @@ class TestViewerHandleHelpers:
         handle = ViewerHandle.__new__(ViewerHandle)
         handle._timeout = 1.0  # type: ignore[attr-defined]
         out = tmp_path / "snap.png"
+        sent: list[str] = []
 
         def fake_send(cmd: dict[str, Any]) -> dict[str, Any]:
+            sent.append(cmd["cmd"])
+            if cmd["cmd"] == "get_stats":
+                return {
+                    "ok": True,
+                    "stats": {
+                        "applied_command_revision": 1,
+                        "rendered_frame_revision": 1,
+                    },
+                }
             assert cmd["cmd"] == "snapshot"
 
             def writer() -> None:
@@ -585,6 +595,7 @@ class TestViewerHandleHelpers:
         assert out.exists()
         assert out.read_bytes() == b"png"
         assert elapsed >= 0.15
+        assert sent == ["snapshot", "get_stats", "get_stats"]
 
     def test_render_animation_forwards_target_bearing_states(self, tmp_path):
         """render_animation keeps using the frame loop while forwarding state.target."""

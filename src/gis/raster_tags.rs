@@ -150,32 +150,79 @@ pub(crate) fn read_transform<R: std::io::Read + std::io::Seek>(
         let values = values
             .into_f64_vec()
             .map_err(|err| GisError::InvalidTransform(err.to_string()))?;
-        if values.len() < 16 {
+        if values.len() != 16 {
+            return Err(GisError::InvalidTransform(format!(
+                "ModelTransformationTag must contain exactly 16 doubles, found {}",
+                values.len()
+            )));
+        }
+        if values.iter().any(|value| !value.is_finite()) {
             return Err(GisError::InvalidTransform(
-                "ModelTransformationTag must contain 16 doubles".to_string(),
+                "ModelTransformationTag coefficients must be finite".to_string(),
             ));
         }
-        return AffineTransform::new([
+        if values[2] != 0.0
+            || values[6] != 0.0
+            || values[8] != 0.0
+            || values[9] != 0.0
+            || values[12] != 0.0
+            || values[13] != 0.0
+            || values[14] != 0.0
+            || values[15] != 1.0
+        {
+            return Err(GisError::InvalidTransform(
+                "ModelTransformationTag is not a finite 2D affine transform".to_string(),
+            ));
+        }
+        let transform = AffineTransform::new([
             values[0], values[1], values[3], values[4], values[5], values[7],
-        ])
-        .map(Some);
+        ])?;
+        validate_north_up_transform(transform)?;
+        return Ok(Some(transform));
     }
 
-    let pixel_scale = match decoder.find_tag(Tag::ModelPixelScaleTag)? {
-        Some(value) => value
-            .into_f64_vec()
-            .map_err(|err| GisError::InvalidTransform(err.to_string()))?,
-        None => return Ok(None),
+    // Read both tags before deciding absence. A single tag is malformed
+    // metadata, not the legacy local-coordinate fallback.
+    let pixel_scale = decoder
+        .find_tag(Tag::ModelPixelScaleTag)?
+        .map(|value| {
+            value
+                .into_f64_vec()
+                .map_err(|err| GisError::InvalidTransform(err.to_string()))
+        })
+        .transpose()?;
+    let tiepoints = decoder
+        .find_tag(Tag::ModelTiepointTag)?
+        .map(|value| {
+            value
+                .into_f64_vec()
+                .map_err(|err| GisError::InvalidTransform(err.to_string()))
+        })
+        .transpose()?;
+    let (pixel_scale, tiepoints) = match (pixel_scale, tiepoints) {
+        (None, None) => return Ok(None),
+        (Some(_), None) => {
+            return Err(GisError::InvalidTransform(
+                "ModelPixelScaleTag is present but ModelTiepointTag is missing".to_string(),
+            ))
+        }
+        (None, Some(_)) => {
+            return Err(GisError::InvalidTransform(
+                "ModelTiepointTag is present but ModelPixelScaleTag is missing".to_string(),
+            ))
+        }
+        (Some(pixel_scale), Some(tiepoints)) => (pixel_scale, tiepoints),
     };
-    let tiepoints = match decoder.find_tag(Tag::ModelTiepointTag)? {
-        Some(value) => value
-            .into_f64_vec()
-            .map_err(|err| GisError::InvalidTransform(err.to_string()))?,
-        None => return Ok(None),
-    };
-    if pixel_scale.len() < 2 || tiepoints.len() < 6 {
+    // The viewer supports exactly one 2D scale/tiepoint transform. Accepting
+    // truncated or additional records would silently discard metadata and
+    // make the selected placement ambiguous.
+    if pixel_scale.len() != 3 || tiepoints.len() != 6 {
         return Err(GisError::InvalidTransform(
-            "GeoTIFF pixel scale/tiepoint tags are incomplete".to_string(),
+            format!(
+                "GeoTIFF pixel scale/tiepoint tags must contain exactly 3 and 6 doubles, found {} and {}",
+                pixel_scale.len(),
+                tiepoints.len()
+            ),
         ));
     }
     let scale_x = pixel_scale[0];
@@ -184,15 +231,49 @@ pub(crate) fn read_transform<R: std::io::Read + std::io::Seek>(
     let raster_j = tiepoints[1];
     let model_x = tiepoints[3];
     let model_y = tiepoints[4];
-    AffineTransform::new([
+    if pixel_scale.iter().any(|value| !value.is_finite())
+        || tiepoints.iter().any(|value| !value.is_finite())
+    {
+        return Err(GisError::InvalidTransform(
+            "GeoTIFF pixel scale/tiepoint coefficients must be finite".to_string(),
+        ));
+    }
+    if scale_x <= 0.0 || scale_y <= 0.0 {
+        return Err(GisError::InvalidTransform(
+            "GeoTIFF pixel scales must be positive (no mirrored or south-up transforms)"
+                .to_string(),
+        ));
+    }
+    let transform = AffineTransform::new([
         scale_x,
         0.0,
         model_x - raster_i * scale_x,
         0.0,
         -scale_y,
         model_y + raster_j * scale_y,
-    ])
-    .map(Some)
+    ])?;
+    validate_north_up_transform(transform)?;
+    Ok(Some(transform))
+}
+
+fn validate_north_up_transform(transform: AffineTransform) -> GisResult<()> {
+    if transform.is_rotated_or_sheared() {
+        return Err(GisError::InvalidTransform(
+            "rotated or sheared GeoTIFF transforms are not supported by terrain ingestion"
+                .to_string(),
+        ));
+    }
+    if transform.a <= 0.0 {
+        return Err(GisError::InvalidTransform(
+            "mirrored or zero-span GeoTIFF X transforms are not supported".to_string(),
+        ));
+    }
+    if transform.e >= 0.0 {
+        return Err(GisError::InvalidTransform(
+            "south-up or zero-span GeoTIFF Y transforms are not supported".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn read_crs<R: std::io::Read + std::io::Seek>(
@@ -345,4 +426,192 @@ fn looks_like_wkt(value: &str) -> bool {
     ["GEOGCRS[", "PROJCRS[", "GEOGCS[", "PROJCS["]
         .iter()
         .any(|prefix| upper.starts_with(prefix))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{read_crs, read_transform};
+    use std::io::Cursor;
+    use tiff::decoder::Decoder;
+    use tiff::encoder::{colortype, TiffEncoder};
+    use tiff::tags::Tag;
+
+    fn decoder_with_tags(
+        pixel_scale: Option<&[f64]>,
+        tiepoint: Option<&[f64]>,
+        matrix: Option<&[f64]>,
+        epsg: Option<u16>,
+    ) -> Decoder<Cursor<Vec<u8>>> {
+        let mut bytes = Cursor::new(Vec::new());
+        {
+            let mut encoder = TiffEncoder::new(&mut bytes).unwrap();
+            let mut image = encoder.new_image::<colortype::Gray8>(1, 1).unwrap();
+            if let Some(values) = pixel_scale {
+                image
+                    .encoder()
+                    .write_tag(Tag::ModelPixelScaleTag, values)
+                    .unwrap();
+            }
+            if let Some(values) = tiepoint {
+                image
+                    .encoder()
+                    .write_tag(Tag::ModelTiepointTag, values)
+                    .unwrap();
+            }
+            if let Some(values) = matrix {
+                image
+                    .encoder()
+                    .write_tag(Tag::ModelTransformationTag, values)
+                    .unwrap();
+            }
+            if let Some(code) = epsg {
+                let geokeys = [1_u16, 1, 0, 1, 3072, 0, 1, code];
+                image
+                    .encoder()
+                    .write_tag(Tag::GeoKeyDirectoryTag, &geokeys[..])
+                    .unwrap();
+            }
+            image.write_data(&[0]).unwrap();
+        }
+        bytes.set_position(0);
+        Decoder::new(bytes).unwrap()
+    }
+
+    fn valid_matrix() -> [f64; 16] {
+        [
+            2.0,
+            0.0,
+            0.0,
+            500_000.0,
+            0.0,
+            -3.0,
+            0.0,
+            5_500_000.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ]
+    }
+
+    #[test]
+    fn transform_absence_is_the_only_local_fallback() {
+        let mut decoder = decoder_with_tags(None, None, None, None);
+        assert_eq!(read_transform(&mut decoder).unwrap(), None);
+    }
+
+    #[test]
+    fn paired_scale_and_tiepoint_produce_north_up_affine() {
+        let mut decoder = decoder_with_tags(
+            Some(&[2.0, 3.0, 0.0]),
+            Some(&[0.0, 0.0, 0.0, 500_000.0, 5_500_000.0, 0.0]),
+            None,
+            None,
+        );
+        assert_eq!(
+            read_transform(&mut decoder).unwrap().unwrap().tuple(),
+            (2.0, 0.0, 500_000.0, 0.0, -3.0, 5_500_000.0)
+        );
+    }
+
+    #[test]
+    fn partial_scale_or_tiepoint_metadata_is_rejected() {
+        let mut scale_only = decoder_with_tags(Some(&[1.0, 1.0, 0.0]), None, None, None);
+        assert!(read_transform(&mut scale_only).is_err());
+        let mut tiepoint_only =
+            decoder_with_tags(None, Some(&[0.0, 0.0, 0.0, 0.0, 1.0, 0.0]), None, None);
+        assert!(read_transform(&mut tiepoint_only).is_err());
+    }
+
+    #[test]
+    fn every_rejected_scale_tiepoint_shape_leaves_resource_ledger_exactly_stable() {
+        let before = crate::core::resource_tracker::ledger_snapshot();
+        let cases: &[(Option<&[f64]>, Option<&[f64]>)] = &[
+            (Some(&[1.0, 1.0]), Some(&[0.0; 6])),
+            (Some(&[1.0, 1.0, 0.0, 9.0]), Some(&[0.0; 6])),
+            (Some(&[1.0, 1.0, 0.0]), Some(&[0.0; 5])),
+            (Some(&[1.0, 1.0, 0.0]), Some(&[0.0; 12])),
+            (Some(&[f64::NAN, 1.0, 0.0]), Some(&[0.0; 6])),
+            (Some(&[-1.0, 1.0, 0.0]), Some(&[0.0; 6])),
+            (Some(&[1.0, 0.0, 0.0]), Some(&[0.0; 6])),
+        ];
+        for (pixel_scale, tiepoint) in cases {
+            let mut decoder = decoder_with_tags(*pixel_scale, *tiepoint, None, None);
+            assert!(read_transform(&mut decoder).is_err());
+            let after = crate::core::resource_tracker::ledger_snapshot();
+            assert_eq!(
+                after.current_host_visible_bytes,
+                before.current_host_visible_bytes
+            );
+            assert_eq!(
+                after.current_device_local_bytes,
+                before.current_device_local_bytes
+            );
+            assert_eq!(after.by_label, before.by_label);
+        }
+    }
+
+    #[test]
+    fn transformation_length_must_be_exactly_sixteen() {
+        for len in [15, 17] {
+            let values = vec![0.0; len];
+            let mut decoder = decoder_with_tags(None, None, Some(&values), None);
+            assert!(
+                read_transform(&mut decoder).is_err(),
+                "accepted length {len}"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_orientation_and_span_are_rejected() {
+        let mut cases = Vec::new();
+        let mut non_finite = valid_matrix();
+        non_finite[0] = f64::NAN;
+        cases.push(non_finite);
+        let mut mirrored = valid_matrix();
+        mirrored[0] = -2.0;
+        cases.push(mirrored);
+        let mut south_up = valid_matrix();
+        south_up[5] = 3.0;
+        cases.push(south_up);
+        let mut rotated = valid_matrix();
+        rotated[1] = 0.25;
+        cases.push(rotated);
+        let mut sheared = valid_matrix();
+        sheared[4] = 0.25;
+        cases.push(sheared);
+        let mut zero_span = valid_matrix();
+        zero_span[0] = 0.0;
+        cases.push(zero_span);
+
+        for matrix in cases {
+            let mut decoder = decoder_with_tags(None, None, Some(&matrix), None);
+            assert!(read_transform(&mut decoder).is_err(), "accepted {matrix:?}");
+        }
+    }
+
+    #[test]
+    fn valid_transform_without_crs_is_unlabeled_cartesian() {
+        let matrix = valid_matrix();
+        let mut decoder = decoder_with_tags(None, None, Some(&matrix), None);
+        assert!(read_transform(&mut decoder).unwrap().is_some());
+        assert!(read_crs(&mut decoder).unwrap().is_none());
+    }
+
+    #[test]
+    fn arbitrary_epsg_authority_is_preserved_without_invented_wkt() {
+        let matrix = valid_matrix();
+        let mut decoder = decoder_with_tags(None, None, Some(&matrix), Some(32633));
+        assert!(read_transform(&mut decoder).unwrap().is_some());
+        let (wkt, authority) = read_crs(&mut decoder).unwrap().unwrap();
+        assert!(wkt.is_none());
+        let authority = authority.unwrap();
+        assert_eq!(authority.get("name").map(String::as_str), Some("EPSG"));
+        assert_eq!(authority.get("code").map(String::as_str), Some("32633"));
+    }
 }

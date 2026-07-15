@@ -219,6 +219,19 @@ impl ViewerTerrainScene {
             .as_ref()
             .is_some_and(crate::core::taa::TaaRenderer::is_enabled)
     }
+
+    pub(crate) fn taa_history_valid(&self) -> bool {
+        self.taa_renderer
+            .as_ref()
+            .is_some_and(crate::core::taa::TaaRenderer::history_valid)
+    }
+
+    pub(crate) fn taa_history_allocation_ids(&self) -> [u64; 2] {
+        self.taa_renderer.as_ref().map_or(
+            [0, 0],
+            crate::core::taa::TaaRenderer::history_allocation_ids,
+        )
+    }
 }
 
 /// Simple terrain scene for interactive viewer
@@ -301,6 +314,8 @@ pub struct ViewerTerrainScene {
     pub(super) shadow_pipeline: Option<wgpu::RenderPipeline>,
     pub(super) shadow_uniform_buffers: Vec<TrackedBuffer>, // One per cascade
     pub(super) shadow_bind_groups: Vec<wgpu::BindGroup>,   // One per cascade
+    /// Terrain revision captured by every live shadow bind group.
+    pub(crate) shadow_bind_group_revision: u64,
 
     // P1.4: TAA support for terrain viewer
     pub(super) taa_renderer: Option<crate::core::taa::TaaRenderer>,

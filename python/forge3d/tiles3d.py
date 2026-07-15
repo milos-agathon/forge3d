@@ -58,6 +58,22 @@ class BoundingVolume:
         return 1.0
 
 
+def _transform_bounding_volume(volume: BoundingVolume, matrix: np.ndarray) -> BoundingVolume:
+    """Transform a tile bound in f64 for the pure-Python traversal fallback."""
+    if volume.volume_type == "box":
+        center = matrix @ np.asarray([*volume.data[:3], 1.0], dtype=np.float64)
+        axes = []
+        for offset in (3, 6, 9):
+            axis = matrix @ np.asarray([*volume.data[offset:offset + 3], 0.0], dtype=np.float64)
+            axes.extend(axis[:3].tolist())
+        return BoundingVolume("box", [*center[:3].tolist(), *axes])
+    if volume.volume_type == "sphere":
+        center = matrix @ np.asarray([*volume.data[:3], 1.0], dtype=np.float64)
+        scale = max(np.linalg.norm(matrix[:3, axis]) for axis in range(3))
+        return BoundingVolume("sphere", [*center[:3].tolist(), float(volume.data[3]) * float(scale)])
+    return volume
+
+
 @dataclass
 class TileContent:
     """Content description for a tile."""
@@ -152,6 +168,9 @@ class Tiles3dDataset:
                 "resolved_path": str(self.tileset.resolve_uri(tile.tile.content_uri() or "")),
                 "sse": float(tile.sse),
                 "depth": int(tile.depth),
+                "world_transform": tile.world_transform.reshape(16, order="F").tolist(),
+                "world_bounds_center": list(tile.world_bounds.center()),
+                "world_bounds_radius": float(tile.world_bounds.radius()),
             }
             for tile in renderer.get_visible_tiles(self.tileset, camera_position)
         ]
@@ -227,6 +246,8 @@ def load_tileset(path: str | Path) -> Tileset:
 class VisibleTile:
     """Result of traversal for a single tile."""
     tile: Tile
+    world_transform: np.ndarray
+    world_bounds: BoundingVolume
     sse: float
     depth: int
 
@@ -300,6 +321,7 @@ class Tiles3dRenderer:
             tileset.root,
             camera_position,
             tileset.root.refine,
+            np.eye(4, dtype=np.float64),
             0,
             result,
         )
@@ -310,31 +332,39 @@ class Tiles3dRenderer:
         tile: Tile,
         camera_pos: Tuple[float, float, float],
         parent_refine: str,
+        parent_transform: np.ndarray,
         depth: int,
         result: List[VisibleTile],
     ):
         if depth > self.max_depth:
             return
 
-        sse = self.compute_sse(tile.geometric_error, tile.bounding_volume, camera_pos)
+        local_transform = (
+            np.asarray(tile.transform, dtype=np.float64).reshape((4, 4), order="F")
+            if tile.transform is not None
+            else np.eye(4, dtype=np.float64)
+        )
+        world_transform = parent_transform @ local_transform
+        world_bounds = _transform_bounding_volume(tile.bounding_volume, world_transform)
+        sse = self.compute_sse(tile.geometric_error, world_bounds, camera_pos)
         refine = tile.refine or parent_refine
         should_refine = sse > self.sse_threshold and tile.children
 
         if should_refine:
             if refine == "REPLACE":
                 for child in tile.children:
-                    self._traverse(child, camera_pos, refine, depth + 1, result)
+                    self._traverse(child, camera_pos, refine, world_transform, depth + 1, result)
             else:  # ADD
                 if tile.has_content():
-                    result.append(VisibleTile(tile=tile, sse=sse, depth=depth))
+                    result.append(VisibleTile(tile=tile, world_transform=world_transform, world_bounds=world_bounds, sse=sse, depth=depth))
                 for child in tile.children:
-                    self._traverse(child, camera_pos, refine, depth + 1, result)
+                    self._traverse(child, camera_pos, refine, world_transform, depth + 1, result)
         else:
             if tile.has_content():
-                result.append(VisibleTile(tile=tile, sse=sse, depth=depth))
+                result.append(VisibleTile(tile=tile, world_transform=world_transform, world_bounds=world_bounds, sse=sse, depth=depth))
             elif tile.children:
                 for child in tile.children:
-                    self._traverse(child, camera_pos, refine, depth + 1, result)
+                    self._traverse(child, camera_pos, refine, world_transform, depth + 1, result)
 
     def cache_stats(self) -> Dict[str, int]:
         """Return cache statistics."""
@@ -423,7 +453,25 @@ def decode_pnts(data: bytes) -> Dict[str, Any]:
     if callable(native_decode):
         decoded = dict(native_decode(data))
         point_count = int(decoded.get("point_count", 0))
-        decoded["positions"] = np.asarray(decoded["positions"], dtype=np.float32).reshape(point_count, 3)
+        decoded["positions"] = np.asarray(decoded["positions"], dtype=np.float64).reshape(point_count, 3)
+        if decoded.get("relative_positions") is not None:
+            decoded["relative_positions"] = np.asarray(
+                decoded["relative_positions"], dtype=np.float64
+            ).reshape(point_count, 3)
+        else:
+            # Wheels predating the explicit dual-coordinate native contract
+            # return tile-relative positions only. Preserve compatibility at
+            # the Python boundary without ever narrowing the absolute result.
+            decoded["relative_positions"] = decoded["positions"].copy()
+            if len(data) >= 28 and data[:4] == b"pnts":
+                ft_json_len = int.from_bytes(data[12:16], "little")
+                feature_table = json.loads(data[28 : 28 + ft_json_len].decode("utf-8"))
+                rtc_center = feature_table.get("RTC_CENTER")
+                if rtc_center is not None:
+                    decoded["rtc_center"] = tuple(float(value) for value in rtc_center)
+                    decoded["positions"] = decoded["positions"] + np.asarray(
+                        rtc_center, dtype=np.float64
+                    )
         if decoded.get("colors") is not None:
             decoded["colors"] = np.asarray(decoded["colors"], dtype=np.uint8).reshape(point_count, 3)
         if decoded.get("colors_rgba") is not None:
@@ -458,13 +506,19 @@ def decode_pnts(data: bytes) -> Dict[str, Any]:
     points_length = ft_json.get("POINTS_LENGTH", 0)
 
     # Extract positions
-    positions = np.zeros((points_length, 3), dtype=np.float32)
+    positions = np.zeros((points_length, 3), dtype=np.float64)
     if "POSITION" in ft_json:
         pos_offset = ft_json["POSITION"].get("byteOffset", 0)
         positions = np.frombuffer(
             ft_bin[pos_offset:pos_offset + points_length * 12],
             dtype=np.float32
-        ).reshape(-1, 3)
+        ).astype(np.float64).reshape(-1, 3)
+
+    relative_positions = positions.copy()
+    rtc_center = ft_json.get("RTC_CENTER")
+    if rtc_center is not None:
+        rtc = np.asarray(rtc_center, dtype=np.float64).reshape(3)
+        positions = positions + rtc
 
     colors = None
     if "RGB" in ft_json:
@@ -476,6 +530,8 @@ def decode_pnts(data: bytes) -> Dict[str, Any]:
 
     return {
         "positions": positions,
+        "relative_positions": relative_positions,
+        "rtc_center": rtc_center,
         "colors": colors,
         "normals": None,
         "point_count": points_length,

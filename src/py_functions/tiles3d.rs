@@ -81,6 +81,12 @@ pub(crate) fn tiles3d_traverse_py(
         )?;
         d.set_item("sse", tile.sse)?;
         d.set_item("depth", tile.depth)?;
+        d.set_item(
+            "world_transform",
+            tile.world_transform.to_cols_array().to_vec(),
+        )?;
+        d.set_item("world_bounds_center", tile.world_bounds.center().to_array())?;
+        d.set_item("world_bounds_radius", tile.world_bounds.radius())?;
         out.push(d.into());
     }
     Ok(out)
@@ -110,7 +116,16 @@ pub(crate) fn decode_pnts_py(py: Python<'_>, data: &[u8]) -> PyResult<PyObject> 
             .transpose()
             .unwrap_or_default(),
     )?;
-    d.set_item("positions", PyArray1::from_vec_bound(py, payload.positions))?;
+    let relative_positions = payload.positions.clone();
+    let world_positions = payload.world_positions();
+    d.set_item("positions", PyArray1::from_vec_bound(py, world_positions))?;
+    d.set_item(
+        "relative_positions",
+        PyArray1::from_vec_bound(py, relative_positions),
+    )?;
+    d.set_item("rtc_center", payload.rtc_center)?;
+    d.set_item("quantized_volume_offset", payload.quantized_volume_offset)?;
+    d.set_item("quantized_volume_scale", payload.quantized_volume_scale)?;
     d.set_item(
         "colors",
         payload

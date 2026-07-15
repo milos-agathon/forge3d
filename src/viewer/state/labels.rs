@@ -73,8 +73,26 @@ impl Viewer {
     /// Called automatically during render, but can be called manually.
     pub fn update_labels(&mut self) {
         let frame = self.current_frame_camera();
+        self.update_labels_for_frame(frame);
+    }
+
+    /// One Viewer-owned label update path for both automatic and manual calls.
+    /// The frozen frame, render eye, viewport, selection, collision index, and
+    /// pick boxes therefore cannot diverge between those entry points.
+    pub(crate) fn update_labels_for_frame(
+        &mut self,
+        frame: crate::viewer::viewer_types::FrameCamera,
+    ) -> usize {
+        let selected_u32 = self.unified_picking.selection_manager().get_selection();
+        let selected_ids: std::collections::HashSet<u64> =
+            selected_u32.iter().map(|&id| u64::from(id)).collect();
         let view_proj = frame.view_projection(self.config.width, self.config.height);
-        self.label_manager.update(view_proj);
+        self.label_manager.update_with_camera_anchored(
+            view_proj,
+            Some(frame.render_eye()),
+            Some(&selected_ids),
+            &frame.anchor,
+        )
     }
 
     /// Resize the label collision grid for new screen dimensions.

@@ -123,6 +123,7 @@ impl DensityVolumeAtlasGpu {
         });
 
         let mut report = data.report;
+        report.atlas_allocation_id = texture.ledger_id();
         report.raymarch_steps = raymarch_steps;
         report.half_res = half_res;
 
@@ -236,6 +237,7 @@ pub fn build_density_volume_atlas_data(
             atlas_dimensions: [atlas_width, atlas_height, atlas_depth],
             total_voxels,
             texture_bytes,
+            atlas_allocation_id: 0,
             memory_budget_bytes: DENSITY_VOLUME_MEMORY_BUDGET_BYTES,
             raymarch_steps: 0,
             half_res: false,
@@ -280,9 +282,8 @@ fn fingerprint_configs(context: TerrainVolumeContext<'_>, configs: &[DensityVolu
     for value in context.contract_extent {
         value.to_bits().hash(&mut hasher);
     }
-    for value in context.render_origin_span {
-        value.to_bits().hash(&mut hasher);
-    }
+    // render_origin_span is anchor-relative metadata, not voxel content.
+    // Rebasing updates GPU metadata/uniforms but must not replace the atlas.
     context.domain.0.to_bits().hash(&mut hasher);
     context.domain.1.to_bits().hash(&mut hasher);
     context.z_scale.to_bits().hash(&mut hasher);
@@ -632,5 +633,18 @@ mod tests {
         // Render center = (300, 10, 90), render size = (200, 6, 100).
         assert_eq!(metadata.min_corner, [200.0, 7.0, 40.0]);
         assert_eq!(metadata.inv_size, [0.005, 1.0 / 6.0, 0.01]);
+    }
+
+    #[test]
+    fn rebases_change_only_density_metadata_not_voxel_identity() {
+        let before = build_density_volume_atlas_data(flat_context(), &[config("plume")]).unwrap();
+        let mut rebased_context = flat_context();
+        rebased_context.render_origin_span = [-10_000.0, 25_000.0, 8.0, 8.0];
+        let after = build_density_volume_atlas_data(rebased_context, &[config("plume")]).unwrap();
+
+        assert_eq!(before.fingerprint, after.fingerprint);
+        assert_eq!(before.dimensions, after.dimensions);
+        assert_eq!(before.voxels, after.voxels);
+        assert_ne!(before.metadata[0].min_corner, after.metadata[0].min_corner);
     }
 }

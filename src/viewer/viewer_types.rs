@@ -164,6 +164,15 @@ pub struct FogCameraUniforms {
     pub _pad_end: f32,
 }
 
+/// Viewer-only generic-object shadow ABI. This deliberately does not reuse the
+/// signed offscreen Scene's 112-byte terrain shadow ABI.
+#[repr(C, align(16))]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct ViewerShadowUniforms {
+    pub light_view_proj: [[f32; 4]; 4],
+    pub object_model: [[f32; 4]; 4],
+}
+
 /// Std140-compatible upsample params for fog_upsample.wgsl
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -175,12 +184,23 @@ pub struct FogUpsampleParamsStd140 {
 
 #[cfg(test)]
 mod fog_uniform_tests {
-    use super::{FogCameraUniforms, VolumetricUniformsStd140};
+    use super::{FogCameraUniforms, ViewerShadowUniforms, VolumetricUniformsStd140};
 
     #[test]
     fn fog_uniforms_match_wgsl_sizes() {
         assert_eq!(std::mem::size_of::<VolumetricUniformsStd140>(), 96);
         assert_eq!(std::mem::size_of::<FogCameraUniforms>(), 368);
+    }
+
+    #[test]
+    fn viewer_shadow_uniforms_match_wgsl_abi() {
+        assert_eq!(std::mem::size_of::<ViewerShadowUniforms>(), 128);
+        assert_eq!(std::mem::align_of::<ViewerShadowUniforms>(), 16);
+        assert_eq!(
+            std::mem::offset_of!(ViewerShadowUniforms, light_view_proj),
+            0
+        );
+        assert_eq!(std::mem::offset_of!(ViewerShadowUniforms, object_model), 64);
     }
 }
 

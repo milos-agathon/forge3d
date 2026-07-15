@@ -10,6 +10,69 @@ impl ViewerTerrainScene {
         }
     }
 
+    pub(crate) fn stage_review_raster_replacement(
+        &self,
+        removed_ids: &[u32],
+        overlays: &[crate::viewer::scene_review::ViewerRasterOverlayConfig],
+    ) -> Result<(super::super::overlay::OverlayStack, Vec<u32>)> {
+        let additions = overlays
+            .iter()
+            .map(|overlay| {
+                super::super::overlay::OverlayStack::load_image_config(
+                    &overlay.name,
+                    std::path::Path::new(&overlay.path),
+                    overlay.extent,
+                    overlay.opacity.unwrap_or(1.0),
+                    crate::viewer::terrain::overlay::BlendMode::Normal,
+                    overlay.z_order.unwrap_or(0),
+                )
+                .map_err(anyhow::Error::msg)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let (mut candidate, ids) = if let Some(stack) = self.overlay_stack.as_ref() {
+            stack.stage_replacement(removed_ids, additions)
+        } else {
+            let empty =
+                super::super::overlay::OverlayStack::new(self.device.clone(), self.queue.clone());
+            empty.stage_replacement(removed_ids, additions)
+        };
+        if let Some(terrain) = self.terrain.as_ref() {
+            candidate.build_composite(terrain.dimensions.0, terrain.dimensions.1)?;
+        }
+        Ok((candidate, ids))
+    }
+
+    pub(crate) fn stage_review_vector_replacement(
+        &self,
+        removed_ids: &[u32],
+        mut layers: Vec<VectorOverlayLayer>,
+        anchor: &crate::camera::Anchor,
+    ) -> Result<(VectorOverlayStack, Vec<u32>)> {
+        for layer in &mut layers {
+            crate::viewer::terrain::vector_overlay::repack_source_vertices(
+                layer,
+                self.terrain.as_ref(),
+                anchor,
+            );
+        }
+        if let Some(stack) = self.vector_overlay_stack.as_ref() {
+            stack.stage_replacement(removed_ids, layers)
+        } else {
+            VectorOverlayStack::new(self.device.clone(), self.queue.clone())
+                .stage_replacement(removed_ids, layers)
+        }
+    }
+
+    pub(crate) fn commit_review_stacks(
+        &mut self,
+        raster: super::super::overlay::OverlayStack,
+        vectors: VectorOverlayStack,
+    ) {
+        self.pbr_config.overlay.enabled = raster.has_visible_layers();
+        self.overlay_stack = Some(raster);
+        self.vector_overlay_stack = Some(vectors);
+    }
+
     /// Add an overlay layer from an image file. Returns layer ID or error.
     pub fn add_overlay_image(
         &mut self,
@@ -213,6 +276,18 @@ impl ViewerTerrainScene {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    pub(crate) fn all_vector_overlay_source_points(&self) -> Vec<glam::DVec3> {
+        self.vector_overlay_stack
+            .as_ref()
+            .map_or_else(Vec::new, |stack| stack.source_world_points())
+    }
+
+    pub(crate) fn vector_overlay_memory_evidence(&self) -> (u64, u64, u64, Vec<u64>) {
+        self.vector_overlay_stack
+            .as_ref()
+            .map_or_else(|| (0, 0, 0, Vec::new()), |stack| stack.memory_evidence())
     }
 
     /// Remove a vector overlay by ID. Returns true if found and removed.

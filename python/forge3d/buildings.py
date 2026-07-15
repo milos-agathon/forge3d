@@ -430,7 +430,9 @@ def add_buildings_cityjson(
 
         buildings = []
         for bdata in result.get("buildings", []):
-            positions = np.array(bdata["positions"], dtype=np.float32)
+            # Absolute/projected CityJSON coordinates remain f64 until an
+            # actual renderer subtracts its frame anchor.
+            positions = np.array(bdata["positions"], dtype=np.float64)
             indices = np.array(bdata["indices"], dtype=np.uint32)
             normals = bdata.get("normals")
             if normals is not None:

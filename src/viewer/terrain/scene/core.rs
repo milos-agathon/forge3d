@@ -17,7 +17,7 @@ impl ViewerTerrainScene {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size: wgpu::BufferSize::new(160),
                     },
                     count: None,
                 },
@@ -192,6 +192,7 @@ impl ViewerTerrainScene {
             shadow_pipeline: None,
             shadow_uniform_buffers: Vec::new(),
             shadow_bind_groups: Vec::new(),
+            shadow_bind_group_revision: 0,
             // P1.4: TAA support
             taa_renderer: None,
             taa_jitter: crate::core::jitter::JitterState::new(),

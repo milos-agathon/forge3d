@@ -1,3 +1,4 @@
+use super::geometry::compute_normals;
 use super::*;
 
 fn sample_cityjson() -> &'static [u8] {
@@ -90,6 +91,48 @@ fn test_cityjson_surface_with_hole_preserves_void() {
             centroid[0] <= 4.0 || centroid[0] >= 6.0 || centroid[1] <= 4.0 || centroid[1] >= 6.0,
             "triangle centroid {:?} fell inside the CityJSON interior ring",
             centroid
+        );
+    }
+}
+
+#[test]
+fn non_axis_aligned_normals_cover_every_vertex() {
+    // Two disjoint, identically oriented triangles ensure vertices 3..5 are
+    // covered. The former flat-array `idx * 3` guard silently left them at +Z.
+    let positions = [
+        6_378_137.0,
+        500_000.0,
+        -5_500_000.0,
+        6_378_138.0,
+        500_000.0,
+        -5_499_999.0,
+        6_378_137.0,
+        500_001.0,
+        -5_499_999.0,
+        6_378_147.0,
+        500_010.0,
+        -5_499_990.0,
+        6_378_148.0,
+        500_010.0,
+        -5_499_989.0,
+        6_378_147.0,
+        500_011.0,
+        -5_499_989.0,
+    ];
+    let normals = compute_normals(&positions, &[0, 1, 2, 3, 4, 5]);
+    let expected = -1.0_f32 / 3.0_f32.sqrt();
+    for (index, normal) in normals.chunks_exact(3).enumerate() {
+        assert!(
+            (normal[0] - expected).abs() < 1.0e-6,
+            "vertex {index}: {normal:?}"
+        );
+        assert!(
+            (normal[1] - expected).abs() < 1.0e-6,
+            "vertex {index}: {normal:?}"
+        );
+        assert!(
+            (normal[2] + expected).abs() < 1.0e-6,
+            "vertex {index}: {normal:?}"
         );
     }
 }

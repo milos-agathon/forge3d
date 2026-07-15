@@ -252,6 +252,19 @@ impl LabelManager {
         self.labels.len() + self.line_labels.len()
     }
 
+    /// Absolute f64 source positions retained for prospective-frame checks.
+    pub(crate) fn world_points(&self) -> Vec<DVec3> {
+        self.labels
+            .values()
+            .map(|label| label.world_pos)
+            .chain(
+                self.line_labels
+                    .values()
+                    .flat_map(|label| label.polyline.iter().copied()),
+            )
+            .collect()
+    }
+
     /// Set the current zoom level for scale-dependent visibility.
     pub fn set_zoom(&mut self, zoom: f32) {
         self.current_zoom = zoom;

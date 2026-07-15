@@ -20,6 +20,45 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _validate_installed_wheel_paths(package_path: Path, native_path: Path) -> None:
+    """Fail closed when an installed-wheel lane resolves repo-local Python code."""
+
+    source_package = _repo_root() / "python" / "forge3d"
+    if _is_within(package_path, source_package):
+        raise RuntimeError(
+            "FORGE3D_TEST_INSTALLED_WHEEL resolved the repo-local Python package: "
+            f"{package_path}"
+        )
+    if _is_within(native_path, source_package):
+        raise RuntimeError(
+            "FORGE3D_TEST_INSTALLED_WHEEL resolved a repo-local native extension: "
+            f"{native_path}"
+        )
+    if not package_path.is_file() or not native_path.is_file():
+        raise RuntimeError(
+            "FORGE3D_TEST_INSTALLED_WHEEL requires importable installed package and native files: "
+            f"package={package_path}, native={native_path}"
+        )
+
+
+def _require_installed_wheel_runtime() -> None:
+    if os.environ.get("FORGE3D_NO_BOOTSTRAP") != "1":
+        raise RuntimeError(
+            "FORGE3D_TEST_INSTALLED_WHEEL requires FORGE3D_NO_BOOTSTRAP=1"
+        )
+    package = importlib.import_module("forge3d")
+    native = importlib.import_module("forge3d._forge3d")
+    _validate_installed_wheel_paths(Path(package.__file__), Path(native.__file__))
+
+
 def _ensure_python_path():
     repo = _repo_root()
     pkg_dir = repo / "python"
@@ -240,6 +279,10 @@ def pytest_sessionstart(session):
     tests_dir = _repo_root() / "tests"
     if str(tests_dir) not in sys.path:
         sys.path.insert(0, str(tests_dir))
+
+    if os.environ.get("FORGE3D_TEST_INSTALLED_WHEEL") == "1":
+        _require_installed_wheel_runtime()
+        return
 
     if os.environ.get("FORGE3D_NO_BOOTSTRAP") == "1":
         return

@@ -273,10 +273,12 @@ class TestNativeModuleSymbols:
             f"_forge3d.{fn_name} should be callable, got {type(obj)}"
         )
 
-    @pytest.mark.parametrize("fn_name", LATER_GIS_FUNCTIONS)
-    def test_later_gis_function_not_registered(self, fn_name: str):
-        """C5/C6 GIS functions must not be exported by the C4.0 slice."""
-        assert not hasattr(_native, fn_name)
+    def test_later_gis_functions_not_registered(self):
+        """Any deferred GIS functions must remain absent without an empty-set skip."""
+        unexpected = [
+            fn_name for fn_name in self.LATER_GIS_FUNCTIONS if hasattr(_native, fn_name)
+        ]
+        assert unexpected == []
 
 
 # ===========================================================================

@@ -51,6 +51,10 @@ impl SsgiRenderer {
         &self.ssgi_history
     }
 
+    pub fn history_allocation_id(&self) -> u64 {
+        self.ssgi_history.ledger_id()
+    }
+
     pub fn upscaled_texture(&self) -> &Texture {
         &self.ssgi_upscaled
     }
@@ -68,6 +72,10 @@ impl SsgiRenderer {
         self.invalidate_history();
         self.scene_history_ready = false;
         self.scene_history_index = 0;
+    }
+
+    pub fn history_valid(&self) -> bool {
+        self.history_valid
     }
 
     pub(crate) fn invalidate_history(&mut self) {

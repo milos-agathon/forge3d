@@ -39,25 +39,20 @@ impl Anchor {
         }
     }
 
-    pub fn with_epsilon(anchor_epsilon: f64) -> Self {
-        debug_assert!(
-            anchor_epsilon.is_finite() && anchor_epsilon > 0.0,
-            "anchor epsilon must be finite and positive; use try_with_epsilon at trust boundaries"
-        );
-        Self {
+    /// Checked public threshold constructor. Invalid values are rejected in
+    /// every build profile; there is no release-only unchecked path.
+    pub fn with_epsilon(anchor_epsilon: f64) -> Option<Self> {
+        (anchor_epsilon.is_finite() && anchor_epsilon > 0.0).then_some(Self {
             origin: DVec3::ZERO,
             anchor_epsilon,
-        }
+        })
     }
 
     /// Checked epsilon constructor for trust boundaries: rejects a non-finite
     /// or non-positive rebase threshold rather than silently accepting a
     /// degenerate anchor that would never (or always) rebase.
     pub fn try_with_epsilon(anchor_epsilon: f64) -> Option<Self> {
-        (anchor_epsilon.is_finite() && anchor_epsilon > 0.0).then_some(Self {
-            origin: DVec3::ZERO,
-            anchor_epsilon,
-        })
+        Self::with_epsilon(anchor_epsilon)
     }
 
     pub fn origin(&self) -> DVec3 {
@@ -106,6 +101,14 @@ impl Anchor {
     /// world positions, so they are not rebased; they still use the one
     /// sanctioned narrowing implementation.
     pub fn to_render_direction(&self, direction: DVec3) -> Vec3 {
+        Self::direction_to_render(direction)
+    }
+
+    /// Narrow a non-position direction or dimension without constructing a
+    /// throwaway anchor. Viewer code must use the active frame anchor for
+    /// positions; this associated helper exists only for translation-invariant
+    /// quantities such as colors, UVs, normals, and physical spans.
+    pub fn direction_to_render(direction: DVec3) -> Vec3 {
         Vec3::new(
             Self::narrow(direction.x),
             Self::narrow(direction.y),
@@ -177,6 +180,27 @@ mod tests {
         assert!(Anchor::try_with_epsilon(-5.0).is_none());
         assert!(Anchor::try_with_epsilon(f64::NAN).is_none());
         assert!(Anchor::try_with_epsilon(f64::INFINITY).is_none());
+    }
+
+    #[test]
+    fn exact_threshold_does_not_rebase_but_next_f64_does() {
+        let mut anchor = Anchor::with_epsilon(1_000.0).unwrap();
+        let below = f64::from_bits(1_000.0_f64.to_bits() - 1);
+        assert!(!anchor.rebase_if_needed(DVec3::new(below, 0.0, 0.0)));
+        assert!(!anchor.rebase_if_needed(DVec3::new(1_000.0, 0.0, 0.0)));
+        let next = f64::from_bits(1_000.0_f64.to_bits() + 1);
+        assert!(anchor.rebase_if_needed(DVec3::new(next, 0.0, 0.0)));
+        assert!(!anchor.rebase_if_needed(DVec3::new(next, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn repeated_threshold_crossings_publish_at_most_one_rebase_per_focus() {
+        let mut anchor = Anchor::with_epsilon(1_000.0).unwrap();
+        let mut count = 0;
+        for focus in [1_001.0, 1_001.0, 2_002.0, 2_002.0, 3_003.0, 3_003.0] {
+            count += usize::from(anchor.rebase_if_needed(DVec3::new(focus, 0.0, 0.0)));
+        }
+        assert_eq!(count, 3);
     }
 
     #[test]

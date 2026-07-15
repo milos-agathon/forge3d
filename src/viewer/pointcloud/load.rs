@@ -6,6 +6,44 @@ pub(super) struct LoadResult {
     pub has_intensity: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PointCloudPathPreflight {
+    pub min: glam::DVec3,
+    pub max: glam::DVec3,
+    pub center: glam::DVec3,
+    pub extent_render: f32,
+}
+
+/// Read only the LAS/LAZ header needed to select and validate the prospective
+/// frame. This performs no point decode, GPU allocation, or live-state change.
+pub(crate) fn preflight_laz_bounds(path: &str) -> Result<PointCloudPathPreflight, String> {
+    use las::{Read, Reader};
+
+    let reader =
+        Reader::from_path(path).map_err(|e| format!("Failed to open LAS/LAZ file: {e}"))?;
+    let header = reader.header();
+    if header.number_of_points() == 0 {
+        return Err("point cloud contains no points".to_string());
+    }
+    let bounds = header.bounds();
+    // LAS is X/Y horizontal and Z-up; viewer world is X/Z horizontal and Y-up.
+    let min = glam::DVec3::new(bounds.min.x, bounds.min.z, bounds.min.y);
+    let max = glam::DVec3::new(bounds.max.x, bounds.max.z, bounds.max.y);
+    if !min.is_finite() || !max.is_finite() || !min.cmple(max).all() {
+        return Err("point-cloud header contains invalid bounds".to_string());
+    }
+    let center = (min + max) * 0.5;
+    let extent_render = crate::camera::Anchor::direction_to_render(max - min)
+        .max_element()
+        .max(100.0);
+    Ok(PointCloudPathPreflight {
+        min,
+        max,
+        center,
+        extent_render,
+    })
+}
+
 pub(super) fn load_laz_points(path: &str, max_points: usize) -> Result<LoadResult, String> {
     use las::{Read, Reader};
 

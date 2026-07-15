@@ -70,6 +70,8 @@ impl Viewer {
         self.geom_vb = Some(vb);
         self.geom_ib = Some(ib);
         self.geom_index_count = mesh.indices.len() as u32;
+        self.object_source_positions.clone_from(&mesh.positions);
+        self.object_source_indices.clone_from(&mesh.indices);
         self.geom_bind_group = None;
 
         update_ipc_stats(true, vertices.len() as u32, mesh.indices.len() as u32, true);

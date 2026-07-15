@@ -237,9 +237,8 @@ where
                             }
                             req @ IpcRequest::SetSceneReviewState { .. } => {
                                 match ipc_request_to_viewer_cmd(&req) {
-                                    // The server only acknowledges enqueue. The event-loop
-                                    // transaction publishes the registry snapshot after the
-                                    // complete runtime scene has committed successfully.
+                                    // cmd_sender waits for the correlated event-loop result;
+                                    // success therefore means the runtime transaction committed.
                                     Ok(Some(cmd)) => match cmd_sender(cmd) {
                                         Ok(()) => success_response_for_request(&req),
                                         Err(e) => {

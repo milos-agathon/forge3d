@@ -26,6 +26,9 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             let world = glam::DVec3::from(*world_pos);
             if let Err(err) = viewer.validate_content_points([world]) {
                 eprintln!("[label] rejected '{text}': {err}");
+                viewer.reject_command(format!(
+                    "label_rejected: text={text} {err} unchanged_state=true"
+                ));
                 return true;
             }
 
@@ -94,6 +97,9 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             let world_points: Vec<DVec3> = polyline.iter().copied().map(DVec3::from).collect();
             if let Err(err) = viewer.validate_content_points(world_points.iter().copied()) {
                 eprintln!("[label] rejected line '{text}': {err}");
+                viewer.reject_command(format!(
+                    "line_label_rejected: text={text} {err} unchanged_state=true"
+                ));
                 return true;
             }
 
@@ -157,7 +163,10 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
         } => {
             match viewer.load_label_atlas(atlas_png_path, metrics_json_path) {
                 Ok(()) => println!("[label] atlas loaded from {}", atlas_png_path),
-                Err(e) => eprintln!("[label] failed to load atlas: {}", e),
+                Err(e) => {
+                    eprintln!("[label] failed to load atlas: {}", e);
+                    viewer.reject_command(format!("label_atlas_execution_failed: {e}"));
+                }
             }
             true
         }
@@ -189,6 +198,9 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             let world_points: Vec<DVec3> = polyline.iter().copied().map(DVec3::from).collect();
             if let Err(err) = viewer.validate_content_points(world_points.iter().copied()) {
                 eprintln!("[label] rejected curved label '{text}': {err}");
+                viewer.reject_command(format!(
+                    "curved_label_rejected: text={text} {err} unchanged_state=true"
+                ));
                 return true;
             }
 
@@ -238,6 +250,9 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             let world = glam::DVec3::from(*anchor);
             if let Err(err) = viewer.validate_content_points([world]) {
                 eprintln!("[label] rejected callout '{text}': {err}");
+                viewer.reject_command(format!(
+                    "callout_rejected: text={text} {err} unchanged_state=true"
+                ));
                 return true;
             }
 

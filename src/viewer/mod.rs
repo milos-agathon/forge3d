@@ -39,7 +39,8 @@ use viewer_config::INITIAL_CMDS;
 use viewer_config::INITIAL_TERRAIN_CONFIG;
 use viewer_constants::VIEWER_SNAPSHOT_MAX_MEGAPIXELS;
 use viewer_types::{
-    FogCameraUniforms, FogUpsampleParamsStd140, SkyUniforms, VolumetricUniformsStd140,
+    FogCameraUniforms, FogUpsampleParamsStd140, SkyUniforms, ViewerShadowUniforms,
+    VolumetricUniformsStd140,
 };
 
 // HUD push functions available for future use

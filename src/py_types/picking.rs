@@ -96,11 +96,7 @@ impl From<crate::picking::TerrainQueryResult> for PyTerrainQueryResult {
             elevation: r.elevation,
             slope: r.slope,
             aspect: r.aspect,
-            world_pos: (
-                f64::from(r.world_pos[0]),
-                f64::from(r.world_pos[1]),
-                f64::from(r.world_pos[2]),
-            ),
+            world_pos: (r.world_pos[0], r.world_pos[1], r.world_pos[2]),
             normal: (r.normal[0], r.normal[1], r.normal[2]),
         }
     }

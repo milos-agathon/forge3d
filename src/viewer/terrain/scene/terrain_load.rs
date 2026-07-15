@@ -7,10 +7,32 @@ use glam::{DVec2, DVec3};
 const MAX_VIEWER_TERRAIN_GRID_RESOLUTION: u32 = 2048;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct TerrainFootprint {
+pub(crate) struct TerrainFootprint {
     pub world_origin_xz: DVec2,
     pub world_span_xz: DVec2,
     pub fallback: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct TerrainPathPreflight {
+    raster_info: crate::gis::types::RasterInfo,
+    footprint: TerrainFootprint,
+}
+
+impl TerrainPathPreflight {
+    /// Default absolute terrain focus derived without decoding pixels or
+    /// allocating renderer resources.
+    pub(crate) fn default_focus(&self) -> DVec3 {
+        DVec3::new(
+            self.footprint.world_origin_xz.x + self.footprint.world_span_xz.x * 0.5,
+            0.0,
+            self.footprint.world_origin_xz.y + self.footprint.world_span_xz.y * 0.5,
+        )
+    }
+
+    pub(crate) fn max_horizontal_span(&self) -> f64 {
+        self.footprint.world_span_xz.max_element()
+    }
 }
 
 /// Translate a north-up GeoTIFF affine into the viewer basis
@@ -63,10 +85,13 @@ impl ViewerTerrainScene {
     /// Validate raster metadata before an IPC load is enqueued. Malformed or
     /// unsupported affine metadata is therefore rejected before terrain-scene
     /// or GPU-resource allocation can begin.
-    pub(crate) fn validate_terrain_path(path: &str) -> Result<()> {
+    pub(crate) fn preflight_terrain_path(path: &str) -> Result<TerrainPathPreflight> {
         let raster_info = crate::gis::raster_info::read_raster_info(path)?;
-        terrain_footprint_from_info(&raster_info)?;
-        Ok(())
+        let footprint = terrain_footprint_from_info(&raster_info)?;
+        Ok(TerrainPathPreflight {
+            raster_info,
+            footprint,
+        })
     }
 
     pub fn load_terrain(&mut self, path: &str) -> Result<()> {
@@ -74,8 +99,9 @@ impl ViewerTerrainScene {
 
         // Metadata is a trust boundary. A read/decode failure is not equivalent
         // to an absent transform and must not silently become local placement.
-        let raster_info = crate::gis::raster_info::read_raster_info(path)?;
-        let footprint = terrain_footprint_from_info(&raster_info)?;
+        let preflight = Self::preflight_terrain_path(path)?;
+        let raster_info = preflight.raster_info;
+        let footprint = preflight.footprint;
 
         let file = File::open(path)?;
         let mut decoder = tiff::decoder::Decoder::new(file)?;
@@ -179,24 +205,24 @@ impl ViewerTerrainScene {
         )?;
 
         let terrain_width = width as f32;
-        let terrain_span = crate::camera::Anchor::new()
-            .to_render_direction(DVec3::new(
-                footprint.world_span_xz.x,
-                0.0,
-                footprint.world_span_xz.y,
-            ))
-            .abs()
-            .max_element();
+        let terrain_span = crate::camera::Anchor::direction_to_render(DVec3::new(
+            footprint.world_span_xz.x,
+            0.0,
+            footprint.world_span_xz.y,
+        ))
+        .abs()
+        .max_element();
         let cam_radius = terrain_span * 1.5;
 
         let uniforms = TerrainUniforms {
             view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(),
-            render_origin_span: [0.0, 0.0, width as f32, height as f32],
             sun_dir: [0.5, 0.8, 0.3, 0.0],
             terrain_params: [min_h, max_h - min_h, terrain_width, 1.0],
             lighting: [1.0, 0.3, 0.5, -999999.0],
             background: [0.5, 0.7, 0.9, 0.0],
             water_color: [0.2, 0.4, 0.6, 0.0],
+            render_origin_xz: [0.0, 0.0],
+            render_span_xz: [width as f32, height as f32],
         };
 
         let uniform_buffer = tracked_create_buffer_init(
@@ -236,12 +262,12 @@ impl ViewerTerrainScene {
             ],
         });
 
-        self.terrain_revision_counter = self.terrain_revision_counter.wrapping_add(1);
+        let next_revision = self.terrain_revision_counter.wrapping_add(1);
         let mut terrain = ViewerTerrainData {
             heightmap,
             dimensions: (width, height),
             domain: (min_h, max_h),
-            revision: self.terrain_revision_counter,
+            revision: next_revision,
             raster_info,
             world_origin_xz: footprint.world_origin_xz,
             world_span_xz: footprint.world_span_xz,
@@ -269,7 +295,23 @@ impl ViewerTerrainScene {
             water_color: [0.2, 0.4, 0.6],
         };
         terrain.cam_target = terrain.default_camera_target();
-        self.terrain = Some(terrain);
+        // Stage every dependent shadow binding against the candidate texture
+        // before publication. During the swap, drop old bind groups while the
+        // old tracked texture owner is still accounted, then replace terrain;
+        // no live bind group can outlast the owner recorded in the ledger.
+        let staged_shadow_bind_groups = self.build_shadow_bind_groups_for(&terrain);
+        let staged_shadow_revision = if staged_shadow_bind_groups.is_empty() {
+            0
+        } else {
+            next_revision
+        };
+        let old_shadow_bind_groups =
+            std::mem::replace(&mut self.shadow_bind_groups, staged_shadow_bind_groups);
+        drop(old_shadow_bind_groups);
+        let old_terrain = self.terrain.replace(terrain);
+        drop(old_terrain);
+        self.terrain_revision_counter = next_revision;
+        self.shadow_bind_group_revision = staged_shadow_revision;
         update_terrain_volumetrics_report(TerrainVolumetricsReport::default());
 
         println!(
@@ -321,26 +363,67 @@ impl ViewerTerrainScene {
         ))
     }
 
-    pub fn handle_mouse_drag(&mut self, dx: f32, dy: f32) {
+    pub fn handle_mouse_drag(
+        &mut self,
+        anchor: &crate::camera::Anchor,
+        dx: f32,
+        dy: f32,
+    ) -> Result<(), crate::viewer::camera_controller::CameraFrameError> {
         if let Some(ref mut t) = self.terrain {
-            t.cam_phi_deg += dx * 0.3;
-            t.cam_theta_deg = (t.cam_theta_deg - dy * 0.3).clamp(5.0, 85.0);
+            let phi = t.cam_phi_deg + dx * 0.3;
+            let theta = (t.cam_theta_deg - dy * 0.3).clamp(5.0, 85.0);
+            t.validate_camera_state(
+                anchor,
+                phi,
+                theta,
+                t.cam_radius,
+                t.cam_fov_deg,
+                t.cam_target,
+            )?;
+            t.cam_phi_deg = phi;
+            t.cam_theta_deg = theta;
         }
+        Ok(())
     }
 
-    pub fn handle_scroll(&mut self, delta: f32) {
+    pub fn handle_scroll(
+        &mut self,
+        anchor: &crate::camera::Anchor,
+        delta: f32,
+    ) -> Result<(), crate::viewer::camera_controller::CameraFrameError> {
         if let Some(ref mut t) = self.terrain {
             let factor = (-delta * 0.05).exp();
-            t.cam_radius = (t.cam_radius * factor).clamp(100.0, 50000.0);
+            let radius = (t.cam_radius * factor).clamp(100.0, 50000.0);
+            t.validate_camera_state(
+                anchor,
+                t.cam_phi_deg,
+                t.cam_theta_deg,
+                radius,
+                t.cam_fov_deg,
+                t.cam_target,
+            )?;
+            t.cam_radius = radius;
         }
+        Ok(())
     }
 
-    pub fn handle_keys(&mut self, forward: f32, right: f32, up: f32) {
+    pub fn handle_keys(
+        &mut self,
+        anchor: &crate::camera::Anchor,
+        forward: f32,
+        right: f32,
+        up: f32,
+    ) -> Result<(), crate::viewer::camera_controller::CameraFrameError> {
         if let Some(ref mut t) = self.terrain {
-            t.cam_phi_deg += right * 2.0;
-            t.cam_theta_deg = (t.cam_theta_deg - forward * 2.0).clamp(5.0, 85.0);
-            t.cam_radius = (t.cam_radius * (1.0 - up * 0.02)).clamp(100.0, 50000.0);
+            let phi = t.cam_phi_deg + right * 2.0;
+            let theta = (t.cam_theta_deg - forward * 2.0).clamp(5.0, 85.0);
+            let radius = (t.cam_radius * (1.0 - up * 0.02)).clamp(100.0, 50000.0);
+            t.validate_camera_state(anchor, phi, theta, radius, t.cam_fov_deg, t.cam_target)?;
+            t.cam_phi_deg = phi;
+            t.cam_theta_deg = theta;
+            t.cam_radius = radius;
         }
+        Ok(())
     }
 }
 

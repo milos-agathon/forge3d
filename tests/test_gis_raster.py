@@ -510,7 +510,9 @@ def test_read_raster_info_missing_crs_warning(tmp_path: Path):
     assert info.crs_wkt is None
     assert info.crs_authority is None
     assert info.transform == pytest.approx((1.0, 0.0, 10.0, 0.0, -1.0, 20.0))
-    assert {"missing_crs", "not_georeferenced"} <= _warning_codes(info)
+    assert info.is_georeferenced is True
+    assert "missing_crs" in _warning_codes(info)
+    assert "not_georeferenced" not in _warning_codes(info)
 
 
 def test_read_raster_info_missing_transform_warning(tmp_path: Path):
@@ -547,19 +549,18 @@ def test_read_raster_info_rejects_malformed_wkt(tmp_path: Path):
         gis.read_raster_info(path)
 
 
-def test_write_raster_positive_y_transform_round_trips(tmp_path: Path):
+def test_write_raster_positive_y_transform_is_rejected_as_south_up(tmp_path: Path):
     path = tmp_path / "positive_y.tif"
     transform = (1.0, 0.0, 10.0, 0.0, 1.0, 20.0)
 
-    info = gis.write_raster(
-        path,
-        np.ones((2, 2), dtype=np.uint8),
-        crs="EPSG:4326",
-        transform=transform,
-    )
-
-    assert info.transform == pytest.approx(transform)
-    assert gis.read_raster_info(path).transform == pytest.approx(transform)
+    with pytest.raises(RuntimeError, match="PostWriteValidationFailed.*south-up"):
+        gis.write_raster(
+            path,
+            np.ones((2, 2), dtype=np.uint8),
+            crs="EPSG:4326",
+            transform=transform,
+        )
+    assert not path.exists()
 
 
 @pytest.mark.parametrize("shape", [(2, 3, 3), (2, 3, 4)])

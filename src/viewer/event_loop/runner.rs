@@ -2,7 +2,8 @@
 // Event loop runner functions for the interactive viewer
 // Extracted from mod.rs as part of the viewer refactoring
 
-use std::sync::Arc;
+use std::io;
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::Instant;
 
 use winit::event::{ElementState, Event, WindowEvent};
@@ -16,26 +17,36 @@ use super::super::Viewer;
 use super::super::ViewerConfig;
 use super::super::INITIAL_CMDS;
 use super::{
-    get_ipc_queue, get_ipc_stats, parse_initial_commands, spawn_stdin_reader, update_ipc_stats,
+    command_priority, get_ipc_queue, get_ipc_stats, order_command_batch, parse_initial_commands,
+    spawn_stdin_reader, update_ipc_stats, QueuedIpcCommand,
 };
 
-fn establishes_prospective_frame(cmd: &ViewerCmd) -> bool {
-    matches!(
-        cmd,
-        ViewerCmd::LoadTerrain(_)
-            | ViewerCmd::SetTerrainCamera { .. }
-            | ViewerCmd::SetTerrain { .. }
-            | ViewerCmd::LoadPointCloud { .. }
-            | ViewerCmd::SetPointCloudParams { .. }
-            | ViewerCmd::SetCamLookAt { .. }
-    )
+fn apply_command_batch(viewer: &mut Viewer, commands: Vec<ViewerCmd>) -> Result<(), String> {
+    viewer.preflight_command_batch(&commands)?;
+    for command in order_command_batch(commands) {
+        viewer.handle_cmd(command)?;
+    }
+    Ok(())
 }
 
-fn partition_frame_batch(commands: Vec<ViewerCmd>) -> Vec<ViewerCmd> {
-    let (frame, content): (Vec<_>, Vec<_>) = commands
-        .into_iter()
-        .partition(establishes_prospective_frame);
-    frame.into_iter().chain(content).collect()
+type EventLoopFatal = Arc<Mutex<Option<String>>>;
+
+fn record_event_loop_fatal(fatal: &EventLoopFatal, message: String) {
+    match fatal.lock() {
+        Ok(mut slot) => *slot = Some(message),
+        Err(_) => eprintln!("[viewer] fatal-error channel is poisoned"),
+    }
+}
+
+fn propagate_event_loop_fatal(fatal: EventLoopFatal) -> Result<(), Box<dyn std::error::Error>> {
+    let message = fatal
+        .lock()
+        .map_err(|_| io::Error::other("viewer fatal-error channel is poisoned"))?
+        .take();
+    match message {
+        Some(message) => Err(io::Error::other(message).into()),
+        None => Ok(()),
+    }
 }
 
 #[cfg(feature = "extension-module")]
@@ -61,7 +72,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
 
     // Collect initial commands provided by example CLI
     let mut pending_cmds: Vec<ViewerCmd> = if let Some(cmds) = INITIAL_CMDS.get() {
-        parse_initial_commands(cmds)
+        parse_initial_commands(cmds)?
     } else {
         Vec::new()
     };
@@ -72,8 +83,10 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
     let mut viewer_opt: Option<Viewer> = None;
     let mut last_frame = Instant::now();
     let mut pending_scale_factor_resize = false;
+    let fatal_error: EventLoopFatal = Arc::new(Mutex::new(None));
+    let fatal_for_loop = Arc::clone(&fatal_error);
 
-    let _ = event_loop.run(move |event, elwt| {
+    event_loop.run(move |event, elwt| {
         match event {
             Event::Resumed if viewer_opt.is_none() => {
                 // Initialize viewer on resume (required for some platforms)
@@ -96,14 +109,18 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                             }
                         }
                         // Apply any pending commands from CLI now that viewer exists
-                        for cmd in partition_frame_batch(std::mem::take(&mut pending_cmds)) {
-                            if let Some(viewer) = viewer_opt.as_mut() {
-                                viewer.handle_cmd(cmd);
+                        if let Some(viewer) = viewer_opt.as_mut() {
+                            if let Err(error) =
+                                apply_command_batch(viewer, std::mem::take(&mut pending_cmds))
+                            {
+                                eprintln!("[viewer] initial command batch rejected: {error}");
                             }
                         }
                     }
                     Err(e) => {
-                        eprintln!("Failed to create viewer: {}", e);
+                        let message = format!("Failed to create viewer: {e}");
+                        eprintln!("{message}");
+                        record_event_loop_fatal(&fatal_for_loop, message);
                         elwt.exit();
                     }
                 }
@@ -186,7 +203,9 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                 other => {
                     if let Some(viewer) = viewer_opt.as_mut() {
                         eprintln!("[IPC] Processing command: {:?}", other);
-                        viewer.handle_cmd(other);
+                        if let Err(error) = apply_command_batch(viewer, vec![other]) {
+                            eprintln!("[viewer] command rejected without mutation: {error}");
+                        }
                     } else {
                         eprintln!("[IPC] Viewer not ready, dropping command");
                     }
@@ -194,9 +213,9 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
             },
             _ => {}
         }
-    });
+    })?;
 
-    Ok(())
+    propagate_event_loop_fatal(fatal_error)
 }
 
 /// Run the viewer with an IPC server for non-blocking Python control.
@@ -218,12 +237,14 @@ pub fn run_viewer_with_ipc(
     let ipc_handle = ipc::start_ipc_server(
         ipc_config,
         move |cmd| {
-            if let Ok(mut q) = get_ipc_queue().lock() {
-                q.push_back(cmd);
-                Ok(())
-            } else {
-                Err("Queue lock failed".to_string())
-            }
+            let (completion, result) = mpsc::sync_channel(1);
+            get_ipc_queue()
+                .lock()
+                .map_err(|_| "Queue lock failed".to_string())?
+                .push_back(QueuedIpcCommand { cmd, completion });
+            result
+                .recv_timeout(std::time::Duration::from_secs(300))
+                .map_err(|error| format!("viewer command completion unavailable: {error}"))?
         },
         || {
             get_ipc_stats()
@@ -255,7 +276,7 @@ pub fn run_viewer_with_ipc(
 
     // Collect initial commands
     let mut pending_cmds: Vec<ViewerCmd> = if let Some(cmds) = INITIAL_CMDS.get() {
-        parse_initial_commands(cmds)
+        parse_initial_commands(cmds)?
     } else {
         Vec::new()
     };
@@ -264,8 +285,10 @@ pub fn run_viewer_with_ipc(
     let mut viewer_opt: Option<Viewer> = None;
     let mut last_frame = Instant::now();
     let mut pending_scale_factor_resize = false;
+    let fatal_error: EventLoopFatal = Arc::new(Mutex::new(None));
+    let fatal_for_loop = Arc::clone(&fatal_error);
 
-    let _ = event_loop.run(move |event, elwt| {
+    event_loop.run(move |event, elwt| {
         // ControlFlow::Poll for IPC mode - responsive command handling
         elwt.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
@@ -278,8 +301,10 @@ pub fn run_viewer_with_ipc(
                     match v {
                         Ok(mut v) => {
                             eprintln!("[viewer-ipc] Viewer initialized successfully");
-                            for cmd in partition_frame_batch(std::mem::take(&mut pending_cmds)) {
-                                v.handle_cmd(cmd);
+                            if let Err(error) =
+                                apply_command_batch(&mut v, std::mem::take(&mut pending_cmds))
+                            {
+                                eprintln!("[viewer-ipc] initial command batch rejected: {error}");
                             }
                             viewer_opt = Some(v);
                             last_frame = Instant::now();
@@ -292,7 +317,9 @@ pub fn run_viewer_with_ipc(
                             window.request_redraw();
                         }
                         Err(e) => {
-                            eprintln!("[viewer-ipc] FATAL: Failed to create viewer: {}", e);
+                            let message = format!("Failed to create viewer: {e}");
+                            eprintln!("[viewer-ipc] FATAL: {message}");
+                            record_event_loop_fatal(&fatal_for_loop, message);
                             elwt.exit();
                         }
                     }
@@ -331,20 +358,35 @@ pub fn run_viewer_with_ipc(
                 let mut has_pending_snapshot = false;
                 if let Some(viewer) = viewer_opt.as_mut() {
                     if let Ok(mut q) = get_ipc_queue().lock() {
-                        let commands = partition_frame_batch(q.drain(..).collect());
+                        let mut queued: Vec<QueuedIpcCommand> = q.drain(..).collect();
                         drop(q);
-                        for cmd in commands {
-                            match cmd {
+                        let commands = queued
+                            .iter()
+                            .map(|item| item.cmd.clone())
+                            .collect::<Vec<_>>();
+                        if let Err(error) = viewer.preflight_command_batch(&commands) {
+                            eprintln!("[viewer-ipc] command batch rejected: {error}");
+                            for item in queued {
+                                let _ = item.completion.send(Err(error.clone()));
+                            }
+                            window.request_redraw();
+                            return;
+                        }
+                        queued.sort_by_key(|item| command_priority(&item.cmd));
+                        for item in queued {
+                            match item.cmd {
                                 ViewerCmd::Quit => {
                                     if viewer.snapshot_request.is_some() {
                                         viewer.update(0.0);
                                         let _ = viewer.render();
                                     }
+                                    let _ = item.completion.send(Ok(()));
                                     elwt.exit();
                                     return;
                                 }
                                 other => {
-                                    viewer.handle_cmd(other);
+                                    let outcome = viewer.handle_cmd(other);
+                                    let _ = item.completion.send(outcome);
                                 }
                             }
                         }
@@ -392,14 +434,28 @@ pub fn run_viewer_with_ipc(
             }
             _ => {}
         }
-    });
+    })?;
 
-    Ok(())
+    propagate_event_loop_fatal(fatal_error)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn event_loop_fatal_is_returned_to_the_binary() {
+        let fatal: EventLoopFatal = Arc::new(Mutex::new(None));
+        record_event_loop_fatal(&fatal, "adapter rejected".to_string());
+        let error = propagate_event_loop_fatal(fatal).expect_err("fatal state must be returned");
+        assert!(error.to_string().contains("adapter rejected"));
+    }
+
+    #[test]
+    fn clean_event_loop_exit_remains_successful() {
+        let fatal: EventLoopFatal = Arc::new(Mutex::new(None));
+        propagate_event_loop_fatal(fatal).expect("clean exit must remain successful");
+    }
 
     #[test]
     fn frame_establishing_commands_precede_content_and_keep_stable_order() {
@@ -447,9 +503,9 @@ mod tests {
                 horizon_fade_angle: None,
             },
         ];
-        let ordered = partition_frame_batch(commands);
-        assert!(matches!(ordered[0], ViewerCmd::SetCamLookAt { .. }));
-        assert!(matches!(ordered[1], ViewerCmd::LoadTerrain(_)));
+        let ordered = order_command_batch(commands);
+        assert!(matches!(ordered[0], ViewerCmd::LoadTerrain(_)));
+        assert!(matches!(ordered[1], ViewerCmd::SetCamLookAt { .. }));
         assert!(matches!(
             &ordered[2],
             ViewerCmd::AddLabel { text, .. } if text == "before"

@@ -28,15 +28,22 @@ impl<'de> serde::Deserialize<'de> for ViewerVectorVertex {
                 "vector XYZ/RGBA lanes must be finite",
             ));
         }
+        if lanes[3..7].iter().any(|value| !(0.0..=1.0).contains(value)) {
+            return Err(serde::de::Error::custom(
+                "vector RGBA lanes must be finite values in [0, 1]",
+            ));
+        }
         let id = lanes[7];
         if !id.is_finite() || id < 0.0 || id.fract() != 0.0 || id > f64::from(u32::MAX) {
             return Err(serde::de::Error::custom(
                 "vector feature ID must be an integer in [0, u32::MAX]",
             ));
         }
-        let local = crate::camera::Anchor::new();
-        let rgb = local.to_render_direction(glam::DVec3::new(lanes[3], lanes[4], lanes[5]));
-        let alpha = local.to_render_direction(glam::DVec3::new(lanes[6], 0.0, 0.0));
+        let rgb = crate::camera::Anchor::direction_to_render(glam::DVec3::new(
+            lanes[3], lanes[4], lanes[5],
+        ));
+        let alpha =
+            crate::camera::Anchor::direction_to_render(glam::DVec3::new(lanes[6], 0.0, 0.0));
         Ok(Self {
             position: [lanes[0], lanes[1], lanes[2]],
             color: [rgb.x, rgb.y, rgb.z, alpha.x],
@@ -75,6 +82,21 @@ mod vector_vertex_tests {
             assert!(
                 serde_json::from_str::<ViewerVectorVertex>(json).is_err(),
                 "{json}"
+            );
+        }
+    }
+
+    #[test]
+    fn rgba_overflow_and_out_of_domain_values_are_rejected() {
+        for json in [
+            "[0,0,0,1e300,0,0,1,1]",
+            "[0,0,0,-0.001,0,0,1,1]",
+            "[0,0,0,1.001,0,0,1,1]",
+            "[0,0,0,1,0,0,2,1]",
+        ] {
+            assert!(
+                serde_json::from_str::<ViewerVectorVertex>(json).is_err(),
+                "accepted invalid RGBA row {json}"
             );
         }
     }

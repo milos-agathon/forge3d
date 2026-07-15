@@ -70,6 +70,26 @@ mod tests {
     }
 
     #[test]
+    fn pick_and_manual_label_update_translate_to_execution_commands() {
+        let pick = parse_ipc_request(r#"{"cmd":"pick_at","x":320,"y":200,"shift":true}"#).unwrap();
+        assert!(matches!(
+            ipc_request_to_viewer_cmd(&pick).unwrap(),
+            Some(crate::viewer::viewer_enums::ViewerCmd::PickAt {
+                x: 320,
+                y: 200,
+                shift: true,
+                ctrl: false
+            })
+        ));
+
+        let update = parse_ipc_request(r#"{"cmd":"update_labels"}"#).unwrap();
+        assert!(matches!(
+            ipc_request_to_viewer_cmd(&update).unwrap(),
+            Some(crate::viewer::viewer_enums::ViewerCmd::UpdateLabels)
+        ));
+    }
+
+    #[test]
     fn test_parse_set_terrain_scatter() {
         let json = r#"{
             "cmd":"set_terrain_scatter",

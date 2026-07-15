@@ -21,6 +21,14 @@ pub enum ResourceHandle {
     },
 }
 
+impl ResourceHandle {
+    fn ledger_id(&self) -> u64 {
+        match self {
+            Self::Buffer { ledger_id, .. } | Self::Texture { ledger_id, .. } => *ledger_id,
+        }
+    }
+}
+
 impl Drop for ResourceHandle {
     fn drop(&mut self) {
         let tracker = global_tracker();
@@ -546,6 +554,11 @@ impl TrackedBuffer {
     pub fn inner(&self) -> &wgpu::Buffer {
         &self.inner
     }
+
+    /// Stable ledger handle for this exact tracked allocation.
+    pub fn ledger_id(&self) -> u64 {
+        self._registry.ledger_id()
+    }
 }
 
 impl std::ops::Deref for TrackedBuffer {
@@ -566,6 +579,11 @@ impl TrackedTexture {
     /// Explicit accessor for the wrapped texture (equivalent to `&*self`).
     pub fn inner(&self) -> &wgpu::Texture {
         &self.inner
+    }
+
+    /// Stable ledger handle for this exact tracked allocation.
+    pub fn ledger_id(&self) -> u64 {
+        self._registry.ledger_id()
     }
 }
 

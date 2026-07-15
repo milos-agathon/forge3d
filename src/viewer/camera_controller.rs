@@ -225,6 +225,7 @@ impl FpsCamera {
 }
 
 /// Combined camera controller with mode switching
+#[derive(Clone)]
 pub struct CameraController {
     mode: CameraMode,
     orbit: OrbitCamera,
@@ -257,8 +258,9 @@ impl CameraController {
                 CameraMode::Fps => {
                     self.fps.position = self.orbit.eye();
                     // Compute yaw/pitch from orbit
-                    let forward = crate::camera::Anchor::new()
-                        .to_render_direction((self.orbit.target - self.orbit.eye()).normalize());
+                    let forward = crate::camera::Anchor::direction_to_render(
+                        (self.orbit.target - self.orbit.eye()).normalize(),
+                    );
                     self.fps.pitch = forward.y.asin();
                     self.fps.yaw = forward.z.atan2(forward.x);
                 }
@@ -291,10 +293,44 @@ impl CameraController {
         self.last_mouse_pos = Some((x, y));
     }
 
+    fn validate_current_pose(&self, anchor: &Anchor) -> Result<(), CameraFrameError> {
+        validate_camera_pose(anchor, self.eye(), self.eye(), self.target()).map(|_| ())
+    }
+
+    pub fn try_handle_mouse_move(
+        &mut self,
+        anchor: &Anchor,
+        x: f32,
+        y: f32,
+    ) -> Result<(), CameraFrameError> {
+        let mut candidate = self.clone();
+        candidate.handle_mouse_move(x, y);
+        if let Err(error) = candidate.validate_current_pose(anchor) {
+            // Cursor history is input bookkeeping, not camera state. Advance it
+            // so one rejected event cannot poison the next delta.
+            self.last_mouse_pos = Some((x, y));
+            return Err(error);
+        }
+        *self = candidate;
+        Ok(())
+    }
+
     pub fn handle_mouse_scroll(&mut self, delta: f32) {
         if let CameraMode::Orbit = self.mode {
             self.orbit.zoom(delta);
         }
+    }
+
+    pub fn try_handle_mouse_scroll(
+        &mut self,
+        anchor: &Anchor,
+        delta: f32,
+    ) -> Result<(), CameraFrameError> {
+        let mut candidate = self.clone();
+        candidate.handle_mouse_scroll(delta);
+        candidate.validate_current_pose(anchor)?;
+        *self = candidate;
+        Ok(())
     }
 
     pub fn handle_pan(&mut self, delta_x: f32, delta_y: f32) {
@@ -303,12 +339,40 @@ impl CameraController {
         }
     }
 
+    pub fn try_handle_pan(
+        &mut self,
+        anchor: &Anchor,
+        delta_x: f32,
+        delta_y: f32,
+    ) -> Result<(), CameraFrameError> {
+        let mut candidate = self.clone();
+        candidate.handle_pan(delta_x, delta_y);
+        candidate.validate_current_pose(anchor)?;
+        *self = candidate;
+        Ok(())
+    }
+
     pub fn update_fps(&mut self, dt: f32, forward: f32, right: f32, up: f32) {
         if let CameraMode::Fps = self.mode {
             self.fps.move_forward(forward * dt);
             self.fps.move_right(right * dt);
             self.fps.move_up(up * dt);
         }
+    }
+
+    pub fn try_update_fps(
+        &mut self,
+        anchor: &Anchor,
+        dt: f32,
+        forward: f32,
+        right: f32,
+        up: f32,
+    ) -> Result<(), CameraFrameError> {
+        let mut candidate = self.clone();
+        candidate.update_fps(dt, forward, right, up);
+        candidate.validate_current_pose(anchor)?;
+        *self = candidate;
+        Ok(())
     }
 
     pub fn view_matrix(&self, anchor: &Anchor) -> Mat4 {
@@ -385,7 +449,7 @@ impl CameraController {
     ) -> Result<(), CameraFrameError> {
         validate_camera_pose(current_anchor, eye, eye, target)?;
 
-        let forward = Anchor::new().to_render_direction((target - eye).normalize());
+        let forward = Anchor::direction_to_render((target - eye).normalize());
         let pitch = forward.y.asin();
         let yaw = forward.z.atan2(forward.x);
         let distance = (target - eye).length().max(0.01);
@@ -393,9 +457,7 @@ impl CameraController {
         // Update orbit
         self.mode = CameraMode::Orbit;
         self.orbit.target = target;
-        self.orbit.distance = Anchor::new()
-            .to_render_direction(DVec3::new(distance, 0.0, 0.0))
-            .x;
+        self.orbit.distance = Anchor::direction_to_render(DVec3::new(distance, 0.0, 0.0)).x;
         self.orbit.yaw = yaw;
         self.orbit.pitch = pitch;
         self.orbit.up = if up.length_squared() > 0.0 {

@@ -10,7 +10,6 @@ use crate::viewer::event_loop::update_scene_review_state;
 use crate::viewer::terrain::vector_overlay::{
     OverlayPrimitive, VectorOverlayLayer, VectorSourceVertex,
 };
-use crate::viewer::terrain::BlendMode;
 use crate::viewer::viewer_enums::ViewerTerrainScatterBatchConfig;
 use crate::viewer::viewer_enums::{
     ViewerDenoiseConfig, ViewerDensityVolumeConfig, ViewerDofConfig, ViewerHeightAoConfig,
@@ -341,75 +340,18 @@ impl Viewer {
     pub(crate) fn reapply_scene_review_state(&mut self) -> Result<(), String> {
         let effective = self.scene_review_registry.effective_state()?;
         let content_anchor = self.validate_scene_review_effective(&effective)?;
-        let mut raster_ids = Vec::new();
-        let mut vector_ids = Vec::new();
-        let mut label_ids = Vec::new();
-
-        if let Some(ref mut terrain_viewer) = self.terrain_viewer {
-            for overlay in &effective.raster_overlays {
-                match terrain_viewer.add_overlay_image(
-                    &overlay.name,
-                    std::path::Path::new(&overlay.path),
-                    overlay.extent,
-                    overlay.opacity.unwrap_or(1.0),
-                    BlendMode::Normal,
-                    overlay.z_order.unwrap_or(0),
-                ) {
-                    Ok(id) => raster_ids.push(id),
-                    Err(err) => {
-                        let message = format!(
-                            "Failed to load review raster overlay '{}': {err}",
-                            overlay.name
-                        );
-                        self.remove_scene_review_runtime_ids(&raster_ids, &vector_ids, &label_ids);
-                        return Err(message);
-                    }
-                }
-            }
-        }
-
-        for overlay in &effective.vector_overlays {
-            match add_managed_vector_overlay(self, overlay, &content_anchor) {
-                Ok(Some(id)) => vector_ids.push(id),
-                Ok(None) => {}
-                Err(err) => {
-                    self.remove_scene_review_runtime_ids(&raster_ids, &vector_ids, &label_ids);
-                    return Err(err);
-                }
-            }
-        }
-
-        for label in &effective.labels {
-            match add_review_label(self, label, &content_anchor) {
-                Ok(id) => label_ids.push(id),
-                Err(err) => {
-                    self.remove_scene_review_runtime_ids(&raster_ids, &vector_ids, &label_ids);
-                    return Err(err);
-                }
-            }
-        }
-
-        #[cfg(feature = "enable-gpu-instancing")]
-        {
-            if let Some(ref mut terrain_viewer) = self.terrain_viewer {
-                if let Err(err) =
-                    terrain_viewer.set_scatter_batches_from_configs(&effective.scatter_batches)
-                {
-                    self.remove_scene_review_runtime_ids(&raster_ids, &vector_ids, &label_ids);
-                    return Err(format!("Failed to set review scatter batches: {err:#}"));
-                }
-            }
-        }
-        #[cfg(not(feature = "enable-gpu-instancing"))]
-        {
-            if !effective.scatter_batches.is_empty() {
-                self.remove_scene_review_runtime_ids(&raster_ids, &vector_ids, &label_ids);
-                return Err(
-                    "Review scatter batches require Cargo feature 'enable-gpu-instancing'"
-                        .to_string(),
-                );
-            }
-        }
+        // All fallible parsing happens before any live registry/runtime change.
+        let staged_labels = effective
+            .labels
+            .iter()
+            .map(|payload| stage_review_label(payload, &content_anchor))
+            .collect::<Result<Vec<_>, _>>()?;
+        scene_review_injected_failure("after_label_staging")?;
+        let staged_vector_layers = effective
+            .vector_overlays
+            .iter()
+            .map(review_vector_layer)
+            .collect::<Vec<_>>();
 
         let old_raster_ids = self
             .scene_review_registry
@@ -420,7 +362,87 @@ impl Viewer {
             .managed_vector_overlay_ids
             .clone();
         let old_label_ids = self.scene_review_registry.managed_label_ids.clone();
-        self.remove_scene_review_runtime_ids(&old_raster_ids, &old_vector_ids, &old_label_ids);
+
+        // Detached candidates preserve unmanaged layers. Their allocations and
+        // next-ID counters are unreachable from the live renderer until swap.
+        let (staged_stacks, raster_ids, vector_ids, staged_bvhs) =
+            if let Some(terrain_viewer) = self.terrain_viewer.as_ref() {
+                let (raster_stack, raster_ids) = terrain_viewer
+                    .stage_review_raster_replacement(&old_raster_ids, &effective.raster_overlays)
+                    .map_err(|error| format!("review raster staging failed: {error}"))?;
+                scene_review_injected_failure("after_raster_composite")?;
+                let (vector_stack, vector_ids) = terrain_viewer
+                    .stage_review_vector_replacement(
+                        &old_vector_ids,
+                        staged_vector_layers,
+                        &content_anchor,
+                    )
+                    .map_err(|error| format!("review vector staging failed: {error}"))?;
+                scene_review_injected_failure("after_vector_allocation")?;
+                let staged_bvhs = vector_stack
+                    .render_layer_data()
+                    .filter(|(id, ..)| vector_ids.contains(id))
+                    .filter_map(|(id, name, vertices, indices, primitive)| {
+                        crate::viewer::terrain::vector_overlay::build_layer_bvh(
+                            id, name, vertices, indices, primitive,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                (
+                    Some((raster_stack, vector_stack)),
+                    raster_ids,
+                    vector_ids,
+                    staged_bvhs,
+                )
+            } else {
+                (None, Vec::new(), Vec::new(), Vec::new())
+            };
+
+        #[cfg(feature = "enable-gpu-instancing")]
+        let staged_scatter_batches = self
+            .terrain_viewer
+            .as_ref()
+            .map(|terrain_viewer| {
+                terrain_viewer.stage_scatter_batches_from_configs(&effective.scatter_batches)
+            })
+            .transpose()
+            .map_err(|err| format!("Failed to stage review scatter batches: {err:#}"))?;
+        #[cfg(not(feature = "enable-gpu-instancing"))]
+        {
+            if !effective.scatter_batches.is_empty() {
+                return Err(
+                    "Review scatter batches require Cargo feature 'enable-gpu-instancing'"
+                        .to_string(),
+                );
+            }
+        }
+
+        // Commit: no fallible work remains. Drop old managed BVHs, atomically
+        // swap both complete stacks, then update labels and registry last.
+        for id in &old_vector_ids {
+            self.unified_picking.remove_layer_bvh(*id);
+        }
+        if let (Some(terrain_viewer), Some((raster_stack, vector_stack))) =
+            (self.terrain_viewer.as_mut(), staged_stacks)
+        {
+            terrain_viewer.commit_review_stacks(raster_stack, vector_stack);
+        }
+        #[cfg(feature = "enable-gpu-instancing")]
+        if let (Some(terrain_viewer), Some(scatter_batches)) =
+            (self.terrain_viewer.as_mut(), staged_scatter_batches)
+        {
+            terrain_viewer.commit_scatter_batches(scatter_batches);
+        }
+        for bvh in staged_bvhs {
+            self.unified_picking.register_layer_bvh(bvh);
+        }
+        for id in old_label_ids {
+            let _ = self.remove_label(id);
+        }
+        let label_ids = staged_labels
+            .into_iter()
+            .map(|label| label.commit(self))
+            .collect::<Vec<_>>();
         self.apply_scene_review_preset(effective.preset.as_ref());
 
         self.scene_review_registry.managed_raster_overlay_ids = raster_ids;
@@ -428,26 +450,6 @@ impl Viewer {
         self.scene_review_registry.managed_label_ids = label_ids;
 
         Ok(())
-    }
-
-    fn remove_scene_review_runtime_ids(
-        &mut self,
-        raster_ids: &[u32],
-        vector_ids: &[u32],
-        label_ids: &[u64],
-    ) {
-        if let Some(ref mut terrain_viewer) = self.terrain_viewer {
-            for &id in raster_ids {
-                let _ = terrain_viewer.remove_overlay(id);
-            }
-            for &id in vector_ids {
-                let _ = terrain_viewer.remove_vector_overlay(id);
-                self.unified_picking.remove_layer_bvh(id);
-            }
-        }
-        for &id in label_ids {
-            let _ = self.remove_label(id);
-        }
     }
 
     fn validate_scene_review_effective(
@@ -512,31 +514,10 @@ impl Viewer {
     }
 }
 
-fn add_managed_vector_overlay(
-    viewer: &mut Viewer,
-    overlay: &ViewerVectorOverlayLayerConfig,
-    anchor: &crate::camera::Anchor,
-) -> Result<Option<u32>, String> {
-    let world_points = overlay
-        .vertices
-        .iter()
-        .map(|vertex| DVec3::from(vertex.position))
-        .collect::<Vec<_>>();
-    for point in world_points {
-        crate::viewer::camera_controller::validate_world_point(
-            crate::viewer::camera_controller::CoordRole::Content,
-            point,
-            anchor,
-        )
-        .map_err(|err| err.to_string())?;
-    }
-    let Some(ref mut terrain_viewer) = viewer.terrain_viewer else {
-        return Ok(None);
-    };
-
+fn review_vector_layer(overlay: &ViewerVectorOverlayLayerConfig) -> VectorOverlayLayer {
     let primitive =
         OverlayPrimitive::from_str(&overlay.primitive).unwrap_or(OverlayPrimitive::Triangles);
-    let layer = VectorOverlayLayer {
+    VectorOverlayLayer {
         name: overlay.name.clone(),
         source_vertices: overlay
             .vertices
@@ -554,32 +535,6 @@ fn add_managed_vector_overlay(
         point_size: overlay.point_size,
         visible: true,
         z_order: overlay.z_order,
-    };
-    let id = terrain_viewer
-        .add_vector_overlay_with_id(None, layer, anchor)
-        .map_err(|e| e.to_string())?;
-    let render_data = terrain_viewer.vector_overlay_render_data(id);
-    register_vector_overlay_bvh(viewer, id, render_data.as_ref());
-    Ok(Some(id))
-}
-
-fn register_vector_overlay_bvh(
-    viewer: &mut Viewer,
-    layer_id: u32,
-    render_data: Option<&(
-        String,
-        Vec<crate::viewer::terrain::vector_overlay::VectorVertex>,
-        Vec<u32>,
-        OverlayPrimitive,
-    )>,
-) {
-    let Some((name, vertices, indices, primitive)) = render_data else {
-        return;
-    };
-    if let Some(layer) = crate::viewer::terrain::vector_overlay::build_layer_bvh(
-        layer_id, name, vertices, indices, *primitive,
-    ) {
-        viewer.unified_picking.register_layer_bvh(layer);
     }
 }
 
@@ -744,11 +699,49 @@ fn review_label_world_points(payload: &Map<String, Value>) -> Result<Vec<DVec3>,
     }
 }
 
-fn add_review_label(
-    viewer: &mut Viewer,
+enum StagedReviewLabel {
+    Point {
+        text: String,
+        world_pos: DVec3,
+        style: LabelStyle,
+    },
+    Line {
+        text: String,
+        polyline: Vec<DVec3>,
+        style: LabelStyle,
+        placement: LineLabelPlacement,
+        repeat_distance: f32,
+    },
+}
+
+impl StagedReviewLabel {
+    fn commit(self, viewer: &mut Viewer) -> u64 {
+        match self {
+            Self::Point {
+                text,
+                world_pos,
+                style,
+            } => viewer.add_label(&text, (world_pos.x, world_pos.y, world_pos.z), Some(style)),
+            Self::Line {
+                text,
+                polyline,
+                style,
+                placement,
+                repeat_distance,
+            } => {
+                viewer
+                    .label_manager
+                    .add_line_label(text, polyline, style, placement, repeat_distance)
+                    .0
+            }
+        }
+    }
+}
+
+fn stage_review_label(
     payload: &Map<String, Value>,
     anchor: &crate::camera::Anchor,
-) -> Result<u64, String> {
+) -> Result<StagedReviewLabel, String> {
     let kind = payload
         .get("kind")
         .and_then(Value::as_str)
@@ -766,11 +759,11 @@ fn add_review_label(
                 anchor,
             )
             .map_err(|err| err.to_string())?;
-            Ok(viewer.add_label(
-                &point.text,
-                (point.world_pos[0], point.world_pos[1], point.world_pos[2]),
-                Some(style),
-            ))
+            Ok(StagedReviewLabel::Point {
+                text: point.text,
+                world_pos: DVec3::from(point.world_pos),
+                style,
+            })
         }
         "line" => {
             let line: LineLabelPayload =
@@ -790,16 +783,13 @@ fn add_review_label(
                 )
                 .map_err(|err| err.to_string())?;
             }
-            Ok(viewer
-                .label_manager
-                .add_line_label(
-                    line.text,
-                    polyline,
-                    style,
-                    placement,
-                    line.repeat_distance.unwrap_or(0.0),
-                )
-                .0)
+            Ok(StagedReviewLabel::Line {
+                text: line.text,
+                polyline,
+                style,
+                placement,
+                repeat_distance: line.repeat_distance.unwrap_or(0.0),
+            })
         }
         "curved" => {
             let curved: CurvedLabelPayload =
@@ -815,10 +805,13 @@ fn add_review_label(
                 )
                 .map_err(|err| err.to_string())?;
             }
-            Ok(viewer
-                .label_manager
-                .add_line_label(curved.text, polyline, style, LineLabelPlacement::Along, 0.0)
-                .0)
+            Ok(StagedReviewLabel::Line {
+                text: curved.text,
+                polyline,
+                style,
+                placement: LineLabelPlacement::Along,
+                repeat_distance: 0.0,
+            })
         }
         "callout" => {
             let callout: CalloutLabelPayload =
@@ -840,13 +833,61 @@ fn add_review_label(
                 anchor,
             )
             .map_err(|err| err.to_string())?;
-            Ok(viewer.add_label(
-                &callout.text,
-                (callout.anchor[0], callout.anchor[1], callout.anchor[2]),
-                Some(style),
-            ))
+            Ok(StagedReviewLabel::Point {
+                text: callout.text,
+                world_pos: DVec3::from(callout.anchor),
+                style,
+            })
         }
         other => Err(format!("Unsupported review label kind: {other}")),
+    }
+}
+
+#[cfg(test)]
+static SCENE_REVIEW_FAILURE_POINT: std::sync::atomic::AtomicU8 =
+    std::sync::atomic::AtomicU8::new(0);
+
+#[cfg(test)]
+fn scene_review_injected_failure(point: &str) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    let expected = match point {
+        "after_label_staging" => 1,
+        "after_vector_allocation" => 2,
+        "after_raster_composite" => 3,
+        _ => 0,
+    };
+    if SCENE_REVIEW_FAILURE_POINT.load(Ordering::SeqCst) == expected {
+        Err(format!("injected scene-review failure: {point}"))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(test))]
+fn scene_review_injected_failure(point: &str) -> Result<(), String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static MATCHING_CALLS: AtomicU64 = AtomicU64::new(0);
+    if std::env::var("RUN_M06_VIEWER_CI").as_deref() != Ok("1") {
+        return Ok(());
+    }
+    let Ok(spec) = std::env::var("FORGE3D_M06_SCENE_REVIEW_FAILPOINT") else {
+        return Ok(());
+    };
+    let (wanted, nth) = spec
+        .rsplit_once(':')
+        .and_then(|(wanted, nth)| nth.parse::<u64>().ok().map(|nth| (wanted, nth)))
+        .unwrap_or((spec.as_str(), 1));
+    if wanted != point || nth == 0 {
+        return Ok(());
+    }
+    let call = MATCHING_CALLS.fetch_add(1, Ordering::SeqCst) + 1;
+    if call == nth {
+        Err(format!(
+            "injected scene-review failure: point={point} matching_call={call}"
+        ))
+    } else {
+        Ok(())
     }
 }
 
@@ -943,9 +984,7 @@ fn first_f32(map: &Map<String, Value>, keys: &[&str]) -> Option<f32> {
 }
 
 fn narrow_nonposition_scalar(value: f64) -> f32 {
-    crate::camera::Anchor::new()
-        .to_render_direction(DVec3::new(value, 0.0, 0.0))
-        .x
+    crate::camera::Anchor::direction_to_render(DVec3::new(value, 0.0, 0.0)).x
 }
 
 fn first_u32(map: &Map<String, Value>, keys: &[&str]) -> Option<u32> {

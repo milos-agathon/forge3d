@@ -4,7 +4,6 @@
 
 struct Uniforms {
     view_proj: mat4x4<f32>,
-    render_origin_span: vec4<f32>, // render origin X/Z, physical span X/Z
     sun_dir: vec4<f32>,
     terrain_params: vec4<f32>,  // min_h, h_range, terrain_width, z_scale
     lighting: vec4<f32>,        // sun_intensity, ambient, shadow_intensity, water_level
@@ -20,6 +19,8 @@ struct Uniforms {
     screen_dims: vec4<f32>,     // width, height, _, _
     // Overlay params: enabled (>0.5), opacity, blend_mode (0=normal, 1=multiply, 2=overlay), solid (>0.5)
     overlay_params: vec4<f32>,
+    render_origin_xz: vec2<f32>, // append-only ABI offset 240
+    render_span_xz: vec2<f32>,   // append-only ABI offset 248
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -106,11 +107,10 @@ fn vs_main(@location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>) -> VertexOut
     
     let world_y = height_to_world_y(h);
     
-    let world_x = u.render_origin_span.x + uv.x * u.render_origin_span.z;
-    let world_z = u.render_origin_span.y + uv.y * u.render_origin_span.w;
+    let world_xz = u.render_origin_xz + uv * u.render_span_xz;
     
     var out: VertexOutput;
-    out.world_pos = vec3<f32>(world_x, world_y, world_z);
+    out.world_pos = vec3<f32>(world_xz.x, world_y, world_xz.y);
     out.position = u.view_proj * vec4<f32>(out.world_pos, 1.0);
     out.uv = uv;
     out.raw_height = h;
@@ -134,8 +134,8 @@ fn compute_normal(uv: vec2<f32>) -> vec3<f32> {
     let right = vec2<i32>(min(texel.x + 1, max_texel.x), texel.y);
     let down = vec2<i32>(texel.x, max(texel.y - 1, 0));
     let up = vec2<i32>(texel.x, min(texel.y + 1, max_texel.y));
-    let step_x = u.render_origin_span.z / max(f32(dims_u.x) - 1.0, 1.0);
-    let step_z = u.render_origin_span.w / max(f32(dims_u.y) - 1.0, 1.0);
+    let step_x = u.render_span_xz.x / max(f32(dims_u.x) - 1.0, 1.0);
+    let step_z = u.render_span_xz.y / max(f32(dims_u.y) - 1.0, 1.0);
     let h_l = height_to_world_y(textureLoad(heightmap, left, 0).r);
     let h_r = height_to_world_y(textureLoad(heightmap, right, 0).r);
     let h_d = height_to_world_y(textureLoad(heightmap, down, 0).r);
@@ -736,9 +736,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // View direction
     let view_dir = normalize(u.camera_pos.xyz - in.world_pos);
-    let terrain_width = u.render_origin_span.z;
-    let terrain_depth = u.render_origin_span.w;
-    let terrain_span = max(terrain_width, terrain_depth);
+    let terrain_span = max(abs(u.render_span_xz.x), abs(u.render_span_xz.y));
     let hdri_enabled = u.ibl_params.x > 0.5;
 
     // === DIRECT SUN LIGHTING ===

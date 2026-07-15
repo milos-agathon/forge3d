@@ -54,7 +54,7 @@ def test_absolute_sources_remain_f64_until_anchor_packing():
     city = _read("src/import/cityjson/types.rs")
     assert "pub positions: Vec<f64>" in city
     city_geometry = _read("src/import/cityjson/geometry.rs")
-    assert "to_render_direction" in city_geometry
+    assert "direction_to_render" in city_geometry
     assert "point[0] as f32" not in city_geometry
 
 
@@ -81,9 +81,9 @@ def test_frame_camera_precedence_is_full_pose_not_anchor_only():
 
 def test_mouse_pick_ray_uses_render_frame_not_object_local_model():
     source = _read("src/viewer/input/viewer_input.rs")
-    picking = source.split("Calculate matrices for unprojection", 1)[1].split(
-        "Create event", 1
+    picking = source.split("pub(crate) fn pick_at_screen", 1)[1].split(
+        "pub fn handle_input", 1
     )[0]
     assert "let frame = self.current_frame_camera()" in picking
-    assert "let view_proj = proj * view_mat" in picking
+    assert "frame.projection(self.config.width, self.config.height) * frame.view()" in picking
     assert "anchored_object_model" not in picking

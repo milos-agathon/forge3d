@@ -182,6 +182,13 @@ impl SsrRenderer {
 
         // Temporal accumulation smooths the reflection
         let fallback_end = Instant::now();
+        let temporal_history_view = if self.history_state.is_valid() {
+            &self.ssr_history_view
+        } else {
+            // First frame after construction/rebase: reading the current result
+            // as history makes temporal filtering an exact current-frame pass.
+            &self.ssr_final_view
+        };
         let temporal_bg = device.create_bind_group(&BindGroupDescriptor {
             label: Some("p5.ssr.temporal.bg"),
             layout: &self.temporal_bind_group_layout,
@@ -192,7 +199,7 @@ impl SsrRenderer {
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: BindingResource::TextureView(&self.ssr_history_view),
+                    resource: BindingResource::TextureView(temporal_history_view),
                 },
                 BindGroupEntry {
                     binding: 2,
@@ -257,6 +264,7 @@ impl SsrRenderer {
                 depth_or_array_layers: 1,
             },
         );
+        self.history_state.mark_populated();
 
         self.clear_scene_color_override();
 

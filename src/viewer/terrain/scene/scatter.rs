@@ -190,10 +190,10 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
 }
 
 impl ViewerTerrainScene {
-    pub fn set_scatter_batches_from_configs(
-        &mut self,
+    pub(crate) fn stage_scatter_batches_from_configs(
+        &self,
         batches: &[crate::viewer::viewer_enums::ViewerTerrainScatterBatchConfig],
-    ) -> Result<()> {
+    ) -> Result<Vec<TerrainScatterBatch>> {
         let mut gpu_batches = Vec::with_capacity(batches.len());
         for batch in batches {
             let levels = batch
@@ -231,8 +231,21 @@ impl ViewerTerrainScene {
             gpu_batches.push(gpu_batch);
         }
 
+        Ok(gpu_batches)
+    }
+
+    pub(crate) fn commit_scatter_batches(&mut self, gpu_batches: Vec<TerrainScatterBatch>) {
         self.scatter_batches = gpu_batches;
         self.scatter_last_frame_stats = TerrainScatterFrameStats::default();
+    }
+
+    pub fn set_scatter_batches_from_configs(
+        &mut self,
+        batches: &[crate::viewer::viewer_enums::ViewerTerrainScatterBatchConfig],
+    ) -> Result<()> {
+        let gpu_batches = self.stage_scatter_batches_from_configs(batches)?;
+
+        self.commit_scatter_batches(gpu_batches);
         Ok(())
     }
 

@@ -2,7 +2,9 @@ use glam::Mat4;
 
 use crate::core::screen_space_effects::ScreenSpaceEffectsManager;
 use crate::viewer::viewer_enums::FogMode;
-use crate::viewer::{CameraFrustum, FogCameraUniforms, Viewer, VolumetricUniformsStd140};
+use crate::viewer::{
+    CameraFrustum, FogCameraUniforms, Viewer, ViewerShadowUniforms, VolumetricUniformsStd140,
+};
 
 use super::mat4_to_array;
 
@@ -26,7 +28,7 @@ impl Viewer {
         }
 
         if self.fog_use_shadows {
-            self.render_fog_shadow_cascades(encoder);
+            self.render_fog_shadow_cascades(encoder, frame);
         }
 
         let inv_view = view_mat.inverse();
@@ -70,7 +72,9 @@ impl Viewer {
             sun_direction: [sun_dir_ws.x, sun_dir_ws.y, sun_dir_ws.z],
             sun_intensity: self.sky_sun_intensity.max(0.0),
             ambient_color: [0.2, 0.25, 0.3],
-            temporal_alpha: self.fog_temporal_alpha.clamp(0.0, 0.9),
+            temporal_alpha: self
+                .fog_history_state
+                .blend_alpha(self.fog_temporal_alpha.clamp(0.0, 0.9)),
             use_shadows: if self.fog_use_shadows { 1 } else { 0 },
             jitter_strength: 0.8,
             frame_index: self.fog_frame_index,
@@ -116,11 +120,20 @@ impl Viewer {
             );
         }
 
+        self.fog_history_state.mark_populated();
         self.fog_frame_index = self.fog_frame_index.wrapping_add(1);
     }
 
-    fn render_fog_shadow_cascades(&mut self, encoder: &mut wgpu::CommandEncoder) {
-        let vb = self.geom_vb.as_ref().unwrap();
+    fn render_fog_shadow_cascades(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        frame: crate::viewer::viewer_types::FrameCamera,
+    ) {
+        let Some(vb) = self.geom_vb.as_ref() else {
+            // Terrain shadows use their own viewer-specific pipeline. A
+            // terrain-only scene has no generic geometry buffer to draw here.
+            return;
+        };
         if let (Some(ref csm), Some(ref csm_pipe), Some(ref csm_cam_buf)) = (
             self.csm.as_ref(),
             self.csm_depth_pipeline.as_ref(),
@@ -132,9 +145,12 @@ impl Viewer {
                     csm.cascade_depth_view(cascade_idx),
                     csm.cascade_projection(cascade_idx),
                 ) {
-                    let light_vp_arr = light_vp.to_cols_array();
+                    let shadow_uniforms = ViewerShadowUniforms {
+                        light_view_proj: light_vp.to_cols_array_2d(),
+                        object_model: self.anchored_object_model(frame).to_cols_array_2d(),
+                    };
                     self.queue
-                        .write_buffer(csm_cam_buf, 0, bytemuck::cast_slice(&light_vp_arr));
+                        .write_buffer(csm_cam_buf, 0, bytemuck::bytes_of(&shadow_uniforms));
                     let mut shadow_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("viewer.csm.depth"),
                         color_attachments: &[],

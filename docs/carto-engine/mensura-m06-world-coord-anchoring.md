@@ -3,7 +3,8 @@
 Status: implementation complete on `codex/m06-fgv-audit-remediation`; merge
 acceptance remains pending until the required NVIDIA/Vulkan PR job is green with
 zero skipped M-06 tests. No signed recipe certificate refresh is required: the
-packaged target recipe passes and its shared signed shader hashes are unchanged.
+target recipe passes on local Metal with the fresh release extension and its
+shared signed shader hashes are unchanged.
 
 The authoritative contract is
 [`mensura-m06-full-geospatial-viewer-spec.md`](./mensura-m06-full-geospatial-viewer-spec.md).
@@ -126,10 +127,11 @@ composition, mouse picking, and transaction ordering.
 
 ## Local preflight evidence
 
-The pre-PR Metal preflight used the normally packaged ABI3 wheel and a freshly
-built release viewer, not the editable development extension. The required live
-file completed `4 passed` with a zero-skip JUnit result. These results are useful
-regression evidence, but they do not replace the required NVIDIA/Vulkan job:
+The predecessor pre-PR Metal preflight recorded the following results with an
+ABI3 wheel and release viewer. They remain supplementary historical regression
+evidence; the final fail-closed M-06 entry point now rejects Metal before live
+collection and only the required NVIDIA/Vulkan job can establish release
+acceptance:
 
 - local/translated-terrain parity: SSIM `0.9999999993148123`, MAE
   `7.978e-09`, maximum channel difference one byte; the signed-transform
@@ -149,12 +151,75 @@ regression evidence, but they do not replace the required NVIDIA/Vulkan job:
 - the scene-review residual rejection preserved the prior runtime and registry
   exactly.
 
-The signed `mapscene_terrain_raster` recipe golden also passes against the
-packaged wheel on Metal. Viewer shadow depth now has its own 128-byte camera ABI
-shader, while the offscreen signed recipe keeps its original shared 112-byte
-shader. The shared `terrain.shadow_depth.shader` and `terrain_pbr_pom.shader`
-hashes therefore remain unchanged and no protected certificate-refresh run is
-needed for this change.
+The signed `mapscene_terrain_raster` recipe golden also passes against the fresh
+release extension on Metal. Its built-in IBL resolution is hermetic: optional
+untracked demo HDRIs cannot change signed-recipe pixels. Viewer shadow depth now
+has its own 128-byte camera ABI shader, while the offscreen signed recipe keeps
+its original shared 112-byte shader. The shared
+`terrain.shadow_depth.shader` and `terrain_pbr_pom.shader` hashes therefore
+remain unchanged and no protected certificate-refresh run is needed.
+
+## Audit remediation reconciliation
+
+The source audits did not assign stable `Axx` identifiers. This implementation
+ledger assigns `A01` through `A37` in audit order so every distinct finding can
+be tracked without collapsing it into a theme. `FULL` means the production path
+and locally admissible proof are complete. NVIDIA/Vulkan-only rows remain
+`NOT_PROVEN`; local Metal is never substituted for them.
+
+| ID | Requirement / original audit gap | Status | Production and test evidence | Remaining deficiency |
+|---|---|---|---|---|
+| A01 | Exact world-coordinate f64-to-f32 inventory | FULL | `test_world_coord_f32_gate.py` inventories operations and rejecting probes; `Anchor::narrow` is the sole sanctioned implementation. | None. |
+| A02 | Exact matrix-producer inventory | FULL | `test_m06_viewer_matrix_contract.py` keys file/function/operation/ordinal and rejects multiline, alias, inverse, duplicate, and previous-VP probes. | None. |
+| A03 | One persistent viewer anchor and one frame-start rebase | FULL | `test_m06_single_rebase_contract.py` inventories storage, construction, aliases, delegates, and the sole mutation. | None. |
+| A04 | Object transform applies translation/rotation/scale exactly once | FULL | Absolute translation remains f64; vertices stay local; `anchored_object_model` is the sole render transform and is shared by visible, fog-shadow, and pick paths. | None. |
+| A05 | One terrain > point-cloud > general camera for the whole frame | FULL | Frozen `FrameCamera` drives geometry, terrain, labels, sky/fog, GI, points, snapshots, and picking; precedence/permutation tests are green. | None. |
+| A06 | Point-cloud snapshot composes over terrain | FULL | Snapshot point pass loads the existing color target; composition tests assert terrain is not cleared. | None. |
+| A07 | Exact GeoTIFF transform decoding and typed rejection | FULL | Exact 16-value ModelTransformation and scale/tie parsing reject partial, malformed, non-finite, signed, rotated, sheared, and zero-span inputs. | None. |
+| A08 | One synchronous metadata ingress before enqueue/allocation | FULL | `load_terrain` uses one preflight/parser; metadata failures cannot become missing-transform fallback. | None. |
+| A09 | Complete non-square physical footprint across terrain consumers | FULL | PBR, simple, shadow, drape, scatter, density, DoF, snapshot, and picking use one origin/span contract. | None. |
+| A10 | Terrain Rust/WGSL sizes, offsets, alignment, and bindings | FULL | Compile-time 160/128/256-byte assertions plus WGSL field-order and minimum-binding gates are green. | None. |
+| A11 | Allocation-free deterministic temporal reset | FULL | Shared validity state resets TAA/SSGI/SSAO/SSR/fog without resource creation; first post-rebase blend is bypassed. | NVIDIA visual no-flash evidence is tracked separately in A35. |
+| A12 | Generic-object fog shadows and separate 128-byte viewer ABI | FULL | Viewer shadow uniforms contain light VP plus anchored object model; terrain-only scenes do not unwrap a missing geometry buffer; signed 112-byte shader is untouched. | NVIDIA visual shadow evidence is tracked separately in A35. |
+| A13 | Prospective-frame residual validation for all content | FULL | Camera, terrain, object, label, vector, and point content validate the whole prospective batch before state publication. | None. |
+| A14 | Stable frame-establishing command order | FULL | `command_batch.rs` stable-partitions terrain/point/camera before content; all 24 Rust permutations pass. | None. |
+| A15 | Correlated IPC completion and rendered-frame fencing | FULL | Command IDs and applied/rendered revisions prevent enqueue acknowledgements from masquerading as completed snapshots or picks. | None. |
+| A16 | Transactional scene-review installation | FULL | Complete scene staging includes labels, vectors, rasters, BVHs, and scatter; failpoints roll back IDs/runtime and publish registry last. | NVIDIA rollback evidence is tracked separately in A36. |
+| A17 | Label, line, curved-label, and callout f64 retention | FULL | Rust serde/storage and Python payload tests preserve sub-millimetre Earth-scale values to the anchor boundary. | None. |
+| A18 | Exact eight-lane vector schema and ID validation | FULL | XYZ f64, RGBA f32, ID u32; wrong lanes, non-finite values, fractional/negative/overflow IDs reject synchronously. | None. |
+| A19 | Vector repack and BVH use actual render vertices and feature IDs | FULL | Rebase repacks through existing `COPY_DST`; BVH rebuild/failpoint and repeated-rebase precision tests pass. | None. |
+| A20 | Point-cloud f64 source and reusable render/device buffers | FULL | Source positions remain f64; render cache is anchor-packed; rebases rewrite existing buffers. | None. |
+| A21 | Exact point/vector/terrain/temporal telemetry | FULL | Source, render, device, tracked, and owner/resource IDs report real allocations rather than estimates. | NVIDIA memory evidence is tracked separately in A36. |
+| A22 | Point-cloud culling, visibility, and picking share the frame | FULL | Active-camera frustum, screen/snapshot visibility, and absolute pick restoration are exercised together. | NVIDIA 500k coexistence is tracked separately in A36. |
+| A23 | Mouse/IPC picks use frozen-frame matrices and return absolute f64 | FULL | `pick_at` and queued mouse picks execute exactly once against the rendered revision and restore the copied anchor. | NVIDIA millimetre output is tracked separately in A36. |
+| A24 | CityJSON transforms and normals retain precision | FULL | Transformed positions remain f64; normals derive from local direction differences and tests cover Earth-scale transforms. | None. |
+| A25 | 3D Tiles hierarchy/content transforms retain f64 and exact bytes | FULL | World transforms/bounds and PNTS RTC offsets remain f64; render packing occurs after scene anchoring and telemetry includes f64 source bytes. | None. |
+| A26 | Density/scatter identity is independent of render-origin metadata | FULL | Immutable voxel/content identity excludes `render_origin_span`; rebases update only metadata/uniforms without allocation. | None. |
+| A27 | JUnit zero-skip verifier is fail closed | FULL | Nested/root suites, malformed counters/XML, contradictions, zero tests, failures, errors, skips, and xfails have rejecting fixtures. | None. |
+| A28 | CI preserves pytest and verifier failures and uploads evidence | FULL | Workflow records both exit codes, always verifies an existing XML, always uploads evidence, and fails if either command fails. | Runtime artifact contents are tracked separately in A37. |
+| A29 | CI tests the exact installed wheel, not repo-local Python/native files | FULL | Installed-wheel path gate requires `FORGE3D_NO_BOOTSTRAP=1` and rejects repo-local package or extension resolution. | Exact required-lane execution is tracked separately in A37. |
+| A30 | Hardware probe fails closed on adapter absence/crash | FULL | Probe distinguishes ABSENT from CRASH; the required lane requires physical NVIDIA/Vulkan and a fresh release viewer. | Actual required adapter execution is tracked separately in A37. |
+| A31 | Signed recipe, shader hashes, and certificates remain protected | FULL | Target Metal recipe passes; certificate signature verifies; deterministic built-in IBL ignores optional local HDRIs; no golden/certificate refresh occurred. | Cross-backend determinism remains a required-lane concern. |
+| A32 | Neighboring terrain PBR and vector-overlay behavior | FULL | Local Metal integration completed 24 tests with zero skips after the fresh release build. | Metal is supplementary, not release proof. |
+| A33 | Live M-06 harness and adversarial negative controls | FULL | Native raster writer plus rasterio oracle, SSIM/MAE controls, cast-before-subtract control, typed transform failures, and zero-skip artifact schema are implemented and source-tested. | Hardware results are tracked in A34-A37. |
+| A34 | Live translated/rebased terrain equivalence on NVIDIA/Vulkan | NOT_PROVEN | Required test is wired fail closed. | The exact published remediation head must complete the required external job green. |
+| A35 | Live effects, full orbit, CSM/fog/temporal no-flash on NVIDIA/Vulkan | NOT_PROVEN | Required assertions and artifacts are wired. | The exact published remediation head must complete the required external job green. |
+| A36 | Live 500k points, 1 mm separation, resource stability, and rollback on NVIDIA/Vulkan | NOT_PROVEN | Required assertions and negative controls are wired. | The exact published remediation head must complete the required external job green. |
+| A37 | Exact-head required CI: zero skips/failures/errors and uploaded evidence | NOT_PROVEN | `ci-success` depends on `test-m06-full-geospatial-viewer`; JUnit and evidence validators are fail closed. | Refresh the required exact-head job after publication; local evidence is not release proof. |
+
+| Specification task | Status | Local closure | Remaining deficiency |
+|---|---|---|---|
+| M06-FGV-00 | FULL | Enforcement, allocation, inventory, JUnit, workflow, and negative-control gates are implemented and green. | None. |
+| M06-FGV-01 | FULL | Metadata, fallback, arbitrary/missing CRS, typed rejection, and height-tag contracts are green. | None. |
+| M06-FGV-02 | FULL | Single owner/rebase, active camera, frozen frame, and pre-encode refresh contracts are green. | None. |
+| M06-FGV-03 | FULL | Uniform/WGSL/pipeline contracts and protected local Metal recipe parity are green. | NVIDIA runtime is included in M06-FGV-09. |
+| M06-FGV-04 | FULL | Exact matrix inventory and all named subsystem producers are classified and frame-bound. | None. |
+| M06-FGV-05 | FULL | Persistent precision, repack/BVH, picking, point buffers, telemetry, and temporal resets are green. | NVIDIA runtime is included in M06-FGV-09. |
+| M06-FGV-06 | FULL | Rust serde, exact vector schema, scene-review precision, and transaction tests are green. | None. |
+| M06-FGV-07 | FULL | Python payload validation, public API, docs, and stubs are green. | None. |
+| M06-FGV-08 | FULL | Prospective residual boundary, no-mutation errors, and sole-narrowing gates are green. | None. |
+| M06-FGV-09 | NOT_PROVEN | Required NVIDIA/Vulkan workflow and live harness are fully wired. | Exact-head hardware job must complete green with zero skips and valid evidence. |
+| M06-FGV-10 | FULL | Compatibility, signed-recipe protection, neighboring integration, implementation plan, and handoff documentation are complete locally. | Release verdict remains gated by M06-FGV-09. |
 
 ## Certificate policy
 
