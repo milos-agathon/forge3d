@@ -42,6 +42,9 @@ impl Viewer {
             .map_or(1.0, |cloud| cloud.cam_radius);
         let mut general_eye = current.eye_world;
         let mut general_target = current.target_world;
+        let mut object_translation = self.object_translation;
+        let object_present = !self.object_source_positions.is_empty();
+        let mut object_transform_requested = false;
         let mut requested_terrain_path: Option<&str> = None;
         let mut requested_point_path: Option<&str> = None;
         let mut requested_terrain_target: Option<[f64; 3]> = None;
@@ -117,6 +120,12 @@ impl Viewer {
                     general_eye = DVec3::from(*eye);
                     general_target = DVec3::from(*target);
                 }
+                ViewerCmd::SetTransform { translation, .. } => {
+                    object_transform_requested = true;
+                    if let Some(translation) = translation {
+                        object_translation = DVec3::from(*translation);
+                    }
+                }
                 _ => {}
             }
         }
@@ -130,6 +139,8 @@ impl Viewer {
             DVec3::new(target.x, 0.0, target.z)
         } else if point_present {
             point_center.ok_or_else(|| "prospective point cloud has no center".to_string())?
+        } else if object_transform_requested {
+            object_translation
         } else {
             general_eye
         };
@@ -164,7 +175,7 @@ impl Viewer {
             );
             validate_points(&anchor, CoordRole::Eye, [center + offset])?;
             validate_points(&anchor, CoordRole::Target, [center])?;
-        } else {
+        } else if !(object_transform_requested && requested_general_pose.is_none()) {
             validate_points(&anchor, CoordRole::Eye, [general_eye])?;
             validate_points(&anchor, CoordRole::Target, [general_target])?;
         }
@@ -187,7 +198,9 @@ impl Viewer {
             CoordRole::Content,
             self.label_manager.world_points(),
         )?;
-        validate_points(&anchor, CoordRole::Object, [self.object_translation])?;
+        if object_present {
+            validate_points(&anchor, CoordRole::Object, [object_translation])?;
+        }
 
         for cmd in commands {
             match cmd {
@@ -258,9 +271,7 @@ impl Viewer {
                     rotation_quat,
                     scale,
                 } => {
-                    let translation = translation
-                        .map(DVec3::from)
-                        .unwrap_or(self.object_translation);
+                    let translation = translation.map(DVec3::from).unwrap_or(object_translation);
                     let rotation = rotation_quat
                         .map(glam::Quat::from_array)
                         .unwrap_or(self.object_rotation);

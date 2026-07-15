@@ -1,3 +1,4 @@
+use crate::viewer::camera_controller::{prospective_anchor, validate_world_point, CoordRole};
 use crate::viewer::event_loop::{
     set_pending_bundle_load, set_pending_bundle_save, update_ipc_transform_stats,
 };
@@ -117,8 +118,13 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 .map(glam::Quat::from_array)
                 .unwrap_or(viewer.object_rotation);
             let candidate_scale = scale.map(glam::Vec3::from).unwrap_or(viewer.object_scale);
-            if viewer
-                .validate_content_points([candidate_translation])
+            let validation_anchor =
+                if viewer.terrain_viewer.is_some() || viewer.point_cloud_active() {
+                    viewer.prospective_frame_camera().anchor
+                } else {
+                    prospective_anchor(&viewer.camera_anchor, candidate_translation)
+                };
+            if validate_world_point(CoordRole::Object, candidate_translation, &validation_anchor)
                 .is_err()
                 || !candidate_rotation.is_finite()
                 || candidate_rotation.length_squared() == 0.0

@@ -61,12 +61,22 @@ def test_absolute_sources_remain_f64_until_anchor_packing():
 def test_object_vertices_stay_local_and_translation_is_anchored_once():
     command = _read("src/viewer/cmd/ipc_command.rs")
     assert "viewer.object_translation = candidate_translation" in command
+    assert "prospective_anchor(&viewer.camera_anchor, candidate_translation)" in command
+    assert "validate_world_point(CoordRole::Object, candidate_translation, &validation_anchor)" in command
     assert "transformed_positions" not in command
     assert "transform_point3" not in command
     frame = _read("src/viewer/render/main_loop/frame_anchor.rs")
     assert "frame.anchor.model_offset(self.object_translation)" in frame
     geometry = _read("src/viewer/render/main_loop/geometry/pass.rs")
     assert geometry.count("anchored_object_model(frame)") == 1
+
+
+def test_object_preflight_ignores_unloaded_identity_placeholder():
+    preflight = _read("src/viewer/event_loop/command_preflight.rs")
+    assert "let object_present = !self.object_source_positions.is_empty()" in preflight
+    assert "if object_present {\n            validate_points(&anchor, CoordRole::Object, [object_translation])?;" in preflight
+    assert "} else if object_transform_requested {\n            object_translation" in preflight
+    assert "else if !(object_transform_requested && requested_general_pose.is_none())" in preflight
 
 
 def test_frame_camera_precedence_is_full_pose_not_anchor_only():
