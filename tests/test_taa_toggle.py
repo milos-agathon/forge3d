@@ -15,6 +15,15 @@ pytest.importorskip("forge3d")
 
 REPO_ROOT = Path(__file__).parent.parent
 
+# The camera animation demo lives under examples/, which is untracked/local-only.
+# Skip cleanly (instead of erroring on read_text) when the example is absent.
+_CAMERA_DEMO = REPO_ROOT / "examples" / "camera_animation_demo.py"
+if not _CAMERA_DEMO.exists():
+    pytest.skip(
+        "example 'camera_animation_demo.py' is untracked/local-only",
+        allow_module_level=True,
+    )
+
 
 def read_existing_contents(*relative_paths: str) -> list[str]:
     contents: list[str] = []

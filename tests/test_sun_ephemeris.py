@@ -311,7 +311,11 @@ class TestSunEphemerisPresetWiring:
         """P0.3/M2: Verify sun ephemeris CLI flags exist."""
         import subprocess
         import sys
-        
+        from pathlib import Path
+
+        if not Path("examples/terrain_demo.py").exists():
+            pytest.skip("example 'terrain_demo.py' is untracked/local-only")
+
         # Check that terrain_demo.py --help includes sun ephemeris flags
         result = subprocess.run(
             [sys.executable, "-B", "examples/terrain_demo.py", "--help"],
@@ -328,7 +332,10 @@ class TestSunEphemerisPresetWiring:
         # Import the terrain_demo module to check param_map
         import importlib.util
         from pathlib import Path
-        
+
+        if not Path("examples/terrain_demo.py").exists():
+            pytest.skip("example 'terrain_demo.py' is untracked/local-only")
+
         spec = importlib.util.spec_from_file_location(
             "terrain_demo", 
             Path("examples/terrain_demo.py")

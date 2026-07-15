@@ -11,6 +11,10 @@ import pytest
 
 DEMO_DEM = Path(__file__).parent.parent / "python" / "forge3d" / "data" / "mini_dem.npy"
 DEMO_HDR = Path(__file__).parent.parent / "assets" / "hdri" / "snow_field_4k.hdr"
+DEMO_SCRIPT = Path(__file__).parent.parent / "examples" / "terrain_demo.py"
+
+if not DEMO_SCRIPT.exists():
+    pytest.skip("example 'terrain_demo.py' is untracked/local-only", allow_module_level=True)
 
 pytestmark = pytest.mark.offscreen
 

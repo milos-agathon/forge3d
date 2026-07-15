@@ -307,7 +307,10 @@ def test_mapscene_validation_reports_alignment_residual_and_resolution_mismatch(
 
 
 def test_swiss_viewer_uses_shared_raster_alignment_helpers() -> None:
-    source = Path("examples/swiss_terrain_landcover_viewer.py").read_text(encoding="utf-8")
+    example_path = Path("examples/swiss_terrain_landcover_viewer.py")
+    if not example_path.exists():
+        pytest.skip("example 'swiss_terrain_landcover_viewer.py' is untracked/local-only")
+    source = example_path.read_text(encoding="utf-8")
 
     assert "def ensure_dem_in_target_crs" not in source
     assert "from rasterio.warp import reproject" not in source

@@ -372,7 +372,25 @@ examples/output/
 examples/**/*.py
 tests/test_*example*.py
 tests/test_*examples*.py
-!tests/test_italy_forest_cover_example.py
+# Untracked example-runner tests (kept on disk; examples themselves are untracked)
+tests/test_bosnia_terrain_landcover_viewer.py
+tests/test_bryce_canyon_storm_timelapse.py
+tests/test_california_fire_smoke_effect.py
+tests/test_france_population_spikes_height_shade.py
+tests/test_helsinki_transit_daycycle.py
+tests/test_humanity_globe_video.py
+tests/test_iberia_builtup_cover_3d.py
+tests/test_khumbu_icefall_sentinel_timelapse.py
+tests/test_luxembourg_rail_overlay.py
+tests/test_osm_city_demo.py
+tests/test_poland_population_contour_3d.py
+tests/test_romania_builtup_cover_3d.py
+tests/test_rotterdam_solar_potential_shadow_study.py
+tests/test_swiss_terrain_landcover_viewer.py
+tests/test_terrain_camera_rigs_demo.py
+tests/test_terrain_demo.py
+tests/test_turkiye_river_basins_3d.py
+tests/test_uk_ireland_lighthouse_map.py
 .superpowers/
 scripts/*
 

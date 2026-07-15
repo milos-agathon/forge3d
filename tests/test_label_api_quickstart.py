@@ -4,12 +4,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 EXAMPLE = Path("examples/label_api_truth_basic.py")
 PUBLIC_DOCS = [
     Path("docs/api/api_reference.rst"),
     Path("docs/guides/label_support_matrix.md"),
 ]
+
+if not EXAMPLE.exists():
+    pytest.skip(
+        "example 'label_api_truth_basic.py' is untracked/local-only",
+        allow_module_level=True,
+    )
 
 
 def _load_example_module():

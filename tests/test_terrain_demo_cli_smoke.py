@@ -10,6 +10,8 @@ import importlib.util
 import argparse
 import sys
 
+import pytest
+
 from forge3d.config import RendererConfig
 
 
@@ -31,7 +33,10 @@ def _load_module_by_path(path: Path) -> types.ModuleType:
 
 def test_terrain_demo_preset_cli_smoke() -> None:
     repo = Path(__file__).resolve().parents[1]
-    mod = _load_module_by_path(repo / "examples" / "terrain_demo.py")
+    demo_path = repo / "examples" / "terrain_demo.py"
+    if not demo_path.exists():
+        pytest.skip("example 'terrain_demo.py' is untracked/local-only")
+    mod = _load_module_by_path(demo_path)
 
     # Build a minimal argparse.Namespace matching _build_renderer_config usage
     args = argparse.Namespace(

@@ -19,6 +19,8 @@ def _load_terrain_demo() -> types.ModuleType:
     """Load terrain_demo.py module by path."""
     repo = Path(__file__).resolve().parents[1]
     example = repo / "examples" / "terrain_demo.py"
+    if not example.exists():
+        pytest.skip("example 'terrain_demo.py' is untracked/local-only")
     examples_dir = str(example.parent)
     added_examples_dir = examples_dir not in sys.path
     if added_examples_dir:

@@ -17,6 +17,14 @@ EXAMPLES = {
     "fuji_labels": Path("examples/fuji_labels_demo.py"),
 }
 
+_missing_examples = sorted(str(path) for path in EXAMPLES.values() if not path.exists())
+if _missing_examples:
+    pytest.skip(
+        "canonical mapscene examples are untracked/local-only: "
+        + ", ".join(_missing_examples),
+        allow_module_level=True,
+    )
+
 
 def _load_example(path: Path):
     examples_dir = str(path.parent.resolve())

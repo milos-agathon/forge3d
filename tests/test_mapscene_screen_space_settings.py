@@ -17,6 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _load_water_cloud_example():
     path = ROOT / "examples" / "mapscene_water_clouds.py"
+    if not path.exists():
+        pytest.skip("example 'mapscene_water_clouds' is untracked/local-only")
     spec = importlib.util.spec_from_file_location("mapscene_water_clouds_example", path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)

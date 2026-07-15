@@ -15,6 +15,11 @@ def _load_example_module():
     repo_root = Path(__file__).resolve().parents[1]
     example_dir = repo_root / "examples"
     module_path = example_dir / "california_wildfire_smoke_video.py"
+    if not module_path.exists():
+        pytest.skip(
+            "example 'california_wildfire_smoke_video.py' is untracked/local-only",
+            allow_module_level=True,
+        )
     if str(example_dir) not in sys.path:
         sys.path.insert(0, str(example_dir))
     spec = importlib.util.spec_from_file_location("california_wildfire_smoke_video", module_path)

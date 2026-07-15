@@ -17,6 +17,8 @@ BUILDING_EXAMPLE = Path("examples/mapscene_buildings_labels.py")
 
 
 def _load_example(path: Path):
+    if not path.exists():
+        pytest.skip(f"example '{path.name}' is untracked/local-only")
     examples_dir = str(path.parent.resolve())
     added_examples_dir = examples_dir not in sys.path
     if added_examples_dir:

@@ -240,6 +240,8 @@ class TestShadowTechniqueDifferentiation:
     
     def _render_with_technique(self, dem_path: Path, technique: str, output_path: Path) -> bytes:
         """Render the DEM with the specified shadow technique and return the image bytes."""
+        if not Path("examples/terrain_demo.py").exists():
+            pytest.skip("example 'terrain_demo.py' is untracked/local-only")
         import subprocess
         import sys
         

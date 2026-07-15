@@ -15,6 +15,9 @@ pytest.importorskip("PIL.Image")
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_PATH = REPO_ROOT / "examples" / "california_cigar_smoke_demo.py"
 
+if not EXAMPLE_PATH.exists():
+    pytest.skip("example 'california_cigar_smoke_demo' is untracked/local-only", allow_module_level=True)
+
 
 def skip_missing_california_cache(exc: RuntimeError) -> None:
     if "Cached California terrain assets are missing" in str(exc):
