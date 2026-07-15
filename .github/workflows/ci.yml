@@ -568,9 +568,11 @@ jobs:
           rustup default stable
           rustup show active-toolchain | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/rust-toolchain.txt"
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+      - name: Use runner-provisioned Python
+        shell: pwsh
+        run: |
+          python --version 2>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/python-bootstrap-version.txt"
+          python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"
 
       - uses: actions/download-artifact@v4
         with:

@@ -403,6 +403,8 @@ def test_m06_job_level_environment_uses_valid_github_actions_contexts():
     assert "FORGE3D_M06_ARTIFACT_DIR:" not in job_environment
     assert "FORGE3D_M06_ARTIFACT_DIR=$artifactDir" in m06_job
     assert "Add-Content $env:GITHUB_ENV" in m06_job
+    assert "actions/setup-python" not in m06_job
+    assert "python-bootstrap-version.txt" in m06_job
     assert (
         "path: ${{ runner.temp }}/forge3d-m06-${{ github.run_id }}-${{ github.run_attempt }}/"
     ) in m06_job
