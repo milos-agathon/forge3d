@@ -40,6 +40,10 @@ pub struct TerrainReferenceDesc {
     pub sun_azimuth_deg: f32,
     pub sun_elevation_deg: f32,
     pub sun_intensity: f32,
+    /// Directional sun colour (linear RGB). The hybrid path keeps the legacy
+    /// warm-white default `[1.0, 0.97, 0.92]` for byte-identical output; see
+    /// `factor_sun_lighting` for the direct-vs-ReSTIR factoring convention.
+    pub sun_color: [f32; 3],
     /// Optional equirect environment map (RGB f32 rows) + dims; None uses the
     /// constant-white fallback scaled by `env_intensity`.
     pub env_map: Option<(Vec<f32>, u32, u32)>,
@@ -231,6 +235,27 @@ fn finite3(v: [f32; 3]) -> bool {
     v.iter().all(|x| x.is_finite())
 }
 
+/// Factor the sun descriptor into the two lighting conventions the terrain
+/// path uses. Returns `(direct_light_color, restir_intensity, restir_color)`.
+///
+/// The two conventions are deliberately ASYMMETRIC and must stay that way:
+/// - the direct-light uniform bakes intensity into the colour
+///   (`light_color = I * sun_color`), and
+/// - the ReSTIR directional light keeps them separate, passing `I.max(1e-6)`
+///   as intensity and the RAW `sun_color` as colour.
+///
+/// Multiplying the ReSTIR colour by intensity would apply intensity twice;
+/// dropping the direct multiply would omit it there. Kept as a free function
+/// so the factoring can be unit-tested without a GPU.
+fn factor_sun_lighting(sun_intensity: f32, sun_color: [f32; 3]) -> ([f32; 3], f32, [f32; 3]) {
+    let direct = [
+        sun_intensity * sun_color[0],
+        sun_intensity * sun_color[1],
+        sun_intensity * sun_color[2],
+    ];
+    (direct, sun_intensity.max(1e-6), sun_color)
+}
+
 /// Trust-boundary validation of every public input before any GPU work.
 fn validate_desc(desc: &TerrainReferenceDesc) -> Result<(), RenderError> {
     let err = |msg: String| Err(RenderError::Render(msg));
@@ -392,11 +417,10 @@ impl HybridPathTracer {
         let el = desc.sun_elevation_deg.to_radians();
         // Direction from surface TOWARD the sun (kernel convention).
         let light_dir = [az.cos() * el.cos(), el.sin(), az.sin() * el.cos()];
-        let light_color = [
-            desc.sun_intensity,
-            desc.sun_intensity * 0.97,
-            desc.sun_intensity * 0.92,
-        ];
+        // Direct shading bakes intensity into the colour; the ReSTIR light
+        // below keeps them separate (see factor_sun_lighting).
+        let (light_color, restir_sun_intensity, restir_sun_color) =
+            factor_sun_lighting(desc.sun_intensity, desc.sun_color);
 
         let mut base = Uniforms {
             width,
@@ -494,10 +518,12 @@ impl HybridPathTracer {
         tracked.buffer(&scene_buf);
 
         // --- Directional-light table for the ReSTIR spatial pass ---
+        // Colour is the RAW sun_color; intensity is passed separately (already
+        // clamped to 1e-6). Do NOT premultiply — the kernel applies intensity.
         let sun_light = GpuDirectionalLight::new(
             [-light_dir[0], -light_dir[1], -light_dir[2]],
-            desc.sun_intensity.max(1e-6),
-            [1.0, 0.97, 0.92],
+            restir_sun_intensity,
+            restir_sun_color,
             1.0,
         );
         let dir_lights_buf = tracked_create_buffer_init(
@@ -1072,5 +1098,47 @@ impl HybridPathTracer {
             minmax_pyramid_bytes: terrain_scene.pyramid.byte_size,
             gpu_resource_bytes,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::factor_sun_lighting;
+
+    #[test]
+    fn direct_bakes_intensity_restir_keeps_it_separate() {
+        let i = 2.5f32;
+        let c = [0.9f32, 0.5, 0.2];
+        let (direct, restir_intensity, restir_color) = factor_sun_lighting(i, c);
+        // Direct-light uniform bakes intensity into the colour.
+        assert_eq!(direct, [i * c[0], i * c[1], i * c[2]]);
+        // ReSTIR keeps the raw colour and passes intensity separately.
+        assert_eq!(restir_color, c);
+        assert_eq!(restir_intensity, i.max(1e-6));
+        // The whole trap: the two conventions must NOT collapse to the same
+        // triple — a symmetric edit (premultiplying ReSTIR) breaks byte parity.
+        assert_ne!(restir_color, direct);
+    }
+
+    #[test]
+    fn default_warm_white_matches_legacy_literals() {
+        // Byte-identity guard: the default sun_color reproduces the old
+        // hard-coded direct triple `[I, I*0.97, I*0.92]` and the old ReSTIR
+        // colour `[1.0, 0.97, 0.92]` exactly.
+        let i = 2.5f32;
+        let (direct, restir_intensity, restir_color) = factor_sun_lighting(i, [1.0, 0.97, 0.92]);
+        assert_eq!(direct, [i, i * 0.97, i * 0.92]);
+        assert_eq!(restir_color, [1.0, 0.97, 0.92]);
+        assert_eq!(restir_intensity, i.max(1e-6));
+    }
+
+    #[test]
+    fn zero_colour_disables_sun_but_clamps_restir_intensity() {
+        // (0,0,0) disables the sun through colour; ReSTIR intensity still
+        // clamps to 1e-6 so the reservoir bookkeeping stays valid.
+        let (direct, restir_intensity, restir_color) = factor_sun_lighting(0.0, [0.0, 0.0, 0.0]);
+        assert_eq!(direct, [0.0, 0.0, 0.0]);
+        assert_eq!(restir_color, [0.0, 0.0, 0.0]);
+        assert_eq!(restir_intensity, 1e-6);
     }
 }

@@ -8,6 +8,47 @@
 
 use super::super::super::*;
 
+/// Trust boundary for `sun_color`: exactly three finite, non-negative numbers.
+/// (0,0,0) is intentionally valid (disables the sun via colour). The value is
+/// received as an untyped object so EVERY malformed shape — scalar, string,
+/// numeric strings, byte-oriented sequences, wrong arity — is rejected HERE
+/// with ValueError; a typed `(f32, f32, f32)` parameter would fail PyO3
+/// extraction first and cross as TypeError instead.
+#[cfg(feature = "extension-module")]
+fn extract_sun_color(obj: &Bound<'_, PyAny>) -> PyResult<[f32; 3]> {
+    use pyo3::types::{PyByteArray, PyBytes, PyMemoryView, PyString};
+    let reject =
+        || PyValueError::new_err("sun_color must be exactly three finite, non-negative numbers");
+    // Byte-oriented containers iterate as small ints and would otherwise pass.
+    if obj.is_instance_of::<PyString>()
+        || obj.is_instance_of::<PyBytes>()
+        || obj.is_instance_of::<PyByteArray>()
+        || obj.is_instance_of::<PyMemoryView>()
+    {
+        return Err(reject());
+    }
+    let mut out = [0.0f32; 3];
+    let mut count = 0usize;
+    for item in obj.iter().map_err(|_| reject())? {
+        let item = item.map_err(|_| reject())?;
+        if count == 3 {
+            return Err(reject());
+        }
+        if item.is_instance_of::<PyString>() || item.is_instance_of::<PyBytes>() {
+            return Err(reject());
+        }
+        out[count] = item.extract::<f32>().map_err(|_| reject())?;
+        count += 1;
+    }
+    if count != 3 {
+        return Err(reject());
+    }
+    if out.iter().any(|c| !c.is_finite() || *c < 0.0) {
+        return Err(reject());
+    }
+    Ok(out)
+}
+
 /// Render a converged path-traced reference of a real DEM under sun + IBL,
 /// optionally mixed with mesh geometry (terrain stays a first-class primitive
 /// of the shared hybrid traversal).
@@ -42,6 +83,12 @@ use super::super::super::*;
     variance_threshold = 1e-3,
     seed = 7u32,
     certificate = None,
+    // Appended (not inserted) to keep positional compatibility of the publicly
+    // re-exported native signature: an old positional call must not rebind
+    // env_map (or any later arg) to sun_color. None means the legacy warm
+    // white (1.0, 0.97, 0.92); received untyped so malformed values raise
+    // ValueError (see extract_sun_color), not PyO3's extraction TypeError.
+    sun_color = None,
 ))]
 pub(crate) fn hybrid_render_terrain_reference(
     py: Python<'_>,
@@ -65,9 +112,19 @@ pub(crate) fn hybrid_render_terrain_reference(
     variance_threshold: f32,
     seed: u32,
     certificate: Option<Bound<'_, PyAny>>,
+    sun_color: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
     use crate::path_tracing::hybrid_compute::{HybridPathTracer, TerrainReferenceDesc};
     use numpy::PyArray1;
+
+    // Trust boundary: raised at the PyO3 layer as ValueError — validate_desc
+    // returns RenderError, which would cross as PyRuntimeError. Validated
+    // BEFORE the first GPU touch so a missing adapter cannot pre-empt it with
+    // a device RuntimeError.
+    let sun_color: [f32; 3] = match sun_color.as_ref() {
+        None => [1.0, 0.97, 0.92],
+        Some(obj) => extract_sun_color(obj)?,
+    };
 
     let certificate_capture =
         crate::core::certificate::begin_render_capture("hybrid_render_terrain_reference");
@@ -154,6 +211,7 @@ pub(crate) fn hybrid_render_terrain_reference(
         sun_azimuth_deg,
         sun_elevation_deg,
         sun_intensity,
+        sun_color,
         env_map: env,
         env_intensity,
         mesh,

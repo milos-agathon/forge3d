@@ -281,6 +281,8 @@ __pycache__/
 !tests/golden/recipes/*.png
 !tests/golden/presets/
 !tests/golden/presets/*.png
+!tests/golden/hybrid_terrain/
+!tests/golden/hybrid_terrain/*.png
 !python/forge3d/data/fonts/
 !python/forge3d/data/fonts/*.png
 !docs/gallery/images/*.png
@@ -290,7 +292,6 @@ __pycache__/
 !docs/tutorials/images/*.png
 !docs/tutorials/images/*.jpg
 tests/golden/adjudication/
-tests/golden/hybrid_terrain/
 tests/golden/labels/*.png
 tests/golden/labels/*.jpg
 tests/golden/labels/*.jpeg

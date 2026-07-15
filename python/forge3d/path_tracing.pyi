@@ -71,6 +71,7 @@ def hybrid_render_terrain_reference(
     sun_azimuth_deg: float = ...,
     sun_elevation_deg: float = ...,
     sun_intensity: float = ...,
+    sun_color: Tuple[float, float, float] = ...,
     env_map: np.ndarray | None = ...,
     env_intensity: float = ...,
     mesh_vertices: np.ndarray | None = ...,

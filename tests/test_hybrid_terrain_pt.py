@@ -362,6 +362,151 @@ def test_trust_boundary_validation():
         )
 
 
+# ---------------------------------------------------------------------------
+# Slice 1: hybrid terrain sun_color parity (2026-07-13 HDR mood design)
+# ---------------------------------------------------------------------------
+WARM_WHITE = (1.0, 0.97, 0.92)
+
+
+def test_sun_color_signature_and_stubs():
+    """sun_color is on both the wrapper and native signatures, defaults to the
+    legacy warm-white, and appears in both hand-maintained .pyi stubs."""
+    import inspect
+
+    from forge3d import _forge3d as _native
+
+    sig = inspect.signature(hybrid_render_terrain_reference)
+    assert "sun_color" in sig.parameters, "wrapper is missing sun_color"
+    assert sig.parameters["sun_color"].default == WARM_WHITE, (
+        f"wrapper default {sig.parameters['sun_color'].default!r} != {WARM_WHITE!r}"
+    )
+
+    nsig = inspect.signature(_native.hybrid_render_terrain_reference)
+    assert "sun_color" in nsig.parameters, "native fn is missing sun_color"
+    # The native default is None (resolved to warm white inside the boundary
+    # so malformed values can raise ValueError instead of PyO3's extraction
+    # TypeError); PyO3 may also render it as an Ellipsis placeholder. Accept
+    # those but reject a wrong concrete default.
+    ndefault = nsig.parameters["sun_color"].default
+    assert ndefault in (None, WARM_WHITE, inspect.Parameter.empty, ...), (
+        f"native default {ndefault!r} unexpected"
+    )
+    # Positional compatibility: sun_color must be APPENDED (last), so an old
+    # positional call cannot rebind env_map (or any later arg) to sun_color.
+    native_params = list(nsig.parameters)
+    assert native_params[-1] == "sun_color", (
+        f"sun_color must be the last native param, got order {native_params}"
+    )
+    assert native_params.index("env_map") < native_params.index("sun_color")
+
+    pkg = Path(f3d.__file__).resolve().parent
+    for stub in ("path_tracing.pyi", "__init__.pyi"):
+        text = (pkg / stub).read_text(encoding="utf-8")
+        assert "sun_color" in text, f"{stub} stub missing sun_color"
+
+
+def test_sun_color_rejects_malformed():
+    """Malformed sun_color is rejected with ValueError at the wrapper trust
+    boundary, before any GPU work (so this needs no GPU)."""
+    dem = np.zeros((4, 4), dtype=np.float32)
+    bad_values = [
+        (1.0, float("nan"), 1.0),  # non-finite
+        (1.0, float("inf"), 1.0),  # non-finite
+        (1.0, -0.1, 1.0),          # negative
+        (1.0, 1.0),                # wrong arity (too few)
+        (1.0, 1.0, 1.0, 1.0),      # wrong arity (too many)
+        0.5,                       # not a sequence
+        "abc",                     # a string is not three numbers
+        ("0.5", "0.9", "0.8"),     # numeric strings are not numbers
+        bytearray([1, 1, 1]),      # byte-oriented, not an RGB numeric sequence
+        memoryview(bytes([1, 1, 1])),  # byte-oriented view
+    ]
+    for bad in bad_values:
+        with pytest.raises(ValueError):
+            hybrid_render_terrain_reference(
+                dem, 8, 8, CAM, sun_color=bad, max_frames=4, min_frames=2
+            )
+
+
+def test_sun_color_zero_is_accepted():
+    """(0,0,0) is valid — it disables the sun via colour. It must NOT raise
+    ValueError; a GPU-less runner may raise a different error, which is fine."""
+    dem = np.zeros((4, 4), dtype=np.float32)
+    try:
+        hybrid_render_terrain_reference(
+            dem, 8, 8, CAM, sun_color=(0.0, 0.0, 0.0),
+            max_frames=4, min_frames=2, variance_threshold=1e30,
+        )
+    except ValueError as exc:  # pragma: no cover - only on wrongful rejection
+        pytest.fail(f"(0,0,0) sun_color was wrongly rejected: {exc}")
+    except Exception:
+        pass  # non-ValueError (e.g. GPU unavailable) does not concern this test
+
+
+def test_sun_color_native_boundary_rejects_malformed():
+    """The native PyO3 boundary independently rejects bad sun_color with
+    ValueError — including EXTRACTION failures (scalars, strings, numeric
+    strings, numpy scalars, byte-oriented sequences, wrong arity), which must
+    NOT surface as PyO3's TypeError. Validation runs BEFORE the first GPU
+    touch, so this holds even without an adapter — no _require_gpu() gate."""
+    from forge3d import _forge3d as _native
+
+    dem = _dem()
+    fast = {"max_frames": 4, "min_frames": 2, "variance_threshold": 1e30}
+    bad_values = [
+        (1.0, -1.0, 1.0),              # negative
+        (1.0, float("nan"), 1.0),      # non-finite
+        (1.0, float("inf"), 1.0),      # non-finite
+        (1.0, 1.0),                    # wrong arity (too few)
+        (1.0, 1.0, 1.0, 1.0),          # wrong arity (too many)
+        0.5,                           # scalar, not a sequence
+        "abc",                         # a string is not three numbers
+        ("0.5", "0.9", "0.8"),         # numeric strings are not numbers
+        np.float64(0.5),               # numpy scalar, not a sequence
+        np.array([1.0, 1.0]),          # numpy array with wrong arity
+        bytearray([1, 1, 1]),          # byte-oriented, iterates as small ints
+        memoryview(bytes([1, 1, 1])),  # byte-oriented view
+    ]
+    for bad in bad_values:
+        with pytest.raises(ValueError):
+            _native.hybrid_render_terrain_reference(
+                dem, 8, 8, CAM, sun_color=bad, **fast
+            )
+
+
+def test_sun_color_native_accepts_numeric_sequences():
+    """Any sequence of exactly three finite non-negative numbers is a valid
+    native sun_color (list, numpy array — parity with the wrapper). It must
+    NOT raise ValueError; a GPU-less runner may raise a different error."""
+    from forge3d import _forge3d as _native
+
+    dem = _dem()
+    fast = {"max_frames": 4, "min_frames": 2, "variance_threshold": 1e30}
+    for good in [[1.0, 0.97, 0.92], np.array([1.0, 0.97, 0.92], dtype=np.float32)]:
+        try:
+            _native.hybrid_render_terrain_reference(
+                dem, 8, 8, CAM, sun_color=good, **fast
+            )
+        except ValueError as exc:  # pragma: no cover - only on wrongful rejection
+            pytest.fail(f"valid sun_color {good!r} was wrongly rejected: {exc}")
+        except Exception:
+            pass  # non-ValueError (e.g. GPU unavailable) does not concern this test
+
+
+def test_sun_color_live_control_changes_output(reference):
+    """GPU live-control: a custom sun colour changes the converged render, so
+    the plumbed control is real (not a silently-dropped kwarg)."""
+    dem, out_default = reference  # default render uses warm-white sun_color
+    out_blue = hybrid_render_terrain_reference(
+        dem, SIZE, SIZE, CAM, **{**_scene_kwargs(dem), "sun_color": (0.2, 0.3, 1.5)}
+    )
+    a = out_default["rgba"][..., :3].astype(np.float64)
+    b = out_blue["rgba"][..., :3].astype(np.float64)
+    diff = float(np.abs(a - b).mean())
+    print(f"\nTERRAIN PT sun_color control: mean abs RGB delta {diff:.3f}")
+    assert diff > 1.0, "custom sun_color did not change the converged render"
+
+
 def test_mixed_scene_mesh_and_terrain():
     """Terrain is a first-class primitive of the shared hybrid traversal:
     a triangle mesh mixed into the scene occludes the heightfield, shows the

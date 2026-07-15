@@ -886,6 +886,7 @@ def hybrid_render_terrain_reference(
     sun_azimuth_deg: float = 315.0,
     sun_elevation_deg: float = 45.0,
     sun_intensity: float = 2.5,
+    sun_color: "tuple[float, float, float]" = (1.0, 0.97, 0.92),
     env_map: "np.ndarray | None" = None,
     env_intensity: float = 0.35,
     mesh_vertices: "np.ndarray | None" = None,
@@ -910,6 +911,12 @@ def hybrid_render_terrain_reference(
     terrain renders alongside existing primitives. ``spp`` sets the camera
     samples per accumulation frame; the min-max pyramid keeps per-sample
     texture reads O(log mips), so cost scales ~linearly from 1 to 8 spp.
+
+    ``sun_color`` is the directional sun colour (linear RGB) and defaults to the
+    legacy warm-white ``(1.0, 0.97, 0.92)`` so output is byte-identical when
+    omitted. It must be three finite, non-negative numbers; ``(0.0, 0.0, 0.0)``
+    is valid and disables the sun through colour. Colour and intensity are
+    independent controls, so components above one are allowed.
 
     Accumulates frames until the per-pixel luminance variance of the running
     mean across the last convergence window drops below
@@ -942,6 +949,37 @@ def hybrid_render_terrain_reference(
         raise ValueError(f"spp must be in 1..=64, got {spp}")
     if not (float(spacing[0]) > 0.0 and float(spacing[1]) > 0.0):
         raise ValueError(f"spacing must be > 0, got {spacing}")
+    # Trust boundary: sun_color must be exactly three finite, non-negative
+    # numbers. (0,0,0) is intentionally valid (disables the sun via colour).
+    # Strings and byte-oriented containers are rejected here so the wrapper
+    # matches the native boundary's "numbers only" contract: float("0.5")
+    # would otherwise sneak numeric strings through, and bytes/bytearray/
+    # memoryview iterate as small ints, which are not an RGB colour.
+    if isinstance(sun_color, (str, bytes, bytearray, memoryview)):
+        raise ValueError(
+            f"sun_color must be three numbers, not a str/bytes-like object: {sun_color!r}"
+        )
+    try:
+        num_components = len(sun_color)
+    except TypeError:
+        raise ValueError(
+            f"sun_color must be a sequence of three numbers, got {sun_color!r}"
+        )
+    if num_components != 3:
+        raise ValueError(
+            f"sun_color must have exactly three components, got {num_components}"
+        )
+    components = (sun_color[0], sun_color[1], sun_color[2])
+    if any(isinstance(c, (str, bytes, bytearray, memoryview)) for c in components):
+        raise ValueError(f"sun_color components must be numbers, got {sun_color!r}")
+    try:
+        sun_rgb = (float(components[0]), float(components[1]), float(components[2]))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"sun_color components must be numbers: {exc}")
+    if not all(bool(np.isfinite(c)) for c in sun_rgb):
+        raise ValueError(f"sun_color components must be finite, got {sun_color!r}")
+    if any(c < 0.0 for c in sun_rgb):
+        raise ValueError(f"sun_color components must be non-negative, got {sun_color!r}")
     cam = dict(camera or {})
     env = None
     if env_map is not None:
@@ -969,6 +1007,7 @@ def hybrid_render_terrain_reference(
         sun_azimuth_deg=float(sun_azimuth_deg),
         sun_elevation_deg=float(sun_elevation_deg),
         sun_intensity=float(sun_intensity),
+        sun_color=sun_rgb,
         env_map=env,
         env_intensity=float(env_intensity),
         mesh_vertices=mv,
