@@ -388,3 +388,19 @@ def test_f_probe_positive_golden_mismatch_fails_ci_and_probe_negative_is_absent(
     assert "UNTRUSTED external PR" in golden_job
     assert 'needs.test-golden-images.result }}" != "success"' in aggregate
     assert 'needs.test-golden-images.result }}" != "skipped"' in aggregate
+
+
+def test_m06_job_level_environment_uses_valid_github_actions_contexts():
+    ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    m06_job = ci_yml.split("  test-m06-full-geospatial-viewer:", 1)[1].split(
+        "\n  build-docs:", 1
+    )[0]
+    job_environment = m06_job.split("\n    steps:", 1)[0]
+
+    assert "${{ runner." not in job_environment, (
+        "the runner context is unavailable while GitHub evaluates job-level env"
+    )
+    assert (
+        "FORGE3D_M06_ARTIFACT_DIR: ${{ github.workspace }}/../forge3d-m06-"
+        "${{ github.run_id }}-${{ github.run_attempt }}"
+    ) in job_environment

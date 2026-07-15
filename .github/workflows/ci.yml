@@ -520,7 +520,9 @@ jobs:
       FORGE3D_NO_BOOTSTRAP: '1'
       FORGE3D_TEST_INSTALLED_WHEEL: '1'
       RUN_M06_VIEWER_CI: '1'
-      FORGE3D_M06_ARTIFACT_DIR: ${{ runner.temp }}/forge3d-m06-${{ github.run_id }}-${{ github.run_attempt }}
+      # Job-level env cannot use the runner context. Keep evidence outside the
+      # checkout so the pre-checkout sentinel survives actions/checkout cleanup.
+      FORGE3D_M06_ARTIFACT_DIR: ${{ github.workspace }}/../forge3d-m06-${{ github.run_id }}-${{ github.run_attempt }}
       FORGE3D_VIEWER_BINARY: ${{ github.workspace }}/target/release/interactive_viewer.exe
       FORGE3D_TEST_DEM: ${{ github.workspace }}/assets/tif/switzerland_dem.tif
 
