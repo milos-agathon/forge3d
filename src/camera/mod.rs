@@ -3,8 +3,11 @@
 //! Provides right-handed, Y-up, -Z forward camera math (standard GL-style look-at).
 //! Supports both "wgpu" (0..1 Z) and "gl" (-1..1 Z) clip spaces.
 
+pub mod anchor;
 pub mod dof;
 pub mod validation;
+
+pub use anchor::Anchor;
 
 use glam::{Mat4, Vec3, Vec4Swizzles};
 use numpy::PyArray2;

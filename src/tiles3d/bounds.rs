@@ -1,7 +1,13 @@
 //! Bounding volume types for 3D Tiles
+//!
+//! World-space math here is f64 end to end (MENSURA): geodetic regions go
+//! through the full-precision geocentric conversion and are never truncated
+//! to f32 — ECEF magnitudes are ~6.38e6 m, where an f32 mantissa costs ≈0.5 m.
 
-use glam::{Mat4, Vec3};
+use glam::{DVec3, Mat4, Vec3};
 use serde::{Deserialize, Serialize};
+
+use crate::geo::units::{Ellipsoidal, Height};
 
 /// Bounding volume for a 3D Tile
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,36 +46,46 @@ pub struct BoundingRegion {
 }
 
 impl BoundingVolume {
-    /// Get the center point of the bounding volume
-    pub fn center(&self) -> Vec3 {
+    /// Get the center point of the bounding volume, in f64 world space.
+    pub fn center(&self) -> DVec3 {
         match self {
-            Self::Box(b) => Vec3::new(b.data[0], b.data[1], b.data[2]),
-            Self::Sphere(s) => Vec3::new(s.sphere[0], s.sphere[1], s.sphere[2]),
+            Self::Box(b) => DVec3::new(b.data[0] as f64, b.data[1] as f64, b.data[2] as f64),
+            Self::Sphere(s) => {
+                DVec3::new(s.sphere[0] as f64, s.sphere[1] as f64, s.sphere[2] as f64)
+            }
             Self::Region(r) => {
                 let lon = (r.region[0] + r.region[2]) / 2.0;
                 let lat = (r.region[1] + r.region[3]) / 2.0;
-                let height = (r.region[4] + r.region[5]) / 2.0;
+                // 3D Tiles region heights are ellipsoidal metres per spec §8.
+                let height = Height::<Ellipsoidal>::new((r.region[4] + r.region[5]) / 2.0);
                 wgs84_to_ecef(lon, lat, height)
             }
         }
     }
 
-    /// Get approximate radius for SSE calculation
-    pub fn radius(&self) -> f32 {
+    /// Get approximate radius for SSE calculation, in metres (f64).
+    pub fn radius(&self) -> f64 {
         match self {
             Self::Box(b) => {
-                let x_len = Vec3::new(b.data[3], b.data[4], b.data[5]).length();
-                let y_len = Vec3::new(b.data[6], b.data[7], b.data[8]).length();
-                let z_len = Vec3::new(b.data[9], b.data[10], b.data[11]).length();
+                let x_len = Vec3::new(b.data[3], b.data[4], b.data[5]).length() as f64;
+                let y_len = Vec3::new(b.data[6], b.data[7], b.data[8]).length() as f64;
+                let z_len = Vec3::new(b.data[9], b.data[10], b.data[11]).length() as f64;
                 (x_len * x_len + y_len * y_len + z_len * z_len).sqrt()
             }
-            Self::Sphere(s) => s.sphere[3],
+            Self::Sphere(s) => s.sphere[3] as f64,
             Self::Region(r) => {
+                // region[] is [west, south, east, north] in RADIANS. The
+                // east-west arc shrinks with cos(latitude); use the region's
+                // central latitude and the half-diagonal of the box.
+                const R: f64 = 6_378_137.0;
                 let d_lon = (r.region[2] - r.region[0]).abs();
                 let d_lat = (r.region[3] - r.region[1]).abs();
                 let d_h = (r.region[5] - r.region[4]).abs();
-                let approx_meters = (d_lon.max(d_lat) * 6378137.0) as f32;
-                (approx_meters * approx_meters + (d_h as f32) * (d_h as f32)).sqrt() / 2.0
+                let lat_c = (r.region[1] + r.region[3]) / 2.0;
+                let half_ew = d_lon / 2.0 * R * lat_c.cos();
+                let half_ns = d_lat / 2.0 * R;
+                let half_h = d_h / 2.0;
+                (half_ew * half_ew + half_ns * half_ns + half_h * half_h).sqrt()
             }
         }
     }
@@ -102,11 +118,12 @@ impl BoundingVolume {
         }
     }
 
-    /// Check if this volume intersects a frustum (simplified AABB check)
+    /// Check if this volume intersects a frustum (simplified AABB check).
+    /// Clip-space math runs in f64 so ECEF-magnitude centers keep precision.
     pub fn intersects_frustum(&self, view_proj: &Mat4) -> bool {
         let center = self.center();
         let radius = self.radius();
-        let clip = *view_proj * center.extend(1.0);
+        let clip = view_proj.as_dmat4() * center.extend(1.0);
         if clip.w <= 0.0 {
             return radius > clip.z.abs();
         }
@@ -119,19 +136,18 @@ impl BoundingVolume {
     }
 }
 
-/// Convert WGS84 geodetic coordinates to ECEF
-fn wgs84_to_ecef(lon_rad: f64, lat_rad: f64, height: f64) -> Vec3 {
-    const A: f64 = 6378137.0;
-    const E2: f64 = 0.00669437999014;
-    let sin_lat = lat_rad.sin();
-    let cos_lat = lat_rad.cos();
-    let sin_lon = lon_rad.sin();
-    let cos_lon = lon_rad.cos();
-    let n = A / (1.0 - E2 * sin_lat * sin_lat).sqrt();
-    let x = (n + height) * cos_lat * cos_lon;
-    let y = (n + height) * cos_lat * sin_lon;
-    let z = (n * (1.0 - E2) + height) * sin_lat;
-    Vec3::new(x as f32, y as f32, z as f32)
+/// Convert WGS84 geodetic coordinates (radians) to ECEF, full f64.
+///
+/// The height parameter is TYPED: only an ellipsoidal height is accepted.
+/// Orthometric DEM heights must first go through
+/// `crate::geo::geoid::orthometric_to_ellipsoidal`.
+pub fn wgs84_to_ecef(lon_rad: f64, lat_rad: f64, height: Height<Ellipsoidal>) -> DVec3 {
+    crate::geo::projections::geocentric::wgs84_geodetic_to_ecef(
+        lon_rad.to_degrees(),
+        lat_rad.to_degrees(),
+        height.metres(),
+    )
+    .expect("finite geodetic inputs")
 }
 
 impl Default for BoundingVolume {

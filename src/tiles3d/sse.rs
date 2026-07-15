@@ -57,15 +57,15 @@ pub fn compute_sse(
     params: &SseParams,
 ) -> f32 {
     let center = bounding_volume.center();
-    let distance = (center - camera_position).length();
+    let distance = (center - camera_position.as_dvec3()).length();
 
     if distance < 0.001 {
         return f32::MAX; // Camera inside tile, always refine
     }
 
-    // SSE = (geometric_error / distance) * sse_factor
-    // This gives us pixels of error on screen
-    (geometric_error / distance) * params.sse_factor()
+    // SSE = (geometric_error / distance) * sse_factor. The result is a pixel
+    // count, not a world coordinate; narrowing it to f32 is fine.
+    ((geometric_error as f64 / distance) * params.sse_factor() as f64) as f32
 }
 
 /// Compute SSE using view-projection matrix (for frustum-based computation)
@@ -76,14 +76,14 @@ pub fn compute_sse_with_matrix(
     params: &SseParams,
 ) -> f32 {
     let center = bounding_volume.center();
-    let clip = *view_proj * center.extend(1.0);
+    let clip = view_proj.as_dmat4() * center.extend(1.0);
 
     if clip.w <= 0.0 {
         return f32::MAX; // Behind camera
     }
 
     let distance = clip.w;
-    (geometric_error / distance) * params.sse_factor()
+    ((geometric_error as f64 / distance) * params.sse_factor() as f64) as f32
 }
 
 /// Determine if a tile should be refined based on SSE threshold
@@ -98,11 +98,12 @@ pub fn should_refine(
     sse > threshold
 }
 
-/// Compute distance from camera to bounding volume surface (not center)
-pub fn distance_to_surface(bounding_volume: &BoundingVolume, camera_position: Vec3) -> f32 {
+/// Compute distance from camera to bounding volume surface (not center),
+/// in metres (f64 — the values involved are ECEF-magnitude).
+pub fn distance_to_surface(bounding_volume: &BoundingVolume, camera_position: Vec3) -> f64 {
     let center = bounding_volume.center();
     let radius = bounding_volume.radius();
-    let center_dist = (center - camera_position).length();
+    let center_dist = (center - camera_position.as_dvec3()).length();
     (center_dist - radius).max(0.001)
 }
 
@@ -114,7 +115,7 @@ pub fn compute_sse_surface(
     params: &SseParams,
 ) -> f32 {
     let distance = distance_to_surface(bounding_volume, camera_position);
-    (geometric_error / distance) * params.sse_factor()
+    ((geometric_error as f64 / distance) * params.sse_factor() as f64) as f32
 }
 
 #[cfg(test)]
