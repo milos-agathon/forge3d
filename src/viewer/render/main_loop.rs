@@ -4,6 +4,7 @@
 
 mod finalize;
 pub(crate) mod frame_anchor;
+mod frame_anchor_stats;
 mod frame_setup;
 mod geometry;
 mod postfx;

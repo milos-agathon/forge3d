@@ -1970,6 +1970,12 @@ def _decoded_pnts_payload(
     )
 
 
+def _tiles3d_position_source_bytes(positions: Any) -> int:
+    import numpy as np
+
+    return int(np.asarray(positions, dtype=np.float64).reshape((-1, 3)).nbytes)
+
+
 def _decoded_b3dm_payload(
     decoded: Mapping[str, Any],
     metadata: dict[str, Any],
@@ -2022,20 +2028,23 @@ def _tiles3d_payload_for_content(
     list[float],
     bool,
     bool,
+    int,
 ] | None:
     suffix = str(path).lower()
     if suffix.endswith(".pnts"):
-        payload = _decoded_pnts_payload(tiles3d.decode_pnts(path.read_bytes()), metadata, width, height)
+        decoded = tiles3d.decode_pnts(path.read_bytes())
+        payload = _decoded_pnts_payload(decoded, metadata, width, height)
         if payload is None:
             return None
         points, rgba, sizes = payload
-        return points, rgba, sizes, [], [], [], True, True
+        return points, rgba, sizes, [], [], [], True, True, _tiles3d_position_source_bytes(decoded.get("positions"))
     if suffix.endswith(".b3dm"):
-        payload = _decoded_b3dm_payload(tiles3d.decode_b3dm(path.read_bytes()), metadata, width, height)
+        decoded = tiles3d.decode_b3dm(path.read_bytes())
+        payload = _decoded_b3dm_payload(decoded, metadata, width, height)
         if payload is None:
             return None
         polylines, rgba, widths = payload
-        return [], [], [], polylines, rgba, widths, False, True
+        return [], [], [], polylines, rgba, widths, False, True, _tiles3d_position_source_bytes(decoded.get("positions"))
     return None
 
 
@@ -2052,6 +2061,7 @@ def _tiles3d_render_payload_for_layer(
     list[float],
     bool,
     bool,
+    int,
 ] | None:
     path = _source_path(layer.source)
     if not path or not str(path).lower().endswith((".pnts", ".b3dm", "tileset.json")):
@@ -2082,6 +2092,7 @@ def _tiles3d_render_payload_for_layer(
 
     point_chunks: list[tuple[Any, Any]] = []
     mesh_chunks: list[tuple[Any, Any]] = []
+    source_bytes = 0
     for tile in visible:
         tile_path = str(tile.get("resolved_path") or tile.get("uri") or "")
         if not tile_path.lower().endswith((".pnts", ".b3dm")):
@@ -2092,6 +2103,7 @@ def _tiles3d_render_payload_for_layer(
             if tile_path.lower().endswith(".pnts"):
                 decoded = tiles3d.decode_pnts(raw)
                 positions = _transform_tiles3d_positions(decoded.get("positions"), transform)
+                source_bytes += _tiles3d_position_source_bytes(positions)
                 colors = decoded.get("colors")
                 if colors is None and decoded.get("colors_rgba") is not None:
                     colors = np.asarray(decoded["colors_rgba"], dtype=np.uint8).reshape((-1, 4))[:, :3]
@@ -2099,6 +2111,7 @@ def _tiles3d_render_payload_for_layer(
             else:
                 decoded = tiles3d.decode_b3dm(raw)
                 positions = _transform_tiles3d_positions(decoded.get("positions"), transform)
+                source_bytes += _tiles3d_position_source_bytes(positions)
                 indices = np.asarray(decoded.get("indices"), dtype=np.int64).reshape((-1,))
                 mesh_chunks.append((positions, indices))
         except Exception:
@@ -2174,6 +2187,7 @@ def _tiles3d_render_payload_for_layer(
         [mesh_width] * len(all_lines),
         bool(point_chunks),
         True,
+        source_bytes,
     )
 
 
@@ -2208,6 +2222,7 @@ def _composite_native_point_cloud_layers(base: Any, recipe: "SceneRecipe") -> tu
     stroke_width: list[float] = []
     has_point_clouds = False
     has_tiles = False
+    tiles3d_source_bytes = 0
     for layer in layers:
         if isinstance(layer, PointCloudLayer):
             payload = _pointcloud_payload_for_layer(layer, int(width), int(height))
@@ -2230,6 +2245,7 @@ def _composite_native_point_cloud_layers(base: Any, recipe: "SceneRecipe") -> tu
                 layer_widths,
                 payload_has_points,
                 payload_has_tiles,
+                payload_source_bytes,
             ) = tiles_payload
             points_xy.extend(layer_points)
             point_rgba.extend(layer_rgba)
@@ -2239,6 +2255,7 @@ def _composite_native_point_cloud_layers(base: Any, recipe: "SceneRecipe") -> tu
             stroke_width.extend(layer_widths)
             has_point_clouds = has_point_clouds or payload_has_points
             has_tiles = has_tiles or payload_has_tiles
+            tiles3d_source_bytes += int(payload_source_bytes)
     if not points_xy and not polylines:
         return base, False, {}
     render_kwargs = {
@@ -2258,6 +2275,7 @@ def _composite_native_point_cloud_layers(base: Any, recipe: "SceneRecipe") -> tu
         metadata["point_cloud_backend"] = "native_oit_points"
     if has_tiles:
         metadata["tiles3d_backend"] = "native_oit_geometry"
+        metadata["tiles3d_source_bytes"] = tiles3d_source_bytes
     if edl_requested:
         metadata["point_cloud_edl_backend"] = "weighted_oit_depth_edl"
     return _alpha_composite_rgba(base, np.asarray(overlay, dtype=np.uint8)), True, metadata
@@ -5639,6 +5657,7 @@ class MapScene:
             "point_cloud_backend",
             "point_cloud_edl_backend",
             "tiles3d_backend",
+            "tiles3d_source_bytes",
             "cloud_shadow_backend",
             "cloud_shadow_coverage",
             "cloud_shadow_strength",

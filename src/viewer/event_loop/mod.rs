@@ -4,6 +4,8 @@
 
 mod cmd_parse_init;
 mod command_batch;
+mod command_preflight;
+mod command_preflight_helpers;
 mod ipc_state;
 mod runner;
 mod stdin_reader;

@@ -27,7 +27,7 @@ def test_drained_batch_is_preflighted_once_before_any_handler_runs() -> None:
 
 
 def test_prospective_frame_precedence_and_existing_pending_content_are_locked() -> None:
-    source = _read("src/viewer/event_loop/command_batch.rs")
+    source = _read("src/viewer/event_loop/command_preflight.rs")
     terrain = source.index("if terrain_present")
     point = source.index("else if point_present")
     general = source.index("else {\n            general_eye")

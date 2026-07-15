@@ -1005,6 +1005,7 @@ def test_gpu_backend_uses_pnts_tiles3d_layer_as_oit_points(tmp_path, monkeypatch
     ]
     assert calls["vector"]["point_size"] == [7.0, 7.0]
     assert report.supported_features["tiles3d.mapscene_render"] == "supported"
+    assert scene.last_render_metadata["tiles3d_source_bytes"] == 2 * 3 * 8
 
 
 def test_gpu_backend_uses_tileset_json_pnts_content_as_oit_points(tmp_path, monkeypatch):
@@ -1075,9 +1076,16 @@ def test_gpu_backend_uses_tileset_json_pnts_content_as_oit_points(tmp_path, monk
     assert calls["tileset_path"] == tileset_path
     assert calls["traverse"] == ((1.0, 2.0, 3.0), 8.0, 32)
     assert calls["pnts_bytes"] == b"pnts"
-    assert calls["vector"]["points_xy"] == [(-1.0, 1.0), (1.0, -1.0)]
+    expected_points = map_scene._project_tiles3d_perspective(
+        [[5.0, 5.0, 0.0], [7.0, 9.0, 1.0]],
+        {"point_size": 3.0, "camera_position": [1.0, 2.0, 3.0], "sse_threshold": 8.0},
+        80,
+        64,
+    )
+    assert calls["vector"]["points_xy"] == expected_points
     assert calls["vector"]["point_size"] == [3.0, 3.0]
     assert report.supported_features["tiles3d.mapscene_render"] == "supported"
+    assert scene.last_render_metadata["tiles3d_source_bytes"] == 2 * 3 * 8
 
 
 def test_gpu_backend_uses_b3dm_tiles3d_layer_as_oit_wireframe(tmp_path, monkeypatch):
@@ -1139,6 +1147,7 @@ def test_gpu_backend_uses_b3dm_tiles3d_layer_as_oit_wireframe(tmp_path, monkeypa
     assert calls["vector"]["stroke_width"] == [4.0]
     assert report.supported_features["tiles3d.mapscene_render"] == "supported"
     assert scene.last_render_metadata["tiles3d_backend"] == "native_oit_geometry"
+    assert scene.last_render_metadata["tiles3d_source_bytes"] == 3 * 3 * 8
     assert "point_cloud_backend" not in scene.last_render_metadata
 
 
@@ -1204,10 +1213,22 @@ def test_gpu_backend_uses_tileset_json_b3dm_content_as_oit_wireframe(tmp_path, m
     assert calls["tileset_path"] == tileset_path
     assert calls["traverse"] == ((1.0, 1.0, 4.0), 16.0, 32)
     assert calls["b3dm_bytes"] == b"b3dm"
-    assert calls["vector"]["polylines"] == [[(-1.0, 1.0), (1.0, 1.0), (-1.0, -1.0), (-1.0, 1.0)]]
+    expected_vertices = map_scene._project_tiles3d_perspective(
+        [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 2.0, 0.0]],
+        {"bounds": [0.0, 0.0, 2.0, 2.0], "camera_position": [1.0, 1.0, 4.0]},
+        80,
+        64,
+    )
+    assert calls["vector"]["polylines"] == [[
+        expected_vertices[0],
+        expected_vertices[1],
+        expected_vertices[2],
+        expected_vertices[0],
+    ]]
     assert calls["vector"]["stroke_width"] == [2.0]
     assert report.supported_features["tiles3d.mapscene_render"] == "supported"
     assert scene.last_render_metadata["tiles3d_backend"] == "native_oit_geometry"
+    assert scene.last_render_metadata["tiles3d_source_bytes"] == 3 * 3 * 8
 
 
 def test_gpu_backend_precise_polygon_path_uses_data_driven_fill_and_outline(tmp_path, monkeypatch):
