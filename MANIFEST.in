@@ -22,6 +22,7 @@ recursive-include examples *.ipynb
 # Include data files needed for the library
 recursive-include data *.rgba *.txt
 recursive-include assets *.png *.json *.md
+recursive-include assets *.bin
 
 # Include configuration files
 include pytest.ini
