@@ -66,10 +66,8 @@ fn anchored_view(
 
     let mut anchor = Anchor::new();
     anchor.rebase_if_needed(eye_d);
-    let eye_v = anchor.to_render_vec3(eye_d);
-    let target_v = anchor.to_render_vec3(target_d);
     let up_v = anchor.to_render_direction(up_d);
-    Ok(Mat4::look_at_rh(eye_v, target_v, up_v))
+    Ok(anchor.view_look_at(eye_d, target_d, up_v))
 }
 
 /// Returns the GL->WGPU depth conversion matrix.

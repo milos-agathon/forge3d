@@ -31,36 +31,43 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 }
             }
 
+            let point_cloud_owns_frame = viewer
+                .terrain_viewer
+                .as_ref()
+                .and_then(|scene| scene.terrain.as_ref())
+                .is_none();
+            let prospective_anchor = viewer.prospective_frame_camera().anchor;
             if let Some(ref mut point_cloud) = viewer.point_cloud {
                 let mode = color_mode
                     .as_ref()
                     .map(|mode| ColorMode::from_str(mode))
                     .unwrap_or(ColorMode::Elevation);
 
-                point_cloud.set_point_size(*point_size);
                 eprintln!("[pointcloud] Loading file...");
-
                 match point_cloud.load_from_file(
                     &viewer.device,
                     &viewer.queue,
+                    &prospective_anchor,
+                    point_cloud_owns_frame,
                     path,
                     *max_points,
                     mode,
                 ) {
                     Ok(()) => {
+                        point_cloud.set_point_size(*point_size);
                         eprintln!("[pointcloud] Loaded {} points", point_cloud.point_count);
                         eprintln!(
                             "[pointcloud] Bounds: ({:.1}, {:.1}, {:.1}) - ({:.1}, {:.1}, {:.1})",
-                            point_cloud.bounds_min[0],
-                            point_cloud.bounds_min[1],
-                            point_cloud.bounds_min[2],
-                            point_cloud.bounds_max[0],
-                            point_cloud.bounds_max[1],
-                            point_cloud.bounds_max[2]
+                            point_cloud.bounds_min.x,
+                            point_cloud.bounds_min.y,
+                            point_cloud.bounds_min.z,
+                            point_cloud.bounds_max.x,
+                            point_cloud.bounds_max.y,
+                            point_cloud.bounds_max.z
                         );
                         eprintln!(
                             "[pointcloud] Center: ({:.1}, {:.1}, {:.1})",
-                            point_cloud.center[0], point_cloud.center[1], point_cloud.center[2]
+                            point_cloud.center.x, point_cloud.center.y, point_cloud.center.z
                         );
                         eprintln!("[pointcloud] Load complete, returning to render loop");
                     }

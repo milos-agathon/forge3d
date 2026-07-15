@@ -18,6 +18,8 @@ struct VolumetricsUniforms {
     screen_dims: vec4<f32>,
     // terrain_width, min_h, z_scale, h_range (16 bytes)
     terrain_params: vec4<f32>,
+    // anchored render origin x/z, physical render span x/z
+    render_origin_span: vec4<f32>,
     // active_count, has_density_volumes, pad, pad
     density_volume_count: vec4<f32>,
     density_volume_min: array<vec4<f32>, 4>,
@@ -78,8 +80,9 @@ fn get_terrain_height(world_pos: vec3<f32>) -> f32 {
     let min_h = u.terrain_params.y;
     let z_scale = u.terrain_params.z;
     
-    // UV coordinates: 0..1 maps to 0..terrain_width
-    let uv = world_pos.xz / terrain_width;
+    // UV coordinates use the same anchored physical terrain footprint as the
+    // simple/PBR/shadow/scatter paths.
+    let uv = (world_pos.xz - u.render_origin_span.xy) / u.render_origin_span.zw;
     
     // Check bounds
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {

@@ -505,6 +505,65 @@ jobs:
           if-no-files-found: error
 
   # ============================================================================
+  # M-06 Option-2 Full Geospatial Viewer acceptance
+  #
+  # This is a required, zero-skip hardware lane. An unavailable adapter, a
+  # stale/missing release viewer, or a skipped acceptance test is a hard error.
+  # ============================================================================
+  test-m06-full-geospatial-viewer:
+    name: M-06 Full Geospatial Viewer (NVIDIA Vulkan)
+    needs: build-wheels
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
+    timeout-minutes: 35
+    env:
+      WGPU_BACKEND: vulkan
+      FORGE3D_NO_BOOTSTRAP: '1'
+      FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'
+      RUN_M06_VIEWER_CI: '1'
+      FORGE3D_M06_ARTIFACT_DIR: tests/artifacts/m06
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-windows
+          path: dist/
+
+      - name: Install wheel and acceptance dependencies
+        run: |
+          python scripts/install_compatible_wheel.py dist
+          python -m pip install pytest numpy pillow rasterio laspy
+
+      - name: Build the exact release viewer under test
+        run: cargo build --release --bin interactive_viewer --features async_readback,enable-gpu-instancing
+
+      - name: Require a real Vulkan hardware adapter
+        run: python scripts/terrain_ci_probe.py --mode terrain
+
+      - name: Run M-06 source and live acceptance
+        run: |
+          New-Item -ItemType Directory -Force $env:FORGE3D_M06_ARTIFACT_DIR | Out-Null
+          python -m pytest tests/test_m06_anchoring_boundary.py tests/test_world_coord_f32_gate.py tests/test_m06_viewer_matrix_contract.py tests/test_m06_single_rebase_contract.py tests/test_m06_temporal_resource_contract.py tests/test_m06_scene_review_transaction.py tests/test_m06_full_geospatial_viewer.py -v --tb=short --junitxml=$env:FORGE3D_M06_ARTIFACT_DIR/junit.xml
+          python scripts/assert_junit_zero_skips.py $env:FORGE3D_M06_ARTIFACT_DIR/junit.xml
+
+      - name: Upload M-06 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m06-full-geospatial-viewer-evidence
+          path: tests/artifacts/m06/
+          if-no-files-found: error
+
+  # ============================================================================
   # Documentation Build
   # ============================================================================
   build-docs:
@@ -547,7 +606,7 @@ jobs:
   # ============================================================================
   ci-success:
     name: CI Success
-    needs: [terrain-golden-paths, test-rust, build-wheels, test-python, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, build-docs]
+    needs: [terrain-golden-paths, test-rust, build-wheels, test-python, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, build-docs]
     runs-on: ubuntu-latest
     if: always()
 
@@ -570,6 +629,7 @@ jobs:
              [ "${{ needs.test-python-linux-arm.result }}" != "success" ] || \
              { [ "${{ needs.test-golden-images.result }}" != "success" ] && [ "${{ needs.test-golden-images.result }}" != "skipped" ]; } || \
              { [ "${{ needs.refresh-recipe-certificates.result }}" != "success" ] && [ "${{ needs.refresh-recipe-certificates.result }}" != "skipped" ]; } || \
+             [ "${{ needs.test-m06-full-geospatial-viewer.result }}" != "success" ] || \
              [ "${{ needs.build-docs.result }}" != "success" ]; then
             echo "❌ CI failed"
             exit 1

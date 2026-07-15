@@ -2,7 +2,6 @@
 // Viewer input handling methods
 // Extracted from mod.rs as part of the viewer refactoring
 
-use glam::Mat4;
 use winit::event::*;
 use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -59,18 +58,14 @@ impl Viewer {
                             // Point click only; drag selection is handled by the lasso path.
 
                             // Calculate matrices for unprojection
-                            let aspect = self.config.width as f32 / self.config.height as f32;
-                            let fov = self.view_config.fov_deg.to_radians();
-                            let proj = Mat4::perspective_rh(
-                                fov,
-                                aspect,
-                                self.view_config.znear,
-                                self.view_config.zfar,
-                            );
-                            let view = self.camera.view_matrix();
-                            // Apply object transform to view matrix for consistent space
-                            let model_view = view * self.object_transform;
-                            let view_proj = proj * model_view;
+                            let frame = self.current_frame_camera();
+                            let proj = frame.projection(self.config.width, self.config.height);
+                            // Vector BVHs are rebuilt from their anchor-packed
+                            // render vertices, so the pick ray lives in the
+                            // copied frame's render space. Object-local model
+                            // transforms must not contaminate this ray.
+                            let view_mat = frame.view();
+                            let view_proj = proj * view_mat;
                             let inv_view_proj = view_proj.inverse();
 
                             // Unproject cursor to ray
@@ -93,6 +88,12 @@ impl Viewer {
 
                             // Perform picking query
                             let mut results = self.unified_picking.handle_pick_event(&ray, &event);
+                            for result in &mut results {
+                                result.world_pos = frame
+                                    .anchor
+                                    .to_world_from_render_f64(glam::DVec3::from(result.world_pos))
+                                    .to_array();
+                            }
 
                             // Also check for label hits (screen-space)
                             if let Some(label_id) = self.label_manager.pick_at(x as f32, y as f32) {
@@ -286,46 +287,6 @@ impl Viewer {
             }
         } else {
             self.camera.update_fps(dt, forward, right, up);
-        }
-
-        // Update GI camera params
-        if let Some(ref mut gi) = self.gi {
-            let aspect = self.config.width as f32 / self.config.height as f32;
-            let fov = self.view_config.fov_deg.to_radians();
-            let proj =
-                Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
-            let view = self.camera.view_matrix();
-            let inv_proj = proj.inverse();
-
-            fn to_arr4(m: Mat4) -> [[f32; 4]; 4] {
-                let c = m.to_cols_array();
-                [
-                    [c[0], c[1], c[2], c[3]],
-                    [c[4], c[5], c[6], c[7]],
-                    [c[8], c[9], c[10], c[11]],
-                    [c[12], c[13], c[14], c[15]],
-                ]
-            }
-            let eye = self.camera.eye();
-            // Apply object transform to view matrix for consistent GI
-            let model_view = view * self.object_transform;
-            let inv_model_view = model_view.inverse();
-            let view_proj = proj * model_view;
-            let cam = crate::core::screen_space_effects::CameraParams {
-                view_matrix: to_arr4(model_view),
-                inv_view_matrix: to_arr4(inv_model_view),
-                proj_matrix: to_arr4(proj),
-                inv_proj_matrix: to_arr4(inv_proj),
-                prev_view_proj_matrix: to_arr4(self.prev_view_proj),
-                camera_pos: [eye.x, eye.y, eye.z],
-                frame_index: self.frame_count as u32,
-                // P1.2: Pass jitter offset to shaders for TAA unjitter
-                jitter_offset: self.taa_jitter.offset_array(),
-                _pad_jitter: [0.0, 0.0],
-            };
-            gi.update_camera(&self.queue, &cam);
-            // P1.1: Store current view_proj for next frame's motion vectors
-            self.prev_view_proj = view_proj;
         }
     }
 }

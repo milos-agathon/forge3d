@@ -3,6 +3,7 @@
 // Extracted from mod.rs as part of the viewer refactoring
 
 mod finalize;
+pub(crate) mod frame_anchor;
 mod frame_setup;
 mod geometry;
 mod postfx;
@@ -34,6 +35,7 @@ impl RenderAvailability {
 
 impl Viewer {
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+        self.prepare_frame_anchor();
         let (output, view, snapshot_dimensions, mut encoder) = self.prepare_render_frame()?;
         let availability = self.render_geometry_stage(&mut encoder);
         encoder = self.render_secondary_paths(encoder, &view, snapshot_dimensions, availability);

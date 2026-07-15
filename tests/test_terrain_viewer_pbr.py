@@ -37,10 +37,15 @@ pytestmark = pytest.mark.interactive_viewer
 
 def find_viewer_binary() -> Path:
     """Find the interactive_viewer binary."""
+    override = os.environ.get("FORGE3D_VIEWER_BINARY")
+    if override:
+        binary = Path(override)
+        assert binary.is_file(), f"FORGE3D_VIEWER_BINARY does not exist: {binary}"
+        return binary
     ext = ".exe" if os.name == "nt" else ""
     candidates = [
-        PROJECT_ROOT / "target" / "debug" / f"interactive_viewer{ext}",
         PROJECT_ROOT / "target" / "release" / f"interactive_viewer{ext}",
+        PROJECT_ROOT / "target" / "debug" / f"interactive_viewer{ext}",
     ]
     for c in candidates:
         if c.exists():
@@ -153,6 +158,26 @@ def wait_for_snapshot(path: Path, timeout_s: float = 10.0) -> bool:
     return False
 
 
+def wait_for_frame_advance(sock: socket.socket, frames: int = 2, timeout_s: float = 15.0) -> None:
+    """Wait until queued IPC state has crossed at least ``frames`` renders.
+
+    IPC acknowledgements confirm enqueueing, not event-loop application.  A
+    snapshot sent immediately after a PBR/HDR command can therefore capture the
+    prior state and make visual comparisons intermittently identical.
+    """
+    start_response = send_ipc(sock, {"cmd": "get_stats"})
+    assert start_response.get("ok"), start_response
+    start = int(start_response["stats"]["frame_count"])
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        response = send_ipc(sock, {"cmd": "get_stats"})
+        assert response.get("ok"), response
+        if int(response["stats"]["frame_count"]) >= start + frames:
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"viewer did not advance {frames} frames after IPC command")
+
+
 def write_solid_overlay(path: Path, rgba: tuple[int, int, int, int]) -> None:
     """Write a flat RGBA overlay image for preserve_colors testing."""
     if not HAS_PIL:
@@ -222,7 +247,13 @@ def terrain_mask(rgb: np.ndarray) -> np.ndarray:
 def viewer_context():
     """Fixture that starts viewer and provides IPC connection."""
     binary = find_viewer_binary()
-    dem = find_test_dem()
+    terrain_tmp = tempfile.TemporaryDirectory()
+    dem = Path(terrain_tmp.name) / "local-pbr-ridge.tif"
+    # Keep this suite independent of geospatial unit metadata.  The former
+    # fallback fixture was a WGS84-degree GeoTIFF with metre elevations; M-06
+    # correctly preserves that 4.5-degree physical span, which is not a valid
+    # local PBR lighting test domain.
+    write_ridge_heightmap_tiff(dem)
     
     process, port = start_viewer_with_ipc(binary)
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -236,10 +267,11 @@ def viewer_context():
     # Set consistent camera for reproducible output
     send_ipc(sock, {
         "cmd": "set_terrain",
-        "phi": 45.0, "theta": 45.0, "radius": 2000.0, "fov": 55.0,
+        "phi": 45.0, "theta": 45.0, "radius": 220.0, "fov": 55.0,
         "zscale": 1.0, "sun_azimuth": 135.0, "sun_elevation": 45.0,
         "sun_intensity": 1.0, "ambient": 0.3
     })
+    wait_for_frame_advance(sock)
     
     yield {
         "process": process,
@@ -256,6 +288,7 @@ def viewer_context():
     sock.close()
     process.terminate()
     process.wait(timeout=5)
+    terrain_tmp.cleanup()
 
 
 class TestTerrainViewerPbr:
@@ -418,6 +451,7 @@ class TestTerrainViewerPbr:
                 "sun_visibility": {"enabled": False},
             })
             assert resp.get("ok"), f"Fallback PBR config failed: {resp.get('error')}"
+            wait_for_frame_advance(sock)
 
             assert send_ipc(sock, {
                 "cmd": "snapshot",
@@ -433,6 +467,7 @@ class TestTerrainViewerPbr:
                 "ibl_intensity": 1.0,
             })
             assert resp.get("ok"), f"HDRI PBR config failed: {resp.get('error')}"
+            wait_for_frame_advance(sock)
 
             assert send_ipc(sock, {
                 "cmd": "snapshot",
@@ -504,6 +539,7 @@ class TestTerrainViewerPbr:
                     "sun_visibility": {"enabled": False},
                 })
                 assert resp.get("ok"), f"Rotation-0 PBR config failed: {resp.get('error')}"
+                wait_for_frame_advance(sock)
 
                 assert send_ipc(sock, {
                     "cmd": "snapshot",
@@ -518,6 +554,7 @@ class TestTerrainViewerPbr:
                     "hdr_rotate_deg": 90.0,
                 })
                 assert resp.get("ok"), f"Rotation-90 PBR config failed: {resp.get('error')}"
+                wait_for_frame_advance(sock)
 
                 assert send_ipc(sock, {
                     "cmd": "snapshot",

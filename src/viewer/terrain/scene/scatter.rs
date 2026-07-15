@@ -9,15 +9,23 @@ use crate::terrain::scatter::{
 };
 
 #[cfg(feature = "enable-gpu-instancing")]
-fn viewer_render_from_contract() -> glam::Mat4 {
-    // The terrain viewer renders in terrain-width units:
-    // x/z cover [0, terrain_width], and both terrain shaders resolve world_y to
-    // (height - min_height) * z_scale despite differing uniform formulas.
-    //
-    // TerrainScatterSource already emits that same contract, so the viewer path should not
-    // introduce an extra contract->world transform. Callers must size orbit radius and scatter
-    // draw distances in terrain-width units because the viewer does not preserve DEM span metadata.
-    glam::Mat4::IDENTITY
+fn viewer_render_from_contract(
+    render_origin_span: [f32; 4],
+    terrain_dimensions: (u32, u32),
+) -> (glam::Mat4, f32) {
+    let width = terrain_dimensions.0.max(1) as f32;
+    let depth = terrain_dimensions.1.max(1) as f32;
+    let scale_x = render_origin_span[2] / width;
+    let scale_z = render_origin_span[3] / depth;
+    let transform = glam::Mat4::from_scale_rotation_translation(
+        glam::Vec3::new(scale_x, 1.0, scale_z),
+        glam::Quat::IDENTITY,
+        glam::Vec3::new(render_origin_span[0], 0.0, render_origin_span[1]),
+    );
+    // Scatter meshes are local, so preserve their proportions under a raster
+    // with non-square pixels while mapping instance positions exactly.
+    let instance_scale = (scale_x.abs() * scale_z.abs()).sqrt();
+    (transform, instance_scale)
 }
 
 #[cfg(feature = "enable-gpu-instancing")]
@@ -30,7 +38,8 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
     proj: glam::Mat4,
     eye_render: glam::Vec3,
     heightmap_view: &wgpu::TextureView,
-    terrain_width: f32,
+    render_origin_span: [f32; 4],
+    terrain_dimensions: (u32, u32),
     terrain_min_height: f32,
     z_scale: f32,
     light_dir: [f32; 3],
@@ -39,12 +48,14 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     renderer: &mut crate::render::mesh_instanced::MeshInstancedRenderer,
+    hlod_instance_buffer: &wgpu::Buffer,
 ) -> Result<TerrainScatterFrameStats> {
     if batches.is_empty() {
         return Ok(TerrainScatterFrameStats::default());
     }
 
-    let render_from_contract = viewer_render_from_contract();
+    let (render_from_contract, instance_scale) =
+        viewer_render_from_contract(render_origin_span, terrain_dimensions);
     let eye_contract = render_from_contract.inverse().transform_point3(eye_render);
 
     renderer.reset_draw_batch_uniforms();
@@ -54,28 +65,21 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
         Some(crate::render::mesh_instanced::TerrainBlendContext {
             heightmap_view,
             world_to_uv_scale_bias: [
-                1.0 / terrain_width.max(1e-3),
-                1.0 / terrain_width.max(1e-3),
-                0.0,
-                0.0,
+                1.0 / render_origin_span[2],
+                1.0 / render_origin_span[3],
+                -render_origin_span[0] / render_origin_span[2],
+                -render_origin_span[1] / render_origin_span[3],
             ],
             height_to_world: [z_scale, -terrain_min_height * z_scale, 0.0, 0.0],
         }),
     );
     let mut frame_stats = TerrainScatterFrameStats::default();
-    // Pre-create a single HLOD identity instance buffer that lives as long as the pass.
     let identity_packed = pack_hlod_identity_instance(render_from_contract);
-    let hlod_inst_bytes = (std::mem::size_of::<f32>() * 16) as u64;
-    let hlod_instbuf = crate::core::resource_tracker::tracked_create_buffer(
-        device,
-        &wgpu::BufferDescriptor {
-            label: Some("terrain.scatter.hlod.instance_buffer"),
-            size: hlod_inst_bytes,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        },
-    )?;
-    queue.write_buffer(&hlod_instbuf, 0, bytemuck::cast_slice(&identity_packed));
+    queue.write_buffer(
+        hlod_instance_buffer,
+        0,
+        bytemuck::cast_slice(&identity_packed),
+    );
 
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("terrain_viewer.scatter_pass"),
@@ -98,9 +102,6 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
         timestamp_writes: None,
         occlusion_query_set: None,
     });
-
-    // Viewer uses identity render_from_contract, so instance_scale is 1.0.
-    let instance_scale = 1.0_f32;
 
     for batch in batches {
         let (batch_stats, draws) = batch.prepare_draws(
@@ -176,7 +177,7 @@ pub(in crate::viewer::terrain) fn render_scatter_batches(
                     None,
                     vbuf,
                     ibuf,
-                    &hlod_instbuf,
+                    hlod_instance_buffer,
                     index_count,
                     1,
                 );
@@ -204,7 +205,7 @@ impl ViewerTerrainScene {
                     max_distance: level.max_distance,
                 })
                 .collect::<Vec<_>>();
-            gpu_batches.push(TerrainScatterBatch::new(
+            let mut gpu_batch = TerrainScatterBatch::new(
                 self.device.as_ref(),
                 self.queue.as_ref(),
                 levels,
@@ -225,7 +226,9 @@ impl ViewerTerrainScene {
                     strength: batch.terrain_contact.strength,
                     vertical_weight: batch.terrain_contact.vertical_weight,
                 },
-            )?);
+            )?;
+            gpu_batch.preallocate_instance_buffers(self.device.as_ref())?;
+            gpu_batches.push(gpu_batch);
         }
 
         self.scatter_batches = gpu_batches;
@@ -249,7 +252,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn viewer_render_contract_is_identity_for_all_viewer_modes() {
-        assert_eq!(viewer_render_from_contract(), glam::Mat4::IDENTITY);
+    fn viewer_render_contract_maps_pixel_contract_to_anchored_physical_span() {
+        let (transform, instance_scale) =
+            viewer_render_from_contract([-125.0, 40.0, 600.0, 200.0], (20, 10));
+        assert_eq!(
+            transform.transform_point3(glam::Vec3::new(0.0, 7.0, 0.0)),
+            glam::Vec3::new(-125.0, 7.0, 40.0)
+        );
+        assert_eq!(
+            transform.transform_point3(glam::Vec3::new(20.0, 7.0, 10.0)),
+            glam::Vec3::new(475.0, 7.0, 240.0)
+        );
+        assert!((instance_scale - (600.0_f32).sqrt()).abs() < 1e-5);
     }
 }

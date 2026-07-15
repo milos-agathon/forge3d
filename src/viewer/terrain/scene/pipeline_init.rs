@@ -273,7 +273,7 @@ impl ViewerTerrainScene {
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             &self.device,
             "terrain_viewer.shadow_depth.shader",
-            include_str!("../../../shaders/terrain_shadow_depth.wgsl"),
+            include_str!("../shader_pbr/terrain_shadow_depth.wgsl"),
         );
 
         // Create pipeline layout

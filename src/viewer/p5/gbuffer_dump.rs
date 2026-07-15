@@ -389,11 +389,11 @@ impl Viewer {
         self.viz_mode = VizMode::Material;
         self.gi_viz_mode = GiVizMode::None;
 
-        let eye = Vec3::new(-1.4, 1.1, -2.4);
-        let target = Vec3::new(0.0, 1.0, 0.0);
+        let eye = glam::DVec3::new(-1.4, 1.1, -2.4);
+        let target = glam::DVec3::new(0.0, 1.0, 0.0);
         self.camera
-            .set_look_at(eye, target, Vec3::Y)
-            .expect("P51 Cornell scene camera coords are within the viewer local frame");
+            .set_look_at(&self.camera_anchor, eye, target, Vec3::Y)
+            .expect("P51 Cornell camera pose is renderable");
 
         Ok(prev)
     }
@@ -407,7 +407,12 @@ impl Viewer {
         self.viz_mode = prev.viz_mode;
         self.gi_viz_mode = prev.gi_viz_mode;
         self.camera
-            .set_look_at(prev.camera_eye, prev.camera_target, Vec3::Y)
-            .expect("restored Cornell camera coords are within the viewer local frame");
+            .set_look_at(
+                &self.camera_anchor,
+                prev.camera_eye,
+                prev.camera_target,
+                Vec3::Y,
+            )
+            .expect("restored Cornell camera pose is renderable");
     }
 }

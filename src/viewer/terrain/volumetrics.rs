@@ -27,7 +27,8 @@ pub struct VolumetricsUniforms {
     pub sun_direction: [f32; 4],      // 16 bytes (vec3 + intensity), offset 112
     pub shaft_params: [f32; 4], // shaft_intensity, light_shafts_enabled, steps, mode; offset 128
     pub screen_dims: [f32; 4],  // width, height, pad, pad; offset 144
-    pub terrain_params: [f32; 4], // terrain_size, min_h, h_scale, pad; offset 160
+    pub terrain_params: [f32; 4], // reference span, min_h, h_scale, h_range; offset 160
+    pub render_origin_span: [f32; 4], // anchored origin x/z and physical span x/z
     pub density_volume_count: [f32; 4],
     pub density_volume_min: [[f32; 4]; MAX_DENSITY_VOLUMES],
     pub density_volume_inv_size: [[f32; 4]; MAX_DENSITY_VOLUMES],
@@ -298,6 +299,7 @@ impl VolumetricsPass {
         height_dims: (u32, u32),
         terrain_revision: u64,
         terrain_params: [f32; 4],
+        render_origin_span: [f32; 4],
         config: &super::pbr_renderer::VolumetricsConfig,
     ) -> anyhow::Result<()> {
         if config.density_volumes.is_empty() {
@@ -309,7 +311,8 @@ impl VolumetricsPass {
         let context = TerrainVolumeContext {
             heightmap,
             height_dims,
-            terrain_width: terrain_params[0],
+            contract_extent: [height_dims.0.max(1) as f32, height_dims.1.max(1) as f32],
+            render_origin_span,
             domain: (terrain_params[1], terrain_params[1] + terrain_params[3]),
             z_scale: terrain_params[2],
             terrain_revision,
@@ -373,7 +376,8 @@ impl VolumetricsPass {
         far: f32,
         sun_direction: [f32; 3],
         sun_intensity: f32,
-        terrain_params: [f32; 4], // width, min_h, h_scale, pad
+        terrain_params: [f32; 4], // reference span, min_h, h_scale, h_range
+        render_origin_span: [f32; 4],
         config: &super::pbr_renderer::VolumetricsConfig,
     ) -> anyhow::Result<()> {
         // Update uniforms with proper alignment
@@ -390,6 +394,7 @@ impl VolumetricsPass {
             height_dims,
             terrain_revision,
             terrain_params,
+            render_origin_span,
             config,
         )?;
 
@@ -446,6 +451,7 @@ impl VolumetricsPass {
             ],
             screen_dims: [width as f32, height as f32, 0.0, 0.0],
             terrain_params,
+            render_origin_span,
             density_volume_count: [
                 self.last_report.active_volume_count as f32,
                 if self.last_report.active_volume_count > 0 {

@@ -6,4 +6,4 @@ mod state;
 mod types;
 
 pub use state::PointCloudState;
-pub use types::{ColorMode, PointCloudUniforms, PointInstance3D};
+pub use types::{ColorMode, PointCloudUniforms, PointInstance3D, PointSource3D};

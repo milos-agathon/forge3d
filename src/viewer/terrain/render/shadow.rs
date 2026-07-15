@@ -7,6 +7,7 @@ impl ViewerTerrainScene {
         camera_view: glam::Mat4,
         camera_proj: glam::Mat4,
         sun_direction: glam::Vec3,
+        render_origin_span: [f32; 4],
     ) {
         // Early exit if shadow infrastructure not ready
         let csm = match self.csm_renderer.as_mut() {
@@ -69,6 +70,7 @@ impl ViewerTerrainScene {
             // Match main shader terrain_params layout: [min_h, h_range, terrain_width, z_scale]
             let shadow_uniforms = ShadowPassUniforms {
                 light_view_proj,
+                render_origin_span,
                 terrain_params: [min_h, max_h - min_h, terrain_width, z_scale],
                 grid_params: [grid_res as f32, 0.0, 0.0, 0.0],
                 height_curve: [

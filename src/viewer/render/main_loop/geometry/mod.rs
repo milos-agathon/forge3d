@@ -70,7 +70,9 @@ impl Viewer {
                 availability.have_z,
                 availability.have_bgl,
                 self.geom_index_count,
-                self.object_transform == glam::Mat4::IDENTITY
+                self.object_translation == glam::DVec3::ZERO
+                    && self.object_rotation == glam::Quat::IDENTITY
+                    && self.object_scale == glam::Vec3::ONE
             );
             let _ = std::fs::OpenOptions::new()
                 .create(true)

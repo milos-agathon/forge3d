@@ -132,41 +132,20 @@ impl ViewerTerrainScene {
         }
     }
 
-    /// Add a vector overlay layer. Returns layer ID.
-    /// If drape is true and terrain is loaded, vertices will be draped onto terrain.
-    pub fn add_vector_overlay(&mut self, layer: VectorOverlayLayer) -> Result<u32> {
-        self.add_vector_overlay_with_id(None, layer)
-    }
-
     /// Add a vector overlay layer with an externally allocated ID.
     /// If drape is true and terrain is loaded, vertices will be draped onto terrain.
     pub fn add_vector_overlay_with_id(
         &mut self,
         id: Option<u32>,
         mut layer: VectorOverlayLayer,
+        anchor: &crate::camera::Anchor,
     ) -> Result<u32> {
         self.ensure_vector_overlay_stack();
-
-        // If draping requested and terrain is loaded, drape the vertices
-        if layer.drape {
-            if let Some(ref terrain) = self.terrain {
-                let terrain_width = terrain.dimensions.0.max(terrain.dimensions.1) as f32;
-                let height_range = terrain.domain.1 - terrain.domain.0;
-                // Match terrain shader formula: world_y = (h - min_h) / h_range * terrain_width * z_scale * 0.001
-                let height_scale = terrain_width * terrain.z_scale * 0.001 / height_range.max(1.0);
-
-                drape_vertices(crate::viewer::terrain::vector_overlay::DrapeParams {
-                    vertices: &mut layer.vertices,
-                    heightmap: &terrain.heightmap,
-                    dims: terrain.dimensions,
-                    terrain_width,
-                    terrain_origin: (0.0, 0.0),
-                    height_offset: layer.drape_offset,
-                    height_min: terrain.domain.0,
-                    height_scale,
-                });
-            }
-        }
+        crate::viewer::terrain::vector_overlay::repack_source_vertices(
+            &mut layer,
+            self.terrain.as_ref(),
+            anchor,
+        );
 
         if let Some(ref mut stack) = self.vector_overlay_stack {
             match id {
@@ -176,6 +155,64 @@ impl ViewerTerrainScene {
         } else {
             Ok(0)
         }
+    }
+
+    pub(crate) fn repack_vector_overlays(&mut self, anchor: &crate::camera::Anchor) {
+        if let Some(stack) = self.vector_overlay_stack.as_mut() {
+            stack.repack_for_anchor(self.terrain.as_ref(), anchor);
+        }
+    }
+
+    pub(crate) fn vector_overlay_render_data(
+        &self,
+        id: u32,
+    ) -> Option<(
+        String,
+        Vec<crate::viewer::terrain::vector_overlay::VectorVertex>,
+        Vec<u32>,
+        crate::viewer::terrain::vector_overlay::OverlayPrimitive,
+    )> {
+        self.vector_overlay_stack
+            .as_ref()?
+            .render_layer_data()
+            .find_map(|(layer_id, name, vertices, indices, primitive)| {
+                (layer_id == id).then(|| {
+                    (
+                        name.to_string(),
+                        vertices.to_vec(),
+                        indices.to_vec(),
+                        primitive,
+                    )
+                })
+            })
+    }
+
+    pub(crate) fn all_vector_overlay_render_data(
+        &self,
+    ) -> Vec<(
+        u32,
+        String,
+        Vec<crate::viewer::terrain::vector_overlay::VectorVertex>,
+        Vec<u32>,
+        crate::viewer::terrain::vector_overlay::OverlayPrimitive,
+    )> {
+        self.vector_overlay_stack
+            .as_ref()
+            .map(|stack| {
+                stack
+                    .render_layer_data()
+                    .map(|(id, name, vertices, indices, primitive)| {
+                        (
+                            id,
+                            name.to_string(),
+                            vertices.to_vec(),
+                            indices.to_vec(),
+                            primitive,
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Remove a vector overlay by ID. Returns true if found and removed.

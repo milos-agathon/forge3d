@@ -1,22 +1,22 @@
 use std::collections::{HashMap, HashSet};
 
-use glam::Vec3;
+use glam::DVec3;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::accel::cpu_bvh::{build_bvh_cpu, BuildOptions, MeshCPU};
-use crate::accel::types::{Aabb, BvhNode, Triangle};
 use crate::labels::{LabelStyle, LineLabelPlacement};
-use crate::picking::LayerBvhData;
 use crate::viewer::event_loop::update_scene_review_state;
-use crate::viewer::terrain::vector_overlay::{OverlayPrimitive, VectorOverlayLayer, VectorVertex};
+use crate::viewer::terrain::vector_overlay::{
+    OverlayPrimitive, VectorOverlayLayer, VectorSourceVertex,
+};
 use crate::viewer::terrain::BlendMode;
 use crate::viewer::viewer_enums::ViewerTerrainScatterBatchConfig;
 use crate::viewer::viewer_enums::{
     ViewerDenoiseConfig, ViewerDensityVolumeConfig, ViewerDofConfig, ViewerHeightAoConfig,
     ViewerLensEffectsConfig, ViewerMaterialLayerConfig, ViewerMotionBlurConfig, ViewerSkyConfig,
-    ViewerSunVisConfig, ViewerTonemapConfig, ViewerVectorOverlayConfig, ViewerVolumetricsConfig,
+    ViewerSunVisConfig, ViewerTonemapConfig, ViewerVectorOverlayConfig, ViewerVectorVertex,
+    ViewerVolumetricsConfig,
 };
 use crate::viewer::Viewer;
 
@@ -32,7 +32,7 @@ pub struct ViewerRasterOverlayConfig {
 #[derive(Debug, Clone, Default)]
 pub struct ViewerVectorOverlayLayerConfig {
     pub name: String,
-    pub vertices: Vec<[f32; 8]>,
+    pub vertices: Vec<ViewerVectorVertex>,
     pub indices: Vec<u32>,
     pub primitive: String,
     pub drape: bool,
@@ -301,17 +301,25 @@ impl Viewer {
         &mut self,
         state: ViewerSceneReviewStateConfig,
     ) -> Result<(), String> {
+        let previous = self.scene_review_registry.clone();
         self.scene_review_registry.install(state)?;
-        let result = self.reapply_scene_review_state();
+        if let Err(err) = self.reapply_scene_review_state() {
+            self.scene_review_registry = previous;
+            return Err(err);
+        }
         update_scene_review_state(self.scene_review_registry.snapshot());
-        result
+        Ok(())
     }
 
     pub(crate) fn apply_scene_variant(&mut self, variant_id: &str) -> Result<(), String> {
+        let previous = self.scene_review_registry.clone();
         self.scene_review_registry.apply_variant(variant_id)?;
-        let result = self.reapply_scene_review_state();
+        if let Err(err) = self.reapply_scene_review_state() {
+            self.scene_review_registry = previous;
+            return Err(err);
+        }
         update_scene_review_state(self.scene_review_registry.snapshot());
-        result
+        Ok(())
     }
 
     pub(crate) fn set_review_layer_visible(
@@ -319,19 +327,20 @@ impl Viewer {
         layer_id: &str,
         visible: bool,
     ) -> Result<(), String> {
+        let previous = self.scene_review_registry.clone();
         self.scene_review_registry
             .set_review_layer_visible(layer_id, visible)?;
-        let result = self.reapply_scene_review_state();
+        if let Err(err) = self.reapply_scene_review_state() {
+            self.scene_review_registry = previous;
+            return Err(err);
+        }
         update_scene_review_state(self.scene_review_registry.snapshot());
-        result
+        Ok(())
     }
 
     pub(crate) fn reapply_scene_review_state(&mut self) -> Result<(), String> {
         let effective = self.scene_review_registry.effective_state()?;
-        self.clear_managed_scene_review_runtime();
-        self.apply_scene_review_preset(effective.preset.as_ref());
-
-        let mut first_error: Option<String> = None;
+        let content_anchor = self.validate_scene_review_effective(&effective)?;
         let mut raster_ids = Vec::new();
         let mut vector_ids = Vec::new();
         let mut label_ids = Vec::new();
@@ -347,29 +356,36 @@ impl Viewer {
                     overlay.z_order.unwrap_or(0),
                 ) {
                     Ok(id) => raster_ids.push(id),
-                    Err(err) => record_scene_review_error(
-                        &mut first_error,
-                        format!(
+                    Err(err) => {
+                        let message = format!(
                             "Failed to load review raster overlay '{}': {err}",
                             overlay.name
-                        ),
-                    ),
+                        );
+                        self.remove_scene_review_runtime_ids(&raster_ids, &vector_ids, &label_ids);
+                        return Err(message);
+                    }
                 }
             }
         }
 
         for overlay in &effective.vector_overlays {
-            match add_managed_vector_overlay(self, overlay) {
+            match add_managed_vector_overlay(self, overlay, &content_anchor) {
                 Ok(Some(id)) => vector_ids.push(id),
                 Ok(None) => {}
-                Err(err) => record_scene_review_error(&mut first_error, err),
+                Err(err) => {
+                    self.remove_scene_review_runtime_ids(&raster_ids, &vector_ids, &label_ids);
+                    return Err(err);
+                }
             }
         }
 
         for label in &effective.labels {
-            match add_review_label(self, label) {
+            match add_review_label(self, label, &content_anchor) {
                 Ok(id) => label_ids.push(id),
-                Err(err) => record_scene_review_error(&mut first_error, err),
+                Err(err) => {
+                    self.remove_scene_review_runtime_ids(&raster_ids, &vector_ids, &label_ids);
+                    return Err(err);
+                }
             }
         }
 
@@ -379,91 +395,155 @@ impl Viewer {
                 if let Err(err) =
                     terrain_viewer.set_scatter_batches_from_configs(&effective.scatter_batches)
                 {
-                    record_scene_review_error(
-                        &mut first_error,
-                        format!("Failed to set review scatter batches: {err:#}"),
-                    );
+                    self.remove_scene_review_runtime_ids(&raster_ids, &vector_ids, &label_ids);
+                    return Err(format!("Failed to set review scatter batches: {err:#}"));
                 }
             }
         }
         #[cfg(not(feature = "enable-gpu-instancing"))]
         {
             if !effective.scatter_batches.is_empty() {
-                record_scene_review_error(
-                    &mut first_error,
+                self.remove_scene_review_runtime_ids(&raster_ids, &vector_ids, &label_ids);
+                return Err(
                     "Review scatter batches require Cargo feature 'enable-gpu-instancing'"
                         .to_string(),
                 );
             }
         }
 
+        let old_raster_ids = self
+            .scene_review_registry
+            .managed_raster_overlay_ids
+            .clone();
+        let old_vector_ids = self
+            .scene_review_registry
+            .managed_vector_overlay_ids
+            .clone();
+        let old_label_ids = self.scene_review_registry.managed_label_ids.clone();
+        self.remove_scene_review_runtime_ids(&old_raster_ids, &old_vector_ids, &old_label_ids);
+        self.apply_scene_review_preset(effective.preset.as_ref());
+
         self.scene_review_registry.managed_raster_overlay_ids = raster_ids;
         self.scene_review_registry.managed_vector_overlay_ids = vector_ids;
         self.scene_review_registry.managed_label_ids = label_ids;
 
-        if let Some(err) = first_error {
-            Err(err)
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 
-    fn clear_managed_scene_review_runtime(&mut self) {
-        let raster_ids = std::mem::take(&mut self.scene_review_registry.managed_raster_overlay_ids);
-        let vector_ids = std::mem::take(&mut self.scene_review_registry.managed_vector_overlay_ids);
-        let label_ids = std::mem::take(&mut self.scene_review_registry.managed_label_ids);
-
+    fn remove_scene_review_runtime_ids(
+        &mut self,
+        raster_ids: &[u32],
+        vector_ids: &[u32],
+        label_ids: &[u64],
+    ) {
         if let Some(ref mut terrain_viewer) = self.terrain_viewer {
-            for id in raster_ids {
+            for &id in raster_ids {
                 let _ = terrain_viewer.remove_overlay(id);
             }
-            for id in vector_ids {
+            for &id in vector_ids {
                 let _ = terrain_viewer.remove_vector_overlay(id);
+                self.unified_picking.remove_layer_bvh(id);
             }
-            terrain_viewer.clear_scatter_batches();
         }
-
-        for id in label_ids {
+        for &id in label_ids {
             let _ = self.remove_label(id);
         }
     }
-}
 
-fn record_scene_review_error(first_error: &mut Option<String>, message: String) {
-    eprintln!("[scene_review] {message}");
-    if first_error.is_none() {
-        *first_error = Some(message);
+    fn validate_scene_review_effective(
+        &self,
+        effective: &ViewerSceneBaseStateConfig,
+    ) -> Result<crate::camera::Anchor, String> {
+        let mut anchor = self.prospective_frame_camera().anchor;
+        if let (Some(terrain), Some(preset)) = (
+            self.terrain_viewer
+                .as_ref()
+                .and_then(|scene| scene.terrain.as_ref()),
+            effective.preset.as_ref(),
+        ) {
+            let camera = preset.get("camera").and_then(Value::as_object);
+            let phi = first_f32(preset, &["cam_phi", "phi_deg", "phi"])
+                .or_else(|| camera.and_then(|map| first_f32(map, &["phi_deg", "phi"])))
+                .unwrap_or(terrain.cam_phi_deg);
+            let theta = first_f32(preset, &["cam_theta", "theta_deg", "theta"])
+                .or_else(|| camera.and_then(|map| first_f32(map, &["theta_deg", "theta"])))
+                .unwrap_or(terrain.cam_theta_deg);
+            let radius = first_f32(preset, &["cam_radius", "radius"])
+                .or_else(|| camera.and_then(|map| first_f32(map, &["radius", "distance"])))
+                .unwrap_or(terrain.cam_radius);
+            let fov = first_f32(preset, &["cam_fov", "fov_deg", "fov"])
+                .or_else(|| camera.and_then(|map| first_f32(map, &["fov_deg", "fov"])))
+                .unwrap_or(terrain.cam_fov_deg);
+            terrain
+                .validate_camera_state(
+                    &self.camera_anchor,
+                    phi,
+                    theta,
+                    radius,
+                    fov,
+                    terrain.cam_target,
+                )
+                .map_err(|err| err.to_string())?;
+            anchor = self.camera_anchor;
+            anchor.rebase_if_needed(DVec3::new(terrain.cam_target.x, 0.0, terrain.cam_target.z));
+        }
+
+        for overlay in &effective.vector_overlays {
+            for vertex in &overlay.vertices {
+                crate::viewer::camera_controller::validate_world_point(
+                    crate::viewer::camera_controller::CoordRole::Content,
+                    DVec3::from(vertex.position),
+                    &anchor,
+                )
+                .map_err(|err| err.to_string())?;
+            }
+        }
+        for payload in &effective.labels {
+            for point in review_label_world_points(payload)? {
+                crate::viewer::camera_controller::validate_world_point(
+                    crate::viewer::camera_controller::CoordRole::Content,
+                    point,
+                    &anchor,
+                )
+                .map_err(|err| err.to_string())?;
+            }
+        }
+        Ok(anchor)
     }
 }
 
 fn add_managed_vector_overlay(
     viewer: &mut Viewer,
     overlay: &ViewerVectorOverlayLayerConfig,
+    anchor: &crate::camera::Anchor,
 ) -> Result<Option<u32>, String> {
+    let world_points = overlay
+        .vertices
+        .iter()
+        .map(|vertex| DVec3::from(vertex.position))
+        .collect::<Vec<_>>();
+    for point in world_points {
+        crate::viewer::camera_controller::validate_world_point(
+            crate::viewer::camera_controller::CoordRole::Content,
+            point,
+            anchor,
+        )
+        .map_err(|err| err.to_string())?;
+    }
     let Some(ref mut terrain_viewer) = viewer.terrain_viewer else {
         return Ok(None);
     };
 
-    let verts: Vec<VectorVertex> = overlay
-        .vertices
-        .iter()
-        .map(|vertex| {
-            let feature_id = if vertex.len() > 7 {
-                vertex[7] as u32
-            } else {
-                0
-            };
-            VectorVertex::with_feature_id(
-                vertex[0], vertex[1], vertex[2], vertex[3], vertex[4], vertex[5], vertex[6],
-                feature_id,
-            )
-        })
-        .collect();
     let primitive =
         OverlayPrimitive::from_str(&overlay.primitive).unwrap_or(OverlayPrimitive::Triangles);
     let layer = VectorOverlayLayer {
         name: overlay.name.clone(),
-        vertices: verts,
+        source_vertices: overlay
+            .vertices
+            .iter()
+            .map(|vertex| VectorSourceVertex::from(*vertex))
+            .collect(),
+        vertices: Vec::new(),
         indices: overlay.indices.clone(),
         primitive,
         drape: overlay.drape,
@@ -476,88 +556,31 @@ fn add_managed_vector_overlay(
         z_order: overlay.z_order,
     };
     let id = terrain_viewer
-        .add_vector_overlay(layer)
+        .add_vector_overlay_with_id(None, layer, anchor)
         .map_err(|e| e.to_string())?;
-    register_vector_overlay_bvh(viewer, id, overlay, primitive);
+    let render_data = terrain_viewer.vector_overlay_render_data(id);
+    register_vector_overlay_bvh(viewer, id, render_data.as_ref());
     Ok(Some(id))
 }
 
 fn register_vector_overlay_bvh(
     viewer: &mut Viewer,
     layer_id: u32,
-    overlay: &ViewerVectorOverlayLayerConfig,
-    primitive: OverlayPrimitive,
+    render_data: Option<&(
+        String,
+        Vec<crate::viewer::terrain::vector_overlay::VectorVertex>,
+        Vec<u32>,
+        OverlayPrimitive,
+    )>,
 ) {
-    if primitive != OverlayPrimitive::Triangles || overlay.indices.is_empty() {
-        return;
-    }
-
-    let positions: Vec<[f32; 3]> = overlay
-        .vertices
-        .iter()
-        .map(|vertex| [vertex[0], vertex[1], vertex[2]])
-        .collect();
-    let triangles: Vec<[u32; 3]> = overlay
-        .indices
-        .chunks(3)
-        .filter_map(|chunk| (chunk.len() == 3).then_some([chunk[0], chunk[1], chunk[2]]))
-        .collect();
-    let mesh = MeshCPU::new(positions.clone(), triangles.clone());
-    let Ok(bvh) = build_bvh_cpu(&mesh, &BuildOptions::default()) else {
+    let Some((name, vertices, indices, primitive)) = render_data else {
         return;
     };
-
-    let mut layer_data = LayerBvhData::new(layer_id, overlay.name.clone());
-    layer_data.cpu_nodes = bvh
-        .nodes
-        .iter()
-        .map(|node| {
-            let kind = if node.is_leaf() { 1 } else { 0 };
-            BvhNode {
-                aabb: Aabb::new(node.aabb_min, node.aabb_max),
-                kind,
-                left_idx: node.left,
-                right_idx: node.right,
-                parent_idx: 0,
-            }
-        })
-        .collect();
-    layer_data.cpu_triangles = bvh
-        .tri_indices
-        .iter()
-        .map(|&tri_idx| {
-            let idx = tri_idx as usize;
-            if idx < triangles.len() {
-                let tri = triangles[idx];
-                Triangle::new(
-                    positions[tri[0] as usize],
-                    positions[tri[1] as usize],
-                    positions[tri[2] as usize],
-                )
-            } else {
-                Triangle::new([0.0; 3], [0.0; 3], [0.0; 3])
-            }
-        })
-        .collect();
-    layer_data.cpu_feature_ids = bvh
-        .tri_indices
-        .iter()
-        .map(|&tri_idx| {
-            let idx = tri_idx as usize;
-            if idx < triangles.len() {
-                let tri = triangles[idx];
-                let vertex_index = tri[0] as usize;
-                overlay
-                    .vertices
-                    .get(vertex_index)
-                    .map(|vertex| vertex[7] as u32)
-                    .unwrap_or(layer_id)
-            } else {
-                layer_id
-            }
-        })
-        .collect();
-    viewer.unified_picking.register_layer_bvh(layer_data);
+    if let Some(layer) = crate::viewer::terrain::vector_overlay::build_layer_bvh(
+        layer_id, name, vertices, indices, *primitive,
+    ) {
+        viewer.unified_picking.register_layer_bvh(layer);
+    }
 }
 
 impl Viewer {
@@ -698,7 +721,34 @@ impl Viewer {
     }
 }
 
-fn add_review_label(viewer: &mut Viewer, payload: &Map<String, Value>) -> Result<u64, String> {
+fn review_label_world_points(payload: &Map<String, Value>) -> Result<Vec<DVec3>, String> {
+    let kind = payload
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Review label payload missing 'kind'".to_string())?;
+    let value = Value::Object(payload.clone());
+    match kind {
+        "point" => serde_json::from_value::<PointLabelPayload>(value)
+            .map(|item| vec![DVec3::from(item.world_pos)])
+            .map_err(|err| err.to_string()),
+        "line" => serde_json::from_value::<LineLabelPayload>(value)
+            .map(|item| item.polyline.into_iter().map(DVec3::from).collect())
+            .map_err(|err| err.to_string()),
+        "curved" => serde_json::from_value::<CurvedLabelPayload>(value)
+            .map(|item| item.polyline.into_iter().map(DVec3::from).collect())
+            .map_err(|err| err.to_string()),
+        "callout" => serde_json::from_value::<CalloutLabelPayload>(value)
+            .map(|item| vec![DVec3::from(item.anchor)])
+            .map_err(|err| err.to_string()),
+        other => Err(format!("Unsupported review label kind: {other}")),
+    }
+}
+
+fn add_review_label(
+    viewer: &mut Viewer,
+    payload: &Map<String, Value>,
+    anchor: &crate::camera::Anchor,
+) -> Result<u64, String> {
     let kind = payload
         .get("kind")
         .and_then(Value::as_str)
@@ -710,6 +760,12 @@ fn add_review_label(viewer: &mut Viewer, payload: &Map<String, Value>) -> Result
                 serde_json::from_value(payload_value).map_err(|e| e.to_string())?;
             let mut style = LabelStyle::default();
             apply_point_style(&mut style, &point);
+            crate::viewer::camera_controller::validate_world_point(
+                crate::viewer::camera_controller::CoordRole::Content,
+                DVec3::from(point.world_pos),
+                anchor,
+            )
+            .map_err(|err| err.to_string())?;
             Ok(viewer.add_label(
                 &point.text,
                 (point.world_pos[0], point.world_pos[1], point.world_pos[2]),
@@ -725,11 +781,15 @@ fn add_review_label(viewer: &mut Viewer, payload: &Map<String, Value>) -> Result
                 Some("along") => LineLabelPlacement::Along,
                 _ => LineLabelPlacement::Center,
             };
-            let polyline: Vec<Vec3> = line
-                .polyline
-                .iter()
-                .map(|point| Vec3::new(point[0], point[1], point[2]))
-                .collect();
+            let polyline: Vec<DVec3> = line.polyline.iter().copied().map(DVec3::from).collect();
+            for point in polyline.iter().copied() {
+                crate::viewer::camera_controller::validate_world_point(
+                    crate::viewer::camera_controller::CoordRole::Content,
+                    point,
+                    anchor,
+                )
+                .map_err(|err| err.to_string())?;
+            }
             Ok(viewer
                 .label_manager
                 .add_line_label(
@@ -746,11 +806,15 @@ fn add_review_label(viewer: &mut Viewer, payload: &Map<String, Value>) -> Result
                 serde_json::from_value(payload_value).map_err(|e| e.to_string())?;
             let mut style = LabelStyle::default();
             apply_curved_style(&mut style, &curved);
-            let polyline: Vec<Vec3> = curved
-                .polyline
-                .iter()
-                .map(|point| Vec3::new(point[0], point[1], point[2]))
-                .collect();
+            let polyline: Vec<DVec3> = curved.polyline.iter().copied().map(DVec3::from).collect();
+            for point in polyline.iter().copied() {
+                crate::viewer::camera_controller::validate_world_point(
+                    crate::viewer::camera_controller::CoordRole::Content,
+                    point,
+                    anchor,
+                )
+                .map_err(|err| err.to_string())?;
+            }
             Ok(viewer
                 .label_manager
                 .add_line_label(curved.text, polyline, style, LineLabelPlacement::Along, 0.0)
@@ -770,6 +834,12 @@ fn add_review_label(viewer: &mut Viewer, payload: &Map<String, Value>) -> Result
                 style.offset = offset;
                 style.flags.leader = true;
             }
+            crate::viewer::camera_controller::validate_world_point(
+                crate::viewer::camera_controller::CoordRole::Content,
+                DVec3::from(callout.anchor),
+                anchor,
+            )
+            .map_err(|err| err.to_string())?;
             Ok(viewer.add_label(
                 &callout.text,
                 (callout.anchor[0], callout.anchor[1], callout.anchor[2]),
@@ -868,8 +938,14 @@ fn first_f32(map: &Map<String, Value>, keys: &[&str]) -> Option<f32> {
     keys.iter().find_map(|key| {
         map.get(*key)
             .and_then(Value::as_f64)
-            .map(|value| value as f32)
+            .map(narrow_nonposition_scalar)
     })
+}
+
+fn narrow_nonposition_scalar(value: f64) -> f32 {
+    crate::camera::Anchor::new()
+        .to_render_direction(DVec3::new(value, 0.0, 0.0))
+        .x
 }
 
 fn first_u32(map: &Map<String, Value>, keys: &[&str]) -> Option<u32> {
@@ -898,19 +974,19 @@ fn first_array3(map: &Map<String, Value>, keys: &[&str]) -> Option<[f32; 3]> {
 fn value_as_array3(value: &Value) -> Option<[f32; 3]> {
     let array = value.as_array()?;
     (array.len() == 3).then_some([
-        array.first()?.as_f64()? as f32,
-        array.get(1)?.as_f64()? as f32,
-        array.get(2)?.as_f64()? as f32,
+        narrow_nonposition_scalar(array.first()?.as_f64()?),
+        narrow_nonposition_scalar(array.get(1)?.as_f64()?),
+        narrow_nonposition_scalar(array.get(2)?.as_f64()?),
     ])
 }
 
 fn value_as_array4(value: &Value) -> Option<[f32; 4]> {
     let array = value.as_array()?;
     (array.len() == 4).then_some([
-        array.first()?.as_f64()? as f32,
-        array.get(1)?.as_f64()? as f32,
-        array.get(2)?.as_f64()? as f32,
-        array.get(3)?.as_f64()? as f32,
+        narrow_nonposition_scalar(array.first()?.as_f64()?),
+        narrow_nonposition_scalar(array.get(1)?.as_f64()?),
+        narrow_nonposition_scalar(array.get(2)?.as_f64()?),
+        narrow_nonposition_scalar(array.get(3)?.as_f64()?),
     ])
 }
 
@@ -1258,7 +1334,7 @@ fn parse_sky_config(value: &Value) -> Option<ViewerSkyConfig> {
 #[derive(Debug, Clone, Deserialize)]
 struct PointLabelPayload {
     text: String,
-    world_pos: [f32; 3],
+    world_pos: [f64; 3],
     #[serde(default)]
     size: Option<f32>,
     #[serde(default)]
@@ -1290,7 +1366,7 @@ struct PointLabelPayload {
 #[derive(Debug, Clone, Deserialize)]
 struct LineLabelPayload {
     text: String,
-    polyline: Vec<[f32; 3]>,
+    polyline: Vec<[f64; 3]>,
     #[serde(default)]
     size: Option<f32>,
     #[serde(default)]
@@ -1314,7 +1390,7 @@ struct LineLabelPayload {
 #[derive(Debug, Clone, Deserialize)]
 struct CurvedLabelPayload {
     text: String,
-    polyline: Vec<[f32; 3]>,
+    polyline: Vec<[f64; 3]>,
     #[serde(default)]
     size: Option<f32>,
     #[serde(default)]
@@ -1330,7 +1406,7 @@ struct CurvedLabelPayload {
 #[derive(Debug, Clone, Deserialize)]
 struct CalloutLabelPayload {
     text: String,
-    anchor: [f32; 3],
+    anchor: [f64; 3],
     #[serde(default)]
     offset: Option<[f32; 2]>,
     #[serde(default)]

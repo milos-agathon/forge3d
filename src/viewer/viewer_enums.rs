@@ -15,6 +15,6 @@ pub use config::{
     ViewerLensEffectsConfig, ViewerMaterialLayerConfig, ViewerMotionBlurConfig, ViewerSkyConfig,
     ViewerSunVisConfig, ViewerTerrainScatterBatchConfig, ViewerTerrainScatterBlendConfig,
     ViewerTerrainScatterContactConfig, ViewerTerrainScatterLevelConfig, ViewerTonemapConfig,
-    ViewerVectorOverlayConfig, ViewerVolumetricsConfig,
+    ViewerVectorOverlayConfig, ViewerVectorVertex, ViewerVolumetricsConfig,
 };
 pub use modes::{parse_gi_viz_mode_token, CaptureKind, FogMode, VizMode};

@@ -131,6 +131,12 @@ impl Anchor {
     pub fn model_offset(&self, object_origin: DVec3) -> Vec3 {
         self.to_render_vec3(object_origin)
     }
+
+    /// Restore a render-space coordinate already represented as f64 (for
+    /// example, a CPU pick widened from the f32 render BVH) to world space.
+    pub fn to_world_from_render_f64(&self, render: DVec3) -> DVec3 {
+        self.origin + render
+    }
 }
 
 #[cfg(test)]

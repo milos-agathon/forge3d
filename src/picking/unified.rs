@@ -18,7 +18,7 @@ pub struct RichPickResult {
     /// Layer name
     pub layer_name: String,
     /// World position of the hit
-    pub world_pos: [f32; 3],
+    pub world_pos: [f64; 3],
     /// Feature attributes as key-value pairs
     pub attributes: HashMap<String, String>,
     /// Terrain info if terrain was hit
@@ -328,7 +328,7 @@ impl UnifiedPickingSystem {
                     results.push(RichPickResult {
                         feature_id,
                         layer_name: layer.name.clone(),
-                        world_pos,
+                        world_pos: world_pos.map(f64::from),
                         attributes,
                         terrain_info: None,
                         hit_distance: distance,

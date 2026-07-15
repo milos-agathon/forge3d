@@ -1,7 +1,7 @@
 //! 3D Tiles renderer with caching
 //! Extended with P4: 3D Buildings Pipeline support
 
-use glam::{DMat4, DVec3, Vec3};
+use glam::{DMat4, DVec3};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -252,6 +252,8 @@ pub struct BuildingRenderData {
     pub vertex_count: usize,
     /// Total triangle count
     pub triangle_count: usize,
+    /// Absolute origin used to pack `positions` into render-space f32.
+    pub world_origin: DVec3,
 }
 
 /// Per-building instance data
@@ -282,18 +284,37 @@ impl BuildingRenderData {
             instances: Vec::new(),
             vertex_count: 0,
             triangle_count: 0,
+            world_origin: DVec3::ZERO,
         }
     }
 
     /// Create from a slice of BuildingGeom
     pub fn from_buildings(buildings: &[BuildingGeom]) -> Self {
         let mut data = Self::new();
-        data.add_buildings(buildings);
+        let mut anchor = crate::camera::Anchor::new();
+        if let Some(position) = buildings
+            .iter()
+            .find_map(|building| building.positions.get(0..3))
+        {
+            anchor.rebase_if_needed(DVec3::new(position[0], position[1], position[2]));
+        }
+        data.world_origin = anchor.origin();
+        data.add_buildings_anchored(buildings, &anchor);
         data
     }
 
     /// Add buildings to the render data
     pub fn add_buildings(&mut self, buildings: &[BuildingGeom]) {
+        let mut anchor = crate::camera::Anchor::new();
+        anchor.rebase_if_needed(self.world_origin);
+        self.add_buildings_anchored(buildings, &anchor);
+    }
+
+    pub fn add_buildings_anchored(
+        &mut self,
+        buildings: &[BuildingGeom],
+        anchor: &crate::camera::Anchor,
+    ) {
         for building in buildings {
             if building.is_empty() {
                 continue;
@@ -303,7 +324,12 @@ impl BuildingRenderData {
             let index_offset = self.indices.len() as u32;
 
             // Add positions
-            self.positions.extend_from_slice(&building.positions);
+            self.positions
+                .extend(building.positions.chunks_exact(3).flat_map(|position| {
+                    anchor
+                        .to_render_vec3(DVec3::new(position[0], position[1], position[2]))
+                        .to_array()
+                }));
 
             // Add normals (generate if missing)
             if let Some(ref normals) = building.normals {
@@ -388,10 +414,10 @@ impl Tiles3dRenderer {
     pub fn get_visible_buildings(
         &self,
         buildings: &[BuildingGeom],
-        camera_pos: Vec3,
+        camera_pos: DVec3,
         max_distance: f32,
     ) -> BuildingRenderData {
-        let max_dist_sq = max_distance * max_distance;
+        let max_dist_sq = f64::from(max_distance) * f64::from(max_distance);
 
         let visible: Vec<&BuildingGeom> = buildings
             .iter()

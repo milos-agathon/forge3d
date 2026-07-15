@@ -14,6 +14,7 @@ use wgpu::{
 use winit::keyboard::KeyCode;
 use winit::window::Window;
 
+use crate::camera::Anchor;
 use crate::cli::args::GiVizMode;
 use crate::core::gpu_timing::GpuTimingManager;
 use crate::core::ibl::IBLRenderer;
@@ -31,6 +32,7 @@ use super::camera_controller::CameraController;
 use super::scene_review::ViewerSceneReviewRegistry;
 use super::viewer_config::{FpsCounter, ViewerConfig};
 use super::viewer_enums::{CaptureKind, FogMode, VizMode};
+use super::viewer_types::FrameCamera;
 
 pub struct Viewer {
     pub(crate) window: Arc<Window>,
@@ -41,6 +43,12 @@ pub struct Viewer {
     pub(crate) adapter: Arc<Adapter>,
     pub(crate) config: SurfaceConfiguration,
     pub(crate) camera: CameraController,
+    /// Sole persistent anchor owned by the interactive viewer.
+    pub(crate) camera_anchor: Anchor,
+    /// Immutable pose/anchor copied at the latest frame boundary.
+    pub(crate) frame_camera: Option<FrameCamera>,
+    pub(crate) camera_rebase_count: u64,
+    pub(crate) history_invalidation_count: u64,
     pub(crate) view_config: ViewerConfig,
     pub(crate) frame_count: u64,
     pub(crate) fps_counter: FpsCounter,
@@ -76,11 +84,6 @@ pub struct Viewer {
     pub(crate) geom_vb: Option<TrackedBuffer>,
     pub(crate) geom_ib: Option<TrackedBuffer>,
     pub(crate) geom_index_count: u32,
-    // Store original mesh data for CPU-side transform (workaround for GPU buffer sync issue)
-    pub(crate) original_mesh_positions: Vec<[f32; 3]>,
-    pub(crate) original_mesh_normals: Vec<[f32; 3]>,
-    pub(crate) original_mesh_uvs: Vec<[f32; 2]>,
-    pub(crate) original_mesh_indices: Vec<u32>,
     pub(crate) z_texture: Option<TrackedTexture>,
     pub(crate) z_view: Option<TextureView>,
     // Albedo texture for geometry
@@ -249,10 +252,9 @@ pub struct Viewer {
     pub(crate) ssr_scene_loaded: bool,
     pub(crate) ssr_scene_preset: Option<SsrScenePreset>,
     // Object transform (for IPC SetTransform command)
-    pub(crate) object_translation: glam::Vec3,
+    pub(crate) object_translation: glam::DVec3,
     pub(crate) object_rotation: glam::Quat,
     pub(crate) object_scale: glam::Vec3,
-    pub(crate) object_transform: glam::Mat4,
     // Transform version counter for IPC ack (incremented on each set_transform)
     pub(crate) transform_version: u64,
     // P0.1/M1: OIT (Order-Independent Transparency)

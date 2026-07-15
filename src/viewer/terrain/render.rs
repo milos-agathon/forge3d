@@ -36,6 +36,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub(super) struct TerrainUniforms {
     pub view_proj: [[f32; 4]; 4],
+    pub render_origin_span: [f32; 4],
     pub sun_dir: [f32; 4],
     pub terrain_params: [f32; 4],
     pub lighting: [f32; 4],
@@ -44,11 +45,12 @@ pub(super) struct TerrainUniforms {
 }
 
 /// Shadow pass uniforms for depth-only terrain rendering (per cascade)
-/// Must match ShadowPassUniforms in terrain_shadow_depth.wgsl exactly (112 bytes)
+/// Must match ShadowPassUniforms in terrain_shadow_depth.wgsl exactly (128 bytes)
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ShadowPassUniforms {
     pub light_view_proj: [[f32; 4]; 4], // 64 bytes
+    pub render_origin_span: [f32; 4],   // 16 bytes
     pub terrain_params: [f32; 4],       // 16 bytes: spacing, height_exag, height_min, height_max
     pub grid_params: [f32; 4],          // 16 bytes: grid_resolution, _pad, _pad, _pad
     pub height_curve: [f32; 4],         // 16 bytes: mode, strength, power, _pad
@@ -59,6 +61,7 @@ pub struct ShadowPassUniforms {
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub(super) struct TerrainPbrUniforms {
     pub view_proj: [[f32; 4]; 4],
+    pub render_origin_span: [f32; 4],
     pub sun_dir: [f32; 4],
     pub terrain_params: [f32; 4],
     pub lighting: [f32; 4],

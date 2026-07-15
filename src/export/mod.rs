@@ -133,7 +133,8 @@ mod tests {
         let labels = vec![LabelData {
             id: LabelId(1),
             text: "Test Label".to_string(),
-            world_pos: Vec3::new(50.0, 0.0, 50.0),
+            world_pos: glam::DVec3::new(50.0, 0.0, 50.0),
+            render_pos: Vec3::new(50.0, 0.0, 50.0),
             style: LabelStyle {
                 size: 14.0,
                 color: [0.0, 0.0, 0.0, 1.0],

@@ -21,11 +21,10 @@ impl Viewer {
             return Ok(());
         }
 
-        let aspect = self.config.width as f32 / self.config.height as f32;
-        let fov = self.view_config.fov_deg.to_radians();
-        let proj = Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
-        let view_mat = self.camera.view_matrix();
-        let model_view = view_mat * self.object_transform;
+        let frame = self.current_frame_camera();
+        let proj = frame.projection(self.config.width, self.config.height);
+        let view_mat = frame.view();
+        let model_view = view_mat * self.anchored_object_model(frame);
         let cam_pack = [to_arr4(model_view), to_arr4(proj)];
 
         {
@@ -37,7 +36,7 @@ impl Viewer {
         {
             if let Some(ref mut gi_mgr) = self.gi {
                 let inv_proj = proj.inverse();
-                let eye = self.camera.eye();
+                let eye = frame.render_eye();
                 let inv_model_view = model_view.inverse();
                 let view_proj = proj * model_view;
                 let cam = crate::core::screen_space_effects::CameraParams {

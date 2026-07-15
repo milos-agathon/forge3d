@@ -1,5 +1,3 @@
-use glam::Mat4;
-
 use crate::core::screen_space_effects::{CameraParams, ScreenSpaceEffectsManager};
 use crate::viewer::Viewer;
 
@@ -17,10 +15,8 @@ impl Viewer {
             return;
         }
         let cam_buf = self.geom_camera_buffer.as_ref().unwrap();
-        let aspect = self.config.width as f32 / self.config.height as f32;
-        let fov = self.view_config.fov_deg.to_radians();
-        let proj_base =
-            Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
+        let frame = self.current_frame_camera();
+        let proj_base = frame.projection(self.config.width, self.config.height);
 
         let proj = if self.taa_jitter.enabled {
             crate::core::jitter::apply_jitter(
@@ -34,8 +30,8 @@ impl Viewer {
             proj_base
         };
 
-        let view_mat = self.camera.view_matrix();
-        let model_view = view_mat * self.object_transform;
+        let view_mat = frame.view();
+        let model_view = view_mat * self.anchored_object_model(frame);
         self.log_snapshot_geometry_transform();
 
         let cam_pack = [mat4_to_array(model_view), mat4_to_array(proj)];
@@ -43,7 +39,7 @@ impl Viewer {
             .write_buffer(cam_buf, 0, bytemuck::cast_slice(&cam_pack));
 
         let inv_proj = proj.inverse();
-        let eye = self.camera.eye();
+        let eye = frame.render_eye();
         let inv_model_view = model_view.inverse();
         let view_proj = proj * model_view;
         let cam = CameraParams {
@@ -119,7 +115,9 @@ impl Viewer {
 
     fn log_snapshot_geometry_transform(&self) {
         if self.snapshot_request.is_some() {
-            let is_identity = self.object_transform == glam::Mat4::IDENTITY;
+            let is_identity = self.object_translation == glam::DVec3::ZERO
+                && self.object_rotation == glam::Quat::IDENTITY
+                && self.object_scale == glam::Vec3::ONE;
             let t = self.object_translation;
             let s = self.object_scale;
             let msg = format!(

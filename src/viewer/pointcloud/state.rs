@@ -2,10 +2,12 @@ use crate::core::error::RenderResult;
 use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use crate::viewer::pointcloud::load::load_laz_points;
 use crate::viewer::pointcloud::shader::POINTCLOUD_SHADER;
-use crate::viewer::pointcloud::{ColorMode, PointCloudUniforms, PointInstance3D};
+use crate::viewer::pointcloud::{ColorMode, PointCloudUniforms, PointInstance3D, PointSource3D};
+use glam::DVec3;
 
 /// Point cloud state for the viewer.
 pub struct PointCloudState {
+    pub source_points: Vec<PointSource3D>,
     pub points: Vec<PointInstance3D>,
     pub instance_buffer: Option<TrackedBuffer>,
     pub uniform_buffer: TrackedBuffer,
@@ -15,9 +17,10 @@ pub struct PointCloudState {
     pub point_size: f32,
     pub visible: bool,
     pub color_mode: ColorMode,
-    pub bounds_min: [f32; 3],
-    pub bounds_max: [f32; 3],
-    pub center: [f32; 3],
+    pub bounds_min: DVec3,
+    pub bounds_max: DVec3,
+    pub center: DVec3,
+    pub extent_render: f32,
     pub has_rgb: bool,
     pub has_intensity: bool,
     pub cam_phi: f32,
@@ -141,6 +144,7 @@ impl PointCloudState {
         );
 
         Ok(Self {
+            source_points: Vec::new(),
             points: Vec::new(),
             instance_buffer: None,
             uniform_buffer,
@@ -150,9 +154,10 @@ impl PointCloudState {
             point_size: 2.0,
             visible: true,
             color_mode: ColorMode::Elevation,
-            bounds_min: [0.0; 3],
-            bounds_max: [0.0; 3],
-            center: [0.0; 3],
+            bounds_min: DVec3::ZERO,
+            bounds_max: DVec3::ZERO,
+            center: DVec3::ZERO,
+            extent_render: 100.0,
             has_rgb: false,
             has_intensity: false,
             cam_phi: 0.7,
@@ -187,88 +192,150 @@ impl PointCloudState {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        anchor: &crate::camera::Anchor,
+        rebase_to_center: bool,
         path: &str,
         max_points: u64,
         color_mode: ColorMode,
     ) -> Result<(), String> {
         let load_result = load_laz_points(path, max_points as usize)?;
-        let mut points = load_result.points;
-
-        self.has_rgb = load_result.has_rgb;
-        self.has_intensity = load_result.has_intensity;
+        let points = load_result.points;
 
         println!(
             "[pointcloud] Data flags - has_rgb: {}, has_intensity: {}",
-            self.has_rgb, self.has_intensity
+            load_result.has_rgb, load_result.has_intensity
         );
 
         if points.is_empty() {
             return Err("No points loaded".to_string());
         }
 
-        let mut min = [f32::MAX; 3];
-        let mut max = [f32::MIN; 3];
+        let mut min = DVec3::splat(f64::INFINITY);
+        let mut max = DVec3::splat(f64::NEG_INFINITY);
         for p in &points {
-            for i in 0..3 {
-                min[i] = min[i].min(p.position[i]);
-                max[i] = max[i].max(p.position[i]);
+            if !p.position.is_finite() {
+                return Err("point cloud contains a non-finite world position".to_string());
             }
+            min = min.min(p.position);
+            max = max.max(p.position);
         }
 
-        let center = [
-            (min[0] + max[0]) / 2.0,
-            (min[1] + max[1]) / 2.0,
-            (min[2] + max[2]) / 2.0,
-        ];
-
-        for p in &mut points {
-            p.position[0] -= center[0];
-            p.position[1] -= center[1];
-            p.position[2] -= center[2];
+        let center = (min + max) * 0.5;
+        let mut candidate_anchor = *anchor;
+        if rebase_to_center {
+            candidate_anchor.rebase_if_needed(center);
         }
-
-        self.bounds_min = [min[0] - center[0], min[1] - center[1], min[2] - center[2]];
-        self.bounds_max = [max[0] - center[0], max[1] - center[1], max[2] - center[2]];
-        self.center = [0.0, 0.0, 0.0];
+        for point in [min, max] {
+            crate::viewer::camera_controller::validate_world_point(
+                crate::viewer::camera_controller::CoordRole::Content,
+                point,
+                &candidate_anchor,
+            )
+            .map_err(|err| err.to_string())?;
+        }
+        let extent_render = crate::camera::Anchor::new()
+            .to_render_direction(max - min)
+            .max_element()
+            .max(100.0);
 
         eprintln!(
             "[pointcloud] Original center: ({:.1}, {:.1}, {:.1})",
-            center[0], center[1], center[2]
+            center.x, center.y, center.z
         );
         eprintln!(
             "[pointcloud] Extent: ({:.1}, {:.1}, {:.1})",
-            self.bounds_max[0] - self.bounds_min[0],
-            self.bounds_max[1] - self.bounds_min[1],
-            self.bounds_max[2] - self.bounds_min[2]
+            max.x - min.x,
+            max.y - min.y,
+            max.z - min.z
         );
 
-        self.points = points;
-        self.point_count = self.points.len();
-        self.color_mode = color_mode;
-        self.upload_points(device, queue)
-            .map_err(|e| e.to_string())?;
-
-        Ok(())
-    }
-
-    fn upload_points(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> RenderResult<()> {
-        if self.points.is_empty() {
-            return Ok(());
-        }
-
+        let render_points = points
+            .iter()
+            .map(|point| PointInstance3D {
+                position: candidate_anchor.to_render_vec3(point.position).to_array(),
+                elevation_norm: point.elevation_norm,
+                rgb: point.rgb,
+                intensity: point.intensity,
+                size: point.size,
+                _pad: [0.0; 3],
+            })
+            .collect::<Vec<_>>();
         let buffer = tracked_create_buffer(
             device,
             &wgpu::BufferDescriptor {
                 label: Some("PointCloud.InstanceBuffer"),
-                size: (self.points.len() * std::mem::size_of::<PointInstance3D>()) as u64,
+                size: (render_points.len() * std::mem::size_of::<PointInstance3D>()) as u64,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             },
-        )?;
+        )
+        .map_err(|err| err.to_string())?;
+        queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&render_points));
 
-        queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&self.points));
+        // Commit only after validation, packing, allocation, and upload all succeed.
+        self.has_rgb = load_result.has_rgb;
+        self.has_intensity = load_result.has_intensity;
+        self.bounds_min = min;
+        self.bounds_max = max;
+        self.center = center;
+        self.extent_render = extent_render;
+        self.point_count = points.len();
+        self.color_mode = color_mode;
+        self.source_points = points;
+        self.points = render_points;
         self.instance_buffer = Some(buffer);
+
         Ok(())
+    }
+
+    fn pack_for_anchor(&mut self, anchor: &crate::camera::Anchor) {
+        self.points = self
+            .source_points
+            .iter()
+            .map(|point| PointInstance3D {
+                position: anchor.to_render_vec3(point.position).to_array(),
+                elevation_norm: point.elevation_norm,
+                rgb: point.rgb,
+                intensity: point.intensity,
+                size: point.size,
+                _pad: [0.0; 3],
+            })
+            .collect();
+    }
+
+    /// Repack into the existing COPY_DST instance buffer. Routine rebases do
+    /// not allocate or replace GPU resources.
+    pub fn repack_for_anchor(
+        &mut self,
+        queue: &wgpu::Queue,
+        anchor: &crate::camera::Anchor,
+    ) -> Result<(), String> {
+        if self.source_points.is_empty() {
+            return Ok(());
+        }
+        self.pack_for_anchor(anchor);
+        let buffer = self
+            .instance_buffer
+            .as_ref()
+            .ok_or_else(|| "point-cloud instance buffer is missing".to_string())?;
+        queue.write_buffer(buffer, 0, bytemuck::cast_slice(&self.points));
+        Ok(())
+    }
+
+    pub fn camera_pose_world(&self) -> (DVec3, DVec3, f32, f32) {
+        let extent = self.extent_render.max(100.0);
+        let radius = extent * 2.0 * self.cam_radius;
+        let offset = DVec3::new(
+            f64::from(radius * self.cam_theta.cos() * self.cam_phi.cos()),
+            f64::from(radius * self.cam_theta.sin()),
+            f64::from(radius * self.cam_theta.cos() * self.cam_phi.sin()),
+        );
+        (
+            self.center + offset,
+            self.center,
+            (extent * 0.01).max(0.01),
+            extent * 10.0,
+        )
     }
 
     pub fn render<'pass>(
@@ -312,6 +379,7 @@ impl PointCloudState {
     }
 
     pub fn clear(&mut self) {
+        self.source_points.clear();
         self.points.clear();
         self.instance_buffer = None;
         self.point_count = 0;

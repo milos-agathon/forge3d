@@ -67,11 +67,14 @@ impl ViewerTerrainScene {
                     [state.sun_dir.x, state.sun_dir.y, state.sun_dir.z],
                     terrain_sun_intensity,
                     [
-                        state.terrain_width,
+                        state.render_origin_span[2]
+                            .abs()
+                            .max(state.render_origin_span[3].abs()),
                         terrain.domain.0,
                         state.shader_z_scale,
                         state.h_range,
                     ],
+                    state.render_origin_span,
                     &self.pbr_config.volumetrics,
                 ) {
                     eprintln!("[terrain] volumetrics apply failed: {e}");

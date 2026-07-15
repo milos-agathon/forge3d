@@ -23,6 +23,13 @@ pub fn parse_initial_commands(cmds: &[String]) -> Vec<ViewerCmd> {
 }
 
 fn parse_single_initial_command(l: &str) -> Option<Vec<ViewerCmd>> {
+    // CLI flags are translated into the same textual command vocabulary as
+    // stdin. Route through that complete parser first so startup and runtime
+    // commands cannot silently drift (fog/sky used to be startup no-ops).
+    if let Some(commands) = super::stdin_reader::parse_stdin_command(l) {
+        return Some(commands);
+    }
+
     // GI seed
     if l.starts_with(":gi-seed") || l.starts_with("gi-seed ") {
         let mut it = l.split_whitespace();
@@ -302,4 +309,18 @@ fn parse_single_initial_command(l: &str) -> Option<Vec<ViewerCmd>> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_uses_runtime_parser_for_fog_controls() {
+        let commands =
+            parse_initial_commands(&[":fog on".to_string(), ":fog-temporal 0.8".to_string()]);
+        assert!(
+            matches!(commands.as_slice(), [ViewerCmd::FogToggle(true), ViewerCmd::FogSetTemporal(alpha)] if (*alpha - 0.8).abs() < f32::EPSILON)
+        );
+    }
 }

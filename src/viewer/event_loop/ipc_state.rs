@@ -61,6 +61,50 @@ pub fn update_ipc_transform_stats(transform_version: u64, transform_is_identity:
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn update_ipc_frame_stats(
+    active_camera: &str,
+    camera_anchor_origin: [f64; 3],
+    camera_rebase_count: u64,
+    history_invalidation_count: u64,
+    frame_count: u64,
+    taa_enabled: bool,
+    ssgi_enabled: bool,
+    ssgi_temporal_enabled: bool,
+    ssr_enabled: bool,
+    fog_enabled: bool,
+    point_cloud_point_count: u64,
+    point_cloud_source_bytes: u64,
+    point_cloud_render_cache_bytes: u64,
+    point_cloud_gpu_instance_bytes: u64,
+) {
+    let metrics = crate::core::memory_tracker::global_tracker().get_metrics();
+    if let Ok(mut stats) = get_ipc_stats().lock() {
+        stats.active_camera.clear();
+        stats.active_camera.push_str(active_camera);
+        stats.camera_anchor_origin = camera_anchor_origin;
+        stats.camera_rebase_count = camera_rebase_count;
+        stats.history_invalidation_count = history_invalidation_count;
+        stats.frame_count = frame_count;
+        stats.taa_enabled = taa_enabled;
+        stats.ssgi_enabled = ssgi_enabled;
+        stats.ssgi_temporal_enabled = ssgi_temporal_enabled;
+        stats.ssr_enabled = ssr_enabled;
+        stats.fog_enabled = fog_enabled;
+        stats.point_cloud_point_count = point_cloud_point_count;
+        stats.point_cloud_source_bytes = point_cloud_source_bytes;
+        stats.point_cloud_render_cache_bytes = point_cloud_render_cache_bytes;
+        stats.point_cloud_gpu_instance_bytes = point_cloud_gpu_instance_bytes;
+        stats.tracked_buffer_count = metrics.buffer_count;
+        stats.tracked_texture_count = metrics.texture_count;
+        stats.tracked_total_bytes = metrics.total_bytes;
+        stats.host_visible_bytes = metrics.host_visible_bytes;
+        stats.peak_host_visible_bytes = metrics.peak_host_visible_bytes;
+        stats.host_visible_limit_bytes = metrics.limit_bytes;
+        stats.within_host_visible_budget = metrics.within_budget;
+    }
+}
+
 /// Global terrain heterogeneous-volumetrics report for IPC queries.
 static TERRAIN_VOLUMETRICS_REPORT: OnceLock<Mutex<TerrainVolumetricsReport>> = OnceLock::new();
 
@@ -84,12 +128,6 @@ pub fn get_scene_review_state() -> &'static Mutex<SceneReviewSnapshot> {
 pub fn update_scene_review_state(snapshot: SceneReviewSnapshot) {
     if let Ok(mut current) = get_scene_review_state().lock() {
         *current = snapshot;
-    }
-}
-
-pub fn update_active_scene_variant(active_scene_variant: Option<String>) {
-    if let Ok(mut current) = get_scene_review_state().lock() {
-        current.active_scene_variant = active_scene_variant;
     }
 }
 

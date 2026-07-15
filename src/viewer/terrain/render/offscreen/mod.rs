@@ -11,7 +11,7 @@ pub(super) struct SnapshotRenderState {
     pub(super) view_proj: glam::Mat4,
     pub(super) sun_dir: glam::Vec3,
     pub(super) eye: glam::Vec3,
-    pub(super) terrain_width: f32,
+    pub(super) render_origin_span: [f32; 4],
     pub(super) h_range: f32,
     pub(super) shader_z_scale: f32,
     pub(super) vo_view_proj: [[f32; 4]; 4],
@@ -27,6 +27,7 @@ impl ViewerTerrainScene {
         width: u32,
         height: u32,
         selected_feature_id: u32,
+        frame: crate::viewer::viewer_types::FrameCamera,
     ) -> Option<crate::core::resource_tracker::TrackedTexture> {
         eprintln!("[DEBUG render_to_texture ENTRY] {}x{}", width, height);
         if self.terrain.is_none() {
@@ -54,7 +55,7 @@ impl ViewerTerrainScene {
                 return None;
             }
         };
-        let state = self.build_snapshot_render_state(encoder, target_format, width, height);
+        let state = self.build_snapshot_render_state(encoder, target_format, width, height, frame);
         let has_vector_overlays = self.prepare_snapshot_overlays();
 
         self.render_snapshot_scene_pass(

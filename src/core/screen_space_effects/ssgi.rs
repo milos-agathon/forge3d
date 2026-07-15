@@ -37,6 +37,7 @@ pub struct SsgiRenderer {
     // ssgi_history   : Rgba16Float previous-frame GI radiance used for temporal resolve.
     ssgi_history: TrackedTexture,
     ssgi_history_view: TextureView,
+    history_valid: bool,
     // ssgi_filtered  : Rgba16Float temporally filtered GI radiance (same layout as
     //                   ssgi_texture).
     ssgi_filtered: TrackedTexture,

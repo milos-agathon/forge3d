@@ -1,4 +1,16 @@
 use bytemuck::{Pod, Zeroable};
+use glam::DVec3;
+
+/// Persistent absolute point-cloud source data. Only `position` is f64 world
+/// state; colors, intensity and marker size remain f32 non-position data.
+#[derive(Debug, Clone, Copy)]
+pub struct PointSource3D {
+    pub position: DVec3,
+    pub elevation_norm: f32,
+    pub rgb: [f32; 3],
+    pub intensity: f32,
+    pub size: f32,
+}
 
 /// 3D point instance for GPU rendering.
 #[repr(C)]

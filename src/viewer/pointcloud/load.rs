@@ -1,7 +1,7 @@
-use crate::viewer::pointcloud::PointInstance3D;
+use crate::viewer::pointcloud::PointSource3D;
 
 pub(super) struct LoadResult {
-    pub points: Vec<PointInstance3D>,
+    pub points: Vec<PointSource3D>,
     pub has_rgb: bool,
     pub has_intensity: bool,
 }
@@ -50,10 +50,6 @@ pub(super) fn load_laz_points(path: &str, max_points: usize) -> Result<LoadResul
         }
 
         let point = point_result.map_err(|e| format!("Error reading point: {}", e))?;
-        let px = point.x as f32;
-        let py = point.z as f32;
-        let pz = point.y as f32;
-
         let elevation_norm = if z_range > 0.0 {
             ((point.z - min_z) / z_range).clamp(0.0, 1.0) as f32
         } else {
@@ -74,13 +70,12 @@ pub(super) fn load_laz_points(path: &str, max_points: usize) -> Result<LoadResul
         intensity_min = intensity_min.min(point.intensity);
         intensity_max = intensity_max.max(point.intensity);
 
-        points.push(PointInstance3D {
-            position: [px, py, pz],
+        points.push(PointSource3D {
+            position: glam::DVec3::new(point.x, point.z, point.y),
             elevation_norm,
             rgb,
             intensity: point.intensity as f32,
             size: 1.0,
-            _pad: [0.0; 3],
         });
 
         if points.len() % 100000 == 0 {

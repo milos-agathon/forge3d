@@ -284,10 +284,21 @@ impl ScreenSpaceEffectsManager {
             .map(|r| r.get_output_for_display())
     }
 
-    pub fn ssgi_reset_history(&mut self, device: &Device, queue: &Queue) -> RenderResult<()> {
+    /// Invalidate SSGI temporal state. This is deliberately infallible and
+    /// allocation-free so rebasing cannot fail after the frame anchor changes.
+    pub fn ssgi_reset_history(&mut self) {
         if let Some(ref mut ssgi) = self.ssgi_renderer {
-            ssgi.reset_history(device, queue)?;
+            ssgi.reset_history();
         }
-        Ok(())
+    }
+
+    /// Invalidate all temporal screen-space histories without allocating.
+    pub fn invalidate_temporal_histories(&mut self) {
+        if let Some(ref mut ssao) = self.ssao_renderer {
+            ssao.invalidate_history();
+        }
+        if let Some(ref mut ssgi) = self.ssgi_renderer {
+            ssgi.invalidate_history();
+        }
     }
 }

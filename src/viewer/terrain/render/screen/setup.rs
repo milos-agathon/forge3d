@@ -8,47 +8,35 @@ impl ViewerTerrainScene {
         width: u32,
         height: u32,
         flags: &ScreenRenderFlags,
+        frame: crate::viewer::viewer_types::FrameCamera,
     ) -> ScreenRenderState {
-        let (
-            r,
-            terrain_z_scale,
-            terrain_width,
-            h_range,
-            domain,
-            fov_deg,
-            sun_azimuth_deg,
-            sun_elevation_deg,
-            eye,
-            target,
-            view_mat,
-        ) = {
+        let (terrain_z_scale, h_range, domain, sun_azimuth_deg, sun_elevation_deg, target) = {
             let terrain = self.terrain.as_ref().unwrap();
             (
-                terrain.cam_radius,
                 terrain.z_scale,
-                terrain.terrain_width(),
                 terrain.height_range(),
                 terrain.domain,
-                terrain.cam_fov_deg,
                 terrain.sun_azimuth_deg,
                 terrain.sun_elevation_deg,
-                terrain.camera_eye(),
                 terrain.camera_target(),
-                terrain.camera_view_matrix(),
             )
         };
-        let legacy_z_scale = terrain_z_scale * h_range * 1000.0 / terrain_width.max(1.0);
-        let shader_z_scale = if flags.use_pbr {
-            terrain_z_scale
-        } else {
-            legacy_z_scale
+        let shader_z_scale = terrain_z_scale;
+        let (origin_world, span_world) = {
+            let terrain = self.terrain.as_ref().unwrap();
+            (terrain.world_origin_xz, terrain.world_span_xz)
         };
-        let proj_base = glam::Mat4::perspective_rh(
-            fov_deg.to_radians(),
-            width as f32 / height as f32,
-            1.0,
-            r * 10.0,
-        );
+        let origin =
+            frame
+                .anchor
+                .to_render_vec3(glam::DVec3::new(origin_world.x, 0.0, origin_world.y));
+        let span =
+            frame
+                .anchor
+                .to_render_direction(glam::DVec3::new(span_world.x, 0.0, span_world.y));
+        let render_origin_span = [origin.x, origin.z, span.x, span.z];
+        let terrain_width = span.x;
+        let proj_base = frame.projection(width, height);
         let proj = if self.taa_jitter.enabled {
             crate::core::jitter::apply_jitter(
                 proj_base,
@@ -60,7 +48,9 @@ impl ViewerTerrainScene {
         } else {
             proj_base
         };
+        let view_mat = frame.view();
         let view_proj = proj * view_mat;
+        let eye = frame.render_eye();
 
         let sun_az = sun_azimuth_deg.to_radians();
         let sun_el = sun_elevation_deg.to_radians();
@@ -76,7 +66,7 @@ impl ViewerTerrainScene {
             self.update_shadow_bind_groups();
         }
         if flags.use_pbr && self.shadow_pipeline.is_some() {
-            self.render_shadow_passes(encoder, view_mat, proj, -sun_dir);
+            self.render_shadow_passes(encoder, view_mat, proj, -sun_dir, render_origin_span);
         } else if flags.use_pbr {
             eprintln!(
                 "[render] Skipping shadow passes: pipeline={}",
@@ -90,11 +80,7 @@ impl ViewerTerrainScene {
                 "[render] terrain_params: min_h={:.1}, h_range={:.1}, width={:.1}, z_scale={:.2}",
                 domain.0, h_range, terrain_width, shader_z_scale
             );
-            let max_y = if flags.use_pbr {
-                h_range * terrain_z_scale
-            } else {
-                terrain_width * legacy_z_scale * 0.001
-            };
+            let max_y = h_range * terrain_z_scale;
             println!("[render] Expected Y range: 0 to {:.1}", max_y);
             println!(
                 "[render] Camera target: ({:.1}, {:.1}, {:.1})",
@@ -105,6 +91,7 @@ impl ViewerTerrainScene {
         let terrain = self.terrain.as_ref().unwrap();
         let uniforms = TerrainUniforms {
             view_proj: view_proj.to_cols_array_2d(),
+            render_origin_span,
             sun_dir: [sun_dir.x, sun_dir.y, sun_dir.z, 0.0],
             terrain_params: [
                 terrain.domain.0,
@@ -176,6 +163,7 @@ impl ViewerTerrainScene {
             }
             let pbr_uniforms = TerrainPbrUniforms {
                 view_proj: view_proj.to_cols_array_2d(),
+                render_origin_span,
                 sun_dir: [sun_dir.x, sun_dir.y, sun_dir.z, 0.0],
                 terrain_params: [domain.0, domain.1 - domain.0, terrain_width, z_scale],
                 lighting: [sun_intensity, ambient, shadow_intensity, water_level],
@@ -225,7 +213,7 @@ impl ViewerTerrainScene {
             }
         }
 
-        self.dispatch_heightfield_compute(encoder, terrain_width, sun_dir);
+        self.dispatch_heightfield_compute(encoder, [span.x, span.z], sun_dir);
 
         ScreenRenderState {
             view_mat,
@@ -234,7 +222,7 @@ impl ViewerTerrainScene {
             view_proj_array: view_proj.to_cols_array_2d(),
             sun_dir,
             eye,
-            terrain_width,
+            render_origin_span,
             h_range,
             shader_z_scale,
             cam_radius,

@@ -52,7 +52,10 @@ pub(super) fn create_textures(
         "ssgi_filtered",
         width,
         height,
-        TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
+        TextureUsages::STORAGE_BINDING
+            | TextureUsages::TEXTURE_BINDING
+            | TextureUsages::COPY_SRC
+            | TextureUsages::COPY_DST,
     )?;
     let (ssgi_upscaled, ssgi_upscaled_view) = rgba16_texture(
         device,

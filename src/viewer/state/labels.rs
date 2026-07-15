@@ -2,14 +2,13 @@
 
 use crate::labels::{LabelId, LabelStyle};
 use crate::viewer::Viewer;
-use glam::Vec3;
 
 impl Viewer {
     /// Add a label at a world position.
     pub fn add_label(
         &mut self,
         text: &str,
-        world_pos: (f32, f32, f32),
+        world_pos: (f64, f64, f64),
         style: Option<LabelStyle>,
     ) -> u64 {
         self.add_label_with_id(None, text, world_pos, style)
@@ -20,10 +19,10 @@ impl Viewer {
         &mut self,
         id: Option<u64>,
         text: &str,
-        world_pos: (f32, f32, f32),
+        world_pos: (f64, f64, f64),
         style: Option<LabelStyle>,
     ) -> u64 {
-        let pos = Vec3::new(world_pos.0, world_pos.1, world_pos.2);
+        let pos = glam::DVec3::new(world_pos.0, world_pos.1, world_pos.2);
         let style = style.unwrap_or_default();
         let id =
             self.label_manager
@@ -73,16 +72,8 @@ impl Viewer {
     /// Update label positions based on current camera.
     /// Called automatically during render, but can be called manually.
     pub fn update_labels(&mut self) {
-        let aspect = self.config.width as f32 / self.config.height as f32;
-        let fov_rad = self.view_config.fov_deg.to_radians();
-        let view = self.camera.view_matrix();
-        let proj = glam::Mat4::perspective_rh(
-            fov_rad,
-            aspect,
-            self.view_config.znear,
-            self.view_config.zfar,
-        );
-        let view_proj = proj * view;
+        let frame = self.current_frame_camera();
+        let view_proj = frame.view_projection(self.config.width, self.config.height);
         self.label_manager.update(view_proj);
     }
 

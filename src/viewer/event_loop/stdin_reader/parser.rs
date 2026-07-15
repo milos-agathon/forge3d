@@ -4,7 +4,7 @@ mod render;
 
 use crate::viewer::viewer_enums::ViewerCmd;
 
-pub(super) fn parse_stdin_command(line: &str) -> Option<Vec<ViewerCmd>> {
+pub(crate) fn parse_stdin_command(line: &str) -> Option<Vec<ViewerCmd>> {
     if let Some(cmds) = gi::parse_gi_command(line) {
         return Some(cmds);
     }

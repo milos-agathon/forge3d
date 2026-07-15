@@ -441,6 +441,16 @@ impl TerrainScatterBatch {
         Ok(())
     }
 
+    /// Reserve each per-LOD instance buffer at configuration time so routine
+    /// frames only rewrite existing COPY_DST buffers.
+    pub fn preallocate_instance_buffers(&mut self, device: &wgpu::Device) -> Result<()> {
+        let capacity = self.transforms_rowmajor.len();
+        for buffer in &mut self.instance_buffers {
+            ensure_instance_capacity(device, buffer, capacity)?;
+        }
+        Ok(())
+    }
+
     pub fn last_stats(&self) -> &TerrainScatterBatchStats {
         &self.last_stats
     }

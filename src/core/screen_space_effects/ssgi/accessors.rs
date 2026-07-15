@@ -64,9 +64,13 @@ impl SsgiRenderer {
         queue.write_buffer(&self.composite_uniform, 0, bytemuck::cast_slice(&params));
     }
 
-    pub fn reset_history(&mut self, device: &Device, queue: &Queue) -> RenderResult<()> {
+    pub fn reset_history(&mut self) {
+        self.invalidate_history();
         self.scene_history_ready = false;
         self.scene_history_index = 0;
-        self.set_half_res(device, queue, self.half_res)
+    }
+
+    pub(crate) fn invalidate_history(&mut self) {
+        self.history_valid = false;
     }
 }

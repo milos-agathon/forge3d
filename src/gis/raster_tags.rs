@@ -268,12 +268,9 @@ pub(crate) fn read_crs<R: std::io::Read + std::io::Seek>(
 
     let epsg = projected_epsg.or(geographic_epsg);
     if let Some(code) = epsg {
-        // G-002a1 has no CRS database; validate only the supported EPSG subset.
-        if !matches!(code, 4326 | 3857 | 32631) {
-            return Err(GisError::InvalidCrs(format!(
-                "unsupported EPSG code {code}; this TIFF-only backend supports EPSG:4326, EPSG:3857, and EPSG:32631"
-            )));
-        }
+        // Metadata inspection does not imply reprojection support. Preserve any
+        // finite GeoKey authority code verbatim; operations that transform
+        // coordinates validate their supported CRS pairs at their own boundary.
         let mut authority = HashMap::new();
         authority.insert("name".to_string(), "EPSG".to_string());
         authority.insert("code".to_string(), code.to_string());

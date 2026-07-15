@@ -121,7 +121,7 @@ impl SsgiRenderer {
         }
         let t2 = Instant::now();
 
-        if self.settings.temporal_enabled != 0 {
+        if self.settings.temporal_enabled != 0 && self.history_valid {
             let temporal_bg = device.create_bind_group(&BindGroupDescriptor {
                 label: Some("p5.ssgi.temporal.bg"),
                 layout: &self.temporal_bind_group_layout,
@@ -201,6 +201,7 @@ impl SsgiRenderer {
                 depth_or_array_layers: 1,
             },
         );
+        self.history_valid = true;
 
         // Task 3: Always run upsample pass when SSGI is enabled (even if not half-res, it will be 1:1)
         // This ensures upsample_ms > 0.0 as required by P5.2 acceptance criteria

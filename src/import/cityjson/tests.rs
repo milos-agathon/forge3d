@@ -80,7 +80,7 @@ fn test_cityjson_surface_with_hole_preserves_void() {
     assert!(building.vertex_count() >= 8);
     assert!(building.triangle_count() >= 4);
     for tri in building.indices.chunks(3) {
-        let centroid = tri.iter().fold([0.0f32; 2], |mut acc, index| {
+        let centroid = tri.iter().fold([0.0f64; 2], |mut acc, index| {
             let base = *index as usize * 3;
             acc[0] += building.positions[base] / 3.0;
             acc[1] += building.positions[base + 1] / 3.0;

@@ -1,6 +1,6 @@
 //! Label types and data structures.
 
-use glam::Vec3;
+use glam::{DVec3, Vec3};
 
 /// Unique identifier for a label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -165,7 +165,9 @@ pub struct LabelData {
     /// Text content.
     pub text: String,
     /// World position (x, y, z).
-    pub world_pos: Vec3,
+    pub world_pos: DVec3,
+    /// Cached render-frame position, refreshed only through `Anchor`.
+    pub render_pos: Vec3,
     /// Style configuration.
     pub style: LabelStyle,
     /// Computed screen position (x, y) or None if off-screen.
@@ -188,7 +190,9 @@ pub struct LineLabelData {
     /// Text content.
     pub text: String,
     /// Polyline vertices in world space [(x, y, z), ...].
-    pub polyline: Vec<Vec3>,
+    pub polyline: Vec<DVec3>,
+    /// Cached render-frame polyline paired one-for-one with `polyline`.
+    pub render_polyline: Vec<Vec3>,
     /// Style configuration.
     pub style: LabelStyle,
     /// Placement mode (center or along).

@@ -336,7 +336,7 @@ pub struct IpcRasterOverlaySpec {
 pub struct IpcSceneVectorOverlay {
     pub name: String,
     #[serde(default)]
-    pub vertices: Vec<[f32; 8]>,
+    pub vertices: Vec<crate::viewer::viewer_enums::ViewerVectorVertex>,
     #[serde(default)]
     pub indices: Vec<u32>,
     #[serde(default = "super::defaults::default_primitive")]
@@ -421,6 +421,27 @@ pub struct ViewerStats {
     pub scene_has_mesh: bool,
     pub transform_version: u64,
     pub transform_is_identity: bool,
+    pub active_camera: String,
+    pub camera_anchor_origin: [f64; 3],
+    pub camera_rebase_count: u64,
+    pub history_invalidation_count: u64,
+    pub frame_count: u64,
+    pub taa_enabled: bool,
+    pub ssgi_enabled: bool,
+    pub ssgi_temporal_enabled: bool,
+    pub ssr_enabled: bool,
+    pub fog_enabled: bool,
+    pub point_cloud_point_count: u64,
+    pub point_cloud_source_bytes: u64,
+    pub point_cloud_render_cache_bytes: u64,
+    pub point_cloud_gpu_instance_bytes: u64,
+    pub tracked_buffer_count: u32,
+    pub tracked_texture_count: u32,
+    pub tracked_total_bytes: u64,
+    pub host_visible_bytes: u64,
+    pub peak_host_visible_bytes: u64,
+    pub host_visible_limit_bytes: u64,
+    pub within_host_visible_budget: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

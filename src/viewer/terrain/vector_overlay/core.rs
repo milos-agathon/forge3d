@@ -129,4 +129,34 @@ impl VectorOverlayStack {
     pub fn visible_layers(&self) -> impl Iterator<Item = &VectorOverlayGpu> {
         self.layers.iter().filter(|l| l.config.visible)
     }
+
+    /// Repack every layer into an existing COPY_DST vertex buffer.
+    pub fn repack_for_anchor(
+        &mut self,
+        terrain: Option<&crate::viewer::terrain::scene::ViewerTerrainData>,
+        anchor: &crate::camera::Anchor,
+    ) {
+        for layer in &mut self.layers {
+            repack_source_vertices(&mut layer.config, terrain, anchor);
+            self.queue.write_buffer(
+                &layer.vertex_buffer,
+                0,
+                bytemuck::cast_slice(&layer.config.vertices),
+            );
+        }
+    }
+
+    pub fn render_layer_data(
+        &self,
+    ) -> impl Iterator<Item = (u32, &str, &[VectorVertex], &[u32], OverlayPrimitive)> {
+        self.layers.iter().map(|layer| {
+            (
+                layer.id,
+                layer.config.name.as_str(),
+                layer.config.vertices.as_slice(),
+                layer.config.indices.as_slice(),
+                layer.config.primitive,
+            )
+        })
+    }
 }

@@ -16,7 +16,11 @@ const DENSITY_VOLUME_TEXEL_BYTES: u64 = 2;
 pub struct TerrainVolumeContext<'a> {
     pub heightmap: &'a [f32],
     pub height_dims: (u32, u32),
-    pub terrain_width: f32,
+    /// Width/depth of the existing f32 terrain-local contract. Density
+    /// configuration is authored in this space, just like scatter instances.
+    pub contract_extent: [f32; 2],
+    /// Anchored render origin X/Z followed by physical render span X/Z.
+    pub render_origin_span: [f32; 4],
     pub domain: (f32, f32),
     pub z_scale: f32,
     pub terrain_revision: u64,
@@ -190,17 +194,19 @@ pub fn build_density_volume_atlas_data(
             }
         }
 
+        let render_center = contract_to_render_point(context, config.center);
+        let render_size = contract_to_render_size(context, config.size);
         let min_corner = [
-            config.center[0] - config.size[0] * 0.5,
-            config.center[1] - config.size[1] * 0.5,
-            config.center[2] - config.size[2] * 0.5,
+            render_center[0] - render_size[0] * 0.5,
+            render_center[1] - render_size[1] * 0.5,
+            render_center[2] - render_size[2] * 0.5,
         ];
         metadata.push(DensityVolumeGpuMetadata {
             min_corner,
             inv_size: [
-                1.0 / config.size[0].max(1e-3),
-                1.0 / config.size[1].max(1e-3),
-                1.0 / config.size[2].max(1e-3),
+                1.0 / render_size[0].max(1e-3),
+                1.0 / render_size[1].max(1e-3),
+                1.0 / render_size[2].max(1e-3),
             ],
             atlas_offset: [0.0, 0.0, z_cursor as f32 / atlas_depth as f32],
             atlas_scale: [
@@ -271,7 +277,12 @@ fn fingerprint_configs(context: TerrainVolumeContext<'_>, configs: &[DensityVolu
     let mut hasher = DefaultHasher::new();
     context.terrain_revision.hash(&mut hasher);
     context.height_dims.hash(&mut hasher);
-    context.terrain_width.to_bits().hash(&mut hasher);
+    for value in context.contract_extent {
+        value.to_bits().hash(&mut hasher);
+    }
+    for value in context.render_origin_span {
+        value.to_bits().hash(&mut hasher);
+    }
     context.domain.0.to_bits().hash(&mut hasher);
     context.domain.1.to_bits().hash(&mut hasher);
     context.z_scale.to_bits().hash(&mut hasher);
@@ -381,13 +392,35 @@ fn localized_haze_density(local: [f32; 3], config: &DensityVolumeConfig, noise_m
     soft_box_falloff(local, config.edge_softness) * body.max(layer * 0.7) * noise_mix
 }
 
-fn sample_terrain_height(context: TerrainVolumeContext<'_>, world_x: f32, world_z: f32) -> f32 {
+fn contract_to_render_point(context: TerrainVolumeContext<'_>, point: [f32; 3]) -> [f32; 3] {
+    [
+        context.render_origin_span[0]
+            + point[0] / context.contract_extent[0].max(1.0) * context.render_origin_span[2],
+        point[1],
+        context.render_origin_span[1]
+            + point[2] / context.contract_extent[1].max(1.0) * context.render_origin_span[3],
+    ]
+}
+
+fn contract_to_render_size(context: TerrainVolumeContext<'_>, size: [f32; 3]) -> [f32; 3] {
+    [
+        size[0] / context.contract_extent[0].max(1.0) * context.render_origin_span[2].abs(),
+        size[1],
+        size[2] / context.contract_extent[1].max(1.0) * context.render_origin_span[3].abs(),
+    ]
+}
+
+fn sample_terrain_height(
+    context: TerrainVolumeContext<'_>,
+    contract_x: f32,
+    contract_z: f32,
+) -> f32 {
     if context.height_dims.0 < 2 || context.height_dims.1 < 2 || context.heightmap.is_empty() {
         return 0.0;
     }
 
-    let u = (world_x / context.terrain_width).clamp(0.0, 1.0);
-    let v = (world_z / context.terrain_width).clamp(0.0, 1.0);
+    let u = (contract_x / context.contract_extent[0].max(1.0)).clamp(0.0, 1.0);
+    let v = (contract_z / context.contract_extent[1].max(1.0)).clamp(0.0, 1.0);
     let x = u * (context.height_dims.0 - 1) as f32;
     let y = v * (context.height_dims.1 - 1) as f32;
     let x0 = x.floor() as u32;
@@ -526,7 +559,8 @@ mod tests {
         TerrainVolumeContext {
             heightmap: &HEIGHTS,
             height_dims: (8, 8),
-            terrain_width: 8.0,
+            contract_extent: [8.0, 8.0],
+            render_origin_span: [0.0, 0.0, 8.0, 8.0],
             domain: (0.0, 1.0),
             z_scale: 1.0,
             terrain_revision: 7,
@@ -583,5 +617,20 @@ mod tests {
         let high = atlas.voxels
             [(((dims[2] - 2) * dims[1] + (dims[1] - 2)) * dims[0] + (dims[0] - 2)) as usize];
         assert!(low > high);
+    }
+
+    #[test]
+    fn density_metadata_uses_anchored_non_square_terrain_contract() {
+        let mut context = flat_context();
+        context.contract_extent = [8.0, 8.0];
+        context.render_origin_span = [-100.0, 40.0, 800.0, 200.0];
+        let mut volume = config("localized_haze");
+        volume.center = [4.0, 10.0, 2.0];
+        volume.size = [2.0, 6.0, 4.0];
+        let atlas = build_density_volume_atlas_data(context, &[volume]).unwrap();
+        let metadata = &atlas.metadata[0];
+        // Render center = (300, 10, 90), render size = (200, 6, 100).
+        assert_eq!(metadata.min_corner, [200.0, 7.0, 40.0]);
+        assert_eq!(metadata.inv_size, [0.005, 1.0 / 6.0, 0.01]);
     }
 }

@@ -33,8 +33,8 @@ pub type CityJsonResult<T> = Result<T, CityJsonError>;
 pub struct BuildingGeom {
     /// Unique identifier
     pub id: String,
-    /// Vertex positions as flat [x, y, z, x, y, z, ...] in transformed coordinates
-    pub positions: Vec<f32>,
+    /// Absolute transformed vertex positions retained in f64 until render packing.
+    pub positions: Vec<f64>,
     /// Triangle indices into positions (each group of 3 = one triangle)
     pub indices: Vec<u32>,
     /// Normal vectors per vertex (optional)

@@ -11,7 +11,7 @@ pub struct PyPickResult {
     #[pyo3(get)]
     pub screen_y: u32,
     #[pyo3(get)]
-    pub world_pos: Option<(f32, f32, f32)>,
+    pub world_pos: Option<(f64, f64, f64)>,
     #[pyo3(get)]
     pub layer_name: Option<String>,
 }
@@ -62,7 +62,7 @@ pub struct PyTerrainQueryResult {
     #[pyo3(get)]
     pub aspect: f32,
     #[pyo3(get)]
-    pub world_pos: (f32, f32, f32),
+    pub world_pos: (f64, f64, f64),
     #[pyo3(get)]
     pub normal: (f32, f32, f32),
 }
@@ -96,7 +96,11 @@ impl From<crate::picking::TerrainQueryResult> for PyTerrainQueryResult {
             elevation: r.elevation,
             slope: r.slope,
             aspect: r.aspect,
-            world_pos: (r.world_pos[0], r.world_pos[1], r.world_pos[2]),
+            world_pos: (
+                f64::from(r.world_pos[0]),
+                f64::from(r.world_pos[1]),
+                f64::from(r.world_pos[2]),
+            ),
             normal: (r.normal[0], r.normal[1], r.normal[2]),
         }
     }
@@ -112,7 +116,7 @@ pub struct PyRichPickResult {
     #[pyo3(get)]
     pub layer_name: String,
     #[pyo3(get)]
-    pub world_pos: (f32, f32, f32),
+    pub world_pos: (f64, f64, f64),
     #[pyo3(get)]
     pub attributes: std::collections::HashMap<String, String>,
     #[pyo3(get)]

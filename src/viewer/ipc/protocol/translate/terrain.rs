@@ -18,7 +18,11 @@ use super::super::request::IpcRequest;
 
 pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, String> {
     match req {
-        IpcRequest::LoadTerrain { path } => Ok(Some(ViewerCmd::LoadTerrain(path.clone()))),
+        IpcRequest::LoadTerrain { path } => {
+            crate::viewer::terrain::ViewerTerrainScene::validate_terrain_path(path)
+                .map_err(|err| err.to_string())?;
+            Ok(Some(ViewerCmd::LoadTerrain(path.clone())))
+        }
         IpcRequest::SetTerrainCamera {
             phi_deg,
             theta_deg,

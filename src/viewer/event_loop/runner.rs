@@ -19,6 +19,25 @@ use super::{
     get_ipc_queue, get_ipc_stats, parse_initial_commands, spawn_stdin_reader, update_ipc_stats,
 };
 
+fn establishes_prospective_frame(cmd: &ViewerCmd) -> bool {
+    matches!(
+        cmd,
+        ViewerCmd::LoadTerrain(_)
+            | ViewerCmd::SetTerrainCamera { .. }
+            | ViewerCmd::SetTerrain { .. }
+            | ViewerCmd::LoadPointCloud { .. }
+            | ViewerCmd::SetPointCloudParams { .. }
+            | ViewerCmd::SetCamLookAt { .. }
+    )
+}
+
+fn partition_frame_batch(commands: Vec<ViewerCmd>) -> Vec<ViewerCmd> {
+    let (frame, content): (Vec<_>, Vec<_>) = commands
+        .into_iter()
+        .partition(establishes_prospective_frame);
+    frame.into_iter().chain(content).collect()
+}
+
 #[cfg(feature = "extension-module")]
 use super::super::INITIAL_TERRAIN_CONFIG;
 
@@ -77,7 +96,7 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                             }
                         }
                         // Apply any pending commands from CLI now that viewer exists
-                        for cmd in pending_cmds.drain(..) {
+                        for cmd in partition_frame_batch(std::mem::take(&mut pending_cmds)) {
                             if let Some(viewer) = viewer_opt.as_mut() {
                                 viewer.handle_cmd(cmd);
                             }
@@ -259,7 +278,7 @@ pub fn run_viewer_with_ipc(
                     match v {
                         Ok(mut v) => {
                             eprintln!("[viewer-ipc] Viewer initialized successfully");
-                            for cmd in pending_cmds.drain(..) {
+                            for cmd in partition_frame_batch(std::mem::take(&mut pending_cmds)) {
                                 v.handle_cmd(cmd);
                             }
                             viewer_opt = Some(v);
@@ -312,7 +331,9 @@ pub fn run_viewer_with_ipc(
                 let mut has_pending_snapshot = false;
                 if let Some(viewer) = viewer_opt.as_mut() {
                     if let Ok(mut q) = get_ipc_queue().lock() {
-                        while let Some(cmd) = q.pop_front() {
+                        let commands = partition_frame_batch(q.drain(..).collect());
+                        drop(q);
+                        for cmd in commands {
                             match cmd {
                                 ViewerCmd::Quit => {
                                     if viewer.snapshot_request.is_some() {
@@ -374,4 +395,68 @@ pub fn run_viewer_with_ipc(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frame_establishing_commands_precede_content_and_keep_stable_order() {
+        let commands = vec![
+            ViewerCmd::AddLabel {
+                id: None,
+                text: "before".to_string(),
+                world_pos: [6_378_137.0, 0.0, 0.0],
+                size: None,
+                color: None,
+                halo_color: None,
+                halo_width: None,
+                priority: None,
+                min_zoom: None,
+                max_zoom: None,
+                offset: None,
+                rotation: None,
+                underline: None,
+                small_caps: None,
+                leader: None,
+                horizon_fade_angle: None,
+            },
+            ViewerCmd::SetCamLookAt {
+                eye: [6_378_137.0, 100.0, 100.0],
+                target: [6_378_137.0, 0.0, 0.0],
+                up: [0.0, 1.0, 0.0],
+            },
+            ViewerCmd::LoadTerrain("terrain.tif".to_string()),
+            ViewerCmd::AddLabel {
+                id: None,
+                text: "after".to_string(),
+                world_pos: [6_378_138.0, 0.0, 0.0],
+                size: None,
+                color: None,
+                halo_color: None,
+                halo_width: None,
+                priority: None,
+                min_zoom: None,
+                max_zoom: None,
+                offset: None,
+                rotation: None,
+                underline: None,
+                small_caps: None,
+                leader: None,
+                horizon_fade_angle: None,
+            },
+        ];
+        let ordered = partition_frame_batch(commands);
+        assert!(matches!(ordered[0], ViewerCmd::SetCamLookAt { .. }));
+        assert!(matches!(ordered[1], ViewerCmd::LoadTerrain(_)));
+        assert!(matches!(
+            &ordered[2],
+            ViewerCmd::AddLabel { text, .. } if text == "before"
+        ));
+        assert!(matches!(
+            &ordered[3],
+            ViewerCmd::AddLabel { text, .. } if text == "after"
+        ));
+    }
 }

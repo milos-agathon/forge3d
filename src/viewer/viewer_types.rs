@@ -3,7 +3,61 @@
 // RELEVANT FILES: shaders/viewer_lit.wgsl, shaders/volumetric.wgsl
 
 use crate::geometry::MeshBuffers;
-use glam::{Mat3, Mat4, Vec2, Vec3};
+use glam::{DVec3, Mat3, Mat4, Vec2, Vec3};
+
+use crate::camera::Anchor;
+
+/// Camera source selected for the whole viewer frame. Precedence is terrain,
+/// then point cloud, then the general geometry camera.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ActiveCameraKind {
+    Terrain,
+    PointCloud,
+    General,
+}
+
+/// Immutable camera/anchor snapshot shared by every pass encoded for one frame.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FrameCamera {
+    pub kind: ActiveCameraKind,
+    pub anchor: Anchor,
+    pub eye_world: DVec3,
+    pub target_world: DVec3,
+    pub up: Vec3,
+    pub fov_deg: f32,
+    pub near: f32,
+    pub far: f32,
+}
+
+impl FrameCamera {
+    pub fn view(self) -> Mat4 {
+        self.anchor
+            .view_look_at(self.eye_world, self.target_world, self.up)
+    }
+
+    pub fn projection(self, width: u32, height: u32) -> Mat4 {
+        Mat4::perspective_rh(
+            self.fov_deg.to_radians(),
+            width as f32 / height.max(1) as f32,
+            self.near,
+            self.far,
+        )
+    }
+
+    pub fn view_projection(self, width: u32, height: u32) -> Mat4 {
+        self.projection(width, height) * self.view()
+    }
+
+    pub fn render_eye(self) -> Vec3 {
+        self.anchor.to_render_vec3(self.eye_world)
+    }
+
+    pub fn with_pose(mut self, eye_world: DVec3, target_world: DVec3) -> Self {
+        self.eye_world = eye_world;
+        self.target_world = target_world;
+        self
+    }
+}
 
 /// Sky rendering uniforms (P6-01)
 #[repr(C, align(16))]
@@ -105,7 +159,9 @@ pub struct FogCameraUniforms {
     pub eye_position: [f32; 3],
     pub near: f32,
     pub far: f32,
+    pub _pad_far: [f32; 3],
     pub _pad: [f32; 3],
+    pub _pad_end: f32,
 }
 
 /// Std140-compatible upsample params for fog_upsample.wgsl
@@ -115,6 +171,17 @@ pub struct FogUpsampleParamsStd140 {
     pub sigma: f32,
     pub use_bilateral: u32,
     pub _pad: [f32; 2],
+}
+
+#[cfg(test)]
+mod fog_uniform_tests {
+    use super::{FogCameraUniforms, VolumetricUniformsStd140};
+
+    #[test]
+    fn fog_uniforms_match_wgsl_sizes() {
+        assert_eq!(std::mem::size_of::<VolumetricUniformsStd140>(), 96);
+        assert_eq!(std::mem::size_of::<FogCameraUniforms>(), 368);
+    }
 }
 
 /// Packed vertex for viewer scene geometry
@@ -136,8 +203,8 @@ pub struct P51CornellSceneState {
     pub fog_enabled: bool,
     pub viz_mode: super::viewer_enums::VizMode,
     pub gi_viz_mode: crate::cli::args::GiVizMode,
-    pub camera_eye: Vec3,
-    pub camera_target: Vec3,
+    pub camera_eye: DVec3,
+    pub camera_target: DVec3,
 }
 
 /// Scene mesh container for viewer geometry

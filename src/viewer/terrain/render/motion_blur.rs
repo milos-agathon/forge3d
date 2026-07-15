@@ -7,6 +7,7 @@ impl ViewerTerrainScene {
         target_format: wgpu::TextureFormat,
         width: u32,
         height: u32,
+        frame: crate::viewer::viewer_types::FrameCamera,
     ) -> Option<TrackedTexture> {
         if self.terrain.is_none() {
             return None;
@@ -20,7 +21,8 @@ impl ViewerTerrainScene {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("terrain_viewer.motion_blur_fallback"),
                 });
-            let result = self.render_to_texture(&mut encoder, target_format, width, height, 0);
+            let result =
+                self.render_to_texture(&mut encoder, target_format, width, height, 0, frame);
             self.queue.submit(std::iter::once(encoder.finish()));
             return result;
         }
@@ -133,7 +135,13 @@ impl ViewerTerrainScene {
                     label: Some("terrain_viewer.motion_blur_sample"),
                 });
 
-            let frame_tex = self.render_to_texture(&mut encoder, target_format, width, height, 0);
+            let sample_frame = if let Some(terrain) = self.terrain.as_ref() {
+                frame.with_pose(terrain.camera_eye(), terrain.camera_target())
+            } else {
+                frame
+            };
+            let frame_tex =
+                self.render_to_texture(&mut encoder, target_format, width, height, 0, sample_frame);
             self.queue.submit(std::iter::once(encoder.finish()));
 
             // Add to accumulation (additive blend)

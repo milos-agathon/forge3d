@@ -477,7 +477,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 gi.update_ssgi_settings(&viewer.queue, |s| {
                     s.temporal_enabled = if *on { 1 } else { 0 };
                 });
-                let _ = gi.ssgi_reset_history(&viewer.device, &viewer.queue);
+                gi.ssgi_reset_history();
             }
             true
         }

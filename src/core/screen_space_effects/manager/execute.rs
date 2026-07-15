@@ -93,14 +93,14 @@ impl ScreenSpaceEffectsManager {
         self.last_hzb_ms
     }
 
-    pub fn set_gi_seed(&mut self, device: &Device, queue: &Queue, seed: u32) -> RenderResult<()> {
+    pub fn set_gi_seed(&mut self, _device: &Device, queue: &Queue, seed: u32) -> RenderResult<()> {
         if let Some(ref mut ssao) = self.ssao_renderer {
             ssao.set_seed(queue, seed);
         }
         if let Some(ref mut ssgi) = self.ssgi_renderer {
             ssgi.set_seed(queue, seed);
         }
-        self.ssgi_reset_history(device, queue)?;
+        self.ssgi_reset_history();
         Ok(())
     }
 }

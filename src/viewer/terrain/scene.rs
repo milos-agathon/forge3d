@@ -4,11 +4,11 @@
 use super::denoise::DenoisePass;
 use super::render::TerrainUniforms;
 use super::shader::TERRAIN_SHADER;
-use super::vector_overlay::{drape_vertices, VectorOverlayLayer, VectorOverlayStack};
+use super::vector_overlay::{VectorOverlayLayer, VectorOverlayStack};
 use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 use crate::shadows::{CsmConfig, CsmRenderer};
 use anyhow::Result;
-use glam::{Mat4, Vec3};
+use glam::{DVec2, DVec3, Vec3};
 use std::sync::Arc;
 
 /// P0.1/M1: WBOIT compose shader for final compositing of accumulation buffers
@@ -64,6 +64,12 @@ pub struct ViewerTerrainData {
     pub dimensions: (u32, u32),
     pub domain: (f32, f32),
     pub revision: u64,
+    pub raster_info: crate::gis::types::RasterInfo,
+    /// Absolute viewer-world X/Z origin: `(map X, -map Y)`.
+    pub world_origin_xz: DVec2,
+    /// Positive physical viewer-world X/Z span.
+    pub world_span_xz: DVec2,
+    pub georeferencing_fallback: bool,
     pub _heightmap_texture: TrackedTexture,
     pub heightmap_view: wgpu::TextureView,
     pub vertex_buffer: TrackedBuffer,
@@ -76,7 +82,7 @@ pub struct ViewerTerrainData {
     pub cam_phi_deg: f32,
     pub cam_theta_deg: f32,
     pub cam_fov_deg: f32,
-    pub cam_target: [f32; 3],
+    pub cam_target: DVec3,
     // Sun/lighting
     pub sun_azimuth_deg: f32,
     pub sun_elevation_deg: f32,
@@ -95,45 +101,79 @@ impl ViewerTerrainData {
         self.dimensions.0 as f32
     }
 
-    pub fn terrain_depth(&self) -> f32 {
-        self.dimensions.1 as f32
-    }
-
     pub fn height_range(&self) -> f32 {
         self.domain.1 - self.domain.0
     }
 
-    pub fn default_camera_target(&self) -> [f32; 3] {
-        [
-            self.terrain_width() * 0.5,
-            self.height_range() * self.z_scale * 0.5,
-            self.terrain_depth() * 0.5,
-        ]
-    }
-
-    pub fn camera_target(&self) -> Vec3 {
-        Vec3::from_array(self.cam_target)
-    }
-
-    pub fn camera_eye(&self) -> Vec3 {
-        crate::terrain::camera::orbit_camera(
-            self.camera_target(),
-            self.cam_radius,
-            self.cam_phi_deg,
-            self.cam_theta_deg,
+    pub fn default_camera_target(&self) -> DVec3 {
+        DVec3::new(
+            self.world_origin_xz.x + self.world_span_xz.x * 0.5,
+            f64::from(self.height_range() * self.z_scale * 0.5),
+            self.world_origin_xz.y + self.world_span_xz.y * 0.5,
         )
     }
 
-    pub fn camera_view_matrix(&self) -> Mat4 {
+    pub fn camera_target(&self) -> DVec3 {
+        self.cam_target
+    }
+
+    pub fn camera_eye(&self) -> DVec3 {
+        Self::camera_eye_for(
+            self.cam_target,
+            self.cam_phi_deg,
+            self.cam_theta_deg,
+            self.cam_radius,
+        )
+    }
+
+    pub fn camera_eye_for(target: DVec3, phi_deg: f32, theta_deg: f32, radius: f32) -> DVec3 {
+        let phi = phi_deg.to_radians();
+        let theta = theta_deg.to_radians();
+        target
+            + DVec3::new(
+                f64::from(radius * theta.sin() * phi.cos()),
+                f64::from(radius * theta.cos()),
+                f64::from(radius * theta.sin() * phi.sin()),
+            )
+    }
+
+    pub fn validate_camera_state(
+        &self,
+        anchor: &crate::camera::Anchor,
+        phi_deg: f32,
+        theta_deg: f32,
+        radius: f32,
+        fov_deg: f32,
+        target: DVec3,
+    ) -> Result<(), crate::viewer::camera_controller::CameraFrameError> {
+        if ![phi_deg, theta_deg, radius, fov_deg]
+            .into_iter()
+            .all(f32::is_finite)
+        {
+            return Err(
+                crate::viewer::camera_controller::CameraFrameError::NonFinite {
+                    role: crate::viewer::camera_controller::CoordRole::Target,
+                },
+            );
+        }
+        crate::viewer::camera_controller::validate_camera_pose(
+            anchor,
+            DVec3::new(target.x, 0.0, target.z),
+            Self::camera_eye_for(target, phi_deg, theta_deg, radius),
+            target,
+        )?;
+        Ok(())
+    }
+
+    pub fn camera_up(&self) -> Vec3 {
         let eye = self.camera_eye();
         let target = self.camera_target();
         let view_dir = (target - eye).normalize_or_zero();
-        let up = if view_dir.dot(Vec3::Y).abs() > 0.999 {
+        if view_dir.dot(DVec3::Y).abs() > 0.999 {
             -Vec3::Z
         } else {
             Vec3::Y
-        };
-        Mat4::look_at_rh(eye, target, up)
+        }
     }
 
     /// Set camera state from animation keyframe values.
@@ -143,15 +183,41 @@ impl ViewerTerrainData {
         theta_deg: f32,
         radius: f32,
         fov_deg: f32,
-        target: Option<[f32; 3]>,
+        target: Option<[f64; 3]>,
     ) {
         self.cam_phi_deg = phi_deg;
         self.cam_theta_deg = theta_deg;
         self.cam_radius = radius;
         self.cam_fov_deg = fov_deg;
         if let Some(target) = target {
-            self.cam_target = target;
+            self.cam_target = DVec3::from_array(target);
         }
+    }
+}
+
+impl ViewerTerrainScene {
+    /// Refresh anchor-derived CPU caches. Terrain vertices remain local; the
+    /// current anchor is consumed when per-frame uniforms are prepared.
+    pub(crate) fn refresh_anchor_caches(&mut self, _anchor: &crate::camera::Anchor) {
+        self.repack_vector_overlays(_anchor);
+    }
+
+    /// Reset terrain temporal state without replacing GPU resources.
+    pub(crate) fn invalidate_temporal_history(&mut self) {
+        if let Some(taa) = self.taa_renderer.as_mut() {
+            taa.reset_history();
+        }
+        self.taa_jitter = if self.taa_jitter.enabled {
+            crate::core::jitter::JitterState::enabled()
+        } else {
+            crate::core::jitter::JitterState::new()
+        };
+    }
+
+    pub(crate) fn is_taa_enabled(&self) -> bool {
+        self.taa_renderer
+            .as_ref()
+            .is_some_and(crate::core::taa::TaaRenderer::is_enabled)
     }
 }
 
@@ -242,6 +308,8 @@ pub struct ViewerTerrainScene {
     pub(super) terrain_revision_counter: u64,
     #[cfg(feature = "enable-gpu-instancing")]
     pub(super) scatter_renderer: crate::render::mesh_instanced::MeshInstancedRenderer,
+    #[cfg(feature = "enable-gpu-instancing")]
+    pub(super) scatter_hlod_instance_buffer: TrackedBuffer,
     #[cfg(feature = "enable-gpu-instancing")]
     pub(super) scatter_batches: Vec<crate::terrain::scatter::TerrainScatterBatch>,
     #[cfg(feature = "enable-gpu-instancing")]

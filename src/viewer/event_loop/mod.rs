@@ -11,9 +11,8 @@ pub use cmd_parse_init::parse_initial_commands;
 pub use ipc_state::{
     get_ipc_queue, get_ipc_stats, get_lasso_state, get_pick_events, get_scene_review_state,
     get_terrain_volumetrics_report, set_pending_bundle_load, set_pending_bundle_save,
-    take_pending_bundle_load, take_pending_bundle_save, update_active_scene_variant,
-    update_ipc_stats, update_ipc_transform_stats, update_scene_review_state,
-    update_terrain_volumetrics_report,
+    take_pending_bundle_load, take_pending_bundle_save, update_ipc_frame_stats, update_ipc_stats,
+    update_ipc_transform_stats, update_scene_review_state, update_terrain_volumetrics_report,
 };
 pub use runner::{run_viewer, run_viewer_with_ipc};
 pub use stdin_reader::spawn_stdin_reader;

@@ -116,11 +116,15 @@ impl Viewer {
         self.generate_stripe_env_map(&preset)?;
         self.ssr_scene_loaded = true;
 
-        let eye = glam::Vec3::new(preset.camera_distance, preset.camera_height, 0.0);
-        let target = glam::Vec3::new(0.0, preset.camera_height * 0.5, 0.0);
+        let eye = glam::DVec3::new(
+            f64::from(preset.camera_distance),
+            f64::from(preset.camera_height),
+            0.0,
+        );
+        let target = glam::DVec3::new(0.0, f64::from(preset.camera_height * 0.5), 0.0);
         self.camera
-            .set_look_at(eye, target, glam::Vec3::Y)
-            .expect("SSR preset camera coords are within the viewer local frame");
+            .set_look_at(&self.camera_anchor, eye, target, glam::Vec3::Y)
+            .expect("SSR preset camera pose is renderable");
 
         Ok(())
     }

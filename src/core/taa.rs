@@ -273,6 +273,12 @@ impl TaaRenderer {
         self.enabled
     }
 
+    /// Invalidate temporal contents without reallocating GPU resources.
+    pub fn reset_history(&mut self) {
+        self.read_index = 0;
+        self.first_frame = true;
+    }
+
     /// Update settings
     pub fn update_settings(&mut self, queue: &Queue, jitter_offset: [f32; 2], frame_index: u32) {
         self.settings.jitter_offset = jitter_offset;

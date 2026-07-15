@@ -1,6 +1,4 @@
 use super::RenderAvailability;
-use glam::Mat4;
-
 use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::viewer::Viewer;
 
@@ -133,6 +131,7 @@ impl Viewer {
             None
         };
 
+        let frame = self.current_frame_camera();
         if let Some(ref mut tv) = self.terrain_viewer {
             if tv.has_terrain() {
                 eprintln!("[DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request={:?}, terrain_snap_size={:?}",
@@ -146,6 +145,7 @@ impl Viewer {
                     self.config.width,
                     self.config.height,
                     self.selected_feature_id,
+                    frame,
                 );
 
                 // Then render to offscreen texture at snapshot resolution (if requested)
@@ -156,7 +156,7 @@ impl Viewer {
                         // Motion blur handles its own encoder internally
                         self.queue.submit(std::iter::once(encoder.finish()));
                         if let Some(tex) =
-                            tv.render_with_motion_blur(self.config.format, snap_w, snap_h)
+                            tv.render_with_motion_blur(self.config.format, snap_w, snap_h, frame)
                         {
                             self.pending_snapshot_tex = Some(tex);
                         }
@@ -173,6 +173,7 @@ impl Viewer {
                             snap_w,
                             snap_h,
                             self.selected_feature_id,
+                            frame,
                         ) {
                             self.pending_snapshot_tex = Some(tex);
                         }
@@ -270,29 +271,8 @@ impl Viewer {
         // P5: Render point cloud (after terrain, before labels)
         if let Some(ref pc) = self.point_cloud {
             if pc.visible && pc.point_count > 0 && pc.instance_buffer.is_some() {
-                // Points are centered at origin, compute extent for camera distance
-                let extent_x = pc.bounds_max[0] - pc.bounds_min[0];
-                let extent_y = pc.bounds_max[1] - pc.bounds_min[1];
-                let extent_z = pc.bounds_max[2] - pc.bounds_min[2];
-                let extent = extent_x.max(extent_y).max(extent_z).max(100.0);
-
-                // Use orbit camera state from point cloud
-                let base_radius = extent * 2.0;
-                let r = base_radius * pc.cam_radius;
-                let center = glam::Vec3::ZERO;
-                // Spherical coords from point cloud camera state
-                let eye = glam::Vec3::new(
-                    r * pc.cam_theta.cos() * pc.cam_phi.cos(),
-                    r * pc.cam_theta.sin(),
-                    r * pc.cam_theta.cos() * pc.cam_phi.sin(),
-                );
-
-                let view_mat = Mat4::look_at_rh(eye, center, glam::Vec3::Y);
-                let aspect = self.config.width as f32 / self.config.height.max(1) as f32;
-                let near = extent * 0.01;
-                let far = extent * 10.0;
-                let proj = Mat4::perspective_rh(45.0_f32.to_radians(), aspect, near, far);
-                let view_proj = proj * view_mat;
+                let frame = self.current_frame_camera();
+                let view_proj = frame.view_projection(self.config.width, self.config.height);
 
                 // Simple render pass - clear to dark background for point cloud
                 {
@@ -302,12 +282,16 @@ impl Viewer {
                             view: &view,
                             resolve_target: None,
                             ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color {
-                                    r: 0.1,
-                                    g: 0.1,
-                                    b: 0.15,
-                                    a: 1.0,
-                                }),
+                                load: if terrain_rendered {
+                                    wgpu::LoadOp::Load
+                                } else {
+                                    wgpu::LoadOp::Clear(wgpu::Color {
+                                        r: 0.1,
+                                        g: 0.1,
+                                        b: 0.15,
+                                        a: 1.0,
+                                    })
+                                },
                                 store: wgpu::StoreOp::Store,
                             },
                         })],
@@ -329,10 +313,7 @@ impl Viewer {
                     let snap_view = snap_tex.create_view(&wgpu::TextureViewDescriptor::default());
                     let snap_w = snap_tex.width() as f32;
                     let snap_h = snap_tex.height() as f32;
-                    let snap_aspect = snap_w / snap_h.max(1.0);
-                    let snap_proj =
-                        Mat4::perspective_rh(45.0_f32.to_radians(), snap_aspect, near, far);
-                    let snap_view_proj = snap_proj * view_mat;
+                    let snap_view_proj = frame.view_projection(snap_w as u32, snap_h as u32);
 
                     let mut pc_snap_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("viewer.pointcloud.pass.snapshot"),
@@ -340,12 +321,7 @@ impl Viewer {
                             view: &snap_view,
                             resolve_target: None,
                             ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color {
-                                    r: 0.1,
-                                    g: 0.1,
-                                    b: 0.15,
-                                    a: 1.0,
-                                }),
+                                load: wgpu::LoadOp::Load,
                                 store: wgpu::StoreOp::Store,
                             },
                         })],
