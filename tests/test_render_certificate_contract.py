@@ -116,6 +116,11 @@ def test_public_render_entrypoints_expose_certificate_keyword() -> None:
 
 
 def test_brdf_tile_emits_a_live_certified_pass() -> None:
+    import pytest
+
+    if not f3d.has_gpu():
+        pytest.skip("BRDF tile render requires a GPU adapter")
+
     from forge3d.diagnostics import render_certificate
 
     rgba = f3d.render_brdf_tile("lambert", 0.4, 32, 32, certificate=True)
@@ -123,7 +128,10 @@ def test_brdf_tile_emits_a_live_certified_pass() -> None:
 
     assert rgba.shape == (32, 32, 4)
     assert [entry["label"] for entry in certificate["passes"]] == ["brdf.tile"]
-    assert certificate["passes"][0]["gpu_ms"] > 0.0
+    if "timestamp_query" in certificate["capabilities"]["granted"]:
+        assert certificate["passes"][0]["gpu_ms"] > 0.0
+    else:
+        assert certificate["passes"][0]["gpu_ms"] == 0.0
     assert set(certificate["engine"]["wgsl_module_hashes"]) == {"brdf_tile.shader"}
 
 

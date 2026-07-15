@@ -91,6 +91,18 @@ pub fn make_bg_lut(
     view: &TextureView,
     samp: &Sampler,
 ) -> BindGroup {
+    if pipeline.descriptor_indexing {
+        // With descriptor indexing the LUT layout is a binding ARRAY
+        // (count = max_palette_textures). Binding a single view against it is
+        // under-binding: wgpu-hal's Metal backend panics slicing the exposed
+        // array ("range end index N out of range for slice of length 1",
+        // found by the first Metal-lane CI run after capability negotiation
+        // started granting TEXTURE_BINDING_ARRAY). Replicate the single LUT
+        // across every slot — the single-LUT shader path only samples index 0.
+        let views: Vec<&TextureView> =
+            std::iter::repeat_n(view, pipeline.max_palette_textures.max(1) as usize).collect();
+        return make_bg_lut_array(pipeline, device, &views, samp);
+    }
     device.create_bind_group(&BindGroupDescriptor {
         label: Some("vf.Terrain.bg.lut"),
         layout: &pipeline.bgl_lut,
