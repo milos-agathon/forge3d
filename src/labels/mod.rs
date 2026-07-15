@@ -68,6 +68,14 @@ fn renderer_channels_from_atlas(channels: u32) -> u32 {
     channels
 }
 
+/// Stable, inspectable reason why a label was rejected during native layout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LabelLayoutDiagnostic {
+    pub label_id: LabelId,
+    pub stage: &'static str,
+    pub reason: String,
+}
+
 fn font_collection_from_metrics(
     metrics_json_path: impl AsRef<Path>,
 ) -> Result<Option<Arc<FontCollection>>, String> {
@@ -131,6 +139,7 @@ pub struct LabelManager {
     projector: LabelProjector,
     visible_instances: Vec<TextInstance>,
     leader_lines: Vec<LeaderLine>,
+    layout_diagnostics: Vec<LabelLayoutDiagnostic>,
     enabled: bool,
     current_zoom: f32,
     max_visible_labels: usize,
@@ -140,6 +149,21 @@ pub struct LabelManager {
 }
 
 impl LabelManager {
+    fn reset_layout_output(&mut self) {
+        self.collision_rtree.clear();
+        self.visible_instances.clear();
+        self.leader_lines.clear();
+        self.layout_diagnostics.clear();
+        for label in self.labels.values_mut() {
+            label.visible = false;
+            label.screen_pos = None;
+        }
+        for label in self.line_labels.values_mut() {
+            label.visible = false;
+            label.glyph_positions.clear();
+        }
+    }
+
     /// Create a new label manager with default settings.
     pub fn new(screen_width: u32, screen_height: u32) -> Self {
         Self {
@@ -152,6 +176,7 @@ impl LabelManager {
             projector: LabelProjector::new(screen_width, screen_height),
             visible_instances: Vec::new(),
             leader_lines: Vec::new(),
+            layout_diagnostics: Vec::new(),
             enabled: true,
             current_zoom: 1.0,
             max_visible_labels: 500,
@@ -180,6 +205,9 @@ impl LabelManager {
             metrics_json,
         )?;
         self.atlas = Some(atlas);
+        // Raw atlas bytes do not declare an immutable shaping font collection.
+        // Never retain fonts from a previously loaded file-backed atlas.
+        self.fonts = None;
         Ok(())
     }
 
@@ -306,12 +334,15 @@ impl LabelManager {
     pub fn clear(&mut self) {
         self.labels.clear();
         self.line_labels.clear();
-        self.leader_lines.clear();
+        self.reset_layout_output();
     }
 
     /// Set enabled state.
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
+        if !enabled {
+            self.reset_layout_output();
+        }
     }
 
     /// Check if labels are enabled.
@@ -427,6 +458,11 @@ impl LabelManager {
         &self.leader_lines
     }
 
+    /// Structured failures from the most recent layout transaction.
+    pub fn layout_diagnostics(&self) -> &[LabelLayoutDiagnostic] {
+        &self.layout_diagnostics
+    }
+
     /// Pick a label at the given screen coordinates.
     pub fn pick_at(&self, x: f32, y: f32) -> Option<LabelId> {
         // Query a small box around the cursor (e.g. 4x4 pixels)
@@ -467,18 +503,18 @@ impl LabelManager {
         selected_ids: Option<&std::collections::HashSet<u64>>,
         anchor: &crate::camera::Anchor,
     ) -> usize {
-        if !self.enabled {
+        if !self.enabled || self.atlas.is_none() {
+            self.reset_layout_output();
             return 0;
         }
 
-        let atlas = self.atlas.as_ref();
-        self.collision_rtree.clear();
-        self.visible_instances.clear();
-        self.leader_lines.clear();
+        self.reset_layout_output();
+        let atlas = self.atlas.as_ref().unwrap();
 
         let (screen_w, screen_h) = self.projector.screen_size();
         let mut visible_count = 0;
         let fonts = self.fonts.clone();
+        let layout_diagnostics = &mut self.layout_diagnostics;
 
         // Collect labels and sort by priority (higher priority first)
         let mut sorted_labels: Vec<_> = self.labels.values_mut().collect();
@@ -538,12 +574,7 @@ impl LabelManager {
 
                 // Shape once and keep the exact fallback face / GSUB glyph identities
                 // for both collision bounds and GPU instance construction.
-                let shaped = if atlas.is_some() {
-                    fonts.as_ref()
-                } else {
-                    None
-                }
-                .and_then(|fonts| {
+                let shaped = if let Some(fonts) = &fonts {
                     match shape::shape(
                         &label.text,
                         Arc::clone(fonts),
@@ -553,27 +584,36 @@ impl LabelManager {
                         &[],
                     ) {
                         Ok(shaped) => Some(shaped),
-                        Err(_) => None,
-                    }
-                });
-                let line_range = 0..label.text.chars().count();
-                let line_ranges = std::slice::from_ref(&line_range);
-                let (width, height) = if let (Some(atlas), Some(shaped)) = (atlas, &shaped) {
-                    match atlas.measure_shaped(shaped, line_ranges) {
-                        Ok(measurement) => measurement,
-                        Err(_) => {
+                        Err(error) => {
+                            layout_diagnostics.push(LabelLayoutDiagnostic {
+                                label_id: label.id,
+                                stage: "shape",
+                                reason: error.to_string(),
+                            });
                             label.visible = false;
                             continue;
                         }
                     }
-                } else if let Some(atlas) = atlas {
-                    atlas.measure_text(&label.text, label.style.size)
                 } else {
-                    let glyphs = label.text.chars().filter(|ch| !ch.is_whitespace()).count();
-                    (
-                        (glyphs.max(1) as f32) * label.style.size * 0.6,
-                        label.style.size,
-                    )
+                    None
+                };
+                let line_range = 0..label.text.chars().count();
+                let line_ranges = std::slice::from_ref(&line_range);
+                let (width, height) = if let Some(shaped) = &shaped {
+                    match atlas.measure_shaped(shaped, line_ranges) {
+                        Ok(measurement) => measurement,
+                        Err(error) => {
+                            layout_diagnostics.push(LabelLayoutDiagnostic {
+                                label_id: label.id,
+                                stage: "measure",
+                                reason: error,
+                            });
+                            label.visible = false;
+                            continue;
+                        }
+                    }
+                } else {
+                    atlas.measure_text(&label.text, label.style.size)
                 };
                 let half_w = width * 0.5;
                 let half_h = height * 0.5;
@@ -585,69 +625,64 @@ impl LabelManager {
                     screen_pos[1] + half_h,
                 ];
 
-                // Check collision using R-tree
-                if self.collision_rtree.try_insert(label.id.0, bounds) {
-                    label.visible = true;
-                    visible_count += 1;
-
-                    // Generate leader line if offset and flag set
-                    if label.style.flags.leader
-                        && (label.style.offset[0].abs() > 1.0 || label.style.offset[1].abs() > 1.0)
-                    {
-                        self.leader_lines.push(create_leader_line(
-                            anchor_screen,
-                            screen_pos,
-                            label.style.halo_color,
-                            1.5,
-                        ));
+                // Preflight the complete GPU instance stream before mutating
+                // collision state, visibility counts, or leader-line output.
+                let mut color = label.style.color;
+                if let Some(selected) = selected_ids {
+                    if selected.contains(&label.id.0) {
+                        color = [1.0, 0.8, 0.0, 1.0];
+                        label.computed_alpha = 1.0;
                     }
-
-                    // Apply color with computed alpha
-                    let mut color = label.style.color;
-
-                    // Highlight if selected
-                    if let Some(selected) = selected_ids {
-                        if selected.contains(&label.id.0) {
-                            // Gold highlight color
-                            color = [1.0, 0.8, 0.0, 1.0];
-                            // Also ensure fully opaque if highlighted
-                            label.computed_alpha = 1.0;
+                }
+                color[3] = label.computed_alpha;
+                let instances = if let Some(shaped) = &shaped {
+                    match atlas.layout_shaped(
+                        shaped,
+                        line_ranges,
+                        screen_pos,
+                        color,
+                        label.style.halo_color,
+                        label.style.halo_width,
+                    ) {
+                        Ok(instances) => instances,
+                        Err(error) => {
+                            layout_diagnostics.push(LabelLayoutDiagnostic {
+                                label_id: label.id,
+                                stage: "layout",
+                                reason: error,
+                            });
+                            label.visible = false;
+                            continue;
                         }
                     }
-
-                    color[3] = label.computed_alpha;
-
-                    if let Some(atlas) = atlas {
-                        let instances = if let Some(shaped) = &shaped {
-                            match atlas.layout_shaped(
-                                shaped,
-                                line_ranges,
-                                screen_pos,
-                                color,
-                                label.style.halo_color,
-                                label.style.halo_width,
-                            ) {
-                                Ok(instances) => instances,
-                                Err(_) => {
-                                    label.visible = false;
-                                    continue;
-                                }
-                            }
-                        } else {
-                            atlas.layout_text(
-                                &label.text,
-                                screen_pos,
-                                label.style.size,
-                                color,
-                                label.style.halo_color,
-                                label.style.halo_width,
-                            )
-                        };
-                        self.visible_instances.extend(instances);
-                    }
                 } else {
+                    atlas.layout_text(
+                        &label.text,
+                        screen_pos,
+                        label.style.size,
+                        color,
+                        label.style.halo_color,
+                        label.style.halo_width,
+                    )
+                };
+
+                if !self.collision_rtree.try_insert(label.id.0, bounds) {
                     label.visible = false;
+                    continue;
                 }
+                label.visible = true;
+                visible_count += 1;
+                if label.style.flags.leader
+                    && (label.style.offset[0].abs() > 1.0 || label.style.offset[1].abs() > 1.0)
+                {
+                    self.leader_lines.push(create_leader_line(
+                        anchor_screen,
+                        screen_pos,
+                        label.style.halo_color,
+                        1.5,
+                    ));
+                }
+                self.visible_instances.extend(instances);
             } else {
                 label.screen_pos = None;
                 label.visible = false;
@@ -691,7 +726,12 @@ impl LabelManager {
                     &[],
                 ) {
                     Ok(shaped) => Some(shaped),
-                    Err(_) => {
+                    Err(error) => {
+                        layout_diagnostics.push(LabelLayoutDiagnostic {
+                            label_id: line_label.id,
+                            stage: "shape",
+                            reason: error.to_string(),
+                        });
                         line_label.visible = false;
                         continue;
                     }
@@ -704,7 +744,12 @@ impl LabelManager {
             let shaped_stream = if let Some(shaped) = &shaped {
                 match positioned::positioned_glyphs(shaped, line_ranges) {
                     Ok(glyphs) => Some(glyphs),
-                    Err(_) => {
+                    Err(error) => {
+                        layout_diagnostics.push(LabelLayoutDiagnostic {
+                            label_id: line_label.id,
+                            stage: "position",
+                            reason: error.to_string(),
+                        });
                         line_label.visible = false;
                         continue;
                     }
@@ -731,41 +776,43 @@ impl LabelManager {
             );
 
             if placements.is_empty() {
+                layout_diagnostics.push(LabelLayoutDiagnostic {
+                    label_id: line_label.id,
+                    stage: "placement",
+                    reason: "line has no valid glyph placements".to_owned(),
+                });
                 line_label.visible = false;
                 continue;
             }
 
-            line_label.glyph_positions = placements;
-            line_label.visible = true;
-            visible_count += 1;
-
             let mut color = line_label.style.color;
             color[3] = color[3].clamp(0.0, 1.0);
-            if let Some(atlas) = atlas {
-                if let Some(shaped) = &shaped {
-                    match atlas.layout_shaped_on_placements(
-                        shaped,
-                        line_ranges,
-                        &line_label.glyph_positions,
-                        color,
-                        line_label.style.halo_color,
-                        line_label.style.halo_width,
-                    ) {
-                        Ok(instances) => self.visible_instances.extend(instances),
-                        Err(_) => {
-                            line_label.visible = false;
-                            continue;
-                        }
+            let instances = if let Some(shaped) = &shaped {
+                match atlas.layout_shaped_on_placements(
+                    shaped,
+                    line_ranges,
+                    &placements,
+                    color,
+                    line_label.style.halo_color,
+                    line_label.style.halo_width,
+                ) {
+                    Ok(instances) => instances,
+                    Err(error) => {
+                        layout_diagnostics.push(LabelLayoutDiagnostic {
+                            label_id: line_label.id,
+                            stage: "layout",
+                            reason: error,
+                        });
+                        line_label.visible = false;
+                        continue;
                     }
-                } else {
-                    for (ch, placement) in line_label
-                        .text
-                        .chars()
-                        .zip(line_label.glyph_positions.iter())
-                    {
-                        if ch == ' ' {
-                            continue;
-                        }
+                }
+            } else {
+                let mut output = Vec::new();
+                for (ch, placement) in line_label.text.chars().zip(placements.iter()) {
+                    if ch == ' ' {
+                        continue;
+                    }
                     let mut instances = atlas.layout_text(
                         &ch.to_string(),
                         placement.screen_pos,
@@ -777,10 +824,14 @@ impl LabelManager {
                     for instance in &mut instances {
                         instance.rotation = placement.rotation;
                     }
-                    self.visible_instances.extend(instances);
+                    output.extend(instances);
                 }
-            }
-            }
+                output
+            };
+            line_label.glyph_positions = placements;
+            line_label.visible = true;
+            visible_count += 1;
+            self.visible_instances.extend(instances);
         }
 
         self.visible_instances.len()
@@ -846,5 +897,25 @@ mod tests {
         assert_eq!(algorithm, DeclutterAlgorithm::Annealing);
         assert_eq!(config.seed, 123);
         assert_eq!(config.max_iterations, 50);
+    }
+
+    #[test]
+    fn disabling_or_updating_without_an_atlas_clears_all_layout_state() {
+        let mut manager = LabelManager::new(800, 600);
+        let id = manager.add_label("Map".to_owned(), Vec3::ZERO, LabelStyle::default());
+        assert!(manager.get_label(id).unwrap().visible);
+
+        manager.set_enabled(false);
+        assert!(!manager.get_label(id).unwrap().visible);
+        assert!(manager.get_label(id).unwrap().screen_pos.is_none());
+        assert_eq!(manager.visible_count(), 0);
+        assert!(manager.leader_lines().is_empty());
+        assert!(manager.layout_diagnostics().is_empty());
+        assert!(manager.pick_at(0.0, 0.0).is_none());
+
+        manager.set_enabled(true);
+        assert_eq!(manager.update(Mat4::IDENTITY), 0);
+        assert!(!manager.get_label(id).unwrap().visible);
+        assert!(manager.pick_at(0.0, 0.0).is_none());
     }
 }

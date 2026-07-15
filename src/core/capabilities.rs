@@ -10,11 +10,6 @@ pub const WANTED: &[(&str, Features, &str)] = &[
         "per-pass GPU timings unavailable; certificate passes[].gpu_ms will be 0",
     ),
     (
-        "pipeline_statistics_query",
-        Features::PIPELINE_STATISTICS_QUERY,
-        "pipeline_stats absent from certificate passes[]",
-    ),
-    (
         "texture_binding_array",
         Features::TEXTURE_BINDING_ARRAY,
         "terrain LUT texture-array bind path disabled; single-LUT rebind path used",
@@ -105,15 +100,23 @@ mod tests {
     use super::*;
     #[test]
     fn intersection_only_grants_adapter_features() {
+        let _lock = crate::core::degradation::TEST_SINK_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        crate::core::degradation::clear_degradations();
         let caps =
             CapabilitySet::negotiate(Features::TIMESTAMP_QUERY | Features::DEPTH_CLIP_CONTROL);
         assert!(caps.granted.contains(Features::TIMESTAMP_QUERY));
         assert!(!caps.granted.contains(Features::TEXTURE_BINDING_ARRAY));
         assert!(!caps.granted.contains(Features::DEPTH_CLIP_CONTROL)); // never request unwanted
         assert_eq!(caps.wanted, CapabilitySet::wants());
+        crate::core::degradation::clear_degradations();
     }
     #[test]
     fn empty_adapter_grants_nothing_and_degrades() {
+        let _lock = crate::core::degradation::TEST_SINK_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         crate::core::degradation::clear_degradations();
         let caps = CapabilitySet::negotiate(Features::empty());
         assert!(caps.granted.is_empty());

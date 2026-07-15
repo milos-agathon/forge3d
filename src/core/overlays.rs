@@ -55,10 +55,16 @@ pub struct OverlayRenderer {
     pub bind_group_layout: BindGroupLayout,
     pub bind_group: BindGroup,
     pub pipeline: RenderPipeline,
+    raster_bind_group_layout: BindGroupLayout,
+    raster_bind_group: BindGroup,
+    raster_pipeline: RenderPipeline,
 
     // resources
     pub overlay_tex: Option<TrackedTexture>,
     pub overlay_view: Option<TextureView>,
+    _fallback_tex: TrackedTexture,
+    fallback_view: TextureView,
+    page_table_dummy: TrackedBuffer,
     pub overlay_sampler: Sampler,
     pub height_sampler: Sampler,
     // M5: Depth sampler for terrain occlusion
@@ -172,6 +178,38 @@ impl OverlayRenderer {
                 },
             ],
         });
+        let raster_bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("overlay_raster_bgl"),
+                entries: &[
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: TextureViewDimension::D2,
+                            sample_type: TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
 
         // Create default 1x1 white overlay and height views to bind initially
         let overlay_sampler = device.create_sampler(&SamplerDescriptor {
@@ -206,7 +244,9 @@ impl OverlayRenderer {
             ..Default::default()
         });
 
-        // Dummy 1x1 RGBA texture for overlay
+        // Dummy 1x1 RGBA texture for overlay. Raster overlays are already
+        // display-ready compositor pixels, so preserve their channel values
+        // instead of applying an implicit sRGB decode into the unorm target.
         let dummy_tex = tracked_create_texture(
             device,
             &TextureDescriptor {
@@ -219,7 +259,7 @@ impl OverlayRenderer {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: TextureDimension::D2,
-                format: TextureFormat::Rgba8UnormSrgb,
+                format: TextureFormat::Rgba8Unorm,
                 usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
                 view_formats: &[],
             },
@@ -276,6 +316,24 @@ impl OverlayRenderer {
                 },
             ],
         });
+        let raster_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("overlay_raster_bg"),
+            layout: &raster_bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&dummy_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&overlay_sampler),
+                },
+            ],
+        });
 
         let module = crate::core::shader_registry::create_labeled_shader_module(
             device,
@@ -286,6 +344,11 @@ impl OverlayRenderer {
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("overlays_pl"),
             bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let raster_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("overlay_raster_pl"),
+            bind_group_layouts: &[&raster_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -317,6 +380,34 @@ impl OverlayRenderer {
                 multiview: None,
             },
         );
+        let raster_pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
+            device,
+            &RenderPipelineDescriptor {
+                label: Some("overlay_raster_pipeline"),
+                layout: Some(&raster_pipeline_layout),
+                vertex: VertexState {
+                    module: &module,
+                    entry_point: "vs_fullscreen",
+                    buffers: &[],
+                },
+                primitive: PrimitiveState {
+                    topology: PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(FragmentState {
+                    module: &module,
+                    entry_point: "fs_raster_overlay",
+                    targets: &[Some(ColorTargetState {
+                        format: color_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: ColorWrites::ALL,
+                    })],
+                }),
+                multiview: None,
+            },
+        );
 
         Ok(Self {
             uniforms,
@@ -324,12 +415,18 @@ impl OverlayRenderer {
             bind_group_layout,
             bind_group,
             pipeline,
+            raster_bind_group_layout,
+            raster_bind_group,
+            raster_pipeline,
             overlay_tex: None,
             overlay_view: None,
+            _fallback_tex: dummy_tex,
+            fallback_view: dummy_view,
+            page_table_dummy: pt_dummy,
             overlay_sampler,
             height_sampler,
             depth_sampler,
-            overlay_format: TextureFormat::Rgba8UnormSrgb,
+            overlay_format: TextureFormat::Rgba8Unorm,
         })
     }
 
@@ -408,51 +505,17 @@ impl OverlayRenderer {
         page_table: Option<&Buffer>,
         depth_view: Option<&TextureView>, // M5: Terrain depth texture for occlusion
     ) -> RenderResult<()> {
-        // Use 1x1 fallback views when any overlay/height/depth view is missing.
-        // Prefer provided view, then stored view, else fallback.
+        // Prefer provided/stored resources and retain one renderer-owned fallback
+        // for every optional binding. Metal requires these resources to outlive
+        // the bind group; recreating and immediately dropping temporary views
+        // produced transparent frames on otherwise valid overlay draws.
         let use_overlay_view = overlay_view.or(self.overlay_view.as_ref());
-        let (dummy_tex, dummy_view) =
-            if use_overlay_view.is_none() || height_view.is_none() || depth_view.is_none() {
-                let t = tracked_create_texture(
-                    device,
-                    &TextureDescriptor {
-                        label: Some("overlay_dummy_tmp"),
-                        size: wgpu::Extent3d {
-                            width: 1,
-                            height: 1,
-                            depth_or_array_layers: 1,
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: TextureDimension::D2,
-                        format: TextureFormat::Rgba8UnormSrgb,
-                        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-                        view_formats: &[],
-                    },
-                )?;
-                let v = t.create_view(&TextureViewDescriptor::default());
-                (Some(t), Some(v))
-            } else {
-                (None, None)
-            };
-
-        let overlay_view = use_overlay_view.unwrap_or_else(|| dummy_view.as_ref().unwrap());
-        let height_view = height_view.unwrap_or_else(|| dummy_view.as_ref().unwrap());
-        let depth_view = depth_view.unwrap_or_else(|| dummy_view.as_ref().unwrap());
-
-        // Fallback dummy storage buffer if page table is not provided
-        let pt_dummy = tracked_create_buffer(
-            device,
-            &BufferDescriptor {
-                label: Some("overlay_page_table_dummy_recreate"),
-                size: std::mem::size_of::<[u32; 8]>() as u64,
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            },
-        )?;
+        let overlay_view = use_overlay_view.unwrap_or(&self.fallback_view);
+        let height_view = height_view.unwrap_or(&self.fallback_view);
+        let depth_view = depth_view.unwrap_or(&self.fallback_view);
         let pt_binding = page_table
             .map(|b| b.as_entire_binding())
-            .unwrap_or_else(|| pt_dummy.as_entire_binding());
+            .unwrap_or_else(|| self.page_table_dummy.as_entire_binding());
 
         self.bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("overlay_bg"),
@@ -493,9 +556,25 @@ impl OverlayRenderer {
                 },
             ],
         });
+        self.raster_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("overlay_raster_bg"),
+            layout: &self.raster_bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniform_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(overlay_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.overlay_sampler),
+                },
+            ],
+        });
 
-        // Keep dummy_tex alive so dummy_view stays valid.
-        drop(dummy_tex);
         Ok(())
     }
 
@@ -513,8 +592,18 @@ impl OverlayRenderer {
             return;
         }
         crate::core::shader_registry::record_shader_use("overlays_shader");
-        pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &self.bind_group, &[]);
+        let raster_only = overlay_en
+            && !altitude_en
+            && !contours_en
+            && self.uniforms.depth_params[0] < 0.5
+            && self.uniforms.halo_params[0] < 0.5;
+        if raster_only {
+            pass.set_pipeline(&self.raster_pipeline);
+            pass.set_bind_group(0, &self.raster_bind_group, &[]);
+        } else {
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.bind_group, &[]);
+        }
         pass.draw(0..3, 0..1);
     }
 }

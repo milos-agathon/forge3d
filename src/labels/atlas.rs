@@ -2,7 +2,7 @@
 
 use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::core::text_overlay::TextInstance;
-use crate::labels::positioned::positioned_glyphs;
+use crate::labels::positioned::{positioned_glyphs, PositionedGlyph};
 use crate::labels::shape::ShapedText;
 use crate::labels::types::GlyphPlacement;
 use serde::Deserialize;
@@ -38,6 +38,27 @@ pub struct GlyphMetrics {
 pub struct GlyphKey {
     pub font_index: usize,
     pub glyph_id: u16,
+}
+
+fn path_glyph_center(
+    glyph: &PositionedGlyph,
+    metric: &GlyphMetrics,
+    placement: &GlyphPlacement,
+    pen: f32,
+    scale: f32,
+    shaped_size: f32,
+) -> [f32; 2] {
+    let half_width = metric.width * scale * 0.5;
+    let half_height = metric.height * scale * 0.5;
+    let baseline_y = glyph.line_index as f32 * shaped_size * 1.2;
+    let local_x =
+        glyph.origin[0] - pen + metric.offset_x * scale + half_width - glyph.advance[0] * 0.5;
+    let local_y = glyph.origin[1] - baseline_y + metric.offset_y * scale + half_height;
+    let (sin, cos) = placement.rotation.sin_cos();
+    [
+        placement.screen_pos[0] + local_x * cos - local_y * sin,
+        placement.screen_pos[1] + local_x * sin + local_y * cos,
+    ]
 }
 
 /// MSDF font atlas with glyph metrics.
@@ -501,11 +522,16 @@ impl MsdfAtlas {
             ));
         }
         let scale = shaped.size / self.atlas_font_size;
+        let mut line_pens = HashMap::<usize, f32>::new();
         positioned
             .into_iter()
             .zip(placements)
-            .filter(|(glyph, _)| glyph.path.is_some())
-            .map(|(glyph, placement)| {
+            .filter_map(|(glyph, placement)| {
+                let pen = *line_pens.entry(glyph.line_index).or_insert(0.0);
+                *line_pens.get_mut(&glyph.line_index).unwrap() += glyph.advance[0];
+                glyph.path.is_some().then_some((glyph, placement, pen))
+            })
+            .map(|(glyph, placement, pen)| {
                 let metric = self
                     .get_glyph_id(glyph.font_index, glyph.glyph_id)
                     .ok_or_else(|| {
@@ -514,17 +540,18 @@ impl MsdfAtlas {
                             glyph.font_index, glyph.glyph_id
                         )
                     })?;
-                let half_width = metric.width * scale * 0.5;
-                let half_height = metric.height * scale * 0.5;
+                let width = metric.width * scale;
+                let height = metric.height * scale;
+                // `placement.screen_pos` is the path sample at pen+advance/2.
+                // Preserve GPOS offsets and atlas bearings exactly once by
+                // moving the quad center relative to that sample, then rotate
+                // the offset into the path tangent frame.
+                let center = path_glyph_center(&glyph, metric, placement, pen, scale, shaped.size);
+                let half_width = width * 0.5;
+                let half_height = height * 0.5;
                 let mut instance = TextInstance::new(
-                    [
-                        placement.screen_pos[0] - half_width,
-                        placement.screen_pos[1] - half_height,
-                    ],
-                    [
-                        placement.screen_pos[0] + half_width,
-                        placement.screen_pos[1] + half_height,
-                    ],
+                    [center[0] - half_width, center[1] - half_height],
+                    [center[0] + half_width, center[1] + half_height],
                     [metric.uv[0], metric.uv[1]],
                     [metric.uv[2], metric.uv[3]],
                     color,
@@ -623,8 +650,10 @@ impl Clone for MsdfAtlas {
 
 #[cfg(test)]
 mod tests {
-    use super::{GlyphKey, MsdfAtlas};
+    use super::{path_glyph_center, GlyphKey, GlyphMetrics, MsdfAtlas};
+    use crate::labels::positioned::PositionedGlyph;
     use crate::labels::renderer_channels_from_atlas;
+    use crate::labels::types::GlyphPlacement;
 
     #[test]
     fn parses_metrics_with_serde_json() {
@@ -693,5 +722,39 @@ mod tests {
         assert_eq!(unicode_map[&102], key);
         assert_eq!(glyphs[&key].font_index, 1);
         assert_eq!(glyphs[&key].glyph_id, 700);
+    }
+
+    #[test]
+    fn path_layout_rotates_gpos_origin_and_atlas_bearing_exactly_once() {
+        let glyph = PositionedGlyph {
+            glyph_id: 7,
+            font_index: 0,
+            cluster: 0,
+            line_index: 0,
+            origin: [18.0, -4.0],
+            advance: [10.0, 0.0],
+            path: None,
+        };
+        let metric = GlyphMetrics {
+            codepoint: 0,
+            font_index: 0,
+            glyph_id: 7,
+            uv: [0.0, 0.0, 1.0, 1.0],
+            width: 8.0,
+            height: 12.0,
+            offset_x: 2.0,
+            offset_y: 3.0,
+            advance: 10.0,
+        };
+        let placement = GlyphPlacement {
+            screen_pos: [100.0, 50.0],
+            rotation: std::f32::consts::FRAC_PI_2,
+            scale: 20.0,
+        };
+
+        let center = path_glyph_center(&glyph, &metric, &placement, 10.0, 2.0, 20.0);
+
+        assert!((center[0] - 86.0).abs() < 1.0e-5);
+        assert!((center[1] - 65.0).abs() < 1.0e-5);
     }
 }

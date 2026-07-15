@@ -8,10 +8,12 @@ mod pick;
 mod polygon_fill;
 mod readback;
 mod render;
+mod timing;
 
 use inputs::*;
 use readback::*;
 use render::*;
+use timing::*;
 
 pub(crate) use basic::*;
 pub(crate) use demo::*;

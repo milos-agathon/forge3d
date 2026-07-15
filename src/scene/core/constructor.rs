@@ -9,6 +9,11 @@ impl Scene {
         let _allocation_scope = allocation_owner.activate();
         let grid = grid.unwrap_or(128).max(2);
         let g = crate::core::gpu::try_ctx()?;
+        // Scene destruction is deferred by wgpu/Metal. Retire any resources
+        // from previously dropped Scenes before allocating a fresh set of
+        // pipelines and bindings; simultaneously live Scenes remain valid.
+        // This is a construction boundary, never a routine-frame stall.
+        g.device.poll(wgpu::Maintain::Wait);
 
         let sample_count = 1;
         let (color, color_view) = create_color_texture(&g.device, width, height)?;

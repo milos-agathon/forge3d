@@ -191,6 +191,15 @@ impl FontCollection {
             .collect()
     }
 
+    /// Immutable source labels in the same order as shaped `font_index` values.
+    ///
+    /// These names are provenance only; callers that persist text artifacts
+    /// must pair them with [`FaceDescriptor::sha256`] instead of trusting a
+    /// path string as font identity.
+    pub fn sources(&self) -> Vec<String> {
+        self.faces.iter().map(|face| face.source.clone()).collect()
+    }
+
     pub fn font_bytes(&self, index: usize) -> Result<&[u8], TextError> {
         self.faces
             .get(index)

@@ -97,6 +97,51 @@ pub fn visual_order(
     Ok(order)
 }
 
+/// Apply UAX #9 L2 to already-constructed glyph groups.
+///
+/// `logical_characters` contains the source-character index of each atomic
+/// base-plus-attached-mark group. L3 therefore happens structurally before L2:
+/// L2 can reverse groups, but it can never split or reverse the glyphs inside a
+/// group.
+pub fn visual_order_groups(
+    paragraph: &BidiParagraph,
+    line_ranges: &[Range<usize>],
+    logical_characters: &[usize],
+) -> Result<Vec<usize>, BidiError> {
+    let length = paragraph.levels.len();
+    if paragraph.classes.len() != length
+        || paragraph.mirrored.len() != length
+        || paragraph.text.chars().count() != length
+        || paragraph.paragraph_level > 1
+        || logical_characters.iter().any(|&index| index >= length)
+    {
+        return Err(BidiError::MalformedParagraph);
+    }
+
+    let mut output = Vec::with_capacity(logical_characters.len());
+    for line in line_ranges {
+        if line.start > line.end || line.end > length {
+            return Err(BidiError::InvalidLineRange(line.clone()));
+        }
+        let levels = line_levels(paragraph, line.clone());
+        let group_indices = logical_characters
+            .iter()
+            .enumerate()
+            .filter(|(_, character)| line.contains(character))
+            .filter(|(_, character)| !explicit::removed_by_x9(paragraph.classes[**character]))
+            .map(|(group, _)| group)
+            .collect::<Vec<_>>();
+        let group_levels = group_indices
+            .iter()
+            .map(|&group| levels[logical_characters[group] - line.start])
+            .collect::<Vec<_>>();
+        let mut local_order = (0..group_indices.len()).collect::<Vec<_>>();
+        reorder_items_l2(&group_levels, &mut local_order);
+        output.extend(local_order.into_iter().map(|local| group_indices[local]));
+    }
+    Ok(output)
+}
+
 pub(super) fn line_levels(paragraph: &BidiParagraph, line: Range<usize>) -> Vec<u8> {
     use BidiClass::{Bn, Fsi, Lre, Lri, Lro, Pdf, Pdi, Rle, Rli, Rlo, Ws, B, S};
     let mut levels = paragraph.levels[line.clone()].to_vec();
@@ -148,6 +193,29 @@ fn reorder_l2(levels: &[u8], line_start: usize, order: &mut [usize]) {
             }
             let mut end = start + 1;
             while end < order.len() && levels[order[end] - line_start] >= threshold {
+                end += 1;
+            }
+            order[start..end].reverse();
+            start = end;
+        }
+    }
+}
+
+fn reorder_items_l2(levels: &[u8], order: &mut [usize]) {
+    let Some(&max_level) = levels.iter().max() else {
+        return;
+    };
+    let Some(min_odd) = levels.iter().copied().filter(|level| level & 1 == 1).min() else {
+        return;
+    };
+    for level in (min_odd..=max_level).rev() {
+        let mut start = 0usize;
+        while start < order.len() {
+            while start < order.len() && levels[order[start]] < level {
+                start += 1;
+            }
+            let mut end = start;
+            while end < order.len() && levels[order[end]] >= level {
                 end += 1;
             }
             order[start..end].reverse();

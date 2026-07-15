@@ -133,6 +133,16 @@ def validate_atlas_metrics(metrics: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(sources, Sequence) or isinstance(sources, (str, bytes)):
             raise ValueError("Atlas metrics font_sources must be a sequence")
         normalized["font_sources"] = [str(source) for source in sources]
+    if "font_sha256" in metrics:
+        hashes = metrics["font_sha256"]
+        if not isinstance(hashes, Sequence) or isinstance(hashes, (str, bytes)):
+            raise ValueError("Atlas metrics font_sha256 must be a sequence")
+        normalized_hashes = [str(value).lower() for value in hashes]
+        if any(len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value) for value in normalized_hashes):
+            raise ValueError("Atlas metrics font_sha256 entries must be lowercase SHA-256 hex")
+        if "font_sources" in normalized and len(normalized_hashes) != len(normalized["font_sources"]):
+            raise ValueError("Atlas metrics font_sources/font_sha256 lengths must match")
+        normalized["font_sha256"] = normalized_hashes
     if "sdf_byte_count" in metrics:
         normalized["sdf_byte_count"] = int(metrics["sdf_byte_count"])
     return normalized
@@ -149,8 +159,13 @@ def save_atlas(
     png.parent.mkdir(parents=True, exist_ok=True)
     metrics.parent.mkdir(parents=True, exist_ok=True)
     save_png(png, atlas.image)
+    canonical = validate_atlas_metrics(atlas.metrics)
+    # Runtime timing is useful diagnostics but is not part of atlas identity.
+    # Normalize it at the persistence boundary so independent processes write
+    # byte-identical canonical JSON without caller-side cleanup.
+    canonical["bake_ms"] = 0.0
     metrics.write_text(
-        json.dumps(validate_atlas_metrics(atlas.metrics), indent=2, sort_keys=True) + "\n",
+        json.dumps(canonical, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     return png, metrics

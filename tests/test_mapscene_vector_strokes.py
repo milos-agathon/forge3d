@@ -251,6 +251,28 @@ def test_native_vector_oit_line_output_has_visible_alpha() -> None:
     assert np.count_nonzero(point_image[..., 3]) > 0
 
 
+def test_native_vector_oit_repeated_frames_are_bitexact() -> None:
+    if not hasattr(f3d, "vector_render_oit_py") or not f3d.has_gpu():
+        return
+
+    frames = [
+        np.asarray(
+            f3d.vector_render_oit_py(
+                32,
+                24,
+                points_xy=[(0.0, 0.0)],
+                point_rgba=[(1.0, 0.5, 0.0, 1.0)],
+                point_size=[6.0],
+            )
+        ).copy()
+        for _ in range(4)
+    ]
+
+    assert all(np.array_equal(frames[0], frame) for frame in frames[1:])
+    assert 0 < np.count_nonzero(frames[0][..., 3]) < frames[0].shape[0] * frames[0].shape[1]
+    assert frames[0][0, 0].tolist() == [0, 0, 0, 0]
+
+
 def test_native_vector_oit_edl_output_has_visible_alpha() -> None:
     if not hasattr(f3d, "vector_render_oit_edl_py") or not f3d.has_gpu():
         return

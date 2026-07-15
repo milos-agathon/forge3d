@@ -210,7 +210,6 @@ pub use shadows::{
     ShadowManager, ShadowManagerConfig,
 };
 
-#[cfg(feature = "extension-module")]
 // PyO3 module entry point so Python can `import forge3d._forge3d`
 // This must be named exactly `_forge3d` to match [tool.maturin].module-name in pyproject.toml
 #[cfg(feature = "extension-module")]

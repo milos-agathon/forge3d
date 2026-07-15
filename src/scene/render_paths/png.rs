@@ -19,6 +19,7 @@ impl Scene {
         // Read back live GPU-pass timings, record each into the certificate,
         // and freeze this render's capture (one render = one capture).
         self.record_render_timings(&mut timing);
+        crate::core::certificate::record_pass("scene.readback_copy", 0.0, 1);
         self.store_render_timing(timing);
         self.finish_certificate_capture(certificate_capture);
 
@@ -60,7 +61,6 @@ impl Scene {
             }
         }
 
-        let main_scope = scene_ts_begin(timing, encoder, "scene.main");
         {
             let (target_view, resolve_target) = if self.sample_count > 1 {
                 (
@@ -94,6 +94,7 @@ impl Scene {
                         stencil_ops: None,
                     });
 
+            let timestamp_writes = scene_render_pass_timestamps(timing, "scene.main", 1);
             let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene-rp"),
                 color_attachments: &[
@@ -125,6 +126,7 @@ impl Scene {
                     }),
                 ],
                 depth_stencil_attachment: depth_attachment,
+                timestamp_writes,
                 ..Default::default()
             });
 
@@ -274,7 +276,6 @@ impl Scene {
                 }
             }
         }
-        scene_ts_end(timing, encoder, main_scope, 1);
 
         if self.ssao_enabled {
             crate::core::shader_registry::record_shader_use("ssao-compute");
@@ -310,4 +311,3 @@ impl Scene {
         Ok(())
     }
 }
-

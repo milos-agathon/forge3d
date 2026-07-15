@@ -64,7 +64,11 @@ impl Scene {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                // This is a 2D pixel compositor, not a lighting input. Keep
+                // the uploaded bytes in the scene target's unorm color space;
+                // Metal otherwise returned a transparent first frame for the
+                // sRGB upload and decoded source colors on later frames.
+                format: wgpu::TextureFormat::Rgba8Unorm,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             },
@@ -96,6 +100,16 @@ impl Scene {
                 depth_or_array_layers: 1,
             },
         );
+        // Flush constructor-time queue writes and this texture upload into a
+        // distinct submission before the texture participates in a bind
+        // group. On Metal, combining the Scene's initial resource writes with
+        // the first overlay draw otherwise yields a persistently transparent
+        // color target; an empty submit is the wgpu upload boundary and does
+        // adds no work to routine frames. Waiting here also guarantees that a
+        // short-lived compositor Scene cannot drop the upload resources while
+        // Metal still has the initial batch in flight.
+        g.queue.submit(std::iter::empty());
+        g.device.poll(wgpu::Maintain::Wait);
         let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
 
         // Update overlay renderer state

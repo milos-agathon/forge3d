@@ -23,6 +23,22 @@ def load_cases() -> list[dict]:
 CASES = load_cases()
 
 
+def _harfbuzz_fixture_projection(runs: list[dict]) -> list[dict]:
+    """Project the additive public payload onto the committed HB oracle schema."""
+    run_keys = ("text_range", "direction", "script", "language", "bidi_levels")
+    glyph_keys = ("glyph_id", "font_index", "cluster", "x_advance", "x_offset")
+    return [
+        {
+            **{key: run[key] for key in run_keys},
+            "glyphs": [
+                {key: glyph[key] for key in glyph_keys}
+                for glyph in run["glyphs"]
+            ],
+        }
+        for run in runs
+    ]
+
+
 def test_committed_corpus_has_at_least_200_cases_across_required_groups():
     assert len(CASES) >= 200
     identities = {
@@ -58,7 +74,7 @@ def test_shape_matches_harfbuzz(case):
     shaped = forge3d.text.shape(
         case["text"], fonts, case["size"], **case["options"]
     )
-    assert shaped.to_dict()["runs"] == case["runs"]
+    assert _harfbuzz_fixture_projection(shaped.to_dict()["runs"]) == case["runs"]
 
 
 def test_shaped_text_is_native_and_immutable():
@@ -77,15 +93,42 @@ def test_shape_is_size_invariant_in_q26_6_space():
     assert small == large
 
 
-def test_public_payload_is_the_task_7_integer_conformance_surface():
+def test_public_payload_keeps_integer_conformance_and_adds_positioning_provenance():
     shaped = forge3d.text.shape(
         "Map", [str(ROOT / "assets/fonts/NotoSans-subset.ttf")], 12.0
     )
     payload = shaped.to_dict()
-    assert set(payload) == {"text", "size", "levels", "legal_breaks", "runs"}
-    assert set(payload["runs"][0]["glyphs"][0]) == {
-        "glyph_id", "font_index", "cluster", "x_advance", "x_offset"
+    assert set(payload) == {
+        "text",
+        "size",
+        "levels",
+        "legal_breaks",
+        "font_sources",
+        "font_sha256",
+        "runs",
+        "positioned_glyphs",
     }
+    assert set(payload["runs"][0]["glyphs"][0]) == {
+        "glyph_id",
+        "font_index",
+        "cluster",
+        "x_advance",
+        "y_advance",
+        "x_offset",
+        "y_offset",
+        "attached_to",
+    }
+    assert set(payload["positioned_glyphs"][0]) == {
+        "glyph_id",
+        "font_index",
+        "cluster",
+        "line_index",
+        "origin",
+        "advance",
+        "has_outline",
+    }
+    assert payload["font_sources"]
+    assert all(len(digest) == 64 for digest in payload["font_sha256"])
 
 
 def test_rtl_glyphs_remain_logical_until_line_ranges_are_known():

@@ -1,6 +1,6 @@
 use crate::labels::font::{FontCollection, FontRequest, TextError as FontError};
 use crate::labels::msdf::{bake_msdf_atlas, bake_msdf_atlas_from_shaped, BakedMsdfAtlas};
-use crate::labels::positioned::{positioned_outlines, svg_path_data};
+use crate::labels::positioned::{positioned_glyphs, positioned_outlines, svg_path_data};
 use crate::labels::raster::rasterize;
 use crate::labels::shape::{self, Direction, FeatureSetting, ShapedText, TextError};
 use numpy::{PyArray2, PyArray3};
@@ -11,7 +11,8 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fs;
 use std::ops::Range;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::UNIX_EPOCH;
 use ttf_parser::Tag;
 
 #[pyclass(name = "ShapedText", module = "forge3d._forge3d", frozen)]
@@ -115,6 +116,21 @@ impl PyShapedText {
         output.set_item("size", self.inner.size)?;
         output.set_item("levels", &self.inner.levels)?;
         output.set_item("legal_breaks", &self.inner.legal_breaks)?;
+        output.set_item("font_sources", self.inner.fonts.sources())?;
+        output.set_item(
+            "font_sha256",
+            self.inner
+                .face_descriptors
+                .iter()
+                .map(|descriptor| {
+                    descriptor
+                        .sha256
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>(),
+        )?;
         let runs = PyList::empty_bound(py);
         for run in &self.inner.runs {
             let item = PyDict::new_bound(py);
@@ -136,13 +152,32 @@ impl PyShapedText {
                 value.set_item("font_index", glyph.font_index)?;
                 value.set_item("cluster", glyph.cluster)?;
                 value.set_item("x_advance", glyph.x_advance)?;
+                value.set_item("y_advance", glyph.y_advance)?;
                 value.set_item("x_offset", glyph.x_offset)?;
+                value.set_item("y_offset", glyph.y_offset)?;
+                value.set_item("attached_to", glyph.attached_to)?;
                 glyphs.append(value)?;
             }
             item.set_item("glyphs", glyphs)?;
             runs.append(item)?;
         }
         output.set_item("runs", runs)?;
+        let range = 0..self.inner.text.chars().count();
+        let positioned = positioned_glyphs(&self.inner, std::slice::from_ref(&range))
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let positioned_output = PyList::empty_bound(py);
+        for glyph in positioned {
+            let value = PyDict::new_bound(py);
+            value.set_item("glyph_id", glyph.glyph_id)?;
+            value.set_item("font_index", glyph.font_index)?;
+            value.set_item("cluster", glyph.cluster)?;
+            value.set_item("line_index", glyph.line_index)?;
+            value.set_item("origin", glyph.origin)?;
+            value.set_item("advance", glyph.advance)?;
+            value.set_item("has_outline", glyph.path.is_some())?;
+            positioned_output.append(value)?;
+        }
+        output.set_item("positioned_glyphs", positioned_output)?;
         Ok(output.into())
     }
 
@@ -228,6 +263,38 @@ fn load_fonts(py: Python<'_>, font_chain: Vec<String>) -> PyResult<Arc<FontColle
             diagnostic(py, "font_chain_required"),
         ));
     }
+    type FontCacheKey = Vec<(String, u64, u128)>;
+    static FONT_CACHE: LazyLock<Mutex<HashMap<FontCacheKey, Arc<FontCollection>>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+
+    let mut key = Vec::with_capacity(font_chain.len());
+    for path in &font_chain {
+        let metadata = fs::metadata(path).map_err(|error| {
+            let reason = if error.kind() == std::io::ErrorKind::NotFound {
+                "font_not_found"
+            } else {
+                "font_io_error"
+            };
+            let value = diagnostic(py, reason);
+            value.set_item("font", path).unwrap();
+            exception_with_diagnostic::<PyValueError>(
+                py,
+                format!("failed to inspect font {path}: {error}"),
+                value,
+            )
+        })?;
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+            .map_or(0, |value| value.as_nanos());
+        let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.into());
+        key.push((canonical.display().to_string(), metadata.len(), modified));
+    }
+    if let Some(fonts) = FONT_CACHE.lock().unwrap().get(&key).cloned() {
+        return Ok(fonts);
+    }
+
     let requests = font_chain
         .into_iter()
         .map(|path| {
@@ -248,7 +315,7 @@ fn load_fonts(py: Python<'_>, font_chain: Vec<String>) -> PyResult<Arc<FontColle
             Ok(FontRequest::from_bytes(path, bytes))
         })
         .collect::<PyResult<Vec<_>>>()?;
-    FontCollection::load(&requests)
+    let fonts = FontCollection::load(&requests)
         .map(Arc::new)
         .map_err(|error| {
             exception_with_diagnostic::<PyValueError>(
@@ -256,7 +323,9 @@ fn load_fonts(py: Python<'_>, font_chain: Vec<String>) -> PyResult<Arc<FontColle
                 error.to_string(),
                 font_error_diagnostic(py, &error),
             )
-        })
+        })?;
+    FONT_CACHE.lock().unwrap().insert(key, Arc::clone(&fonts));
+    Ok(fonts)
 }
 
 #[pyfunction]

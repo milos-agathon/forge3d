@@ -10,6 +10,22 @@ import unicodedata
 from pathlib import Path
 
 
+SOURCE_HASHES = {
+    "BidiBrackets.txt": "dadbaf38a0d0246e5b805bf8725cb81b7c621f93d030595635f5ba2c2f179428",
+    "emoji-data.txt": "2cb2bb9455cda83e8481541ecf5b6dfda66a3bb89efa3fa7c5297eccf607b72b",
+}
+
+
+def verify_sources(bidi_brackets: Path, emoji_data: Path) -> None:
+    for path in (bidi_brackets, emoji_data):
+        expected = SOURCE_HASHES[path.name]
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual != expected:
+            raise ValueError(
+                f"SHA-256 mismatch for {path.name}: expected {expected}, got {actual}"
+            )
+
+
 def rust_char(value: int) -> str:
     character = chr(value)
     if character in "()[]{}":
@@ -83,6 +99,7 @@ def main() -> None:
     parser.add_argument("--emoji-data", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     arguments = parser.parse_args()
+    verify_sources(arguments.bidi_brackets, arguments.emoji_data)
     arguments.output_dir.mkdir(parents=True, exist_ok=True)
     (arguments.output_dir / "bidi_brackets.rs").write_text(
         generate_brackets(arguments.bidi_brackets), encoding="utf-8", newline="\n"

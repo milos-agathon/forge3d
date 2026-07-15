@@ -208,30 +208,26 @@ class MapPlate:
             dst[..., :3] = src[..., :3]
 
     def _render_title(self) -> np.ndarray | None:
-        """Render title text to an RGBA image using PIL."""
+        """Render title text through the packaged native shaping pipeline."""
         if self._title is None:
             return None
-        try:
-            from PIL import Image, ImageDraw, ImageFont
-        except ImportError:
-            return None
+        from ._map_scene_render import _draw_text
+
         font_size = self._title.font_size
-        try:
-            font = ImageFont.truetype("DejaVuSans.ttf", font_size)
-        except OSError:
-            try:
-                font = ImageFont.truetype("Arial.ttf", font_size)
-            except OSError:
-                font = ImageFont.load_default()
-        dummy = Image.new("RGBA", (1, 1))
-        draw = ImageDraw.Draw(dummy)
-        bbox = draw.textbbox((0, 0), self._title.text, font=font)
-        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        tw = max(1, int(np.ceil(len(self._title.text) * font_size * 0.68)))
+        th = max(1, int(np.ceil(font_size * 1.35)))
         padding = 10
-        img = Image.new("RGBA", (tw + padding * 2, th + padding * 2), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
-        draw.text((padding, padding), self._title.text, font=font, fill=self._title.color)
-        return np.array(img, dtype=np.uint8)
+        image = np.zeros((th + padding * 2, tw + padding * 2, 4), dtype=np.uint8)
+        _draw_text(
+            image,
+            self._title.text,
+            (padding, padding),
+            color=self._title.color,
+            halo=(0, 0, 0, 0),
+            halo_width_px=0.0,
+            font_size=float(font_size),
+        )
+        return image
 
     def _position_element(
         self,

@@ -107,9 +107,21 @@ module-name = "forge3d._forge3d"
 cargo-extra-args = "--profile release-lto"
 # Generate abi3 wheels for Python 3.10+ compatibility
 features = ["extension-module", "weighted-oit", "enable-tbn", "enable-gpu-instancing", "enable-staging-rings", "copc_laz", "cog_streaming", "gis-remote", "geos-topology"]
+include = [
+    { path = "assets/fonts/*.ttf", format = "sdist" },
+    { path = "assets/fonts/*-OFL.txt", format = "sdist" },
+    { path = "assets/fonts/PROVENANCE.md", format = "sdist" },
+]
 exclude = [
     "_build/**",
-    "assets/**",
+    "assets/colormaps/**",
+    "assets/geojson/**",
+    "assets/gpkg/**",
+    "assets/lidar/**",
+    "assets/objects/**",
+    "assets/tif/**",
+    "assets/*.mp4",
+    "assets/*.png",
     "dist*/**",
     "docs/**",
     "logs/**",
@@ -135,7 +147,7 @@ exclude = ["tests*"]
 
 [tool.setuptools.package-data]
 # Include data files in Python package
-"forge3d" = ["data/*.rgba", "data/*.npy", "data/*.geojson", "data/fonts/*.png", "data/fonts/*.json", "data/fonts/*.ttf", "assets/*.png"]
+"forge3d" = ["data/*.rgba", "data/*.npy", "data/*.geojson", "data/fonts/*.png", "data/fonts/*.json", "data/fonts/*.ttf", "data/fonts/*.txt", "data/fonts/*.md", "assets/*.png"]
 
 [project.entry-points."forge3d.colormaps"]
 # third parties can register here; example kept for docs

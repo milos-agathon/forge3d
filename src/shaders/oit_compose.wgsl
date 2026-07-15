@@ -7,9 +7,6 @@ var color_accumulation: texture_2d<f32>;
 @group(0) @binding(1)
 var reveal_accumulation: texture_2d<f32>;
 
-@group(0) @binding(2)
-var tex_sampler: sampler;
-
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -34,9 +31,13 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Sample accumulation buffers
-    let accum_color = textureSample(color_accumulation, tex_sampler, in.uv);
-    let reveal = textureSample(reveal_accumulation, tex_sampler, in.uv).r;
+    // Resolve one accumulation texel into the corresponding output pixel.
+    // These attachments have identical extents; filtering is both unnecessary
+    // and harmful here (Metal may return poison values for the float resolve
+    // sample). Fragment position is already in framebuffer pixel coordinates.
+    let pixel = vec2<i32>(in.clip_position.xy);
+    let accum_color = textureLoad(color_accumulation, pixel, 0);
+    let reveal = textureLoad(reveal_accumulation, pixel, 0).r;
     
     // Weighted OIT resolve
     // accum_color.rgb contains weighted color sum

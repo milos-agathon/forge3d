@@ -1,5 +1,5 @@
-use super::distance::{contains, correct_collision, edge_distance, median};
-use super::edge::{color_edges, flatten_path, Contour, Edge};
+use super::distance::{collision_mask, contains, correct_collision, edge_distance};
+use super::edge::{color_contours, flatten_path, Contour, Edge};
 use crate::labels::font::{FontCollection, FontGlyph, TextError};
 use crate::labels::shape::ShapedText;
 use lyon_path::math::Point;
@@ -150,6 +150,7 @@ fn field(edges: &[Edge], point: Point, inside: bool) -> ([f32; 3], f32) {
     let mut channels = [f32::INFINITY; 3];
     let mut channel_true = [f32::INFINITY; 3];
     let mut nearest = f32::INFINITY;
+    let sign = if inside { 1.0 } else { -1.0 };
     for edge in edges {
         let distance = edge_distance(point, *edge);
         nearest = nearest.min(distance.true_distance.abs());
@@ -158,35 +159,23 @@ fn field(edges: &[Edge], point: Point, inside: bool) -> ([f32; 3], f32) {
                 && distance.true_distance.abs() < channel_true[channel]
             {
                 channel_true[channel] = distance.true_distance.abs();
-                *value = distance.pseudo_distance;
+                // Edge winding identifies the locally interior side of one
+                // contour, but glyph fill is the non-zero union of every
+                // contour (including holes). Preserve the colored
+                // pseudo-distance magnitude and apply the independently
+                // point-sampled fill sign so the RGB median has canonical
+                // inside/outside semantics before interpolation.
+                *value = distance.pseudo_distance.abs().copysign(sign);
             }
         }
     }
-    let sign = if inside { 1.0 } else { -1.0 };
     for channel in &mut channels {
         if !channel.is_finite() {
             *channel = nearest.copysign(sign);
         }
     }
     let truth = nearest.copysign(sign);
-    let corrected = correct_collision(channels, truth);
-    debug_assert_eq!(median(corrected) >= 0.0, truth >= 0.0);
-    (corrected, truth)
-}
-
-fn majority_coverage_inside(contours: &[Contour], pixel_x: u32, pixel_y: u32) -> bool {
-    const SUBPIXELS: u32 = 8;
-    let mut covered = 0u32;
-    for subpixel_y in 0..SUBPIXELS {
-        for subpixel_x in 0..SUBPIXELS {
-            let sample = Point::new(
-                pixel_x as f32 + (subpixel_x as f32 + 0.5) / SUBPIXELS as f32,
-                pixel_y as f32 + (subpixel_y as f32 + 0.5) / SUBPIXELS as f32,
-            );
-            covered += u32::from(contains(contours, sample));
-        }
-    }
-    covered * 2 >= SUBPIXELS * SUBPIXELS
+    (channels, truth)
 }
 
 fn bake_prepared(
@@ -224,18 +213,41 @@ fn bake_prepared(
             &glyph.contours,
             Point::new(x as f32 - offset_x, y as f32 - offset_y),
         );
-        let edges: Vec<_> = contours.iter().flat_map(color_edges).collect();
-        for pixel_y in y..y + cell_height {
-            for pixel_x in x..x + cell_width {
+        let edges = color_contours(&contours);
+        let mut fields = Vec::with_capacity(cell_width as usize * cell_height as usize);
+        let mut scalar_fields = Vec::with_capacity(fields.capacity());
+        for local_y in 0..cell_height {
+            for local_x in 0..cell_width {
+                let pixel_x = x + local_x;
+                let pixel_y = y + local_y;
+                let sample = Point::new(pixel_x as f32 + 0.5, pixel_y as f32 + 0.5);
                 let (rgb, scalar) = if edges.is_empty() {
                     ([-px_range; 3], -px_range)
                 } else {
-                    let sample = Point::new(pixel_x as f32 + 0.5, pixel_y as f32 + 0.5);
-                    field(
-                        &edges,
-                        sample,
-                        majority_coverage_inside(&contours, pixel_x, pixel_y),
-                    )
+                    field(&edges, sample, contains(&contours, sample))
+                };
+                fields.push(rgb);
+                scalar_fields.push(scalar);
+            }
+        }
+        let corrections = collision_mask(
+            &contours,
+            &edges,
+            &fields,
+            cell_width as usize,
+            cell_height as usize,
+            Point::new(x as f32, y as f32),
+        );
+        for local_y in 0..cell_height {
+            for local_x in 0..cell_width {
+                let index = local_y as usize * cell_width as usize + local_x as usize;
+                let pixel_x = x + local_x;
+                let pixel_y = y + local_y;
+                let scalar = scalar_fields[index];
+                let rgb = if corrections[index] {
+                    correct_collision(fields[index], scalar)
+                } else {
+                    fields[index]
                 };
                 let target = (pixel_y as usize * width as usize + pixel_x as usize) * 3;
                 for channel in 0..3 {
@@ -337,7 +349,7 @@ pub fn bake_msdf_atlas_from_shaped(
 
 #[cfg(test)]
 mod tests {
-    use super::{bake_msdf_atlas_from_shaped, field, median};
+    use super::{bake_msdf_atlas_from_shaped, field};
     use crate::labels::font::{FontCollection, FontRequest};
     use crate::labels::msdf::distance::contains;
     use crate::labels::msdf::edge::{color_edges, Contour};
@@ -352,16 +364,16 @@ mod tests {
         }
     }
 
-    fn assert_field_sign(contours: &[Contour], samples: &[(f32, f32)]) {
+    fn assert_scalar_field_sign(contours: &[Contour], samples: &[(f32, f32)]) {
         let edges: Vec<_> = contours.iter().flat_map(color_edges).collect();
         for &(x, y) in samples {
             let point = Point::new(x, y);
             let inside = contains(contours, point);
-            let reconstructed = median(field(&edges, point, inside).0);
+            let scalar = field(&edges, point, inside).1;
             assert_eq!(
-                reconstructed >= 0.0,
+                scalar >= 0.0,
                 inside,
-                "wrong MSDF sign at ({x}, {y})"
+                "wrong point-sampled scalar sign at ({x}, {y})"
             );
         }
     }
@@ -377,7 +389,7 @@ mod tests {
         ]);
         let hole = contour(&[(3.0, 3.0), (3.0, 7.0), (7.0, 7.0), (7.0, 3.0), (3.0, 3.0)]);
         let samples = [(1.0, 1.0), (2.9, 5.0), (5.0, 5.0), (11.0, 5.0)];
-        assert_field_sign(&[outer.clone(), hole.clone()], &samples);
+        assert_scalar_field_sign(&[outer.clone(), hole.clone()], &samples);
 
         let reversed = [
             Contour {
@@ -387,7 +399,7 @@ mod tests {
                 points: hole.points.into_iter().rev().collect(),
             },
         ];
-        assert_field_sign(&reversed, &samples);
+        assert_scalar_field_sign(&reversed, &samples);
     }
 
     #[test]
@@ -402,8 +414,8 @@ mod tests {
             (10.8, 2.8),
             (11.2, 3.2),
         ];
-        assert_field_sign(&[acute], &samples);
-        assert_field_sign(&[obtuse], &samples);
+        assert_scalar_field_sign(&[acute], &samples);
+        assert_scalar_field_sign(&[obtuse], &samples);
     }
 
     #[test]

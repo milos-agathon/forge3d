@@ -1,4 +1,4 @@
-use crate::labels::shape::bidi::{resolve_bidi, visual_order, BidiError};
+use crate::labels::shape::bidi::{resolve_bidi, visual_order_groups, BidiError};
 use crate::labels::shape::{ShapedGlyph, ShapedText, TextError};
 use lyon_path::{math::point, Event, Path};
 use std::collections::HashMap;
@@ -95,6 +95,7 @@ fn transformed(path: &Path, scale: f32, x: f32, y: f32) -> Path {
 }
 
 struct GlyphGroup<'a> {
+    logical_character: usize,
     glyphs: Vec<&'a ShapedGlyph>,
 }
 
@@ -117,16 +118,14 @@ fn attachment_root(glyphs: &[ShapedGlyph], index: usize) -> usize {
 /// UAX #9 L3 requires a combining mark to remain after its base even when L2 reverses
 /// the source characters. Grouping on the GPOS attachment graph before visual traversal
 /// makes the base the reorder unit while retaining the original mark order within it.
-fn glyph_groups_by_character(shaped: &ShapedText) -> Vec<Vec<GlyphGroup<'_>>> {
+fn glyph_groups(shaped: &ShapedText) -> Vec<GlyphGroup<'_>> {
     let byte_to_character: HashMap<usize, usize> = shaped
         .text
         .char_indices()
         .enumerate()
         .map(|(character, (byte, _))| (byte, character))
         .collect();
-    let mut groups = (0..shaped.text.chars().count())
-        .map(|_| Vec::new())
-        .collect::<Vec<Vec<GlyphGroup<'_>>>>();
+    let mut groups = Vec::new();
     for run in &shaped.runs {
         let mut roots = Vec::new();
         for index in 0..run.glyphs.len() {
@@ -150,7 +149,10 @@ fn glyph_groups_by_character(shaped: &ShapedText) -> Vec<Vec<GlyphGroup<'_>>> {
                     })
                     .map(|(_, glyph)| glyph),
             );
-            groups[character].push(GlyphGroup { glyphs });
+            groups.push(GlyphGroup {
+                logical_character: character,
+                glyphs,
+            });
         }
     }
     groups
@@ -169,8 +171,14 @@ pub fn positioned_glyphs(
     }
     let mut paragraph = resolve_bidi(&shaped.text, None)?;
     paragraph.levels.clone_from(&shaped.levels);
-    let visual = visual_order(&paragraph, line_ranges)?;
-    let groups = glyph_groups_by_character(shaped);
+    // UAX #9 L3: construct attachment groups before applying L2 so the base
+    // and all attached marks are one indivisible visual-reordering unit.
+    let groups = glyph_groups(shaped);
+    let logical_characters = groups
+        .iter()
+        .map(|group| group.logical_character)
+        .collect::<Vec<_>>();
+    let visual_groups = visual_order_groups(&paragraph, line_ranges, &logical_characters)?;
     let line_for_character: Vec<_> = (0..character_count)
         .map(|character| {
             line_ranges
@@ -181,48 +189,48 @@ pub fn positioned_glyphs(
     let mut cursors = vec![0.0f32; line_ranges.len()];
     let mut output = Vec::new();
 
-    for character in visual {
+    for group_index in visual_groups {
+        let group = &groups[group_index];
+        let character = group.logical_character;
         let Some(line_index) = line_for_character[character] else {
             continue;
         };
         let mut mirror_pending = true;
-        for group in &groups[character] {
-            for glyph in &group.glyphs {
-                let mirrored = if mirror_pending {
-                    paragraph.mirrored[character]
-                        .map(|character| shaped.fonts.glyph_for(character))
-                        .transpose()?
-                } else {
-                    None
-                };
-                mirror_pending = false;
-                let font_index = mirrored.map_or(glyph.font_index, |value| value.font_index);
-                let glyph_id = mirrored.map_or(glyph.glyph_id, |value| value.glyph_id.0);
-                let metrics = shaped.fonts.metrics(font_index)?;
-                let scale = shaped.size / f32::from(metrics.units_per_em);
-                let x = cursors[line_index] + glyph.x_offset as f32 * shaped.size / 64.0;
-                let y = line_index as f32 * shaped.size * 1.2
-                    - glyph.y_offset as f32 * shaped.size / 64.0;
-                let advance = [
-                    glyph.x_advance as f32 * shaped.size / 64.0,
-                    glyph.y_advance as f32 * shaped.size / 64.0,
-                ];
-                let path = match shaped.fonts.outline(font_index, GlyphId(glyph_id)) {
-                    Ok(outline) => Some(transformed(&outline, scale, x, y)),
-                    Err(crate::labels::font::TextError::MissingOutline { .. }) => None,
-                    Err(error) => return Err(error.into()),
-                };
-                output.push(PositionedGlyph {
-                    glyph_id,
-                    font_index,
-                    cluster: glyph.cluster,
-                    line_index,
-                    origin: [x, y],
-                    advance,
-                    path,
-                });
-                cursors[line_index] += advance[0];
-            }
+        for glyph in &group.glyphs {
+            let mirrored = if mirror_pending {
+                paragraph.mirrored[character]
+                    .map(|character| shaped.fonts.glyph_for(character))
+                    .transpose()?
+            } else {
+                None
+            };
+            mirror_pending = false;
+            let font_index = mirrored.map_or(glyph.font_index, |value| value.font_index);
+            let glyph_id = mirrored.map_or(glyph.glyph_id, |value| value.glyph_id.0);
+            let metrics = shaped.fonts.metrics(font_index)?;
+            let scale = shaped.size / f32::from(metrics.units_per_em);
+            let x = cursors[line_index] + glyph.x_offset as f32 * shaped.size / 64.0;
+            let y =
+                line_index as f32 * shaped.size * 1.2 - glyph.y_offset as f32 * shaped.size / 64.0;
+            let advance = [
+                glyph.x_advance as f32 * shaped.size / 64.0,
+                glyph.y_advance as f32 * shaped.size / 64.0,
+            ];
+            let path = match shaped.fonts.outline(font_index, GlyphId(glyph_id)) {
+                Ok(outline) => Some(transformed(&outline, scale, x, y)),
+                Err(crate::labels::font::TextError::MissingOutline { .. }) => None,
+                Err(error) => return Err(error.into()),
+            };
+            output.push(PositionedGlyph {
+                glyph_id,
+                font_index,
+                cluster: glyph.cluster,
+                line_index,
+                origin: [x, y],
+                advance,
+                path,
+            });
+            cursors[line_index] += advance[0];
         }
     }
     Ok(output)
@@ -341,7 +349,7 @@ pub fn outline_bounds(outlines: &[PositionedOutline]) -> Option<[f32; 4]> {
 
 #[cfg(test)]
 mod tests {
-    use super::{positioned_outlines, svg_path_data};
+    use super::{positioned_glyphs, positioned_outlines, svg_path_data};
     use crate::labels::font::{FontCollection, FontRequest};
     use crate::labels::shape::{self, Direction, ShapedGlyph, ShapedRun, ShapedText};
     use std::sync::Arc;
@@ -401,12 +409,13 @@ mod tests {
             .unwrap(),
         );
         let base = fonts.glyph_for('ב').unwrap().glyph_id.0;
-        let mark = fonts.glyph_for('י').unwrap().glyph_id.0;
+        let first_mark = fonts.glyph_for('י').unwrap().glyph_id.0;
+        let second_mark = fonts.glyph_for('ו').unwrap().glyph_id.0;
         let trailing = fonts.glyph_for('ד').unwrap().glyph_id.0;
         let shaped = ShapedText {
-            text: "בְד".to_owned(),
+            text: "בְֱד".to_owned(),
             runs: vec![ShapedRun {
-                text_range: 0..6,
+                text_range: 0..8,
                 glyphs: vec![
                     ShapedGlyph {
                         glyph_id: base,
@@ -419,7 +428,7 @@ mod tests {
                         attached_to: None,
                     },
                     ShapedGlyph {
-                        glyph_id: mark,
+                        glyph_id: first_mark,
                         font_index: 0,
                         cluster: 2,
                         x_advance: 0,
@@ -429,9 +438,19 @@ mod tests {
                         attached_to: Some(0),
                     },
                     ShapedGlyph {
-                        glyph_id: trailing,
+                        glyph_id: second_mark,
                         font_index: 0,
                         cluster: 4,
+                        x_advance: 0,
+                        y_advance: 0,
+                        x_offset: -32,
+                        y_offset: 32,
+                        attached_to: Some(0),
+                    },
+                    ShapedGlyph {
+                        glyph_id: trailing,
+                        font_index: 0,
+                        cluster: 6,
                         x_advance: 64,
                         y_advance: 0,
                         x_offset: 0,
@@ -439,24 +458,36 @@ mod tests {
                         attached_to: None,
                     },
                 ],
-                bidi_levels: vec![1, 1, 1],
+                bidi_levels: vec![1, 1, 1, 1],
                 direction: Direction::RightToLeft,
                 script: Tag::from_bytes(b"hebr"),
                 language: None,
             }],
-            levels: vec![1, 1, 1],
-            legal_breaks: vec![0, 3],
+            levels: vec![1, 1, 1, 1],
+            legal_breaks: vec![0, 4],
             face_descriptors: fonts.descriptors(),
             fonts,
             size: 16.0,
         };
 
-        let line = 0..3;
-        let outlines = positioned_outlines(&shaped, std::slice::from_ref(&line)).unwrap();
-        let clusters: Vec<_> = outlines.iter().map(|outline| outline.cluster).collect();
+        let line = 0..4;
+        let positioned = positioned_glyphs(&shaped, std::slice::from_ref(&line)).unwrap();
+        let clusters: Vec<_> = positioned.iter().map(|glyph| glyph.cluster).collect();
+        let glyph_ids: Vec<_> = positioned.iter().map(|glyph| glyph.glyph_id).collect();
+        let origins: Vec<_> = positioned.iter().map(|glyph| glyph.origin).collect();
+        let advances: Vec<_> = positioned.iter().map(|glyph| glyph.advance).collect();
 
-        // L2 produces alef, mark, bet at the character level. L3 turns the
-        // attachment into an atomic bet+sheva group, yielding alef, bet, mark.
-        assert_eq!(clusters, vec![4, 0, 2]);
+        // L2 reverses the character groups. L3 keeps both marks after the base,
+        // in their original attachment order, while retaining exact GPOS data.
+        assert_eq!(clusters, vec![6, 0, 2, 4]);
+        assert_eq!(glyph_ids, vec![trailing, base, first_mark, second_mark]);
+        assert_eq!(
+            origins,
+            vec![[0.0, 0.0], [16.0, 0.0], [20.0, -6.0], [24.0, -8.0]]
+        );
+        assert_eq!(
+            advances,
+            vec![[16.0, 0.0], [16.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
+        );
     }
 }

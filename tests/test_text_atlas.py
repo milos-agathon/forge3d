@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 import numpy as np
@@ -85,6 +87,30 @@ def test_default_bake_is_deterministic_and_uses_committed_font():
     assert (default_latin_atlas_paths()[0].parent / "NotoSansLatin-subset.ttf").exists()
 
 
+def test_independent_atlas_saves_are_byte_identical(tmp_path):
+    first = bake_atlas(charset="Map", font_size=18, px_range=4, padding=2)
+    second = bake_atlas(charset="Map", font_size=18, px_range=4, padding=2)
+
+    first_png, first_json = save_atlas(first, tmp_path / "first.png", tmp_path / "first.json")
+    second_png, second_json = save_atlas(second, tmp_path / "second.png", tmp_path / "second.json")
+
+    assert first_png.read_bytes() == second_png.read_bytes()
+    assert first_json.read_bytes() == second_json.read_bytes()
+    assert json.loads(first_json.read_text(encoding="utf-8"))["bake_ms"] == 0.0
+
+
+def test_shaped_atlas_rejects_a_different_supplied_font_chain():
+    root = Path(__file__).resolve().parents[1]
+    latin = root / "assets" / "fonts" / "NotoSansLatin-subset.ttf"
+    arabic = root / "assets" / "fonts" / "NotoSansArabic-subset.ttf"
+    shaped = f3d.text.shape("Map", [str(latin)], 18.0)
+
+    with pytest.raises(f3d.text.TextShapingError) as caught:
+        f3d.text.bake_msdf_atlas([str(arabic)], shaped, 18.0)
+
+    assert caught.value.diagnostics[0]["reason"] == "atlas_font_mismatch"
+
+
 def test_text_atlas_has_no_bitmap_or_optional_dependency_tokens():
     source = Path("python/forge3d/text_atlas.py").read_text(encoding="utf-8")
     for token in ("PIL", "ImageFont", "ImageDraw", "scipy", "_sdf", "bitmap-mask"):
@@ -114,10 +140,39 @@ def test_default_latin_atlas_is_in_package_data_and_sdist_manifest():
     assert "data/fonts/*.png" in package_data
     assert "data/fonts/*.json" in package_data
     assert "data/fonts/*.ttf" in package_data
+    assert "data/fonts/*.txt" in package_data
+    assert "data/fonts/*.md" in package_data
     assert "python/forge3d/data/fonts" in manifest
     assert "*.png" in manifest
     assert "*.json" in manifest
     assert "*.ttf" in manifest
+    assert "*.txt" in manifest
+    assert "*.md" in manifest
+
+
+def test_packaged_font_notices_map_every_binary_to_exact_hash_and_notice():
+    font_dir = Path("python/forge3d/data/fonts")
+    notices = json.loads((font_dir / "FONT-NOTICES.json").read_text(encoding="utf-8"))
+    expected = {
+        "NotoSansArabic-subset.ttf": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic)",
+        "NotoSansDevanagari-subset.ttf": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/devanagari)",
+        "NotoSansHebrew-subset.ttf": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/hebrew)",
+        "NotoSansLatin-subset.ttf": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)",
+        "NotoSansSC-subset.ttf": "Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'",
+    }
+
+    assert set(notices["fonts"]) == set(expected)
+    assert (font_dir / notices["license_file"]).read_text(encoding="utf-8").startswith(
+        "This Font Software is licensed under the SIL Open Font License, Version 1.1."
+    )
+    for name, copyright_notice in expected.items():
+        binary = font_dir / name
+        entry = notices["fonts"][name]
+        assert entry["copyright_notice"] == copyright_notice
+        assert entry["upstream"].startswith("https://github.com/google/fonts/")
+        assert entry["sha256"] == hashlib.sha256(binary.read_bytes()).hexdigest()
+    for name, expected_hash in notices["generated_assets"].items():
+        assert expected_hash == hashlib.sha256((font_dir / name).read_bytes()).hexdigest()
 
 
 def test_label_plan_normalizes_halo_typography_aliases():

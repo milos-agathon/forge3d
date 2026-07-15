@@ -379,19 +379,21 @@ impl TerrainScene {
     pub(super) fn take_render_timing(&self) -> Option<crate::core::gpu_timing::GpuTimingManager> {
         let mut guard = self.gpu_timing.lock().ok()?;
         if guard.is_none() {
-            if !self
+            let timestamps_available = self
                 .device
                 .features()
-                .contains(wgpu::Features::TIMESTAMP_QUERY)
-            {
-                return None;
-            }
+                .contains(wgpu::Features::TIMESTAMP_QUERY);
+            let encoder_timestamps_safe = self.adapter.get_info().backend != wgpu::Backend::Metal;
             // Timestamps only: this path never issues pipeline-statistics
             // queries, so enabling that query set would make `resolve_queries`
             // resolve a never-written statistics range and lose the device on
             // adapters that also advertise PIPELINE_STATISTICS_QUERY.
             let config = crate::core::gpu_timing::GpuTimingConfig {
-                enable_timestamps: true,
+                // The terrain path contains render, compute, and copy work in
+                // one encoder. Metal corrupts later attachments when those
+                // scopes are bracketed with encoder-level timestamp writes;
+                // retain stable pass records with honest 0.0 timings there.
+                enable_timestamps: timestamps_available && encoder_timestamps_safe,
                 enable_pipeline_stats: false,
                 enable_debug_markers: false,
                 label_prefix: "forge3d".to_string(),

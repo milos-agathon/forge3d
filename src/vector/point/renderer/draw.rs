@@ -1,6 +1,31 @@
 use super::*;
 
 impl PointRenderer {
+    pub fn prepare_oit(
+        &self,
+        queue: &wgpu::Queue,
+        transform: &[[f32; 4]; 4],
+        viewport_size: [f32; 2],
+        pixel_scale: f32,
+    ) {
+        let uniform = self.build_uniform(transform, viewport_size, pixel_scale);
+        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
+    }
+
+    pub fn render_oit_prepared<'pass>(
+        &'pass self,
+        render_pass: &mut wgpu::RenderPass<'pass>,
+        instance_count: u32,
+    ) {
+        if let Some(instance_buffer) = &self.instance_buffer {
+            crate::core::shader_registry::record_shader_use("point_instanced.wgsl");
+            render_pass.set_pipeline(&self.oit_pipeline);
+            render_pass.set_bind_group(0, &self.bind_group, &[]);
+            render_pass.set_vertex_buffer(0, instance_buffer.slice(..));
+            render_pass.draw(0..4, 0..instance_count);
+        }
+    }
+
     pub fn render_oit<'pass>(
         &'pass self,
         render_pass: &mut wgpu::RenderPass<'pass>,
@@ -10,15 +35,8 @@ impl PointRenderer {
         pixel_scale: f32,
         instance_count: u32,
     ) -> Result<(), RenderError> {
-        if let Some(instance_buffer) = &self.instance_buffer {
-            let uniform = self.build_uniform(transform, viewport_size, pixel_scale);
-            queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
-            crate::core::shader_registry::record_shader_use("point_instanced.wgsl");
-            render_pass.set_pipeline(&self.oit_pipeline);
-            render_pass.set_bind_group(0, &self.bind_group, &[]);
-            render_pass.set_vertex_buffer(0, instance_buffer.slice(..));
-            render_pass.draw(0..4, 0..instance_count);
-        }
+        self.prepare_oit(queue, transform, viewport_size, pixel_scale);
+        self.render_oit_prepared(render_pass, instance_count);
         Ok(())
     }
 

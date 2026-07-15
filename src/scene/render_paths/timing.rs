@@ -50,19 +50,19 @@ impl Scene {
         let mut guard = self.render_timing.lock().ok()?;
         if guard.is_none() {
             let g = crate::core::gpu::ctx_if_initialized()?;
-            if !g
+            let timestamps_available = g
                 .device
                 .features()
-                .contains(wgpu::Features::TIMESTAMP_QUERY)
-            {
-                return None;
-            }
+                .contains(wgpu::Features::TIMESTAMP_QUERY);
             // Timestamps only: this path never issues pipeline-statistics
             // queries, so enabling that query set would make `resolve_queries`
             // resolve a never-written statistics range and lose the device on
             // adapters that also advertise PIPELINE_STATISTICS_QUERY.
             let config = crate::core::gpu_timing::GpuTimingConfig {
-                enable_timestamps: true,
+                // Scene's primary pass writes timestamps at native render-pass
+                // boundaries. That path is safe on Metal; mixed-pass terrain
+                // encoders apply a separate backend guard.
+                enable_timestamps: timestamps_available,
                 enable_pipeline_stats: false,
                 enable_debug_markers: false,
                 label_prefix: "forge3d".to_string(),
@@ -143,4 +143,17 @@ pub(super) fn scene_ts_end(
     if let (Some(t), Some(id)) = (timing.as_mut(), scope) {
         t.end_scope_with_draws(encoder, id, draw_calls);
     }
+}
+
+/// Reserve native render-pass timestamp writes. Prefer this over encoder-level
+/// begin/end writes for passes with color or depth attachments: it preserves
+/// live certificate timing without corrupting repeated Metal renders.
+pub(super) fn scene_render_pass_timestamps<'a>(
+    timing: &'a mut Option<crate::core::gpu_timing::GpuTimingManager>,
+    label: &str,
+    draw_calls: u32,
+) -> Option<wgpu::RenderPassTimestampWrites<'a>> {
+    timing
+        .as_mut()
+        .and_then(|manager| manager.render_pass_timestamp_writes(label, draw_calls))
 }

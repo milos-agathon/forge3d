@@ -109,6 +109,88 @@ pub fn correct_collision(mut channels: [f32; 3], truth: f32) -> [f32; 3] {
     channels
 }
 
+fn bilinear(values: [[f32; 3]; 4], x: f32, y: f32) -> [f32; 3] {
+    let mut output = [0.0; 3];
+    for channel in 0..3 {
+        output[channel] = values[0][channel] * (1.0 - x) * (1.0 - y)
+            + values[1][channel] * x * (1.0 - y)
+            + values[2][channel] * (1.0 - x) * y
+            + values[3][channel] * x * y;
+    }
+    output
+}
+
+fn scalar_truth(contours: &[Contour], edges: &[Edge], point: Point) -> f32 {
+    let nearest = edges
+        .iter()
+        .map(|edge| edge_distance(point, *edge).true_distance.abs())
+        .fold(f32::INFINITY, f32::min);
+    nearest.copysign(if contains(contours, point) { 1.0 } else { -1.0 })
+}
+
+/// Detect interpolation sign clashes using neighboring texels and independent
+/// point-sampled containment. Only texels participating in a real off-grid
+/// clash are eligible for scalar correction.
+pub fn collision_mask(
+    contours: &[Contour],
+    edges: &[Edge],
+    fields: &[[f32; 3]],
+    width: usize,
+    height: usize,
+    origin: Point,
+) -> Vec<bool> {
+    let mut mask = vec![false; width.saturating_mul(height)];
+    if width < 2 || height < 2 || fields.len() != mask.len() || edges.is_empty() {
+        return mask;
+    }
+    const SUBCELL_SAMPLES: [f32; 2] = [0.25, 0.75];
+    for y in 0..height - 1 {
+        for x in 0..width - 1 {
+            let indices = [
+                y * width + x,
+                y * width + x + 1,
+                (y + 1) * width + x,
+                (y + 1) * width + x + 1,
+            ];
+            let values = [
+                fields[indices[0]],
+                fields[indices[1]],
+                fields[indices[2]],
+                fields[indices[3]],
+            ];
+            let mut clash = false;
+            for fy in SUBCELL_SAMPLES {
+                for fx in SUBCELL_SAMPLES {
+                    let sample = Point::new(
+                        origin.x + x as f32 + 0.5 + fx,
+                        origin.y + y as f32 + 0.5 + fy,
+                    );
+                    let reconstructed = median(bilinear(values, fx, fy));
+                    let truth = scalar_truth(contours, edges, sample);
+                    // A collision is not limited to a literal sign flip. Color
+                    // pseudo-distances can interpolate close to zero far from
+                    // the outline, producing long halo/fill rays even while
+                    // every texel retains the correct sign. Correct only
+                    // dangerous underestimation (the reconstructed boundary
+                    // is materially closer than the independent scalar
+                    // boundary), preserving genuine corner separation.
+                    let sign_clash = (reconstructed >= 0.0) != (truth >= 0.0);
+                    let distance_clash = reconstructed.abs() + 0.75 < truth.abs();
+                    if sign_clash || distance_clash {
+                        clash = true;
+                    }
+                }
+            }
+            if clash {
+                for index in indices {
+                    mask[index] = true;
+                }
+            }
+        }
+    }
+    mask
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,5 +235,62 @@ mod tests {
         assert!(median(corrected) >= 0.0);
         assert!(corrected.iter().any(|value| *value != corrected[0]));
         assert_eq!(corrected.iter().filter(|value| **value == 0.5).count(), 1);
+    }
+
+    #[test]
+    fn spatial_collision_mask_distinguishes_clean_and_clashing_neighbors() {
+        let contour = Contour {
+            points: vec![
+                Point::new(0.0, 0.0),
+                Point::new(3.0, 0.0),
+                Point::new(3.0, 3.0),
+                Point::new(0.0, 3.0),
+                Point::new(0.0, 0.0),
+            ],
+        };
+        let edges = crate::labels::msdf::edge::color_edges(&contour);
+        let clean = vec![[1.0; 3]; 9];
+        assert!(!collision_mask(
+            std::slice::from_ref(&contour),
+            &edges,
+            &clean,
+            3,
+            3,
+            Point::new(0.0, 0.0),
+        )
+        .into_iter()
+        .any(|value| value));
+
+        let clash = vec![[-1.0; 3]; 9];
+        assert!(collision_mask(
+            std::slice::from_ref(&contour),
+            &edges,
+            &clash,
+            3,
+            3,
+            Point::new(0.0, 0.0),
+        )
+        .into_iter()
+        .any(|value| value));
+
+        let far_contour = Contour {
+            points: contour
+                .points
+                .iter()
+                .map(|point| Point::new(point.x + 10.0, point.y + 10.0))
+                .collect(),
+        };
+        let far_edges = crate::labels::msdf::edge::color_edges(&far_contour);
+        let false_near_boundary = vec![[-0.05; 3]; 9];
+        assert!(collision_mask(
+            std::slice::from_ref(&far_contour),
+            &far_edges,
+            &false_near_boundary,
+            3,
+            3,
+            Point::new(0.0, 0.0),
+        )
+        .into_iter()
+        .any(|value| value));
     }
 }

@@ -1,8 +1,11 @@
 {
-  "bake_ms": 212.817875,
+  "bake_ms": 0.0,
   "baseline": 24.0,
   "byte_count": 516000,
   "channels": 3,
+  "font_sha256": [
+    "3cdd82f05768b6101094b7daa24287053e07d6db5a21411d5076f5617f190e68"
+  ],
   "font_size": 24.0,
   "font_source": "forge3d/data/fonts/NotoSansLatin-subset.ttf",
   "font_sources": [

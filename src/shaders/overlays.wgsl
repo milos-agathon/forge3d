@@ -1,5 +1,5 @@
 // src/shaders/overlays.wgsl
-// Fullscreen overlay compositor: drape overlay (RGBA8 sRGB) and optional altitude ramp from height texture.
+// Fullscreen overlay compositor: display-ready RGBA8 overlay and optional altitude ramp from height texture.
 // M5: Extended with depth-correct vector overlay support and halo rendering.
 
 struct OverlayUniforms {
@@ -119,6 +119,18 @@ fn sample_overlay_with_halo(uv: vec2<f32>) -> vec4<f32> {
   return vec4<f32>(result_color, result_alpha);
 }
 
+// The ordinary 2D compositor deliberately has its own entry point and compact
+// bind-group layout. Keeping unused height/depth/page-table resources out of
+// this pipeline avoids cross-Scene Metal binding interference while the full
+// effect pipeline remains available for altitude, contour, depth, and halo.
+@fragment
+fn fs_raster_overlay(in: VsOut) -> @location(0) vec4<f32> {
+  let uv_ov = vec2<f32>(U.overlay_uv.x, U.overlay_uv.y) +
+    in.uv * vec2<f32>(U.overlay_uv.z, U.overlay_uv.w);
+  let ov = textureSample(overlay_tex, overlay_samp, uv_ov);
+  return vec4<f32>(ov.rgb, clamp(U.overlay_params.y, 0.0, 1.0) * ov.a);
+}
+
 @fragment
 fn fs_overlay(in: VsOut) -> @location(0) vec4<f32> {
   var col : vec3<f32> = vec3<f32>(0.0);
@@ -127,6 +139,18 @@ fn fs_overlay(in: VsOut) -> @location(0) vec4<f32> {
   let ov_en = U.overlay_params.x > 0.5;
   let ov_a  = clamp(U.overlay_params.y, 0.0, 1.0);
   let alt_en = U.overlay_params.z > 0.5;
+
+  // The overwhelmingly common base-composite path needs only the uploaded
+  // raster. Keep it independent of optional height/depth/page-table bindings;
+  // reading a dummy runtime-sized storage array poisoned the fragment result
+  // on Metal even though its value was multiplied by zero below.
+  if (ov_en && !alt_en && U.contour_params.x <= 0.5 &&
+      U.depth_params.x <= 0.5 && U.halo_params.x <= 0.5) {
+    let uv_ov = vec2<f32>(U.overlay_uv.x, U.overlay_uv.y) +
+      in.uv * vec2<f32>(U.overlay_uv.z, U.overlay_uv.w);
+    let ov = textureSample(overlay_tex, overlay_samp, uv_ov);
+    return vec4<f32>(ov.rgb, ov_a * ov.a);
+  }
 
   if (ov_en) {
     // M5: Sample overlay with optional halo effect

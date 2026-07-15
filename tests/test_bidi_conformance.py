@@ -28,8 +28,6 @@ def test_bidi_conformance() -> None:
             "test",
             "bidi_conformance_corpus",
             "--lib",
-            "--features",
-            "extension-module",
             "--",
             "--nocapture",
         ],

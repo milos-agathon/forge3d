@@ -583,6 +583,7 @@ from .map_scene import (
     MapFurnitureLayer,
     MapScene,
     MapSceneNativeUnavailable,
+    MapSceneTextLayoutError,
     BuildingLayer as MapSceneBuildingLayer,
     OrbitCamera,
     OutputSpec,
@@ -871,6 +872,7 @@ __all__ = [
     # Typed MapScene recipe contract
     "MapScene",
     "MapSceneNativeUnavailable",
+    "MapSceneTextLayoutError",
     "CompiledScenePlan",
     "SceneRecipe",
     "TerrainSource",

@@ -157,6 +157,22 @@ def _blend_region(image: Any, mask: Any, color: tuple[int, int, int, int]) -> No
     image[..., 3] = np.clip(out_alpha * 255.0, 0.0, 255.0).astype(np.uint8)
 
 
+def _blend_rect(
+    image: Any, x0: int, y0: int, x1: int, y1: int, color: tuple[int, int, int, int]
+) -> None:
+    """Blend a solid rectangle without allocating a full-frame mask."""
+    height, width = image.shape[:2]
+    x0 = max(0, min(width, int(x0)))
+    x1 = max(0, min(width, int(x1)))
+    y0 = max(0, min(height, int(y0)))
+    y1 = max(0, min(height, int(y1)))
+    if x0 >= x1 or y0 >= y1:
+        return
+    import numpy as np
+
+    _blend_region(image[y0:y1, x0:x1], np.ones((y1 - y0, x1 - x0), dtype=np.float32), color)
+
+
 def _draw_pixel_block(image: Any, x: int, y: int, color: tuple[int, int, int, int], radius: int = 1) -> None:
     import numpy as np
 
@@ -165,9 +181,7 @@ def _draw_pixel_block(image: Any, x: int, y: int, color: tuple[int, int, int, in
     x1 = min(width, int(x) + radius + 1)
     y0 = max(0, int(y) - radius)
     y1 = min(height, int(y) + radius + 1)
-    mask = np.zeros((height, width), dtype=bool)
-    mask[y0:y1, x0:x1] = True
-    _blend_region(image, mask, color)
+    _blend_rect(image, x0, y0, x1, y1, color)
 
 
 def _draw_disc(image: Any, x: float, y: float, color: tuple[int, int, int, int], radius: float) -> None:
@@ -747,18 +761,34 @@ def _draw_text(
 ) -> None:
     from .text import rasterize_shaped_run, shape
 
+    import math
+
     x, y = anchor
     shaped = shape(str(text), _text_font_chain(font_chain), float(font_size))
+    bounds = shaped.outline_bounds()
+    if bounds is None:
+        return
+    radius = max(0, int(round(float(halo_width_px))))
+    padding = radius + 1
+    baseline_x = float(x)
+    baseline_y = float(y) + float(font_size)
+    image_height, image_width = image.shape[:2]
+    x0 = max(0, int(math.floor(baseline_x + float(bounds[0]))) - padding)
+    y0 = max(0, int(math.floor(baseline_y + float(bounds[1]))) - padding)
+    x1 = min(image_width, int(math.ceil(baseline_x + float(bounds[2]))) + padding)
+    y1 = min(image_height, int(math.ceil(baseline_y + float(bounds[3]))) + padding)
+    if x0 >= x1 or y0 >= y1:
+        return
     mask = rasterize_shaped_run(
         shaped,
-        int(image.shape[1]),
-        int(image.shape[0]),
-        origin=(float(x), float(y) + float(font_size)),
+        x1 - x0,
+        y1 - y0,
+        origin=(baseline_x - x0, baseline_y - y0),
     )
-    radius = max(0, int(round(float(halo_width_px))))
+    target = image[y0:y1, x0:x1]
     if halo[3] > 0 and radius > 0:
-        _composite_text_mask(image, _expanded_mask(mask, radius), halo)
-    _composite_text_mask(image, mask, color)
+        _composite_text_mask(target, _expanded_mask(mask, radius), halo)
+    _composite_text_mask(target, mask, color)
 
 
 def _overlay_rgba(image: Any, overlay: Any, x: int, y: int) -> None:
@@ -1187,11 +1217,14 @@ def _draw_simple_legend(image: Any, options: Mapping[str, Any]) -> None:
     panel_h = len(rows) * 13 + 12
     x0 = width - panel_w - 12
     y0 = height - panel_h - 12
-    import numpy as np
-
-    mask = np.zeros((height, width), dtype=bool)
-    mask[max(0, y0) : min(height, y0 + panel_h), max(0, x0) : min(width, x0 + panel_w)] = True
-    _blend_region(image, mask, _color(options.get("background"), (255, 255, 255, 205)))
+    _blend_rect(
+        image,
+        x0,
+        y0,
+        x0 + panel_w,
+        y0 + panel_h,
+        _color(options.get("background"), (255, 255, 255, 205)),
+    )
     for index, row in enumerate(rows):
         y = y0 + 8 + index * 13
         swatch = _rgb(row, salt="legend")

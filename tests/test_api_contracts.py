@@ -247,6 +247,7 @@ class TestNativeModuleSymbols:
         "text_shape",
         "rasterize_shaped_run",
         "bake_msdf_atlas",
+        "bake_msdf_atlas_shaped",
         # CENSOR: global degradation sink
         "native_degradations",
         "clear_native_degradations",

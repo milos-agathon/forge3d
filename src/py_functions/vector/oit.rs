@@ -49,29 +49,43 @@ pub(crate) fn vector_render_oit_py(
             &scene.device,
             width,
             height,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
+            wgpu::TextureFormat::Rgba8Unorm,
         )
         .map_err(vector_runtime_err)?;
         let (final_tex, final_view) =
             create_rgba_target(&scene.device, "vf.Vector.RenderOIT.Final", width, height)?;
-        let mut encoder = scene
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("vf.Vector.RenderOIT.Encoder"),
-            });
+        prepare_oit_scene(&mut scene, width, height);
+        scene.flush_uploads();
+        let mut timing = VectorPassTiming::new(scene.device.clone(), &scene.queue, 2)?;
+        let accumulation_timing = timing.reserve("vector.oit", 1);
+        let compose_timing = timing.reserve("vector.oit.compose", 1);
+        let mut accumulation_encoder =
+            scene
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("vf.Vector.RenderOIT.AccumulationEncoder"),
+                });
 
-        // CENSOR F-04: live per-pass timing for the certificate; falls back to
-        // 0.0 pass records when TIMESTAMP_QUERY is not granted.
-        let mut timing = crate::core::gpu_timing::OneShotTiming::for_current_device();
-        let oit_scope = timing.begin(&mut encoder, "vector.oit");
         {
-            let mut pass = oit.begin_accumulation(&mut encoder);
+            let mut pass = oit.begin_accumulation_timed(
+                &mut accumulation_encoder,
+                timing.render_pass_writes(accumulation_timing),
+            );
             render_oit_scene(&mut scene, &mut pass, width, height)?;
         }
-        timing.end(&mut encoder, oit_scope, 1);
-        let compose_scope = timing.begin(&mut encoder, "vector.oit.compose");
+        let accumulation_submission = scene.queue.submit(Some(accumulation_encoder.finish()));
+        scene.device.poll(wgpu::Maintain::WaitForSubmissionIndex(
+            accumulation_submission,
+        ));
+
+        let mut compose_encoder =
+            scene
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("vf.Vector.RenderOIT.ComposeEncoder"),
+                });
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut pass = compose_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("vf.Vector.RenderOIT.Compose"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &final_view,
@@ -83,14 +97,13 @@ pub(crate) fn vector_render_oit_py(
                 })],
                 depth_stencil_attachment: None,
                 occlusion_query_set: None,
-                timestamp_writes: None,
+                timestamp_writes: timing.render_pass_writes(compose_timing),
             });
             oit.compose(&mut pass);
         }
-        timing.end(&mut encoder, compose_scope, 1);
-        timing.resolve(&mut encoder);
+        timing.resolve(&mut compose_encoder);
 
-        scene.queue.submit(Some(encoder.finish()));
+        scene.queue.submit(Some(compose_encoder.finish()));
         scene.device.poll(wgpu::Maintain::Wait);
         let result = read_rgba_texture_to_py(
             py,
@@ -166,7 +179,7 @@ pub(crate) fn vector_render_oit_edl_py(
             &scene.device,
             width,
             height,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
+            wgpu::TextureFormat::Rgba8Unorm,
         )
         .map_err(vector_runtime_err)?;
         let (final_tex, final_view) =
@@ -177,24 +190,39 @@ pub(crate) fn vector_render_oit_edl_py(
             width,
             height,
         )?;
-        let mut encoder = scene
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("vf.Vector.RenderOITEDL.Encoder"),
-            });
+        prepare_oit_scene(&mut scene, width, height);
+        scene.flush_uploads();
+        let mut timing = VectorPassTiming::new(scene.device.clone(), &scene.queue, 3)?;
+        let accumulation_timing = timing.reserve("vector.oit", 1);
+        let compose_timing = timing.reserve("vector.oit.compose", 1);
+        let edl_timing = timing.reserve("vector.edl", 1);
 
-        // CENSOR F-04: live per-pass timing for the certificate; falls back to
-        // 0.0 pass records when TIMESTAMP_QUERY is not granted.
-        let mut timing = crate::core::gpu_timing::OneShotTiming::for_current_device();
-        let oit_scope = timing.begin(&mut encoder, "vector.oit");
+        let mut accumulation_encoder =
+            scene
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("vf.Vector.RenderOITEDL.AccumulationEncoder"),
+                });
         {
-            let mut pass = oit.begin_accumulation(&mut encoder);
+            let mut pass = oit.begin_accumulation_timed(
+                &mut accumulation_encoder,
+                timing.render_pass_writes(accumulation_timing),
+            );
             render_oit_scene(&mut scene, &mut pass, width, height)?;
         }
-        timing.end(&mut encoder, oit_scope, 1);
-        let compose_scope = timing.begin(&mut encoder, "vector.oit.compose");
+        let accumulation_submission = scene.queue.submit(Some(accumulation_encoder.finish()));
+        scene.device.poll(wgpu::Maintain::WaitForSubmissionIndex(
+            accumulation_submission,
+        ));
+
+        let mut compose_encoder =
+            scene
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("vf.Vector.RenderOITEDL.ComposeEncoder"),
+                });
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut pass = compose_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("vf.Vector.RenderOITEDL.Compose"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &final_view,
@@ -206,11 +234,14 @@ pub(crate) fn vector_render_oit_edl_py(
                 })],
                 depth_stencil_attachment: None,
                 occlusion_query_set: None,
-                timestamp_writes: None,
+                timestamp_writes: timing.render_pass_writes(compose_timing),
             });
             oit.compose(&mut pass);
         }
-        timing.end(&mut encoder, compose_scope, 1);
+        let compose_submission = scene.queue.submit(Some(compose_encoder.finish()));
+        scene
+            .device
+            .poll(wgpu::Maintain::WaitForSubmissionIndex(compose_submission));
 
         let (edl_pipeline, edl_bind_group) = oit
             .create_edl_pipeline(
@@ -220,9 +251,14 @@ pub(crate) fn vector_render_oit_edl_py(
                 edl_radius_px.max(1.0),
             )
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        let edl_scope = timing.begin(&mut encoder, "vector.edl");
+        let mut edl_encoder =
+            scene
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("vf.Vector.RenderOITEDL.PostEncoder"),
+                });
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut pass = edl_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("vf.Vector.RenderOITEDL.Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &edl_view,
@@ -234,17 +270,16 @@ pub(crate) fn vector_render_oit_edl_py(
                 })],
                 depth_stencil_attachment: None,
                 occlusion_query_set: None,
-                timestamp_writes: None,
+                timestamp_writes: timing.render_pass_writes(edl_timing),
             });
             crate::core::shader_registry::record_shader_use("vf.Vector.PointEDL");
             pass.set_pipeline(&edl_pipeline);
             pass.set_bind_group(0, &edl_bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
-        timing.end(&mut encoder, edl_scope, 1);
-        timing.resolve(&mut encoder);
+        timing.resolve(&mut edl_encoder);
 
-        scene.queue.submit(Some(encoder.finish()));
+        scene.queue.submit(Some(edl_encoder.finish()));
         scene.device.poll(wgpu::Maintain::Wait);
         drop(final_tex);
         let result = read_rgba_texture_to_py(

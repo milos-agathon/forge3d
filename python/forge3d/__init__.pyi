@@ -103,6 +103,7 @@ from .map_scene import (
     MapFurnitureLayer as MapFurnitureLayer,
     MapScene as MapScene,
     MapSceneNativeUnavailable as MapSceneNativeUnavailable,
+    MapSceneTextLayoutError as MapSceneTextLayoutError,
     BuildingLayer as MapSceneBuildingLayer,
     OrbitCamera as OrbitCamera,
     OutputSpec as OutputSpec,

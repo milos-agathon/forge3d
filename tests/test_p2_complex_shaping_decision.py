@@ -17,10 +17,20 @@ def test_complex_shaping_has_no_external_shaping_dependencies():
 
 def test_native_text_shaper_returns_littera_glyph_metadata():
     shaped = f3d.text.shape("مرحبا", [str(ROOT / "assets/fonts/NotoSansArabic-subset.ttf")], 16.0)
-    run = shaped.to_dict()["runs"][0]
+    payload = shaped.to_dict()
+    run = payload["runs"][0]
     assert run["direction"] == "rtl"
     assert run["glyphs"][0]["cluster"] < run["glyphs"][-1]["cluster"]
     assert all(glyph["glyph_id"] > 0 for glyph in run["glyphs"])
+    assert payload["font_sources"]
+    assert all(len(value) == 64 for value in payload["font_sha256"])
+    assert payload["positioned_glyphs"]
+    assert all(
+        set(("glyph_id", "font_index", "cluster", "line_index", "origin", "advance", "has_outline"))
+        <= set(glyph)
+        for glyph in payload["positioned_glyphs"]
+    )
+    assert all("y_advance" in glyph and "y_offset" in glyph and "attached_to" in glyph for glyph in run["glyphs"])
 
 
 def test_arabic_script_shaping_is_accepted_with_native_joined_glyphs():
@@ -48,10 +58,14 @@ def test_arabic_script_shaping_is_accepted_with_native_joined_glyphs():
     assert plan.accepted[0].typography["engine"] == "littera"
     assert plan.accepted[0].typography["glyph_ids"]
     assert plan.accepted[0].typography["direction"] == "rtl"
-    assert plan.accepted[0].typography["render_mapping"] == "positioned_outlines"
+    assert plan.accepted[0].typography["render_mapping"] == "positioned_glyphs_by_id"
     assert plan.accepted[0].typography["compositor"] == "native_analytic_coverage"
     assert plan.accepted[0].typography["shaped_runs"][0]["glyphs"]
     assert plan.accepted[0].typography["font_indices"]
+    assert plan.accepted[0].positioned_glyphs
+    assert plan.accepted[0].to_dict()["positioned_glyphs"] == [
+        dict(glyph) for glyph in plan.accepted[0].positioned_glyphs
+    ]
 
 
 def test_devanagari_is_supported_by_littera():

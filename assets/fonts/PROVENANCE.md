@@ -47,7 +47,8 @@ $env:PYTHONPATH='python'
 python -c "from forge3d.text_atlas import bake_atlas, save_atlas, default_latin_atlas_paths; p=default_latin_atlas_paths(); a=bake_atlas(font_size=24, px_range=6, padding=3); print(a.metrics['bake_ms'], a.metrics['byte_count']); a.metrics['bake_ms']=0.0; save_atlas(a, *p)"
 ```
 
-- `atlas_latin_default.png` SHA-256: `c7c1de53801fd72cf7a0fd26d61377e6993412a652c488200f71796c53e885fa`
-- `atlas_latin_default.json` SHA-256: `fc07dea94ade3492d83df01a8dc7c9efee8faca1b7e469edc1967529e8bd2b52`
+- `atlas_latin_default.png` SHA-256: `2360e58d97aa24d436693d3481e87b3728b76b4c1adeb453dbd87e2a4e7f0290`
+- `atlas_latin_default.json` SHA-256: `d28d280511fc89b5dae2cadb00f64ec48150561d59ceaeb5bc021d9c26b5dc67`
 - RGB byte count: `516000`
-- Regeneration bake time observed on 2026-07-14: `43.4691 ms`
+- Runtime bake timing is diagnostic-only; `save_atlas` normalizes persisted
+  `bake_ms` to `0.0` so canonical JSON is byte-stable.

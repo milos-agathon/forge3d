@@ -18,7 +18,7 @@ from .diagnostics import (
 )
 
 
-PAYLOAD_VERSION = 1
+PAYLOAD_VERSION = 2
 REJECTION_REASONS = (
     "collision",
     "outside_view",
@@ -123,45 +123,57 @@ def _glyph_set(glyph_atlas: Any) -> set[str] | None:
     return None
 
 
-def _font_path_from_glyph_atlas(glyph_atlas: Any) -> str | None:
+def _font_paths_from_glyph_atlas(glyph_atlas: Any) -> list[str]:
     if not isinstance(glyph_atlas, Mapping):
-        return None
+        return []
+    paths: list[str] = []
+    for key in ("font_chain", "font_paths", "font_sources"):
+        values = glyph_atlas.get(key)
+        if isinstance(values, Sequence) and not isinstance(values, (str, bytes)):
+            for value in values:
+                path = Path(str(value))
+                if path.suffix.lower() in {".ttf", ".otf", ".ttc"} and path.exists():
+                    paths.append(str(path))
     for key in ("font_path", "source_font_path", "font_file", "source_path"):
         value = glyph_atlas.get(key)
         if not value:
             continue
         path = Path(str(value))
         if path.suffix.lower() in {".ttf", ".otf", ".ttc"} and path.exists():
-            return str(path)
+            paths.append(str(path))
     coverage = glyph_atlas.get("coverage")
     if isinstance(coverage, Mapping):
         value = coverage.get("path") or coverage.get("font_path")
         if value:
             path = Path(str(value))
             if path.suffix.lower() in {".ttf", ".otf", ".ttc"} and path.exists():
-                return str(path)
-    return None
+                paths.append(str(path))
+    return list(dict.fromkeys(paths))
+
+
+def _packaged_latin_font_path() -> str:
+    return str(Path(__file__).resolve().parent / "data" / "fonts" / "NotoSansLatin-subset.ttf")
 
 
 def _native_shape_label_glyphs(text: str, glyph_atlas: Any) -> tuple[list[str] | None, Mapping[str, Any]] | None:
-    font_path = _font_path_from_glyph_atlas(glyph_atlas)
-    if not font_path:
+    font_paths = _font_paths_from_glyph_atlas(glyph_atlas)
+    if not font_paths:
         return None
     try:
         from .text import shape
 
-        shaped = shape(text, [font_path], 1.0)
+        shaped = shape(text, font_paths, 1.0)
     except Exception as error:
+        diagnostics = list(getattr(error, "diagnostics", ()))
+        native_reason = str(diagnostics[0].get("reason", "shaping_failed")) if diagnostics else "shaping_failed"
         return None, {
             "shaping": "littera_error",
-            "diagnostics": list(getattr(error, "diagnostics", ())),
+            "native_reason": native_reason,
+            "diagnostics": diagnostics,
         }
     payload = shaped.to_dict()
     glyph_records = [glyph for run in payload["runs"] for glyph in run["glyphs"]]
-    # LabelPlan.glyphs remains the logical source-character sequence used for
-    # atlas coverage checks. Native glyph IDs and clusters are retained in the
-    # shaping details for render-time consumption, including ligatures and
-    # multiple glyphs that share one source cluster.
+    positioned = [dict(glyph) for glyph in payload.get("positioned_glyphs", ())]
     glyphs = list(text)
     if not glyphs:
         return None
@@ -173,10 +185,12 @@ def _native_shape_label_glyphs(text: str, glyph_atlas: Any) -> tuple[list[str] |
         "font_indices": [glyph["font_index"] for glyph in glyph_records],
         "clusters": [glyph["cluster"] for glyph in glyph_records],
         "advances": [glyph["x_advance"] for glyph in glyph_records],
-        "render_mapping": "positioned_outlines",
+        "positioned_glyphs": positioned,
+        "render_mapping": "positioned_glyphs_by_id",
         "shaped_runs": payload["runs"],
         "compositor": "native_analytic_coverage",
-        "font_chain": [font_path],
+        "font_chain": list(payload.get("font_sources", font_paths)),
+        "font_sha256": list(payload.get("font_sha256", ())),
     }
     return glyphs, details
 
@@ -224,7 +238,21 @@ def _shape_label_glyphs(text: str, glyph_atlas: Any | None = None) -> tuple[list
     if native_shaped is not None:
         return native_shaped
     if not _requires_complex_shaping(text):
-        return list(text), {}
+        packaged = _native_shape_label_glyphs(text, {"font_path": _packaged_latin_font_path()})
+        if packaged is not None:
+            glyphs, details = packaged
+            if glyphs is not None:
+                return glyphs, details
+            diagnostics = list(details.get("diagnostics", ()))
+            if diagnostics and diagnostics[0].get("reason") != "native_text_unavailable":
+                return glyphs, details
+        # Planning remains usable without the extension, but this compatibility
+        # payload is explicitly non-renderable by the production compositor.
+        return list(text), {
+            "shaping": "legacy_metadata_only",
+            "render_mapping": "legacy_codepoints_not_renderable",
+            "positioned_glyphs": [],
+        }
     return None, {
         "shaping": "font_chain_required",
         "diagnostics": [{"status": "diagnostic_block", "reason": "font_chain_required"}],
@@ -731,6 +759,7 @@ class AcceptedLabel:
     world_bounds: Sequence[float] | None = None
     typography: Mapping[str, Any] | None = None
     glyphs: Sequence[str] = field(default_factory=tuple)
+    positioned_glyphs: Sequence[Mapping[str, Any]] = field(default_factory=tuple)
     ordering_key: str | None = None
 
     def __post_init__(self) -> None:
@@ -754,6 +783,7 @@ class AcceptedLabel:
         )
         self.typography = _json_safe(_normalize_typography(self.typography))
         self.glyphs = tuple(str(glyph) for glyph in self.glyphs)
+        self.positioned_glyphs = tuple(_json_safe(dict(glyph)) for glyph in self.positioned_glyphs)
         self.ordering_key = self.ordering_key or self.label_id
 
     def to_dict(self) -> dict[str, Any]:
@@ -769,6 +799,7 @@ class AcceptedLabel:
             "world_bounds": list(self.world_bounds) if self.world_bounds is not None else None,
             "typography": dict(self.typography or {}),
             "glyphs": list(self.glyphs),
+            "positioned_glyphs": [dict(glyph) for glyph in self.positioned_glyphs],
             "ordering_key": self.ordering_key,
         }
 
@@ -786,6 +817,7 @@ class AcceptedLabel:
             world_bounds=data.get("world_bounds"),
             typography=data.get("typography") or {},
             glyphs=data.get("glyphs") or (),
+            positioned_glyphs=data.get("positioned_glyphs") or (),
             ordering_key=data.get("ordering_key"),
         )
 
@@ -993,6 +1025,7 @@ class LabelPlan:
                     if shaping_diagnostics
                     else "shaping_failed"
                 )
+                native_reason = str(shaping_details.get("native_reason", reason))
                 if reason not in REJECTION_REASONS:
                     reason = "shaping_failed"
                 rejected.append(
@@ -1001,7 +1034,7 @@ class LabelPlan:
                         source_id=source_id,
                         reason=reason,
                         ordering_key=ordering_key,
-                        details=dict(shaping_details),
+                        details={**dict(shaping_details), "native_reason": native_reason},
                     )
                 )
                 continue
@@ -1234,9 +1267,14 @@ class LabelPlan:
                     world_bounds=world_bounds,
                     typography={
                         **_normalize_typography(typography or record.get("typography") or {}),
-                        **dict(shaping_details),
+                        **{
+                            key: value
+                            for key, value in shaping_details.items()
+                            if key != "positioned_glyphs"
+                        },
                     },
                     glyphs=list(glyph_sequence),
+                    positioned_glyphs=shaping_details.get("positioned_glyphs", ()),
                     ordering_key=ordering_key,
                 )
             )

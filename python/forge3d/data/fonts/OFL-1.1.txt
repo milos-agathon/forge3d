@@ -1,9 +1,6 @@
-Copyright 2022 The Noto Project Authors (https://github.com/notofonts/devanagari)
-
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
 https://scripts.sil.org/OFL
-
 
 -----------------------------------------------------------
 SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
@@ -74,8 +71,8 @@ permission.
 5) The Font Software, modified or unmodified, in part or in whole,
 must be distributed entirely under this license, and must not be
 distributed under any other license. The requirement for fonts to
-remain under this license does not apply to any document created
-using the Font Software.
+remain under this license does not apply to any document created using
+the Font Software.
 
 TERMINATION
 This license becomes null and void if any of the above conditions are
