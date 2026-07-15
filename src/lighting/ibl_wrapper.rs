@@ -88,8 +88,27 @@ impl IBL {
             }
         };
 
-        // Load HDR image
-        let hdr_image = crate::formats::hdr::load_hdr(path).map_err(|e| {
+        // Load the environment map, dispatching by file extension so the
+        // documented .hdr/.rgbe/.exr contract holds. The loader returns a
+        // RenderError; wrap it MANUALLY with PyIOError (not `?` through the
+        // generic From<RenderError>, which would surface I/O failures as
+        // PyRuntimeError — the wrong type for a file-load error).
+        let ext = Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .unwrap_or_default();
+        let hdr_image = match ext.as_str() {
+            "hdr" | "rgbe" => crate::formats::load_hdr(path),
+            "exr" => crate::formats::load_exr(path),
+            other => {
+                return Err(pyo3::exceptions::PyIOError::new_err(format!(
+                    "Unsupported environment map format '.{}' for '{}': expected .hdr, .rgbe, or .exr",
+                    other, path
+                )));
+            }
+        }
+        .map_err(|e| {
             pyo3::exceptions::PyIOError::new_err(format!(
                 "Failed to load HDR file '{}': {}",
                 path, e

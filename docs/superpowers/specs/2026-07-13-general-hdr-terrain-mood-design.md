@@ -78,7 +78,7 @@ band = environment[start:stop, :, :3]
 
 `apply_luminance_preserving_tint` accepts RGB or RGBA arrays. It blends the supplied tint with identity using `strength`, multiplies RGB, then restores the original Rec.709 luminance by adding the per-pixel luminance delta. Alpha is copied unchanged. A strength of zero returns values identical to the input. Callers grade a completed composition when map and legend colours must remain matched.
 
-Both functions validate shapes, finite inputs, `0 <= strength <= 1`, `0 < horizon_fraction <= 1`, and `max_gain >= 1`. They preserve floating input dtype; integer input is calculated in float and rounded/clipped back to the original integer range.
+Both functions validate shapes, finite inputs, `0 <= strength <= 1`, `0 < horizon_fraction <= 1`, and `max_gain >= 1`. They preserve floating input dtype. The integer round-trip applies only to `apply_luminance_preserving_tint` (computed in float, rounded/clipped back to the original integer range); `environment_mood_tint` returns a float64 tint for integer environments because a colour multiplier has no meaningful integer representation. For floating images `apply_luminance_preserving_tint` clamps the graded RGB to the input dtype's finite range before casting, so extreme-but-finite inputs saturate instead of overflowing to `inf`/`nan`; in-range values are unaffected.
 
 Mood-ordering tests use small synthetic linear-RGB environment arrays with controlled cool, warm, and brown horizon rows. They do not depend on git-ignored HDR files, local caches, or machine-specific paths.
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import List, Tuple
 
+import numpy as np
+
 
 def hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:
     """Convert hex color to RGB tuple (0-255 range).
@@ -54,11 +56,170 @@ def hex_to_rgba(hex_color: str, alpha: float = 1.0) -> List[float]:
 
 def rgb_to_normalized(rgb: Tuple[int, int, int]) -> List[float]:
     """Convert RGB (0-255) to normalized (0.0-1.0) values.
-    
+
     Args:
         rgb: Tuple of (R, G, B) values in 0-255 range
-        
+
     Returns:
         List of [R, G, B] values in 0.0-1.0 range
     """
     return [rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0]
+
+
+# Rec.709 luminance weights (sum to exactly 1.0 in float64), shared by the
+# opt-in environment mood-grade utilities below.
+_REC709_WEIGHTS = np.array([0.2126, 0.7152, 0.0722], dtype=np.float64)
+
+
+def environment_mood_tint(
+    environment: "np.ndarray",
+    *,
+    horizon_fraction: float = 10 / 64,
+    max_gain: float = 1.25,
+) -> "np.ndarray":
+    """Derive an artistic mood tint from an HDR environment's horizon band.
+
+    This is an OPT-IN, renderer-independent utility. It never touches the
+    environment the path tracer samples and never triggers a re-trace. It
+    exists because physically correct environment lighting does not necessarily
+    express the artistic mood of an HDR: a sunset's warm colour is concentrated
+    near the horizon, while an up-facing surface integrates the (often blue)
+    sky. The returned tint is the horizon band's chromaticity, normalized to
+    unit luminance, for use as a colour multiplier by
+    :func:`apply_luminance_preserving_tint`.
+
+    Args:
+        environment: Linear-RGB environment array, shape ``(H, W, >=3)``.
+        horizon_fraction: Fraction of ``H`` (rows) forming the central horizon
+            band. Must be in ``(0, 1]``.
+        max_gain: Per-channel clamp on the returned multiplier, applied
+            symmetrically as ``[1 / max_gain, max_gain]``. Must be ``>= 1``.
+
+    Returns:
+        A length-3 multiplier in the environment's floating dtype (float16/32/
+        64); integer or other environments yield a float64 tint. If the band's
+        Rec.709 luminance is ``<= 1e-12`` (a near-black band), returns the
+        identity ``[1, 1, 1]``.
+
+    The band is fixed as::
+
+        band_height = max(1, min(H, round(horizon_fraction * H)))  # ties-to-even
+        start = (H - band_height) // 2
+        stop = start + band_height  # exclusive
+
+    The band mean uses a float64 accumulator. This deliberately does NOT use
+    saturation or peak-radiance weighting, which gives the wrong sign for valid
+    brown environments.
+    """
+    if not np.isfinite(horizon_fraction) or not (0.0 < float(horizon_fraction) <= 1.0):
+        raise ValueError(f"horizon_fraction must be in (0, 1], got {horizon_fraction!r}")
+    if not np.isfinite(max_gain) or not (float(max_gain) >= 1.0):
+        raise ValueError(f"max_gain must be >= 1, got {max_gain!r}")
+
+    env = np.asarray(environment)
+    if env.ndim != 3 or env.shape[2] < 3:
+        raise ValueError(f"environment must be (H, W, >=3), got shape {env.shape}")
+    if env.shape[0] == 0 or env.shape[1] == 0:
+        # Empty spatial axes have no horizon band; the mean would be NaN.
+        raise ValueError(f"environment must have non-empty H and W, got shape {env.shape}")
+    if not np.isfinite(env).all():
+        raise ValueError("environment contains non-finite samples")
+
+    # The tint preserves a floating input dtype (float16/32/64); integer or
+    # other environments yield a float64 tint (a multiplier has no meaningful
+    # integer round-trip). The band mean itself always accumulates in float64.
+    out_dtype = env.dtype if np.issubdtype(env.dtype, np.floating) else np.float64
+
+    height = int(env.shape[0])
+    band_height = max(1, min(height, round(horizon_fraction * height)))
+    start = (height - band_height) // 2
+    stop = start + band_height
+    band = np.asarray(env[start:stop, :, :3], dtype=np.float64)
+    mean_rgb = band.mean(axis=(0, 1))
+
+    lum = float(np.dot(mean_rgb, _REC709_WEIGHTS))
+    if lum <= 1e-12:
+        return np.ones(3, dtype=out_dtype)
+    tint = np.clip(mean_rgb / lum, 1.0 / float(max_gain), float(max_gain))
+    return tint.astype(out_dtype)
+
+
+def apply_luminance_preserving_tint(
+    image: "np.ndarray",
+    tint: "np.ndarray",
+    *,
+    strength: float = 0.0,
+) -> "np.ndarray":
+    """Apply a luminance-preserving colour tint to a completed RGB(A) image.
+
+    This is a POST-render artistic operation. Callers grade a finished
+    composition (so map and legend colours stay matched) rather than changing
+    physical lighting. The tint is blended with identity by ``strength``,
+    multiplied into RGB, then the original Rec.709 luminance is restored by
+    adding the per-pixel luminance delta. Alpha is copied unchanged. A
+    ``strength`` of zero returns values identical to the input.
+
+    Args:
+        image: RGB ``(H, W, 3)`` or RGBA ``(H, W, 4)`` array. Floating dtype is
+            preserved, with graded RGB clamped to the dtype's finite range (so
+            extreme inputs saturate instead of overflowing to ``inf``);
+            integer dtype is computed in float and rounded/clipped back to its
+            original integer range.
+        tint: Length-3 colour multiplier (e.g. from
+            :func:`environment_mood_tint`).
+        strength: Blend amount in ``[0, 1]``.
+
+    Returns:
+        The graded image, same shape and dtype as ``image``.
+    """
+    if not np.isfinite(strength) or not (0.0 <= float(strength) <= 1.0):
+        raise ValueError(f"strength must be in [0, 1], got {strength!r}")
+
+    img = np.asarray(image)
+    if img.ndim != 3 or img.shape[2] not in (3, 4):
+        raise ValueError(f"image must be (H, W, 3) or (H, W, 4), got shape {img.shape}")
+    if not np.isfinite(img).all():
+        raise ValueError("image contains non-finite samples")
+
+    tint_arr = np.asarray(tint, dtype=np.float64)
+    if tint_arr.shape != (3,):
+        raise ValueError(f"tint must have exactly three components, got shape {tint_arr.shape}")
+    if not np.isfinite(tint_arr).all():
+        raise ValueError("tint contains non-finite values")
+
+    if float(strength) == 0.0:
+        return img.copy()
+
+    in_dtype = img.dtype
+    rgb = img[..., :3].astype(np.float64)
+    mix = 1.0 + float(strength) * (tint_arr - 1.0)
+    # The tint+restore pipeline is homogeneous in `rgb`, so inputs near the
+    # float64 maximum are computed on a power-of-two downscale (exact in
+    # binary floating point — identical bits for every in-range input) to keep
+    # the intermediates finite, then scaled back.
+    peak = float(np.abs(rgb).max()) if rgb.size else 0.0
+    scale = 2.0 ** (int(np.ceil(np.log2(peak))) - 500) if peak > 2.0**500 else 1.0
+    work = rgb / scale
+    lum0 = work @ _REC709_WEIGHTS
+    tinted = work * mix
+    lum1 = tinted @ _REC709_WEIGHTS
+    tinted = tinted + (lum0 - lum1)[..., None]
+    if scale != 1.0:
+        # Saturate in the scaled domain (exact power-of-two bounds) so the
+        # scale-back multiply cannot overflow to inf (or warn).
+        limit = np.finfo(np.float64).max / scale
+        tinted = np.clip(tinted, -limit, limit) * scale
+
+    out = img.astype(np.float64)
+    out[..., :3] = tinted
+    # Alpha (if present) is already carried through `out` unchanged.
+
+    if np.issubdtype(in_dtype, np.integer):
+        info = np.iinfo(in_dtype)
+        return np.clip(np.rint(out), info.min, info.max).astype(in_dtype)
+    # Floating range policy: graded RGB is clamped to the input dtype's finite
+    # range so a narrower cast (or a scaled-back near-max float64 value)
+    # cannot produce inf. In-range values pass through bit-identically.
+    finfo = np.finfo(in_dtype)
+    out[..., :3] = np.clip(out[..., :3], float(finfo.min), float(finfo.max))
+    return out.astype(in_dtype)

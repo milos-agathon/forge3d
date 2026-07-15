@@ -340,4 +340,43 @@ mod tests {
 
         assert_eq!(rgba, expected);
     }
+
+    #[test]
+    fn load_hdr_uncompressed_round_trip_dims_and_values() {
+        use std::io::Write;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let mut path = std::env::temp_dir();
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock before unix epoch")
+            .as_nanos();
+        path.push(format!(
+            "forge3d_hdr_radiance_{}_{}.hdr",
+            std::process::id(),
+            nonce
+        ));
+        {
+            let mut f = File::create(&path).expect("create radiance fixture");
+            // 4x2, width < 8 avoids the new-style RLE path (first byte 128 != 2
+            // also forces the uncompressed scanline branch).
+            f.write_all(b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 2 +X 4\n")
+                .unwrap();
+            let px = [128u8, 64, 32, 129]; // e=129 -> 2^(129-128-8) = 2^-7
+            for _ in 0..(4 * 2) {
+                f.write_all(&px).unwrap();
+            }
+        }
+        let img = load_hdr(&path).expect("decode radiance fixture");
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!((img.width, img.height), (4, 2));
+        assert_eq!(img.data.len(), 4 * 2 * 3);
+        let exp = 2.0f32.powi(129 - 128 - 8);
+        for i in 0..(4 * 2) {
+            assert!((img.data[i * 3] - 128.0 * exp).abs() < 1e-6);
+            assert!((img.data[i * 3 + 1] - 64.0 * exp).abs() < 1e-6);
+            assert!((img.data[i * 3 + 2] - 32.0 * exp).abs() < 1e-6);
+        }
+    }
 }
