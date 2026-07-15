@@ -348,6 +348,30 @@ def _escape_xml(text: str) -> str:
         .replace("'", "&apos;"))
 
 
+def _native_label_path(
+    text: str, font_size: float, font_family: str, precision: int
+) -> tuple[str, tuple[float, float, float, float]]:
+    """Return native outline data and bounds without consulting host fonts."""
+    from .text import shape
+
+    root = Path(__file__).resolve().parent / "data" / "fonts"
+    requested = Path(font_family)
+    fonts = ([requested] if requested.is_file() else []) + [
+        root / name
+        for name in (
+            "NotoSansLatin-subset.ttf",
+            "NotoSansArabic-subset.ttf",
+            "NotoSansHebrew-subset.ttf",
+            "NotoSansDevanagari-subset.ttf",
+            "NotoSansSC-subset.ttf",
+        )
+    ]
+    shaped = shape(text, [str(path) for path in fonts], float(font_size))
+    path = shaped.svg_path(precision=max(0, min(8, int(precision))))
+    bounds = shaped.outline_bounds()
+    return path, bounds or (0.0, 0.0, 0.0, 0.0)
+
+
 def generate_svg(
     scene: VectorScene,
     width: int = 800,
@@ -456,14 +480,14 @@ def generate_svg(
                 bounds, width, height
             )
 
-            text = _escape_xml(label.text)
-            font_size = f"{style.font_size:.{precision}f}"
-
+            path, path_bounds = _native_label_path(
+                label.text, style.font_size, style.font_family, precision
+            )
+            tx = sx - (path_bounds[0] + path_bounds[2]) * 0.5
+            ty = sy - (path_bounds[1] + path_bounds[3]) * 0.5
             common_attrs = (
-                f'x="{sx:.{precision}f}" y="{sy:.{precision}f}" '
-                f'font-family="{style.font_family}" font-size="{font_size}" '
-                f'font-weight="{style.font_weight}" text-anchor="middle" '
-                f'dominant-baseline="middle"'
+                f'd="{path}" '
+                f'transform="translate({tx:.{precision}f} {ty:.{precision}f})"'
             )
 
             # Halo (stroke behind text)
@@ -471,13 +495,15 @@ def generate_svg(
                 halo_color = _color_to_css(style.halo_color)
                 halo_w = f"{style.halo_width * 2:.{precision}f}"
                 lines.append(
-                    f'  <text {common_attrs} fill="none" stroke="{halo_color}" '
-                    f'stroke-width="{halo_w}" stroke-linejoin="round">{text}</text>'
+                    f'  <path {common_attrs} fill="none" stroke="{halo_color}" '
+                    f'stroke-width="{halo_w}" stroke-linejoin="round"/>'
                 )
 
             # Main text
             text_color = _color_to_css(style.color)
-            lines.append(f'  <text {common_attrs} fill="{text_color}">{text}</text>')
+            lines.append(
+                f'  <path {common_attrs} fill="{text_color}" fill-rule="nonzero"/>'
+            )
 
     lines.append('</svg>')
     return '\n'.join(lines)

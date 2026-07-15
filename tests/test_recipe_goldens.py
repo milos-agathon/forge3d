@@ -103,15 +103,10 @@ def _write_rgba_png(path: Path, rgba: np.ndarray) -> Path:
     return path
 
 
-def _arabic_font_path() -> Path | None:
-    for path in (
-        Path("C:/Windows/Fonts/arial.ttf"),
-        Path("C:/Windows/Fonts/tahoma.ttf"),
-        Path("C:/Windows/Fonts/segoeui.ttf"),
-    ):
-        if path.exists():
-            return path
-    return None
+def _arabic_font_path() -> Path:
+    path = ROOT / "assets" / "fonts" / "NotoSansArabic-subset.ttf"
+    assert path.is_file(), f"Packaged Arabic test font is missing: {path}"
+    return path
 
 
 def _pad4(data: bytes, pad: bytes = b" ") -> bytes:
@@ -350,12 +345,17 @@ def _label_halo_depth(tmp_path: Path) -> f3d.MapScene:
 
 
 def _label_arabic_joining(tmp_path: Path) -> f3d.MapScene:
-    from forge3d.text_atlas import bake_atlas, save_atlas
+    from forge3d.text_atlas import BakedAtlas, save_atlas
 
     shaped_glyphs = ["\ufe8e", "\ufe92", "\ufea3", "\ufeae", "\ufee3"]
     charset = sorted(set("مرحبا" + "".join(shaped_glyphs)))
     font_path = _arabic_font_path()
-    atlas = bake_atlas(font_path=font_path, charset=charset, font_size=34, px_range=8, padding=4)
+    shaped = f3d.text.shape("مرحبا", [str(font_path)], 34.0)
+    baked = f3d.text.bake_msdf_atlas([str(font_path)], shaped, 34.0, 8.0, 4)
+    metrics = dict(baked["metrics"])
+    metrics["font_source"] = str(font_path)
+    metrics["font_sources"] = [str(font_path)]
+    atlas = BakedAtlas(image=np.asarray(baked["image"], dtype=np.uint8), metrics=metrics)
     atlas_png, atlas_json = save_atlas(
         atlas,
         tmp_path / "arabic_joining_atlas.png",
@@ -367,8 +367,7 @@ def _label_arabic_joining(tmp_path: Path) -> f3d.MapScene:
         "metrics_path": str(atlas_json),
         "source_path": str(atlas_json),
     }
-    if font_path is not None:
-        glyph_atlas["font_path"] = str(font_path)
+    glyph_atlas["font_path"] = str(font_path)
     return _base_scene(
         tmp_path,
         "mapscene_label_arabic_joining",
@@ -1096,6 +1095,21 @@ def test_recipe_golden_catalog_links_docs_gallery() -> None:
         assert spec.command in gallery
 
 
+def test_arabic_golden_recipe_accepts_packaged_font_and_rasterizes_coverage(
+    tmp_path: Path,
+) -> None:
+    scene = _label_arabic_joining(tmp_path)
+    compiled = scene.compile_plan()
+    plan = compiled.label_plans["labels"]
+    assert not plan.rejected
+    assert len(plan.accepted) == 1
+    assert plan.accepted[0].typography["glyph_ids"]
+    shaped = f3d.text.shape("مرحبا", [str(_arabic_font_path())], 34.0)
+    mask = f3d.text.rasterize_shaped_run(shaped, 128, 80, origin=(40.0, 48.0))
+    assert np.count_nonzero(mask > 0.0) > 20
+    assert np.any((mask > 0.0) & (mask < 1.0))
+
+
 def test_update_mode_is_read_at_call_time(monkeypatch: pytest.MonkeyPatch) -> None:
     """Baseline-update mode must be a call-time decision, not an import-time
     constant, or the negative control's delenv guard is dead code."""
@@ -1208,6 +1222,9 @@ def test_recipe_goldens_render_and_match(tmp_path, spec: RecipeGolden) -> None:
         assert metadata["building_shadow_model"] == "terrain_csm_mesh_cast_receive"
     output_path = Path(scene.last_render_path or scene.recipe.output.path or "")
     assert output_path.exists()
+    if spec.scene_id == "mapscene_label_arabic_joining":
+        rendered = f3d.png_to_numpy(output_path)
+        assert np.count_nonzero(np.max(rendered[..., :3], axis=-1) > 245) > 20
     if _certificate_refresh_without_backend_baseline(spec):
         assert spec.canonical_golden_path.exists(), (
             f"Certificate refresh requires the canonical baseline for {spec.scene_id}; "

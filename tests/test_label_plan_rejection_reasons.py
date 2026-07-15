@@ -1,4 +1,13 @@
+from pathlib import Path
+
 from forge3d.label_plan import REJECTION_REASONS
+
+
+BASE_REJECTION_REASONS = tuple(
+    reason
+    for reason in REJECTION_REASONS
+    if reason not in {"font_chain_required", "malformed_font", "shaping_failed"}
+)
 
 
 _GLYPHS_WITHOUT_BANG = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ")
@@ -81,17 +90,54 @@ def test_label_plan_retains_every_required_rejection_reason():
         "terrain-label": "terrain_occluded",
         "unsupported-geometry": "unsupported_geometry_type",
     }
-    assert set(reasons_by_label.values()) == set(REJECTION_REASONS)
+    assert set(reasons_by_label.values()) == set(BASE_REJECTION_REASONS)
 
     diagnostics_by_code = {diagnostic.code: diagnostic for diagnostic in plan.diagnostics}
     assert diagnostics_by_code["missing_glyphs"].object_id == "missing-glyph"
     assert diagnostics_by_code["missing_glyphs"].details["missing_glyphs"] == ["!"]
     assert diagnostics_by_code["label_rejection_summary"].details["rejection_counts"] == {
-        reason: 1 for reason in REJECTION_REASONS
+        reason: 1 for reason in BASE_REJECTION_REASONS
     }
 
     payload = plan.to_dict()
     assert LabelPlan.from_dict(payload).to_dict() == payload
+
+
+def test_shaping_rejection_reasons_are_structured(
+    tmp_path, monkeypatch
+):
+    from forge3d import LabelPlan
+    from forge3d import text as text_module
+
+    def compile_with(atlas):
+        return LabelPlan.compile(
+            labels=[_point("arabic", "مرحبا", 10.0, 10.0)],
+            camera={},
+            viewport=(100, 100),
+            glyph_atlas=atlas,
+        ).rejected[0]
+
+    missing_chain = compile_with({"glyphs": list("مرحبا")})
+
+    malformed_path = tmp_path / "malformed.ttf"
+    malformed_path.write_bytes(b"not a font")
+    malformed = compile_with(
+        {"glyphs": list("مرحبا"), "font_path": str(malformed_path)}
+    )
+
+    packaged = Path(__file__).resolve().parents[1] / "assets/fonts/NotoSansArabic-subset.ttf"
+    monkeypatch.setattr(
+        text_module,
+        "shape",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("synthetic failure")),
+    )
+    generic = compile_with({"glyphs": list("مرحبا"), "font_path": str(packaged)})
+
+    reasons = {missing_chain.reason, malformed.reason, generic.reason}
+    assert reasons == {"font_chain_required", "malformed_font", "shaping_failed"}
+    assert reasons | set(BASE_REJECTION_REASONS) == set(REJECTION_REASONS)
+    for rejected in (missing_chain, malformed, generic):
+        assert rejected.details["diagnostics"] or rejected.reason == "shaping_failed"
 
 
 def test_rejected_labels_keep_candidate_identity_and_structured_details():

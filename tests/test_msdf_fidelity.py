@@ -12,13 +12,15 @@ ROOT = Path(__file__).resolve().parents[1]
 FONT = ROOT / "assets" / "fonts" / "NotoSansLatin-subset.ttf"
 
 
-def _bake(size: int) -> tuple[dict, np.ndarray, np.ndarray]:
+def _bake(
+    size: int, character: str = "A"
+) -> tuple[dict, np.ndarray, np.ndarray, np.ndarray]:
     baked = forge3d.text.bake_msdf_atlas(
-        [str(FONT)], "A", size, px_range=4.0, padding=2
+        [str(FONT)], character, size, px_range=4.0, padding=2
     )
     image = baked["image"]
-    glyph = baked["metrics"]["glyphs"][str(ord("A"))]
-    shaped = forge3d.text.shape("A", [str(FONT)], float(size))
+    glyph = baked["metrics"]["glyphs"][str(ord(character))]
+    shaped = forge3d.text.shape(character, [str(FONT)], float(size))
     analytic = forge3d.text.rasterize_shaped_run(
         shaped,
         int(glyph["w"]),
@@ -29,12 +31,31 @@ def _bake(size: int) -> tuple[dict, np.ndarray, np.ndarray]:
         int(glyph["y"]) : int(glyph["y"] + glyph["h"]),
         int(glyph["x"]) : int(glyph["x"] + glyph["w"]),
     ]
-    return baked, cell, analytic
+    sdf_cell = baked["sdf_image"][
+        int(glyph["y"]) : int(glyph["y"] + glyph["h"]),
+        int(glyph["x"]) : int(glyph["x"] + glyph["w"]),
+    ]
+    return baked, cell, sdf_cell, analytic
 
 
-def _coverage(field: np.ndarray, px_range: float) -> np.ndarray:
-    median = np.median(field.astype(np.float32) / 255.0, axis=2)
-    return np.clip((median - 0.5) * px_range + 0.5, 0.0, 1.0)
+def _smoothstep(low: np.ndarray, high: np.ndarray, value: np.ndarray) -> np.ndarray:
+    t = np.clip((value - low) / np.maximum(high - low, 1.0e-6), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _renderer_coverage(field: np.ndarray, *, channels: int) -> np.ndarray:
+    """Mirror text_overlay.wgsl median + fwidth + smoothstep reconstruction."""
+    normalized = field.astype(np.float32) / 255.0
+    encoded = np.median(normalized, axis=2) if channels == 3 else normalized
+    signed = encoded - 0.5
+    dy, dx = np.gradient(signed)
+    edge_width = np.maximum((np.abs(dx) + np.abs(dy)) * 2.0, 1.0e-6)
+    return _smoothstep(-edge_width, edge_width, signed).astype(np.float32)
+
+
+def _distance_coverage(field: np.ndarray, px_range: float) -> np.ndarray:
+    encoded = np.median(field.astype(np.float32) / 255.0, axis=2)
+    return np.clip((encoded - 0.5) * px_range + 0.5, 0.0, 1.0)
 
 
 def _bilinear(field: np.ndarray, x: float, y: float) -> np.ndarray:
@@ -59,42 +80,36 @@ def _bilinear(field: np.ndarray, x: float, y: float) -> np.ndarray:
     )
 
 
-def _render_12px_from_msdf(channel: int | None = None) -> tuple[dict, np.ndarray, np.ndarray]:
-    target_size = 12
+def _render_upscaled_fields() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     scale = 8
-    px_range = 4
-    padding = 2
-    layout, _, analytic = _bake(target_size)
-    source = forge3d.text.bake_msdf_atlas(
-        [str(FONT)],
-        "A",
-        target_size * scale,
-        px_range=px_range * scale,
-        padding=padding * scale,
+    character = "V"
+    source, source_msdf, source_sdf, _ = _bake(12, character)
+    source_glyph = source["metrics"]["glyphs"][str(ord(character))]
+    source_msdf = source_msdf.astype(np.float32)
+    source_sdf = source_sdf.astype(np.float32)
+    output_shape = (
+        int(source_glyph["h"]) * scale,
+        int(source_glyph["w"]) * scale,
     )
-    target_glyph = layout["metrics"]["glyphs"][str(ord("A"))]
-    source_glyph = source["metrics"]["glyphs"][str(ord("A"))]
-    source_cell = source["image"][
-        int(source_glyph["y"]) : int(source_glyph["y"] + source_glyph["h"]),
-        int(source_glyph["x"]) : int(source_glyph["x"] + source_glyph["w"]),
-    ].astype(np.float32) / 255.0
-    coverage = np.zeros_like(analytic)
-    for y in range(coverage.shape[0]):
-        for x in range(coverage.shape[1]):
-            covered = 0
-            for sy in range(8):
-                for sx in range(8):
-                    source_x = (
-                        x + (sx + 0.5) / 8.0 + float(target_glyph["ox"])
-                    ) * scale - float(source_glyph["ox"])
-                    source_y = (
-                        y + (sy + 0.5) / 8.0 + float(target_glyph["oy"])
-                    ) * scale - float(source_glyph["oy"])
-                    sample = _bilinear(source_cell, source_x, source_y)
-                    distance = sample[channel] if channel is not None else np.median(sample)
-                    covered += distance >= 0.5
-            coverage[y, x] = covered / 64.0
-    return source, coverage, analytic
+    shaped = forge3d.text.shape(character, [str(FONT)], float(12 * scale))
+    analytic = forge3d.text.rasterize_shaped_run(
+        shaped,
+        output_shape[1],
+        output_shape[0],
+        origin=(
+            -float(source_glyph["ox"]) * scale,
+            -float(source_glyph["oy"]) * scale,
+        ),
+    )
+    sampled_msdf = np.empty(output_shape + (3,), dtype=np.float32)
+    sampled_sdf = np.empty(output_shape, dtype=np.float32)
+    for y in range(analytic.shape[0]):
+        for x in range(analytic.shape[1]):
+            source_x = (x + 0.5) / scale
+            source_y = (y + 0.5) / scale
+            sampled_msdf[y, x] = _bilinear(source_msdf, source_x, source_y)
+            sampled_sdf[y, x] = _bilinear(source_sdf, source_x, source_y)
+    return sampled_msdf, sampled_sdf, analytic
 
 
 def _boundary(mask: np.ndarray) -> np.ndarray:
@@ -115,7 +130,8 @@ def _hausdorff(left: np.ndarray, right: np.ndarray) -> float:
 
 
 def test_true_rgb_msdf_meets_12px_analytic_fidelity():
-    baked, decoded, analytic = _render_12px_from_msdf()
+    baked, cell, _, analytic = _bake(12)
+    decoded = _renderer_coverage(cell, channels=3)
     intersection = np.count_nonzero((decoded >= 0.5) & (analytic >= 0.5))
     union = np.count_nonzero((decoded >= 0.5) | (analytic >= 0.5))
     iou = intersection / union
@@ -130,8 +146,8 @@ def test_true_rgb_msdf_meets_12px_analytic_fidelity():
 
 
 def test_true_rgb_msdf_meets_96px_ssim():
-    baked, cell, analytic = _bake(96)
-    decoded = _coverage(cell, baked["metrics"]["px_range"])
+    baked, cell, _, analytic = _bake(96)
+    decoded = _distance_coverage(cell, baked["metrics"]["px_range"])
     measured = ssim(decoded, analytic, data_range=1.0)
 
     print(f"96px SSIM={measured:.9f}")
@@ -139,20 +155,30 @@ def test_true_rgb_msdf_meets_96px_ssim():
 
 
 def test_single_channel_ablation_loses_the_sharp_corner():
-    _, red_coverage, analytic = _render_12px_from_msdf(channel=0)
-    distance = _hausdorff(red_coverage, analytic)
+    msdf_cell, sdf_cell, analytic = _render_upscaled_fields()
+    msdf_coverage = _renderer_coverage(msdf_cell, channels=3)
+    sdf_coverage = _renderer_coverage(sdf_cell, channels=1)
+    msdf_distance = _hausdorff(msdf_coverage, analytic)
+    sdf_distance = _hausdorff(sdf_coverage, analytic)
 
-    print(f"single-channel Hausdorff={distance:.6f}px")
-    assert distance > 0.5
+    print(
+        f"MSDF Hausdorff={msdf_distance:.6f}px "
+        f"independent SDF Hausdorff={sdf_distance:.6f}px"
+    )
+    assert sdf_distance > msdf_distance
+    assert sdf_distance > 0.5
 
 
 def test_bake_metadata_is_typed_deterministic_and_measured():
-    first, _, _ = _bake(12)
-    second, _, _ = _bake(12)
+    first, _, first_sdf, _ = _bake(12)
+    second, _, second_sdf, _ = _bake(12)
 
     assert first["image"].dtype == np.uint8
     assert first["image"].tobytes() == second["image"].tobytes()
+    assert first_sdf.dtype == np.uint8
+    assert first_sdf.tobytes() == second_sdf.tobytes()
     assert first["metrics"]["channels"] == 3
     assert first["metrics"]["kind"] == "msdf_font_atlas"
     assert first["metrics"]["byte_count"] == first["image"].nbytes
+    assert first["metrics"]["sdf_byte_count"] == first["sdf_image"].nbytes
     assert first["metrics"]["bake_ms"] >= 0.0

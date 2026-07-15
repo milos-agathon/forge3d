@@ -34,7 +34,7 @@ mod types;
 pub mod typography;
 pub mod unicode;
 
-pub use atlas::{GlyphMetrics, MsdfAtlas};
+pub use atlas::{GlyphKey, GlyphMetrics, MsdfAtlas};
 pub use callout::{Callout, CalloutStyle, PointerDirection};
 pub use collision::CollisionGrid;
 pub use curved::{CurvedGlyphInstance, CurvedTextLayout, SampledPath};
@@ -56,13 +56,68 @@ pub use types::{
 pub use typography::{KerningTable, TextCase, TypographySettings};
 
 use crate::core::text_overlay::{TextInstance, TextOverlayRenderer};
+use crate::labels::font::{FontCollection, FontRequest};
 use glam::{DVec3, Mat4, Vec3};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use wgpu::{Device, Queue};
 
 fn renderer_channels_from_atlas(channels: u32) -> u32 {
     debug_assert!(matches!(channels, 1 | 3));
     channels
+}
+
+fn font_collection_from_metrics(
+    metrics_json_path: impl AsRef<Path>,
+) -> Result<Option<Arc<FontCollection>>, String> {
+    let metrics_path = metrics_json_path.as_ref();
+    let json = std::fs::read_to_string(metrics_path)
+        .map_err(|error| format!("Failed to read atlas font metadata: {error}"))?;
+    let value: serde_json::Value = serde_json::from_str(&json)
+        .map_err(|error| format!("Invalid atlas font metadata JSON: {error}"))?;
+    let mut sources = value
+        .get("font_sources")
+        .and_then(|sources| sources.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|source| source.as_str())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if sources.is_empty() {
+        if let Some(source) = value.get("font_source").and_then(|source| source.as_str()) {
+            sources.push(source.to_owned());
+        }
+    }
+    if sources.is_empty() {
+        return Ok(None);
+    }
+
+    let base = metrics_path.parent().unwrap_or_else(|| Path::new("."));
+    let requests = sources
+        .into_iter()
+        .map(|source| {
+            let declared = PathBuf::from(&source);
+            let basename = declared.file_name().map(PathBuf::from);
+            let path = [
+                Some(declared.clone()),
+                Some(base.join(&declared)),
+                basename.map(|name| base.join(name)),
+            ]
+            .into_iter()
+            .flatten()
+            .find(|candidate| candidate.is_file())
+            .ok_or_else(|| format!("Atlas font source is unavailable: {source}"))?;
+            let bytes = std::fs::read(&path).map_err(|error| {
+                format!("Failed to read atlas font {}: {error}", path.display())
+            })?;
+            Ok(FontRequest::from_bytes(path.display().to_string(), bytes))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    FontCollection::load(&requests)
+        .map(Arc::new)
+        .map(Some)
+        .map_err(|error| error.to_string())
 }
 
 /// Manages screen-space labels with collision detection and depth occlusion.
@@ -71,6 +126,7 @@ pub struct LabelManager {
     line_labels: HashMap<LabelId, LineLabelData>,
     next_id: u64,
     atlas: Option<MsdfAtlas>,
+    fonts: Option<Arc<FontCollection>>,
     collision_rtree: LabelRTree,
     projector: LabelProjector,
     visible_instances: Vec<TextInstance>,
@@ -91,6 +147,7 @@ impl LabelManager {
             line_labels: HashMap::new(),
             next_id: 1,
             atlas: None,
+            fonts: None,
             collision_rtree: LabelRTree::new(screen_width, screen_height),
             projector: LabelProjector::new(screen_width, screen_height),
             visible_instances: Vec::new(),
@@ -135,7 +192,9 @@ impl LabelManager {
         metrics_json_path: &str,
     ) -> Result<(), String> {
         let atlas = MsdfAtlas::load_from_files(device, queue, atlas_png_path, metrics_json_path)?;
+        let fonts = font_collection_from_metrics(metrics_json_path)?;
         self.atlas = Some(atlas);
+        self.fonts = fonts;
         Ok(())
     }
 
@@ -419,6 +478,7 @@ impl LabelManager {
 
         let (screen_w, screen_h) = self.projector.screen_size();
         let mut visible_count = 0;
+        let fonts = self.fonts.clone();
 
         // Collect labels and sort by priority (higher priority first)
         let mut sorted_labels: Vec<_> = self.labels.values_mut().collect();
@@ -476,17 +536,45 @@ impl LabelManager {
                 screen_pos[1] += label.style.offset[1];
                 label.screen_pos = Some(screen_pos);
 
-                // Calculate label bounds
-                let (width, height) = atlas.map_or_else(
-                    || {
-                        let glyphs = label.text.chars().filter(|ch| !ch.is_whitespace()).count();
-                        (
-                            (glyphs.max(1) as f32) * label.style.size * 0.6,
-                            label.style.size,
-                        )
-                    },
-                    |atlas| atlas.measure_text(&label.text, label.style.size),
-                );
+                // Shape once and keep the exact fallback face / GSUB glyph identities
+                // for both collision bounds and GPU instance construction.
+                let shaped = if atlas.is_some() {
+                    fonts.as_ref()
+                } else {
+                    None
+                }
+                .and_then(|fonts| {
+                    match shape::shape(
+                        &label.text,
+                        Arc::clone(fonts),
+                        label.style.size,
+                        None,
+                        None,
+                        &[],
+                    ) {
+                        Ok(shaped) => Some(shaped),
+                        Err(_) => None,
+                    }
+                });
+                let line_range = 0..label.text.chars().count();
+                let line_ranges = std::slice::from_ref(&line_range);
+                let (width, height) = if let (Some(atlas), Some(shaped)) = (atlas, &shaped) {
+                    match atlas.measure_shaped(shaped, line_ranges) {
+                        Ok(measurement) => measurement,
+                        Err(_) => {
+                            label.visible = false;
+                            continue;
+                        }
+                    }
+                } else if let Some(atlas) = atlas {
+                    atlas.measure_text(&label.text, label.style.size)
+                } else {
+                    let glyphs = label.text.chars().filter(|ch| !ch.is_whitespace()).count();
+                    (
+                        (glyphs.max(1) as f32) * label.style.size * 0.6,
+                        label.style.size,
+                    )
+                };
                 let half_w = width * 0.5;
                 let half_h = height * 0.5;
 
@@ -529,16 +617,32 @@ impl LabelManager {
 
                     color[3] = label.computed_alpha;
 
-                    // Generate text instances for this label
                     if let Some(atlas) = atlas {
-                        let instances = atlas.layout_text(
-                            &label.text,
-                            screen_pos,
-                            label.style.size,
-                            color,
-                            label.style.halo_color,
-                            label.style.halo_width,
-                        );
+                        let instances = if let Some(shaped) = &shaped {
+                            match atlas.layout_shaped(
+                                shaped,
+                                line_ranges,
+                                screen_pos,
+                                color,
+                                label.style.halo_color,
+                                label.style.halo_width,
+                            ) {
+                                Ok(instances) => instances,
+                                Err(_) => {
+                                    label.visible = false;
+                                    continue;
+                                }
+                            }
+                        } else {
+                            atlas.layout_text(
+                                &label.text,
+                                screen_pos,
+                                label.style.size,
+                                color,
+                                label.style.halo_color,
+                                label.style.halo_width,
+                            )
+                        };
                         self.visible_instances.extend(instances);
                     }
                 } else {
@@ -577,8 +681,42 @@ impl LabelManager {
                 continue;
             }
 
-            // Compute glyph advances
-            let advances = compute_glyph_advances(&line_label.text, line_label.style.size);
+            let shaped = if let Some(fonts) = &fonts {
+                match shape::shape(
+                    &line_label.text,
+                    Arc::clone(fonts),
+                    line_label.style.size,
+                    None,
+                    None,
+                    &[],
+                ) {
+                    Ok(shaped) => Some(shaped),
+                    Err(_) => {
+                        line_label.visible = false;
+                        continue;
+                    }
+                }
+            } else {
+                None
+            };
+            let line_range = 0..line_label.text.chars().count();
+            let line_ranges = std::slice::from_ref(&line_range);
+            let shaped_stream = if let Some(shaped) = &shaped {
+                match positioned::positioned_glyphs(shaped, line_ranges) {
+                    Ok(glyphs) => Some(glyphs),
+                    Err(_) => {
+                        line_label.visible = false;
+                        continue;
+                    }
+                }
+            } else {
+                None
+            };
+            let advances = if let Some(glyphs) = &shaped_stream {
+                glyphs.iter().map(|glyph| glyph.advance[0]).collect()
+            } else {
+                compute_glyph_advances(&line_label.text, line_label.style.size)
+            };
 
             // Compute placements
             let placements = compute_line_label_placement(
@@ -601,18 +739,33 @@ impl LabelManager {
             line_label.visible = true;
             visible_count += 1;
 
-            // Emit one rotated atlas glyph quad per placed line-label glyph.
             let mut color = line_label.style.color;
             color[3] = color[3].clamp(0.0, 1.0);
-            for (ch, placement) in line_label
-                .text
-                .chars()
-                .zip(line_label.glyph_positions.iter())
-            {
-                if ch == ' ' {
-                    continue;
-                }
-                if let Some(atlas) = atlas {
+            if let Some(atlas) = atlas {
+                if let Some(shaped) = &shaped {
+                    match atlas.layout_shaped_on_placements(
+                        shaped,
+                        line_ranges,
+                        &line_label.glyph_positions,
+                        color,
+                        line_label.style.halo_color,
+                        line_label.style.halo_width,
+                    ) {
+                        Ok(instances) => self.visible_instances.extend(instances),
+                        Err(_) => {
+                            line_label.visible = false;
+                            continue;
+                        }
+                    }
+                } else {
+                    for (ch, placement) in line_label
+                        .text
+                        .chars()
+                        .zip(line_label.glyph_positions.iter())
+                    {
+                        if ch == ' ' {
+                            continue;
+                        }
                     let mut instances = atlas.layout_text(
                         &ch.to_string(),
                         placement.screen_pos,
@@ -626,6 +779,7 @@ impl LabelManager {
                     }
                     self.visible_instances.extend(instances);
                 }
+            }
             }
         }
 

@@ -39,7 +39,7 @@ def rasterize_shaped_run(
 ) -> npt.NDArray[np.float32]: ...
 def bake_msdf_atlas(
     font_chain: Sequence[str | Path],
-    charset: str,
+    charset: str | ShapedText,
     font_size: float,
     px_range: float = ...,
     padding: int = ...,

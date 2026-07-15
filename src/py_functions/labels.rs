@@ -60,5 +60,5 @@ pub(crate) fn declutter_optimal_py(
 }
 
 pub(crate) use crate::labels::py_text::{
-    bake_msdf_atlas_py, rasterize_shaped_run_py, text_shape_py,
+    bake_msdf_atlas_py, bake_msdf_atlas_shaped_py, rasterize_shaped_run_py, text_shape_py,
 };

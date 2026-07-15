@@ -40,9 +40,11 @@ def bake_atlas(
         [font], characters, float(font_size), float(px_range), int(padding)
     )
     metrics = dict(baked["metrics"])
-    metrics["font_source"] = (
+    font_source = (
         str(font) if font_path is not None else "forge3d/data/fonts/NotoSansLatin-subset.ttf"
     )
+    metrics["font_source"] = font_source
+    metrics["font_sources"] = [font_source]
     return BakedAtlas(
         image=np.asarray(baked["image"], dtype=np.uint8),
         metrics=validate_atlas_metrics(metrics),
@@ -85,7 +87,54 @@ def validate_atlas_metrics(metrics: Mapping[str, Any]) -> dict[str, Any]:
             if field not in value:
                 raise ValueError(f"Glyph {key!r} missing metric {field!r}")
             glyph[field] = float(value[field])
+        if "font_index" in value:
+            glyph["font_index"] = int(value["font_index"])
+        if "glyph_id" in value:
+            glyph["glyph_id"] = int(value["glyph_id"])
         normalized["glyphs"][str(int(key))] = glyph
+    glyphs_by_id = metrics.get("glyphs_by_id", {})
+    if glyphs_by_id:
+        if not isinstance(glyphs_by_id, Mapping):
+            raise ValueError("Atlas metrics glyphs_by_id must be a mapping")
+        normalized["glyphs_by_id"] = {}
+        for identity, value in glyphs_by_id.items():
+            if not isinstance(value, Mapping):
+                raise ValueError(f"Glyph identity {identity!r} metrics must be a mapping")
+            try:
+                font_index_text, glyph_id_text = str(identity).split(":", 1)
+                font_index = int(font_index_text)
+                glyph_id = int(glyph_id_text)
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    f"Glyph identity {identity!r} must be '<font_index>:<glyph_id>'"
+                ) from error
+            glyph = {}
+            for field in ("x", "y", "w", "h", "ox", "oy", "adv"):
+                if field not in value:
+                    raise ValueError(f"Glyph identity {identity!r} missing metric {field!r}")
+                glyph[field] = float(value[field])
+            if int(value.get("font_index", font_index)) != font_index:
+                raise ValueError(f"Glyph identity {identity!r} has mismatched font_index")
+            if int(value.get("glyph_id", glyph_id)) != glyph_id:
+                raise ValueError(f"Glyph identity {identity!r} has mismatched glyph_id")
+            glyph["font_index"] = font_index
+            glyph["glyph_id"] = glyph_id
+            normalized["glyphs_by_id"][f"{font_index}:{glyph_id}"] = glyph
+    unicode_map = metrics.get("unicode_map", {})
+    if unicode_map:
+        if not isinstance(unicode_map, Mapping):
+            raise ValueError("Atlas metrics unicode_map must be a mapping")
+        normalized["unicode_map"] = {
+            str(int(codepoint)): str(identity)
+            for codepoint, identity in unicode_map.items()
+        }
+    if "font_sources" in metrics:
+        sources = metrics["font_sources"]
+        if not isinstance(sources, Sequence) or isinstance(sources, (str, bytes)):
+            raise ValueError("Atlas metrics font_sources must be a sequence")
+        normalized["font_sources"] = [str(source) for source in sources]
+    if "sdf_byte_count" in metrics:
+        normalized["sdf_byte_count"] = int(metrics["sdf_byte_count"])
     return normalized
 
 

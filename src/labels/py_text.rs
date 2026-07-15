@@ -1,7 +1,5 @@
-#![cfg(feature = "extension-module")]
-
 use crate::labels::font::{FontCollection, FontRequest, TextError as FontError};
-use crate::labels::msdf::bake_msdf_atlas;
+use crate::labels::msdf::{bake_msdf_atlas, bake_msdf_atlas_from_shaped, BakedMsdfAtlas};
 use crate::labels::positioned::{positioned_outlines, svg_path_data};
 use crate::labels::raster::rasterize;
 use crate::labels::shape::{self, Direction, FeatureSetting, ShapedText, TextError};
@@ -347,9 +345,46 @@ pub(crate) fn bake_msdf_atlas_py(
                 font_error_diagnostic(py, &error),
             )
         })?;
+    baked_msdf_to_py(py, &baked)
+}
+
+#[pyfunction]
+#[pyo3(name = "bake_msdf_atlas_shaped")]
+#[pyo3(signature = (shaped, font_size = None, px_range = 8.0, padding = 4))]
+pub(crate) fn bake_msdf_atlas_shaped_py(
+    py: Python<'_>,
+    shaped: PyRef<'_, PyShapedText>,
+    font_size: Option<f32>,
+    px_range: f32,
+    padding: u32,
+) -> PyResult<PyObject> {
+    let font_size = font_size.unwrap_or(shaped.inner.size);
+    if !font_size.is_finite() || font_size <= 0.0 || !px_range.is_finite() || px_range <= 0.0 {
+        return Err(PyValueError::new_err(
+            "font_size and px_range must be finite and positive",
+        ));
+    }
+    let baked = bake_msdf_atlas_from_shaped(&shaped.inner, font_size, px_range, padding).map_err(
+        |error| {
+            exception_with_diagnostic::<PyValueError>(
+                py,
+                error.to_string(),
+                font_error_diagnostic(py, &error),
+            )
+        },
+    )?;
+    baked_msdf_to_py(py, &baked)
+}
+
+fn baked_msdf_to_py(py: Python<'_>, baked: &BakedMsdfAtlas) -> PyResult<PyObject> {
     let image = ndarray::Array3::from_shape_vec(
         (baked.height as usize, baked.width as usize, 3),
         baked.image.clone(),
+    )
+    .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    let sdf_image = ndarray::Array2::from_shape_vec(
+        (baked.height as usize, baked.width as usize),
+        baked.sdf_image.clone(),
     )
     .map_err(|error| PyValueError::new_err(error.to_string()))?;
     let metrics = PyDict::new_bound(py);
@@ -364,7 +399,10 @@ pub(crate) fn bake_msdf_atlas_py(
     metrics.set_item("height", baked.height)?;
     metrics.set_item("bake_ms", baked.bake_ms)?;
     metrics.set_item("byte_count", baked.byte_count())?;
+    metrics.set_item("sdf_byte_count", baked.sdf_image.len())?;
     let glyphs = PyDict::new_bound(py);
+    let glyphs_by_id = PyDict::new_bound(py);
+    let unicode_map = PyDict::new_bound(py);
     for glyph in &baked.glyphs {
         let value = PyDict::new_bound(py);
         value.set_item("x", glyph.x)?;
@@ -374,11 +412,21 @@ pub(crate) fn bake_msdf_atlas_py(
         value.set_item("ox", glyph.offset_x)?;
         value.set_item("oy", glyph.offset_y)?;
         value.set_item("adv", glyph.advance)?;
-        glyphs.set_item(glyph.codepoint.to_string(), value)?;
+        value.set_item("font_index", glyph.font_index)?;
+        value.set_item("glyph_id", glyph.glyph_id)?;
+        let identity = format!("{}:{}", glyph.font_index, glyph.glyph_id);
+        glyphs_by_id.set_item(&identity, &value)?;
+        if glyph.codepoint != 0 {
+            glyphs.set_item(glyph.codepoint.to_string(), &value)?;
+            unicode_map.set_item(glyph.codepoint.to_string(), identity)?;
+        }
     }
     metrics.set_item("glyphs", glyphs)?;
+    metrics.set_item("glyphs_by_id", glyphs_by_id)?;
+    metrics.set_item("unicode_map", unicode_map)?;
     let output = PyDict::new_bound(py);
     output.set_item("image", PyArray3::from_owned_array_bound(py, image))?;
+    output.set_item("sdf_image", PyArray2::from_owned_array_bound(py, sdf_image))?;
     output.set_item("metrics", metrics)?;
     Ok(output.into())
 }
@@ -392,6 +440,7 @@ mod tests {
 
     #[test]
     fn all_non_font_text_error_families_have_stable_reasons() {
+        pyo3::prepare_freethreaded_python();
         Python::with_gil(|py| {
             let cases = [
                 (

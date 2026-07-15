@@ -151,8 +151,8 @@ mod tests {
 
         let svg_text = labels_to_svg_text(&labels);
 
-        assert!(svg_text.contains("<text"));
-        assert!(svg_text.contains("Test Label"));
-        assert!(svg_text.contains("font-size"));
+        assert!(!svg_text.contains("<text"));
+        assert!(svg_text.contains("<path"));
+        assert!(svg_text.contains("d=\"M"));
     }
 }

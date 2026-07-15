@@ -68,18 +68,29 @@ def rasterize_shaped_run(
 
 def bake_msdf_atlas(
     font_chain: Sequence[str | Path],
-    charset: str,
+    charset: str | ShapedText,
     font_size: float,
     px_range: float = 8.0,
     padding: int = 4,
 ):
-    return _native.bake_msdf_atlas(
-        [str(Path(font)) for font in font_chain],
-        charset,
-        font_size,
-        px_range,
-        padding,
-    )
+    fonts = [str(Path(font)) for font in font_chain]
+    if hasattr(_native, "ShapedText") and isinstance(charset, ShapedText):
+        baked = _native.bake_msdf_atlas_shaped(
+            charset,
+            font_size,
+            px_range,
+            padding,
+        )
+    else:
+        baked = _native.bake_msdf_atlas(
+            fonts,
+            charset,
+            font_size,
+            px_range,
+            padding,
+        )
+    baked["metrics"]["font_sources"] = fonts
+    return baked
 
 
 __all__ = [

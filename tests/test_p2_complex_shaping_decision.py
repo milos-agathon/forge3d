@@ -8,27 +8,6 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
-
-def _arabic_font_path() -> Path:
-    candidates = [
-        # Windows
-        Path("C:/Windows/Fonts/arial.ttf"),
-        Path("C:/Windows/Fonts/tahoma.ttf"),
-        Path("C:/Windows/Fonts/segoeui.ttf"),
-        # Linux (GitHub-hosted runners ship DejaVu/Noto/Liberation)
-        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-        Path("/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf"),
-        Path("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
-        # macOS
-        Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
-        Path("/System/Library/Fonts/Supplemental/Tahoma.ttf"),
-    ]
-    for path in candidates:
-        if path.exists():
-            return path
-    raise AssertionError("Arabic shaping test requires a local TrueType font")
-
-
 def test_complex_shaping_has_no_external_shaping_dependencies():
     cargo = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
 

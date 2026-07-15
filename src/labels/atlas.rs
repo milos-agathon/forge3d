@@ -2,8 +2,12 @@
 
 use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::core::text_overlay::TextInstance;
+use crate::labels::positioned::positioned_glyphs;
+use crate::labels::shape::ShapedText;
+use crate::labels::types::GlyphPlacement;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::Arc;
 use wgpu::{Device, Queue, TextureView};
 
@@ -12,6 +16,10 @@ use wgpu::{Device, Queue, TextureView};
 pub struct GlyphMetrics {
     /// Unicode codepoint.
     pub codepoint: u32,
+    /// Source face in the immutable shaped font collection.
+    pub font_index: usize,
+    /// Font-specific glyph identifier after GSUB/fallback selection.
+    pub glyph_id: u16,
     /// UV coordinates in atlas [u0, v0, u1, v1].
     pub uv: [f32; 4],
     /// Glyph width in atlas pixels.
@@ -26,14 +34,22 @@ pub struct GlyphMetrics {
     pub advance: f32,
 }
 
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+pub struct GlyphKey {
+    pub font_index: usize,
+    pub glyph_id: u16,
+}
+
 /// MSDF font atlas with glyph metrics.
 pub struct MsdfAtlas {
     pub texture: Arc<TrackedTexture>,
     pub view: Arc<TextureView>,
     pub width: u32,
     pub height: u32,
-    /// Glyph metrics indexed by Unicode codepoint.
-    glyphs: HashMap<u32, GlyphMetrics>,
+    /// Canonical glyph metrics indexed by shaped font/glyph identity.
+    glyphs: HashMap<GlyphKey, GlyphMetrics>,
+    /// Compatibility aliases from source Unicode codepoints to shaped identities.
+    unicode_map: HashMap<u32, GlyphKey>,
     /// Font size used when generating the atlas.
     pub atlas_font_size: f32,
     /// Line height in atlas pixels.
@@ -50,7 +66,12 @@ struct AtlasMetricsJson {
     line_height: Option<f32>,
     baseline: Option<f32>,
     channels: Option<u32>,
+    #[serde(default)]
     glyphs: HashMap<String, GlyphMetricsJson>,
+    #[serde(default)]
+    glyphs_by_id: HashMap<String, GlyphMetricsJson>,
+    #[serde(default)]
+    unicode_map: HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,6 +85,8 @@ struct GlyphMetricsJson {
     #[serde(default)]
     oy: f32,
     adv: Option<f32>,
+    font_index: Option<usize>,
+    glyph_id: Option<u16>,
 }
 
 impl MsdfAtlas {
@@ -76,7 +99,7 @@ impl MsdfAtlas {
         atlas_height: u32,
         metrics_json: &str,
     ) -> Result<Self, String> {
-        let (glyphs, atlas_font_size, line_height, baseline, channels) =
+        let (glyphs, unicode_map, atlas_font_size, line_height, baseline, channels) =
             Self::parse_metrics(metrics_json, atlas_width, atlas_height)?;
         let pixel_count = atlas_width as usize * atlas_height as usize;
         let upload_data = if channels == 3 && atlas_image.len() == pixel_count * 3 {
@@ -144,6 +167,7 @@ impl MsdfAtlas {
             width: atlas_width,
             height: atlas_height,
             glyphs,
+            unicode_map,
             atlas_font_size,
             line_height,
             baseline,
@@ -195,10 +219,20 @@ impl MsdfAtlas {
         json: &str,
         atlas_width: u32,
         atlas_height: u32,
-    ) -> Result<(HashMap<u32, GlyphMetrics>, f32, f32, f32, u32), String> {
+    ) -> Result<
+        (
+            HashMap<GlyphKey, GlyphMetrics>,
+            HashMap<u32, GlyphKey>,
+            f32,
+            f32,
+            f32,
+            u32,
+        ),
+        String,
+    > {
         let parsed: AtlasMetricsJson =
             serde_json::from_str(json).map_err(|e| format!("Invalid atlas metrics JSON: {e}"))?;
-        if parsed.glyphs.is_empty() {
+        if parsed.glyphs.is_empty() && parsed.glyphs_by_id.is_empty() {
             return Err("Atlas metrics must contain at least one glyph".to_string());
         }
 
@@ -209,41 +243,297 @@ impl MsdfAtlas {
         if channels != 1 && channels != 3 {
             return Err(format!("Atlas channels must be 1 or 3, got {channels}"));
         }
-        let mut glyphs = HashMap::with_capacity(parsed.glyphs.len());
+        let parse_key = |value: &str| -> Result<GlyphKey, String> {
+            let (font_index, glyph_id) = value
+                .split_once(':')
+                .ok_or_else(|| format!("Atlas glyph identity must be font:glyph, got {value:?}"))?;
+            Ok(GlyphKey {
+                font_index: font_index
+                    .parse()
+                    .map_err(|_| format!("Invalid atlas font index: {font_index:?}"))?,
+                glyph_id: glyph_id
+                    .parse()
+                    .map_err(|_| format!("Invalid atlas glyph id: {glyph_id:?}"))?,
+            })
+        };
+        let metric = |codepoint: u32,
+                      key: GlyphKey,
+                      glyph: &GlyphMetricsJson|
+         -> Result<GlyphMetrics, String> {
+            if glyph.w <= 0.0 || glyph.h <= 0.0 {
+                return Err(format!(
+                    "Atlas glyph {}:{} has non-positive dimensions",
+                    key.font_index, key.glyph_id
+                ));
+            }
+            Ok(GlyphMetrics {
+                codepoint,
+                font_index: key.font_index,
+                glyph_id: key.glyph_id,
+                uv: [
+                    glyph.x / atlas_width as f32,
+                    glyph.y / atlas_height as f32,
+                    (glyph.x + glyph.w) / atlas_width as f32,
+                    (glyph.y + glyph.h) / atlas_height as f32,
+                ],
+                width: glyph.w,
+                height: glyph.h,
+                offset_x: glyph.ox,
+                offset_y: glyph.oy,
+                advance: glyph.adv.unwrap_or(glyph.w),
+            })
+        };
+        let mut glyphs = HashMap::with_capacity(parsed.glyphs.len() + parsed.glyphs_by_id.len());
+        let mut unicode_aliases = HashMap::with_capacity(parsed.glyphs.len());
 
-        for (codepoint_str, glyph) in parsed.glyphs {
+        for (identity, glyph) in &parsed.glyphs_by_id {
+            let key = parse_key(identity)?;
+            if glyph
+                .font_index
+                .is_some_and(|value| value != key.font_index)
+                || glyph.glyph_id.is_some_and(|value| value != key.glyph_id)
+            {
+                return Err(format!(
+                    "Atlas glyph identity {identity:?} disagrees with its metric fields"
+                ));
+            }
+            glyphs.insert(key, metric(0, key, glyph)?);
+        }
+
+        for (codepoint_str, glyph) in &parsed.glyphs {
             let codepoint = codepoint_str.parse::<u32>().map_err(|_| {
                 format!("Atlas glyph key is not a Unicode codepoint: {codepoint_str}")
             })?;
-            if glyph.w <= 0.0 || glyph.h <= 0.0 {
+            let key = if let Some(identity) = parsed.unicode_map.get(codepoint_str) {
+                parse_key(identity)?
+            } else if let (Some(font_index), Some(glyph_id)) = (glyph.font_index, glyph.glyph_id) {
+                GlyphKey {
+                    font_index,
+                    glyph_id,
+                }
+            } else {
+                GlyphKey {
+                    font_index: 0,
+                    glyph_id: u16::try_from(codepoint).map_err(|_| {
+                        format!("Legacy atlas glyph U+{codepoint:04X} needs an explicit glyph_id")
+                    })?,
+                }
+            };
+            unicode_aliases.insert(codepoint, key);
+            glyphs.entry(key).or_insert(metric(codepoint, key, glyph)?);
+        }
+        for (codepoint, identity) in &parsed.unicode_map {
+            let codepoint = codepoint
+                .parse::<u32>()
+                .map_err(|_| format!("Atlas unicode_map key is not a codepoint: {codepoint:?}"))?;
+            let key = parse_key(identity)?;
+            if !glyphs.contains_key(&key) {
                 return Err(format!(
-                    "Atlas glyph {codepoint} has non-positive dimensions"
+                    "Atlas unicode_map U+{codepoint:04X} references missing identity {identity:?}"
                 ));
             }
-            let u0 = glyph.x / atlas_width as f32;
-            let v0 = glyph.y / atlas_height as f32;
-            let u1 = (glyph.x + glyph.w) / atlas_width as f32;
-            let v1 = (glyph.y + glyph.h) / atlas_height as f32;
-            glyphs.insert(
-                codepoint,
-                GlyphMetrics {
-                    codepoint,
-                    uv: [u0, v0, u1, v1],
-                    width: glyph.w,
-                    height: glyph.h,
-                    offset_x: glyph.ox,
-                    offset_y: glyph.oy,
-                    advance: glyph.adv.unwrap_or(glyph.w),
-                },
-            );
+            unicode_aliases.insert(codepoint, key);
+            if let Some(glyph) = glyphs.get_mut(&key) {
+                if glyph.codepoint == 0 {
+                    glyph.codepoint = codepoint;
+                }
+            }
         }
 
-        Ok((glyphs, font_size, line_height, baseline, channels))
+        Ok((
+            glyphs,
+            unicode_aliases,
+            font_size,
+            line_height,
+            baseline,
+            channels,
+        ))
     }
 
     /// Get glyph metrics for a character.
     pub fn get_glyph(&self, c: char) -> Option<&GlyphMetrics> {
-        self.glyphs.get(&(c as u32))
+        self.unicode_map
+            .get(&(c as u32))
+            .and_then(|key| self.glyphs.get(key))
+    }
+
+    pub fn get_glyph_id(&self, font_index: usize, glyph_id: u16) -> Option<&GlyphMetrics> {
+        self.glyphs.get(&GlyphKey {
+            font_index,
+            glyph_id,
+        })
+    }
+
+    fn shaped_rects(
+        &self,
+        shaped: &ShapedText,
+        line_ranges: &[Range<usize>],
+    ) -> Result<Vec<([f32; 4], GlyphMetrics)>, String> {
+        let scale = shaped.size / self.atlas_font_size;
+        positioned_glyphs(shaped, line_ranges)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .filter(|glyph| glyph.path.is_some())
+            .map(|glyph| {
+                let metric = self
+                    .get_glyph_id(glyph.font_index, glyph.glyph_id)
+                    .copied()
+                    .ok_or_else(|| {
+                        format!(
+                            "Atlas is missing shaped glyph {}:{}",
+                            glyph.font_index, glyph.glyph_id
+                        )
+                    })?;
+                let x0 = glyph.origin[0] + metric.offset_x * scale;
+                let y0 = glyph.origin[1] + metric.offset_y * scale;
+                Ok((
+                    [
+                        x0,
+                        y0,
+                        x0 + metric.width * scale,
+                        y0 + metric.height * scale,
+                    ],
+                    metric,
+                ))
+            })
+            .collect()
+    }
+
+    /// Measure the positioned shaped-glyph stream rather than iterating codepoints.
+    pub fn measure_shaped(
+        &self,
+        shaped: &ShapedText,
+        line_ranges: &[Range<usize>],
+    ) -> Result<(f32, f32), String> {
+        let rects = self.shaped_rects(shaped, line_ranges)?;
+        if rects.is_empty() {
+            return Ok((0.0, shaped.size));
+        }
+        let bounds = rects.iter().fold(
+            [
+                f32::INFINITY,
+                f32::INFINITY,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+            ],
+            |mut bounds, (rect, _)| {
+                bounds[0] = bounds[0].min(rect[0]);
+                bounds[1] = bounds[1].min(rect[1]);
+                bounds[2] = bounds[2].max(rect[2]);
+                bounds[3] = bounds[3].max(rect[3]);
+                bounds
+            },
+        );
+        Ok((
+            bounds[2] - bounds[0],
+            (bounds[3] - bounds[1]).max(shaped.size),
+        ))
+    }
+
+    /// Build GPU quads from visual `PositionedGlyph` records keyed by font/glyph id.
+    pub fn layout_shaped(
+        &self,
+        shaped: &ShapedText,
+        line_ranges: &[Range<usize>],
+        center_pos: [f32; 2],
+        color: [f32; 4],
+        halo_color: [f32; 4],
+        halo_width: f32,
+    ) -> Result<Vec<TextInstance>, String> {
+        let rects = self.shaped_rects(shaped, line_ranges)?;
+        if rects.is_empty() {
+            return Ok(Vec::new());
+        }
+        let bounds = rects.iter().fold(
+            [
+                f32::INFINITY,
+                f32::INFINITY,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+            ],
+            |mut bounds, (rect, _)| {
+                bounds[0] = bounds[0].min(rect[0]);
+                bounds[1] = bounds[1].min(rect[1]);
+                bounds[2] = bounds[2].max(rect[2]);
+                bounds[3] = bounds[3].max(rect[3]);
+                bounds
+            },
+        );
+        let shift = [
+            center_pos[0] - (bounds[0] + bounds[2]) * 0.5,
+            center_pos[1] - (bounds[1] + bounds[3]) * 0.5,
+        ];
+        Ok(rects
+            .into_iter()
+            .map(|(rect, glyph)| {
+                TextInstance::new(
+                    [rect[0] + shift[0], rect[1] + shift[1]],
+                    [rect[2] + shift[0], rect[3] + shift[1]],
+                    [glyph.uv[0], glyph.uv[1]],
+                    [glyph.uv[2], glyph.uv[3]],
+                    color,
+                )
+                .with_halo(halo_color, halo_width)
+            })
+            .collect())
+    }
+
+    /// Build rotated GPU quads for a shaped stream already placed along a path.
+    ///
+    /// The placement slice corresponds to the full visual glyph stream, including
+    /// zero-advance attached marks and whitespace. Only outlined glyphs emit quads.
+    pub fn layout_shaped_on_placements(
+        &self,
+        shaped: &ShapedText,
+        line_ranges: &[Range<usize>],
+        placements: &[GlyphPlacement],
+        color: [f32; 4],
+        halo_color: [f32; 4],
+        halo_width: f32,
+    ) -> Result<Vec<TextInstance>, String> {
+        let positioned =
+            positioned_glyphs(shaped, line_ranges).map_err(|error| error.to_string())?;
+        if positioned.len() != placements.len() {
+            return Err(format!(
+                "Shaped glyph/placement count mismatch: {} glyphs, {} placements",
+                positioned.len(),
+                placements.len()
+            ));
+        }
+        let scale = shaped.size / self.atlas_font_size;
+        positioned
+            .into_iter()
+            .zip(placements)
+            .filter(|(glyph, _)| glyph.path.is_some())
+            .map(|(glyph, placement)| {
+                let metric = self
+                    .get_glyph_id(glyph.font_index, glyph.glyph_id)
+                    .ok_or_else(|| {
+                        format!(
+                            "Atlas is missing shaped glyph {}:{}",
+                            glyph.font_index, glyph.glyph_id
+                        )
+                    })?;
+                let half_width = metric.width * scale * 0.5;
+                let half_height = metric.height * scale * 0.5;
+                let mut instance = TextInstance::new(
+                    [
+                        placement.screen_pos[0] - half_width,
+                        placement.screen_pos[1] - half_height,
+                    ],
+                    [
+                        placement.screen_pos[0] + half_width,
+                        placement.screen_pos[1] + half_height,
+                    ],
+                    [metric.uv[0], metric.uv[1]],
+                    [metric.uv[2], metric.uv[3]],
+                    color,
+                )
+                .with_halo(halo_color, halo_width);
+                instance.rotation = placement.rotation;
+                Ok(instance)
+            })
+            .collect()
     }
 
     /// Measure text dimensions at a given size.
@@ -322,6 +612,7 @@ impl Clone for MsdfAtlas {
             width: self.width,
             height: self.height,
             glyphs: self.glyphs.clone(),
+            unicode_map: self.unicode_map.clone(),
             atlas_font_size: self.atlas_font_size,
             line_height: self.line_height,
             baseline: self.baseline,
@@ -332,7 +623,7 @@ impl Clone for MsdfAtlas {
 
 #[cfg(test)]
 mod tests {
-    use super::MsdfAtlas;
+    use super::{GlyphKey, MsdfAtlas};
     use crate::labels::renderer_channels_from_atlas;
 
     #[test]
@@ -346,9 +637,10 @@ mod tests {
             }
         }"#;
 
-        let (glyphs, font_size, line_height, baseline, channels) =
+        let (glyphs, unicode_map, font_size, line_height, baseline, channels) =
             MsdfAtlas::parse_metrics(json, 64, 64).expect("metrics should parse");
-        let glyph = glyphs.get(&65).expect("A glyph should be present");
+        let key = unicode_map[&65];
+        let glyph = glyphs.get(&key).expect("A glyph should be present");
 
         assert_eq!(font_size, 24.0);
         assert_eq!(line_height, 32.0);
@@ -377,7 +669,29 @@ mod tests {
             "channels": 3,
             "glyphs": {"65": {"x": 0, "y": 0, "w": 8, "h": 8, "adv": 7}}
         }"#;
-        let (_, _, _, _, channels) = MsdfAtlas::parse_metrics(json, 8, 8).unwrap();
+        let (_, _, _, _, _, channels) = MsdfAtlas::parse_metrics(json, 8, 8).unwrap();
         assert_eq!(renderer_channels_from_atlas(channels), 3);
+    }
+
+    #[test]
+    fn canonical_metrics_are_keyed_by_font_and_shaped_glyph_id() {
+        let json = r#"{
+            "channels": 3,
+            "glyphs": {
+                "102": {"x": 0, "y": 0, "w": 8, "h": 8, "font_index": 1, "glyph_id": 700}
+            },
+            "glyphs_by_id": {
+                "1:700": {"x": 0, "y": 0, "w": 8, "h": 8, "font_index": 1, "glyph_id": 700}
+            },
+            "unicode_map": {"102": "1:700"}
+        }"#;
+        let (glyphs, unicode_map, ..) = MsdfAtlas::parse_metrics(json, 8, 8).unwrap();
+        let key = GlyphKey {
+            font_index: 1,
+            glyph_id: 700,
+        };
+        assert_eq!(unicode_map[&102], key);
+        assert_eq!(glyphs[&key].font_index, 1);
+        assert_eq!(glyphs[&key].glyph_id, 700);
     }
 }

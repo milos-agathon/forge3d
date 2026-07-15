@@ -13,6 +13,8 @@ pub struct Edge {
     pub from: Point,
     pub to: Point,
     pub color: u8,
+    /// Signed contour orientation (+1 counter-clockwise, -1 clockwise).
+    pub winding: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -58,6 +60,8 @@ pub fn sharp_corners(contour: &Contour) -> Vec<usize> {
 
 pub fn color_edges(contour: &Contour) -> Vec<Edge> {
     let corners = sharp_corners(contour);
+    let winding = contour_orientation(contour).signum();
+    let winding = if winding == 0.0 { 1.0 } else { winding };
     let mut color_index = 0usize;
     let mut edges: Vec<_> = contour
         .points
@@ -75,6 +79,7 @@ pub fn color_edges(contour: &Contour) -> Vec<Edge> {
                 } else {
                     COLORS[color_index]
                 },
+                winding,
             }
         })
         .collect();
@@ -110,26 +115,31 @@ pub fn flatten_path(path: &Path, scale: f32, offset: Point) -> Vec<Contour> {
             }
             Event::Line { to, .. } => points.push(transform(to)),
             Event::Quadratic { from, ctrl, to } => {
-                QuadraticBezierSegment { from, ctrl, to }.for_each_flattened(
-                    FLATTENING_TOLERANCE / scale.max(1.0e-6),
-                    &mut |line: &LineSegment<f32>| points.push(transform(line.to)),
-                );
+                QuadraticBezierSegment {
+                    from: transform(from),
+                    ctrl: transform(ctrl),
+                    to: transform(to),
+                }
+                .for_each_flattened(FLATTENING_TOLERANCE, &mut |line: &LineSegment<f32>| {
+                    points.push(line.to)
+                });
             }
             Event::Cubic {
                 from,
                 ctrl1,
                 ctrl2,
                 to,
-            } => CubicBezierSegment {
-                from,
-                ctrl1,
-                ctrl2,
-                to,
+            } => {
+                CubicBezierSegment {
+                    from: transform(from),
+                    ctrl1: transform(ctrl1),
+                    ctrl2: transform(ctrl2),
+                    to: transform(to),
+                }
+                .for_each_flattened(FLATTENING_TOLERANCE, &mut |line: &LineSegment<f32>| {
+                    points.push(line.to)
+                })
             }
-            .for_each_flattened(
-                FLATTENING_TOLERANCE / scale.max(1.0e-6),
-                &mut |line: &LineSegment<f32>| points.push(transform(line.to)),
-            ),
             Event::End { first, close, .. } => {
                 let first = transform(first);
                 if close && points.last().copied() != Some(first) {
@@ -181,5 +191,22 @@ mod tests {
             .zip(colors.iter().cycle().skip(1))
             .take(colors.len())
             .all(|(left, right)| left != right));
+    }
+
+    #[test]
+    fn closing_edge_keeps_orientation_and_a_distinct_seam_color() {
+        let edges = color_edges(&square());
+        assert_eq!(edges.len(), 4);
+        assert!(edges.iter().all(|edge| edge.winding > 0.0));
+        assert_ne!(edges.first().unwrap().color, edges.last().unwrap().color);
+
+        let mut reversed = square();
+        reversed.points.reverse();
+        let reversed = color_edges(&reversed);
+        assert!(reversed.iter().all(|edge| edge.winding < 0.0));
+        assert_ne!(
+            reversed.first().unwrap().color,
+            reversed.last().unwrap().color
+        );
     }
 }

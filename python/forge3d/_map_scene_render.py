@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from ._map_scene_common import _layer_id, _stable_hash
@@ -675,31 +676,62 @@ def _label_anchor(label: Any, width: int, height: int) -> tuple[int, int]:
     return _point_to_pixel((len(str(getattr(label, "label_id", ""))) * 7, len(str(getattr(label, "text", ""))) * 5), width, height)
 
 
-def _draw_text_fallback(
-    image: Any,
-    text: str,
-    x: int,
-    y: int,
-    color: tuple[int, int, int, int],
-    halo: tuple[int, int, int, int],
-    halo_width_px: float = 1.0,
-) -> None:
-    halo_radius = max(0, int(round(float(halo_width_px))))
-    cursor = int(x)
-    for char in str(text):
-        code = ord(char)
-        for row in range(7):
-            for col in range(5):
-                edge = row in {0, 6} or col in {0, 4}
-                bit = (code >> ((row + col) % 6)) & 1
-                if edge or bit:
-                    _draw_pixel_block(image, cursor + col, int(y) + row, halo, radius=halo_radius)
-        for row in range(7):
-            for col in range(5):
-                bit = (code >> ((row * 5 + col) % 7)) & 1
-                if bit or row in {1, 5}:
-                    _draw_pixel_block(image, cursor + col, int(y) + row, color, radius=0)
-        cursor += 6
+def _text_font_chain(font_chain: Sequence[str] | None = None) -> list[str]:
+    root = Path(__file__).resolve().parent / "data" / "fonts"
+    bundled = [
+        root / name
+        for name in (
+            "NotoSansLatin-subset.ttf",
+            "NotoSansArabic-subset.ttf",
+            "NotoSansHebrew-subset.ttf",
+            "NotoSansDevanagari-subset.ttf",
+            "NotoSansSC-subset.ttf",
+        )
+    ]
+    return [*(str(path) for path in font_chain or ()), *(str(path) for path in bundled)]
+
+
+def _composite_text_mask(image: Any, mask: Any, color: tuple[int, int, int, int]) -> None:
+    import numpy as np
+
+    coverage = np.asarray(mask, dtype=np.float32)[..., None]
+    source_alpha = coverage * (float(color[3]) / 255.0)
+    destination = np.asarray(image, dtype=np.float32) / 255.0
+    destination_alpha = destination[..., 3:4]
+    output_alpha = source_alpha + destination_alpha * (1.0 - source_alpha)
+    source_rgb = np.asarray(color[:3], dtype=np.float32).reshape(1, 1, 3) / 255.0
+    numerator = (
+        source_rgb * source_alpha
+        + destination[..., :3] * destination_alpha * (1.0 - source_alpha)
+    )
+    output_rgb = np.divide(
+        numerator,
+        output_alpha,
+        out=np.zeros_like(numerator),
+        where=output_alpha > 0.0,
+    )
+    image[..., :3] = np.clip(output_rgb * 255.0 + 0.5, 0, 255).astype(np.uint8)
+    image[..., 3] = np.clip(output_alpha[..., 0] * 255.0 + 0.5, 0, 255).astype(np.uint8)
+
+
+def _expanded_mask(mask: Any, radius: int) -> Any:
+    import numpy as np
+
+    source = np.asarray(mask, dtype=np.float32)
+    if radius <= 0:
+        return source
+    padded = np.pad(source, radius)
+    return np.maximum.reduce(
+        [
+            padded[
+                radius + dy : radius + dy + source.shape[0],
+                radius + dx : radius + dx + source.shape[1],
+            ]
+            for dy in range(-radius, radius + 1)
+            for dx in range(-radius, radius + 1)
+            if dx * dx + dy * dy <= radius * radius
+        ]
+    )
 
 
 def _draw_text(
@@ -710,24 +742,23 @@ def _draw_text(
     color: tuple[int, int, int, int],
     halo: tuple[int, int, int, int],
     halo_width_px: float = 1.0,
+    font_size: float = 12.0,
+    font_chain: Sequence[str] | None = None,
 ) -> None:
-    x, y = anchor
-    try:
-        import numpy as np
-        from PIL import Image, ImageDraw, ImageFont
+    from .text import rasterize_shaped_run, shape
 
-        pil = Image.fromarray(image, mode="RGBA")
-        draw = ImageDraw.Draw(pil)
-        font = ImageFont.load_default()
-        radius = max(0, int(round(float(halo_width_px))))
-        for dx in range(-radius, radius + 1):
-            for dy in range(-radius, radius + 1):
-                if dx or dy:
-                    draw.text((x + dx, y + dy), str(text), font=font, fill=halo)
-        draw.text((x, y), str(text), font=font, fill=color)
-        image[...] = np.asarray(pil, dtype=image.dtype)
-    except Exception:
-        _draw_text_fallback(image, str(text), x, y, color, halo, halo_width_px=halo_width_px)
+    x, y = anchor
+    shaped = shape(str(text), _text_font_chain(font_chain), float(font_size))
+    mask = rasterize_shaped_run(
+        shaped,
+        int(image.shape[1]),
+        int(image.shape[0]),
+        origin=(float(x), float(y) + float(font_size)),
+    )
+    radius = max(0, int(round(float(halo_width_px))))
+    if halo[3] > 0 and radius > 0:
+        _composite_text_mask(image, _expanded_mask(mask, radius), halo)
+    _composite_text_mask(image, mask, color)
 
 
 def _overlay_rgba(image: Any, overlay: Any, x: int, y: int) -> None:
@@ -1188,7 +1219,16 @@ def _compose_scale_bar(image: Any, recipe: Any, options: Mapping[str, Any]) -> N
             int(image.shape[1]),
             geodesic=bool(options.get("geodesic", cfg.geodesic)),
         )
-    overlay = ScaleBar(float(meters_per_pixel), config=cfg).render()
+    overlay, label, anchor = ScaleBar(float(meters_per_pixel), config=cfg).render_geometry()
+    _draw_text(
+        overlay,
+        label,
+        anchor,
+        color=cfg.label_color,
+        halo=(0, 0, 0, 0),
+        halo_width_px=0.0,
+        font_size=float(cfg.font_size),
+    )
     _place_overlay(
         image,
         overlay,
@@ -1208,7 +1248,17 @@ def _compose_north_arrow(image: Any, recipe: Any, options: Mapping[str, Any]) ->
         integer_fields=("size", "font_size", "border_width"),
     )
     cfg = NorthArrowConfig(**_config_kwargs(NorthArrowConfig, scaled_options))
-    overlay = NorthArrow(cfg).render()
+    overlay, label, anchor = NorthArrow(cfg).render_geometry()
+    if label is not None and anchor is not None:
+        _draw_text(
+            overlay,
+            label,
+            anchor,
+            color=cfg.color,
+            halo=(0, 0, 0, 0),
+            halo_width_px=0.0,
+            font_size=float(cfg.font_size),
+        )
     _place_overlay(
         image,
         overlay,
@@ -1417,6 +1467,10 @@ def _composite_recipe_layers(
                     color=text_color,
                     halo=halo_color,
                     halo_width_px=halo_width,
+                    font_size=_number(
+                        typography.get("size", typography.get("font_size")), 12.0
+                    ),
+                    font_chain=typography.get("font_chain"),
                 )
         elif isinstance(layer, layer_types.building_layer) and include_buildings:
             _draw_buildings(base, layer, width, height)

@@ -545,7 +545,7 @@ def test_public_label_vector_render_is_deterministic_and_not_placeholder(tmp_pat
     assert not hasattr(map_scene, "_render_source_derived_rgba")
 
 
-def test_gpu_backend_uses_native_sdf_text_for_labels(tmp_path, monkeypatch):
+def test_gpu_backend_uses_native_msdf_text_for_labels(tmp_path, monkeypatch):
     scene = f3d.MapScene(
         terrain=f3d.TerrainSource(
             data=np.zeros((8, 8), dtype=np.float32),
@@ -576,7 +576,7 @@ def test_gpu_backend_uses_native_sdf_text_for_labels(tmp_path, monkeypatch):
     def fake_terrain(_recipe, _heightmap):
         rgba = np.zeros((64, 80, 4), dtype=np.uint8)
         rgba[..., 3] = 255
-        return rgba
+        return map_scene._MapSceneNativeRenderResult(rgba=rgba)
 
     class FakeNativeTextScene:
         def __init__(self, width, height):
@@ -609,7 +609,7 @@ def test_gpu_backend_uses_native_sdf_text_for_labels(tmp_path, monkeypatch):
 
     import forge3d._map_scene_render as render_helpers
 
-    monkeypatch.setattr(map_scene, "_render_terrain_renderer_rgba", fake_terrain)
+    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result", fake_terrain)
     monkeypatch.setattr(map_scene, "_native_scene_class", lambda: FakeNativeTextScene)
     monkeypatch.setattr(
         render_helpers,
@@ -624,7 +624,7 @@ def test_gpu_backend_uses_native_sdf_text_for_labels(tmp_path, monkeypatch):
     assert calls["scene_size"] == (80, 64)
     assert calls["terrain_disabled"] is True
     assert calls["base_shape"] == (64, 80, 4)
-    assert calls["atlas_channels"] == 1
+    assert calls["atlas_channels"] == 3
     assert calls["glyphs"] == 2
     assert calls["last_glyph_arg_count"] == 17
 

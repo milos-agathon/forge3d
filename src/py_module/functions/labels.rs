@@ -6,5 +6,6 @@ pub(super) fn register_labels_py_functions(m: &Bound<'_, PyModule>) -> PyResult<
     m.add_function(wrap_pyfunction!(text_shape_py, m)?)?;
     m.add_function(wrap_pyfunction!(rasterize_shaped_run_py, m)?)?;
     m.add_function(wrap_pyfunction!(bake_msdf_atlas_py, m)?)?;
+    m.add_function(wrap_pyfunction!(bake_msdf_atlas_shaped_py, m)?)?;
     Ok(())
 }
