@@ -549,18 +549,19 @@ def test_read_raster_info_rejects_malformed_wkt(tmp_path: Path):
         gis.read_raster_info(path)
 
 
-def test_write_raster_positive_y_transform_is_rejected_as_south_up(tmp_path: Path):
+def test_write_raster_positive_y_transform_round_trips_as_gis_metadata(tmp_path: Path):
     path = tmp_path / "positive_y.tif"
     transform = (1.0, 0.0, 10.0, 0.0, 1.0, 20.0)
 
-    with pytest.raises(RuntimeError, match="PostWriteValidationFailed.*south-up"):
-        gis.write_raster(
-            path,
-            np.ones((2, 2), dtype=np.uint8),
-            crs="EPSG:4326",
-            transform=transform,
-        )
-    assert not path.exists()
+    gis.write_raster(
+        path,
+        np.ones((2, 2), dtype=np.uint8),
+        crs="EPSG:4326",
+        transform=transform,
+    )
+
+    info = gis.read_raster_info(path)
+    assert tuple(info.transform) == pytest.approx(transform)
 
 
 @pytest.mark.parametrize("shape", [(2, 3, 3), (2, 3, 4)])

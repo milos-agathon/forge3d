@@ -177,7 +177,6 @@ pub(crate) fn read_transform<R: std::io::Read + std::io::Seek>(
         let transform = AffineTransform::new([
             values[0], values[1], values[3], values[4], values[5], values[7],
         ])?;
-        validate_north_up_transform(transform)?;
         return Ok(Some(transform));
     }
 
@@ -252,28 +251,7 @@ pub(crate) fn read_transform<R: std::io::Read + std::io::Seek>(
         -scale_y,
         model_y + raster_j * scale_y,
     ])?;
-    validate_north_up_transform(transform)?;
     Ok(Some(transform))
-}
-
-fn validate_north_up_transform(transform: AffineTransform) -> GisResult<()> {
-    if transform.is_rotated_or_sheared() {
-        return Err(GisError::InvalidTransform(
-            "rotated or sheared GeoTIFF transforms are not supported by terrain ingestion"
-                .to_string(),
-        ));
-    }
-    if transform.a <= 0.0 {
-        return Err(GisError::InvalidTransform(
-            "mirrored or zero-span GeoTIFF X transforms are not supported".to_string(),
-        ));
-    }
-    if transform.e >= 0.0 {
-        return Err(GisError::InvalidTransform(
-            "south-up or zero-span GeoTIFF Y transforms are not supported".to_string(),
-        ));
-    }
-    Ok(())
 }
 
 pub(crate) fn read_crs<R: std::io::Read + std::io::Seek>(
@@ -568,30 +546,37 @@ mod tests {
     }
 
     #[test]
-    fn malformed_orientation_and_span_are_rejected() {
-        let mut cases = Vec::new();
+    fn malformed_transformations_are_rejected_but_orientation_is_metadata() {
+        let mut rejected_cases = Vec::new();
         let mut non_finite = valid_matrix();
         non_finite[0] = f64::NAN;
-        cases.push(non_finite);
-        let mut mirrored = valid_matrix();
-        mirrored[0] = -2.0;
-        cases.push(mirrored);
-        let mut south_up = valid_matrix();
-        south_up[5] = 3.0;
-        cases.push(south_up);
-        let mut rotated = valid_matrix();
-        rotated[1] = 0.25;
-        cases.push(rotated);
-        let mut sheared = valid_matrix();
-        sheared[4] = 0.25;
-        cases.push(sheared);
+        rejected_cases.push(non_finite);
         let mut zero_span = valid_matrix();
         zero_span[0] = 0.0;
-        cases.push(zero_span);
+        rejected_cases.push(zero_span);
 
-        for matrix in cases {
+        for matrix in rejected_cases {
             let mut decoder = decoder_with_tags(None, None, Some(&matrix), None);
             assert!(read_transform(&mut decoder).is_err(), "accepted {matrix:?}");
+        }
+
+        let mut accepted_cases = Vec::new();
+        let mut mirrored = valid_matrix();
+        mirrored[0] = -2.0;
+        accepted_cases.push(mirrored);
+        let mut south_up = valid_matrix();
+        south_up[5] = 3.0;
+        accepted_cases.push(south_up);
+        let mut rotated = valid_matrix();
+        rotated[1] = 0.25;
+        accepted_cases.push(rotated);
+        let mut sheared = valid_matrix();
+        sheared[4] = 0.25;
+        accepted_cases.push(sheared);
+
+        for matrix in accepted_cases {
+            let mut decoder = decoder_with_tags(None, None, Some(&matrix), None);
+            assert!(read_transform(&mut decoder).is_ok(), "rejected {matrix:?}");
         }
     }
 

@@ -358,14 +358,19 @@ def test_missing_and_invalid_transform_diagnostics(tmp_path: Path):
         )
 
 
-def test_rotated_sheared_transform_is_rejected(tmp_path: Path):
-    with pytest.raises(RuntimeError, match="PostWriteValidationFailed"):
-        gis.write_raster(
-            tmp_path / "rotated.tif",
-            np.ones((2, 2), dtype=np.uint8),
-            crs="EPSG:4326",
-            transform=(1.0, 0.25, 0.0, 0.0, -1.0, 2.0),
-        )
+def test_rotated_sheared_transform_round_trips_as_gis_metadata(tmp_path: Path):
+    path = tmp_path / "rotated.tif"
+    transform = (1.0, 0.25, 0.0, 0.0, -1.0, 2.0)
+
+    gis.write_raster(
+        path,
+        np.ones((2, 2), dtype=np.uint8),
+        crs="EPSG:4326",
+        transform=transform,
+    )
+
+    info = gis.read_raster_info(path)
+    assert tuple(info.transform) == pytest.approx(transform)
 
 
 def test_window_from_bounds_inside_and_partial(tmp_path: Path):
