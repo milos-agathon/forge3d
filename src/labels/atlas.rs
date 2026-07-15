@@ -40,6 +40,8 @@ pub struct MsdfAtlas {
     pub line_height: f32,
     /// Baseline offset from top of line.
     pub baseline: f32,
+    /// Distance-field channels declared by atlas metadata (1=SDF, 3=MSDF).
+    pub channels: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,6 +49,7 @@ struct AtlasMetricsJson {
     font_size: Option<f32>,
     line_height: Option<f32>,
     baseline: Option<f32>,
+    channels: Option<u32>,
     glyphs: HashMap<String, GlyphMetricsJson>,
 }
 
@@ -73,6 +76,25 @@ impl MsdfAtlas {
         atlas_height: u32,
         metrics_json: &str,
     ) -> Result<Self, String> {
+        let (glyphs, atlas_font_size, line_height, baseline, channels) =
+            Self::parse_metrics(metrics_json, atlas_width, atlas_height)?;
+        let pixel_count = atlas_width as usize * atlas_height as usize;
+        let upload_data = if channels == 3 && atlas_image.len() == pixel_count * 3 {
+            atlas_image
+                .chunks_exact(3)
+                .flat_map(|pixel| [pixel[0], pixel[1], pixel[2], 255])
+                .collect::<Vec<_>>()
+        } else if atlas_image.len() == pixel_count * 4 {
+            atlas_image.to_vec()
+        } else {
+            return Err(format!(
+                "Atlas byte count {} does not match {}x{} with {} channels",
+                atlas_image.len(),
+                atlas_width,
+                atlas_height,
+                channels
+            ));
+        };
         // Allocate the atlas texture through the tracked wrapper.
         let texture = tracked_create_texture(
             device,
@@ -101,7 +123,7 @@ impl MsdfAtlas {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            atlas_image,
+            &upload_data,
             wgpu::ImageDataLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * atlas_width),
@@ -116,10 +138,6 @@ impl MsdfAtlas {
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Parse metrics
-        let (glyphs, atlas_font_size, line_height, baseline) =
-            Self::parse_metrics(metrics_json, atlas_width, atlas_height)?;
-
         Ok(Self {
             texture: Arc::new(texture),
             view: Arc::new(view),
@@ -129,6 +147,7 @@ impl MsdfAtlas {
             atlas_font_size,
             line_height,
             baseline,
+            channels,
         })
     }
 
@@ -145,13 +164,20 @@ impl MsdfAtlas {
 
         let width = img.width();
         let height = img.height();
-        let rgba_data = img.to_rgba8().into_raw();
-
         // Load JSON metrics
         let metrics_json = std::fs::read_to_string(metrics_json_path)
             .map_err(|e| format!("Failed to read metrics JSON: {}", e))?;
+        let channels = serde_json::from_str::<AtlasMetricsJson>(&metrics_json)
+            .map_err(|error| format!("Invalid atlas metrics JSON: {error}"))?
+            .channels
+            .unwrap_or(1);
+        let image_data = if channels == 3 {
+            img.to_rgb8().into_raw()
+        } else {
+            img.to_rgba8().into_raw()
+        };
 
-        Self::load(device, queue, &rgba_data, width, height, &metrics_json)
+        Self::load(device, queue, &image_data, width, height, &metrics_json)
     }
 
     /// Parse metrics from JSON.
@@ -169,7 +195,7 @@ impl MsdfAtlas {
         json: &str,
         atlas_width: u32,
         atlas_height: u32,
-    ) -> Result<(HashMap<u32, GlyphMetrics>, f32, f32, f32), String> {
+    ) -> Result<(HashMap<u32, GlyphMetrics>, f32, f32, f32, u32), String> {
         let parsed: AtlasMetricsJson =
             serde_json::from_str(json).map_err(|e| format!("Invalid atlas metrics JSON: {e}"))?;
         if parsed.glyphs.is_empty() {
@@ -179,6 +205,10 @@ impl MsdfAtlas {
         let font_size = parsed.font_size.unwrap_or(32.0);
         let line_height = parsed.line_height.unwrap_or(font_size * 1.25);
         let baseline = parsed.baseline.unwrap_or(font_size);
+        let channels = parsed.channels.unwrap_or(1);
+        if channels != 1 && channels != 3 {
+            return Err(format!("Atlas channels must be 1 or 3, got {channels}"));
+        }
         let mut glyphs = HashMap::with_capacity(parsed.glyphs.len());
 
         for (codepoint_str, glyph) in parsed.glyphs {
@@ -208,7 +238,7 @@ impl MsdfAtlas {
             );
         }
 
-        Ok((glyphs, font_size, line_height, baseline))
+        Ok((glyphs, font_size, line_height, baseline, channels))
     }
 
     /// Get glyph metrics for a character.
@@ -295,6 +325,7 @@ impl Clone for MsdfAtlas {
             atlas_font_size: self.atlas_font_size,
             line_height: self.line_height,
             baseline: self.baseline,
+            channels: self.channels,
         }
     }
 }
@@ -302,6 +333,7 @@ impl Clone for MsdfAtlas {
 #[cfg(test)]
 mod tests {
     use super::MsdfAtlas;
+    use crate::labels::renderer_channels_from_atlas;
 
     #[test]
     fn parses_metrics_with_serde_json() {
@@ -314,13 +346,14 @@ mod tests {
             }
         }"#;
 
-        let (glyphs, font_size, line_height, baseline) =
+        let (glyphs, font_size, line_height, baseline, channels) =
             MsdfAtlas::parse_metrics(json, 64, 64).expect("metrics should parse");
         let glyph = glyphs.get(&65).expect("A glyph should be present");
 
         assert_eq!(font_size, 24.0);
         assert_eq!(line_height, 32.0);
         assert_eq!(baseline, 20.0);
+        assert_eq!(channels, 1);
         assert_eq!(glyph.width, 16.0);
         assert_eq!(glyph.height, 18.0);
         assert_eq!(glyph.advance, 17.0);
@@ -336,5 +369,15 @@ mod tests {
             64
         )
         .is_err());
+    }
+
+    #[test]
+    fn atlas_metadata_drives_rgb_renderer_mode() {
+        let json = r#"{
+            "channels": 3,
+            "glyphs": {"65": {"x": 0, "y": 0, "w": 8, "h": 8, "adv": 7}}
+        }"#;
+        let (_, _, _, _, channels) = MsdfAtlas::parse_metrics(json, 8, 8).unwrap();
+        assert_eq!(renderer_channels_from_atlas(channels), 3);
     }
 }

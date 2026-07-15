@@ -173,9 +173,10 @@ def _native_shape_label_glyphs(text: str, glyph_atlas: Any) -> tuple[list[str] |
         "font_indices": [glyph["font_index"] for glyph in glyph_records],
         "clusters": [glyph["cluster"] for glyph in glyph_records],
         "advances": [glyph["x_advance"] for glyph in glyph_records],
-        "render_mapping": "source_atlas_glyphs_task_8_deferred",
+        "render_mapping": "positioned_outlines",
         "shaped_runs": payload["runs"],
-        "compositor": "deferred_task_8",
+        "compositor": "native_analytic_coverage",
+        "font_chain": [font_path],
     }
     return glyphs, details
 

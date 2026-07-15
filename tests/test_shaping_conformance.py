@@ -215,15 +215,11 @@ def test_three_native_text_symbols_are_registered_together():
     ))
 
 
-@pytest.mark.parametrize("name", ["rasterize_shaped_run", "bake_msdf_atlas"])
-def test_future_rendering_seams_fail_explicitly(name):
-    native = get_native_module()
-    with pytest.raises(NotImplementedError) as native_caught:
-        getattr(native, name)()
-    assert native_caught.value.diagnostics[0]["operation"] == name
-
-    function = getattr(forge3d.text, name)
-    with pytest.raises(NotImplementedError) as caught:
-        function()
-    assert caught.value.diagnostics[0]["status"] == "diagnostic_block"
-    assert caught.value.diagnostics[0]["reason"] == "littera_rendering_deferred"
+def test_native_rasterization_seam_is_functional():
+    shaped = forge3d.text.shape(
+        "A", [str(ROOT / "assets/fonts/NotoSans-subset.ttf")], 12.0
+    )
+    mask = get_native_module().rasterize_shaped_run(shaped, 32, 32, (4.0, 20.0))
+    assert mask.shape == (32, 32)
+    assert mask.dtype.name == "float32"
+    assert mask.max() > 0.9

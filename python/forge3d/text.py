@@ -14,12 +14,6 @@ class TextShapingError(ValueError):
         self.diagnostics = diagnostics
 
 
-class TextRenderingDeferred(NotImplementedError):
-    def __init__(self, message: str, diagnostics: list[dict]):
-        super().__init__(message)
-        self.diagnostics = diagnostics
-
-
 _native = get_native_module()
 ShapedText = getattr(_native, "ShapedText", object)
 
@@ -60,27 +54,36 @@ def shape(
         ) from error
 
 
-def rasterize_shaped_run(*args, **kwargs):
-    try:
-        return _native.rasterize_shaped_run(*args, **kwargs)
-    except NotImplementedError as error:
-        raise TextRenderingDeferred(
-            str(error), list(getattr(error, "diagnostics", ()))
-        ) from error
+def rasterize_shaped_run(
+    shaped: ShapedText,
+    width: int,
+    height: int,
+    origin: tuple[float, float] = (0.0, 0.0),
+    line_ranges: Sequence[tuple[int, int]] | None = None,
+):
+    return _native.rasterize_shaped_run(
+        shaped, width, height, origin, line_ranges
+    )
 
 
-def bake_msdf_atlas(*args, **kwargs):
-    try:
-        return _native.bake_msdf_atlas(*args, **kwargs)
-    except NotImplementedError as error:
-        raise TextRenderingDeferred(
-            str(error), list(getattr(error, "diagnostics", ()))
-        ) from error
+def bake_msdf_atlas(
+    font_chain: Sequence[str | Path],
+    charset: str,
+    font_size: float,
+    px_range: float = 8.0,
+    padding: int = 4,
+):
+    return _native.bake_msdf_atlas(
+        [str(Path(font)) for font in font_chain],
+        charset,
+        font_size,
+        px_range,
+        padding,
+    )
 
 
 __all__ = [
     "ShapedText",
-    "TextRenderingDeferred",
     "TextShapingError",
     "bake_msdf_atlas",
     "rasterize_shaped_run",

@@ -19,12 +19,15 @@ pub mod font;
 pub mod layer;
 pub mod leader;
 pub mod line_label;
+pub mod msdf;
 pub mod optimal;
+pub mod positioned;
 mod projection;
 #[cfg(feature = "extension-module")]
 pub mod py_bindings;
 #[cfg(feature = "extension-module")]
 pub mod py_text;
+pub mod raster;
 pub mod rtree;
 pub mod shape;
 mod types;
@@ -56,6 +59,11 @@ use crate::core::text_overlay::{TextInstance, TextOverlayRenderer};
 use glam::{DVec3, Mat4, Vec3};
 use std::collections::HashMap;
 use wgpu::{Device, Queue};
+
+fn renderer_channels_from_atlas(channels: u32) -> u32 {
+    debug_assert!(matches!(channels, 1 | 3));
+    channels
+}
 
 /// Manages screen-space labels with collision detection and depth occlusion.
 pub struct LabelManager {
@@ -639,9 +647,11 @@ impl LabelManager {
             let _ = renderer.recreate_bind_group(device, Some(&atlas.view));
         }
 
-        // Use SDF mode (1 channel) for bitmap fonts, MSDF (3 channels) for proper MSDF atlases.
-        // Default to SDF because current atlases are single-channel bitmap fonts.
-        renderer.set_channels(1);
+        renderer.set_channels(
+            self.atlas
+                .as_ref()
+                .map_or(3, |atlas| renderer_channels_from_atlas(atlas.channels)),
+        );
         renderer.set_smoothing(2.0);
 
         let _ = renderer.upload_instances(device, queue, &self.visible_instances);

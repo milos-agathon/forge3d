@@ -135,7 +135,7 @@ exclude = ["tests*"]
 
 [tool.setuptools.package-data]
 # Include data files in Python package
-"forge3d" = ["data/*.rgba", "data/*.npy", "data/*.geojson", "data/fonts/*.png", "data/fonts/*.json", "assets/*.png"]
+"forge3d" = ["data/*.rgba", "data/*.npy", "data/*.geojson", "data/fonts/*.png", "data/fonts/*.json", "data/fonts/*.ttf", "assets/*.png"]
 
 [project.entry-points."forge3d.colormaps"]
 # third parties can register here; example kept for docs

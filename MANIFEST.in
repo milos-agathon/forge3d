@@ -14,7 +14,7 @@ include rust-toolchain.toml
 recursive-include src *.rs *.wgsl *.md
 recursive-include python *.py *.pyi
 recursive-include python/forge3d/data *.npy *.geojson
-recursive-include python/forge3d/data/fonts *.png *.json
+recursive-include python/forge3d/data/fonts *.png *.json *.ttf
 recursive-include tests *.py
 recursive-include examples *.py
 recursive-include examples *.ipynb

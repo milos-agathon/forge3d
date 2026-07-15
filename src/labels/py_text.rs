@@ -1,12 +1,18 @@
 #![cfg(feature = "extension-module")]
 
 use crate::labels::font::{FontCollection, FontRequest, TextError as FontError};
+use crate::labels::msdf::bake_msdf_atlas;
+use crate::labels::positioned::{positioned_outlines, svg_path_data};
+use crate::labels::raster::rasterize;
 use crate::labels::shape::{self, Direction, FeatureSetting, ShapedText, TextError};
-use pyo3::exceptions::{PyNotImplementedError, PyValueError};
+use numpy::{PyArray2, PyArray3};
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fs;
+use std::ops::Range;
 use std::sync::Arc;
 use ttf_parser::Tag;
 
@@ -142,6 +148,30 @@ impl PyShapedText {
         Ok(output.into())
     }
 
+    #[pyo3(signature = (line_ranges = None, precision = 4))]
+    fn svg_path(
+        &self,
+        line_ranges: Option<Vec<(usize, usize)>>,
+        precision: u8,
+    ) -> PyResult<String> {
+        let ranges = concrete_line_ranges(&self.inner, line_ranges)?;
+        let outlines = positioned_outlines(&self.inner, &ranges)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(svg_path_data(&outlines, precision))
+    }
+
+    #[pyo3(signature = (line_ranges = None))]
+    fn outline_bounds(
+        &self,
+        line_ranges: Option<Vec<(usize, usize)>>,
+    ) -> PyResult<Option<(f32, f32, f32, f32)>> {
+        let ranges = concrete_line_ranges(&self.inner, line_ranges)?;
+        let outlines = positioned_outlines(&self.inner, &ranges)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(crate::labels::positioned::outline_bounds(&outlines)
+            .map(|bounds| (bounds[0], bounds[1], bounds[2], bounds[3])))
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "ShapedText(text={:?}, runs={}, size={})",
@@ -150,6 +180,22 @@ impl PyShapedText {
             self.inner.size
         )
     }
+}
+
+fn concrete_line_ranges(
+    shaped: &ShapedText,
+    line_ranges: Option<Vec<(usize, usize)>>,
+) -> PyResult<Vec<Range<usize>>> {
+    let count = shaped.text.chars().count();
+    let ranges = line_ranges
+        .unwrap_or_else(|| vec![(0, count)])
+        .into_iter()
+        .map(|(start, end)| start..end)
+        .collect::<Vec<_>>();
+    if ranges.is_empty() {
+        return Err(PyValueError::new_err("line_ranges must not be empty"));
+    }
+    Ok(ranges)
 }
 
 fn feature_settings(
@@ -176,18 +222,7 @@ fn feature_settings(
         .collect()
 }
 
-#[pyfunction]
-#[pyo3(name = "text_shape")]
-#[pyo3(signature = (text, font_chain, size, script = None, language = None, features = None))]
-pub(crate) fn text_shape_py(
-    py: Python<'_>,
-    text: &str,
-    font_chain: Vec<String>,
-    size: f32,
-    script: Option<&str>,
-    language: Option<&str>,
-    features: Option<HashMap<String, bool>>,
-) -> PyResult<PyShapedText> {
+fn load_fonts(py: Python<'_>, font_chain: Vec<String>) -> PyResult<Arc<FontCollection>> {
     if font_chain.is_empty() {
         return Err(exception_with_diagnostic::<PyValueError>(
             py,
@@ -215,13 +250,30 @@ pub(crate) fn text_shape_py(
             Ok(FontRequest::from_bytes(path, bytes))
         })
         .collect::<PyResult<Vec<_>>>()?;
-    let fonts = Arc::new(FontCollection::load(&requests).map_err(|error| {
-        exception_with_diagnostic::<PyValueError>(
-            py,
-            error.to_string(),
-            font_error_diagnostic(py, &error),
-        )
-    })?);
+    FontCollection::load(&requests)
+        .map(Arc::new)
+        .map_err(|error| {
+            exception_with_diagnostic::<PyValueError>(
+                py,
+                error.to_string(),
+                font_error_diagnostic(py, &error),
+            )
+        })
+}
+
+#[pyfunction]
+#[pyo3(name = "text_shape")]
+#[pyo3(signature = (text, font_chain, size, script = None, language = None, features = None))]
+pub(crate) fn text_shape_py(
+    py: Python<'_>,
+    text: &str,
+    font_chain: Vec<String>,
+    size: f32,
+    script: Option<&str>,
+    language: Option<&str>,
+    features: Option<HashMap<String, bool>>,
+) -> PyResult<PyShapedText> {
+    let fonts = load_fonts(py, font_chain)?;
     let shaped = shape::shape(
         text,
         fonts,
@@ -244,26 +296,91 @@ pub(crate) fn text_shape_py(
 
 #[pyfunction]
 #[pyo3(name = "rasterize_shaped_run")]
-pub(crate) fn rasterize_shaped_run_py(py: Python<'_>) -> PyResult<()> {
-    let value = diagnostic(py, "littera_rendering_deferred");
-    value.set_item("operation", "rasterize_shaped_run")?;
-    Err(exception_with_diagnostic::<PyNotImplementedError>(
+#[pyo3(signature = (shaped, width, height, origin = (0.0, 0.0), line_ranges = None))]
+pub(crate) fn rasterize_shaped_run_py<'py>(
+    py: Python<'py>,
+    shaped: PyRef<'_, PyShapedText>,
+    width: usize,
+    height: usize,
+    origin: (f32, f32),
+    line_ranges: Option<Vec<(usize, usize)>>,
+) -> PyResult<Bound<'py, PyArray2<f32>>> {
+    let ranges = concrete_line_ranges(&shaped.inner, line_ranges)?;
+    let outlines = positioned_outlines(&shaped.inner, &ranges)
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    Ok(PyArray2::from_owned_array_bound(
         py,
-        "LITTERA analytic rasterization is implemented in Task 8".to_owned(),
-        value,
+        rasterize(&outlines, width, height, origin),
     ))
 }
 
 #[pyfunction]
 #[pyo3(name = "bake_msdf_atlas")]
-pub(crate) fn bake_msdf_atlas_py(py: Python<'_>) -> PyResult<()> {
-    let value = diagnostic(py, "littera_rendering_deferred");
-    value.set_item("operation", "bake_msdf_atlas")?;
-    Err(exception_with_diagnostic::<PyNotImplementedError>(
-        py,
-        "LITTERA MSDF atlas baking is implemented in Task 9".to_owned(),
-        value,
-    ))
+#[pyo3(signature = (font_chain, charset, font_size, px_range = 8.0, padding = 4))]
+pub(crate) fn bake_msdf_atlas_py(
+    py: Python<'_>,
+    font_chain: Vec<String>,
+    charset: &str,
+    font_size: f32,
+    px_range: f32,
+    padding: u32,
+) -> PyResult<PyObject> {
+    if !font_size.is_finite() || font_size <= 0.0 || !px_range.is_finite() || px_range <= 0.0 {
+        return Err(PyValueError::new_err(
+            "font_size and px_range must be finite and positive",
+        ));
+    }
+    let characters: Vec<_> = charset
+        .chars()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    if characters.is_empty() {
+        return Err(PyValueError::new_err("charset must not be empty"));
+    }
+    let fonts = load_fonts(py, font_chain)?;
+    let baked =
+        bake_msdf_atlas(&fonts, &characters, font_size, px_range, padding).map_err(|error| {
+            exception_with_diagnostic::<PyValueError>(
+                py,
+                error.to_string(),
+                font_error_diagnostic(py, &error),
+            )
+        })?;
+    let image = ndarray::Array3::from_shape_vec(
+        (baked.height as usize, baked.width as usize, 3),
+        baked.image.clone(),
+    )
+    .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    let metrics = PyDict::new_bound(py);
+    metrics.set_item("kind", "msdf_font_atlas")?;
+    metrics.set_item("font_size", baked.font_size)?;
+    metrics.set_item("line_height", baked.line_height)?;
+    metrics.set_item("baseline", baked.baseline)?;
+    metrics.set_item("px_range", baked.px_range)?;
+    metrics.set_item("padding", baked.padding)?;
+    metrics.set_item("channels", 3)?;
+    metrics.set_item("width", baked.width)?;
+    metrics.set_item("height", baked.height)?;
+    metrics.set_item("bake_ms", baked.bake_ms)?;
+    metrics.set_item("byte_count", baked.byte_count())?;
+    let glyphs = PyDict::new_bound(py);
+    for glyph in &baked.glyphs {
+        let value = PyDict::new_bound(py);
+        value.set_item("x", glyph.x)?;
+        value.set_item("y", glyph.y)?;
+        value.set_item("w", glyph.width)?;
+        value.set_item("h", glyph.height)?;
+        value.set_item("ox", glyph.offset_x)?;
+        value.set_item("oy", glyph.offset_y)?;
+        value.set_item("adv", glyph.advance)?;
+        glyphs.set_item(glyph.codepoint.to_string(), value)?;
+    }
+    metrics.set_item("glyphs", glyphs)?;
+    let output = PyDict::new_bound(py);
+    output.set_item("image", PyArray3::from_owned_array_bound(py, image))?;
+    output.set_item("metrics", metrics)?;
+    Ok(output.into())
 }
 
 #[cfg(test)]
