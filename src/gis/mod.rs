@@ -34,8 +34,8 @@ pub use geometry::{
 #[cfg(feature = "extension-module")]
 pub use geometry::{
     buffer_geometry_py, geometry_centroid_py, geometry_measure_py, interpolate_line_py,
-    repair_geometry_py, representative_point_py, simplify_geometry_py, union_geometries_py,
-    validate_geometry_py,
+    measure_geometries_py, repair_geometry_py, representative_point_py, simplify_geometry_py,
+    union_geometries_py, validate_geometry_py,
 };
 #[cfg(feature = "extension-module")]
 pub use osm::{parse_osm_features_py, query_osm_features_py};
@@ -70,7 +70,10 @@ pub use vector::{
     load_boundary_py, read_vector_py, reproject_vector_py, vector_bounds_py, vector_crs_py,
     vector_schema_py,
 };
-pub use warp::{align_raster_to, assign_crs, reproject_raster, resample_array, resample_raster};
+pub use warp::{
+    align_raster_to, assign_crs, reproject_raster, resample_array, resample_raster,
+    TransformErrorPolicy,
+};
 
 #[cfg(feature = "extension-module")]
 use std::collections::HashMap;
@@ -246,17 +249,10 @@ pub fn transform_bounds_py(
     bounds: (f64, f64, f64, f64),
     densify: Option<u32>,
 ) -> PyResult<(f64, f64, f64, f64)> {
-    if densify.unwrap_or(0) > 0 {
-        return Err(GisError::InvalidArgument(
-            "unsupported_option: transform_bounds densify is not supported by the built-in backend"
-                .to_string(),
-        )
-        .into());
-    }
     let bounds = crate::gis::affine::validate_bounds_tuple(bounds, false)?;
     let src_crs = extract_required_crs(Some(src_crs))?;
     let dst_crs = extract_required_crs(Some(dst_crs))?;
-    crate::gis::crs::transform_bounds(bounds, &src_crs, &dst_crs)
+    crate::gis::crs::transform_bounds_densified(bounds, &src_crs, &dst_crs, densify.unwrap_or(1))
         .map(|bounds| bounds.tuple())
         .map_err(Into::into)
 }
@@ -613,16 +609,18 @@ pub fn align_raster_to_py(
 }
 
 #[cfg(feature = "extension-module")]
-#[pyfunction(name = "reproject_raster", signature = (source, dst_crs, *, resampling = None))]
+#[pyfunction(name = "reproject_raster", signature = (source, dst_crs, *, resampling = None, on_transform_error = None))]
 pub fn reproject_raster_py(
     source: &Bound<'_, PyAny>,
     dst_crs: &Bound<'_, PyAny>,
     resampling: Option<&str>,
+    on_transform_error: Option<&str>,
 ) -> PyResult<PyObject> {
     let path = extract_path_or_info_path(source)?;
     let dst_crs = extract_required_crs(Some(dst_crs))?;
     let method = warp::ResamplingMethod::parse(resampling)?;
-    let result = reproject_raster(path, dst_crs, method)?;
+    let policy = warp::TransformErrorPolicy::parse(on_transform_error)?;
+    let result = reproject_raster(path, dst_crs, method, policy)?;
     raster_operation_to_py(source.py(), &result)
 }
 

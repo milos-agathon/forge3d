@@ -159,10 +159,27 @@ def repair_geometry(geometry: dict[str, Any], *, method: str = "make_valid"):
 def geometry_measure(
     geometry: dict[str, Any],
     *,
+    crs: str | int | dict[str, Any],
     metrics: tuple[str, ...] | list[str] = ("area", "length"),
 ):
-    """Measure planar area and length for a GeoJSON-like geometry object."""
-    return _require_native().geometry_measure(geometry, metrics=metrics)
+    """Measure area and length for a GeoJSON-like geometry object.
+
+    The CRS is mandatory (MENSURA): EPSG:4326 coordinates are measured with
+    Karney geodesics on the WGS84 ellipsoid (metres / m^2); projected CRSs are
+    measured planar in the CRS units. Geographic CRSs other than EPSG:4326
+    raise rather than silently reporting square degrees.
+    """
+    return _require_native().geometry_measure(geometry, crs=crs, metrics=metrics)
+
+
+def measure_geometries(
+    geometry: dict[str, Any],
+    *,
+    crs: str | int | dict[str, Any],
+    metrics: tuple[str, ...] | list[str] | None = None,
+) -> dict[str, Any]:
+    """Measure geometry; compatibility alias for :func:`geometry_measure`."""
+    return geometry_measure(geometry, crs=crs, metrics=metrics)
 
 
 def geometry_centroid(geometry: dict[str, Any]):
@@ -430,7 +447,11 @@ def transform_bounds(
     *,
     densify: int | None = None,
 ) -> tuple[float, float, float, float]:
-    """Transform bounds; densify must be None or 0 for the built-in backend."""
+    """Transform bounds, densifying each edge into ``densify`` segments.
+
+    ``densify=None`` samples only the corners (legacy behaviour); pass a
+    positive segment count for projections with curved parallels/meridians.
+    """
     return _require_native().transform_bounds(src_crs, dst_crs, bounds, densify=densify)
 
 
@@ -597,12 +618,20 @@ def reproject_raster(
     dst_crs: str | dict[str, Any],
     *,
     resampling: str | None = None,
+    on_transform_error: str = "raise",
 ) -> dict[str, Any]:
-    """Reproject a raster; result["info"] is a serialized RasterInfo dict."""
+    """Reproject a raster; result["info"] is a serialized RasterInfo dict.
+
+    ``on_transform_error`` controls what happens when a pixel's coordinate
+    transform fails: ``"raise"`` (default) raises TransformFailed with the
+    failure count and first failing pixel; ``"nodata"`` fills the failing
+    pixels with nodata and records a diagnostic.
+    """
     return _require_native().reproject_raster(
         _path_or_self(source),
         dst_crs,
         resampling=resampling,
+        on_transform_error=on_transform_error,
     )
 
 
@@ -840,6 +869,7 @@ __all__ = [
     "validate_geometry",
     "repair_geometry",
     "geometry_measure",
+    "measure_geometries",
     "geometry_centroid",
     "representative_point",
     "interpolate_line",

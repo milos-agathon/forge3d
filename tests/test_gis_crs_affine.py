@@ -326,11 +326,14 @@ def test_transform_bounds_public_api_matches_web_mercator():
     assert gis.transform_bounds("EPSG:4326", "EPSG:3857", bounds) == pytest.approx(
         gis.web_mercator_bounds(bounds, "EPSG:4326")
     )
+    # MENSURA: densify is functional. densify=None samples corners only;
+    # densify=0 is rejected; for this equator-centred web-mercator extent the
+    # corner extrema are exact, so densified bounds agree with corner bounds.
     assert gis.transform_bounds("EPSG:4326", "EPSG:3857", bounds, densify=None) == pytest.approx(
-        gis.transform_bounds("EPSG:4326", "EPSG:3857", bounds, densify=0)
-    )
-    with pytest.raises(ValueError, match="unsupported_option"):
         gis.transform_bounds("EPSG:4326", "EPSG:3857", bounds, densify=8)
+    )
+    with pytest.raises(ValueError, match="invalid_argument"):
+        gis.transform_bounds("EPSG:4326", "EPSG:3857", bounds, densify=0)
 
 
 def test_missing_and_invalid_transform_diagnostics(tmp_path: Path):

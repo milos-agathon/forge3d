@@ -163,6 +163,7 @@ class TestNativeModuleSymbols:
         "validate_geometry",
         "repair_geometry",
         "geometry_measure",
+        "measure_geometries",
         # MENSURA geodesy surface (src/py_functions/geodesy.rs)
         "geoid_undulation",
         "orthometric_to_ellipsoidal",

@@ -289,6 +289,11 @@ mod py {
         dict.set_item("valid_count", valid_count)?;
         dict.set_item("nodata_summary", nodata_per_band)?;
         dict.set_item("scale", json_to_py(py, &json!({"units": "meters"}))?)?;
+        // MENSURA: DEM ingestion carries an explicit height-system tag.
+        // GeoTIFF/COG sources rarely declare a vertical datum; "unspecified"
+        // is the honest default — converting to ellipsoidal heights requires
+        // the caller to assert the system (see forge3d.crs.geoid_undulation).
+        dict.set_item("height_system", "unspecified")?;
         dict.set_item(
             "operation",
             operation_py(py, "prepare_dem", 1, 1, target_info.is_some(), Vec::new())?,

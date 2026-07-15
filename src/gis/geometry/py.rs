@@ -24,16 +24,32 @@ pub fn repair_geometry_py(
     json_to_py(py, &result)
 }
 
-#[pyfunction(name = "geometry_measure", signature = (geometry, *, metrics = None))]
+#[pyfunction(name = "geometry_measure", signature = (geometry, *, crs, metrics = None))]
 pub fn geometry_measure_py(
     py: Python<'_>,
     geometry: &Bound<'_, PyAny>,
+    crs: &Bound<'_, PyAny>,
     metrics: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<PyObject> {
+    // MENSURA: the CRS is mandatory — without it a measurement cannot know
+    // whether coordinates are degrees or metres, and square degrees must
+    // never be reported as a length or area.
     let source = py_to_json_strict(geometry)?;
     let metrics = metrics_from_py(metrics)?;
-    let result = super::geometry_measure(&source, &metrics)?;
+    let spec = crate::gis::extract_required_crs(Some(crs))?;
+    let mode = super::measure_mode_for_crs(&spec)?;
+    let result = super::geometry_measure(&source, &metrics, mode)?;
     json_to_py(py, &result)
+}
+
+#[pyfunction(name = "measure_geometries", signature = (geometry, *, crs, metrics = None))]
+pub fn measure_geometries_py(
+    py: Python<'_>,
+    geometry: &Bound<'_, PyAny>,
+    crs: &Bound<'_, PyAny>,
+    metrics: Option<&Bound<'_, PyAny>>,
+) -> PyResult<PyObject> {
+    geometry_measure_py(py, geometry, crs, metrics)
 }
 
 #[pyfunction(name = "geometry_centroid")]
