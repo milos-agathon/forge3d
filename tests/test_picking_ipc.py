@@ -180,16 +180,14 @@ class TestVertexFormat:
         ]
         indices = [0, 1, 2]
         
-        resp = add_vector_overlay(
-            sock,
-            "Invalid Format Test",
-            vertices,
-            indices,
-            primitive="triangles",
-        )
-        
-        # Should fail with parse error
-        assert not resp.get("ok", True), "7-component vertices should be rejected"
+        with pytest.raises(ValueError, match="exactly 8 lanes"):
+            add_vector_overlay(
+                sock,
+                "Invalid Format Test",
+                vertices,
+                indices,
+                primitive="triangles",
+            )
 
 
 if __name__ == "__main__":

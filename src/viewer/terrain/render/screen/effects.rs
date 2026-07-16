@@ -91,13 +91,16 @@ impl ViewerTerrainScene {
             if let Some(ref mut vol_pass) = self.volumetrics_pass {
                 let terrain = self.terrain.as_ref().unwrap();
                 let depth_view = self.depth_view.as_ref().unwrap();
-                let color_input = self
+                let taa_input = self
+                    .taa_renderer
+                    .as_ref()
+                    .filter(|_| flags.needs_taa)
+                    .map(crate::core::taa::TaaRenderer::history_view);
+                let post_input = self
                     .post_process
                     .as_ref()
-                    .unwrap()
-                    .intermediate_view
-                    .as_ref()
-                    .unwrap();
+                    .and_then(|pp| pp.intermediate_view.as_ref());
+                let color_input = taa_input.or(post_input).unwrap();
                 let vol_output = if flags.needs_dof || flags.needs_post_process {
                     self.dof_pass.as_ref().unwrap().input_view.as_ref().unwrap()
                 } else {
@@ -123,11 +126,14 @@ impl ViewerTerrainScene {
                     [state.sun_dir.x, state.sun_dir.y, state.sun_dir.z],
                     terrain.sun_intensity,
                     [
-                        state.terrain_width,
+                        state.render_origin_span[2]
+                            .abs()
+                            .max(state.render_origin_span[3].abs()),
                         terrain.domain.0,
                         state.shader_z_scale,
                         state.h_range,
                     ],
+                    state.render_origin_span,
                     &self.pbr_config.volumetrics,
                 ) {
                     eprintln!("[terrain] volumetrics apply failed: {e}");
@@ -149,6 +155,11 @@ impl ViewerTerrainScene {
 
             if let Some(ref mut dof) = self.dof_pass {
                 let depth_view = self.depth_view.as_ref().unwrap();
+                let taa_input = self
+                    .taa_renderer
+                    .as_ref()
+                    .filter(|_| flags.needs_taa && !flags.needs_volumetrics)
+                    .map(crate::core::taa::TaaRenderer::history_view);
                 let dof_cfg = dof::DofConfig {
                     focus_distance: self.pbr_config.dof.focus_distance,
                     f_stop: self.pbr_config.dof.f_stop,
@@ -159,28 +170,51 @@ impl ViewerTerrainScene {
                     tilt_pitch: self.pbr_config.dof.tilt_pitch,
                     tilt_yaw: self.pbr_config.dof.tilt_yaw,
                 };
-                if let Err(e) = dof.apply_from_input(
-                    encoder,
-                    &self.queue,
-                    depth_view,
-                    dof_output,
-                    width,
-                    height,
-                    self.surface_format,
-                    &dof_cfg,
-                    1.0,
-                    state.cam_radius * 10.0,
-                ) {
+                let result = if let Some(input_view) = taa_input {
+                    dof.apply(
+                        encoder,
+                        &self.queue,
+                        input_view,
+                        depth_view,
+                        dof_output,
+                        width,
+                        height,
+                        self.surface_format,
+                        &dof_cfg,
+                        1.0,
+                        state.cam_radius * 10.0,
+                    )
+                } else {
+                    dof.apply_from_input(
+                        encoder,
+                        &self.queue,
+                        depth_view,
+                        dof_output,
+                        width,
+                        height,
+                        self.surface_format,
+                        &dof_cfg,
+                        1.0,
+                        state.cam_radius * 10.0,
+                    )
+                };
+                if let Err(e) = result {
                     eprintln!("[terrain] DoF apply failed: {e}");
                 }
             }
         }
 
-        if flags.needs_post_process {
+        if flags.needs_post_process
+            || (flags.needs_taa && !flags.needs_volumetrics && !flags.needs_dof)
+        {
             let external_input = if !flags.needs_dof && flags.needs_volumetrics {
                 self.dof_pass
                     .as_ref()
                     .and_then(|dof| dof.input_view.as_ref())
+            } else if flags.needs_taa && !flags.needs_dof {
+                self.taa_renderer
+                    .as_ref()
+                    .map(crate::core::taa::TaaRenderer::history_view)
             } else {
                 None
             };

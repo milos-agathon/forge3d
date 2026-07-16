@@ -27,6 +27,14 @@ from .diagnostics import (
     missing_glyphs_diagnostic,
     placeholder_fallback_diagnostic,
 )
+from .viewer_contract import (
+    NormalizedExtent,
+    VectorOverlayVertex,
+    WorldPosition,
+    normalized_extent as _normalized_extent,
+    vector_overlay_vertices as _vector_overlay_vertices,
+    world_position as _world_position,
+)
 
 # Import Renderer and MSAA config with fallbacks for standalone testing
 try:
@@ -240,14 +248,20 @@ class ViewerHandle:
         return self._send_command(cmd)
 
     def _allocate_label_id(self) -> int:
-        next_id = int(getattr(self, "_next_public_label_id", 1))
-        self._next_public_label_id = next_id + 1
-        return next_id
+        return int(getattr(self, "_next_public_label_id", 1))
+
+    def _commit_label_id(self, label_id: int) -> None:
+        self._next_public_label_id = max(
+            int(getattr(self, "_next_public_label_id", 1)), int(label_id) + 1
+        )
 
     def _allocate_vector_overlay_id(self) -> int:
-        next_id = int(getattr(self, "_next_public_vector_overlay_id", 1))
-        self._next_public_vector_overlay_id = next_id + 1
-        return next_id
+        return int(getattr(self, "_next_public_vector_overlay_id", 1))
+
+    def _commit_vector_overlay_id(self, overlay_id: int) -> None:
+        self._next_public_vector_overlay_id = max(
+            int(getattr(self, "_next_public_vector_overlay_id", 1)), int(overlay_id) + 1
+        )
 
     def _ensure_label_api_state(self) -> Dict[str, Any]:
         state = getattr(self, "_label_api_state", None)
@@ -369,12 +383,9 @@ class ViewerHandle:
 
     @staticmethod
     def _normalize_line_path(
-        polyline: Sequence[Tuple[float, float, float]]
+        polyline: Sequence[WorldPosition]
     ) -> List[Tuple[float, float, float]]:
-        return [
-            (float(point[0]), float(point[1]), float(point[2]))
-            for point in polyline
-        ]
+        return [tuple(_world_position(point, name="polyline point")) for point in polyline]
 
     @staticmethod
     def _line_path_length(polyline: Sequence[Tuple[float, float, float]]) -> float:
@@ -485,7 +496,7 @@ class ViewerHandle:
     def add_label(
         self,
         text: str,
-        world_pos: Tuple[float, float, float],
+        world_pos: WorldPosition,
         size: Optional[float] = None,
         color: Optional[Tuple[float, float, float, float]] = None,
         halo_color: Optional[Tuple[float, float, float, float]] = None,
@@ -500,7 +511,7 @@ class ViewerHandle:
         leader: Optional[bool] = None,
         horizon_fade_angle: Optional[float] = None,
     ) -> Union[int, LabelOperationResult]:
-        """Create a point label and return its stable public label ID."""
+        """Create a label at f64 viewer-world ``(X, display Y, Z)``."""
         diagnostic = self._text_diagnostic(str(text), feature="empty label text")
         if diagnostic is not None:
             return self._label_operation_result(False, [diagnostic])
@@ -509,7 +520,7 @@ class ViewerHandle:
             "cmd": "add_label",
             "id": label_id,
             "text": str(text),
-            "world_pos": [float(world_pos[0]), float(world_pos[1]), float(world_pos[2])],
+            "world_pos": _world_position(world_pos, name="world_pos"),
         }
         if size is not None:
             cmd["size"] = float(size)
@@ -538,6 +549,7 @@ class ViewerHandle:
         if horizon_fade_angle is not None:
             cmd["horizon_fade_angle"] = float(horizon_fade_angle)
         created_id = self._send_label_create(cmd)
+        self._commit_label_id(created_id)
         self._ensure_label_api_state()["label_ids"].add(created_id)
         return created_id
 
@@ -594,7 +606,7 @@ class ViewerHandle:
     def add_line_label(
         self,
         text: str,
-        polyline: Sequence[Tuple[float, float, float]],
+        polyline: Sequence[WorldPosition],
         size: Optional[float] = None,
         color: Optional[Tuple[float, float, float, float]] = None,
         halo_color: Optional[Tuple[float, float, float, float]] = None,
@@ -606,7 +618,7 @@ class ViewerHandle:
         max_zoom: Optional[float] = None,
         terrain_mode: Optional[str] = None,
     ) -> Union[int, LabelOperationResult]:
-        """Create a line label and return its stable public label ID."""
+        """Create a line label along f64 viewer-world points."""
         normalized_polyline = self._normalize_line_path(polyline)
         if terrain_mode not in (None, "none", "flat"):
             diagnostic = experimental_feature_diagnostic(
@@ -626,7 +638,7 @@ class ViewerHandle:
             "cmd": "add_line_label",
             "id": label_id,
             "text": str(text),
-            "polyline": [[float(p[0]), float(p[1]), float(p[2])] for p in normalized_polyline],
+            "polyline": [_world_position(p, name="polyline point") for p in normalized_polyline],
             "placement": str(placement),
         }
         if size is not None:
@@ -646,6 +658,7 @@ class ViewerHandle:
         if max_zoom is not None:
             cmd["max_zoom"] = float(max_zoom)
         created_id = self._send_label_create(cmd)
+        self._commit_label_id(created_id)
         state = self._ensure_label_api_state()
         state["label_ids"].add(created_id)
         state["line_label_glyph_instances"][created_id] = self._build_line_glyph_instances(
@@ -658,7 +671,7 @@ class ViewerHandle:
     def add_curved_label(
         self,
         text: str,
-        path: Sequence[Tuple[float, float, float]],
+        path: Sequence[WorldPosition],
         *,
         size: Optional[float] = None,
         color: Optional[Tuple[float, float, float, float]] = None,
@@ -678,7 +691,7 @@ class ViewerHandle:
     def add_callout(
         self,
         text: str,
-        anchor: Tuple[float, float, float],
+        anchor: WorldPosition,
         offset: Tuple[float, float] = (0.0, -50.0),
         background_color: Optional[Tuple[float, float, float, float]] = None,
         border_color: Optional[Tuple[float, float, float, float]] = None,
@@ -697,7 +710,7 @@ class ViewerHandle:
             "cmd": "add_callout",
             "id": label_id,
             "text": str(text),
-            "anchor": [float(anchor[0]), float(anchor[1]), float(anchor[2])],
+            "anchor": _world_position(anchor, name="anchor"),
             "offset": [float(offset[0]), float(offset[1])],
         }
         if background_color is not None:
@@ -715,13 +728,14 @@ class ViewerHandle:
         if text_color is not None:
             cmd["text_color"] = [float(v) for v in text_color]
         created_id = self._send_label_create(cmd)
+        self._commit_label_id(created_id)
         self._ensure_label_api_state()["label_ids"].add(created_id)
         return created_id
 
     def add_vector_overlay(
         self,
         name: str,
-        vertices: Sequence[Sequence[float]],
+        vertices: Sequence[VectorOverlayVertex],
         indices: Sequence[int],
         primitive: str = "triangles",
         drape: bool = True,
@@ -732,13 +746,19 @@ class ViewerHandle:
         point_size: float = 5.0,
         z_order: int = 0,
     ) -> int:
-        """Create a vector overlay and return its stable public overlay ID."""
+        """Create an overlay from eight-lane XYZ/RGBA/feature-ID vertices.
+
+        XYZ is absolute viewer world ``(X, display Y, Z)`` in f64; projected
+        terrain uses ``Z=-map Y``. RGBA is normalized ``[0, 1]`` and the final
+        lane is an exact unsigned 32-bit feature ID.
+        """
+        validated_vertices = _vector_overlay_vertices(vertices)
         overlay_id = self._allocate_vector_overlay_id()
         cmd: Dict[str, Any] = {
             "cmd": "add_vector_overlay",
             "id": overlay_id,
             "name": str(name),
-            "vertices": [[float(value) for value in vertex] for vertex in vertices],
+            "vertices": validated_vertices,
             "indices": [int(index) for index in indices],
             "primitive": str(primitive),
             "drape": bool(drape),
@@ -749,7 +769,9 @@ class ViewerHandle:
             "point_size": float(point_size),
             "z_order": int(z_order),
         }
-        return self._send_stable_create(cmd, "vector overlay")
+        created_id = self._send_stable_create(cmd, "vector overlay")
+        self._commit_vector_overlay_id(created_id)
+        return created_id
 
     def set_labels_enabled(self, enabled: bool) -> LabelOperationResult:
         """Set label visibility through the public high-level viewer API."""
@@ -864,6 +886,67 @@ class ViewerHandle:
             raise ViewerError("get_stats returned no stats data")
         return stats
 
+    def poll_pick_events(self) -> List[Dict[str, Any]]:
+        """Drain and return completed screen-pick events.
+
+        Every result ``world_pos`` is an absolute f64 viewer-world position in
+        ``(X, display Y, Z)`` coordinates; it is never anchor/render relative.
+        """
+        response = self._send_command({"cmd": "poll_pick_events"})
+        return list(response.get("pick_events") or [])
+
+    def pick_at(
+        self,
+        x: int,
+        y: int,
+        *,
+        shift: bool = False,
+        ctrl: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Pick the frozen rendered frame at a screen pixel.
+
+        The method drains older events, waits for execution of this exact
+        command, and returns its pick results.  Result positions are absolute
+        f64 viewer-world ``(X, display Y, Z)`` values.
+        """
+        self.poll_pick_events()
+        self._send_command(
+            {
+                "cmd": "pick_at",
+                "x": int(x),
+                "y": int(y),
+                "shift": bool(shift),
+                "ctrl": bool(ctrl),
+            }
+        )
+        events = self.poll_pick_events()
+        correlated = [
+            event
+            for event in events
+            if event.get("screen_pos") == [int(x), int(y)]
+        ]
+        return [
+            dict(result)
+            for event in correlated
+            for result in (event.get("results") or [])
+        ]
+
+    def update_labels(self) -> None:
+        """Update labels against the same frozen frame used by rendering."""
+        self._send_command({"cmd": "update_labels"})
+
+    def _wait_for_rendered_revision(self, revision: int, *, timeout: float) -> None:
+        """Fence evidence capture on both command publication and frame submit."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            stats = self.get_stats()
+            if int(stats.get("rendered_frame_revision", 0)) >= revision:
+                return
+            time.sleep(0.01)
+        raise ViewerError(
+            f"Timeout waiting for rendered frame revision {revision}"
+        )
+
     def get_terrain_volumetrics_report(self) -> Dict[str, Any]:
         """Get the latest terrain heterogeneous-volumetrics memory report."""
         response = self._send_command({"cmd": "get_terrain_volumetrics_report"})
@@ -915,12 +998,12 @@ class ViewerHandle:
         self,
         name: str,
         path: Union[str, Path],
-        extent: Optional[Tuple[float, float, float, float]] = None,
+        extent: Optional[NormalizedExtent] = None,
         opacity: Optional[float] = None,
         z_order: Optional[int] = None,
         preserve_colors: Optional[bool] = None,
     ) -> None:
-        """Load an image overlay texture and drape it on the current terrain.
+        """Load an image overlay using normalized UV ``(u0, v0, u1, v1)``.
 
         ``preserve_colors`` switches raster overlays into a viewer mode that
         composites their source colors after terrain lighting so categorical
@@ -932,7 +1015,7 @@ class ViewerHandle:
             "path": str(path),
         }
         if extent is not None:
-            cmd["extent"] = list(extent)
+            cmd["extent"] = _normalized_extent(extent)
         if opacity is not None:
             cmd["opacity"] = float(opacity)
         if z_order is not None:
@@ -989,7 +1072,7 @@ class ViewerHandle:
         """Set object transform (translation, rotation quaternion, scale)."""
         cmd: Dict[str, Any] = {"cmd": "set_transform"}
         if translation is not None:
-            cmd["translation"] = list(translation)
+            cmd["translation"] = _world_position(translation, name="translation")
         if rotation_quat is not None:
             cmd["rotation_quat"] = list(rotation_quat)
         if scale is not None:
@@ -1002,12 +1085,12 @@ class ViewerHandle:
         target: Tuple[float, float, float],
         up: Tuple[float, float, float] = (0.0, 1.0, 0.0),
     ) -> None:
-        """Set camera position using look-at parameters."""
+        """Set f64 viewer-world ``(X, display Y, Z)`` look-at coordinates."""
         self._send_command({
             "cmd": "cam_lookat",
-            "eye": list(eye),
-            "target": list(target),
-            "up": list(up),
+            "eye": _world_position(eye, name="eye"),
+            "target": _world_position(target, name="target"),
+            "up": _world_position(up, name="up"),
         })
     
     def set_fov(self, deg: float) -> None:
@@ -1134,10 +1217,15 @@ class ViewerHandle:
         if height is not None:
             cmd["height"] = int(height)
         self._send_command(cmd)
+        target_revision = int(self.get_stats().get("applied_command_revision", 0))
         _wait_for_snapshot(
             output_path,
             timeout=max(self._timeout, 2.0),
             previous_mtime_ns=previous_mtime_ns,
+        )
+        self._wait_for_rendered_revision(
+            target_revision,
+            timeout=max(self._timeout, 2.0),
         )
     
     def render_animation(

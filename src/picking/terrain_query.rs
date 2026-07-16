@@ -13,8 +13,12 @@ pub struct TerrainQueryResult {
     pub slope: f32,
     /// Aspect angle in degrees (0 = north, 90 = east, 180 = south, 270 = west)
     pub aspect: f32,
-    /// World position of the query point
-    pub world_pos: [f32; 3],
+    /// Render-relative position reconstructed by the depth/ray query.
+    pub render_pos: [f32; 3],
+    /// Absolute f64 world position restored with the exact producing anchor.
+    pub world_pos: [f64; 3],
+    /// Anchor snapshot that produced `render_pos` and `world_pos`.
+    pub producing_anchor: crate::camera::Anchor,
     /// Normal vector at the query point
     pub normal: [f32; 3],
 }
@@ -25,8 +29,34 @@ impl Default for TerrainQueryResult {
             elevation: 0.0,
             slope: 0.0,
             aspect: 0.0,
+            render_pos: [0.0, 0.0, 0.0],
             world_pos: [0.0, 0.0, 0.0],
+            producing_anchor: crate::camera::Anchor::new(),
             normal: [0.0, 1.0, 0.0],
+        }
+    }
+}
+
+impl TerrainQueryResult {
+    fn from_render(
+        render_pos: [f32; 3],
+        producing_anchor: crate::camera::Anchor,
+        elevation: f32,
+        slope: f32,
+        aspect: f32,
+        normal: [f32; 3],
+    ) -> Self {
+        let world_pos = producing_anchor
+            .to_world_from_render_f64(glam::Vec3::from(render_pos).as_dvec3())
+            .to_array();
+        Self {
+            elevation,
+            slope,
+            aspect,
+            render_pos,
+            world_pos,
+            producing_anchor,
+            normal,
         }
     }
 }
@@ -113,8 +143,9 @@ impl TerrainQueryEngine {
         screen_height: u32,
         depth: f32,
         view_proj: [[f32; 4]; 4],
+        producing_anchor: crate::camera::Anchor,
     ) -> Option<TerrainQueryResult> {
-        let world_pos = self.reconstruct_world_from_depth(
+        let render_pos = self.reconstruct_world_from_depth(
             screen_x,
             screen_y,
             screen_width,
@@ -124,15 +155,15 @@ impl TerrainQueryEngine {
         )?;
 
         // Extract elevation from Y coordinate
-        let elevation = world_pos[1] / self.config.z_scale + self.config.min_elevation;
-
-        Some(TerrainQueryResult {
+        let elevation = render_pos[1] / self.config.z_scale + self.config.min_elevation;
+        Some(TerrainQueryResult::from_render(
+            render_pos,
+            producing_anchor,
             elevation,
-            slope: 0.0,  // Would need heightmap sampling for accurate slope
-            aspect: 0.0, // Would need heightmap sampling for accurate aspect
-            world_pos,
-            normal: [0.0, 1.0, 0.0], // Default up normal
-        })
+            0.0, // Would need heightmap sampling for accurate slope
+            0.0, // Would need heightmap sampling for accurate aspect
+            [0.0, 1.0, 0.0],
+        ))
     }
 
     /// Query terrain using ray intersection with heightfield
@@ -143,6 +174,7 @@ impl TerrainQueryEngine {
         heightmap: &[f32],
         heightmap_width: u32,
         heightmap_height: u32,
+        producing_anchor: crate::camera::Anchor,
     ) -> Option<TerrainQueryResult> {
         // Simple ray marching through heightfield
         let max_t = self.config.terrain_width * 2.0;
@@ -203,13 +235,14 @@ impl TerrainQueryEngine {
                     self.compute_normal_at(u, v, heightmap, heightmap_width, heightmap_height);
                 let (slope, aspect) = self.normal_to_slope_aspect(normal);
 
-                return Some(TerrainQueryResult {
+                return Some(TerrainQueryResult::from_render(
+                    hit_pos,
+                    producing_anchor,
                     elevation,
                     slope,
                     aspect,
-                    world_pos: hit_pos,
                     normal,
-                });
+                ));
             }
 
             prev_above = above;
@@ -346,5 +379,44 @@ fn normalize(v: [f32; 3]) -> [f32; 3] {
         [0.0, 1.0, 0.0]
     } else {
         [v[0] / len, v[1] / len, v[2] / len]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn world_result_restores_submillimetre_render_offset_with_producing_anchor() {
+        let origin = glam::DVec3::new(6_378_137.0, 500_000.0, -5_500_000.0);
+        let mut anchor = crate::camera::Anchor::new();
+        assert!(anchor.rebase_if_needed(origin));
+        let result = TerrainQueryResult::from_render(
+            [0.000_25, -0.000_5, 0.000_75],
+            anchor,
+            0.0,
+            0.0,
+            0.0,
+            [0.0, 1.0, 0.0],
+        );
+        let expected = origin + glam::DVec3::new(0.000_25, -0.000_5, 0.000_75);
+        assert!((glam::DVec3::from(result.world_pos) - expected).length() < 1.0e-9);
+        assert_eq!(result.producing_anchor, anchor);
+    }
+
+    #[test]
+    fn current_anchor_is_a_detectable_wrong_provenance_negative_control() {
+        let origin = glam::DVec3::new(6_378_137.0, 500_000.0, -5_500_000.0);
+        let mut producing = crate::camera::Anchor::new();
+        assert!(producing.rebase_if_needed(origin));
+        let render_pos = [0.000_25, 0.0, 0.0];
+        let result =
+            TerrainQueryResult::from_render(render_pos, producing, 0.0, 0.0, 0.0, [0.0, 1.0, 0.0]);
+
+        let mut current = producing;
+        assert!(current.rebase_if_needed(origin + glam::DVec3::X * 1_500.0));
+        let wrong = current.to_world_from_render_f64(glam::Vec3::from(render_pos).as_dvec3());
+        assert!((wrong - glam::DVec3::from(result.world_pos)).length() > 1_000.0);
+        assert!((result.world_pos[0] - 6_378_137.000_25).abs() < 1.0e-9);
     }
 }

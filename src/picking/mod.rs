@@ -44,7 +44,7 @@ pub struct PickResult {
     /// Screen position where the pick occurred
     pub screen_pos: (u32, u32),
     /// World position if depth was available
-    pub world_pos: Option<[f32; 3]>,
+    pub world_pos: Option<[f64; 3]>,
     /// Layer name if available
     pub layer_name: Option<String>,
 }

@@ -21,6 +21,7 @@ impl Viewer {
     pub(super) fn render_geometry_stage(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
     ) -> RenderAvailability {
         let availability = self.geometry_availability();
         self.log_snapshot_geometry_gate(availability);
@@ -39,7 +40,7 @@ impl Viewer {
         ) {
             self.render_geometry_pass(encoder, &mut gi, &zv);
             self.render_geometry_fog(encoder, &mut gi);
-            self.render_postfx_stage(&mut gi, encoder, &zv);
+            self.render_postfx_stage(&mut gi, encoder, &zv, view);
             self.gi = Some(gi);
             self.z_view = Some(zv);
         }
@@ -70,7 +71,7 @@ impl Viewer {
                 availability.have_z,
                 availability.have_bgl,
                 self.geom_index_count,
-                self.object_transform == glam::Mat4::IDENTITY
+                self.object_transform_is_identity()
             );
             let _ = std::fs::OpenOptions::new()
                 .create(true)

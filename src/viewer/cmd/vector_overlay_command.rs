@@ -3,6 +3,15 @@ use crate::viewer::Viewer;
 
 pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
     match cmd {
+        ViewerCmd::PickAt { x, y, shift, ctrl } => {
+            let count = viewer.pick_at_screen(*x, *y, *shift, *ctrl);
+            println!("[picking] IPC pick at ({x}, {y}) produced {count} results");
+            true
+        }
+        ViewerCmd::UpdateLabels => {
+            viewer.update_labels();
+            true
+        }
         ViewerCmd::AddVectorOverlay {
             id,
             name,
@@ -17,26 +26,47 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             point_size,
             z_order,
         } => {
+            let world_points = vertices
+                .iter()
+                .map(|vertex| glam::DVec3::from(vertex.position))
+                .collect::<Vec<_>>();
+            if let Err(err) = viewer.validate_content_points(world_points.iter().copied()) {
+                eprintln!("[vector_overlay] rejected '{name}': {err}");
+                viewer.reject_command(format!(
+                    "vector_overlay_rejected: name={name} {err} unchanged_state=true"
+                ));
+                return true;
+            }
+            let frame = viewer.prospective_frame_camera();
+            let vector_deltas = if let [first, second, ..] = vertices.as_slice() {
+                let first_world = glam::DVec3::from(first.position);
+                let second_world = glam::DVec3::from(second.position);
+                Some((
+                    (second_world - first_world).to_array(),
+                    (frame.anchor.to_render_vec3(second_world)
+                        - frame.anchor.to_render_vec3(first_world))
+                    .to_array(),
+                ))
+            } else {
+                None
+            };
             if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
                 use crate::viewer::terrain::vector_overlay::{
-                    OverlayPrimitive, VectorOverlayLayer, VectorVertex,
+                    OverlayPrimitive, VectorOverlayLayer, VectorSourceVertex,
                 };
 
-                let verts: Vec<VectorVertex> = vertices
+                let source_vertices: Vec<VectorSourceVertex> = vertices
                     .iter()
-                    .map(|v| {
-                        let feature_id = if v.len() > 7 { v[7] as u32 } else { 0 };
-                        VectorVertex::with_feature_id(
-                            v[0], v[1], v[2], v[3], v[4], v[5], v[6], feature_id,
-                        )
-                    })
+                    .copied()
+                    .map(VectorSourceVertex::from)
                     .collect();
                 let primitive =
                     OverlayPrimitive::from_str(primitive).unwrap_or(OverlayPrimitive::Triangles);
 
                 let layer = VectorOverlayLayer {
                     name: name.clone(),
-                    vertices: verts,
+                    source_vertices,
+                    vertices: Vec::new(),
                     indices: indices.clone(),
                     primitive,
                     drape: *drape,
@@ -49,13 +79,21 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                     z_order: *z_order,
                 };
 
-                let id = match terrain_viewer.add_vector_overlay_with_id(*id, layer) {
+                let id = match terrain_viewer.add_vector_overlay_with_id(*id, layer, &frame.anchor)
+                {
                     Ok(id) => id,
                     Err(e) => {
                         eprintln!("[vector_overlay] failed to add '{}': {e}", name);
+                        viewer.command_error = Some(format!(
+                            "vector_overlay_execution_failed: name={name} error={e}"
+                        ));
                         return true;
                     }
                 };
+                if let Some((source_delta, packed_delta)) = vector_deltas {
+                    viewer.last_vector_source_delta = source_delta;
+                    viewer.last_vector_packed_delta = packed_delta;
+                }
                 println!(
                     "[vector_overlay] Added '{}' with {} vertices (id={})",
                     name,
@@ -63,86 +101,24 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                     id
                 );
 
-                if primitive == OverlayPrimitive::Triangles && !indices.is_empty() {
-                    use crate::accel::cpu_bvh::{build_bvh_cpu, BuildOptions, MeshCPU};
-                    use crate::accel::types::{Aabb, BvhNode, Triangle};
-                    use crate::picking::LayerBvhData;
-
-                    let positions: Vec<[f32; 3]> =
-                        vertices.iter().map(|v| [v[0], v[1], v[2]]).collect();
-                    let triangles: Vec<[u32; 3]> = indices
-                        .chunks(3)
-                        .filter_map(|chunk| {
-                            if chunk.len() == 3 {
-                                Some([chunk[0], chunk[1], chunk[2]])
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-
-                    let mesh = MeshCPU::new(positions.clone(), triangles.clone());
-                    if let Ok(bvh) = build_bvh_cpu(&mesh, &BuildOptions::default()) {
-                        let mut layer_data = LayerBvhData::new(id, name.clone());
-                        layer_data.cpu_nodes = bvh
-                            .nodes
-                            .iter()
-                            .map(|node| {
-                                let kind = if node.is_leaf() { 1 } else { 0 };
-                                BvhNode {
-                                    aabb: Aabb::new(node.aabb_min, node.aabb_max),
-                                    kind,
-                                    left_idx: node.left,
-                                    right_idx: node.right,
-                                    parent_idx: 0,
-                                }
-                            })
-                            .collect();
-                        layer_data.cpu_triangles = bvh
-                            .tri_indices
-                            .iter()
-                            .map(|&tri_idx| {
-                                let idx = tri_idx as usize;
-                                if idx < triangles.len() {
-                                    let tri = triangles[idx];
-                                    Triangle::new(
-                                        positions[tri[0] as usize],
-                                        positions[tri[1] as usize],
-                                        positions[tri[2] as usize],
-                                    )
-                                } else {
-                                    Triangle::new([0.0; 3], [0.0; 3], [0.0; 3])
-                                }
-                            })
-                            .collect();
-                        layer_data.cpu_feature_ids = bvh
-                            .tri_indices
-                            .iter()
-                            .map(|&tri_idx| {
-                                let idx = tri_idx as usize;
-                                if idx < triangles.len() {
-                                    let tri = triangles[idx];
-                                    let vertex_index = tri[0] as usize;
-                                    if vertex_index < vertices.len() {
-                                        vertices[vertex_index][7] as u32
-                                    } else {
-                                        id
-                                    }
-                                } else {
-                                    id
-                                }
-                            })
-                            .collect();
-                        viewer.unified_picking.register_layer_bvh(layer_data);
-                        println!(
-                            "[picking] Built BVH for layer {} ({} nodes)",
+                if let Some((layer_name, render_vertices, render_indices, primitive)) =
+                    terrain_viewer.vector_overlay_render_data(id)
+                {
+                    if let Some(layer_data) =
+                        crate::viewer::terrain::vector_overlay::build_layer_bvh(
                             id,
-                            bvh.nodes.len()
-                        );
+                            &layer_name,
+                            &render_vertices,
+                            &render_indices,
+                            primitive,
+                        )
+                    {
+                        viewer.unified_picking.register_layer_bvh(layer_data);
                     }
                 }
             } else {
                 eprintln!("[vector_overlay] No terrain loaded - load terrain first");
+                viewer.reject_command("vector overlay requires loaded terrain");
             }
             true
         }
@@ -169,6 +145,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                     eprintln!("[vector_overlay] id={} not found", id);
                 }
             }
+            viewer.unified_picking.remove_layer_bvh(*id);
             true
         }
         ViewerCmd::SetVectorOverlayVisible { id, visible } => {

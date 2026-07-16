@@ -1,63 +1,52 @@
-use crate::viewer::camera_controller::{coord_within_local_frame, VIEWER_LOCAL_FRAME_MAX_COORD};
 use crate::viewer::terrain;
 use crate::viewer::viewer_enums::ViewerCmd;
 use crate::viewer::Viewer;
-
-/// Enforce the viewer's terrain-local-frame contract (MENSURA M-06) on a terrain
-/// orbit target: an absolute geospatial coordinate is dropped (the previous valid
-/// target is retained) rather than silently truncated to `f32`, mirroring the
-/// `set_look_at` contract on the object-scene camera.
-fn sanitize_terrain_target(target: Option<[f32; 3]>) -> Option<[f32; 3]> {
-    match target {
-        Some(t) if !coord_within_local_frame(glam::Vec3::from(t)) => {
-            eprintln!(
-                "[terrain] camera target {t:?} rejected: outside the viewer local frame \
-                 (|coord| <= {VIEWER_LOCAL_FRAME_MAX_COORD:.0e}); absolute projected/geodetic \
-                 coordinates must use the anchored offscreen Scene path, not the viewer IPC."
-            );
-            None
-        }
-        other => other,
-    }
-}
 
 pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
     match cmd {
         ViewerCmd::LoadTerrain(path) => {
             println!("[XYZZY_TERRAIN] LoadTerrain handler entry, path={}", path);
+            if let Err(err) = terrain::ViewerTerrainScene::preflight_terrain_path(path) {
+                eprintln!("[terrain] rejected before scene/resource mutation: {err}");
+                viewer.reject_command(format!(
+                    "terrain_metadata_preflight_rejected: path={path} error={err} unchanged_state=true"
+                ));
+                return true;
+            }
             if viewer.terrain_viewer.is_none() {
-                eprintln!("[DEBUG LoadTerrain] Creating new terrain_viewer");
-                match terrain::ViewerTerrainScene::new(
+                eprintln!("[DEBUG LoadTerrain] Staging new terrain_viewer");
+                let mut candidate = match terrain::ViewerTerrainScene::new(
                     std::sync::Arc::clone(&viewer.device),
                     std::sync::Arc::clone(&viewer.queue),
                     viewer.config.format,
                 ) {
-                    Ok(scene) => {
-                        viewer.terrain_viewer = Some(scene);
-                        eprintln!("[DEBUG LoadTerrain] terrain_viewer created successfully");
-                    }
+                    Ok(scene) => scene,
                     Err(e) => {
                         eprintln!("[terrain] Failed to create viewer: {}", e);
+                        viewer.reject_command(format!("terrain_scene_construction_failed: {e}"));
                         return true;
                     }
+                };
+                if let Err(error) = candidate.load_terrain(path) {
+                    viewer.reject_command(format!(
+                        "terrain_execution_failed: path={path} error={error} unchanged_state=true"
+                    ));
+                    return true;
                 }
+                viewer.terrain_viewer = Some(candidate);
+                println!("[terrain] Loaded: {}", path);
+                eprintln!("[DEBUG LoadTerrain] staged terrain_viewer published");
             } else {
                 eprintln!("[DEBUG LoadTerrain] terrain_viewer already exists");
-            }
-            if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
-                match terrain_viewer.load_terrain(path) {
-                    Ok(()) => {
-                        println!("[terrain] Loaded: {}", path);
-                        eprintln!(
-                            "[DEBUG LoadTerrain] terrain_viewer has_terrain={}",
-                            terrain_viewer.has_terrain()
-                        );
+                if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
+                    if let Err(error) = terrain_viewer.load_terrain(path) {
+                        viewer.reject_command(format!(
+                            "terrain_execution_failed: path={path} error={error} unchanged_state=true"
+                        ));
+                        return true;
                     }
-                    Err(e) => eprintln!("[terrain] Failed to load {}: {}", path, e),
+                    println!("[terrain] Loaded: {}", path);
                 }
-            }
-            if let Err(err) = viewer.reapply_scene_review_state() {
-                eprintln!("[scene_review] failed to reapply after terrain load: {err}");
             }
             true
         }
@@ -68,13 +57,28 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             fov_deg,
             target,
         } => {
-            if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
-                let target = sanitize_terrain_target(*target);
-                terrain_viewer.set_camera(*phi_deg, *theta_deg, *radius, *fov_deg, target);
-                println!(
-                    "[terrain] Camera: phi={:.1}° theta={:.1}° r={:.1} fov={:.1}° target={:?}",
-                    phi_deg, theta_deg, radius, fov_deg, target
-                );
+            let anchor = viewer.camera_anchor;
+            let outcome = if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
+                match terrain_viewer
+                    .set_camera(*phi_deg, *theta_deg, *radius, *fov_deg, *target, &anchor)
+                {
+                    Ok(()) => {
+                        println!(
+                            "[terrain] Camera: phi={:.1}° theta={:.1}° r={:.1} fov={:.1}° target={:?}",
+                            phi_deg, theta_deg, radius, fov_deg, target
+                        );
+                        Ok(())
+                    }
+                    Err(err) => {
+                        eprintln!("[terrain] camera rejected transactionally: {err}");
+                        Err(err.to_string())
+                    }
+                }
+            } else {
+                Err("terrain camera requires a loaded terrain".to_string())
+            };
+            if let Err(error) = outcome {
+                viewer.reject_command(error);
             }
             true
         }
@@ -108,59 +112,114 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             water_color,
             target,
         } => {
+            let anchor = viewer.camera_anchor;
             if let Some(ref mut terrain_viewer) = viewer.terrain_viewer {
                 if let Some(terrain) = terrain_viewer.terrain.as_mut() {
                     let old_default_target = terrain.default_camera_target();
-                    let target_was_default = terrain
-                        .cam_target
-                        .iter()
-                        .zip(old_default_target.iter())
-                        .all(|(current, default)| (current - default).abs() < 0.01);
+                    let target_was_default =
+                        terrain.cam_target.abs_diff_eq(old_default_target, 0.01);
 
-                    if let Some(v) = phi {
-                        terrain.cam_phi_deg = *v;
+                    let candidate_phi = phi.as_ref().copied().unwrap_or(terrain.cam_phi_deg);
+                    let candidate_theta = theta
+                        .as_ref()
+                        .map(|value| value.clamp(0.0, 85.0))
+                        .unwrap_or(terrain.cam_theta_deg);
+                    let candidate_radius = radius
+                        .as_ref()
+                        .map(|value| value.clamp(100.0, 50000.0))
+                        .unwrap_or(terrain.cam_radius);
+                    let candidate_fov = fov
+                        .as_ref()
+                        .map(|value| value.clamp(10.0, 120.0))
+                        .unwrap_or(terrain.cam_fov_deg);
+                    let candidate_zscale = zscale
+                        .as_ref()
+                        .map(|value| value.max(0.01))
+                        .unwrap_or(terrain.z_scale);
+                    let mut candidate_target = target
+                        .as_ref()
+                        .map(|value| glam::DVec3::from(*value))
+                        .unwrap_or(terrain.cam_target);
+                    if target.is_none() && zscale.is_some() && target_was_default {
+                        candidate_target.y =
+                            f64::from(terrain.height_range() * candidate_zscale * 0.5);
                     }
-                    if let Some(v) = theta {
-                        terrain.cam_theta_deg = v.clamp(0.0, 85.0);
+                    let candidate_sun_azimuth = sun_azimuth
+                        .as_ref()
+                        .copied()
+                        .unwrap_or(terrain.sun_azimuth_deg);
+                    let candidate_sun_elevation = sun_elevation
+                        .as_ref()
+                        .map(|value| value.clamp(-90.0, 90.0))
+                        .unwrap_or(terrain.sun_elevation_deg);
+                    let candidate_sun_intensity = sun_intensity
+                        .as_ref()
+                        .map(|value| value.max(0.0))
+                        .unwrap_or(terrain.sun_intensity);
+                    let candidate_ambient = ambient
+                        .as_ref()
+                        .map(|value| value.clamp(0.0, 1.0))
+                        .unwrap_or(terrain.ambient);
+                    let candidate_shadow = shadow
+                        .as_ref()
+                        .map(|value| value.clamp(0.0, 1.0))
+                        .unwrap_or(terrain.shadow_intensity);
+                    let candidate_water_level =
+                        water_level.as_ref().copied().unwrap_or(terrain.water_level);
+                    let finite = [
+                        candidate_sun_azimuth,
+                        candidate_sun_elevation,
+                        candidate_sun_intensity,
+                        candidate_ambient,
+                        candidate_zscale,
+                        candidate_shadow,
+                        candidate_water_level,
+                    ]
+                    .into_iter()
+                    .all(f32::is_finite)
+                        && background
+                            .as_ref()
+                            .map_or(true, |value| value.iter().copied().all(f32::is_finite))
+                        && water_color
+                            .as_ref()
+                            .map_or(true, |value| value.iter().copied().all(f32::is_finite));
+                    if !finite
+                        || terrain
+                            .validate_camera_state(
+                                &anchor,
+                                candidate_phi,
+                                candidate_theta,
+                                candidate_radius,
+                                candidate_fov,
+                                candidate_target,
+                            )
+                            .is_err()
+                    {
+                        eprintln!("[terrain] SetTerrain rejected transactionally");
+                        viewer.command_error = Some(
+                            "terrain_state_rejected: invalid finite/residual contract unchanged_state=true"
+                                .to_string(),
+                        );
+                        return true;
                     }
-                    if let Some(v) = radius {
-                        terrain.cam_radius = v.clamp(100.0, 50000.0);
+
+                    terrain.cam_phi_deg = candidate_phi;
+                    terrain.cam_theta_deg = candidate_theta;
+                    terrain.cam_radius = candidate_radius;
+                    terrain.cam_fov_deg = candidate_fov;
+                    terrain.cam_target = candidate_target;
+                    terrain.sun_azimuth_deg = candidate_sun_azimuth;
+                    terrain.sun_elevation_deg = candidate_sun_elevation;
+                    terrain.sun_intensity = candidate_sun_intensity;
+                    terrain.ambient = candidate_ambient;
+                    terrain.z_scale = candidate_zscale;
+                    terrain.shadow_intensity = candidate_shadow;
+                    terrain.water_level = candidate_water_level;
+                    if let Some(value) = background {
+                        terrain.background_color = *value;
                     }
-                    if let Some(v) = fov {
-                        terrain.cam_fov_deg = v.clamp(10.0, 120.0);
-                    }
-                    if let Some(v) = sun_azimuth {
-                        terrain.sun_azimuth_deg = *v;
-                    }
-                    if let Some(v) = sun_elevation {
-                        terrain.sun_elevation_deg = v.clamp(-90.0, 90.0);
-                    }
-                    if let Some(v) = sun_intensity {
-                        terrain.sun_intensity = v.max(0.0);
-                    }
-                    if let Some(v) = ambient {
-                        terrain.ambient = v.clamp(0.0, 1.0);
-                    }
-                    if let Some(v) = zscale {
-                        terrain.z_scale = v.max(0.01);
-                        if target.is_none() && target_was_default {
-                            terrain.cam_target = terrain.default_camera_target();
-                        }
-                    }
-                    if let Some(v) = shadow {
-                        terrain.shadow_intensity = v.clamp(0.0, 1.0);
-                    }
-                    if let Some(bg) = background {
-                        terrain.background_color = *bg;
-                    }
-                    if let Some(v) = water_level {
-                        terrain.water_level = *v;
-                    }
-                    if let Some(color) = water_color {
-                        terrain.water_color = *color;
-                    }
-                    if let Some(value) = sanitize_terrain_target(*target) {
-                        terrain.cam_target = value;
+                    if let Some(value) = water_color {
+                        terrain.water_color = *value;
                     }
                 }
                 if let Some(params) = terrain_viewer.get_params() {

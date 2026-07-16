@@ -5,7 +5,7 @@ use super::{
     ViewerDenoiseConfig, ViewerDofConfig, ViewerHeightAoConfig, ViewerLensEffectsConfig,
     ViewerMaterialLayerConfig, ViewerMotionBlurConfig, ViewerSkyConfig, ViewerSunVisConfig,
     ViewerTerrainScatterBatchConfig, ViewerTonemapConfig, ViewerVectorOverlayConfig,
-    ViewerVolumetricsConfig,
+    ViewerVectorVertex, ViewerVolumetricsConfig,
 };
 
 /// Viewer command enum for input parsing.
@@ -35,7 +35,7 @@ pub enum ViewerCmd {
     SetSsaoTechnique(u32),
     SetVizDepthMax(f32),
     SetFov(f32),
-    SetCamLookAt { eye: [f32; 3], target: [f32; 3], up: [f32; 3] },
+    SetCamLookAt { eye: [f64; 3], target: [f64; 3], up: [f32; 3] },
     SetSize(u32, u32),
     SetSsaoComposite(bool),
     SetSsaoCompositeMul(f32),
@@ -62,14 +62,14 @@ pub enum ViewerCmd {
     SetIbl { path: String, intensity: f32 },
     SetZScale(f32),
     SnapshotWithSize { path: String, width: Option<u32>, height: Option<u32> },
-    SetTransform { translation: Option<[f32; 3]>, rotation_quat: Option<[f32; 4]>, scale: Option<[f32; 3]> },
+    SetTransform { translation: Option<[f64; 3]>, rotation_quat: Option<[f32; 4]>, scale: Option<[f32; 3]> },
     LoadTerrain(String),
     SetTerrainCamera {
         phi_deg: f32,
         theta_deg: f32,
         radius: f32,
         fov_deg: f32,
-        target: Option<[f32; 3]>,
+        target: Option<[f64; 3]>,
     },
     SetTerrainSun { azimuth_deg: f32, elevation_deg: f32, intensity: f32 },
     SetTerrain {
@@ -77,7 +77,7 @@ pub enum ViewerCmd {
         sun_azimuth: Option<f32>, sun_elevation: Option<f32>, sun_intensity: Option<f32>,
         ambient: Option<f32>, zscale: Option<f32>, shadow: Option<f32>,
         background: Option<[f32; 3]>, water_level: Option<f32>, water_color: Option<[f32; 3]>,
-        target: Option<[f32; 3]>,
+        target: Option<[f64; 3]>,
     },
     SetTerrainScatter { batches: Vec<ViewerTerrainScatterBatchConfig> },
     ClearTerrainScatter,
@@ -101,7 +101,7 @@ pub enum ViewerCmd {
     SetOverlaysEnabled { enabled: bool }, SetOverlaySolid { solid: bool },
     SetOverlayPreserveColors { preserve_colors: bool }, ListOverlays,
     AddVectorOverlay {
-        id: Option<u32>, name: String, vertices: Vec<[f32; 8]>, indices: Vec<u32>, primitive: String, drape: bool,
+        id: Option<u32>, name: String, vertices: Vec<ViewerVectorVertex>, indices: Vec<u32>, primitive: String, drape: bool,
         drape_offset: f32, opacity: f32, depth_bias: f32, line_width: f32, point_size: f32, z_order: i32,
     },
     RemoveVectorOverlay { id: u32 }, SetVectorOverlayVisible { id: u32, visible: bool },
@@ -119,13 +119,13 @@ pub enum ViewerCmd {
         radius: Option<f32>,
     },
     AddLabel {
-        id: Option<u64>, text: String, world_pos: [f32; 3], size: Option<f32>, color: Option<[f32; 4]>,
+        id: Option<u64>, text: String, world_pos: [f64; 3], size: Option<f32>, color: Option<[f32; 4]>,
         halo_color: Option<[f32; 4]>, halo_width: Option<f32>, priority: Option<i32>,
         min_zoom: Option<f32>, max_zoom: Option<f32>, offset: Option<[f32; 2]>, rotation: Option<f32>,
         underline: Option<bool>, small_caps: Option<bool>, leader: Option<bool>, horizon_fade_angle: Option<f32>,
     },
     AddLineLabel {
-        id: Option<u64>, text: String, polyline: Vec<[f32; 3]>, size: Option<f32>, color: Option<[f32; 4]>,
+        id: Option<u64>, text: String, polyline: Vec<[f64; 3]>, size: Option<f32>, color: Option<[f32; 4]>,
         halo_color: Option<[f32; 4]>, halo_width: Option<f32>, priority: Option<i32>,
         placement: Option<String>, repeat_distance: Option<f32>, min_zoom: Option<f32>, max_zoom: Option<f32>,
     },
@@ -133,12 +133,12 @@ pub enum ViewerCmd {
     LoadLabelAtlas { atlas_png_path: String, metrics_json_path: String },
     SetLabelZoom { zoom: f32 }, SetMaxVisibleLabels { max: usize },
     AddCurvedLabel {
-        id: Option<u64>, text: String, polyline: Vec<[f32; 3]>, size: Option<f32>, color: Option<[f32; 4]>,
+        id: Option<u64>, text: String, polyline: Vec<[f64; 3]>, size: Option<f32>, color: Option<[f32; 4]>,
         halo_color: Option<[f32; 4]>, halo_width: Option<f32>, priority: Option<i32>,
         tracking: Option<f32>, center_on_path: bool,
     },
     AddCallout {
-        id: Option<u64>, text: String, anchor: [f32; 3], offset: Option<[f32; 2]>, background_color: Option<[f32; 4]>,
+        id: Option<u64>, text: String, anchor: [f64; 3], offset: Option<[f32; 2]>, background_color: Option<[f32; 4]>,
         border_color: Option<[f32; 4]>, border_width: Option<f32>, corner_radius: Option<f32>,
         padding: Option<f32>, text_size: Option<f32>, text_color: Option<[f32; 4]>,
     },
@@ -148,7 +148,8 @@ pub enum ViewerCmd {
     SetSceneReviewState { state: ViewerSceneReviewStateConfig },
     ApplySceneVariant { variant_id: String },
     SetReviewLayerVisible { layer_id: String, visible: bool },
-    PollPickEvents, SetLassoMode { enabled: bool }, GetLassoState, ClearSelection,
+    PickAt { x: u32, y: u32, shift: bool, ctrl: bool }, PollPickEvents,
+    UpdateLabels, SetLassoMode { enabled: bool }, GetLassoState, ClearSelection,
     SetOitEnabled { enabled: bool, mode: String }, GetOitMode, SetTaaEnabled { enabled: bool }, GetTaaStatus,
     SetTaaParams { history_weight: Option<f32>, jitter_scale: Option<f32>, enable_jitter: Option<bool> },
 }

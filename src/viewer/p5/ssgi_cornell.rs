@@ -59,7 +59,7 @@ impl Viewer {
             gi.update_ssgi_settings(&self.queue, |s| {
                 *s = original_settings;
             });
-            gi.ssgi_reset_history(&self.device, &self.queue)?;
+            gi.ssgi_reset_history();
             gi.set_ssgi_composite_intensity(&self.queue, P5_SSGI_DIFFUSE_SCALE);
         }
         for _ in 0..P5_SSGI_CORNELL_WARMUP_FRAMES {
@@ -308,7 +308,7 @@ impl Viewer {
                 s.temporal_alpha = 0.0;
                 s.intensity = 1.0;
             });
-            gi.ssgi_reset_history(&self.device, &self.queue)?;
+            gi.ssgi_reset_history();
         }
         self.reexecute_gi(None)?;
         let first_bytes = self.read_ssgi_filtered_bytes()?.0;

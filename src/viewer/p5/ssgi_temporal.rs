@@ -48,7 +48,7 @@ impl Viewer {
             gi.update_ssgi_settings(&self.queue, |s| {
                 s.temporal_alpha = 0.0;
             });
-            gi.ssgi_reset_history(&self.device, &self.queue)?;
+            gi.ssgi_reset_history();
         }
         self.reexecute_gi(None)?;
         let single_bytes = self.capture_material_rgba8()?;
@@ -58,7 +58,7 @@ impl Viewer {
             gi.update_ssgi_settings(&self.queue, |s| {
                 *s = original_settings;
             });
-            gi.ssgi_reset_history(&self.device, &self.queue)?;
+            gi.ssgi_reset_history();
         }
 
         let mut frame8_luma = Vec::new();
@@ -139,7 +139,7 @@ impl Viewer {
             gi.update_ssgi_settings(&self.queue, |s| {
                 *s = original_settings;
             });
-            gi.ssgi_reset_history(&self.device, &self.queue)?;
+            gi.ssgi_reset_history();
             gi.set_ssgi_composite_intensity(&self.queue, 1.0);
         }
         if !was_enabled {

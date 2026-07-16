@@ -358,15 +358,19 @@ def test_missing_and_invalid_transform_diagnostics(tmp_path: Path):
         )
 
 
-def test_rotated_sheared_transform_warning(tmp_path: Path):
-    info = gis.write_raster(
-        tmp_path / "rotated.tif",
+def test_rotated_sheared_transform_round_trips_as_gis_metadata(tmp_path: Path):
+    path = tmp_path / "rotated.tif"
+    transform = (1.0, 0.25, 0.0, 0.0, -1.0, 2.0)
+
+    gis.write_raster(
+        path,
         np.ones((2, 2), dtype=np.uint8),
         crs="EPSG:4326",
-        transform=(1.0, 0.25, 0.0, 0.0, -1.0, 2.0),
+        transform=transform,
     )
 
-    assert "rotated_or_sheared_transform" in _codes(info.warnings)
+    info = gis.read_raster_info(path)
+    assert tuple(info.transform) == pytest.approx(transform)
 
 
 def test_window_from_bounds_inside_and_partial(tmp_path: Path):

@@ -1,4 +1,5 @@
 use super::{ScreenRenderFlags, ScreenRenderState};
+#[cfg(feature = "enable-gpu-instancing")]
 use crate::viewer::terrain::scene::scatter::render_scatter_batches;
 use crate::viewer::terrain::vector_overlay;
 use crate::viewer::terrain::ViewerTerrainScene;
@@ -15,7 +16,7 @@ impl ViewerTerrainScene {
     ) {
         let render_target: &wgpu::TextureView = if flags.needs_denoise {
             self.denoise_pass.as_ref().unwrap().view_a.as_ref().unwrap()
-        } else if flags.needs_volumetrics {
+        } else if flags.needs_taa || flags.needs_volumetrics {
             self.post_process
                 .as_ref()
                 .unwrap()
@@ -98,7 +99,8 @@ impl ViewerTerrainScene {
                 state.proj,
                 state.eye,
                 &terrain.heightmap_view,
-                state.terrain_width,
+                state.render_origin_span,
+                terrain.dimensions,
                 terrain.domain.0,
                 terrain.z_scale,
                 [-state.sun_dir.x, -state.sun_dir.y, -state.sun_dir.z],
@@ -107,6 +109,7 @@ impl ViewerTerrainScene {
                 self.device.as_ref(),
                 self.queue.as_ref(),
                 &mut self.scatter_renderer,
+                &self.scatter_hlod_instance_buffer,
             )
         };
 
@@ -144,6 +147,7 @@ impl ViewerTerrainScene {
                                 view_proj: state.view_proj_array,
                                 sun_dir: state.vo_sun_dir,
                                 lighting: state.vo_lighting,
+                                render_origin_span: state.render_origin_span,
                                 selected_feature_id,
                                 highlight_color,
                             },
@@ -207,6 +211,7 @@ impl ViewerTerrainScene {
                                     view_proj: state.view_proj_array,
                                     sun_dir: state.vo_sun_dir,
                                     lighting: state.vo_lighting,
+                                    render_origin_span: state.render_origin_span,
                                     selected_feature_id,
                                     highlight_color,
                                 },
@@ -244,6 +249,32 @@ impl ViewerTerrainScene {
             OIT_LOG_ONCE.call_once(|| {
                 println!("[render] WBOIT active: mode={}", self.oit_mode);
             });
+        }
+
+        if flags.needs_taa {
+            let color_view = self
+                .post_process
+                .as_ref()
+                .and_then(|pp| pp.intermediate_view.as_ref());
+            let velocity_view = self.taa_velocity_view.as_ref();
+            if let (Some(color_view), Some(velocity_view), Some(taa)) =
+                (color_view, velocity_view, self.taa_renderer.as_mut())
+            {
+                taa.update_settings(
+                    &self.queue,
+                    self.taa_jitter.offset_array(),
+                    self.taa_jitter.index,
+                );
+                taa.execute(
+                    &self.device,
+                    encoder,
+                    &self.queue,
+                    color_view,
+                    velocity_view,
+                    velocity_view,
+                );
+                self.taa_jitter.advance();
+            }
         }
 
         #[cfg(feature = "enable-gpu-instancing")]

@@ -4,6 +4,13 @@ use super::super::request::IpcRequest;
 
 pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
     match req {
+        IpcRequest::PickAt { x, y, shift, ctrl } => Some(ViewerCmd::PickAt {
+            x: *x,
+            y: *y,
+            shift: *shift,
+            ctrl: *ctrl,
+        }),
+        IpcRequest::UpdateLabels => Some(ViewerCmd::UpdateLabels),
         IpcRequest::SetLassoMode { enabled } => Some(ViewerCmd::SetLassoMode { enabled: *enabled }),
         IpcRequest::ClearSelection => Some(ViewerCmd::ClearSelection),
         IpcRequest::SetOitEnabled { enabled, mode } => Some(ViewerCmd::SetOitEnabled {

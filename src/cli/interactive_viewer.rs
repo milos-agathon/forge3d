@@ -32,6 +32,9 @@ pub fn run_interactive_viewer_cli_with_args(
 
     // Seed initial commands with GI configuration derived from GiCliConfig.
     let mut cmds: Vec<String> = gi_cli_config_to_commands(&gi_cfg);
+    let mut initial_width = 1280;
+    let mut initial_height = 720;
+    let mut initial_fov = 60.0;
 
     let mut args = all_args.iter().cloned();
     while let Some(arg) = args.next() {
@@ -40,6 +43,8 @@ pub fn run_interactive_viewer_cli_with_args(
                 if let Some(dim) = args.next() {
                     if let Some((w, h)) = dim.split_once('x') {
                         if let (Ok(wi), Ok(hi)) = (w.parse::<u32>(), h.parse::<u32>()) {
+                            initial_width = wi.max(1);
+                            initial_height = hi.max(1);
                             cmds.push(format!(":size {} {}", wi, hi));
                         }
                     }
@@ -47,6 +52,9 @@ pub fn run_interactive_viewer_cli_with_args(
             }
             "--fov" => {
                 if let Some(val) = args.next() {
+                    if let Ok(parsed) = val.parse::<f32>() {
+                        initial_fov = parsed.clamp(1.0, 179.0);
+                    }
                     cmds.push(format!(":fov {}", val));
                 }
             }
@@ -261,11 +269,11 @@ pub fn run_interactive_viewer_cli_with_args(
     // Use a sensible default viewer configuration; size and FOV can be
     // overridden via initial commands derived from the CLI.
     let config = ViewerConfig {
-        width: 1280,
-        height: 720,
+        width: initial_width,
+        height: initial_height,
         title: "forge3d Interactive Viewer Demo".to_string(),
         vsync: true,
-        fov_deg: 60.0,
+        fov_deg: initial_fov,
         znear: 0.1,
         zfar: 1000.0,
         snapshot_width: None,

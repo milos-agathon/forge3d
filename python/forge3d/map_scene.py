@@ -604,7 +604,7 @@ def _native_ibl_path(recipe: "SceneRecipe") -> tuple[str, bool]:
     if builtin:
         from .terrain_demo import _builtin_ibl_path
 
-        builtin_path = _builtin_ibl_path(builtin)
+        builtin_path = _builtin_ibl_path(builtin, prefer_local_assets=False)
         if builtin_path is not None:
             return str(builtin_path), False
     handle = tempfile.NamedTemporaryFile(suffix=".hdr", delete=False)
@@ -1814,6 +1814,31 @@ def _point_payload(
     points = np.asarray(positions, dtype=np.float64).reshape((-1, 3))
     if points.size == 0:
         return None
+    points_xy = _project_world_xy(points, metadata, width, height)
+    if points_xy is None:
+        return None
+    color = _rgba01(_render_color(metadata.get("color"), (255, 255, 255, 220)))
+    if colors is not None:
+        color_arr = np.asarray(colors, dtype=np.uint8).reshape((-1, 3))
+        point_rgba = [(float(r) / 255.0, float(g) / 255.0, float(b) / 255.0, color[3]) for r, g, b in color_arr[: len(points_xy)]]
+    else:
+        point_rgba = [color] * len(points_xy)
+    size = max(1.0, _render_number(metadata.get("point_size"), 4.0))
+    return points_xy, point_rgba, [size] * len(points_xy)
+
+
+def _project_world_xy(
+    points: Any,
+    metadata: Mapping[str, Any],
+    width: int,
+    height: int,
+) -> list[tuple[float, float]] | None:
+    """Project one shared f64 scene extent; callers must not normalize per tile."""
+    import numpy as np
+
+    points = np.asarray(points, dtype=np.float64).reshape((-1, 3))
+    if points.size == 0 or not np.isfinite(points).all():
+        return None
     xy = points[:, :2]
     bounds = metadata.get("bounds")
     if bounds is not None and len(bounds) >= 4:
@@ -1825,15 +1850,103 @@ def _point_payload(
         hi = xy.max(axis=0)
         uv = (xy - lo) / np.maximum(hi - lo, 1e-9)
     uv = np.clip(uv, 0.0, 1.0)
-    points_xy = [_pixel_to_ndc((float(x) * (width - 1), float(y) * (height - 1)), width, height) for x, y in uv]
-    color = _rgba01(_render_color(metadata.get("color"), (255, 255, 255, 220)))
-    if colors is not None:
-        color_arr = np.asarray(colors, dtype=np.uint8).reshape((-1, 3))
-        point_rgba = [(float(r) / 255.0, float(g) / 255.0, float(b) / 255.0, color[3]) for r, g, b in color_arr[: len(points_xy)]]
+    return [_pixel_to_ndc((float(x) * (width - 1), float(y) * (height - 1)), width, height) for x, y in uv]
+
+
+def _transform_tiles3d_positions(positions: Any, transform: Any) -> Any:
+    """Apply a column-major 3D Tiles content transform in f64."""
+    import numpy as np
+
+    points = np.asarray(positions, dtype=np.float64).reshape((-1, 3))
+    matrix = np.asarray(transform, dtype=np.float64).reshape((4, 4), order="F")
+    homogeneous = np.concatenate(
+        [points, np.ones((len(points), 1), dtype=np.float64)], axis=1
+    )
+    transformed = homogeneous @ matrix.T
+    w = transformed[:, 3:4]
+    if not np.isfinite(transformed).all() or np.any(np.abs(w) <= np.finfo(np.float64).tiny):
+        raise ValueError("3D Tiles transform produced a non-finite or zero homogeneous coordinate")
+    return transformed[:, :3] / w
+
+
+def _project_tiles3d_perspective(
+    points: Any,
+    metadata: Mapping[str, Any],
+    width: int,
+    height: int,
+) -> list[tuple[float, float]] | None:
+    """Perspective-project one f64 3D-Tiles scene after scene-anchor subtraction."""
+    import numpy as np
+
+    world = np.asarray(points, dtype=np.float64).reshape((-1, 3))
+    if world.size == 0 or not np.isfinite(world).all():
+        return None
+    lo = world.min(axis=0)
+    hi = world.max(axis=0)
+    scene_anchor = (lo + hi) * 0.5
+    span = max(float(np.max(hi - lo)), 1.0)
+    target = np.asarray(metadata.get("camera_target", scene_anchor), dtype=np.float64).reshape(3)
+    if "camera_position" in metadata:
+        eye = np.asarray(metadata["camera_position"], dtype=np.float64).reshape(3)
     else:
-        point_rgba = [color] * len(points_xy)
-    size = max(1.0, _render_number(metadata.get("point_size"), 4.0))
-    return points_xy, point_rgba, [size] * len(points_xy)
+        eye = scene_anchor + np.asarray([span * 1.5, span * 1.2, span * 1.5])
+    forward = target - eye
+    forward_length = float(np.linalg.norm(forward))
+    if not np.isfinite(forward_length) or forward_length <= np.finfo(np.float64).eps:
+        raise ValueError("3D Tiles camera eye and target must be distinct")
+    forward /= forward_length
+    up_hint = np.asarray(metadata.get("camera_up", (0.0, 1.0, 0.0)), dtype=np.float64).reshape(3)
+    right = np.cross(forward, up_hint)
+    if np.linalg.norm(right) <= np.finfo(np.float64).eps:
+        up_hint = np.asarray((0.0, 0.0, 1.0), dtype=np.float64)
+        right = np.cross(forward, up_hint)
+    right /= np.linalg.norm(right)
+    up = np.cross(right, forward)
+
+    # Subtract one f64 scene/frame anchor before any display-space narrowing.
+    relative = world - eye
+    camera_x = relative @ right
+    camera_y = relative @ up
+    camera_z = relative @ forward
+    fov_y = np.deg2rad(float(metadata.get("fov_y_deg", 45.0)))
+    if not 0.0 < fov_y < np.pi:
+        raise ValueError("3D Tiles fov_y_deg must be between 0 and 180")
+    focal = 1.0 / np.tan(fov_y * 0.5)
+    aspect = max(float(width), 1.0) / max(float(height), 1.0)
+    visible = camera_z > max(float(metadata.get("near", 1.0e-6)), np.finfo(np.float64).eps)
+    safe_z = np.where(visible, camera_z, 1.0)
+    ndc_x = camera_x * focal / (safe_z * aspect)
+    ndc_y = camera_y * focal / safe_z
+    return [
+        (float(x), float(y)) if is_visible else (float("nan"), float("nan"))
+        for x, y, is_visible in zip(ndc_x, ndc_y, visible)
+    ]
+
+
+def _pick_tiles3d_projected(
+    points: Any,
+    metadata: Mapping[str, Any],
+    width: int,
+    height: int,
+    screen_ndc: tuple[float, float],
+    *,
+    tolerance_ndc: float = 0.02,
+) -> int | None:
+    """Pick the nearest visible 3D-Tiles point in the same shared projection."""
+    import numpy as np
+
+    projected = _project_tiles3d_perspective(points, metadata, width, height)
+    if projected is None:
+        return None
+    xy = np.asarray(projected, dtype=np.float64)
+    visible = np.isfinite(xy).all(axis=1) & (np.abs(xy[:, 0]) <= 1.0) & (np.abs(xy[:, 1]) <= 1.0)
+    if not np.any(visible):
+        return None
+    delta = xy - np.asarray(screen_ndc, dtype=np.float64)
+    distance = np.linalg.norm(delta, axis=1)
+    distance[~visible] = np.inf
+    index = int(np.argmin(distance))
+    return index if distance[index] <= float(tolerance_ndc) else None
 
 
 def _tiles3d_layer_has_native_geometry(layer: "Tiles3DLayer") -> bool:
@@ -1855,6 +1968,12 @@ def _decoded_pnts_payload(
         height,
         point_count=int(decoded.get("point_count", 0)),
     )
+
+
+def _tiles3d_position_source_bytes(positions: Any) -> int:
+    import numpy as np
+
+    return int(np.asarray(positions, dtype=np.float64).reshape((-1, 3)).nbytes)
 
 
 def _decoded_b3dm_payload(
@@ -1909,20 +2028,23 @@ def _tiles3d_payload_for_content(
     list[float],
     bool,
     bool,
+    int,
 ] | None:
     suffix = str(path).lower()
     if suffix.endswith(".pnts"):
-        payload = _decoded_pnts_payload(tiles3d.decode_pnts(path.read_bytes()), metadata, width, height)
+        decoded = tiles3d.decode_pnts(path.read_bytes())
+        payload = _decoded_pnts_payload(decoded, metadata, width, height)
         if payload is None:
             return None
         points, rgba, sizes = payload
-        return points, rgba, sizes, [], [], [], True, True
+        return points, rgba, sizes, [], [], [], True, True, _tiles3d_position_source_bytes(decoded.get("positions"))
     if suffix.endswith(".b3dm"):
-        payload = _decoded_b3dm_payload(tiles3d.decode_b3dm(path.read_bytes()), metadata, width, height)
+        decoded = tiles3d.decode_b3dm(path.read_bytes())
+        payload = _decoded_b3dm_payload(decoded, metadata, width, height)
         if payload is None:
             return None
         polylines, rgba, widths = payload
-        return [], [], [], polylines, rgba, widths, False, True
+        return [], [], [], polylines, rgba, widths, False, True, _tiles3d_position_source_bytes(decoded.get("positions"))
     return None
 
 
@@ -1939,6 +2061,7 @@ def _tiles3d_render_payload_for_layer(
     list[float],
     bool,
     bool,
+    int,
 ] | None:
     path = _source_path(layer.source)
     if not path or not str(path).lower().endswith((".pnts", ".b3dm", "tileset.json")):
@@ -1965,36 +2088,107 @@ def _tiles3d_render_payload_for_layer(
     except Exception:
         return None
 
-    all_points: list[tuple[float, float]] = []
-    all_rgba: list[tuple[float, float, float, float]] = []
-    all_sizes: list[float] = []
-    all_lines: list[list[tuple[float, float]]] = []
-    all_line_rgba: list[tuple[float, float, float, float]] = []
-    all_widths: list[float] = []
-    has_points = False
-    has_tiles = False
+    import numpy as np
+
+    point_chunks: list[tuple[Any, Any]] = []
+    mesh_chunks: list[tuple[Any, Any]] = []
+    source_bytes = 0
     for tile in visible:
         tile_path = str(tile.get("resolved_path") or tile.get("uri") or "")
         if not tile_path.lower().endswith((".pnts", ".b3dm")):
             continue
         try:
-            payload = _tiles3d_payload_for_content(Path(tile_path), metadata, width, height, tiles3d)
+            transform = tile.get("world_transform") or np.eye(4, dtype=np.float64).reshape(16, order="F")
+            raw = Path(tile_path).read_bytes()
+            if tile_path.lower().endswith(".pnts"):
+                decoded = tiles3d.decode_pnts(raw)
+                positions = _transform_tiles3d_positions(decoded.get("positions"), transform)
+                source_bytes += _tiles3d_position_source_bytes(positions)
+                colors = decoded.get("colors")
+                if colors is None and decoded.get("colors_rgba") is not None:
+                    colors = np.asarray(decoded["colors_rgba"], dtype=np.uint8).reshape((-1, 4))[:, :3]
+                point_chunks.append((positions, colors))
+            else:
+                decoded = tiles3d.decode_b3dm(raw)
+                positions = _transform_tiles3d_positions(decoded.get("positions"), transform)
+                source_bytes += _tiles3d_position_source_bytes(positions)
+                indices = np.asarray(decoded.get("indices"), dtype=np.int64).reshape((-1,))
+                mesh_chunks.append((positions, indices))
         except Exception:
             continue
-        if payload is None:
-            continue
-        points, rgba, sizes, lines, line_rgba, widths, payload_has_points, payload_has_tiles = payload
-        all_points.extend(points)
-        all_rgba.extend(rgba)
-        all_sizes.extend(sizes)
-        all_lines.extend(lines)
-        all_line_rgba.extend(line_rgba)
-        all_widths.extend(widths)
-        has_points = has_points or payload_has_points
-        has_tiles = has_tiles or payload_has_tiles
-    if not all_points and not all_lines:
+    if not point_chunks and not mesh_chunks:
         return None
-    return all_points, all_rgba, all_sizes, all_lines, all_line_rgba, all_widths, has_points, has_tiles
+
+    # One scene-wide projection preserves the relative placement of every tile.
+    world_chunks = [chunk[0] for chunk in point_chunks] + [chunk[0] for chunk in mesh_chunks]
+    world_positions = np.concatenate(world_chunks, axis=0)
+    projected = _project_tiles3d_perspective(world_positions, metadata, width, height)
+    if projected is None:
+        return None
+
+    point_color_default = _rgba01(_render_color(metadata.get("color"), (255, 255, 255, 220)))
+    mesh_color = _rgba01(
+        _render_color(metadata.get("mesh_color", metadata.get("color")), (248, 250, 252, 230))
+    )
+    point_size = max(1.0, _render_number(metadata.get("point_size"), 4.0))
+    mesh_width = max(1.0, _render_number(metadata.get("mesh_width", metadata.get("line_width", 2.0)), 2.0))
+    all_points: list[tuple[float, float]] = []
+    all_rgba: list[tuple[float, float, float, float]] = []
+    all_sizes: list[float] = []
+    all_lines: list[list[tuple[float, float]]] = []
+    offset = 0
+    for positions, colors in point_chunks:
+        count = len(positions)
+        chunk_projected = projected[offset:offset + count]
+        visible_indices = [
+            index
+            for index, (x, y) in enumerate(chunk_projected)
+            if np.isfinite(x) and np.isfinite(y) and abs(x) <= 1.0 and abs(y) <= 1.0
+        ]
+        all_points.extend(chunk_projected[index] for index in visible_indices)
+        if colors is None:
+            all_rgba.extend([point_color_default] * len(visible_indices))
+        else:
+            rgb = np.asarray(colors, dtype=np.uint8).reshape((-1, 3))
+            all_rgba.extend(
+                (
+                    float(rgb[index, 0]) / 255.0,
+                    float(rgb[index, 1]) / 255.0,
+                    float(rgb[index, 2]) / 255.0,
+                    point_color_default[3],
+                )
+                for index in visible_indices
+            )
+        all_sizes.extend([point_size] * len(visible_indices))
+        offset += count
+    for positions, indices in mesh_chunks:
+        count = len(positions)
+        vertices = projected[offset:offset + count]
+        offset += count
+        for triangle in indices[: (len(indices) // 3) * 3].reshape((-1, 3)):
+            a, b, c = (int(value) for value in triangle)
+            if min(a, b, c) < 0 or max(a, b, c) >= count:
+                continue
+            if not all(
+                np.isfinite(vertices[index][0])
+                and np.isfinite(vertices[index][1])
+                and abs(vertices[index][0]) <= 1.0
+                and abs(vertices[index][1]) <= 1.0
+                for index in (a, b, c)
+            ):
+                continue
+            all_lines.append([vertices[a], vertices[b], vertices[c], vertices[a]])
+    return (
+        all_points,
+        all_rgba,
+        all_sizes,
+        all_lines,
+        [mesh_color] * len(all_lines),
+        [mesh_width] * len(all_lines),
+        bool(point_chunks),
+        True,
+        source_bytes,
+    )
 
 
 def _composite_native_point_cloud_layers(base: Any, recipe: "SceneRecipe") -> tuple[Any, bool, dict[str, Any]]:
@@ -2028,6 +2222,7 @@ def _composite_native_point_cloud_layers(base: Any, recipe: "SceneRecipe") -> tu
     stroke_width: list[float] = []
     has_point_clouds = False
     has_tiles = False
+    tiles3d_source_bytes = 0
     for layer in layers:
         if isinstance(layer, PointCloudLayer):
             payload = _pointcloud_payload_for_layer(layer, int(width), int(height))
@@ -2050,6 +2245,7 @@ def _composite_native_point_cloud_layers(base: Any, recipe: "SceneRecipe") -> tu
                 layer_widths,
                 payload_has_points,
                 payload_has_tiles,
+                payload_source_bytes,
             ) = tiles_payload
             points_xy.extend(layer_points)
             point_rgba.extend(layer_rgba)
@@ -2059,6 +2255,7 @@ def _composite_native_point_cloud_layers(base: Any, recipe: "SceneRecipe") -> tu
             stroke_width.extend(layer_widths)
             has_point_clouds = has_point_clouds or payload_has_points
             has_tiles = has_tiles or payload_has_tiles
+            tiles3d_source_bytes += int(payload_source_bytes)
     if not points_xy and not polylines:
         return base, False, {}
     render_kwargs = {
@@ -2078,6 +2275,7 @@ def _composite_native_point_cloud_layers(base: Any, recipe: "SceneRecipe") -> tu
         metadata["point_cloud_backend"] = "native_oit_points"
     if has_tiles:
         metadata["tiles3d_backend"] = "native_oit_geometry"
+        metadata["tiles3d_source_bytes"] = tiles3d_source_bytes
     if edl_requested:
         metadata["point_cloud_edl_backend"] = "weighted_oit_depth_edl"
     return _alpha_composite_rgba(base, np.asarray(overlay, dtype=np.uint8)), True, metadata
@@ -5459,6 +5657,7 @@ class MapScene:
             "point_cloud_backend",
             "point_cloud_edl_backend",
             "tiles3d_backend",
+            "tiles3d_source_bytes",
             "cloud_shadow_backend",
             "cloud_shadow_coverage",
             "cloud_shadow_strength",

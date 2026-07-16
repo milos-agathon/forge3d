@@ -23,6 +23,15 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
         } => {
             use crate::labels::LabelStyle;
 
+            let world = glam::DVec3::from(*world_pos);
+            if let Err(err) = viewer.validate_content_points([world]) {
+                eprintln!("[label] rejected '{text}': {err}");
+                viewer.reject_command(format!(
+                    "label_rejected: text={text} {err} unchanged_state=true"
+                ));
+                return true;
+            }
+
             let mut style = LabelStyle::default();
             if let Some(size) = size {
                 style.size = *size;
@@ -64,12 +73,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 style.horizon_fade_angle = *angle;
             }
 
-            let id = viewer.add_label_with_id(
-                *id,
-                text,
-                (world_pos[0], world_pos[1], world_pos[2]),
-                Some(style),
-            );
+            let id = viewer.add_label_with_id(*id, text, (world.x, world.y, world.z), Some(style));
             println!("[label] added id={} text=\"{}\"", id, text);
             true
         }
@@ -88,7 +92,16 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             max_zoom,
         } => {
             use crate::labels::{LabelStyle, LineLabelPlacement};
-            use glam::Vec3;
+            use glam::DVec3;
+
+            let world_points: Vec<DVec3> = polyline.iter().copied().map(DVec3::from).collect();
+            if let Err(err) = viewer.validate_content_points(world_points.iter().copied()) {
+                eprintln!("[label] rejected line '{text}': {err}");
+                viewer.reject_command(format!(
+                    "line_label_rejected: text={text} {err} unchanged_state=true"
+                ));
+                return true;
+            }
 
             let mut style = LabelStyle::default();
             if let Some(size) = size {
@@ -117,15 +130,11 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 Some("along") => LineLabelPlacement::Along,
                 _ => LineLabelPlacement::Center,
             };
-            let polyline: Vec<Vec3> = polyline
-                .iter()
-                .map(|point| Vec3::new(point[0], point[1], point[2]))
-                .collect();
             let repeat_distance = repeat_distance.unwrap_or(0.0);
             let id = viewer.label_manager.add_line_label_with_id(
                 (*id).map(crate::labels::LabelId),
                 text.clone(),
-                polyline,
+                world_points,
                 style,
                 placement,
                 repeat_distance,
@@ -154,7 +163,10 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
         } => {
             match viewer.load_label_atlas(atlas_png_path, metrics_json_path) {
                 Ok(()) => println!("[label] atlas loaded from {}", atlas_png_path),
-                Err(e) => eprintln!("[label] failed to load atlas: {}", e),
+                Err(e) => {
+                    eprintln!("[label] failed to load atlas: {}", e);
+                    viewer.reject_command(format!("label_atlas_execution_failed: {e}"));
+                }
             }
             true
         }
@@ -181,7 +193,16 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             center_on_path: _center_on_path,
         } => {
             use crate::labels::{LabelStyle, LineLabelPlacement};
-            use glam::Vec3;
+            use glam::DVec3;
+
+            let world_points: Vec<DVec3> = polyline.iter().copied().map(DVec3::from).collect();
+            if let Err(err) = viewer.validate_content_points(world_points.iter().copied()) {
+                eprintln!("[label] rejected curved label '{text}': {err}");
+                viewer.reject_command(format!(
+                    "curved_label_rejected: text={text} {err} unchanged_state=true"
+                ));
+                return true;
+            }
 
             let mut style = LabelStyle::default();
             if let Some(size) = size {
@@ -200,14 +221,10 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 style.priority = *priority;
             }
 
-            let polyline: Vec<Vec3> = polyline
-                .iter()
-                .map(|point| Vec3::new(point[0], point[1], point[2]))
-                .collect();
             let id = viewer.label_manager.add_line_label_with_id(
                 (*id).map(crate::labels::LabelId),
                 text.clone(),
-                polyline,
+                world_points,
                 style,
                 LineLabelPlacement::Along,
                 0.0,
@@ -230,6 +247,15 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
         } => {
             use crate::labels::LabelStyle;
 
+            let world = glam::DVec3::from(*anchor);
+            if let Err(err) = viewer.validate_content_points([world]) {
+                eprintln!("[label] rejected callout '{text}': {err}");
+                viewer.reject_command(format!(
+                    "callout_rejected: text={text} {err} unchanged_state=true"
+                ));
+                return true;
+            }
+
             let mut style = LabelStyle::default();
             if let Some(size) = text_size {
                 style.size = *size;
@@ -241,7 +267,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                 style.offset = *offset;
                 style.flags.leader = true;
             }
-            let world_pos = (anchor[0], anchor[1], anchor[2]);
+            let world_pos = (world.x, world.y, world.z);
             let id = viewer.add_label_with_id(*id, text, world_pos, Some(style));
             println!("[label] added callout id={} text=\"{}\"", id, text);
             true

@@ -14,6 +14,7 @@ use crate::core::screen_space_effects::ScreenSpaceEffectsManager;
 pub struct GBufferResources {
     pub geom_bind_group_layout: Option<BindGroupLayout>,
     pub geom_pipeline: Option<RenderPipeline>,
+    pub object_overlay_pipeline: Option<RenderPipeline>,
     pub geom_camera_buffer: Option<TrackedBuffer>,
     pub geom_bind_group: Option<BindGroup>,
     pub geom_vb: Option<TrackedBuffer>,
@@ -31,6 +32,7 @@ impl Default for GBufferResources {
         Self {
             geom_bind_group_layout: None,
             geom_pipeline: None,
+            object_overlay_pipeline: None,
             geom_camera_buffer: None,
             geom_bind_group: None,
             geom_vb: None,
@@ -99,6 +101,46 @@ fn fs_main(inp: VSOut) -> FSOut {
     out.albedo_rgba = vec4<f32>(color.rgb, clamp(inp.v_rough_metal.y, 0.0, 1.0));
     out.depth_r = inp.v_depth_vs;
     return out;
+}
+"#;
+
+const OBJECT_OVERLAY_SHADER: &str = r#"
+struct Camera {
+    view : mat4x4<f32>,
+    proj : mat4x4<f32>,
+};
+@group(0) @binding(0) var<uniform> uCam : Camera;
+@group(0) @binding(1) var tAlbedo : texture_2d<f32>;
+@group(0) @binding(2) var sAlbedo : sampler;
+
+struct VSIn {
+    @location(0) pos : vec3<f32>,
+    @location(1) nrm : vec3<f32>,
+    @location(2) uv  : vec2<f32>,
+    @location(3) rough_metal : vec2<f32>,
+};
+struct VSOut {
+    @builtin(position) pos : vec4<f32>,
+    @location(0) nrm : vec3<f32>,
+    @location(1) uv : vec2<f32>,
+};
+
+@vertex
+fn vs_main(inp: VSIn) -> VSOut {
+    var out: VSOut;
+    let pos_vs = uCam.view * vec4<f32>(inp.pos, 1.0);
+    out.pos = uCam.proj * pos_vs;
+    out.nrm = normalize((uCam.view * vec4<f32>(inp.nrm, 0.0)).xyz);
+    out.uv = inp.uv;
+    return out;
+}
+
+@fragment
+fn fs_main(inp: VSOut) -> @location(0) vec4<f32> {
+    let base = textureSample(tAlbedo, sAlbedo, inp.uv).rgb;
+    let ndl = clamp(dot(normalize(inp.nrm), normalize(vec3<f32>(0.25, 0.75, 0.55))), 0.0, 1.0);
+    let lit = base * (0.35 + 0.65 * ndl);
+    return vec4<f32>(lit, 1.0);
 }
 "#;
 
@@ -275,6 +317,82 @@ pub fn create_gbuffer_resources(
             )
         });
 
+    let object_shader = crate::core::shader_registry::create_labeled_shader_module(
+        device,
+        "viewer.object_overlay.shader",
+        OBJECT_OVERLAY_SHADER,
+    );
+    let object_overlay_pipeline = crate::core::shader_registry::with_error_scope(
+        device,
+        "viewer.object_overlay.pipeline",
+        || {
+            crate::core::shader_registry::create_render_pipeline_scoped(
+                device,
+                &wgpu::RenderPipelineDescriptor {
+                    label: Some("viewer.object_overlay.pipeline"),
+                    layout: Some(&pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &object_shader,
+                        entry_point: "vs_main",
+                        buffers: &[wgpu::VertexBufferLayout {
+                            array_stride: 40,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: &[
+                                wgpu::VertexAttribute {
+                                    format: wgpu::VertexFormat::Float32x3,
+                                    offset: 0,
+                                    shader_location: 0,
+                                },
+                                wgpu::VertexAttribute {
+                                    format: wgpu::VertexFormat::Float32x3,
+                                    offset: 12,
+                                    shader_location: 1,
+                                },
+                                wgpu::VertexAttribute {
+                                    format: wgpu::VertexFormat::Float32x2,
+                                    offset: 24,
+                                    shader_location: 2,
+                                },
+                                wgpu::VertexAttribute {
+                                    format: wgpu::VertexFormat::Float32x2,
+                                    offset: 32,
+                                    shader_location: 3,
+                                },
+                            ],
+                        }],
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &object_shader,
+                        entry_point: "fs_main",
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: surface_format,
+                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::TriangleList,
+                        strip_index_format: None,
+                        front_face: wgpu::FrontFace::Ccw,
+                        cull_mode: Some(wgpu::Face::Back),
+                        polygon_mode: wgpu::PolygonMode::Fill,
+                        unclipped_depth: false,
+                        conservative: false,
+                    },
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: wgpu::TextureFormat::Depth32Float,
+                        depth_write_enabled: false,
+                        depth_compare: wgpu::CompareFunction::LessEqual,
+                        stencil: wgpu::StencilState::default(),
+                        bias: wgpu::DepthBiasState::default(),
+                    }),
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview: None,
+                },
+            )
+        },
+    );
+
     // Composite bind group layout and pipeline - delegated to composite_init
     let comp_bgl = super::composite_init::create_composite_bind_group_layout(device);
     let comp_pipeline =
@@ -283,6 +401,7 @@ pub fn create_gbuffer_resources(
     Ok(GBufferResources {
         geom_bind_group_layout: Some(geom_bgl),
         geom_pipeline: Some(pipeline),
+        object_overlay_pipeline: Some(object_overlay_pipeline),
         geom_camera_buffer: Some(geom_camera_buffer),
         geom_bind_group: None,
         geom_vb: None,

@@ -412,6 +412,7 @@ impl VectorOverlayStack {
             selected_feature_id: params.selected_feature_id,
             highlight_color: params.highlight_color,
             _pad: [0; 7],
+            render_origin_span: params.render_origin_span,
         };
 
         if let Some(ref buf) = self.uniform_buffer {
@@ -514,6 +515,7 @@ impl VectorOverlayStack {
             view_proj,
             sun_dir,
             lighting,
+            render_origin_span,
             selected_feature_id,
             highlight_color,
         } = params;
@@ -553,6 +555,7 @@ impl VectorOverlayStack {
             highlight_color,
             selected_feature_id,
             _pad: [0; 7],
+            render_origin_span,
         };
 
         self.queue

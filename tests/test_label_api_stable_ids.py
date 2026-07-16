@@ -72,9 +72,9 @@ def test_line_label_callout_and_overlay_creation_return_stable_ids():
     overlay_id = viewer.add_vector_overlay(
         "label-halo",
         vertices=[
-            [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
-            [1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
-            [0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1],
+            [1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1],
+            [0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1],
         ],
         indices=[0, 1, 2],
     )

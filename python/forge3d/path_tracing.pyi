@@ -4,7 +4,7 @@
 # RELEVANT FILES:python/forge3d/path_tracing.py,python/forge3d/__init__.pyi,tests/test_path_tracing_api.py
 
 from __future__ import annotations
-from typing import Tuple, Iterable, Dict, Mapping, Callable, Any, Optional
+from typing import Tuple, Iterable, Dict, Mapping, Callable, Any, Optional, Sequence
 import numpy as np
 
 class ExperimentalSyntheticOutput(RuntimeError): ...
@@ -71,6 +71,7 @@ def hybrid_render_terrain_reference(
     sun_azimuth_deg: float = ...,
     sun_elevation_deg: float = ...,
     sun_intensity: float = ...,
+    sun_color: Sequence[float] | np.ndarray = ...,
     env_map: np.ndarray | None = ...,
     env_intensity: float = ...,
     mesh_vertices: np.ndarray | None = ...,

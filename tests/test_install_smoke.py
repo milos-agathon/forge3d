@@ -7,6 +7,8 @@ import sys
 
 import pytest
 
+from tests.conftest import _validate_installed_wheel_paths
+
 try:
     import tomllib  # type: ignore[attr-defined]
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
@@ -169,3 +171,38 @@ def test_installs_interactive_viewer_console_script():
         and ep.value == "forge3d._viewer_entry:main"
         for ep in entry_points
     )
+
+
+def test_installed_wheel_path_gate_rejects_repo_local_package(tmp_path):
+    repo_package = Path(__file__).resolve().parent.parent / "python" / "forge3d"
+    native = tmp_path / "site-packages" / "forge3d" / "_forge3d.abi3.so"
+    native.parent.mkdir(parents=True)
+    native.touch()
+
+    with pytest.raises(RuntimeError, match="repo-local Python package"):
+        _validate_installed_wheel_paths(repo_package / "__init__.py", native)
+
+
+def test_installed_wheel_path_gate_rejects_repo_local_native(tmp_path):
+    package = tmp_path / "site-packages" / "forge3d" / "__init__.py"
+    package.parent.mkdir(parents=True)
+    package.touch()
+    repo_native = (
+        Path(__file__).resolve().parent.parent
+        / "python"
+        / "forge3d"
+        / "_forge3d.abi3.so"
+    )
+
+    with pytest.raises(RuntimeError, match="repo-local native extension"):
+        _validate_installed_wheel_paths(package, repo_native)
+
+
+def test_installed_wheel_path_gate_accepts_external_package_and_native(tmp_path):
+    package = tmp_path / "site-packages" / "forge3d" / "__init__.py"
+    native = tmp_path / "site-packages" / "forge3d" / "_forge3d.abi3.so"
+    package.parent.mkdir(parents=True)
+    package.touch()
+    native.touch()
+
+    _validate_installed_wheel_paths(package, native)

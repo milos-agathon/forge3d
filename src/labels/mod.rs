@@ -48,7 +48,7 @@ pub use types::{
 pub use typography::{KerningTable, TextCase, TypographySettings};
 
 use crate::core::text_overlay::{TextInstance, TextOverlayRenderer};
-use glam::{Mat4, Vec3};
+use glam::{DVec3, Mat4, Vec3};
 use std::collections::HashMap;
 use wgpu::{Device, Queue};
 
@@ -138,19 +138,21 @@ impl LabelManager {
     }
 
     /// Add a label at a world position, preserving an externally allocated ID.
-    pub fn add_label_with_id(
+    pub fn add_label_with_id<P: Into<DVec3>>(
         &mut self,
         id: Option<LabelId>,
         text: String,
-        world_pos: Vec3,
+        world_pos: P,
         style: LabelStyle,
     ) -> LabelId {
         let id = self.allocate_id(id);
 
+        let world_pos = world_pos.into();
         let label = LabelData {
             id,
             text,
             world_pos,
+            render_pos: Vec3::ZERO,
             style,
             screen_pos: None,
             visible: true,
@@ -163,10 +165,10 @@ impl LabelManager {
     }
 
     /// Add a line label along a polyline.
-    pub fn add_line_label(
+    pub fn add_line_label<P: Into<DVec3>>(
         &mut self,
         text: String,
-        polyline: Vec<Vec3>,
+        polyline: Vec<P>,
         style: LabelStyle,
         placement: LineLabelPlacement,
         repeat_distance: f32,
@@ -175,21 +177,24 @@ impl LabelManager {
     }
 
     /// Add a line label along a polyline, preserving an externally allocated ID.
-    pub fn add_line_label_with_id(
+    pub fn add_line_label_with_id<P: Into<DVec3>>(
         &mut self,
         id: Option<LabelId>,
         text: String,
-        polyline: Vec<Vec3>,
+        polyline: Vec<P>,
         style: LabelStyle,
         placement: LineLabelPlacement,
         repeat_distance: f32,
     ) -> LabelId {
         let id = self.allocate_id(id);
 
+        let polyline: Vec<DVec3> = polyline.into_iter().map(Into::into).collect();
+        let render_polyline = vec![Vec3::ZERO; polyline.len()];
         let line_label = LineLabelData {
             id,
             text,
             polyline,
+            render_polyline,
             style,
             placement,
             repeat_distance,
@@ -245,6 +250,19 @@ impl LabelManager {
     /// Get number of labels.
     pub fn label_count(&self) -> usize {
         self.labels.len() + self.line_labels.len()
+    }
+
+    /// Absolute f64 source positions retained for prospective-frame checks.
+    pub(crate) fn world_points(&self) -> Vec<DVec3> {
+        self.labels
+            .values()
+            .map(|label| label.world_pos)
+            .chain(
+                self.line_labels
+                    .values()
+                    .flat_map(|label| label.polyline.iter().copied()),
+            )
+            .collect()
     }
 
     /// Set the current zoom level for scale-dependent visibility.
@@ -361,16 +379,27 @@ impl LabelManager {
         camera_pos: Option<Vec3>,
         selected_ids: Option<&std::collections::HashSet<u64>>,
     ) -> usize {
+        self.update_with_camera_anchored(
+            view_proj,
+            camera_pos,
+            selected_ids,
+            &crate::camera::Anchor::new(),
+        )
+    }
+
+    /// Update using the viewer's frozen frame anchor.
+    pub fn update_with_camera_anchored(
+        &mut self,
+        view_proj: Mat4,
+        camera_pos: Option<Vec3>,
+        selected_ids: Option<&std::collections::HashSet<u64>>,
+        anchor: &crate::camera::Anchor,
+    ) -> usize {
         if !self.enabled {
             return 0;
         }
 
-        if self.atlas.is_none() {
-            self.visible_instances.clear();
-            return 0;
-        }
-
-        let atlas = self.atlas.as_ref().unwrap();
+        let atlas = self.atlas.as_ref();
         self.collision_rtree.clear();
         self.visible_instances.clear();
         self.leader_lines.clear();
@@ -383,6 +412,7 @@ impl LabelManager {
         sorted_labels.sort_by_key(|label| std::cmp::Reverse(label.style.priority));
 
         for label in sorted_labels {
+            label.render_pos = anchor.to_render_vec3(label.world_pos);
             // Skip if we've reached max visible
             if visible_count >= self.max_visible_labels {
                 label.visible = false;
@@ -398,14 +428,14 @@ impl LabelManager {
             }
 
             // Project world position to screen
-            let projected = self.projector.project(label.world_pos, view_proj);
+            let projected = self.projector.project(label.render_pos, view_proj);
 
             if let Some((mut screen_pos, depth)) = projected {
                 label.depth = depth;
 
                 // Compute horizon angle for fade
                 let horizon_alpha = if let Some(cam_pos) = camera_pos {
-                    let to_label = label.world_pos - cam_pos;
+                    let to_label = label.render_pos - cam_pos;
                     let horizontal_dist =
                         (to_label.x * to_label.x + to_label.z * to_label.z).sqrt();
                     let angle_deg = (to_label.y / horizontal_dist.max(0.001))
@@ -434,7 +464,16 @@ impl LabelManager {
                 label.screen_pos = Some(screen_pos);
 
                 // Calculate label bounds
-                let (width, height) = atlas.measure_text(&label.text, label.style.size);
+                let (width, height) = atlas.map_or_else(
+                    || {
+                        let glyphs = label.text.chars().filter(|ch| !ch.is_whitespace()).count();
+                        (
+                            (glyphs.max(1) as f32) * label.style.size * 0.6,
+                            label.style.size,
+                        )
+                    },
+                    |atlas| atlas.measure_text(&label.text, label.style.size),
+                );
                 let half_w = width * 0.5;
                 let half_h = height * 0.5;
 
@@ -478,15 +517,17 @@ impl LabelManager {
                     color[3] = label.computed_alpha;
 
                     // Generate text instances for this label
-                    let instances = atlas.layout_text(
-                        &label.text,
-                        screen_pos,
-                        label.style.size,
-                        color,
-                        label.style.halo_color,
-                        label.style.halo_width,
-                    );
-                    self.visible_instances.extend(instances);
+                    if let Some(atlas) = atlas {
+                        let instances = atlas.layout_text(
+                            &label.text,
+                            screen_pos,
+                            label.style.size,
+                            color,
+                            label.style.halo_color,
+                            label.style.halo_width,
+                        );
+                        self.visible_instances.extend(instances);
+                    }
                 } else {
                     label.visible = false;
                 }
@@ -498,6 +539,18 @@ impl LabelManager {
 
         // Process line labels
         for line_label in self.line_labels.values_mut() {
+            if line_label.render_polyline.len() != line_label.polyline.len() {
+                line_label
+                    .render_polyline
+                    .resize(line_label.polyline.len(), Vec3::ZERO);
+            }
+            for (render, world) in line_label
+                .render_polyline
+                .iter_mut()
+                .zip(line_label.polyline.iter().copied())
+            {
+                *render = anchor.to_render_vec3(world);
+            }
             if visible_count >= self.max_visible_labels {
                 line_label.visible = false;
                 continue;
@@ -516,7 +569,7 @@ impl LabelManager {
 
             // Compute placements
             let placements = compute_line_label_placement(
-                &line_label.polyline,
+                &line_label.render_polyline,
                 &line_label.text,
                 &advances,
                 view_proj,
@@ -546,18 +599,20 @@ impl LabelManager {
                 if ch == ' ' {
                     continue;
                 }
-                let mut instances = atlas.layout_text(
-                    &ch.to_string(),
-                    placement.screen_pos,
-                    line_label.style.size,
-                    color,
-                    line_label.style.halo_color,
-                    line_label.style.halo_width,
-                );
-                for instance in &mut instances {
-                    instance.rotation = placement.rotation;
+                if let Some(atlas) = atlas {
+                    let mut instances = atlas.layout_text(
+                        &ch.to_string(),
+                        placement.screen_pos,
+                        line_label.style.size,
+                        color,
+                        line_label.style.halo_color,
+                        line_label.style.halo_width,
+                    );
+                    for instance in &mut instances {
+                        instance.rotation = placement.rotation;
+                    }
+                    self.visible_instances.extend(instances);
                 }
-                self.visible_instances.extend(instances);
             }
         }
 

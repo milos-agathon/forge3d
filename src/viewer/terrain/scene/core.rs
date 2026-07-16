@@ -17,7 +17,7 @@ impl ViewerTerrainScene {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: None,
+                        min_binding_size: wgpu::BufferSize::new(160),
                     },
                     count: None,
                 },
@@ -118,6 +118,16 @@ impl ViewerTerrainScene {
                 wgpu::CompareFunction::LessEqual,
                 false,
             )?;
+        #[cfg(feature = "enable-gpu-instancing")]
+        let scatter_hlod_instance_buffer = crate::core::resource_tracker::tracked_create_buffer(
+            &device,
+            &wgpu::BufferDescriptor {
+                label: Some("terrain.viewer.scatter.hlod.instance_buffer"),
+                size: (std::mem::size_of::<f32>() * 16) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            },
+        )?;
 
         Ok(Self {
             device,
@@ -182,12 +192,18 @@ impl ViewerTerrainScene {
             shadow_pipeline: None,
             shadow_uniform_buffers: Vec::new(),
             shadow_bind_groups: Vec::new(),
+            shadow_bind_group_revision: 0,
             // P1.4: TAA support
             taa_renderer: None,
             taa_jitter: crate::core::jitter::JitterState::new(),
+            taa_velocity_texture: None,
+            taa_velocity_view: None,
+            taa_velocity_size: (0, 0),
             terrain_revision_counter: 0,
             #[cfg(feature = "enable-gpu-instancing")]
             scatter_renderer,
+            #[cfg(feature = "enable-gpu-instancing")]
+            scatter_hlod_instance_buffer,
             #[cfg(feature = "enable-gpu-instancing")]
             scatter_batches: Vec::new(),
             #[cfg(feature = "enable-gpu-instancing")]

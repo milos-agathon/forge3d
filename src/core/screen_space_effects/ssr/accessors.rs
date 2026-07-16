@@ -1,6 +1,9 @@
 use super::*;
 
 impl SsrRenderer {
+    pub fn history_allocation_id(&self) -> u64 {
+        self.ssr_history_texture.ledger_id()
+    }
     pub fn get_output(&self) -> &TextureView {
         &self.ssr_filtered_view
     }
@@ -24,6 +27,16 @@ impl SsrRenderer {
 
     pub fn update_camera(&mut self, queue: &Queue, camera: &CameraParams) {
         queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(camera));
+    }
+
+    /// Invalidate temporal provenance without allocating or replacing any GPU
+    /// resource. The next execute binds current SSR as its own history.
+    pub(crate) fn invalidate_history(&mut self) {
+        self.history_state.invalidate();
+    }
+
+    pub fn history_valid(&self) -> bool {
+        self.history_state.is_valid()
     }
 
     pub fn spec_view(&self) -> &TextureView {

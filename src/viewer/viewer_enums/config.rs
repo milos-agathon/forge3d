@@ -2,6 +2,106 @@ use crate::geometry::MeshBuffers;
 #[cfg(feature = "enable-gpu-instancing")]
 use crate::terrain::scatter::ScatterWindSettingsNative;
 
+/// Legacy eight-lane vector IPC row with typed storage:
+/// XYZ=f64, RGBA=f32, feature ID=u32.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ViewerVectorVertex {
+    pub position: [f64; 3],
+    pub color: [f32; 4],
+    pub feature_id: u32,
+}
+
+impl<'de> serde::Deserialize<'de> for ViewerVectorVertex {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let lanes = <Vec<f64> as serde::Deserialize>::deserialize(deserializer)?;
+        if lanes.len() != 8 {
+            return Err(serde::de::Error::custom(format!(
+                "vector vertex must contain exactly 8 lanes, got {}",
+                lanes.len()
+            )));
+        }
+        if lanes[..7].iter().any(|value| !value.is_finite()) {
+            return Err(serde::de::Error::custom(
+                "vector XYZ/RGBA lanes must be finite",
+            ));
+        }
+        if lanes[3..7].iter().any(|value| !(0.0..=1.0).contains(value)) {
+            return Err(serde::de::Error::custom(
+                "vector RGBA lanes must be finite values in [0, 1]",
+            ));
+        }
+        let id = lanes[7];
+        if !id.is_finite() || id < 0.0 || id.fract() != 0.0 || id > f64::from(u32::MAX) {
+            return Err(serde::de::Error::custom(
+                "vector feature ID must be an integer in [0, u32::MAX]",
+            ));
+        }
+        let rgb = crate::camera::Anchor::direction_to_render(glam::DVec3::new(
+            lanes[3], lanes[4], lanes[5],
+        ));
+        let alpha =
+            crate::camera::Anchor::direction_to_render(glam::DVec3::new(lanes[6], 0.0, 0.0));
+        Ok(Self {
+            position: [lanes[0], lanes[1], lanes[2]],
+            color: [rgb.x, rgb.y, rgb.z, alpha.x],
+            feature_id: id as u32,
+        })
+    }
+}
+
+#[cfg(test)]
+mod vector_vertex_tests {
+    use super::ViewerVectorVertex;
+
+    #[test]
+    fn legacy_eight_lane_shape_preserves_earth_scale_xyz_and_typed_id() {
+        let vertex: ViewerVectorVertex = serde_json::from_str(
+            "[6378137.001,500000.002,-5500000.003,1.0,0.5,0.25,1.0,4294967295]",
+        )
+        .unwrap();
+        assert_eq!(
+            vertex.position,
+            [6_378_137.001, 500_000.002, -5_500_000.003]
+        );
+        assert_eq!(vertex.color, [1.0, 0.5, 0.25, 1.0]);
+        assert_eq!(vertex.feature_id, u32::MAX);
+    }
+
+    #[test]
+    fn malformed_lengths_and_ids_are_rejected_by_the_custom_visitor() {
+        for json in [
+            "[0,0,0,1,1,1,1]",
+            "[0,0,0,1,1,1,1,1,9]",
+            "[0,0,0,1,1,1,1,1.5]",
+            "[0,0,0,1,1,1,1,-1]",
+            "[0,0,0,1,1,1,1,4294967296]",
+        ] {
+            assert!(
+                serde_json::from_str::<ViewerVectorVertex>(json).is_err(),
+                "{json}"
+            );
+        }
+    }
+
+    #[test]
+    fn rgba_overflow_and_out_of_domain_values_are_rejected() {
+        for json in [
+            "[0,0,0,1e300,0,0,1,1]",
+            "[0,0,0,-0.001,0,0,1,1]",
+            "[0,0,0,1.001,0,0,1,1]",
+            "[0,0,0,1,0,0,2,1]",
+        ] {
+            assert!(
+                serde_json::from_str::<ViewerVectorVertex>(json).is_err(),
+                "accepted invalid RGBA row {json}"
+            );
+        }
+    }
+}
+
 /// Heightfield ray-traced AO configuration for viewer
 #[derive(Debug, Clone, Default)]
 pub struct ViewerHeightAoConfig {
@@ -225,5 +325,6 @@ pub struct ViewerTerrainScatterBatchConfig {
     pub levels: Vec<ViewerTerrainScatterLevelConfig>,
     #[cfg(feature = "enable-gpu-instancing")]
     pub wind: ScatterWindSettingsNative,
+    #[cfg(feature = "enable-gpu-instancing")]
     pub hlod_config: Option<crate::terrain::scatter::HlodConfig>,
 }

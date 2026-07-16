@@ -25,7 +25,6 @@ pub use scene::ViewerTerrainScene;
 // Option B: Vector overlay geometry exports
 #[allow(unused_imports)]
 pub use vector_overlay::{
-    drape_vertices, DrapeParams, OverlayPrimitive, RenderLayerParams, VectorOverlayGpu,
-    VectorOverlayLayer, VectorOverlayStack, VectorOverlayUniforms, VectorVertex,
-    VECTOR_OVERLAY_SHADER,
+    OverlayPrimitive, RenderLayerParams, VectorOverlayGpu, VectorOverlayLayer, VectorOverlayStack,
+    VectorOverlayUniforms, VectorVertex, VECTOR_OVERLAY_SHADER,
 };

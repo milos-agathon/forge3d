@@ -7,18 +7,23 @@ use crate::viewer::viewer_enums::{
     ViewerVolumetricsConfig,
 };
 
+#[cfg(feature = "enable-gpu-instancing")]
+use super::super::payloads::IpcScatterWind;
 use super::super::payloads::{
     IpcDenoiseConfig, IpcDensityVolumeConfig, IpcDofConfig, IpcHeightAoConfig,
-    IpcLensEffectsConfig, IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcScatterWind,
-    IpcSkyConfig, IpcSunVisConfig, IpcTerrainScatterBatch, IpcTerrainScatterBlend,
-    IpcTerrainScatterContact, IpcTerrainScatterLevel, IpcTonemapConfig, IpcVectorOverlayConfig,
-    IpcVolumetricsConfig,
+    IpcLensEffectsConfig, IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcSkyConfig,
+    IpcSunVisConfig, IpcTerrainScatterBatch, IpcTerrainScatterBlend, IpcTerrainScatterContact,
+    IpcTerrainScatterLevel, IpcTonemapConfig, IpcVectorOverlayConfig, IpcVolumetricsConfig,
 };
 use super::super::request::IpcRequest;
 
 pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Result<Option<ViewerCmd>, String> {
     match req {
-        IpcRequest::LoadTerrain { path } => Ok(Some(ViewerCmd::LoadTerrain(path.clone()))),
+        IpcRequest::LoadTerrain { path } => {
+            crate::viewer::terrain::ViewerTerrainScene::preflight_terrain_path(path)
+                .map_err(|err| err.to_string())?;
+            Ok(Some(ViewerCmd::LoadTerrain(path.clone())))
+        }
         IpcRequest::SetTerrainCamera {
             phi_deg,
             theta_deg,
@@ -324,6 +329,7 @@ pub(super) fn map_terrain_scatter_batch(
             })
             .transpose()?
             .unwrap_or_default(),
+        #[cfg(feature = "enable-gpu-instancing")]
         hlod_config: config
             .hlod
             .as_ref()

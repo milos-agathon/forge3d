@@ -239,7 +239,15 @@ from .path_tracing import ExperimentalSyntheticOutput, PathTracer, make_camera
 # -----------------------------------------------------------------------------
 # Interactive Viewer API
 # -----------------------------------------------------------------------------
-from .viewer import LabelBatchResult, ViewerHandle, open_viewer, open_viewer_async
+from .viewer import (
+    LabelBatchResult,
+    NormalizedExtent,
+    VectorOverlayVertex,
+    ViewerHandle,
+    WorldPosition,
+    open_viewer,
+    open_viewer_async,
+)
 from . import viewer_ipc, colors, interactive, datasets, widgets, smoke
 from .datasets import (
     available as available_datasets,
@@ -748,6 +756,9 @@ __all__ = [
     "open_viewer_async",
     "ViewerHandle",
     "LabelBatchResult",
+    "WorldPosition",
+    "VectorOverlayVertex",
+    "NormalizedExtent",
     "ViewerWidget",
     "widgets_available",
     # P4: Map Plate / Creator Workflow

@@ -223,13 +223,14 @@ pub fn label_at_position(
 mod tests {
     use super::*;
     use crate::labels::LabelId;
-    use glam::Vec3;
+    use glam::{DVec3, Vec3};
 
     fn make_test_label(text: &str, x: f32, y: f32) -> LabelData {
         LabelData {
             id: LabelId(1),
             text: text.to_string(),
-            world_pos: Vec3::ZERO,
+            world_pos: DVec3::ZERO,
+            render_pos: Vec3::ZERO,
             style: LabelStyle::default(),
             screen_pos: Some([x, y]),
             visible: true,

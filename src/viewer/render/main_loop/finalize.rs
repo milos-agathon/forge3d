@@ -38,6 +38,11 @@ impl Viewer {
             // This forces the waiting script to continue waiting while we retry.
         }
         output.present();
+        self.rendered_frame_revision = self.applied_command_revision;
+        crate::viewer::event_loop::update_ipc_revision_stats(
+            self.applied_command_revision,
+            self.rendered_frame_revision,
+        );
 
         // Optionally dump P5 artifacts after finishing all passes
         if self.dump_p5_requested {

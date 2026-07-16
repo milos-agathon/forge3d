@@ -8,6 +8,7 @@ use crate::core::error::RenderResult;
 use crate::core::resource_tracker::{
     tracked_create_buffer_init, tracked_create_texture, TrackedBuffer, TrackedTexture,
 };
+use crate::viewer::{FogCameraUniforms, VolumetricUniformsStd140};
 
 /// Resources created during fog initialization
 pub struct FogResources {
@@ -198,8 +199,13 @@ pub fn create_fog_resources(
         include_str!("../../shaders/volumetric.wgsl"),
     );
 
-    let fog_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("viewer.fog.pl"),
+    let fog_raymarch_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("viewer.fog.raymarch.pl"),
+        bind_group_layouts: &[&fog_bgl0, &fog_bgl1, &fog_bgl2],
+        push_constant_ranges: &[],
+    });
+    let fog_froxel_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("viewer.fog.froxel.pl"),
         bind_group_layouts: &[&fog_bgl0, &fog_bgl1, &fog_bgl2, &fog_bgl3],
         push_constant_ranges: &[],
     });
@@ -210,7 +216,7 @@ pub fn create_fog_resources(
                 device,
                 &wgpu::ComputePipelineDescriptor {
                     label: Some("viewer.fog.pipeline"),
-                    layout: Some(&fog_pl),
+                    layout: Some(&fog_raymarch_pl),
                     module: &fog_shader,
                     entry_point: "cs_volumetric",
                 },
@@ -223,7 +229,7 @@ pub fn create_fog_resources(
                 device,
                 &wgpu::ComputePipelineDescriptor {
                     label: Some("viewer.fog.froxel.build"),
-                    layout: Some(&fog_pl),
+                    layout: Some(&fog_froxel_pl),
                     module: &fog_shader,
                     entry_point: "cs_build_froxels",
                 },
@@ -236,7 +242,7 @@ pub fn create_fog_resources(
                 device,
                 &wgpu::ComputePipelineDescriptor {
                     label: Some("viewer.fog.froxel.apply"),
-                    layout: Some(&fog_pl),
+                    layout: Some(&fog_froxel_pl),
                     module: &fog_shader,
                     entry_point: "cs_apply_froxels",
                 },
@@ -244,7 +250,7 @@ pub fn create_fog_resources(
         });
 
     // Fog params buffer
-    let fog_params_data: [u8; 80] = [0; 80];
+    let fog_params_data = [0u8; std::mem::size_of::<VolumetricUniformsStd140>()];
     let fog_params = tracked_create_buffer_init(
         device,
         &wgpu::util::BufferInitDescriptor {
@@ -255,7 +261,7 @@ pub fn create_fog_resources(
     )?;
 
     // Fog camera buffer
-    let fog_camera_data: [u8; 400] = [0; 400];
+    let fog_camera_data = [0u8; std::mem::size_of::<FogCameraUniforms>()];
     let fog_camera = tracked_create_buffer_init(
         device,
         &wgpu::util::BufferInitDescriptor {

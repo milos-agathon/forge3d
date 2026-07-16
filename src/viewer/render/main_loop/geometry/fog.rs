@@ -2,7 +2,9 @@ use glam::Mat4;
 
 use crate::core::screen_space_effects::ScreenSpaceEffectsManager;
 use crate::viewer::viewer_enums::FogMode;
-use crate::viewer::{CameraFrustum, FogCameraUniforms, Viewer, VolumetricUniformsStd140};
+use crate::viewer::{
+    CameraFrustum, FogCameraUniforms, Viewer, ViewerShadowUniforms, VolumetricUniformsStd140,
+};
 
 use super::mat4_to_array;
 
@@ -16,10 +18,9 @@ impl Viewer {
             return;
         }
 
-        let aspect = self.config.width as f32 / self.config.height as f32;
-        let fov = self.view_config.fov_deg.to_radians();
-        let proj = Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
-        let view_mat = self.camera.view_matrix();
+        let frame = self.current_frame_camera();
+        let proj = frame.projection(self.config.width, self.config.height);
+        let view_mat = frame.view();
 
         if let Some(ref mut csm) = self.csm {
             let frustum = CameraFrustum::from_matrices(&view_mat, &proj);
@@ -27,12 +28,12 @@ impl Viewer {
         }
 
         if self.fog_use_shadows {
-            self.render_fog_shadow_cascades(encoder);
+            self.render_fog_shadow_cascades(encoder, frame);
         }
 
         let inv_view = view_mat.inverse();
         let inv_proj = proj.inverse();
-        let eye = self.camera.eye();
+        let eye = frame.render_eye();
         let fog_cam = FogCameraUniforms {
             view: mat4_to_array(view_mat),
             proj: mat4_to_array(proj),
@@ -40,9 +41,11 @@ impl Viewer {
             inv_proj: mat4_to_array(inv_proj),
             view_proj: mat4_to_array(proj * view_mat),
             eye_position: [eye.x, eye.y, eye.z],
-            near: self.view_config.znear,
-            far: self.view_config.zfar,
+            near: frame.near,
+            far: frame.far,
+            _pad_far: [0.0; 3],
             _pad: [0.0; 3],
+            _pad_end: 0.0,
         };
         self.queue
             .write_buffer(&self.fog_camera, 0, bytemuck::bytes_of(&fog_cam));
@@ -61,7 +64,7 @@ impl Viewer {
             phase_g: self.fog_g.clamp(-0.999, 0.999),
             max_steps: steps,
             start_distance: 0.1,
-            max_distance: self.view_config.zfar,
+            max_distance: frame.far,
             _pad_a0: 0.0,
             _pad_a1: 0.0,
             scattering_color: [1.0, 1.0, 1.0],
@@ -69,7 +72,9 @@ impl Viewer {
             sun_direction: [sun_dir_ws.x, sun_dir_ws.y, sun_dir_ws.z],
             sun_intensity: self.sky_sun_intensity.max(0.0),
             ambient_color: [0.2, 0.25, 0.3],
-            temporal_alpha: self.fog_temporal_alpha.clamp(0.0, 0.9),
+            temporal_alpha: self
+                .fog_history_state
+                .blend_alpha(self.fog_temporal_alpha.clamp(0.0, 0.9)),
             use_shadows: if self.fog_use_shadows { 1 } else { 0 },
             jitter_strength: 0.8,
             frame_index: self.fog_frame_index,
@@ -115,11 +120,20 @@ impl Viewer {
             );
         }
 
+        self.fog_history_state.mark_populated();
         self.fog_frame_index = self.fog_frame_index.wrapping_add(1);
     }
 
-    fn render_fog_shadow_cascades(&mut self, encoder: &mut wgpu::CommandEncoder) {
-        let vb = self.geom_vb.as_ref().unwrap();
+    fn render_fog_shadow_cascades(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        frame: crate::viewer::viewer_types::FrameCamera,
+    ) {
+        let Some(vb) = self.geom_vb.as_ref() else {
+            // Terrain shadows use their own viewer-specific pipeline. A
+            // terrain-only scene has no generic geometry buffer to draw here.
+            return;
+        };
         if let (Some(ref csm), Some(ref csm_pipe), Some(ref csm_cam_buf)) = (
             self.csm.as_ref(),
             self.csm_depth_pipeline.as_ref(),
@@ -131,9 +145,12 @@ impl Viewer {
                     csm.cascade_depth_view(cascade_idx),
                     csm.cascade_projection(cascade_idx),
                 ) {
-                    let light_vp_arr = light_vp.to_cols_array();
+                    let shadow_uniforms = ViewerShadowUniforms {
+                        light_view_proj: light_vp.to_cols_array_2d(),
+                        object_model: self.anchored_object_model(frame).to_cols_array_2d(),
+                    };
                     self.queue
-                        .write_buffer(csm_cam_buf, 0, bytemuck::cast_slice(&light_vp_arr));
+                        .write_buffer(csm_cam_buf, 0, bytemuck::bytes_of(&shadow_uniforms));
                     let mut shadow_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("viewer.csm.depth"),
                         color_attachments: &[],

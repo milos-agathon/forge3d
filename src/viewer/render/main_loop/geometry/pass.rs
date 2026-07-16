@@ -1,5 +1,4 @@
-use glam::Mat4;
-
+use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::core::screen_space_effects::{CameraParams, ScreenSpaceEffectsManager};
 use crate::viewer::Viewer;
 
@@ -17,10 +16,8 @@ impl Viewer {
             return;
         }
         let cam_buf = self.geom_camera_buffer.as_ref().unwrap();
-        let aspect = self.config.width as f32 / self.config.height as f32;
-        let fov = self.view_config.fov_deg.to_radians();
-        let proj_base =
-            Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
+        let frame = self.current_frame_camera();
+        let proj_base = frame.projection(self.config.width, self.config.height);
 
         let proj = if self.taa_jitter.enabled {
             crate::core::jitter::apply_jitter(
@@ -34,8 +31,8 @@ impl Viewer {
             proj_base
         };
 
-        let view_mat = self.camera.view_matrix();
-        let model_view = view_mat * self.object_transform;
+        let view_mat = frame.view();
+        let model_view = view_mat * self.anchored_object_model(frame);
         self.log_snapshot_geometry_transform();
 
         let cam_pack = [mat4_to_array(model_view), mat4_to_array(proj)];
@@ -43,7 +40,7 @@ impl Viewer {
             .write_buffer(cam_buf, 0, bytemuck::cast_slice(&cam_pack));
 
         let inv_proj = proj.inverse();
-        let eye = self.camera.eye();
+        let eye = frame.render_eye();
         let inv_model_view = model_view.inverse();
         let view_proj = proj * model_view;
         let cam = CameraParams {
@@ -119,13 +116,12 @@ impl Viewer {
 
     fn log_snapshot_geometry_transform(&self) {
         if self.snapshot_request.is_some() {
-            let is_identity = self.object_transform == glam::Mat4::IDENTITY;
             let t = self.object_translation;
             let s = self.object_scale;
             let msg = format!(
                 "[D1-GEOM] frame={} transform_identity={} index_count={} trans=[{:.3},{:.3},{:.3}] scale=[{:.3},{:.3},{:.3}]\n",
                 self.frame_count,
-                is_identity,
+                self.object_transform_is_identity(),
                 self.geom_index_count,
                 t.x,
                 t.y,
@@ -145,7 +141,7 @@ impl Viewer {
         }
     }
 
-    fn ensure_geometry_bind_group_fallback(&mut self) {
+    pub(in crate::viewer::render::main_loop) fn ensure_geometry_bind_group_fallback(&mut self) {
         if self.geom_bind_group.is_none() {
             let cam_buf = self.geom_camera_buffer.as_ref().unwrap();
             let sampler = self.albedo_sampler.get_or_insert_with(|| {
@@ -222,6 +218,103 @@ impl Viewer {
             });
             self.albedo_view = Some(view);
             self.geom_bind_group = Some(bg);
+        }
+    }
+
+    pub(in crate::viewer::render::main_loop) fn render_object_overlay(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        depth: &wgpu::TextureView,
+        depth_load: wgpu::LoadOp<f32>,
+        width: u32,
+        height: u32,
+    ) {
+        if self.geom_vb.is_none() || self.object_transform_is_identity() {
+            return;
+        }
+        if self.geom_bind_group.is_none() {
+            return;
+        }
+        let Some(cam_buf) = self.geom_camera_buffer.as_ref() else {
+            return;
+        };
+        let Some(pipe) = self.object_overlay_pipeline.as_ref() else {
+            return;
+        };
+        let Some(vb) = self.geom_vb.as_ref() else {
+            return;
+        };
+        let Some(bg_ref) = self.geom_bind_group.as_ref() else {
+            return;
+        };
+
+        let frame = self.current_frame_camera();
+        let model_view = frame.view() * self.anchored_object_model(frame);
+        let proj = frame.projection(width, height);
+        let cam_pack = [mat4_to_array(model_view), mat4_to_array(proj)];
+        self.queue
+            .write_buffer(cam_buf, 0, bytemuck::cast_slice(&cam_pack));
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("viewer.object_overlay"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth,
+                depth_ops: Some(wgpu::Operations {
+                    load: depth_load,
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(pipe);
+        pass.set_bind_group(0, bg_ref, &[]);
+        pass.set_vertex_buffer(0, vb.slice(..));
+        if let Some(ib) = self.geom_ib.as_ref() {
+            pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..self.geom_index_count, 0, 0..1);
+        } else {
+            pass.draw(0..self.geom_index_count, 0..1);
+        }
+    }
+
+    pub(in crate::viewer::render::main_loop) fn create_object_overlay_depth(
+        &self,
+        width: u32,
+        height: u32,
+    ) -> Option<TrackedTexture> {
+        match tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("viewer.object_overlay.snapshot_depth"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            },
+        ) {
+            Ok(texture) => Some(texture),
+            Err(err) => {
+                eprintln!("[viewer] failed to allocate object overlay snapshot depth: {err}");
+                None
+            }
         }
     }
 }

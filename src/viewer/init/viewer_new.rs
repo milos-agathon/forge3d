@@ -44,7 +44,14 @@ impl Viewer {
         #[cfg(not(feature = "extension-module"))]
         let _adapter = dev_res.adapter;
         let surface_config = dev_res.config;
-        let adapter_name = dev_res.adapter_name;
+        let adapter_info = dev_res.adapter_info;
+        let adapter_name = adapter_info.name.clone();
+        let adapter_vendor = adapter_info.vendor;
+        let adapter_device = adapter_info.device;
+        let adapter_backend = format!("{:?}", adapter_info.backend);
+        let adapter_device_type = format!("{:?}", adapter_info.device_type);
+        let adapter_driver = adapter_info.driver.clone();
+        let adapter_driver_info = adapter_info.driver_info.clone();
 
         let width = surface_config.width;
         let height = surface_config.height;
@@ -140,8 +147,16 @@ impl Viewer {
             adapter,
             config: surface_config,
             camera: CameraController::new(),
+            camera_anchor: crate::camera::Anchor::new(),
+            frame_camera: None,
+            camera_rebase_count: 0,
+            history_invalidation_count: 0,
+            last_vector_source_delta: [0.0; 3],
+            last_vector_packed_delta: [0.0; 3],
             view_config: config,
             frame_count: 0,
+            applied_command_revision: 0,
+            rendered_frame_revision: 0,
             fps_counter: FpsCounter::new(),
             #[cfg(feature = "extension-module")]
             terrain_scene: None,
@@ -164,15 +179,14 @@ impl Viewer {
             // GBuffer resources
             geom_bind_group_layout: gbuf.geom_bind_group_layout,
             geom_pipeline: gbuf.geom_pipeline,
+            object_overlay_pipeline: gbuf.object_overlay_pipeline,
             geom_camera_buffer: gbuf.geom_camera_buffer,
             geom_bind_group: gbuf.geom_bind_group,
             geom_vb: gbuf.geom_vb,
             geom_ib: None,
             geom_index_count: 36,
-            original_mesh_positions: Vec::new(),
-            original_mesh_normals: Vec::new(),
-            original_mesh_uvs: Vec::new(),
-            original_mesh_indices: Vec::new(),
+            object_source_positions: Vec::new(),
+            object_source_indices: Vec::new(),
             z_texture: gbuf.z_texture,
             z_view: gbuf.z_view,
             albedo_texture: gbuf.albedo_texture,
@@ -233,6 +247,12 @@ impl Viewer {
             auto_snapshot_done: false,
             dump_p5_requested: false,
             adapter_name,
+            adapter_vendor,
+            adapter_device,
+            adapter_backend,
+            adapter_device_type,
+            adapter_driver,
+            adapter_driver_info,
             debug_logged_render_gate: false,
             // Sky resources
             sky_bind_group_layout0: sky.sky_bind_group_layout0,
@@ -263,6 +283,7 @@ impl Viewer {
             fog_history_sampler: fog.fog_history_sampler,
             fog_pipeline: fog.fog_pipeline,
             fog_frame_index: 0,
+            fog_history_state: crate::core::temporal_history::TemporalHistoryState::invalid(),
             fog_bgl3: fog.fog_bgl3,
             _froxel_tex: fog._froxel_tex,
             froxel_view: fog.froxel_view,
@@ -317,10 +338,9 @@ impl Viewer {
             ssr_scene_loaded: false,
             ssr_scene_preset: None,
             // Object transform
-            object_translation: glam::Vec3::ZERO,
+            object_translation: glam::DVec3::ZERO,
             object_rotation: glam::Quat::IDENTITY,
             object_scale: glam::Vec3::ONE,
-            object_transform: glam::Mat4::IDENTITY,
             transform_version: 0,
             // P0.1/M1: OIT (Order-Independent Transparency) - disabled by default
             oit_enabled: false,
@@ -338,6 +358,7 @@ impl Viewer {
             pending_bundle_load: None,
             scene_review_registry: crate::viewer::scene_review::ViewerSceneReviewRegistry::default(
             ),
+            command_error: None,
         };
 
         viewer.sync_ssr_params_to_gi();
@@ -416,7 +437,7 @@ fn create_csm_depth_resources(
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
                 has_dynamic_offset: false,
-                min_binding_size: None,
+                min_binding_size: wgpu::BufferSize::new(128),
             },
             count: None,
         }],
@@ -484,7 +505,7 @@ fn create_csm_depth_resources(
         device,
         &wgpu::BufferDescriptor {
             label: Some("viewer.csm.depth.camera"),
-            size: std::mem::size_of::<[f32; 16]>() as u64,
+            size: std::mem::size_of::<crate::viewer::viewer_types::ViewerShadowUniforms>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         },
@@ -494,10 +515,12 @@ fn create_csm_depth_resources(
 }
 
 const CSM_DEPTH_SHADER: &str = r#"
-struct CsmCamera {
+// Viewer-specific 128-byte ABI: two consecutive mat4x4<f32> values.
+struct ViewerShadowUniforms {
     light_view_proj : mat4x4<f32>,
+    object_model : mat4x4<f32>,
 };
-@group(0) @binding(0) var<uniform> uCam : CsmCamera;
+@group(0) @binding(0) var<uniform> uShadow : ViewerShadowUniforms;
 
 struct VSIn {
     @location(0) pos : vec3<f32>,
@@ -508,8 +531,8 @@ struct VSIn {
 
 @vertex
 fn vs_main(inp: VSIn) -> @builtin(position) vec4<f32> {
-    let pos_ws = vec4<f32>(inp.pos, 1.0);
-    return uCam.light_view_proj * pos_ws;
+    let pos_ws = uShadow.object_model * vec4<f32>(inp.pos, 1.0);
+    return uShadow.light_view_proj * pos_ws;
 }
 
 @fragment

@@ -32,7 +32,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 "#;
 
 /// Terrain uniforms for the simple terrain shader
-#[repr(C)]
+#[repr(C, align(16))]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub(super) struct TerrainUniforms {
     pub view_proj: [[f32; 4]; 4],
@@ -41,21 +41,25 @@ pub(super) struct TerrainUniforms {
     pub lighting: [f32; 4],
     pub background: [f32; 4],
     pub water_color: [f32; 4],
+    pub render_origin_xz: [f32; 2],
+    pub render_span_xz: [f32; 2],
 }
 
 /// Shadow pass uniforms for depth-only terrain rendering (per cascade)
-/// Must match ShadowPassUniforms in terrain_shadow_depth.wgsl exactly (112 bytes)
-#[repr(C)]
+/// Must match ShadowPassUniforms in terrain_shadow_depth.wgsl exactly (128 bytes)
+#[repr(C, align(16))]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ShadowPassUniforms {
     pub light_view_proj: [[f32; 4]; 4], // 64 bytes
     pub terrain_params: [f32; 4],       // 16 bytes: spacing, height_exag, height_min, height_max
     pub grid_params: [f32; 4],          // 16 bytes: grid_resolution, _pad, _pad, _pad
     pub height_curve: [f32; 4],         // 16 bytes: mode, strength, power, _pad
+    pub render_origin_xz: [f32; 2],     // offset 112
+    pub render_span_xz: [f32; 2],       // offset 120
 }
 
 /// Extended uniforms for PBR terrain shader
-#[repr(C)]
+#[repr(C, align(16))]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub(super) struct TerrainPbrUniforms {
     pub view_proj: [[f32; 4]; 4],
@@ -70,6 +74,56 @@ pub(super) struct TerrainPbrUniforms {
     pub lens_params: [f32; 4], // vignette_strength, vignette_radius, vignette_softness, _
     pub screen_dims: [f32; 4], // width, height, _, _
     pub overlay_params: [f32; 4], // enabled (>0.5), opacity, blend_mode (0=normal, 1=multiply, 2=overlay), solid (>0.5)
+    pub render_origin_xz: [f32; 2],
+    pub render_span_xz: [f32; 2],
+}
+
+const _: [(); 160] = [(); std::mem::size_of::<TerrainUniforms>()];
+const _: [(); 16] = [(); std::mem::align_of::<TerrainUniforms>()];
+const _: [(); 144] = [(); std::mem::offset_of!(TerrainUniforms, render_origin_xz)];
+const _: [(); 152] = [(); std::mem::offset_of!(TerrainUniforms, render_span_xz)];
+const _: [(); 128] = [(); std::mem::size_of::<ShadowPassUniforms>()];
+const _: [(); 16] = [(); std::mem::align_of::<ShadowPassUniforms>()];
+const _: [(); 112] = [(); std::mem::offset_of!(ShadowPassUniforms, render_origin_xz)];
+const _: [(); 120] = [(); std::mem::offset_of!(ShadowPassUniforms, render_span_xz)];
+const _: [(); 256] = [(); std::mem::size_of::<TerrainPbrUniforms>()];
+const _: [(); 16] = [(); std::mem::align_of::<TerrainPbrUniforms>()];
+const _: [(); 240] = [(); std::mem::offset_of!(TerrainPbrUniforms, render_origin_xz)];
+const _: [(); 248] = [(); std::mem::offset_of!(TerrainPbrUniforms, render_span_xz)];
+
+#[cfg(test)]
+mod terrain_uniform_abi_tests {
+    use super::{ShadowPassUniforms, TerrainPbrUniforms, TerrainUniforms};
+
+    #[test]
+    fn append_only_uniform_sizes_and_offsets_match_the_m06_contract() {
+        assert_eq!(std::mem::size_of::<TerrainUniforms>(), 160);
+        assert_eq!(std::mem::align_of::<TerrainUniforms>(), 16);
+        assert_eq!(std::mem::offset_of!(TerrainUniforms, render_origin_xz), 144);
+        assert_eq!(std::mem::offset_of!(TerrainUniforms, render_span_xz), 152);
+
+        assert_eq!(std::mem::size_of::<ShadowPassUniforms>(), 128);
+        assert_eq!(std::mem::align_of::<ShadowPassUniforms>(), 16);
+        assert_eq!(
+            std::mem::offset_of!(ShadowPassUniforms, render_origin_xz),
+            112
+        );
+        assert_eq!(
+            std::mem::offset_of!(ShadowPassUniforms, render_span_xz),
+            120
+        );
+
+        assert_eq!(std::mem::size_of::<TerrainPbrUniforms>(), 256);
+        assert_eq!(std::mem::align_of::<TerrainPbrUniforms>(), 16);
+        assert_eq!(
+            std::mem::offset_of!(TerrainPbrUniforms, render_origin_xz),
+            240
+        );
+        assert_eq!(
+            std::mem::offset_of!(TerrainPbrUniforms, render_span_xz),
+            248
+        );
+    }
 }
 
 impl ViewerTerrainScene {

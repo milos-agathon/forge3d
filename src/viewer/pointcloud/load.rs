@@ -1,9 +1,47 @@
-use crate::viewer::pointcloud::PointInstance3D;
+use crate::viewer::pointcloud::PointSource3D;
 
 pub(super) struct LoadResult {
-    pub points: Vec<PointInstance3D>,
+    pub points: Vec<PointSource3D>,
     pub has_rgb: bool,
     pub has_intensity: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PointCloudPathPreflight {
+    pub min: glam::DVec3,
+    pub max: glam::DVec3,
+    pub center: glam::DVec3,
+    pub extent_render: f32,
+}
+
+/// Read only the LAS/LAZ header needed to select and validate the prospective
+/// frame. This performs no point decode, GPU allocation, or live-state change.
+pub(crate) fn preflight_laz_bounds(path: &str) -> Result<PointCloudPathPreflight, String> {
+    use las::{Read, Reader};
+
+    let reader =
+        Reader::from_path(path).map_err(|e| format!("Failed to open LAS/LAZ file: {e}"))?;
+    let header = reader.header();
+    if header.number_of_points() == 0 {
+        return Err("point cloud contains no points".to_string());
+    }
+    let bounds = header.bounds();
+    // LAS is X/Y horizontal and Z-up; viewer world is X/Z horizontal and Y-up.
+    let min = glam::DVec3::new(bounds.min.x, bounds.min.z, bounds.min.y);
+    let max = glam::DVec3::new(bounds.max.x, bounds.max.z, bounds.max.y);
+    if !min.is_finite() || !max.is_finite() || !min.cmple(max).all() {
+        return Err("point-cloud header contains invalid bounds".to_string());
+    }
+    let center = (min + max) * 0.5;
+    let extent_render = crate::camera::Anchor::direction_to_render(max - min)
+        .max_element()
+        .max(100.0);
+    Ok(PointCloudPathPreflight {
+        min,
+        max,
+        center,
+        extent_render,
+    })
 }
 
 pub(super) fn load_laz_points(path: &str, max_points: usize) -> Result<LoadResult, String> {
@@ -50,10 +88,6 @@ pub(super) fn load_laz_points(path: &str, max_points: usize) -> Result<LoadResul
         }
 
         let point = point_result.map_err(|e| format!("Error reading point: {}", e))?;
-        let px = point.x as f32;
-        let py = point.z as f32;
-        let pz = point.y as f32;
-
         let elevation_norm = if z_range > 0.0 {
             ((point.z - min_z) / z_range).clamp(0.0, 1.0) as f32
         } else {
@@ -74,13 +108,12 @@ pub(super) fn load_laz_points(path: &str, max_points: usize) -> Result<LoadResul
         intensity_min = intensity_min.min(point.intensity);
         intensity_max = intensity_max.max(point.intensity);
 
-        points.push(PointInstance3D {
-            position: [px, py, pz],
+        points.push(PointSource3D {
+            position: glam::DVec3::new(point.x, point.z, point.y),
             elevation_norm,
             rgb,
             intensity: point.intensity as f32,
             size: 1.0,
-            _pad: [0.0; 3],
         });
 
         if points.len() % 100000 == 0 {

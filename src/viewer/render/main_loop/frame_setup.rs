@@ -78,61 +78,15 @@ impl Viewer {
 
         // Update labels with current camera (before any rendering)
         // Use terrain camera if terrain is loaded, otherwise use viewer camera
-        {
-            // Gather selected IDs for highlighting (labels use u64 IDs, picking uses u32)
-            let selected_u32 = self.unified_picking.selection_manager().get_selection();
-            let selected_ids: std::collections::HashSet<u64> =
-                selected_u32.iter().map(|&id| id as u64).collect();
-
-            let (view_proj, camera_pos) = if let Some(ref terrain_viewer) = self.terrain_viewer {
-                if let Some(ref terrain) = terrain_viewer.terrain {
-                    // Use terrain camera parameters
-                    let eye = terrain.camera_eye();
-                    let view_mat = terrain.camera_view_matrix();
-                    let proj = Mat4::perspective_rh(
-                        terrain.cam_fov_deg.to_radians(),
-                        self.config.width as f32 / self.config.height as f32,
-                        1.0,
-                        terrain.cam_radius * 10.0,
-                    );
-                    (proj * view_mat, Some(eye))
-                } else {
-                    // No terrain data, use viewer camera
-                    let aspect = self.config.width as f32 / self.config.height as f32;
-                    let fov = self.view_config.fov_deg.to_radians();
-                    let proj = Mat4::perspective_rh(
-                        fov,
-                        aspect,
-                        self.view_config.znear,
-                        self.view_config.zfar,
-                    );
-                    (proj * self.camera.view_matrix(), Some(self.camera.eye()))
-                }
-            } else {
-                // No terrain viewer, use viewer camera
-                let aspect = self.config.width as f32 / self.config.height as f32;
-                let fov = self.view_config.fov_deg.to_radians();
-                let proj = Mat4::perspective_rh(
-                    fov,
-                    aspect,
-                    self.view_config.znear,
-                    self.view_config.zfar,
-                );
-                (proj * self.camera.view_matrix(), Some(self.camera.eye()))
-            };
-
-            self.label_manager
-                .update_with_camera(view_proj, camera_pos, Some(&selected_ids));
-        }
+        let frame = self.current_frame_camera();
+        self.update_labels_for_frame(frame);
 
         // Render sky background (compute) before opaques
         if self.sky_enabled {
             // Build camera matrices (view, proj, inv_view, inv_proj) and eye
-            let aspect = self.config.width as f32 / self.config.height as f32;
-            let fov = self.view_config.fov_deg.to_radians();
-            let proj =
-                Mat4::perspective_rh(fov, aspect, self.view_config.znear, self.view_config.zfar);
-            let view_mat = self.camera.view_matrix();
+            let frame = self.current_frame_camera();
+            let proj = frame.projection(self.config.width, self.config.height);
+            let view_mat = frame.view();
             let inv_view = view_mat.inverse();
             let inv_proj = proj.inverse();
             fn to_arr4(m: Mat4) -> [[f32; 4]; 4] {
@@ -144,7 +98,7 @@ impl Viewer {
                     [c[12], c[13], c[14], c[15]],
                 ]
             }
-            let eye = self.camera.eye();
+            let eye = frame.render_eye();
             let cam_buf: [[[f32; 4]; 4]; 4] = [
                 to_arr4(view_mat),
                 to_arr4(proj),

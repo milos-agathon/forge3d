@@ -101,7 +101,9 @@ impl SsgiRenderer {
                 sample_count: 1,
                 dimension: TextureDimension::D2,
                 format: TextureFormat::Rgba16Float,
-                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                usage: TextureUsages::STORAGE_BINDING
+                    | TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_SRC,
                 view_formats: &[],
             },
         )?;
@@ -122,7 +124,9 @@ impl SsgiRenderer {
                 sample_count: 1,
                 dimension: TextureDimension::D2,
                 format: TextureFormat::Rgba16Float,
-                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                usage: TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_DST
+                    | TextureUsages::COPY_SRC,
                 view_formats: &[],
             },
         )?;
@@ -145,7 +149,8 @@ impl SsgiRenderer {
                 format: TextureFormat::Rgba16Float,
                 usage: TextureUsages::STORAGE_BINDING
                     | TextureUsages::TEXTURE_BINDING
-                    | TextureUsages::COPY_SRC,
+                    | TextureUsages::COPY_SRC
+                    | TextureUsages::COPY_DST,
                 view_formats: &[],
             },
         )?;

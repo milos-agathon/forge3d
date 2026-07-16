@@ -250,6 +250,29 @@ impl ScreenSpaceEffectsManager {
         self.ssgi_renderer.as_ref().map(|r| r.get_settings())
     }
 
+    pub fn ssgi_history_valid(&self) -> bool {
+        self.ssgi_renderer
+            .as_ref()
+            .is_some_and(SsgiRenderer::history_valid)
+    }
+
+    pub fn ssr_history_valid(&self) -> bool {
+        self.ssr_renderer
+            .as_ref()
+            .is_some_and(SsrRenderer::history_valid)
+    }
+
+    pub fn temporal_history_allocation_ids(&self) -> [u64; 2] {
+        [
+            self.ssgi_renderer
+                .as_ref()
+                .map_or(0, SsgiRenderer::history_allocation_id),
+            self.ssr_renderer
+                .as_ref()
+                .map_or(0, SsrRenderer::history_allocation_id),
+        ]
+    }
+
     pub fn ssgi_timings_ms(&self) -> Option<(f32, f32, f32, f32)> {
         self.ssgi_renderer.as_ref().map(|r| r.timings_ms())
     }
@@ -284,10 +307,24 @@ impl ScreenSpaceEffectsManager {
             .map(|r| r.get_output_for_display())
     }
 
-    pub fn ssgi_reset_history(&mut self, device: &Device, queue: &Queue) -> RenderResult<()> {
+    /// Invalidate SSGI temporal state. This is deliberately infallible and
+    /// allocation-free so rebasing cannot fail after the frame anchor changes.
+    pub fn ssgi_reset_history(&mut self) {
         if let Some(ref mut ssgi) = self.ssgi_renderer {
-            ssgi.reset_history(device, queue)?;
+            ssgi.reset_history();
         }
-        Ok(())
+    }
+
+    /// Invalidate all temporal screen-space histories without allocating.
+    pub fn invalidate_temporal_histories(&mut self) {
+        if let Some(ref mut ssao) = self.ssao_renderer {
+            ssao.invalidate_history();
+        }
+        if let Some(ref mut ssgi) = self.ssgi_renderer {
+            ssgi.invalidate_history();
+        }
+        if let Some(ref mut ssr) = self.ssr_renderer {
+            ssr.invalidate_history();
+        }
     }
 }

@@ -51,6 +51,10 @@ impl SsgiRenderer {
         &self.ssgi_history
     }
 
+    pub fn history_allocation_id(&self) -> u64 {
+        self.ssgi_history.ledger_id()
+    }
+
     pub fn upscaled_texture(&self) -> &Texture {
         &self.ssgi_upscaled
     }
@@ -64,9 +68,17 @@ impl SsgiRenderer {
         queue.write_buffer(&self.composite_uniform, 0, bytemuck::cast_slice(&params));
     }
 
-    pub fn reset_history(&mut self, device: &Device, queue: &Queue) -> RenderResult<()> {
+    pub fn reset_history(&mut self) {
+        self.invalidate_history();
         self.scene_history_ready = false;
         self.scene_history_index = 0;
-        self.set_half_res(device, queue, self.half_res)
+    }
+
+    pub fn history_valid(&self) -> bool {
+        self.history_valid
+    }
+
+    pub(crate) fn invalidate_history(&mut self) {
+        self.history_valid = false;
     }
 }

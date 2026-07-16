@@ -12,8 +12,7 @@ use super::protocol::{
 };
 use crate::viewer::event_loop::{
     get_lasso_state, get_pick_events, get_scene_review_state, get_terrain_volumetrics_report,
-    take_pending_bundle_load, take_pending_bundle_save, update_active_scene_variant,
-    update_scene_review_state,
+    take_pending_bundle_load, take_pending_bundle_save,
 };
 use crate::viewer::viewer_enums::ViewerCmd;
 
@@ -238,26 +237,15 @@ where
                             }
                             req @ IpcRequest::SetSceneReviewState { .. } => {
                                 match ipc_request_to_viewer_cmd(&req) {
-                                    Ok(Some(cmd)) => {
-                                        let snapshot = match &cmd {
-                                            ViewerCmd::SetSceneReviewState { state } => {
-                                                Some(state.snapshot())
-                                            }
-                                            _ => None,
-                                        };
-                                        match cmd_sender(cmd) {
-                                            Ok(()) => {
-                                                if let Some(snapshot) = snapshot {
-                                                    update_scene_review_state(snapshot);
-                                                }
-                                                success_response_for_request(&req)
-                                            }
-                                            Err(e) => {
-                                                eprintln!("[IPC] Command error: {}", e);
-                                                IpcResponse::error(e)
-                                            }
+                                    // cmd_sender waits for the correlated event-loop result;
+                                    // success therefore means the runtime transaction committed.
+                                    Ok(Some(cmd)) => match cmd_sender(cmd) {
+                                        Ok(()) => success_response_for_request(&req),
+                                        Err(e) => {
+                                            eprintln!("[IPC] Command error: {}", e);
+                                            IpcResponse::error(e)
                                         }
-                                    }
+                                    },
                                     Ok(None) => IpcResponse::error(
                                         "Internal error: unhandled special request",
                                     ),
@@ -286,10 +274,7 @@ where
                                 } else {
                                     match ipc_request_to_viewer_cmd(&req) {
                                         Ok(Some(cmd)) => match cmd_sender(cmd) {
-                                            Ok(()) => {
-                                                update_active_scene_variant(Some(variant_id));
-                                                success_response_for_request(&req)
-                                            }
+                                            Ok(()) => success_response_for_request(&req),
                                             Err(e) => {
                                                 eprintln!("[IPC] Command error: {}", e);
                                                 IpcResponse::error(e)

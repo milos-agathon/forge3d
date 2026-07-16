@@ -1,5 +1,6 @@
 use super::*;
 use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
+use crate::core::temporal_history::TemporalHistoryState;
 
 mod accessors;
 mod constructor;
@@ -57,6 +58,7 @@ pub struct SsrRenderer {
     counters_buffer: TrackedBuffer,
     counters_readback: TrackedBuffer,
     temporal_params: TrackedBuffer,
+    history_state: TemporalHistoryState,
 
     last_trace_ms: f32,
     last_shade_ms: f32,

@@ -9,6 +9,8 @@ struct Uniforms {
     lighting: vec4<f32>,        // sun_intensity, ambient, shadow_intensity, water_level
     background: vec4<f32>,      // r, g, b, _
     water_color: vec4<f32>,     // r, g, b, _
+    render_origin_xz: vec2<f32>, // append-only ABI offset 144
+    render_span_xz: vec2<f32>,   // append-only ABI offset 152
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -22,23 +24,18 @@ struct VertexOutput {
     @location(2) raw_height: f32,
 };
 
-fn terrain_depth_from_dims(dims: vec2<f32>) -> f32 {
-    return u.terrain_params.z * dims.y / max(dims.x, 1.0);
-}
-
 fn height_to_world_y(h: f32) -> f32 {
     let min_h = u.terrain_params.x;
     let h_range = u.terrain_params.y;
-    let terrain_width = u.terrain_params.z;
+    let simple_height_extent = u.terrain_params.z;
     let z_scale = u.terrain_params.w;
     let h_normalized = (h - min_h) / max(h_range, 1.0);
-    return h_normalized * terrain_width * z_scale * 0.001;
+    return h_normalized * simple_height_extent * z_scale * 0.001;
 }
 
 fn compute_heightmap_normal(uv: vec2<f32>) -> vec3<f32> {
     let dims_u = textureDimensions(heightmap);
     let dims = vec2<f32>(f32(dims_u.x), f32(dims_u.y));
-    let terrain_depth = terrain_depth_from_dims(dims);
     let max_texel = vec2<i32>(i32(dims_u.x) - 1, i32(dims_u.y) - 1);
     let texel = clamp(
         vec2<i32>(
@@ -52,8 +49,8 @@ fn compute_heightmap_normal(uv: vec2<f32>) -> vec3<f32> {
     let right = vec2<i32>(min(texel.x + 1, max_texel.x), texel.y);
     let down = vec2<i32>(texel.x, max(texel.y - 1, 0));
     let up = vec2<i32>(texel.x, min(texel.y + 1, max_texel.y));
-    let step_x = u.terrain_params.z / max(f32(dims_u.x) - 1.0, 1.0);
-    let step_z = terrain_depth / max(f32(dims_u.y) - 1.0, 1.0);
+    let step_x = u.render_span_xz.x / max(f32(dims_u.x) - 1.0, 1.0);
+    let step_z = u.render_span_xz.y / max(f32(dims_u.y) - 1.0, 1.0);
     let h_l = height_to_world_y(textureLoad(heightmap, left, 0).r);
     let h_r = height_to_world_y(textureLoad(heightmap, right, 0).r);
     let h_d = height_to_world_y(textureLoad(heightmap, down, 0).r);
@@ -66,7 +63,6 @@ fn compute_heightmap_normal(uv: vec2<f32>) -> vec3<f32> {
 @vertex
 fn vs_main(@location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>) -> VertexOutput {
     let dims = vec2<f32>(textureDimensions(heightmap));
-    let terrain_depth = terrain_depth_from_dims(dims);
     let max_texel = vec2<i32>(i32(dims.x) - 1, i32(dims.y) - 1);
     let texel = clamp(
         vec2<i32>(i32(uv.x * f32(dims.x)), i32(uv.y * f32(dims.y))),
@@ -74,14 +70,12 @@ fn vs_main(@location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>) -> VertexOut
         max_texel
     );
     let h = textureLoad(heightmap, texel, 0).r;
-    let terrain_width = u.terrain_params.z;
     let world_y = height_to_world_y(h);
 
-    let world_x = uv.x * terrain_width;
-    let world_z = uv.y * terrain_depth;
+    let world_xz = u.render_origin_xz + uv * u.render_span_xz;
     
     var out: VertexOutput;
-    out.world_pos = vec3<f32>(world_x, world_y, world_z);
+    out.world_pos = vec3<f32>(world_xz.x, world_y, world_xz.y);
     out.position = u.view_proj * vec4<f32>(out.world_pos, 1.0);
     out.uv = uv;
     out.raw_height = h;

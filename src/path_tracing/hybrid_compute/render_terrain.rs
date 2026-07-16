@@ -40,6 +40,7 @@ pub struct TerrainReferenceDesc {
     pub sun_azimuth_deg: f32,
     pub sun_elevation_deg: f32,
     pub sun_intensity: f32,
+    pub sun_color: [f32; 3],
     /// Optional equirect environment map (RGB f32 rows) + dims; None uses the
     /// constant-white fallback scaled by `env_intensity`.
     pub env_map: Option<(Vec<f32>, u32, u32)>,
@@ -231,6 +232,26 @@ fn finite3(v: [f32; 3]) -> bool {
     v.iter().all(|x| x.is_finite())
 }
 
+fn factor_sun_lighting(sun_intensity: f32, sun_color: [f32; 3]) -> ([f32; 3], f32, [f32; 3]) {
+    (
+        [
+            sun_intensity * sun_color[0],
+            sun_intensity * sun_color[1],
+            sun_intensity * sun_color[2],
+        ],
+        sun_intensity.max(1e-6),
+        sun_color,
+    )
+}
+
+fn should_require_valid_sun_reservoirs(
+    sun_elevation_deg: f32,
+    sun_intensity: f32,
+    sun_color: [f32; 3],
+) -> bool {
+    sun_elevation_deg > 0.0 && sun_intensity > 0.0 && sun_color.iter().any(|c| *c > 0.0)
+}
+
 /// Trust-boundary validation of every public input before any GPU work.
 fn validate_desc(desc: &TerrainReferenceDesc) -> Result<(), RenderError> {
     let err = |msg: String| Err(RenderError::Render(msg));
@@ -279,6 +300,9 @@ fn validate_desc(desc: &TerrainReferenceDesc) -> Result<(), RenderError> {
     }
     if !(desc.sun_intensity.is_finite() && desc.sun_intensity >= 0.0) {
         return err("sun intensity must be finite and >= 0".into());
+    }
+    if !finite3(desc.sun_color) || desc.sun_color.iter().any(|c| *c < 0.0) {
+        return err("sun color must have three finite non-negative components".into());
     }
     if !(desc.env_intensity.is_finite() && desc.env_intensity >= 0.0) {
         return err("env intensity must be finite and >= 0".into());
@@ -392,11 +416,8 @@ impl HybridPathTracer {
         let el = desc.sun_elevation_deg.to_radians();
         // Direction from surface TOWARD the sun (kernel convention).
         let light_dir = [az.cos() * el.cos(), el.sin(), az.sin() * el.cos()];
-        let light_color = [
-            desc.sun_intensity,
-            desc.sun_intensity * 0.97,
-            desc.sun_intensity * 0.92,
-        ];
+        let (light_color, restir_sun_intensity, restir_sun_color) =
+            factor_sun_lighting(desc.sun_intensity, desc.sun_color);
 
         let mut base = Uniforms {
             width,
@@ -496,8 +517,8 @@ impl HybridPathTracer {
         // --- Directional-light table for the ReSTIR spatial pass ---
         let sun_light = GpuDirectionalLight::new(
             [-light_dir[0], -light_dir[1], -light_dir[2]],
-            desc.sun_intensity.max(1e-6),
-            [1.0, 0.97, 0.92],
+            restir_sun_intensity,
+            restir_sun_color,
             1.0,
         );
         let dir_lights_buf = tracked_create_buffer_init(
@@ -991,7 +1012,12 @@ impl HybridPathTracer {
                 any_valid = true;
             }
         }
-        if desc.sun_elevation_deg > 0.0 && desc.sun_intensity > 0.0 && !any_valid {
+        if should_require_valid_sun_reservoirs(
+            desc.sun_elevation_deg,
+            desc.sun_intensity,
+            desc.sun_color,
+        ) && !any_valid
+        {
             return Err(RenderError::Render(
                 "terrain PT ReSTIR reuse chain produced no valid reservoirs for a sun-lit \
                  scene — temporal/spatial reuse is broken"
@@ -1072,5 +1098,69 @@ impl HybridPathTracer {
             minmax_pyramid_bytes: terrain_scene.pyramid.byte_size,
             gpu_resource_bytes,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{factor_sun_lighting, should_require_valid_sun_reservoirs};
+
+    #[test]
+    fn direct_bakes_intensity_restir_keeps_it_separate() {
+        let i = 2.5f32;
+        let c = [0.9f32, 0.5, 0.2];
+        let (direct, restir_intensity, restir_color) = factor_sun_lighting(i, c);
+        assert_eq!(direct, [i * c[0], i * c[1], i * c[2]]);
+        assert_eq!(restir_color, c);
+        assert_eq!(restir_intensity, i.max(1e-6));
+        assert_ne!(restir_color, direct);
+    }
+
+    #[test]
+    fn default_warm_white_matches_legacy_literals() {
+        let i = 2.5f32;
+        let (direct, restir_intensity, restir_color) = factor_sun_lighting(i, [1.0, 0.97, 0.92]);
+        assert_eq!(direct, [i, i * 0.97, i * 0.92]);
+        assert_eq!(restir_color, [1.0, 0.97, 0.92]);
+        assert_eq!(restir_intensity, i.max(1e-6));
+    }
+
+    #[test]
+    fn zero_colour_disables_sun_but_clamps_restir_intensity() {
+        let (direct, restir_intensity, restir_color) = factor_sun_lighting(2.5, [0.0, 0.0, 0.0]);
+        assert_eq!(direct, [0.0, 0.0, 0.0]);
+        assert_eq!(restir_color, [0.0, 0.0, 0.0]);
+        assert_eq!(restir_intensity, 2.5);
+        assert!(!should_require_valid_sun_reservoirs(
+            35.0,
+            2.5,
+            [0.0, 0.0, 0.0]
+        ));
+    }
+
+    #[test]
+    fn restir_intensity_still_clamps_when_light_intensity_is_zero() {
+        let (_, restir_intensity, restir_color) = factor_sun_lighting(0.0, [1.0, 0.97, 0.92]);
+        assert_eq!(restir_color, [1.0, 0.97, 0.92]);
+        assert_eq!(restir_intensity, 1e-6);
+    }
+
+    #[test]
+    fn nonzero_sun_energy_requires_valid_reservoirs() {
+        assert!(should_require_valid_sun_reservoirs(
+            35.0,
+            2.5,
+            [1.0, 0.97, 0.92]
+        ));
+        assert!(should_require_valid_sun_reservoirs(
+            35.0,
+            2.5,
+            [0.0, 0.0, 0.1]
+        ));
+        assert!(!should_require_valid_sun_reservoirs(
+            -1.0,
+            2.5,
+            [1.0, 0.97, 0.92]
+        ));
     }
 }

@@ -21,9 +21,9 @@ pub(super) fn parse_geometry(
     Ok(())
 }
 
-pub(super) fn compute_normals(positions: &[f32], indices: &[u32]) -> Vec<f32> {
+pub(super) fn compute_normals(positions: &[f64], indices: &[u32]) -> Vec<f32> {
     let vertex_count = positions.len() / 3;
-    let mut normals = vec![0.0f32; positions.len()];
+    let mut normals = vec![[0.0_f64; 3]; vertex_count];
 
     for tri in indices.chunks(3) {
         if tri.len() < 3 {
@@ -49,31 +49,27 @@ pub(super) fn compute_normals(positions: &[f32], indices: &[u32]) -> Vec<f32> {
         ];
 
         for &idx in tri {
-            let base = idx as usize * 3;
-            if base + 2 < normals.len() {
-                normals[base] += n[0];
-                normals[base + 1] += n[1];
-                normals[base + 2] += n[2];
+            let idx = idx as usize;
+            if idx < normals.len() {
+                normals[idx][0] += n[0];
+                normals[idx][1] += n[1];
+                normals[idx][2] += n[2];
             }
         }
     }
 
-    for i in 0..vertex_count {
-        let base = i * 3;
-        let len =
-            (normals[base].powi(2) + normals[base + 1].powi(2) + normals[base + 2].powi(2)).sqrt();
-        if len > 1e-6 {
-            normals[base] /= len;
-            normals[base + 1] /= len;
-            normals[base + 2] /= len;
-        } else {
-            normals[base] = 0.0;
-            normals[base + 1] = 0.0;
-            normals[base + 2] = 1.0;
-        }
-    }
-
     normals
+        .into_iter()
+        .flat_map(|normal| {
+            let normal = glam::DVec3::from(normal);
+            let normal = if normal.length_squared() > 1.0e-12 {
+                normal.normalize()
+            } else {
+                glam::DVec3::Z
+            };
+            crate::camera::Anchor::direction_to_render(normal).to_array()
+        })
+        .collect()
 }
 
 fn parse_solid(
@@ -181,7 +177,7 @@ fn tessellate_surface(building: &mut BuildingGeom, rings: &[Vec<[f64; 3]>]) -> C
     }
     let path = builder.build();
     let mut tessellator = FillTessellator::new();
-    let mut buffers: VertexBuffers<[f32; 3], u32> = VertexBuffers::new();
+    let mut buffers: VertexBuffers<[f64; 3], u32> = VertexBuffers::new();
     tessellator
         .tessellate_path(
             &path,
@@ -251,44 +247,41 @@ impl SurfaceProjection {
     }
 
     fn project(&self, point: [f64; 3]) -> [f32; 2] {
+        let local =
+            crate::camera::Anchor::direction_to_render(glam::DVec3::from(sub(point, self.origin)));
         match self.drop_axis {
-            0 => [point[1] as f32, point[2] as f32],
-            1 => [point[0] as f32, point[2] as f32],
-            _ => [point[0] as f32, point[1] as f32],
+            0 => [local.y, local.z],
+            1 => [local.x, local.z],
+            _ => [local.x, local.y],
         }
     }
 
-    fn unproject(&self, point: [f32; 2]) -> [f32; 3] {
+    fn unproject(&self, point: [f32; 2]) -> [f64; 3] {
         let u = point[0] as f64;
         let v = point[1] as f64;
-        let mut p = self.origin;
+        let mut p = [0.0_f64; 3];
         match self.drop_axis {
             0 => {
                 p[1] = u;
                 p[2] = v;
-                p[0] = self.origin[0]
-                    - (self.normal[1] * (p[1] - self.origin[1])
-                        + self.normal[2] * (p[2] - self.origin[2]))
-                        / self.normal[0];
+                p[0] = -(self.normal[1] * p[1] + self.normal[2] * p[2]) / self.normal[0];
             }
             1 => {
                 p[0] = u;
                 p[2] = v;
-                p[1] = self.origin[1]
-                    - (self.normal[0] * (p[0] - self.origin[0])
-                        + self.normal[2] * (p[2] - self.origin[2]))
-                        / self.normal[1];
+                p[1] = -(self.normal[0] * p[0] + self.normal[2] * p[2]) / self.normal[1];
             }
             _ => {
                 p[0] = u;
                 p[1] = v;
-                p[2] = self.origin[2]
-                    - (self.normal[0] * (p[0] - self.origin[0])
-                        + self.normal[1] * (p[1] - self.origin[1]))
-                        / self.normal[2];
+                p[2] = -(self.normal[0] * p[0] + self.normal[1] * p[1]) / self.normal[2];
             }
         }
-        [p[0] as f32, p[1] as f32, p[2] as f32]
+        [
+            self.origin[0] + p[0],
+            self.origin[1] + p[1],
+            self.origin[2] + p[2],
+        ]
     }
 }
 

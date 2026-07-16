@@ -84,6 +84,7 @@ impl SsgiRenderer {
             ssgi_view: textures.ssgi_view,
             ssgi_history: textures.ssgi_history,
             ssgi_history_view: textures.ssgi_history_view,
+            history_valid: false,
             ssgi_filtered: textures.ssgi_filtered,
             ssgi_filtered_view: textures.ssgi_filtered_view,
             ssgi_upscaled: textures.ssgi_upscaled,

@@ -604,7 +604,7 @@ impl ViewerTerrainScene {
     pub(super) fn dispatch_heightfield_compute(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
-        terrain_width: f32,
+        terrain_span: [f32; 2],
         sun_dir: glam::Vec3,
     ) {
         let terrain = match self.terrain.as_ref() {
@@ -612,7 +612,8 @@ impl ViewerTerrainScene {
             None => return,
         };
         let (width, height) = terrain.dimensions;
-        let terrain_depth = terrain_width * (height as f32 / width.max(1) as f32);
+        let terrain_width = terrain_span[0];
+        let terrain_depth = terrain_span[1];
         let z_scale = terrain.z_scale;
 
         // Height AO compute pass

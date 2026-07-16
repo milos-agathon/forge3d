@@ -24,6 +24,8 @@ pub enum Tiles3dError {
     Unsupported(String),
     /// HTTP error for remote tilesets
     Http(String),
+    /// Decoded content exceeds the configured resident cache budget.
+    CacheBudget { needed: usize, budget: usize },
 }
 
 impl fmt::Display for Tiles3dError {
@@ -37,6 +39,10 @@ impl fmt::Display for Tiles3dError {
             Self::InvalidGltf(msg) => write!(f, "Invalid glTF: {}", msg),
             Self::Unsupported(msg) => write!(f, "Unsupported: {}", msg),
             Self::Http(msg) => write!(f, "HTTP error: {}", msg),
+            Self::CacheBudget { needed, budget } => write!(
+                f,
+                "Cache budget exceeded: tile needs {needed} bytes, budget is {budget} bytes"
+            ),
         }
     }
 }

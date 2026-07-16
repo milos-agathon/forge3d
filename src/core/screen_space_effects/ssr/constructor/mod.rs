@@ -96,6 +96,7 @@ impl SsrRenderer {
             counters_buffer: buffers.counters_buffer,
             counters_readback: buffers.counters_readback,
             temporal_params: buffers.temporal_params,
+            history_state: crate::core::temporal_history::TemporalHistoryState::invalid(),
             last_trace_ms: 0.0,
             last_shade_ms: 0.0,
             last_fallback_ms: 0.0,

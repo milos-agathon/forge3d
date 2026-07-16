@@ -14,12 +14,14 @@ use wgpu::{
 use winit::keyboard::KeyCode;
 use winit::window::Window;
 
+use crate::camera::Anchor;
 use crate::cli::args::GiVizMode;
 use crate::core::gpu_timing::GpuTimingManager;
 use crate::core::ibl::IBLRenderer;
 use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 use crate::core::screen_space_effects::ScreenSpaceEffectsManager;
 use crate::core::shadows::{CsmConfig, CsmShadowMap};
+use crate::core::temporal_history::TemporalHistoryState;
 use crate::core::text_overlay::TextOverlayRenderer;
 use crate::labels::LabelManager;
 use crate::p5::ssr::SsrScenePreset;
@@ -31,6 +33,7 @@ use super::camera_controller::CameraController;
 use super::scene_review::ViewerSceneReviewRegistry;
 use super::viewer_config::{FpsCounter, ViewerConfig};
 use super::viewer_enums::{CaptureKind, FogMode, VizMode};
+use super::viewer_types::FrameCamera;
 
 pub struct Viewer {
     pub(crate) window: Arc<Window>,
@@ -41,8 +44,18 @@ pub struct Viewer {
     pub(crate) adapter: Arc<Adapter>,
     pub(crate) config: SurfaceConfiguration,
     pub(crate) camera: CameraController,
+    /// Sole persistent anchor owned by the interactive viewer.
+    pub(crate) camera_anchor: Anchor,
+    /// Immutable pose/anchor copied at the latest frame boundary.
+    pub(crate) frame_camera: Option<FrameCamera>,
+    pub(crate) camera_rebase_count: u64,
+    pub(crate) history_invalidation_count: u64,
+    pub(crate) last_vector_source_delta: [f64; 3],
+    pub(crate) last_vector_packed_delta: [f32; 3],
     pub(crate) view_config: ViewerConfig,
     pub(crate) frame_count: u64,
+    pub(crate) applied_command_revision: u64,
+    pub(crate) rendered_frame_revision: u64,
     pub(crate) fps_counter: FpsCounter,
     #[cfg(feature = "extension-module")]
     pub(crate) terrain_scene: Option<crate::terrain::TerrainScene>,
@@ -71,16 +84,15 @@ pub struct Viewer {
     // GBuffer geometry pipeline and resources
     pub(crate) geom_bind_group_layout: Option<BindGroupLayout>,
     pub(crate) geom_pipeline: Option<RenderPipeline>,
+    pub(crate) object_overlay_pipeline: Option<RenderPipeline>,
     pub(crate) geom_camera_buffer: Option<TrackedBuffer>,
     pub(crate) geom_bind_group: Option<BindGroup>,
     pub(crate) geom_vb: Option<TrackedBuffer>,
     pub(crate) geom_ib: Option<TrackedBuffer>,
     pub(crate) geom_index_count: u32,
-    // Store original mesh data for CPU-side transform (workaround for GPU buffer sync issue)
-    pub(crate) original_mesh_positions: Vec<[f32; 3]>,
-    pub(crate) original_mesh_normals: Vec<[f32; 3]>,
-    pub(crate) original_mesh_uvs: Vec<[f32; 2]>,
-    pub(crate) original_mesh_indices: Vec<u32>,
+    /// Retained object-local source used by the public absolute-f64 pick route.
+    pub(crate) object_source_positions: Vec<[f32; 3]>,
+    pub(crate) object_source_indices: Vec<u32>,
     pub(crate) z_texture: Option<TrackedTexture>,
     pub(crate) z_view: Option<TextureView>,
     // Albedo texture for geometry
@@ -151,8 +163,14 @@ pub struct Viewer {
     pub(crate) auto_snapshot_done: bool,
     // P5 dump request
     pub(crate) dump_p5_requested: bool,
-    // Adapter name for meta
+    // Exact viewer adapter identity for runtime evidence.
     pub(crate) adapter_name: String,
+    pub(crate) adapter_vendor: u32,
+    pub(crate) adapter_device: u32,
+    pub(crate) adapter_backend: String,
+    pub(crate) adapter_device_type: String,
+    pub(crate) adapter_driver: String,
+    pub(crate) adapter_driver_info: String,
     // Debug: log render gate and snapshot once
     pub(crate) debug_logged_render_gate: bool,
 
@@ -186,6 +204,7 @@ pub struct Viewer {
     pub(crate) fog_history_sampler: Sampler,
     pub(crate) fog_pipeline: ComputePipeline,
     pub(crate) fog_frame_index: u32,
+    pub(crate) fog_history_state: TemporalHistoryState,
     // Froxelized volumetrics (Milestone 4)
     pub(crate) fog_bgl3: BindGroupLayout,
     pub(crate) _froxel_tex: TrackedTexture,
@@ -249,10 +268,9 @@ pub struct Viewer {
     pub(crate) ssr_scene_loaded: bool,
     pub(crate) ssr_scene_preset: Option<SsrScenePreset>,
     // Object transform (for IPC SetTransform command)
-    pub(crate) object_translation: glam::Vec3,
+    pub(crate) object_translation: glam::DVec3,
     pub(crate) object_rotation: glam::Quat,
     pub(crate) object_scale: glam::Vec3,
-    pub(crate) object_transform: glam::Mat4,
     // Transform version counter for IPC ack (incremented on each set_transform)
     pub(crate) transform_version: u64,
     // P0.1/M1: OIT (Order-Independent Transparency)
@@ -271,4 +289,7 @@ pub struct Viewer {
     pub(crate) pending_bundle_load: Option<String>,
     // TV16 review-state registry
     pub(crate) scene_review_registry: ViewerSceneReviewRegistry,
+    /// Per-command execution outcome consumed by the dispatcher and correlated
+    /// IPC completion channel.
+    pub(crate) command_error: Option<String>,
 }

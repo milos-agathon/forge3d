@@ -1,8 +1,12 @@
 from pathlib import Path
-from typing import Any, Callable, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence, TypeAlias
 
 from .bundle import LoadedBundle
 from .diagnostics import Diagnostic
+
+WorldPosition: TypeAlias = tuple[float, float, float]
+VectorOverlayVertex: TypeAlias = tuple[float, float, float, float, float, float, float, int]
+NormalizedExtent: TypeAlias = tuple[float, float, float, float]
 
 
 class LabelBatchResult:
@@ -37,7 +41,7 @@ class ViewerHandle:
     def add_label(
         self,
         text: str,
-        world_pos: tuple[float, float, float],
+        world_pos: WorldPosition,
         size: Optional[float] = ...,
         color: Optional[tuple[float, float, float, float]] = ...,
         halo_color: Optional[tuple[float, float, float, float]] = ...,
@@ -56,7 +60,7 @@ class ViewerHandle:
     def add_line_label(
         self,
         text: str,
-        polyline: Sequence[tuple[float, float, float]],
+        polyline: Sequence[WorldPosition],
         size: Optional[float] = ...,
         color: Optional[tuple[float, float, float, float]] = ...,
         halo_color: Optional[tuple[float, float, float, float]] = ...,
@@ -71,7 +75,7 @@ class ViewerHandle:
     def add_curved_label(
         self,
         text: str,
-        path: Sequence[tuple[float, float, float]],
+        path: Sequence[WorldPosition],
         *,
         size: Optional[float] = ...,
         color: Optional[tuple[float, float, float, float]] = ...,
@@ -84,7 +88,7 @@ class ViewerHandle:
     def add_callout(
         self,
         text: str,
-        anchor: tuple[float, float, float],
+        anchor: WorldPosition,
         offset: tuple[float, float] = ...,
         background_color: Optional[tuple[float, float, float, float]] = ...,
         border_color: Optional[tuple[float, float, float, float]] = ...,
@@ -97,7 +101,7 @@ class ViewerHandle:
     def add_vector_overlay(
         self,
         name: str,
-        vertices: Sequence[Sequence[float]],
+        vertices: Sequence[VectorOverlayVertex],
         indices: Sequence[int],
         primitive: str = ...,
         drape: bool = ...,
@@ -128,6 +132,16 @@ class ViewerHandle:
     ) -> LabelOperationResult: ...
     def label_configuration_state(self) -> dict[str, Any]: ...
     def get_stats(self) -> dict[str, Any]: ...
+    def poll_pick_events(self) -> list[dict[str, Any]]: ...
+    def pick_at(
+        self,
+        x: int,
+        y: int,
+        *,
+        shift: bool = ...,
+        ctrl: bool = ...,
+    ) -> list[dict[str, Any]]: ...
+    def update_labels(self) -> None: ...
     def get_terrain_volumetrics_report(self) -> dict[str, Any]: ...
     def load_obj(self, path: str | Path) -> None: ...
     def load_gltf(self, path: str | Path) -> None: ...
@@ -141,7 +155,7 @@ class ViewerHandle:
         self,
         name: str,
         path: str | Path,
-        extent: Optional[tuple[float, float, float, float]] = ...,
+        extent: Optional[NormalizedExtent] = ...,
         opacity: Optional[float] = ...,
         z_order: Optional[int] = ...,
         preserve_colors: Optional[bool] = ...,
@@ -161,15 +175,15 @@ class ViewerHandle:
     ) -> None: ...
     def set_transform(
         self,
-        translation: Optional[tuple[float, float, float]] = ...,
+        translation: Optional[WorldPosition] = ...,
         rotation_quat: Optional[tuple[float, float, float, float]] = ...,
         scale: Optional[tuple[float, float, float]] = ...,
     ) -> None: ...
     def set_camera_lookat(
         self,
-        eye: tuple[float, float, float],
-        target: tuple[float, float, float],
-        up: tuple[float, float, float] = ...,
+        eye: WorldPosition,
+        target: WorldPosition,
+        up: WorldPosition = ...,
     ) -> None: ...
     def set_fov(self, deg: float) -> None: ...
     def set_sun(self, azimuth_deg: float, elevation_deg: float) -> None: ...
@@ -188,7 +202,7 @@ class ViewerHandle:
         theta_deg: float,
         radius: float,
         fov_deg: Optional[float] = ...,
-        target: Optional[tuple[float, float, float]] = ...,
+        target: Optional[WorldPosition] = ...,
     ) -> None: ...
     def snapshot(
         self,

@@ -336,7 +336,7 @@ pub struct IpcRasterOverlaySpec {
 pub struct IpcSceneVectorOverlay {
     pub name: String,
     #[serde(default)]
-    pub vertices: Vec<[f32; 8]>,
+    pub vertices: Vec<crate::viewer::viewer_enums::ViewerVectorVertex>,
     #[serde(default)]
     pub indices: Vec<u32>,
     #[serde(default = "super::defaults::default_primitive")]
@@ -415,12 +415,63 @@ pub struct IpcSceneReviewState {
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct ViewerStats {
+    pub adapter_name: String,
+    pub adapter_vendor: u32,
+    pub adapter_device: u32,
+    pub adapter_backend: String,
+    pub adapter_device_type: String,
+    pub adapter_driver: String,
+    pub adapter_driver_info: String,
     pub vb_ready: bool,
     pub vertex_count: u32,
     pub index_count: u32,
     pub scene_has_mesh: bool,
     pub transform_version: u64,
     pub transform_is_identity: bool,
+    pub active_camera: String,
+    pub camera_anchor_origin: [f64; 3],
+    pub camera_rebase_count: u64,
+    pub history_invalidation_count: u64,
+    pub last_vector_source_delta: [f64; 3],
+    pub last_vector_packed_delta: [f32; 3],
+    pub vector_source_bytes: u64,
+    pub vector_render_cache_bytes: u64,
+    pub vector_gpu_bytes: u64,
+    pub vector_gpu_allocation_ids: Vec<u64>,
+    pub vector_bvh_cpu_bytes: u64,
+    pub frame_count: u64,
+    /// Latest command revision that completed validation and publication.
+    pub applied_command_revision: u64,
+    /// Applied revision observed by the latest submitted/presented frame.
+    pub rendered_frame_revision: u64,
+    pub taa_enabled: bool,
+    pub taa_history_valid: bool,
+    pub ssgi_enabled: bool,
+    pub ssgi_temporal_enabled: bool,
+    pub ssgi_history_valid: bool,
+    pub ssr_enabled: bool,
+    pub ssr_history_valid: bool,
+    pub fog_enabled: bool,
+    pub fog_history_valid: bool,
+    /// TAA-A, TAA-B, SSGI, SSR, fog-full, fog-half ledger identities.
+    pub temporal_history_allocation_ids: [u64; 6],
+    pub terrain_revision: u64,
+    pub terrain_heightmap_allocation_id: u64,
+    pub terrain_heightmap_bytes: u64,
+    pub terrain_shadow_binding_revision: u64,
+    pub point_cloud_point_count: u64,
+    pub point_cloud_visible_point_count: u64,
+    pub point_cloud_source_bytes: u64,
+    pub point_cloud_render_cache_bytes: u64,
+    pub point_cloud_gpu_instance_bytes: u64,
+    pub point_cloud_gpu_instance_id: u64,
+    pub tracked_buffer_count: u32,
+    pub tracked_texture_count: u32,
+    pub tracked_total_bytes: u64,
+    pub host_visible_bytes: u64,
+    pub peak_host_visible_bytes: u64,
+    pub host_visible_limit_bytes: u64,
+    pub within_host_visible_budget: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -439,6 +490,8 @@ pub struct TerrainVolumetricsReport {
     pub atlas_dimensions: [u32; 3],
     pub total_voxels: u64,
     pub texture_bytes: u64,
+    /// Process-local ledger identity of the live atlas texture (zero if absent).
+    pub atlas_allocation_id: u64,
     pub memory_budget_bytes: u64,
     pub raymarch_steps: u32,
     pub half_res: bool,
@@ -452,6 +505,7 @@ impl Default for TerrainVolumetricsReport {
             atlas_dimensions: [0, 0, 0],
             total_voxels: 0,
             texture_bytes: 0,
+            atlas_allocation_id: 0,
             memory_budget_bytes: 16 * 1024 * 1024,
             raymarch_steps: 0,
             half_res: false,

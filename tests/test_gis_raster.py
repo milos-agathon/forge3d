@@ -83,6 +83,31 @@ def test_read_raster_info_matches_rasterio_geotiff_contract(tmp_path: Path):
     assert info.is_georeferenced is True
 
 
+def test_read_raster_info_preserves_arbitrary_epsg_metadata(tmp_path: Path):
+    rasterio, Affine = _real_rasterio()
+    path = tmp_path / "utm33-metadata.tif"
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        width=2,
+        height=2,
+        count=1,
+        dtype="uint8",
+        crs="EPSG:32633",
+        transform=Affine(2.0, 0.0, 500_000.0, 0.0, -2.0, 5_000_000.0),
+    ) as dst:
+        dst.write(np.ones((2, 2), dtype=np.uint8), 1)
+
+    info = gis.read_raster_info(path)
+
+    assert info.crs_authority == {"name": "EPSG", "code": "32633"}
+    assert info.transform == pytest.approx(
+        (2.0, 0.0, 500_000.0, 0.0, -2.0, 5_000_000.0)
+    )
+    assert info.is_georeferenced is True
+
+
 def test_write_raster_single_band_returns_authoritative_info(tmp_path: Path):
     path = tmp_path / "single.tif"
     data = np.arange(6, dtype=np.float32).reshape(2, 3)
@@ -485,7 +510,9 @@ def test_read_raster_info_missing_crs_warning(tmp_path: Path):
     assert info.crs_wkt is None
     assert info.crs_authority is None
     assert info.transform == pytest.approx((1.0, 0.0, 10.0, 0.0, -1.0, 20.0))
-    assert {"missing_crs", "not_georeferenced"} <= _warning_codes(info)
+    assert info.is_georeferenced is True
+    assert "missing_crs" in _warning_codes(info)
+    assert "not_georeferenced" not in _warning_codes(info)
 
 
 def test_read_raster_info_missing_transform_warning(tmp_path: Path):
@@ -522,19 +549,19 @@ def test_read_raster_info_rejects_malformed_wkt(tmp_path: Path):
         gis.read_raster_info(path)
 
 
-def test_write_raster_positive_y_transform_round_trips(tmp_path: Path):
+def test_write_raster_positive_y_transform_round_trips_as_gis_metadata(tmp_path: Path):
     path = tmp_path / "positive_y.tif"
     transform = (1.0, 0.0, 10.0, 0.0, 1.0, 20.0)
 
-    info = gis.write_raster(
+    gis.write_raster(
         path,
         np.ones((2, 2), dtype=np.uint8),
         crs="EPSG:4326",
         transform=transform,
     )
 
-    assert info.transform == pytest.approx(transform)
-    assert gis.read_raster_info(path).transform == pytest.approx(transform)
+    info = gis.read_raster_info(path)
+    assert tuple(info.transform) == pytest.approx(transform)
 
 
 @pytest.mark.parametrize("shape", [(2, 3, 3), (2, 3, 4)])

@@ -19,14 +19,8 @@ impl Viewer {
             anyhow::bail!("Mesh is empty (no vertices or indices)");
         }
 
-        // Store original mesh data for CPU-side transform workaround
-        self.original_mesh_positions = mesh.positions.clone();
-        self.original_mesh_normals = mesh.normals.clone();
-        self.original_mesh_uvs = mesh.uvs.clone();
-        self.original_mesh_indices = mesh.indices.clone();
         // Reset transform when new mesh is loaded
-        self.object_transform = glam::Mat4::IDENTITY;
-        self.object_translation = glam::Vec3::ZERO;
+        self.object_translation = glam::DVec3::ZERO;
         self.object_rotation = glam::Quat::IDENTITY;
         self.object_scale = glam::Vec3::ONE;
 
@@ -76,6 +70,8 @@ impl Viewer {
         self.geom_vb = Some(vb);
         self.geom_ib = Some(ib);
         self.geom_index_count = mesh.indices.len() as u32;
+        self.object_source_positions.clone_from(&mesh.positions);
+        self.object_source_indices.clone_from(&mesh.indices);
         self.geom_bind_group = None;
 
         update_ipc_stats(true, vertices.len() as u32, mesh.indices.len() as u32, true);

@@ -19,6 +19,10 @@ import time
 from typing import Any, Dict, Optional, Tuple
 
 from ._viewer_binary import find_viewer_binary as _resolve_viewer_binary
+from .viewer_contract import (
+    vector_overlay_vertices as _vector_overlay_vertices,
+    world_position as _world_position,
+)
 
 
 _READY_PATTERN = re.compile(r"FORGE3D_VIEWER_READY\s+port=(\d+)")
@@ -226,7 +230,7 @@ def add_label(
     Args:
         sock: Connected socket to viewer
         text: Label text content
-        world_pos: World position (x, y, z)
+        world_pos: f64 viewer-world position (X, display Y, Z); projected terrain uses Z=-map Y
         size: Font size in pixels (default: 14)
         color: Text color as RGBA tuple (0-1 range)
         halo_color: Halo/outline color as RGBA tuple
@@ -247,7 +251,7 @@ def add_label(
     cmd: Dict[str, Any] = {
         "cmd": "add_label",
         "text": text,
-        "world_pos": list(world_pos),
+        "world_pos": _world_position(world_pos, name="world_pos"),
     }
     if size is not None:
         cmd["size"] = size
@@ -375,7 +379,7 @@ def add_line_label(
     cmd: Dict[str, Any] = {
         "cmd": "add_line_label",
         "text": text,
-        "polyline": [list(p) for p in polyline],
+        "polyline": [_world_position(p, name="polyline point") for p in polyline],
     }
     if size is not None:
         cmd["size"] = size
@@ -462,7 +466,7 @@ def add_curved_label(
     cmd: Dict[str, Any] = {
         "cmd": "add_curved_label",
         "text": text,
-        "polyline": [list(p) for p in polyline],
+        "polyline": [_world_position(p, name="polyline point") for p in polyline],
     }
     if size is not None:
         cmd["size"] = size
@@ -518,7 +522,7 @@ def add_callout(
     cmd: Dict[str, Any] = {
         "cmd": "add_callout",
         "text": text,
-        "anchor": list(anchor),
+        "anchor": _world_position(anchor, name="anchor"),
         "offset": list(offset),
     }
     if background_color is not None:
@@ -618,7 +622,7 @@ def set_declutter_algorithm(
 def add_vector_overlay(
     sock: socket.socket,
     name: str,
-    vertices: list[list[float]],  # list of [x, y, z, r, g, b, a]
+    vertices: list[list[float]],  # [x, y, z, r, g, b, a, feature_id]
     indices: list[int],
     primitive: str = "triangles",
     drape: bool = True,
@@ -634,7 +638,7 @@ def add_vector_overlay(
     Args:
         sock: Connected socket
         name: Unique name for the layer
-        vertices: List of vertices, each is [x, y, z, r, g, b, a]
+        vertices: Eight lanes per row: f64 XYZ, normalized RGBA, integer u32 feature ID
         indices: List of vertex indices
         primitive: "triangles", "lines", "points", etc.
         drape: Whether to drape onto terrain
@@ -645,10 +649,11 @@ def add_vector_overlay(
         point_size: Size for points
         z_order: Draw order
     """
+    validated_vertices = _vector_overlay_vertices(vertices)
     return send_ipc(sock, {
         "cmd": "add_vector_overlay",
         "name": name,
-        "vertices": vertices,
+        "vertices": validated_vertices,
         "indices": indices,
         "primitive": primitive,
         "drape": drape,
@@ -672,6 +677,30 @@ def poll_pick_events(sock: socket.socket) -> Dict[str, Any]:
     Returns a dict with 'pick_events': list of events.
     """
     return send_ipc(sock, {"cmd": "poll_pick_events"})
+
+def pick_at(
+    sock: socket.socket,
+    x: int,
+    y: int,
+    *,
+    shift: bool = False,
+    ctrl: bool = False,
+) -> Dict[str, Any]:
+    """Execute a screen pick against the frozen rendered frame."""
+    return send_ipc(
+        sock,
+        {
+            "cmd": "pick_at",
+            "x": int(x),
+            "y": int(y),
+            "shift": bool(shift),
+            "ctrl": bool(ctrl),
+        },
+    )
+
+def update_labels(sock: socket.socket) -> Dict[str, Any]:
+    """Update labels against the current frozen frame camera and anchor."""
+    return send_ipc(sock, {"cmd": "update_labels"})
 
 def set_lasso_mode(sock: socket.socket, enabled: bool) -> Dict[str, Any]:
     """Enable or disable lasso selection mode."""

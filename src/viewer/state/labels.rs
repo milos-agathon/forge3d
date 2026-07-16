@@ -2,14 +2,13 @@
 
 use crate::labels::{LabelId, LabelStyle};
 use crate::viewer::Viewer;
-use glam::Vec3;
 
 impl Viewer {
     /// Add a label at a world position.
     pub fn add_label(
         &mut self,
         text: &str,
-        world_pos: (f32, f32, f32),
+        world_pos: (f64, f64, f64),
         style: Option<LabelStyle>,
     ) -> u64 {
         self.add_label_with_id(None, text, world_pos, style)
@@ -20,10 +19,10 @@ impl Viewer {
         &mut self,
         id: Option<u64>,
         text: &str,
-        world_pos: (f32, f32, f32),
+        world_pos: (f64, f64, f64),
         style: Option<LabelStyle>,
     ) -> u64 {
-        let pos = Vec3::new(world_pos.0, world_pos.1, world_pos.2);
+        let pos = glam::DVec3::new(world_pos.0, world_pos.1, world_pos.2);
         let style = style.unwrap_or_default();
         let id =
             self.label_manager
@@ -73,17 +72,27 @@ impl Viewer {
     /// Update label positions based on current camera.
     /// Called automatically during render, but can be called manually.
     pub fn update_labels(&mut self) {
-        let aspect = self.config.width as f32 / self.config.height as f32;
-        let fov_rad = self.view_config.fov_deg.to_radians();
-        let view = self.camera.view_matrix();
-        let proj = glam::Mat4::perspective_rh(
-            fov_rad,
-            aspect,
-            self.view_config.znear,
-            self.view_config.zfar,
-        );
-        let view_proj = proj * view;
-        self.label_manager.update(view_proj);
+        let frame = self.current_frame_camera();
+        self.update_labels_for_frame(frame);
+    }
+
+    /// One Viewer-owned label update path for both automatic and manual calls.
+    /// The frozen frame, render eye, viewport, selection, collision index, and
+    /// pick boxes therefore cannot diverge between those entry points.
+    pub(crate) fn update_labels_for_frame(
+        &mut self,
+        frame: crate::viewer::viewer_types::FrameCamera,
+    ) -> usize {
+        let selected_u32 = self.unified_picking.selection_manager().get_selection();
+        let selected_ids: std::collections::HashSet<u64> =
+            selected_u32.iter().map(|&id| u64::from(id)).collect();
+        let view_proj = frame.view_projection(self.config.width, self.config.height);
+        self.label_manager.update_with_camera_anchored(
+            view_proj,
+            Some(frame.render_eye()),
+            Some(&selected_ids),
+            &frame.anchor,
+        )
     }
 
     /// Resize the label collision grid for new screen dimensions.

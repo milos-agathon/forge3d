@@ -37,7 +37,7 @@ impl VectorOverlayStack {
         layer: VectorOverlayLayer,
     ) -> anyhow::Result<u32> {
         let id = id.unwrap_or(self.next_id);
-        self.next_id = self.next_id.max(id.saturating_add(1));
+        let next_id = self.next_id.max(id.saturating_add(1));
         // Create vertex buffer
         let vertex_buffer = tracked_create_buffer_init(
             &self.device,
@@ -68,6 +68,9 @@ impl VectorOverlayStack {
             id,
         };
 
+        // Publish allocator and layer together only after both tracked
+        // allocations succeed. A rejected layer consumes no public ID.
+        self.next_id = next_id;
         self.layers.push(gpu_layer);
         self.dirty = true;
 
@@ -76,6 +79,32 @@ impl VectorOverlayStack {
 
         println!("[vector_overlay] Added layer '{layer_name}' (id={id})");
         Ok(id)
+    }
+
+    /// Allocate a detached full-stack candidate. Existing unmanaged source
+    /// layers are cloned and reallocated in the candidate; the live stack and
+    /// next-ID allocator are not touched unless the caller later swaps it.
+    pub(crate) fn stage_replacement(
+        &self,
+        removed_ids: &[u32],
+        additions: Vec<VectorOverlayLayer>,
+    ) -> anyhow::Result<(Self, Vec<u32>)> {
+        let mut candidate = Self::new(self.device.clone(), self.queue.clone());
+        candidate.next_id = self.next_id;
+        candidate.enabled = self.enabled;
+        candidate.global_opacity = self.global_opacity;
+        for layer in self
+            .layers
+            .iter()
+            .filter(|layer| !removed_ids.contains(&layer.id))
+        {
+            candidate.add_layer_with_id(Some(layer.id), layer.config.clone())?;
+        }
+        let mut ids = Vec::with_capacity(additions.len());
+        for layer in additions {
+            ids.push(candidate.add_layer(layer)?);
+        }
+        Ok((candidate, ids))
     }
 
     /// Remove a vector overlay by ID. Returns true if found and removed.
@@ -128,5 +157,84 @@ impl VectorOverlayStack {
     /// Get visible layers in z-order
     pub fn visible_layers(&self) -> impl Iterator<Item = &VectorOverlayGpu> {
         self.layers.iter().filter(|l| l.config.visible)
+    }
+
+    /// Repack every layer into an existing COPY_DST vertex buffer.
+    pub fn repack_for_anchor(
+        &mut self,
+        terrain: Option<&crate::viewer::terrain::scene::ViewerTerrainData>,
+        anchor: &crate::camera::Anchor,
+    ) {
+        for layer in &mut self.layers {
+            repack_source_vertices(&mut layer.config, terrain, anchor);
+            self.queue.write_buffer(
+                &layer.vertex_buffer,
+                0,
+                bytemuck::cast_slice(&layer.config.vertices),
+            );
+        }
+    }
+
+    pub fn render_layer_data(
+        &self,
+    ) -> impl Iterator<Item = (u32, &str, &[VectorVertex], &[u32], OverlayPrimitive)> {
+        self.layers.iter().map(|layer| {
+            (
+                layer.id,
+                layer.config.name.as_str(),
+                layer.config.vertices.as_slice(),
+                layer.config.indices.as_slice(),
+                layer.config.primitive,
+            )
+        })
+    }
+
+    /// Absolute f64 vector sources retained independently of anchor-packed GPU
+    /// vertices. Used by whole-batch prospective validation.
+    pub(crate) fn source_world_points(&self) -> Vec<DVec3> {
+        self.layers
+            .iter()
+            .flat_map(|layer| {
+                layer
+                    .config
+                    .source_vertices
+                    .iter()
+                    .map(|vertex| vertex.position)
+            })
+            .collect()
+    }
+
+    pub(crate) fn memory_evidence(&self) -> (u64, u64, u64, Vec<u64>) {
+        let source = self
+            .layers
+            .iter()
+            .map(|layer| {
+                layer.config.source_vertices.capacity() * std::mem::size_of::<VectorSourceVertex>()
+            })
+            .sum::<usize>() as u64;
+        let render = self
+            .layers
+            .iter()
+            .map(|layer| {
+                layer.config.vertices.capacity() * std::mem::size_of::<VectorVertex>()
+                    + layer.config.indices.capacity() * std::mem::size_of::<u32>()
+            })
+            .sum::<usize>() as u64;
+        let device = self
+            .layers
+            .iter()
+            .map(|layer| layer.vertex_buffer.size() + layer.index_buffer.size())
+            .sum();
+        let ids = self
+            .layers
+            .iter()
+            .flat_map(|layer| {
+                [
+                    layer.vertex_buffer.ledger_id(),
+                    layer.index_buffer.ledger_id(),
+                ]
+            })
+            .collect();
+        (source, render, device, ids)
     }
 }

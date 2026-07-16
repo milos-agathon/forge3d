@@ -1,9 +1,8 @@
-use crate::core::resource_tracker::tracked_create_buffer_init;
+use crate::viewer::camera_controller::{prospective_anchor, validate_world_point, CoordRole};
 use crate::viewer::event_loop::{
     set_pending_bundle_load, set_pending_bundle_save, update_ipc_transform_stats,
 };
 use crate::viewer::viewer_enums::ViewerCmd;
-use crate::viewer::viewer_types;
 use crate::viewer::Viewer;
 
 pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
@@ -87,17 +86,18 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             true
         }
         ViewerCmd::SetCamLookAt { eye, target, up } => {
-            let eye = glam::Vec3::from(*eye);
-            let target = glam::Vec3::from(*target);
+            let eye = glam::DVec3::from(*eye);
+            let target = glam::DVec3::from(*target);
             let up = glam::Vec3::from(*up);
-            match viewer.camera.set_look_at(eye, target, up) {
+            match viewer
+                .camera
+                .set_look_at(&viewer.camera_anchor, eye, target, up)
+            {
                 Ok(()) => println!("Camera: eye={:?} target={:?} up={:?}", eye, target, up),
-                Err(err) => eprintln!(
-                    "SetCamLookAt rejected ({err:?}): the interactive viewer renders in a \
-                     terrain-local frame (|coord| <= {:.0e}); absolute projected/geodetic \
-                     coordinates must use the anchored offscreen Scene path, not the viewer IPC.",
-                    crate::viewer::camera_controller::VIEWER_LOCAL_FRAME_MAX_COORD
-                ),
+                Err(err) => {
+                    eprintln!("SetCamLookAt rejected: {err}");
+                    viewer.reject_command(format!("camera_rejected: {err} unchanged_state=true"));
+                }
             }
             true
         }
@@ -111,96 +111,39 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             rotation_quat,
             scale,
         } => {
-            if let Some(t) = translation {
-                viewer.object_translation = glam::Vec3::from(*t);
-            }
-            if let Some(q) = rotation_quat {
-                viewer.object_rotation = glam::Quat::from_array(*q).normalize();
-            }
-            if let Some(s) = scale {
-                viewer.object_scale = glam::Vec3::from(*s);
-            }
-            viewer.object_transform = glam::Mat4::from_scale_rotation_translation(
-                viewer.object_scale,
-                viewer.object_rotation,
-                viewer.object_translation,
-            );
-
-            if !viewer.original_mesh_positions.is_empty() {
-                use viewer_types::PackedVertex;
-
-                let vertex_count = viewer.original_mesh_positions.len();
-                let mut vertices: Vec<PackedVertex> = Vec::with_capacity(vertex_count);
-
-                for i in 0..vertex_count {
-                    let orig_pos = glam::Vec3::from(viewer.original_mesh_positions[i]);
-                    let transformed = viewer.object_transform.transform_point3(orig_pos);
-
-                    let orig_nrm = if i < viewer.original_mesh_normals.len() {
-                        glam::Vec3::from(viewer.original_mesh_normals[i])
-                    } else {
-                        glam::Vec3::Y
-                    };
-                    let rot_mat = glam::Mat3::from_quat(viewer.object_rotation);
-                    let transformed_nrm = (rot_mat * orig_nrm).normalize();
-
-                    let uv = if i < viewer.original_mesh_uvs.len() {
-                        viewer.original_mesh_uvs[i]
-                    } else {
-                        [0.0, 0.0]
-                    };
-
-                    vertices.push(PackedVertex {
-                        position: transformed.to_array(),
-                        normal: transformed_nrm.to_array(),
-                        uv,
-                        rough_metal: [0.5, 0.0],
-                    });
-                }
-
-                let vertex_data = bytemuck::cast_slice(&vertices);
-                match tracked_create_buffer_init(
-                    &viewer.device,
-                    &wgpu::util::BufferInitDescriptor {
-                        label: Some("viewer.ipc.mesh.vb.transformed"),
-                        contents: vertex_data,
-                        usage: wgpu::BufferUsages::VERTEX,
-                    },
-                ) {
-                    Ok(new_vb) => {
-                        viewer.geom_vb = Some(new_vb);
-                    }
-                    Err(e) => {
-                        eprintln!("[viewer] failed to allocate transformed mesh vb: {e}");
-                    }
-                }
-
-                let msg = format!(
-                    "[D1-CPU-TRANSFORM] frame={} vertices={} trans=[{:.3},{:.3},{:.3}] scale=[{:.3},{:.3},{:.3}]\n",
-                    viewer.frame_count,
-                    vertex_count,
-                    viewer.object_translation.x,
-                    viewer.object_translation.y,
-                    viewer.object_translation.z,
-                    viewer.object_scale.x,
-                    viewer.object_scale.y,
-                    viewer.object_scale.z
+            let candidate_translation = translation
+                .map(glam::DVec3::from)
+                .unwrap_or(viewer.object_translation);
+            let candidate_rotation = rotation_quat
+                .map(glam::Quat::from_array)
+                .unwrap_or(viewer.object_rotation);
+            let candidate_scale = scale.map(glam::Vec3::from).unwrap_or(viewer.object_scale);
+            let validation_anchor =
+                if viewer.terrain_viewer.is_some() || viewer.point_cloud_active() {
+                    viewer.prospective_frame_camera().anchor
+                } else {
+                    prospective_anchor(&viewer.camera_anchor, candidate_translation)
+                };
+            if validate_world_point(CoordRole::Object, candidate_translation, &validation_anchor)
+                .is_err()
+                || !candidate_rotation.is_finite()
+                || candidate_rotation.length_squared() == 0.0
+                || !candidate_scale.is_finite()
+            {
+                eprintln!("[viewer] SetTransform rejected transactionally");
+                viewer.reject_command(
+                    "object_transform_rejected: invalid finite/residual contract unchanged_state=true",
                 );
-                let _ = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open("examples/out/d1_debug.log")
-                    .and_then(|mut f| {
-                        use std::io::Write;
-                        f.write_all(msg.as_bytes())
-                    });
+                return true;
             }
-
+            viewer.object_translation = candidate_translation;
+            viewer.object_rotation = candidate_rotation.normalize();
+            viewer.object_scale = candidate_scale;
             viewer.transform_version += 1;
-            let is_identity = viewer.object_translation == glam::Vec3::ZERO
-                && viewer.object_rotation == glam::Quat::IDENTITY
-                && viewer.object_scale == glam::Vec3::ONE;
-            update_ipc_transform_stats(viewer.transform_version, is_identity);
+            update_ipc_transform_stats(
+                viewer.transform_version,
+                viewer.object_transform_is_identity(),
+            );
             true
         }
         _ => false,

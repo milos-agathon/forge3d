@@ -4,7 +4,69 @@
 // optionally draped onto terrain heightfield, with proper lighting and shadowing.
 
 use crate::core::resource_tracker::TrackedBuffer;
+use glam::DVec3;
 use std::sync::Arc;
+
+pub(crate) fn build_layer_bvh(
+    layer_id: u32,
+    name: &str,
+    vertices: &[VectorVertex],
+    indices: &[u32],
+    primitive: OverlayPrimitive,
+) -> Option<crate::picking::LayerBvhData> {
+    use crate::accel::cpu_bvh::{build_bvh_cpu, BuildOptions, MeshCPU};
+    use crate::accel::types::{Aabb, BvhNode, Triangle};
+
+    if primitive != OverlayPrimitive::Triangles || indices.is_empty() {
+        return None;
+    }
+    let positions = vertices
+        .iter()
+        .map(|vertex| vertex.position)
+        .collect::<Vec<_>>();
+    let triangles = indices
+        .chunks_exact(3)
+        .map(|chunk| [chunk[0], chunk[1], chunk[2]])
+        .collect::<Vec<_>>();
+    let mesh = MeshCPU::new(positions.clone(), triangles.clone());
+    let bvh = build_bvh_cpu(&mesh, &BuildOptions::default()).ok()?;
+    let mut layer = crate::picking::LayerBvhData::new(layer_id, name.to_string());
+    layer.cpu_nodes = bvh
+        .nodes
+        .iter()
+        .map(|node| BvhNode {
+            aabb: Aabb::new(node.aabb_min, node.aabb_max),
+            kind: u32::from(node.is_leaf()),
+            left_idx: node.left,
+            right_idx: node.right,
+            parent_idx: 0,
+        })
+        .collect();
+    layer.cpu_triangles = bvh
+        .tri_indices
+        .iter()
+        .map(|&tri_idx| {
+            let tri = triangles.get(tri_idx as usize).copied().unwrap_or([0; 3]);
+            Triangle::new(
+                positions.get(tri[0] as usize).copied().unwrap_or([0.0; 3]),
+                positions.get(tri[1] as usize).copied().unwrap_or([0.0; 3]),
+                positions.get(tri[2] as usize).copied().unwrap_or([0.0; 3]),
+            )
+        })
+        .collect();
+    layer.cpu_feature_ids = bvh
+        .tri_indices
+        .iter()
+        .map(|&tri_idx| {
+            triangles
+                .get(tri_idx as usize)
+                .and_then(|tri| vertices.get(tri[0] as usize))
+                .map(|vertex| vertex.feature_id)
+                .unwrap_or(layer_id)
+        })
+        .collect();
+    Some(layer)
+}
 
 /// Primitive type for vector overlay
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -40,6 +102,24 @@ pub struct VectorVertex {
     pub uv: [f32; 2],       // Texture coords (for textured overlays)
     pub normal: [f32; 3],   // For lit overlays (default: up vec)
     pub feature_id: u32,    // Feature ID for picking (0 = no feature)
+}
+
+/// Persistent absolute vector vertex. This is never uploaded directly.
+#[derive(Copy, Clone, Debug)]
+pub struct VectorSourceVertex {
+    pub position: DVec3,
+    pub color: [f32; 4],
+    pub feature_id: u32,
+}
+
+impl From<crate::viewer::viewer_enums::ViewerVectorVertex> for VectorSourceVertex {
+    fn from(value: crate::viewer::viewer_enums::ViewerVectorVertex) -> Self {
+        Self {
+            position: DVec3::from(value.position),
+            color: value.color,
+            feature_id: value.feature_id,
+        }
+    }
 }
 
 impl VectorVertex {
@@ -108,6 +188,7 @@ impl VectorVertex {
 #[derive(Clone, Debug)]
 pub struct VectorOverlayLayer {
     pub name: String,
+    pub source_vertices: Vec<VectorSourceVertex>,
     pub vertices: Vec<VectorVertex>,
     pub indices: Vec<u32>,
     pub primitive: OverlayPrimitive,
@@ -125,6 +206,7 @@ impl Default for VectorOverlayLayer {
     fn default() -> Self {
         Self {
             name: String::new(),
+            source_vertices: Vec::new(),
             vertices: Vec::new(),
             indices: Vec::new(),
             primitive: OverlayPrimitive::Triangles,
@@ -154,13 +236,14 @@ pub struct VectorOverlayGpu {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct VectorOverlayUniforms {
-    pub view_proj: [[f32; 4]; 4],  // 64 bytes
-    pub sun_dir: [f32; 4],         // 16 bytes
-    pub lighting: [f32; 4],        // sun_intensity, ambient, shadow_strength, terrain_width
-    pub layer_params: [f32; 4],    // opacity, depth_bias, line_width, point_size
-    pub highlight_color: [f32; 4], // Highlight color for selected features (RGBA)
-    pub selected_feature_id: u32,  // Currently selected feature ID (0 = none)
-    pub _pad: [u32; 7],            // Padding: WGSL vec3 has 16-byte alignment → 160 bytes total
+    pub view_proj: [[f32; 4]; 4],     // 64 bytes
+    pub sun_dir: [f32; 4],            // 16 bytes
+    pub lighting: [f32; 4],           // sun_intensity, ambient, shadow_strength, terrain_width
+    pub layer_params: [f32; 4],       // opacity, depth_bias, line_width, point_size
+    pub highlight_color: [f32; 4],    // Highlight color for selected features (RGBA)
+    pub selected_feature_id: u32,     // Currently selected feature ID (0 = none)
+    pub _pad: [u32; 7],               // Preserve the existing 160-byte prefix.
+    pub render_origin_span: [f32; 4], // Anchored origin x/z and physical span x/z.
 }
 
 pub struct VectorOverlayStack {
@@ -233,7 +316,7 @@ fn compute_terrain_normal(
     dims: (u32, u32),
     u: f32,
     v: f32,
-    terrain_width: f32,
+    terrain_span: [f32; 2],
 ) -> [f32; 3] {
     let (w, h) = dims;
     if w < 2 || h < 2 || heightmap.is_empty() {
@@ -249,8 +332,8 @@ fn compute_terrain_normal(
     let h_up = sample_heightmap_bilinear(heightmap, dims, u, v + dv);
 
     // Gradient in height per world unit
-    let world_du = terrain_width * 2.0 * du;
-    let world_dv = terrain_width * 2.0 * dv;
+    let world_du = terrain_span[0] * 2.0 * du;
+    let world_dv = terrain_span[1] * 2.0 * dv;
 
     let dh_dx = (h_right - h_left) / world_du;
     let dh_dz = (h_up - h_down) / world_dv;
@@ -260,16 +343,48 @@ fn compute_terrain_normal(
     [-dh_dx / len, 1.0 / len, -dh_dz / len]
 }
 
-/// Parameters for drape_vertices
-pub struct DrapeParams<'a> {
-    pub vertices: &'a mut [VectorVertex],
-    pub heightmap: &'a [f32],
-    pub dims: (u32, u32),
-    pub terrain_width: f32,
-    pub terrain_origin: (f32, f32),
-    pub height_offset: f32,
-    pub height_min: f32,
-    pub height_scale: f32,
+/// Repack persistent f64 vector sources into the current render frame. Drape
+/// UVs are computed in f64 before the one Anchor narrowing boundary.
+pub fn repack_source_vertices(
+    layer: &mut VectorOverlayLayer,
+    terrain: Option<&crate::viewer::terrain::scene::ViewerTerrainData>,
+    anchor: &crate::camera::Anchor,
+) {
+    layer.vertices.resize(
+        layer.source_vertices.len(),
+        VectorVertex::with_feature_id(0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0),
+    );
+    for (source, render) in layer.source_vertices.iter().zip(layer.vertices.iter_mut()) {
+        let mut world = source.position;
+        let mut normal = [0.0, 1.0, 0.0];
+        if layer.drape {
+            if let Some(terrain) = terrain {
+                let u = (world.x - terrain.world_origin_xz.x) / terrain.world_span_xz.x;
+                let v = (world.z - terrain.world_origin_xz.y) / terrain.world_span_xz.y;
+                let uv = crate::camera::Anchor::direction_to_render(DVec3::new(u, v, 0.0));
+                let height =
+                    sample_heightmap_bilinear(&terrain.heightmap, terrain.dimensions, uv.x, uv.y);
+                world.y +=
+                    f64::from((height - terrain.domain.0) * terrain.z_scale + layer.drape_offset);
+                let span = crate::camera::Anchor::direction_to_render(DVec3::new(
+                    terrain.world_span_xz.x,
+                    terrain.world_span_xz.y,
+                    0.0,
+                ));
+                normal = compute_terrain_normal(
+                    &terrain.heightmap,
+                    terrain.dimensions,
+                    uv.x,
+                    uv.y,
+                    [span.x, span.y],
+                );
+            }
+        }
+        render.position = anchor.to_render_vec3(world).to_array();
+        render.color = source.color;
+        render.normal = normal;
+        render.feature_id = source.feature_id;
+    }
 }
 
 /// Parameters for render_layer_with_highlight
@@ -278,57 +393,9 @@ pub struct RenderLayerParams {
     pub view_proj: [[f32; 4]; 4],
     pub sun_dir: [f32; 3],
     pub lighting: [f32; 4],
+    pub render_origin_span: [f32; 4],
     pub selected_feature_id: u32,
     pub highlight_color: [f32; 4],
-}
-
-/// Drape vertices onto terrain surface
-///
-/// # Arguments
-/// * `params` - Struct containing all draping parameters
-pub fn drape_vertices(params: DrapeParams) {
-    let DrapeParams {
-        vertices,
-        heightmap,
-        dims,
-        terrain_width,
-        terrain_origin,
-        height_offset,
-        height_min,
-        height_scale,
-    } = params;
-
-    if heightmap.is_empty() || dims.0 == 0 || dims.1 == 0 {
-        // If no heightmap, just add offset to original Y
-        for v in vertices.iter_mut() {
-            v.position[1] += height_offset;
-            v.normal = [0.0, 1.0, 0.0];
-        }
-        return;
-    }
-
-    for v in vertices.iter_mut() {
-        // Convert world XZ to terrain UV
-        let x = v.position[0] - terrain_origin.0;
-        let z = v.position[2] - terrain_origin.1;
-
-        // Normalize to [0, 1] range (terrain goes from 0 to terrain_width)
-        let u = (x / terrain_width).clamp(0.0, 1.0);
-        let vv = (z / terrain_width).clamp(0.0, 1.0);
-
-        // Sample heightmap and normalize like the terrain shader does:
-        // world_y = (h - min_h) / h_range * terrain_width * z_scale * 0.001
-        // Here height_scale = terrain_width * z_scale * 0.001 / h_range
-        let h = sample_heightmap_bilinear(heightmap, dims, u, vv);
-        let terrain_height = (h - height_min) * height_scale;
-
-        // Set vertex Y to terrain height + offset + original vertex height
-        // This preserves building extrusion heights when draping
-        v.position[1] = terrain_height + height_offset + v.position[1];
-
-        // Compute normal from terrain gradient for proper lighting
-        v.normal = compute_terrain_normal(heightmap, dims, u, vv, terrain_width);
-    }
 }
 
 // ============================================================================
@@ -347,6 +414,7 @@ struct Uniforms {
     highlight_color: vec4<f32>, // Highlight color for selected features (RGBA)
     selected_feature_id: u32,  // Currently selected feature ID (0 = none)
     _pad: vec3<u32>,           // Padding for alignment
+    render_origin_span: vec4<f32>, // anchored origin x/z, physical span x/z
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -392,7 +460,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let sun_intensity = u.lighting.x;
     let ambient = u.lighting.y;
     let shadow_strength = u.lighting.z;
-    let terrain_width = u.lighting.w;
     
     // Normalize normal
     let normal = normalize(in.normal);
@@ -405,10 +472,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Sample sun visibility for shadow (use world position to compute UV)
     // UV is based on world XZ normalized to [0,1] (terrain goes from 0 to terrain_width)
     // Clamp to [0,1] to ensure valid texture sampling even for vertices slightly outside bounds
-    let uv = clamp(vec2<f32>(
-        (in.world_pos.x / terrain_width),
-        (in.world_pos.z / terrain_width)
-    ), vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
+    let uv = clamp(
+        (in.world_pos.xz - u.render_origin_span.xy) / u.render_origin_span.zw,
+        vec2<f32>(0.0),
+        vec2<f32>(1.0),
+    );
     let sun_vis = textureSampleLevel(sun_vis_tex, sun_vis_sampler, uv, 0.0).r;
     
     // Shadow factor: 1.0 = fully lit, 0.0 = fully shadowed
@@ -442,17 +510,17 @@ fn fs_main_oit(in: VertexOutput) -> OitOutput {
     let sun_intensity = u.lighting.x;
     let ambient = u.lighting.y;
     let shadow_strength = u.lighting.z;
-    let terrain_width = u.lighting.w;
     
     let normal = normalize(in.normal);
     let sun_dir = normalize(u.sun_dir.xyz);
     let ndotl = max(dot(normal, sun_dir), 0.0);
     let diffuse = ndotl * sun_intensity;
     
-    let uv = clamp(vec2<f32>(
-        (in.world_pos.x / terrain_width),
-        (in.world_pos.z / terrain_width)
-    ), vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
+    let uv = clamp(
+        (in.world_pos.xz - u.render_origin_span.xy) / u.render_origin_span.zw,
+        vec2<f32>(0.0),
+        vec2<f32>(1.0),
+    );
     let sun_vis = textureSampleLevel(sun_vis_tex, sun_vis_sampler, uv, 0.0).r;
     let shadow = mix(1.0, sun_vis, shadow_strength);
     let light = ambient + diffuse * shadow;
@@ -480,6 +548,60 @@ fn fs_main_oit(in: VertexOutput) -> OitOutput {
     return out;
 }
 "#;
+
+#[cfg(test)]
+mod option2_precision_tests {
+    use super::*;
+
+    fn layer_at(origin: DVec3) -> VectorOverlayLayer {
+        VectorOverlayLayer {
+            source_vertices: vec![
+                VectorSourceVertex {
+                    position: origin,
+                    color: [1.0, 0.0, 0.0, 1.0],
+                    feature_id: 7,
+                },
+                VectorSourceVertex {
+                    position: origin + DVec3::new(0.001, 0.0, 0.0),
+                    color: [0.0, 0.0, 1.0, 1.0],
+                    feature_id: 8,
+                },
+            ],
+            primitive: OverlayPrimitive::Points,
+            ..VectorOverlayLayer::default()
+        }
+    }
+
+    #[test]
+    fn earth_scale_millimetre_survives_anchor_packing_and_rebases() {
+        let origin = DVec3::new(6_378_137.0, 42.0, -5_500_000.0);
+        let mut layer = layer_at(origin);
+        for offset in [-500.0, -125.0, 0.0, 125.0, 500.0] {
+            let mut anchor = crate::camera::Anchor::new();
+            anchor.rebase_if_needed(origin + DVec3::new(offset, 0.0, 0.0));
+            repack_source_vertices(&mut layer, None, &anchor);
+            let packed_delta =
+                f64::from(layer.vertices[1].position[0] - layer.vertices[0].position[0]);
+            assert!(
+                (packed_delta - 0.001).abs() <= 0.00025,
+                "packed delta {packed_delta} at rebase offset {offset}"
+            );
+            assert_eq!(layer.vertices[0].feature_id, 7);
+            assert_eq!(layer.vertices[1].feature_id, 8);
+        }
+    }
+
+    #[test]
+    fn zero_millimetre_negative_control_collapses_exactly() {
+        let origin = DVec3::new(6_378_137.0, 42.0, -5_500_000.0);
+        let mut layer = layer_at(origin);
+        layer.source_vertices[1].position = origin;
+        let mut anchor = crate::camera::Anchor::new();
+        anchor.rebase_if_needed(origin);
+        repack_source_vertices(&mut layer, None, &anchor);
+        assert_eq!(layer.vertices[0].position, layer.vertices[1].position);
+    }
+}
 
 // ============================================================================
 // Pipeline and Rendering Implementation (Milestone 3)

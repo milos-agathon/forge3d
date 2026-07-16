@@ -90,6 +90,7 @@ specs/001-diagnostics-support-matrices/*
 !specs/001-diagnostics-support-matrices/tasks.md
 output/
 logs/
+tests/artifacts/
 docs/*audit*.md
 docs/*prompt*.md
 docs/**/*audit*.md

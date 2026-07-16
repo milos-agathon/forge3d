@@ -505,6 +505,209 @@ jobs:
           if-no-files-found: error
 
   # ============================================================================
+  # M-06 Option-2 Full Geospatial Viewer acceptance
+  #
+  # This is a required, zero-skip hardware lane. An unavailable adapter, a
+  # stale/missing release viewer, or a skipped acceptance test is a hard error.
+  # ============================================================================
+  test-m06-full-geospatial-viewer:
+    name: M-06 Full Geospatial Viewer (NVIDIA Vulkan)
+    needs: build-wheels
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
+    timeout-minutes: 35
+    env:
+      WGPU_BACKEND: vulkan
+      FORGE3D_NO_BOOTSTRAP: '1'
+      FORGE3D_TEST_INSTALLED_WHEEL: '1'
+      RUN_M06_VIEWER_CI: '1'
+      FORGE3D_VIEWER_BINARY: ${{ github.workspace }}/target/release/interactive_viewer.exe
+      FORGE3D_TEST_DEM: ${{ github.workspace }}/assets/tif/switzerland_dem.tif
+
+    steps:
+      - name: Initialize persistent M-06 evidence before checkout
+        shell: pwsh
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $artifactDir = Join-Path $env:RUNNER_TEMP "forge3d-m06-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          "FORGE3D_M06_ARTIFACT_DIR=$artifactDir" | Add-Content $env:GITHUB_ENV
+          $env:FORGE3D_M06_ARTIFACT_DIR = $artifactDir
+          New-Item -ItemType Directory -Force $env:FORGE3D_M06_ARTIFACT_DIR | Out-Null
+          "initialized=$(Get-Date -Format o)" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/sentinel.txt"
+          @{
+            repository = $env:GITHUB_REPOSITORY
+            base_sha = $env:BASE_SHA
+            head_sha = $env:HEAD_SHA
+            run_id = $env:GITHUB_RUN_ID
+            run_attempt = $env:GITHUB_RUN_ATTEMPT
+            job = $env:GITHUB_JOB
+            runner_name = $env:RUNNER_NAME
+            runner_os = $env:RUNNER_OS
+            runner_arch = $env:RUNNER_ARCH
+            required_labels = @('self-hosted', 'Windows', 'X64', 'forge3d-gpu', 'gpu-nvidia')
+            required_backend = 'vulkan'
+            installed_wheel_required = $true
+          } | ConvertTo-Json -Depth 4 | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/run-context.json"
+
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Capture checkout and LFS provenance
+        if: always()
+        shell: pwsh
+        run: |
+          try { git rev-parse HEAD | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/checked-out-head.txt" } catch { $_ | Out-String | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/checkout-error.txt" }
+          try { git lfs env 2>&1 | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/git-lfs-env.txt" } catch { $_ | Out-String | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/git-lfs-error.txt" }
+          try { git lfs ls-files --long 2>&1 | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/git-lfs-files.txt" } catch { $_ | Out-String | Add-Content "$env:FORGE3D_M06_ARTIFACT_DIR/git-lfs-error.txt" }
+
+      - name: Select stable Rust toolchain
+        shell: pwsh
+        run: |
+          rustup default stable
+          rustup show active-toolchain | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/rust-toolchain.txt"
+
+      - name: Use runner-provisioned Python
+        shell: pwsh
+        run: |
+          python --version 2>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/python-bootstrap-version.txt"
+          python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-windows
+          path: dist/
+
+      - name: Install wheel and acceptance dependencies
+        shell: pwsh
+        run: |
+          python --version 2>&1 | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/python-version.txt"
+          rustc -Vv 2>&1 | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/rustc-version.txt"
+          cargo -Vv 2>&1 | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/cargo-version.txt"
+          Get-ChildItem dist -Filter *.whl | ForEach-Object {
+            Get-FileHash $_.FullName -Algorithm SHA256 | Format-List | Out-String
+          } | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/wheel-sha256.txt"
+          python scripts/install_compatible_wheel.py dist *>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/wheel-install.log"
+          $wheelCode = $LASTEXITCODE
+          python -m pip install pytest numpy scipy pillow rasterio laspy pyproj pooch *>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/dependency-install.log"
+          $dependencyCode = $LASTEXITCODE
+          "wheel_install=$wheelCode`ndependencies=$dependencyCode" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/install-exit-codes.txt"
+          python -m pip freeze | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/python-dependencies.txt"
+          python -c "import hashlib, json, pathlib, forge3d, forge3d._forge3d as native; p=pathlib.Path(native.__file__).resolve(); print(json.dumps({'package': str(pathlib.Path(forge3d.__file__).resolve()), 'native_extension': str(p), 'native_sha256': hashlib.sha256(p.read_bytes()).hexdigest()}, indent=2))" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/installed-wheel-runtime.json"
+          if ($wheelCode -ne 0) { exit $wheelCode }
+          if ($dependencyCode -ne 0) { exit $dependencyCode }
+
+      - name: Build the exact release viewer under test
+        shell: pwsh
+        run: |
+          $command = 'cargo build --release --bin interactive_viewer --features async_readback,enable-gpu-instancing'
+          $command | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/build-command.txt"
+          cargo build --release --bin interactive_viewer --features async_readback,enable-gpu-instancing *>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/build.log"
+          $code = $LASTEXITCODE
+          "build=$code" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/build-exit-code.txt"
+          if (Test-Path $env:FORGE3D_VIEWER_BINARY) {
+            Get-FileHash $env:FORGE3D_VIEWER_BINARY -Algorithm SHA256 | Format-List | Out-String | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/viewer-sha256.txt"
+          }
+          exit $code
+
+      - name: Run M-06 Rust ABI and adapter gates
+        shell: pwsh
+        run: |
+          $features = 'default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings'
+          $filters = @('terrain_uniform_abi_tests', 'backend_request_tests', 'camera::anchor::tests')
+          $filters -join "`n" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/rust-test-filters.txt"
+          $failed = 0
+          foreach ($filter in $filters) {
+            cargo test --release --features $features $filter -- --test-threads=1 *>&1 | Tee-Object -Append "$env:FORGE3D_M06_ARTIFACT_DIR/rust-gates.log"
+            if ($LASTEXITCODE -ne 0) { $failed = $LASTEXITCODE; break }
+          }
+          "rust_gates=$failed" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/rust-gates-exit-code.txt"
+          exit $failed
+
+      - name: Require the exact NVIDIA Vulkan adapter
+        shell: pwsh
+        run: |
+          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:FORGE3D_M06_ARTIFACT_DIR/adapter-probe.json" *>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/adapter-probe.log"
+          $code = $LASTEXITCODE
+          "adapter_probe=$code" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/adapter-probe-exit-code.txt"
+          exit $code
+
+      - name: Run M-06 source and live acceptance
+        shell: pwsh
+        run: |
+          $hdriDir = Join-Path $env:GITHUB_WORKSPACE 'assets/hdri'
+          New-Item -ItemType Directory -Force $hdriDir | Out-Null
+          python -c "from pathlib import Path; from tests.test_terrain_viewer_pbr import write_asymmetric_test_hdr; write_asymmetric_test_hdr(Path('assets/hdri/brown_photostudio_02_4k.hdr'))"
+          $tests = @(
+            'tests/test_m06_anchoring_boundary.py',
+            'tests/test_world_coord_f32_gate.py',
+            'tests/test_m06_viewer_matrix_contract.py',
+            'tests/test_m06_single_rebase_contract.py',
+            'tests/test_m06_temporal_resource_contract.py',
+            'tests/test_m06_scene_review_transaction.py',
+            'tests/test_m06_command_transaction.py',
+            'tests/test_m06_python_viewer_contracts.py',
+            'tests/test_gis_raster.py',
+            'tests/test_gis_crs_affine.py',
+            'tests/test_3dtiles_parse.py',
+            'tests/test_buildings_cityjson.py',
+            'tests/test_viewer_ipc.py',
+            'tests/test_api_contracts.py',
+            'tests/test_install_smoke.py',
+            'tests/test_allocation_gate.py',
+            'tests/test_no_silent_degradation.py',
+            'tests/test_certificate_verifier.py',
+            'tests/test_render_certificate_contract.py',
+            'tests/test_recipe_goldens.py::test_certificate_refresh_rejects_capability_degradation',
+            'tests/test_recipe_goldens.py::test_recipe_golden_gate_rejects_pixel_regression',
+            'tests/test_m06_full_geospatial_viewer.py',
+            'tests/test_terrain_viewer_pbr.py',
+            'tests/test_vector_overlay_rendering.py'
+          )
+          $tests -join "`n" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/pytest-files.txt"
+          $started = Get-Date
+          python -m pytest @tests -v --tb=short --junitxml="$env:FORGE3D_M06_ARTIFACT_DIR/junit.xml" *>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/pytest.log"
+          $pytestCode = $LASTEXITCODE
+          $finished = Get-Date
+          @{
+            started = $started.ToString('o')
+            finished = $finished.ToString('o')
+            elapsed_seconds = ($finished - $started).TotalSeconds
+          } | ConvertTo-Json | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/test-timing.json"
+          $verifyCode = 99
+          if (Test-Path "$env:FORGE3D_M06_ARTIFACT_DIR/junit.xml") {
+            python scripts/assert_junit_zero_skips.py "$env:FORGE3D_M06_ARTIFACT_DIR/junit.xml" *>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/junit-verifier.log"
+            $verifyCode = $LASTEXITCODE
+          } else {
+            'JUnit was not produced' | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/junit-verifier.log"
+          }
+          "pytest=$pytestCode`njunit_verifier=$verifyCode" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/test-exit-codes.txt"
+          if ($pytestCode -ne 0) { exit $pytestCode }
+          if ($verifyCode -ne 0) { exit $verifyCode }
+
+      - name: Finalize evidence manifest
+        if: always()
+        shell: pwsh
+        run: |
+          @{
+            finalized = (Get-Date -Format o)
+            github_sha = $env:GITHUB_SHA
+            backend = $env:WGPU_BACKEND
+            files = @(Get-ChildItem $env:FORGE3D_M06_ARTIFACT_DIR -Recurse -File | ForEach-Object {
+              @{ path = $_.FullName.Substring($env:FORGE3D_M06_ARTIFACT_DIR.Length + 1); bytes = $_.Length; sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash }
+            })
+          } | ConvertTo-Json -Depth 5 | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/evidence-manifest.json"
+
+      - name: Upload M-06 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m06-full-geospatial-viewer-evidence
+          path: ${{ runner.temp }}/forge3d-m06-${{ github.run_id }}-${{ github.run_attempt }}/
+          if-no-files-found: error
+
+  # ============================================================================
   # Documentation Build
   # ============================================================================
   build-docs:
@@ -547,7 +750,7 @@ jobs:
   # ============================================================================
   ci-success:
     name: CI Success
-    needs: [terrain-golden-paths, test-rust, build-wheels, test-python, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, build-docs]
+    needs: [terrain-golden-paths, test-rust, build-wheels, test-python, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, build-docs]
     runs-on: ubuntu-latest
     if: always()
 
@@ -570,6 +773,7 @@ jobs:
              [ "${{ needs.test-python-linux-arm.result }}" != "success" ] || \
              { [ "${{ needs.test-golden-images.result }}" != "success" ] && [ "${{ needs.test-golden-images.result }}" != "skipped" ]; } || \
              { [ "${{ needs.refresh-recipe-certificates.result }}" != "success" ] && [ "${{ needs.refresh-recipe-certificates.result }}" != "skipped" ]; } || \
+             [ "${{ needs.test-m06-full-geospatial-viewer.result }}" != "success" ] || \
              [ "${{ needs.build-docs.result }}" != "success" ]; then
             echo "❌ CI failed"
             exit 1

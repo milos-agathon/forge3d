@@ -6,6 +6,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
         ViewerCmd::SetSceneReviewState { state } => {
             if let Err(err) = viewer.set_scene_review_state(state.clone()) {
                 eprintln!("[scene_review] failed to install review state: {err}");
+                viewer.reject_command(format!("scene_review_transaction_failed: {err}"));
             }
             true
         }
@@ -15,6 +16,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                     "[scene_review] failed to apply variant '{}': {err}",
                     variant_id
                 );
+                viewer.reject_command(format!("scene_variant_transaction_failed: {err}"));
             }
             true
         }
@@ -24,6 +26,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                     "[scene_review] failed to set layer '{}' visible={}: {err}",
                     layer_id, visible
                 );
+                viewer.reject_command(format!("review_layer_transaction_failed: {err}"));
             }
             true
         }

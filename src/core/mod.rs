@@ -57,6 +57,7 @@ pub mod jitter;
 
 // P1.3: Temporal Anti-Aliasing
 pub mod taa;
+pub(crate) mod temporal_history;
 
 // C10: Hierarchical scene graph
 pub mod scene_graph;

@@ -51,6 +51,7 @@ pub fn active_backend() -> Option<String> {
 }
 
 /// Adapter that owns the initialized global render context, if any.
+#[cfg(feature = "extension-module")]
 pub(crate) fn active_adapter_info() -> Option<(wgpu::AdapterInfo, bool)> {
     CTX.get()
         .map(|c| (c.adapter.get_info(), c.software_fallback))
@@ -112,35 +113,31 @@ pub fn deterministic_allow_software() -> bool {
 /// When the variable is set but names no recognized backend, this returns an
 /// error rather than silently falling through to the platform default — a bad
 /// pin must surface as a catchable Python exception, never be ignored.
-fn requested_backend_from_env() -> RenderResult<Option<(String, wgpu::Backends, wgpu::Backend)>> {
+pub(crate) fn requested_backend_from_env(
+) -> RenderResult<Option<(String, wgpu::Backends, wgpu::Backend)>> {
     use std::env;
     let s = match env::var("WGPU_BACKENDS").or_else(|_| env::var("WGPU_BACKEND")) {
         Ok(s) => s,
         Err(_) => return Ok(None),
     };
-    let s_l = s.to_lowercase();
-    if s_l.contains("metal") {
-        return Ok(Some((s, wgpu::Backends::METAL, wgpu::Backend::Metal)));
-    }
-    if s_l.contains("vulkan") {
-        return Ok(Some((s, wgpu::Backends::VULKAN, wgpu::Backend::Vulkan)));
-    }
-    if s_l.contains("dx12") {
-        return Ok(Some((s, wgpu::Backends::DX12, wgpu::Backend::Dx12)));
-    }
-    if s_l.contains("gl") {
-        return Ok(Some((s, wgpu::Backends::GL, wgpu::Backend::Gl)));
-    }
-    if s_l.contains("webgpu") {
-        return Ok(Some((
-            s,
-            wgpu::Backends::BROWSER_WEBGPU,
-            wgpu::Backend::BrowserWebGpu,
-        )));
-    }
-    Err(RenderError::device(format!(
-        "Unrecognized WGPU_BACKENDS value '{s}'. Valid: vulkan|dx12|metal|gl|webgpu"
-    )))
+    parse_backend_request(s).map(Some)
+}
+
+fn parse_backend_request(raw: String) -> RenderResult<(String, wgpu::Backends, wgpu::Backend)> {
+    let normalized = raw.trim().to_ascii_lowercase();
+    let pair = match normalized.as_str() {
+        "metal" => (wgpu::Backends::METAL, wgpu::Backend::Metal),
+        "vulkan" => (wgpu::Backends::VULKAN, wgpu::Backend::Vulkan),
+        "dx12" => (wgpu::Backends::DX12, wgpu::Backend::Dx12),
+        "gl" => (wgpu::Backends::GL, wgpu::Backend::Gl),
+        "webgpu" => (wgpu::Backends::BROWSER_WEBGPU, wgpu::Backend::BrowserWebGpu),
+        _ => {
+            return Err(RenderError::device(format!(
+                "Unrecognized or ambiguous WGPU_BACKENDS value '{raw}'. Exactly one backend is required: vulkan|dx12|metal|gl|webgpu"
+            )))
+        }
+    };
+    Ok((raw, pair.0, pair.1))
 }
 
 fn backends_from_env() -> RenderResult<wgpu::Backends> {
@@ -467,4 +464,20 @@ pub fn create_device_and_queue_for_test() -> Option<(wgpu::Device, wgpu::Queue)>
         }
     };
     Some((device, queue))
+}
+
+#[cfg(test)]
+mod backend_request_tests {
+    use super::parse_backend_request;
+
+    #[test]
+    fn backend_request_is_exact_and_rejects_ambiguous_or_substring_values() {
+        assert_eq!(
+            parse_backend_request("vulkan".to_string()).unwrap().2,
+            wgpu::Backend::Vulkan
+        );
+        assert!(parse_backend_request("notvulkan".to_string()).is_err());
+        assert!(parse_backend_request("vulkan,dx12".to_string()).is_err());
+        assert!(parse_backend_request(String::new()).is_err());
+    }
 }

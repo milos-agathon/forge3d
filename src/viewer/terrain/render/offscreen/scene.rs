@@ -1,4 +1,5 @@
 use super::SnapshotRenderState;
+#[cfg(feature = "enable-gpu-instancing")]
 use crate::viewer::terrain::scene::scatter::render_scatter_batches;
 use crate::viewer::terrain::vector_overlay;
 use crate::viewer::terrain::ViewerTerrainScene;
@@ -148,7 +149,8 @@ impl ViewerTerrainScene {
                 state.proj,
                 state.eye,
                 &terrain.heightmap_view,
-                state.terrain_width,
+                state.render_origin_span,
+                terrain.dimensions,
                 terrain.domain.0,
                 terrain.z_scale,
                 [-state.sun_dir.x, -state.sun_dir.y, -state.sun_dir.z],
@@ -157,6 +159,7 @@ impl ViewerTerrainScene {
                 self.device.as_ref(),
                 self.queue.as_ref(),
                 &mut self.scatter_renderer,
+                &self.scatter_hlod_instance_buffer,
             )
         };
 
@@ -194,6 +197,7 @@ impl ViewerTerrainScene {
                                 view_proj: state.vo_view_proj,
                                 sun_dir: state.vo_sun_dir,
                                 lighting: state.vo_lighting,
+                                render_origin_span: state.render_origin_span,
                                 selected_feature_id,
                                 highlight_color,
                             },
@@ -348,6 +352,7 @@ impl ViewerTerrainScene {
                                 view_proj: state.vo_view_proj,
                                 sun_dir: state.vo_sun_dir,
                                 lighting: state.vo_lighting,
+                                render_origin_span: state.render_origin_span,
                                 selected_feature_id,
                                 highlight_color,
                             },

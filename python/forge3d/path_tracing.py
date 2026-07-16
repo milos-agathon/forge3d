@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any, Dict, Optional, Tuple, Iterable, Mapping, Callable
+from typing import Any, Dict, Optional, Tuple, Iterable, Mapping, Callable, Sequence
 
 import numpy as np
 import time as _time
@@ -886,6 +886,7 @@ def hybrid_render_terrain_reference(
     sun_azimuth_deg: float = 315.0,
     sun_elevation_deg: float = 45.0,
     sun_intensity: float = 2.5,
+    sun_color: "Sequence[float] | np.ndarray" = (1.0, 0.97, 0.92),
     env_map: "np.ndarray | None" = None,
     env_intensity: float = 0.35,
     mesh_vertices: "np.ndarray | None" = None,
@@ -942,6 +943,20 @@ def hybrid_render_terrain_reference(
         raise ValueError(f"spp must be in 1..=64, got {spp}")
     if not (float(spacing[0]) > 0.0 and float(spacing[1]) > 0.0):
         raise ValueError(f"spacing must be > 0, got {spacing}")
+    if isinstance(sun_color, (str, bytes, bytearray, memoryview)):
+        raise ValueError(f"sun_color must be three numbers, got {sun_color!r}")
+    try:
+        if len(sun_color) != 3:
+            raise ValueError(f"sun_color must have exactly three components, got {len(sun_color)}")
+        sun_rgb = (float(sun_color[0]), float(sun_color[1]), float(sun_color[2]))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"sun_color must be a sequence of three numbers: {exc}")
+    if any(isinstance(c, (str, bytes, bytearray, memoryview)) for c in sun_color):
+        raise ValueError(f"sun_color components must be numbers, got {sun_color!r}")
+    if not all(bool(np.isfinite(c)) for c in sun_rgb):
+        raise ValueError(f"sun_color components must be finite, got {sun_color!r}")
+    if any(c < 0.0 for c in sun_rgb):
+        raise ValueError(f"sun_color components must be non-negative, got {sun_color!r}")
     cam = dict(camera or {})
     env = None
     if env_map is not None:
@@ -969,6 +984,7 @@ def hybrid_render_terrain_reference(
         sun_azimuth_deg=float(sun_azimuth_deg),
         sun_elevation_deg=float(sun_elevation_deg),
         sun_intensity=float(sun_intensity),
+        sun_color=sun_rgb,
         env_map=env,
         env_intensity=float(env_intensity),
         mesh_vertices=mv,

@@ -7,6 +7,7 @@ impl ViewerTerrainScene {
         camera_view: glam::Mat4,
         camera_proj: glam::Mat4,
         sun_direction: glam::Vec3,
+        render_origin_span: [f32; 4],
     ) {
         // Early exit if shadow infrastructure not ready
         let csm = match self.csm_renderer.as_mut() {
@@ -77,6 +78,8 @@ impl ViewerTerrainScene {
                     height_curve_power,
                     0.0,
                 ],
+                render_origin_xz: [render_origin_span[0], render_origin_span[1]],
+                render_span_xz: [render_origin_span[2], render_origin_span[3]],
             };
 
             // Upload uniforms

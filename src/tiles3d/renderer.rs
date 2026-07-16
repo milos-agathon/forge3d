@@ -1,7 +1,7 @@
 //! 3D Tiles renderer with caching
 //! Extended with P4: 3D Buildings Pipeline support
 
-use glam::{DMat4, DVec3, Vec3};
+use glam::{DMat4, DVec3};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -115,7 +115,12 @@ impl Tiles3dRenderer {
         let content = self.load_content_from_path(&path)?;
         let byte_size = estimate_content_size(&content);
 
-        self.ensure_cache_space(byte_size);
+        if !self.ensure_cache_space(byte_size) {
+            return Err(Tiles3dError::CacheBudget {
+                needed: byte_size,
+                budget: self.cache_budget,
+            });
+        }
 
         self.cache.insert(
             uri.to_string(),
@@ -165,7 +170,10 @@ impl Tiles3dRenderer {
         }
     }
 
-    fn ensure_cache_space(&mut self, needed: usize) {
+    fn ensure_cache_space(&mut self, needed: usize) -> bool {
+        if needed > self.cache_budget {
+            return false;
+        }
         while self.cache_used + needed > self.cache_budget && !self.cache.is_empty() {
             let oldest = self
                 .cache
@@ -179,6 +187,7 @@ impl Tiles3dRenderer {
                 }
             }
         }
+        self.cache_used + needed <= self.cache_budget
     }
 
     pub fn cache_stats(&self) -> CacheStats {
@@ -206,9 +215,11 @@ fn estimate_content_size(content: &TileContent) -> usize {
                 + m.indices.len() * 4
         }
         TileContent::Points(p) => {
-            p.positions.len() * 4
-                + p.colors.as_ref().map_or(0, |c| c.len())
-                + p.normals.as_ref().map_or(0, |n| n.len() * 4)
+            p.positions.len() * std::mem::size_of::<f64>()
+                + p.colors.as_ref().map_or(0, Vec::len)
+                + p.normals
+                    .as_ref()
+                    .map_or(0, |n| n.len() * std::mem::size_of::<f32>())
         }
     }
 }
@@ -252,6 +263,8 @@ pub struct BuildingRenderData {
     pub vertex_count: usize,
     /// Total triangle count
     pub triangle_count: usize,
+    /// Absolute origin used to pack `positions` into render-space f32.
+    pub world_origin: DVec3,
 }
 
 /// Per-building instance data
@@ -282,18 +295,37 @@ impl BuildingRenderData {
             instances: Vec::new(),
             vertex_count: 0,
             triangle_count: 0,
+            world_origin: DVec3::ZERO,
         }
     }
 
     /// Create from a slice of BuildingGeom
     pub fn from_buildings(buildings: &[BuildingGeom]) -> Self {
         let mut data = Self::new();
-        data.add_buildings(buildings);
+        let mut anchor = crate::camera::Anchor::new();
+        if let Some(position) = buildings
+            .iter()
+            .find_map(|building| building.positions.get(0..3))
+        {
+            anchor.rebase_if_needed(DVec3::new(position[0], position[1], position[2]));
+        }
+        data.world_origin = anchor.origin();
+        data.add_buildings_anchored(buildings, &anchor);
         data
     }
 
     /// Add buildings to the render data
     pub fn add_buildings(&mut self, buildings: &[BuildingGeom]) {
+        let mut anchor = crate::camera::Anchor::new();
+        anchor.rebase_if_needed(self.world_origin);
+        self.add_buildings_anchored(buildings, &anchor);
+    }
+
+    pub fn add_buildings_anchored(
+        &mut self,
+        buildings: &[BuildingGeom],
+        anchor: &crate::camera::Anchor,
+    ) {
         for building in buildings {
             if building.is_empty() {
                 continue;
@@ -303,7 +335,12 @@ impl BuildingRenderData {
             let index_offset = self.indices.len() as u32;
 
             // Add positions
-            self.positions.extend_from_slice(&building.positions);
+            self.positions
+                .extend(building.positions.chunks_exact(3).flat_map(|position| {
+                    anchor
+                        .to_render_vec3(DVec3::new(position[0], position[1], position[2]))
+                        .to_array()
+                }));
 
             // Add normals (generate if missing)
             if let Some(ref normals) = building.normals {
@@ -388,10 +425,10 @@ impl Tiles3dRenderer {
     pub fn get_visible_buildings(
         &self,
         buildings: &[BuildingGeom],
-        camera_pos: Vec3,
+        camera_pos: DVec3,
         max_distance: f32,
     ) -> BuildingRenderData {
-        let max_dist_sq = max_distance * max_distance;
+        let max_dist_sq = f64::from(max_distance) * f64::from(max_distance);
 
         let visible: Vec<&BuildingGeom> = buildings
             .iter()
@@ -412,5 +449,36 @@ impl Tiles3dRenderer {
 
         let owned: Vec<BuildingGeom> = visible.into_iter().cloned().collect();
         BuildingRenderData::from_buildings(&owned)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{estimate_content_size, PointData, TileContent, Tiles3dRenderer};
+
+    #[test]
+    fn point_cache_accounts_f64_positions_exactly() {
+        let content = TileContent::Points(PointData {
+            positions: vec![0.0; 6],
+            colors: Some(vec![0; 8]),
+            normals: Some(vec![0.0; 6]),
+        });
+        assert_eq!(
+            estimate_content_size(&content),
+            6 * std::mem::size_of::<f64>() + 8 + 6 * std::mem::size_of::<f32>()
+        );
+    }
+
+    #[test]
+    fn f64_point_positions_define_the_cache_budget_boundary() {
+        let content = TileContent::Points(PointData {
+            positions: vec![0.0; 6],
+            colors: None,
+            normals: None,
+        });
+        let required = estimate_content_size(&content);
+        assert_eq!(required, 48);
+        assert!(Tiles3dRenderer::with_cache_budget(required).ensure_cache_space(required));
+        assert!(!Tiles3dRenderer::with_cache_budget(required - 1).ensure_cache_space(required));
     }
 }

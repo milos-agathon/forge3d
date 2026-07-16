@@ -1,182 +1,198 @@
-# tests/test_world_coord_f32_gate.py
-# MENSURA win 5 (CI-gated): the textual f64 -> f32 NARROWING cliff exists in
-# exactly ONE place.
-#
-# Source-level gate in the style of tests/test_allocation_gate.py: across the
-# world-coordinate surface of the tree, exactly one `as f32` cast applied to a
-# world coordinate exists — inside `Anchor::narrow`, the helper used only by
-# `Anchor::to_render_*` (src/camera/anchor.rs).
-#
-# SCOPE — be precise about what this PROVES vs. what it does NOT:
-#   PROVES: no `as f32` token on a world-vocabulary source line survives
-#   outside Anchor::narrow, and Anchor::narrow is the SINGLE narrowing
-#   implementation.
-#   DOES NOT PROVE renderer-wide f64 anchoring. A world coordinate that is
-#   STORED as f32 / Vec3 / [f32;3] (via a glam f32 constructor, a PyO3 f32
-#   parameter, or a numpy f32 array) emits no `as f32` token and is therefore
-#   invisible to this textual gate. Giving every Scene / terrain / 3D-Tiles /
-#   point-cloud / vector / culling / picking / label path an f64 object origin
-#   is tracked as the remaining M-06 renderer-wide work and is NOT closed by
-#   this gate alone.
-# RELEVANT FILES: src/camera/anchor.rs, src/geo/units.rs, src/tiles3d/bounds.rs
+"""Fail-closed inventory for every Rust narrowing primitive.
 
+The inventory is deliberately name-agnostic: every ``as f32``, ``.as_vec*()``,
+and f64/DVec-to-f32/Vec helper is occurrence-locked across production Rust.
+Separate positive contracts prove that each viewer world-position route calls
+the active Anchor inside the producing function.
+"""
+
+import hashlib
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+SANCTIONED = "src/camera/anchor.rs"
 
-# Scan every Rust source file. Candidate lines are selected by world-space
-# vocabulary; harmless render scalars are ignored rather than hidden by a
-# directory allowlist.
-GATED = ["src"]
-WORLD_HINT = re.compile(
-    r"\b(world|object_origin|ecef|longitude|latitude|lon|lat|target|eye|world_coord)\w*\b",
-    re.IGNORECASE,
-)
+# Updated only after reviewing the complete inventory printed by a failure.
+# The digest includes (file, function, operation, ordinal, normalized statement).
+EXPECTED_CONVERSION_COUNT = 1250
+EXPECTED_CONVERSION_SHA256 = "e29ca45c234a12b449fa26434d71584d23a78987136ca7b2ccf87a3f015997c5"
 
-# The single sanctioned world-coordinate narrowing site.
-SANCTIONED = ("src/camera/anchor.rs", "value as f32")
 
-# Casts in gated files that are demonstrably NOT world coordinates. Each entry
-# is (path, exact code substring, justification). Keep this list minimal —
-# every addition must name a non-coordinate operand.
-ALLOWLIST = [
-    ("src/core/water_surface/constructor.rs", "x as f32 * step", "grid index"),
-    ("src/core/water_surface/constructor.rs", "y as f32 * step", "grid index"),
-    ("src/path_tracing/restir/types.rs", "self.m as f32", "reservoir sample count"),
-    ("src/path_tracing/restir/types.rs", "other.m as f32", "reservoir sample count"),
-    ("src/shadows/cascade_math.rs", "shadow_map_size as f32", "texture resolution"),
-    ("src/terrain/renderer/resources/resize.rs", "width as f32 * resolution_scale", "pixel width"),
-    ("src/terrain/renderer/resources/resize.rs", "height as f32 * resolution_scale", "pixel height"),
-    ("src/viewer/terrain/overlay/stack/composite.rs", "target_width as f32", "pixel width"),
-    ("src/viewer/terrain/overlay/stack/composite.rs", "target_height as f32", "pixel height"),
-    (
-        "src/scene/py_api/base.rs",
-        "self.width as f32 / self.height as f32",
-        "u32 viewport pixel dimensions (aspect ratio), not world coordinates",
+def _strip_comments_and_strings(text: str) -> str:
+    pattern = re.compile(
+        r"//[^\n]*|/\*.*?\*/|r#*\".*?\"#*|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'",
+        re.S,
+    )
+    return pattern.sub(lambda match: " " * len(match.group(0)), text)
+
+
+def _remove_cfg_test_modules(text: str) -> str:
+    text = _strip_comments_and_strings(text)
+    marker = re.compile(r"#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]\s*mod\s+\w+\s*\{")
+    while match := marker.search(text):
+        depth = 1
+        cursor = match.end()
+        while cursor < len(text) and depth:
+            depth += (text[cursor] == "{") - (text[cursor] == "}")
+            cursor += 1
+        text = text[: match.start()] + " " * (cursor - match.start()) + text[cursor:]
+    return text
+
+
+def _function_spans(text: str):
+    spans = []
+    for match in re.finditer(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)[^;{]*\{", text, re.S):
+        depth = 1
+        cursor = match.end()
+        while cursor < len(text) and depth:
+            depth += (text[cursor] == "{") - (text[cursor] == "}")
+            cursor += 1
+        spans.append((match.start(), cursor, match.group(1)))
+    return spans
+
+
+def _function_name(spans, position: int) -> str:
+    return next(
+        (name for start, end, name in spans if start <= position < end),
+        "<module>",
+    )
+
+
+def _statement(text: str, position: int) -> str:
+    start = max(text.rfind(";", 0, position), text.rfind("{", 0, position)) + 1
+    end_candidates = [candidate for candidate in (text.find(";", position), text.find("}", position)) if candidate >= 0]
+    end = min(end_candidates, default=min(len(text), position + 160))
+    return re.sub(r"\s+", " ", text[start:end]).strip()
+
+
+CONVERSION_PATTERNS = {
+    "as_f32": re.compile(r"\bas\s+f32\b"),
+    "as_vec": re.compile(r"\.\s*as_vec[234]\s*\(\s*\)"),
+    "f64_helper": re.compile(
+        r"\bfn\s+[A-Za-z_][A-Za-z0-9_]*\s*(?:<[^>{}]*>)?\s*\([^)]*(?:f64|DVec[234]|DMat[234])[^)]*\)\s*"
+        r"(?:->\s*(?:f32|Vec[234]|\[\s*f32|Vec\s*<\s*f32))",
+        re.S,
     ),
-    (
-        "src/gis/terrarium.rs",
-        "pixel[0] as f32 * 256.0 + pixel[1] as f32 + pixel[2] as f32 / 256.0",
-        "u8 Terrarium tile decode: 24-bit quantized source data, every "
-        "representable value is exact in f32 (no f64 world value is narrowed)",
-    ),
-    (
-        "src/gis/terrarium.rs",
-        "values[row * tile_width + col] as f32",
-        "mosaic copy of the same 24-bit quantized Terrarium values back into "
-        "the f32 DEM band; exact by construction",
-    ),
-]
+}
 
 
-def _strip_comments(text: str) -> str:
-    # Line comments and doc comments; block comments are not used for code in
-    # the gated files.
-    return "\n".join(line.split("//")[0] for line in text.splitlines())
-
-
-def _gated_files():
-    files = []
-    for entry in GATED:
-        path = ROOT / entry
-        if path.is_dir():
-            files.extend(sorted(path.rglob("*.rs")))
-        elif path.exists():
-            files.append(path)
-        else:
-            raise AssertionError(f"gated path missing: {entry}")
-    return files
-
-
-def _cast_sites():
+def _conversion_inventory_text(rel: str, raw: str):
+    text = _remove_cfg_test_modules(raw)
+    spans = _function_spans(text)
+    matches = []
+    for operation, pattern in CONVERSION_PATTERNS.items():
+        matches.extend((match.start(), operation) for match in pattern.finditer(text))
+    counters = {}
     sites = []
-    for path in _gated_files():
-        rel = path.relative_to(ROOT).as_posix()
-        text = _strip_comments(path.read_text(encoding="utf-8"))
-        for i, line in enumerate(text.splitlines(), 1):
-            for _ in re.finditer(r"\bas f32\b", line):
-                stripped = line.strip()
-                if WORLD_HINT.search(stripped) or (rel, "value as f32") == SANCTIONED:
-                    sites.append((rel, i, stripped))
+    for position, operation in sorted(matches):
+        function = _function_name(spans, position)
+        key = (function, operation)
+        counters[key] = counters.get(key, 0) + 1
+        sites.append(
+            (
+                rel,
+                function,
+                operation,
+                counters[key],
+                _statement(text, position),
+            )
+        )
     return sites
 
 
-def test_exactly_one_world_coordinate_f32_cast():
-    sites = _cast_sites()
-
-    def allowed(site):
-        rel, _i, line = site
-        return any(rel == p and frag in line for p, frag in
-                   [(a[0], a[1]) for a in ALLOWLIST])
-
-    world_casts = [s for s in sites if not allowed(s)]
-    assert len(world_casts) == 1, (
-        "expected exactly ONE world-coordinate `as f32` cast "
-        f"(Anchor::narrow); found {len(world_casts)}: {world_casts}"
-    )
-    rel, _line_no, line = world_casts[0]
-    assert rel == SANCTIONED[0] and SANCTIONED[1] in line, (
-        f"the single sanctioned cast moved: {world_casts[0]}"
-    )
-
-
-def test_allowlist_entries_still_exist_verbatim():
-    # A stale allowlist entry would silently widen the gate.
-    for rel, frag, _why in ALLOWLIST:
-        text = _strip_comments((ROOT / rel).read_text(encoding="utf-8"))
-        assert frag in text, f"stale allowlist entry: {rel}: {frag}"
-
-
-def test_legacy_truncation_sites_are_gone():
-    # The original f32 cliffs named by the MENSURA audit must stay dead.
-    bounds = (ROOT / "src/tiles3d/bounds.rs").read_text(encoding="utf-8")
-    assert "Vec3::new(x as f32, y as f32, z as f32)" not in bounds
-    base = (ROOT / "src/scene/py_api/base.rs").read_text(encoding="utf-8")
-    assert "eye: (f32, f32, f32)" not in base, (
-        "set_camera_look_at must accept f64 world coordinates"
-    )
-
-
-def test_single_narrowing_implementation_lives_only_in_anchor():
-    # M-06: keep exactly ONE sanctioned narrowing implementation. The camera
-    # anchor module must contain exactly one textual `as f32` (inside
-    # Anchor::narrow); a second narrowing helper added here fails immediately.
-    anchor = _strip_comments((ROOT / SANCTIONED[0]).read_text(encoding="utf-8"))
-    count = len(re.findall(r"\bas f32\b", anchor))
-    assert count == 1, (
-        f"{SANCTIONED[0]} must hold exactly one `as f32` (the sole narrowing "
-        f"implementation); found {count}"
-    )
-    assert "fn narrow(value: f64) -> f32" in anchor, (
-        "the sanctioned narrowing helper Anchor::narrow(value: f64) -> f32 moved"
-    )
-
-
-# A hidden helper that rebuilds a render Vec3 by narrowing three world
-# components — the exact pre-MENSURA cliff — must not reappear in ANY file.
-_TRIPLE_NARROW = re.compile(
-    r"Vec3::new\(\s*\w+ as f32\s*,\s*\w+ as f32\s*,\s*\w+ as f32\s*\)"
-)
-
-
-def test_no_file_rebuilds_a_render_vec3_from_three_narrowed_components():
-    for path in _gated_files():
+def conversion_inventory():
+    sites = []
+    for path in sorted((ROOT / "src").rglob("*.rs")):
         rel = path.relative_to(ROOT).as_posix()
-        if rel == SANCTIONED[0]:
-            continue  # anchor narrows component-by-component via Self::narrow
-        text = _strip_comments(path.read_text(encoding="utf-8"))
-        match = _TRIPLE_NARROW.search(text)
-        assert match is None, (
-            f"{rel} rebuilds a render Vec3 from three narrowed scalars "
-            f"({match.group(0)!r}); route world coordinates through Anchor instead"
-        )
+        sites.extend(_conversion_inventory_text(rel, path.read_text(encoding="utf-8")))
+    return sites
 
 
-def test_public_camera_helpers_anchor_earth_scale_targets():
-    """Public camera matrices preserve a 10 m target offset at Earth radius."""
+def _inventory_digest(sites) -> str:
+    payload = "\n".join("\t".join(map(str, site)) for site in sites)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _read(rel: str) -> str:
+    return (ROOT / rel).read_text(encoding="utf-8")
+
+
+def _function_body(rel: str, function: str) -> str:
+    text = _remove_cfg_test_modules(_read(rel))
+    for start, end, name in _function_spans(text):
+        if name == function:
+            return text[start:end]
+    raise AssertionError(f"missing function {rel}::{function}")
+
+
+def test_exact_production_conversion_inventory_is_frozen():
+    sites = conversion_inventory()
+    digest = _inventory_digest(sites)
+    assert (len(sites), digest) == (
+        EXPECTED_CONVERSION_COUNT,
+        EXPECTED_CONVERSION_SHA256,
+    ), f"conversion inventory changed: count={len(sites)} sha256={digest}\n" + "\n".join(
+        repr(site) for site in sites
+    )
+
+
+def test_all_required_rejecting_probes_change_the_inventory():
+    probes = [
+        "v as f32",
+        "coords[0] as f32",
+        "position.as_vec3()",
+        "coords.map(|v| v as f32)",
+        "point.to_array().map(|v| v as f32)",
+        "fn narrow(v: f64) -> f32 { v as f32 }",
+        "macro_rules! narrow { ($v:expr) => { $v as f32 } }",
+        "fn bad(v: f64, origin: f64) -> f32 { v as f32 - origin as f32 }",
+    ]
+    for probe in probes:
+        assert _conversion_inventory_text("probe.rs", probe), f"scanner missed {probe}"
+
+
+def test_anchor_narrow_is_the_only_world_conversion_implementation():
+    anchor = _remove_cfg_test_modules(_read(SANCTIONED))
+    narrow = _function_body(SANCTIONED, "narrow")
+    assert len(re.findall(r"\bas\s+f32\b", narrow)) == 1
+    assert "value as f32" in re.sub(r"\s+", " ", narrow)
+    assert anchor.count("Self::narrow(") == 6
+
+    position = _function_body(SANCTIONED, "to_render_vec3")
+    assert "p - self.origin" in re.sub(r"\s+", " ", position)
+    assert position.count("Self::narrow(") == 3
+    direction = _function_body(SANCTIONED, "direction_to_render")
+    assert direction.count("Self::narrow(") == 3
+
+
+def test_each_viewer_world_route_calls_its_active_anchor_in_the_same_function():
+    routes = {
+        ("src/viewer/viewer_types.rs", "view"): "self.anchor.view_look_at(",
+        ("src/viewer/viewer_types.rs", "render_eye"): "self.anchor.to_render_vec3(",
+        ("src/viewer/render/main_loop/frame_anchor.rs", "anchored_object_model"): "frame.anchor.model_offset(",
+        ("src/viewer/pointcloud/state.rs", "packed_point"): "anchor.to_render_vec3(",
+        ("src/viewer/terrain/vector_overlay.rs", "repack_source_vertices"): "anchor.to_render_vec3(",
+        ("src/labels/mod.rs", "update_with_camera_anchored"): "anchor.to_render_vec3(",
+        ("src/viewer/terrain/render/screen/setup.rs", "build_screen_render_state"): "frame.anchor.to_render_vec3(",
+        ("src/viewer/terrain/render/offscreen/setup.rs", "build_snapshot_render_state"): "frame.anchor.to_render_vec3(",
+        ("src/viewer/input/viewer_input.rs", "pick_at_screen"): ".to_world_from_render_f64(",
+    }
+    for (rel, function), required_call in routes.items():
+        body = re.sub(r"\s+", "", _function_body(rel, function))
+        normalized_call = re.sub(r"\s+", "", required_call)
+        assert normalized_call in body, f"{rel}::{function} lacks {required_call}"
+
+
+def test_cityjson_and_viewer_absolute_storage_types_are_explicitly_f64():
+    assert "pub positions: Vec<f64>" in _read("src/import/cityjson/types.rs")
+    assert "pub(crate) object_translation: glam::DVec3" in _read("src/viewer/viewer_struct.rs")
+    assert "pub world_pos: DVec3" in _read("src/labels/types.rs")
+    assert "pub position: DVec3" in _read("src/viewer/pointcloud/types.rs")
+
+
+def test_public_camera_helper_preserves_earth_scale_offset():
     import numpy as np
-    import forge3d as f3d
     from forge3d import _forge3d
 
     local = np.asarray(
