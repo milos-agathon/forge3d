@@ -273,12 +273,25 @@ def test_intersect_vectors_invalid_suffixes_precede_backend_gate(suffixes):
         gis.intersect_vectors(_feature_collection(), _feature_collection(), suffixes=suffixes)
 
 
-def test_load_boundary_where_unsupported_precedes_backend_gate(tmp_path: Path):
-    path = tmp_path / "boundary.geojson"
-    path.write_text('{"type":"FeatureCollection","features":[]}', encoding="utf-8")
+def test_load_boundary_where_filter_and_invalid_expression(tmp_path: Path):
+    path = _write_feature_collection(
+        tmp_path / "boundary.geojson",
+        [
+            _feature(_unit_square(), {"name": "a", "rank": 1}),
+            _feature(_shifted_square(2.0, 0.0), {"name": "b", "rank": 2}),
+        ],
+    )
 
+    result = gis.load_boundary(path, where="name = 'a'")
+    assert result["info"]["feature_count"] == 1
+    assert result["features"]["features"][0]["properties"]["name"] == "a"
+    assert result["operation"]["input_count"] == 2
+    assert result["operation"]["filtered_count"] == 1
+
+    ranked = gis.load_boundary(path, where="rank >= 2")
+    assert ranked["features"]["features"][0]["properties"]["name"] == "b"
     with pytest.raises(ValueError, match="unsupported_option"):
-        gis.load_boundary(path, where="name = 'a'")
+        gis.load_boundary(path, where="name LIKE 'a%'")
 
 
 def test_no_python_gis_backend_libraries_in_overlay_wrapper():
@@ -1187,6 +1200,22 @@ def test_load_boundary_multi_feature_unions_with_topology_backend(tmp_path: Path
     assert result["operation"]["changed"] is True
 
 
+def test_load_boundary_union_false_and_destination_crs(tmp_path: Path):
+    path = _write_feature_collection(
+        tmp_path / "boundary-options.geojson",
+        [_feature(_unit_square()), _feature(_shifted_square(2.0, 0.0))],
+    )
+
+    separate = gis.load_boundary(path, union=False)
+    assert separate["geometry"]["type"] == "GeometryCollection"
+    assert len(separate["geometry"]["geometries"]) == 2
+    assert separate["operation"]["union"] is False
+
+    projected = gis.load_boundary(path, where="id != 999", dst_crs="EPSG:3857")
+    assert projected["info"]["crs_authority"] == {"name": "EPSG", "code": "3857"}
+    assert projected["info"]["bounds"][2] > 100_000
+
+
 def test_load_boundary_empty_source_returns_empty_feature_set(tmp_path: Path):
     path = _write_feature_collection(tmp_path / "boundary-empty.geojson", [])
 
@@ -1254,4 +1283,3 @@ def test_load_boundary_multi_feature_requires_topology_backend_without_feature(t
     )
 
     _assert_backend_unavailable(lambda: gis.load_boundary(path))
-

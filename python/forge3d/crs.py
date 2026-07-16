@@ -9,7 +9,7 @@ Provides reprojection of coordinates between different coordinate systems.
 Coordinate transforms use the built-in pure-Rust MENSURA projection engine
 (``forge3d._forge3d.CrsTransform``) exclusively; an unsupported CRS raises
 rather than silently falling back to pyproj. pyproj, if installed, is used
-only for WKT/EPSG metadata lookups, never as a hidden transform backend.
+only for WKT/EPSG metadata lookups, never as a transform backend.
 
 Example:
     >>> from forge3d.crs import transform_coords, reproject_geom

@@ -95,6 +95,7 @@ mod py {
         // reason); request-validation and fatal decode errors propagate WITHOUT
         // any download.
         let range_fallback_reason = match try_range_stream(py, &path_or_url, pixel_window)? {
+            #[cfg(feature = "cog_streaming")]
             RangeStep::Streamed(result) => return Ok(result),
             RangeStep::FullFetch(reason) => reason,
         };
@@ -153,6 +154,7 @@ mod py {
     /// result to return immediately, or a signal to do the full fetch (carrying the
     /// fallback reason when a range attempt actually failed).
     enum RangeStep {
+        #[cfg(feature = "cog_streaming")]
         Streamed(PyObject),
         FullFetch(Option<&'static str>),
     }
@@ -283,15 +285,15 @@ mod py {
         path_or_features: &Bound<'_, PyAny>,
         dst_crs: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyObject> {
-        if dst_crs.is_some() {
-            return Err(GisError::BackendUnavailable(
-                "backend_unavailable: proj feature required for building footprint reprojection"
-                    .to_string(),
-            )
-            .into());
-        }
+        let dst_crs = crate::gis::extract_crs(dst_crs)?;
         let value = input_geojson_or_cityjson(path_or_features)?;
-        let features = if value.get("type").and_then(Value::as_str) == Some("CityJSON") {
+        let is_cityjson = value.get("type").and_then(Value::as_str) == Some("CityJSON");
+        let source_crs = if is_cityjson {
+            None
+        } else {
+            crate::gis::vector::geojson_crs(&value)?
+        };
+        let mut features = if is_cityjson {
             cityjson_building_features(&value)?
         } else {
             crate::gis::vector::normalize_features(&value)?
@@ -305,6 +307,21 @@ mod py {
             )
             .into());
         }
+        let output_crs = if let Some(dst_crs) = dst_crs {
+            let result = crate::gis::vector::reproject_vector(
+                crate::gis::vector::VectorReprojectInput::Features {
+                    features,
+                    info: None,
+                    geojson_crs: source_crs,
+                },
+                dst_crs,
+                None,
+            )?;
+            features = result.features;
+            Some(result.dst_crs)
+        } else {
+            source_crs
+        };
         let collection = feature_collection(features);
         let bounds = bounds_for_features(collection.get("features").unwrap().as_array().unwrap());
         let dict = PyDict::new_bound(py);
@@ -317,7 +334,19 @@ mod py {
         dict.set_item("bounds", bounds.map(RasterBounds::tuple))?;
         dict.set_item(
             "crs",
-            json_to_py(py, &json!({"name": "EPSG", "code": "4326"}))?,
+            json_to_py(
+                py,
+                &output_crs
+                    .as_ref()
+                    .map(|crs| {
+                        json!({
+                            "source_kind": "vector",
+                            "wkt": crs.wkt.clone(),
+                            "authority": crate::gis::crs::authority_map(crs),
+                        })
+                    })
+                    .unwrap_or(Value::Null),
+            )?,
         )?;
         dict.set_item(
             "operation",
@@ -813,19 +842,22 @@ mod py {
         Ok(dict.into_py(py))
     }
 
-    #[pyfunction(name = "prepare_osm_scene", signature = (aoi, tags = None, cache = None))]
+    #[pyfunction(name = "prepare_osm_scene", signature = (aoi, tags = None, cache = None, *, endpoint = None, timeout = None))]
     pub fn prepare_osm_scene_py(
         py: Python<'_>,
         aoi: (f64, f64, f64, f64),
         tags: Option<&Bound<'_, PyAny>>,
         cache: Option<&Bound<'_, PyAny>>,
+        endpoint: Option<String>,
+        timeout: Option<f64>,
     ) -> PyResult<PyObject> {
         let aoi = validate_bounds_tuple(aoi, true)?;
         let tags = tags.map(py_to_json).transpose()?.unwrap_or_else(|| {
             json!({"highway": true, "building": true, "natural": "water", "waterway": true, "landuse": true})
         });
         let cache = cache.map(py_to_json).transpose()?;
-        let query = query_osm_features_value(aoi, &tags, cache.as_ref())?;
+        let query =
+            query_osm_features_value(aoi, &tags, cache.as_ref(), endpoint.as_deref(), timeout)?;
         let osm_json = query.get("osm_json").ok_or_else(|| {
             GisError::InvalidArgument(
                 "malformed_payload: query_osm_features returned no osm_json".to_string(),

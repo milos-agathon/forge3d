@@ -63,6 +63,7 @@ pub(crate) fn register_gis_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()>
         crate::gis::calculate_default_transform_py,
         m
     )?)?;
+    m.add_function(wrap_pyfunction!(crate::gis::warped_vrt_info_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::web_mercator_bounds_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::fetch_remote_geodata_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::gis::cache_geodata_py, m)?)?;

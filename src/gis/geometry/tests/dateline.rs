@@ -127,6 +127,36 @@ fn same_sheet_union_splits_at_antimeridian() {
 
 #[cfg(feature = "geos-topology")]
 #[test]
+fn union_of_polygon_touching_minus_180_is_identity() {
+    // Unconditional canonicalization must not damage an already-canonical
+    // west-side polygon: [-180, -175] touches the antimeridian without
+    // crossing it and comes back as the same single Polygon, not as a ring
+    // with a world-spanning edge.
+    let coords = json!([[
+        [-180.0, 5.0],
+        [-175.0, 5.0],
+        [-175.0, -5.0],
+        [-180.0, -5.0],
+        [-180.0, 5.0]
+    ]]);
+    let geometries = json!([{ "type": "Polygon", "coordinates": coords }]);
+    let result = union_geometries(&geometries, wgs84()).expect("union succeeds");
+    assert_eq!(result["geometry"]["type"], json!("Polygon"), "got {result}");
+    let ring = result["geometry"]["coordinates"][0].as_array().unwrap();
+    let xs: Vec<f64> = ring.iter().map(|p| p[0].as_f64().unwrap()).collect();
+    assert!(
+        xs.iter().all(|x| (-180.0..=-175.0).contains(x)),
+        "identity west-side ring, got {xs:?}"
+    );
+    let max_edge = xs
+        .windows(2)
+        .map(|w| (w[1] - w[0]).abs())
+        .fold(0.0, f64::max);
+    assert!(max_edge <= 5.0 + 1e-9, "no world-spanning edge: {max_edge}");
+}
+
+#[cfg(feature = "geos-topology")]
+#[test]
 fn clip_across_dateline_keeps_both_pieces() {
     // MENSURA M-04 root-cause regression at the Rust boundary: a source
     // polygon 175 -> -175 clipped by a clip polygon 178 -> -178 (both crossing

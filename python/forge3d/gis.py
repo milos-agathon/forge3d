@@ -317,12 +317,16 @@ def load_boundary(
     *,
     layer: str | None = None,
     where: str | None = None,
+    union: bool = True,
+    dst_crs: str | int | dict[str, Any] | None = None,
 ):
     """Load a vector boundary through the native topology backend."""
     return _require_native().load_boundary(
         os.fspath(path),
         layer=layer,
         where=where,
+        union=union,
+        dst_crs=dst_crs,
     )
 
 
@@ -332,9 +336,11 @@ def rasterize_vectors(
     *,
     value: float = 1,
     attribute: str | None = None,
+    burn_values: float | list[float] | tuple[float, ...] | None = None,
     dtype: str = "uint8",
     fill: float = 0,
     all_touched: bool = False,
+    merge_alg: str = "replace",
 ):
     """Rasterize polygonal vector features onto an explicit target grid."""
     return _require_native().rasterize_vectors(
@@ -342,9 +348,11 @@ def rasterize_vectors(
         target_info,
         value=value,
         attribute=attribute,
+        burn_values=burn_values,
         dtype=dtype,
         fill=fill,
         all_touched=all_touched,
+        merge_alg=merge_alg,
     )
 
 
@@ -705,6 +713,22 @@ def calculate_default_transform(
     )
 
 
+def warped_vrt_info(
+    source: os.PathLike[str] | str | Any,
+    dst_crs: str | int | dict[str, Any],
+    *,
+    resampling: str | None = None,
+    resolution: float | tuple[float, float] | tuple[int, int] | dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return metadata for a virtual destination grid without materializing pixels."""
+    return _require_native().warped_vrt_info(
+        _path_or_self(source),
+        dst_crs,
+        resampling=resampling,
+        resolution=resolution,
+    )
+
+
 def read_raster_window(
     path: os.PathLike[str] | str,
     bounds_or_window: tuple[float, float, float, float] | tuple[int, int, int, int] | dict[str, Any],
@@ -787,8 +811,13 @@ def query_osm_features(
     aoi: tuple[float, float, float, float],
     tags: dict[str, Any],
     cache: dict[str, Any] | None = None,
+    *,
+    endpoint: str | None = None,
+    timeout: float | None = None,
 ) -> dict[str, Any]:
-    return _require_native().query_osm_features(aoi, tags, cache=cache)
+    return _require_native().query_osm_features(
+        aoi, tags, cache=cache, endpoint=endpoint, timeout=timeout
+    )
 
 
 def parse_osm_features(osm_json: dict[str, Any] | str, tags: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -806,8 +835,13 @@ def prepare_osm_scene(
     aoi: tuple[float, float, float, float],
     tags: dict[str, Any] | None = None,
     cache: dict[str, Any] | None = None,
+    *,
+    endpoint: str | None = None,
+    timeout: float | None = None,
 ) -> dict[str, Any]:
-    return _require_native().prepare_osm_scene(aoi, tags=tags, cache=cache)
+    return _require_native().prepare_osm_scene(
+        aoi, tags=tags, cache=cache, endpoint=endpoint, timeout=timeout
+    )
 
 
 def prepare_dem(
@@ -849,8 +883,17 @@ def build_terrarium_dem(
     bounds: tuple[float, float, float, float],
     zoom: int,
     cache: os.PathLike[str] | str | dict[str, Any] | None = None,
+    *,
+    url_template: str | None = None,
+    timeout: float | None = None,
 ) -> dict[str, Any]:
-    return _require_native().build_terrarium_dem(bounds, zoom, cache=_cache_or_none(cache))
+    return _require_native().build_terrarium_dem(
+        bounds,
+        zoom,
+        cache=_cache_or_none(cache),
+        url_template=url_template,
+        timeout=timeout,
+    )
 
 
 def prepare_landcover_raster(
@@ -968,6 +1011,7 @@ __all__ = [
     "align_raster_to",
     "reproject_raster",
     "calculate_default_transform",
+    "warped_vrt_info",
     "window_from_bounds",
     "read_raster_window",
     "window_transform",

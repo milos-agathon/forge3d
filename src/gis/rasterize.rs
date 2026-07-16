@@ -25,9 +25,36 @@ const INVALID_NODATA: &str = "invalid_nodata";
 pub struct RasterizeOptions {
     pub value: f64,
     pub attribute: Option<String>,
+    pub burn_values: Option<Vec<f64>>,
+    pub merge_alg: MergeAlgorithm,
     pub dtype: RasterDType,
     pub fill: f64,
     pub all_touched: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeAlgorithm {
+    Replace,
+    Add,
+}
+
+impl MergeAlgorithm {
+    pub fn parse(value: &str) -> GisResult<Self> {
+        match value {
+            "replace" => Ok(Self::Replace),
+            "add" => Ok(Self::Add),
+            _ => Err(GisError::InvalidArgument(format!(
+                "{INVALID_ARGUMENT}: merge_alg must be 'replace' or 'add'"
+            ))),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Replace => "replace",
+            Self::Add => "add",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +68,7 @@ pub struct RasterizeResult {
     pub fill: f64,
     pub burned_pixels: usize,
     pub all_touched: bool,
+    pub merge_alg: MergeAlgorithm,
     pub warnings: Vec<RasterWarning>,
 }
 
@@ -187,9 +215,33 @@ pub fn rasterize_vectors(
 ) -> GisResult<RasterizeResult> {
     validate_value_for_dtype(options.dtype, options.fill, "fill")?;
     validate_value_for_dtype(options.dtype, options.value, "value")?;
+    if options.attribute.is_some() && options.burn_values.is_some() {
+        return Err(GisError::InvalidArgument(format!(
+            "{INVALID_ARGUMENT}: attribute and burn_values are mutually exclusive"
+        )));
+    }
+    if let Some(values) = options.burn_values.as_ref() {
+        if values.is_empty() {
+            return Err(GisError::InvalidArgument(format!(
+                "{INVALID_ARGUMENT}: burn_values must not be empty"
+            )));
+        }
+        for &value in values {
+            validate_value_for_dtype(options.dtype, value, "burn_values")?;
+        }
+    }
     let grid = target_grid(target_info)?;
     let source = resolve_vector_source(source)?;
     require_same_crs(&source.crs, &grid.crs)?;
+    if let Some(values) = options.burn_values.as_ref() {
+        if values.len() != 1 && values.len() != source.features.len() {
+            return Err(GisError::InvalidArgument(format!(
+                "{INVALID_ARGUMENT}: burn_values length {} must be 1 or match feature count {}",
+                values.len(),
+                source.features.len()
+            )));
+        }
+    }
     let (values, burned_pixels) = rasterize_source(&source, &grid, &options)?;
     let info = output_info(&grid.info, options.dtype, grid.info.nodata_per_band.clone())?;
     Ok(RasterizeResult {
@@ -202,6 +254,7 @@ pub fn rasterize_vectors(
         fill: options.fill,
         burned_pixels,
         all_touched: options.all_touched,
+        merge_alg: options.merge_alg,
         warnings: Vec::new(),
     })
 }
@@ -395,22 +448,35 @@ fn rasterize_source(
     let height = grid.info.height as usize;
     let mut values = vec![options.fill; width * height];
     let mut burned = vec![false; width * height];
-    for feature in &source.features {
+    for (feature_index, feature) in source.features.iter().enumerate() {
         let geometry = vector::feature_geometry(feature)?;
-        let burn = burn_value(feature, options)?;
+        let burn = burn_value(feature, feature_index, options)?;
         let polygons = parse_polygonal_geometry(geometry)?;
         if polygons.is_empty() {
             return Err(GisError::InvalidGeometry(format!(
                 "{EMPTY_GEOMETRY}: geometry is empty"
             )));
         }
-        for row in 0..height {
-            for col in 0..width {
+        let (row_start, row_end, col_start, col_end) = geometry_pixel_window(
+            &polygons,
+            grid.transform,
+            height,
+            width,
+            options.all_touched,
+        )
+        .unwrap_or((0, height, 0, width));
+        for row in row_start..row_end {
+            for col in col_start..col_end {
                 if polygons.iter().any(|polygon| {
                     pixel_hits_polygon(polygon, grid.transform, row, col, options.all_touched)
                 }) {
                     let index = row * width + col;
-                    values[index] = burn;
+                    let merged = match options.merge_alg {
+                        MergeAlgorithm::Replace => burn,
+                        MergeAlgorithm::Add => values[index] + burn,
+                    };
+                    validate_value_for_dtype(options.dtype, merged, "merged burn value")?;
+                    values[index] = merged;
                     burned[index] = true;
                 }
             }
@@ -427,6 +493,8 @@ fn rasterize_bool(
     let options = RasterizeOptions {
         value: 1.0,
         attribute: None,
+        burn_values: None,
+        merge_alg: MergeAlgorithm::Replace,
         dtype: RasterDType::UInt8,
         fill: 0.0,
         all_touched,
@@ -439,7 +507,14 @@ fn rasterize_bool(
     })
 }
 
-fn burn_value(feature: &Value, options: &RasterizeOptions) -> GisResult<f64> {
+fn burn_value(feature: &Value, feature_index: usize, options: &RasterizeOptions) -> GisResult<f64> {
+    if let Some(values) = options.burn_values.as_ref() {
+        return Ok(if values.len() == 1 {
+            values[0]
+        } else {
+            values[feature_index]
+        });
+    }
     let Some(attribute) = options.attribute.as_deref() else {
         return Ok(options.value);
     };
@@ -455,6 +530,46 @@ fn burn_value(feature: &Value, options: &RasterizeOptions) -> GisResult<f64> {
         })?;
     validate_value_for_dtype(options.dtype, value, attribute)?;
     Ok(value)
+}
+
+/// Return a conservative, clamped pixel window for a geometry.
+///
+/// Transforming the vertices into pixel space is valid for north-up and
+/// rotated/sheared affine grids. A one-cell guard keeps boundary and
+/// `all_touched` semantics exact while avoiding the previous full-grid scan for
+/// every feature. Singular transforms fall back to the caller's full-grid path.
+fn geometry_pixel_window(
+    polygons: &[Polygon],
+    transform: AffineTransform,
+    height: usize,
+    width: usize,
+    all_touched: bool,
+) -> Option<(usize, usize, usize, usize)> {
+    let mut min_col = f64::INFINITY;
+    let mut min_row = f64::INFINITY;
+    let mut max_col = f64::NEG_INFINITY;
+    let mut max_row = f64::NEG_INFINITY;
+    for point in polygons
+        .iter()
+        .flat_map(|polygon| polygon.iter())
+        .flat_map(|ring| ring.iter())
+    {
+        let (col, row) = affine::inverse_apply(transform, point.x, point.y).ok()?;
+        min_col = min_col.min(col);
+        min_row = min_row.min(row);
+        max_col = max_col.max(col);
+        max_row = max_row.max(row);
+    }
+    if !min_col.is_finite() || !min_row.is_finite() || !max_col.is_finite() || !max_row.is_finite()
+    {
+        return None;
+    }
+    let guard = if all_touched { 1.0 } else { 0.5 };
+    let col_start = ((min_col - guard).floor() as isize).clamp(0, width as isize) as usize;
+    let row_start = ((min_row - guard).floor() as isize).clamp(0, height as isize) as usize;
+    let col_end = ((max_col + guard).ceil() as isize).clamp(0, width as isize) as usize;
+    let row_end = ((max_row + guard).ceil() as isize).clamp(0, height as isize) as usize;
+    Some((row_start, row_end, col_start, col_end))
 }
 
 fn parse_polygonal_geometry(value: &Value) -> GisResult<Vec<Polygon>> {
@@ -896,7 +1011,7 @@ mod py {
 
     #[pyfunction(
         name = "rasterize_vectors",
-        signature = (vectors, target_info, *, value = 1.0, attribute = None, dtype = "uint8", fill = 0.0, all_touched = false)
+        signature = (vectors, target_info, *, value = 1.0, attribute = None, burn_values = None, dtype = "uint8", fill = 0.0, all_touched = false, merge_alg = "replace")
     )]
     pub fn rasterize_vectors_py(
         py: Python<'_>,
@@ -904,9 +1019,11 @@ mod py {
         target_info: &Bound<'_, PyAny>,
         value: f64,
         attribute: Option<String>,
+        burn_values: Option<&Bound<'_, PyAny>>,
         dtype: &str,
         fill: f64,
         all_touched: bool,
+        merge_alg: &str,
     ) -> PyResult<PyObject> {
         let source = vector_source_to_json(vectors)?;
         let target_info = raster_info_from_py(target_info)?;
@@ -916,12 +1033,32 @@ mod py {
             RasterizeOptions {
                 value,
                 attribute,
+                burn_values: parse_burn_values(burn_values)?,
+                merge_alg: MergeAlgorithm::parse(merge_alg)?,
                 dtype: parse_raster_dtype(dtype)?,
                 fill,
                 all_touched,
             },
         )?;
         rasterize_result_to_py(py, &result)
+    }
+
+    fn parse_burn_values(value: Option<&Bound<'_, PyAny>>) -> PyResult<Option<Vec<f64>>> {
+        let Some(value) = value else {
+            return Ok(None);
+        };
+        if value.is_none() {
+            return Ok(None);
+        }
+        if let Ok(single) = value.extract::<f64>() {
+            return Ok(Some(vec![single]));
+        }
+        value.extract::<Vec<f64>>().map(Some).map_err(|_| {
+            GisError::InvalidArgument(format!(
+                "{INVALID_ARGUMENT}: burn_values must be a number or numeric sequence"
+            ))
+            .into()
+        })
     }
 
     #[pyfunction(
@@ -1329,6 +1466,7 @@ mod py {
         dict.set_item("fill", result.fill)?;
         dict.set_item("burned_pixels", result.burned_pixels)?;
         dict.set_item("all_touched", result.all_touched)?;
+        dict.set_item("merge_alg", result.merge_alg.as_str())?;
         dict.set_item("warnings", warnings_to_py(py, &result.warnings)?)?;
         Ok(dict.into_py(py))
     }

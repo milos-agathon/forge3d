@@ -469,6 +469,71 @@ def test_mixed_crs_feature_collection_raises_crs_mismatch():
         gis.geometry_centroid(collection)
 
 
+def _mixed_crs_source_collection():
+    def feature(code):
+        return {
+            "type": "Feature",
+            "properties": {},
+            "info": {"crs_authority": {"name": "EPSG", "code": code}},
+            "geometry": _unit_square(),
+        }
+
+    return {
+        "type": "FeatureCollection",
+        "info": {"crs_authority": {"name": "EPSG", "code": "4326"}},
+        "features": [feature("4326"), feature("3857")],
+    }
+
+
+def _fc_with_crs(code, geometry):
+    return {
+        "type": "FeatureCollection",
+        "info": {"crs_authority": {"name": "EPSG", "code": code}},
+        "features": [{"type": "Feature", "properties": {}, "geometry": geometry}],
+    }
+
+
+def test_clip_vector_mixed_crs_source_raises_crs_mismatch():
+    # Regression: the clip source resolver folds per-feature `info` CRS
+    # metadata into the source CRS, so a collection-level EPSG:4326 source
+    # containing an EPSG:3857 feature raises crs_mismatch instead of reaching
+    # the topology backend under the collection-level declaration.
+    aoi = dict(
+        _unit_square(), info={"crs_authority": {"name": "EPSG", "code": "4326"}}
+    )
+    with pytest.raises(ValueError, match="crs_mismatch"):
+        gis.clip_vector(_mixed_crs_source_collection(), aoi)
+
+
+def test_intersect_vectors_mixed_crs_source_raises_crs_mismatch():
+    clean = _fc_with_crs("4326", _unit_square())
+    with pytest.raises(ValueError, match="crs_mismatch"):
+        gis.intersect_vectors(_mixed_crs_source_collection(), clean)
+    with pytest.raises(ValueError, match="crs_mismatch"):
+        gis.intersect_vectors(clean, _mixed_crs_source_collection())
+
+
+def test_dissolve_vector_mixed_crs_source_raises_crs_mismatch():
+    with pytest.raises(ValueError, match="crs_mismatch"):
+        gis.dissolve_vector(_mixed_crs_source_collection())
+
+
+def test_union_identity_for_polygon_touching_minus_180():
+    # Canonical-output regression: a west-side polygon TOUCHING -180 (not
+    # crossing it) must survive canonicalization unchanged — the naive
+    # per-vertex wrap flipped the exact -180 vertices to +180 and produced a
+    # world-spanning 355-degree edge.
+    poly = {
+        "type": "Polygon",
+        "coordinates": [[[-180, 5], [-175, 5], [-175, -5], [-180, -5], [-180, 5]]],
+        "info": {"crs_authority": {"name": "EPSG", "code": "4326"}},
+    }
+    geom = gis.union_geometries([poly])["geometry"]
+    assert geom["type"] == "Polygon"
+    xs = [pt[0] for ring in geom["coordinates"] for pt in ring]
+    assert all(-180.0 <= x <= -175.0 for x in xs), xs
+
+
 def test_union_splits_same_sheet_dateline_polygon():
     # Canonical +/-180 contract: a polygon authored continuously on 175..185
     # (no wrap jump for the unwrapper to detect) still comes back split at the

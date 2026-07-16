@@ -96,6 +96,8 @@ class TestNativeModuleSymbols:
         # CENSOR: typed GPU-error exceptions
         "MemoryBudgetExceeded",
         "DegradedCapability",
+        # MENSURA M-05: structured raster-reprojection failure exception
+        "TransformFailed",
     ]
 
     @pytest.mark.parametrize("cls_name", EXPECTED_CLASSES)
@@ -213,6 +215,7 @@ class TestNativeModuleSymbols:
         "align_raster_to",
         "reproject_raster",
         "calculate_default_transform",
+        "warped_vrt_info",
         "window_from_bounds",
         "read_raster_window",
         "window_transform",
@@ -259,8 +262,6 @@ class TestNativeModuleSymbols:
         "render_brdf_tile_overrides",
     ]
 
-    LATER_GIS_FUNCTIONS = []
-
     @pytest.mark.parametrize("fn_name", EXPECTED_FUNCTIONS)
     def test_registered_function_exists(self, fn_name: str):
         """Each registered pyfunction must be callable on the native module."""
@@ -272,13 +273,6 @@ class TestNativeModuleSymbols:
         assert callable(obj), (
             f"_forge3d.{fn_name} should be callable, got {type(obj)}"
         )
-
-    def test_later_gis_functions_not_registered(self):
-        """Any deferred GIS functions must remain absent without an empty-set skip."""
-        unexpected = [
-            fn_name for fn_name in self.LATER_GIS_FUNCTIONS if hasattr(_native, fn_name)
-        ]
-        assert unexpected == []
 
 
 # ===========================================================================

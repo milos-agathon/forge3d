@@ -148,6 +148,10 @@ version: str
 # pure-Python RuntimeError subclasses otherwise).
 class MemoryBudgetExceeded(RuntimeError): ...
 class DegradedCapability(RuntimeError): ...
+class TransformFailed(RuntimeError):
+    count: int
+    first_pixel: tuple[int, int] | None
+    first_reason: str | None
 
 class RendererConfig:
     lighting: Dict[str, Any]

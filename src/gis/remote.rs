@@ -60,6 +60,44 @@ pub fn fetch_remote_geodata(
     fetch_remote_geodata_inner(url, cache_dir, timeout, checksum, true)
 }
 
+/// Fetch an explicit remote payload while retaining the bytes for an in-process
+/// consumer such as the OSM or Terrarium adapters. This follows the same
+/// validation, checksum, timeout, and cache policy as `fetch_remote_geodata`;
+/// it is not a hidden default download surface.
+pub(crate) fn fetch_remote_geodata_payload(
+    url: &str,
+    cache_dir: Option<&Path>,
+    timeout: Option<f64>,
+) -> GisResult<(Vec<u8>, RemoteDatasetInfo)> {
+    ensure_remote_url(url)?;
+    if let Some(path) = cache_dir.and_then(|dir| existing_cache_path_for_url(dir, url)) {
+        let bytes = fs::read(&path)?;
+        let info = info_from_cache(url, &path, "hit", Vec::new(), None)?;
+        return Ok((bytes, info));
+    }
+    let response = http_get(url, timeout)?;
+    validate_driver(url, response.content_type.as_deref())?;
+    let digest = sha256_hex(&response.body);
+    let cache_path =
+        cache_dir.map(|dir| cache_path_for_url(dir, url, response.content_type.as_deref()));
+    if let Some(path) = cache_path.as_ref() {
+        atomic_write(path, &response.body)?;
+    }
+    let info = RemoteDatasetInfo {
+        url: url.to_string(),
+        cache_path,
+        status: "fetched".to_string(),
+        content_type: response.content_type,
+        byte_size: response.body.len() as u64,
+        checksum: format!("sha256:{digest}"),
+        etag: response.etag,
+        last_modified: response.last_modified,
+        from_cache: false,
+        warnings: Vec::new(),
+    };
+    Ok((response.body, info))
+}
+
 fn fetch_remote_geodata_inner(
     url: &str,
     cache_dir: Option<&Path>,

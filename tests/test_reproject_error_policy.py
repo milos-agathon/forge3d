@@ -74,6 +74,74 @@ def test_unsupported_crs_pair_raises_not_nodata_success(tmp_path):
     assert "row 0, col 0" in message
 
 
+@pytest.fixture
+def singular_source_transform_raster(tmp_path):
+    # A source transform whose LINEAR PART is singular (det = a*e - b*d = 0):
+    # (2,1,0,2,1,0) maps every pixel onto the line x==y, so the source-affine
+    # INVERSE fails for every destination pixel even though the CRS transform
+    # (4326 -> 3857) succeeds. Its bounding box is non-degenerate, so it reaches
+    # the per-pixel reproject loop. Before the fix, `inverse_apply(...).ok()`
+    # dropped each failure to a nodata fill and reported an all-zero SUCCESS.
+    path = tmp_path / "singular.tif"
+    data = np.arange(64, dtype=np.float32).reshape(1, 8, 8) + 1.0
+    transform = (2.0, 1.0, 0.0, 2.0, 1.0, 0.0)
+    gis.write_raster(str(path), data, crs="EPSG:4326", transform=transform)
+    return path
+
+
+def test_singular_source_transform_raises_not_silent_nodata(singular_source_transform_raster):
+    # M-05: a non-invertible SOURCE transform must be counted like any other
+    # transform failure, never silently filled to an all-nodata SUCCESS.
+    from forge3d._forge3d import TransformFailed
+
+    with pytest.raises(TransformFailed) as excinfo:
+        gis.reproject_raster(
+            str(singular_source_transform_raster), "EPSG:3857", resampling="nearest"
+        )
+    assert excinfo.value.count == 64, excinfo.value.count
+    assert tuple(excinfo.value.first_pixel) == (0, 0)
+    assert excinfo.value.policy == "raise"
+
+
+def test_singular_source_transform_nodata_policy_reports_diagnostic(
+    singular_source_transform_raster,
+):
+    # With the explicit nodata opt-in the caller accepts the fill, but the
+    # failure is still surfaced as a diagnostic (never silent).
+    result = gis.reproject_raster(
+        str(singular_source_transform_raster),
+        "EPSG:3857",
+        resampling="nearest",
+        on_transform_error="nodata",
+    )
+    codes = [d["code"] for d in result["diagnostics"]]
+    assert "transform_failures_filled_nodata" in codes
+
+
+def test_align_rejects_singular_source_transform(
+    singular_source_transform_raster, tmp_path
+):
+    # M-05 (resample/align path, not reprojection): aligning a raster whose
+    # SOURCE transform is singular must RAISE (InvalidTransform), never silently
+    # fill an all-nodata aligned raster with success. align_raster_to has no
+    # per-pixel raise/nodata policy, so it rejects the non-invertible source up
+    # front (require_invertible) instead of dropping every pixel to nodata.
+    target = tmp_path / "target.tif"
+    tdata = np.zeros((1, 8, 8), dtype=np.float32)
+    gis.write_raster(
+        str(target),
+        tdata,
+        crs="EPSG:4326",
+        transform=(0.01, 0.0, 13.0, 0.0, -0.01, 52.0),
+    )
+    with pytest.raises(Exception) as excinfo:
+        gis.align_raster_grid(
+            str(singular_source_transform_raster), str(target), resampling="nearest"
+        )
+    msg = str(excinfo.value).lower()
+    assert "singular" in msg or "invertible" in msg or "invalid_transform" in msg, msg
+
+
 def test_invalid_policy_string_is_rejected():
     with pytest.raises(Exception) as excinfo:
         gis.reproject_raster("nonexistent.tif", "EPSG:4326", resampling="nearest",
@@ -123,3 +191,16 @@ def test_transform_failed_count_is_per_pixel_not_per_band(tmp_path):
     with pytest.raises(TransformFailed) as excinfo:
         gis.reproject_raster(str(path), "EPSG:4269", resampling="nearest")
     assert excinfo.value.count == 64, f"expected 64 per-pixel failures, got {excinfo.value.count}"
+
+
+def test_transform_failed_is_surfaced_at_package_level():
+    # M-05/M-07: TransformFailed is re-exported at the forge3d package level
+    # (like MemoryBudgetExceeded/DegradedCapability), not only on the private
+    # _forge3d module, so `except forge3d.TransformFailed` works and it is in
+    # the public __all__.
+    import forge3d
+    from forge3d._forge3d import TransformFailed as _native_tf
+
+    assert hasattr(forge3d, "TransformFailed")
+    assert forge3d.TransformFailed is _native_tf
+    assert "TransformFailed" in forge3d.__all__
