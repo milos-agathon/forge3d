@@ -15,8 +15,8 @@ SANCTIONED = "src/camera/anchor.rs"
 
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
-EXPECTED_CONVERSION_COUNT = 1278
-EXPECTED_CONVERSION_SHA256 = "db001acdb19bd51042d2940de1194c13d382325dc5e550bec70e23d764f1d7ec"
+EXPECTED_CONVERSION_COUNT = 1279
+EXPECTED_CONVERSION_SHA256 = "875dd365debe1992628e61773ffa66be13e26f63d2ec9d6b6661c5758638bbcd"
 
 
 def _strip_comments_and_strings(text: str) -> str:
