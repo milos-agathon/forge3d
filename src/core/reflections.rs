@@ -209,11 +209,7 @@ impl PlanarReflectionRenderer {
     }
 
     /// Begin reflection render pass
-    pub fn begin_reflection_pass<'a>(
-        &'a self,
-        encoder: &'a mut CommandEncoder,
-        timestamp_writes: Option<wgpu::RenderPassTimestampWrites<'a>>,
-    ) -> RenderPass<'a> {
+    pub fn begin_reflection_pass<'a>(&'a self, encoder: &'a mut CommandEncoder) -> RenderPass<'a> {
         encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("planar_reflection_pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -237,7 +233,7 @@ impl PlanarReflectionRenderer {
                 }),
                 stencil_ops: None,
             }),
-            timestamp_writes,
+            timestamp_writes: None,
             occlusion_query_set: None,
         })
     }

@@ -18,22 +18,6 @@ pub(super) struct UploadedVectorScene {
     pub(super) line_count: u32,
 }
 
-impl UploadedVectorScene {
-    /// Commit `Queue::write_buffer` staging writes before the encoded draw.
-    ///
-    /// Point/line instance data and per-draw uniforms are uploaded while the
-    /// command buffer is being assembled.  An empty submit is the explicit
-    /// wgpu upload boundary; the following render submit remains ordered after
-    /// it. Wait only for that upload submission (not global GPU idle), because
-    /// Metal otherwise intermittently starts the draw against zero-filled
-    /// instance/uniform buffers.
-    pub(super) fn flush_uploads(&self) {
-        let upload = self.queue.submit(std::iter::empty());
-        self.device
-            .poll(wgpu::Maintain::WaitForSubmissionIndex(upload));
-    }
-}
-
 pub(super) fn vector_runtime_err<E: std::fmt::Display>(error: E) -> PyErr {
     PyRuntimeError::new_err(error.to_string())
 }
@@ -68,10 +52,7 @@ pub(super) fn create_rgba_target(
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            // Python vector entry points return compositor-ready RGBA bytes.
-            // Keep the attachment linear/unorm so Metal does not apply an
-            // implicit sRGB conversion or substitute an error-frame target.
-            format: wgpu::TextureFormat::Rgba8Unorm,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::COPY_SRC
                 | wgpu::TextureUsages::TEXTURE_BINDING,
@@ -117,10 +98,10 @@ pub(super) fn upload_vector_scene(
     poly_defs: &[PolylineDef],
 ) -> PyResult<UploadedVectorScene> {
     let (device, queue) = gpu_device_queue()?;
-    let mut point_renderer =
-        PointRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm).map_err(vector_runtime_err)?;
-    let mut line_renderer =
-        LineRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm).map_err(vector_runtime_err)?;
+    let mut point_renderer = PointRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .map_err(vector_runtime_err)?;
+    let mut line_renderer = LineRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .map_err(vector_runtime_err)?;
 
     if !point_defs.is_empty() {
         let instances = point_renderer
@@ -151,42 +132,41 @@ pub(super) fn upload_vector_scene(
 }
 
 #[cfg(feature = "weighted-oit")]
-pub(super) fn prepare_oit_scene(scene: &mut UploadedVectorScene, width: u32, height: u32) {
+pub(super) fn render_oit_scene<'a>(
+    scene: &'a mut UploadedVectorScene,
+    pass: &mut wgpu::RenderPass<'a>,
+    width: u32,
+    height: u32,
+) -> PyResult<()> {
     let viewport = viewport_dims(width, height);
     if scene.line_count > 0 {
-        scene.line_renderer.prepare_oit(
-            &scene.queue,
-            &IDENTITY_VIEW_PROJ,
-            viewport,
-            crate::vector::line::LineCap::Round,
-            crate::vector::line::LineJoin::Round,
-            2.0,
-        );
+        scene
+            .line_renderer
+            .render_oit(
+                pass,
+                &scene.queue,
+                &IDENTITY_VIEW_PROJ,
+                viewport,
+                scene.line_count,
+                crate::vector::line::LineCap::Round,
+                crate::vector::line::LineJoin::Round,
+                2.0,
+            )
+            .map_err(vector_runtime_err)?;
     }
     if scene.point_count > 0 {
         let pixel_scale = width.max(height) as f32 * 0.5;
         scene
             .point_renderer
-            .prepare_oit(&scene.queue, &IDENTITY_VIEW_PROJ, viewport, pixel_scale);
-    }
-}
-
-#[cfg(feature = "weighted-oit")]
-pub(super) fn render_oit_scene<'a>(
-    scene: &'a mut UploadedVectorScene,
-    pass: &mut wgpu::RenderPass<'a>,
-    _width: u32,
-    _height: u32,
-) -> PyResult<()> {
-    if scene.line_count > 0 {
-        scene
-            .line_renderer
-            .render_oit_prepared(pass, scene.line_count);
-    }
-    if scene.point_count > 0 {
-        scene
-            .point_renderer
-            .render_oit_prepared(pass, scene.point_count);
+            .render_oit(
+                pass,
+                &scene.queue,
+                &IDENTITY_VIEW_PROJ,
+                viewport,
+                pixel_scale,
+                scene.point_count,
+            )
+            .map_err(vector_runtime_err)?;
     }
     Ok(())
 }

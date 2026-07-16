@@ -53,18 +53,19 @@ impl PointRenderer {
 
         if instances.len() > self.instance_capacity {
             let new_capacity = (instances.len() * 2).max(1024);
-            let mut initialized = vec![instances[0]; new_capacity];
-            initialized[..instances.len()].copy_from_slice(instances);
-            self.instance_buffer = Some(tracked_create_buffer_init(
+            self.instance_buffer = Some(tracked_create_buffer(
                 device,
-                &wgpu::util::BufferInitDescriptor {
+                &wgpu::BufferDescriptor {
                     label: Some("vf.Vector.Point.InstanceBuffer"),
-                    contents: bytemuck::cast_slice(&initialized),
+                    size: (new_capacity * std::mem::size_of::<PointInstance>()) as u64,
                     usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
                 },
             )?);
             self.instance_capacity = new_capacity;
-        } else if let Some(instance_buffer) = &self.instance_buffer {
+        }
+
+        if let Some(instance_buffer) = &self.instance_buffer {
             queue.write_buffer(instance_buffer, 0, bytemuck::cast_slice(instances));
         }
 

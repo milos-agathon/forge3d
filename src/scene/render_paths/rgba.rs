@@ -22,7 +22,6 @@ impl Scene {
         // Read back live GPU-pass timings, record each into the certificate,
         // and freeze this render's capture (one render = one capture).
         self.record_render_timings(&mut timing);
-        crate::core::certificate::record_pass("scene.readback_copy", 0.0, 1);
         self.store_render_timing(timing);
         self.finish_certificate_capture(certificate_capture);
 
@@ -71,9 +70,8 @@ impl Scene {
                         }),
                         stencil_ops: None,
                     });
+            let fast_scope = scene_ts_begin(timing, encoder, "scene.main");
             {
-                let timestamp_writes =
-                    scene_render_pass_timestamps(timing, "scene.main", 1);
                 let _rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("scene-rp-fast-clear"),
                     color_attachments: &[
@@ -105,20 +103,20 @@ impl Scene {
                         }),
                     ],
                     depth_stencil_attachment: depth_attachment,
-                    timestamp_writes,
                     ..Default::default()
                 });
             }
+            scene_ts_end(timing, encoder, fast_scope, 1);
             return Ok(());
         }
 
-        let reflection_timestamps = if self.reflections_enabled && self.reflection_renderer.is_some() {
-            scene_render_pass_timestamps(timing, "scene.reflections", 1)
+        let refl_scope = if self.reflections_enabled {
+            scene_ts_begin(timing, encoder, "scene.reflections")
         } else {
             None
         };
-        self.render_reflections(encoder, reflection_timestamps)
-            .map_err(reflection_err)?;
+        self.render_reflections(encoder).map_err(reflection_err)?;
+        scene_ts_end(timing, encoder, refl_scope, 0);
 
         let cloud_shadow_scope = if self.cloud_shadows_enabled {
             scene_ts_begin(timing, encoder, "scene.cloud_shadows")
@@ -135,6 +133,7 @@ impl Scene {
             }
         }
 
+        let main_scope = scene_ts_begin(timing, encoder, "scene.main");
         {
             let (target_view, resolve_target) = if self.sample_count > 1 {
                 (
@@ -168,7 +167,6 @@ impl Scene {
                         stencil_ops: None,
                     });
 
-            let timestamp_writes = scene_render_pass_timestamps(timing, "scene.main", 1);
             let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene-rp-rgba"),
                 color_attachments: &[
@@ -200,7 +198,6 @@ impl Scene {
                     }),
                 ],
                 depth_stencil_attachment: depth_attachment,
-                timestamp_writes,
                 ..Default::default()
             });
 
@@ -269,6 +266,7 @@ impl Scene {
                 rp.draw_indexed(0..self.nidx, 0, 0..1);
             }
         }
+        scene_ts_end(timing, encoder, main_scope, 1);
 
         #[cfg(feature = "enable-gpu-instancing")]
         let has_instanced_batches =
@@ -428,13 +426,13 @@ impl Scene {
             scene_ts_end(timing, encoder, ssao_scope, 0);
         }
 
-        let cloud_timestamps = if self.clouds_enabled && self.cloud_renderer.is_some() {
-            scene_render_pass_timestamps(timing, "scene.clouds", 1)
+        let clouds_scope = if self.clouds_enabled {
+            scene_ts_begin(timing, encoder, "scene.clouds")
         } else {
             None
         };
-        self.render_clouds(encoder, cloud_timestamps)
-            .map_err(cloud_render_err)?;
+        self.render_clouds(encoder).map_err(cloud_render_err)?;
+        scene_ts_end(timing, encoder, clouds_scope, 0);
 
         let dof_scope = if self.dof_enabled {
             scene_ts_begin(timing, encoder, "scene.dof")
@@ -446,3 +444,4 @@ impl Scene {
         Ok(())
     }
 }
+

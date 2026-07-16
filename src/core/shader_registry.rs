@@ -254,9 +254,6 @@ mod tests {
 
     #[test]
     fn register_shader_source_records_collision_degradation() {
-        let _lock = crate::core::degradation::TEST_SINK_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         crate::core::degradation::clear_degradations();
         // Use labels unlikely to collide with other global registrations.
         let base = "test.shader_registry.collision";

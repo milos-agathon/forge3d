@@ -2,7 +2,6 @@ impl Scene {
     pub(super) fn render_clouds(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
-        timestamp_writes: Option<wgpu::RenderPassTimestampWrites<'_>>,
     ) -> Result<(), String> {
         if !self.clouds_enabled {
             return Ok(());
@@ -35,7 +34,6 @@ impl Scene {
                 },
             })],
             depth_stencil_attachment: None,
-            timestamp_writes,
             ..Default::default()
         });
         crate::core::shader_registry::record_shader_use("cloud_shader");

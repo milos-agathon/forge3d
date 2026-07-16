@@ -1,8 +1,6 @@
 use super::types::*;
 use crate::core::error::RenderError;
-use crate::core::resource_tracker::{
-    tracked_create_buffer, tracked_create_buffer_init, TrackedBuffer,
-};
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
 use crate::vector::api::PointDef;
 use crate::vector::data::{validate_point_instances, PointInstance};
 use crate::vector::layer::Layer;

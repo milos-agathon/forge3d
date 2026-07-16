@@ -157,19 +157,45 @@ impl LineRenderer {
         // Reallocate buffer if needed
         if instances.len() > self.vertex_capacity {
             let new_capacity = (instances.len() * 2).max(1024);
-            let mut initialized = vec![instances[0]; new_capacity];
-            initialized[..instances.len()].copy_from_slice(instances);
-            self.vertex_buffer = Some(tracked_create_buffer_init(
+            self.vertex_buffer = Some(tracked_create_buffer(
                 device,
-                &wgpu::util::BufferInitDescriptor {
+                &wgpu::BufferDescriptor {
                     label: Some("vf.Vector.Line.InstanceBuffer"),
-                    contents: bytemuck::cast_slice(&initialized),
+                    size: (new_capacity * std::mem::size_of::<LineInstance>()) as u64,
                     usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
                 },
             )?);
             self.vertex_capacity = new_capacity;
-        } else if let Some(vertex_buffer) = &self.vertex_buffer {
-            queue.write_buffer(vertex_buffer, 0, bytemuck::cast_slice(instances));
+        }
+
+        // Upload instance data
+        if let Some(vertex_buffer) = &self.vertex_buffer {
+            let instance_data = bytemuck::cast_slice(instances);
+
+            // Use staging buffer for upload
+            let staging_buffer = tracked_create_buffer_init(
+                device,
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("vf.Vector.Line.StagingBuffer"),
+                    contents: instance_data,
+                    usage: wgpu::BufferUsages::COPY_SRC,
+                },
+            )?;
+
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("vf.Vector.Line.Upload"),
+            });
+
+            encoder.copy_buffer_to_buffer(
+                &staging_buffer,
+                0,
+                vertex_buffer,
+                0,
+                instance_data.len() as u64,
+            );
+
+            queue.submit(Some(encoder.finish()));
         }
 
         Ok(())
@@ -215,43 +241,6 @@ impl LineRenderer {
 
     /// H4: Render using weighted OIT MRT. Render pass must be created with color attachments
     /// matching Rgba16Float and R16Float targets.
-    pub fn prepare_oit(
-        &self,
-        queue: &wgpu::Queue,
-        transform: &[[f32; 4]; 4],
-        viewport_size: [f32; 2],
-        cap_style: LineCap,
-        join_style: LineJoin,
-        miter_limit: f32,
-    ) {
-        let uniform = LineUniform {
-            transform: *transform,
-            stroke_color: [1.0, 1.0, 1.0, 1.0],
-            stroke_width: 1.0,
-            _pad0: 0.0,
-            viewport_size,
-            miter_limit,
-            cap_style: cap_style as u32,
-            join_style: join_style as u32,
-            _pad1: [0.0; 5],
-        };
-        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
-    }
-
-    pub fn render_oit_prepared<'pass>(
-        &'pass self,
-        render_pass: &mut wgpu::RenderPass<'pass>,
-        instance_count: u32,
-    ) {
-        if let Some(vertex_buffer) = &self.vertex_buffer {
-            crate::core::shader_registry::record_shader_use("line_aa.wgsl");
-            render_pass.set_pipeline(&self.oit_pipeline);
-            render_pass.set_bind_group(0, &self.bind_group, &[]);
-            render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-            render_pass.draw(0..4, 0..instance_count);
-        }
-    }
-
     pub fn render_oit<'pass>(
         &'pass self,
         render_pass: &mut wgpu::RenderPass<'pass>,
@@ -263,15 +252,26 @@ impl LineRenderer {
         join_style: LineJoin,
         miter_limit: f32,
     ) -> Result<(), RenderError> {
-        self.prepare_oit(
-            queue,
-            transform,
-            viewport_size,
-            cap_style,
-            join_style,
-            miter_limit,
-        );
-        self.render_oit_prepared(render_pass, instance_count);
+        if let Some(vertex_buffer) = &self.vertex_buffer {
+            let uniform = LineUniform {
+                transform: *transform,
+                stroke_color: [1.0, 1.0, 1.0, 1.0],
+                stroke_width: 1.0,
+                _pad0: 0.0,
+                viewport_size,
+                miter_limit,
+                cap_style: cap_style as u32,
+                join_style: join_style as u32,
+                _pad1: [0.0; 5],
+            };
+            queue.write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniform]));
+
+            crate::core::shader_registry::record_shader_use("line_aa.wgsl");
+            render_pass.set_pipeline(&self.oit_pipeline);
+            render_pass.set_bind_group(0, &self.bind_group, &[]);
+            render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            render_pass.draw(0..4, 0..instance_count);
+        }
         Ok(())
     }
 

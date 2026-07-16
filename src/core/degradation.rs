@@ -13,9 +13,6 @@ pub struct Degradation {
 
 static SINK: Mutex<Vec<Degradation>> = Mutex::new(Vec::new());
 
-#[cfg(test)]
-pub(crate) static TEST_SINK_LOCK: Mutex<()> = Mutex::new(());
-
 thread_local! {
     static CAPTURE: RefCell<Option<Vec<Degradation>>> = const { RefCell::new(None) };
 }
@@ -70,7 +67,6 @@ mod tests {
     use super::*;
     #[test]
     fn dedup_on_kind_and_name() {
-        let _lock = TEST_SINK_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         clear_degradations();
         record_degradation("capability_absent", "timestamp_query", "a");
         record_degradation("capability_absent", "timestamp_query", "b");
@@ -81,7 +77,6 @@ mod tests {
 
     #[test]
     fn degradation_capture_is_render_local() {
-        let _lock = TEST_SINK_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         clear_degradations();
         record_degradation("pre_render", "excluded", "before");
         record_degradation("repeated", "included", "before");

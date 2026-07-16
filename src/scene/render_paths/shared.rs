@@ -17,12 +17,11 @@ impl Scene {
 
     /// Copy the color target to a mappable buffer and read it back to RGBA
     /// bytes. `timing` threads the render's [`GpuTimingManager`] so the
+    /// texture→buffer copy is recorded as the `scene.readback_copy` pass, and
     /// `resolve_queries` is emitted into this final encoder — the last submit
-    /// of the render — so every timestamp written by native GPU passes is
-    /// resolved before [`Scene::record_render_timings`] reads it. The copy is
-    /// reported honestly as untimed: encoder-level timestamp writes around a
-    /// texture copy corrupt the following Metal render, while wgpu exposes no
-    /// copy-pass timestamp boundary equivalent to render/compute pass writes.
+    /// of the render — so every timestamp written across the render (main and
+    /// readback encoders) is resolved before [`Scene::record_render_timings`]
+    /// reads it.
     fn readback_color_pixels(
         &self,
         readback_label: &str,
@@ -48,6 +47,7 @@ impl Scene {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some(copy_label),
             });
+        let copy_scope = scene_ts_begin(timing, &mut enc, "scene.readback_copy");
         enc.copy_texture_to_buffer(
             wgpu::ImageCopyTexture {
                 texture: &self.color,
@@ -69,6 +69,7 @@ impl Scene {
                 depth_or_array_layers: 1,
             },
         );
+        scene_ts_end(timing, &mut enc, copy_scope, 1);
         if let Some(t) = timing.as_mut() {
             t.resolve_queries(&mut enc);
         }

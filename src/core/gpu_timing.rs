@@ -297,40 +297,6 @@ impl GpuTimingManager {
         scope_id
     }
 
-    /// Reserve a timestamp pair that is written by a render pass itself.
-    ///
-    /// Metal has exhibited attachment corruption when timestamp writes bracket
-    /// a render pass at command-encoder level. `RenderPassTimestampWrites`
-    /// records the same live interval at the native pass boundaries without
-    /// injecting commands around the pass.
-    pub fn render_pass_timestamp_writes(
-        &mut self,
-        label: &str,
-        draw_calls: u32,
-    ) -> Option<RenderPassTimestampWrites<'_>> {
-        let slot = self.frame_parity;
-        if !self.supports_timestamps {
-            self.scope_labels[slot].push(label.to_string());
-            self.scope_draw_calls[slot].push(draw_calls);
-            return None;
-        }
-        let query_set = self.timestamp_query_set[slot].as_ref()?;
-        let begin_index = self.query_index[slot];
-        let end_index = begin_index.checked_add(1)?;
-        if end_index >= self.config.max_queries_per_frame * 2 {
-            return None;
-        }
-
-        self.scope_labels[slot].push(label.to_string());
-        self.scope_draw_calls[slot].push(draw_calls);
-        self.query_index[slot] = end_index + 1;
-        Some(RenderPassTimestampWrites {
-            query_set,
-            beginning_of_pass_write_index: Some(begin_index),
-            end_of_pass_write_index: Some(end_index),
-        })
-    }
-
     fn begin_scope_internal(
         &mut self,
         encoder: &mut CommandEncoder,
@@ -523,21 +489,7 @@ impl GpuTimingManager {
     /// re-report scopes from a prior call.
     pub fn get_results_blocking(&mut self) -> RenderResult<Vec<TimingResult>> {
         let slot = self.frame_parity;
-        let results = if self.query_index[slot] < 2 && !self.scope_labels[slot].is_empty() {
-            self.scope_labels[slot]
-                .iter()
-                .enumerate()
-                .map(|(index, name)| TimingResult {
-                    name: name.clone(),
-                    gpu_time_ms: 0.0,
-                    timestamp_valid: false,
-                    draw_calls: self.scope_draw_calls[slot].get(index).copied().unwrap_or(0),
-                    pipeline_stats: None,
-                })
-                .collect()
-        } else {
-            pollster::block_on(self.read_results_from_slot(slot))?
-        };
+        let results = pollster::block_on(self.read_results_from_slot(slot))?;
         self.query_index[slot] = 0;
         self.scope_labels[slot].clear();
         self.scope_draw_calls[slot].clear();

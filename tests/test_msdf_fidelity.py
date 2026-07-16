@@ -180,10 +180,8 @@ def test_true_rgb_msdf_meets_12px_analytic_fidelity():
         f"12px IoU={iou:.6f} Hausdorff={hausdorff:.6f}px "
         f"MAE={mean_error:.6f}"
     )
-    # The oracle is continuous area coverage while the atlas sign is sampled
-    # at pixel centers, so a one-pixel disagreement is the quantization bound.
-    assert iou >= 0.90
-    assert hausdorff <= 1.0
+    assert iou >= 0.995
+    assert hausdorff <= 0.5
     assert mean_error <= 0.02
     assert baked["image"].shape[2] == 3
     assert np.any(baked["image"][..., 0] != baked["image"][..., 1])
@@ -197,7 +195,7 @@ def test_true_rgb_msdf_meets_96px_ssim():
     mean_error = float(np.mean(np.abs(decoded - analytic)))
 
     print(f"96px SSIM={measured:.9f} MAE={mean_error:.9f}")
-    assert measured >= 0.985
+    assert measured >= 0.999
     assert mean_error <= 0.003
 
 
@@ -280,6 +278,8 @@ def test_single_channel_ablation_loses_the_sharp_corner():
         f"SSIM={msdf_similarity:.6f}/{sdf_similarity:.6f}"
     )
     assert msdf_distance <= sdf_distance
+    assert msdf_distance <= 0.5
+    assert sdf_distance > 0.5
     assert msdf_similarity > sdf_similarity + 0.005
     assert msdf_error < sdf_error
 

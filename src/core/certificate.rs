@@ -337,14 +337,6 @@ pub fn finish_external_render_capture(
         .ok_or_else(|| RenderError::render("no Python render capture is active"))?;
     record_pass(pass_label, 0.0, draw_calls);
     capture.finish();
-    // A Python-owned render can create and drop several nested native
-    // renderers before this boundary (terrain, vector, label compositor).
-    // Retire wgpu's deferred backend destruction now so the next independent
-    // renderer cannot observe stale Metal resource bindings. This is render
-    // finalization, not a routine per-pass synchronization point.
-    if let Some(ctx) = crate::core::gpu::ctx_if_initialized() {
-        ctx.device.poll(wgpu::Maintain::Wait);
-    }
     Ok(())
 }
 
