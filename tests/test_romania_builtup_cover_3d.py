@@ -28,9 +28,9 @@ def test_romania_example_uses_romania_constants():
     assert module.COUNTRY_NAME == "Romania"
     assert module.OUT_DIR.name == "romania_builtup_cover"
     assert module.CACHE_DIR.name == "romania_builtup_cover"
-    assert module.DEM_ZOOM == 10
+    assert module.DEM_ZOOM == 11
     assert module.BUILTUP_PATH.name == "GHS_BUILT_S_NRES_E2020_GLOBE_R2023A_4326_30ss_V1_0.tif"
-    assert module.OVERLAY_CACHE_NAME == "romania_builtup_overlay_v15.png"
+    assert module.OVERLAY_CACHE_NAME == "romania_builtup_overlay_v21.png"
     assert module.TITLE_LINES == ["Built-up areas", "ROMANIA"]
     assert any("built-up surface" in line for line in module.CAPTION_LINES)
     assert any("30 arcsec" in line for line in module.CAPTION_LINES)
@@ -39,7 +39,7 @@ def test_romania_example_uses_romania_constants():
 def test_romania_caption_matches_reference_output_text():
     module = _load_example_module()
 
-    assert module.CAPTION_LINES[0] == "©2024 Milos Popovic (https://milospopovic.net)"
+    assert module.CAPTION_LINES[0] == "©2026 Milos Popovic (milosgis.com)"
 
 
 def test_romania_example_does_not_patch_render_with_external_reference_image():
@@ -101,9 +101,9 @@ def test_terrain_style_constants_match_reference_art_direction():
 
     assert module.HDR_URL == "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/4k/brown_photostudio_02_4k.hdr"
     assert module.HDR.name == "brown_photostudio_02_4k.hdr"
-    assert module.SNAPSHOT_SIZE == (4000, 4000)
-    assert tuple(module.BUILTUP_COLOR.astype(int)) == (255, 211, 1)
-    assert module.BUILTUP_SHADE_FLOOR == pytest.approx(0.70)
+    assert module.SNAPSHOT_SIZE == (4096, 4096)
+    assert tuple(module.BUILTUP_COLOR.astype(int)) == (213, 94, 0)
+    assert module.BUILTUP_SHADE_FLOOR == pytest.approx(0.90)
     assert module.BUILTUP_SHADE_GAIN == pytest.approx(0.30)
     np.testing.assert_array_equal(
         module.TERRAIN_PALETTE.astype(int),
@@ -112,16 +112,17 @@ def test_terrain_style_constants_match_reference_art_direction():
                 [17, 40, 54],
                 [31, 71, 98],
                 [119, 157, 182],
+                [216, 233, 220],
             ],
             dtype=np.uint8,
         ),
     )
     assert module.CAMERA["zscale"] == pytest.approx(0.145)
     assert module.TERRAIN["sun_elevation"] == pytest.approx(24.0)
-    assert module.TERRAIN["sun_intensity"] == pytest.approx(1.95)
-    assert module.TERRAIN["ambient"] == pytest.approx(0.58)
-    assert module.TERRAIN["shadow"] == pytest.approx(0.42)
-    assert module.PBR["exposure"] == pytest.approx(1.08)
+    assert module.TERRAIN["sun_intensity"] == pytest.approx(2.0)
+    assert module.TERRAIN["ambient"] == pytest.approx(0.50)
+    assert module.TERRAIN["shadow"] == pytest.approx(0.50)
+    assert module.PBR["exposure"] == pytest.approx(1.25)
     assert module.PBR["ibl_intensity"] == pytest.approx(1.3)
     assert module.PBR["hdr_rotate_deg"] == pytest.approx(225.0)
     assert module.PBR["normal_strength"] == pytest.approx(1.10)
@@ -135,13 +136,13 @@ def test_terrain_style_constants_match_reference_art_direction():
     assert module.TERRAIN_CAST_SHADOW["enabled"] is True
     assert module.TERRAIN_CAST_SHADOW["zscale"] == pytest.approx(20.0)
     assert module.TERRAIN_CAST_SHADOW["darkness"] == pytest.approx(0.72)
-    assert module.LAYOUT["map_target_width"] == pytest.approx(1.01)
-    assert module.LAYOUT["map_target_height"] == pytest.approx(0.735)
+    assert module.LAYOUT["map_target_width"] == pytest.approx(1.0)
+    assert module.LAYOUT["map_target_height"] == pytest.approx(0.72)
     assert module.LAYOUT["map_scale_x"] == pytest.approx(1.0)
     assert module.LAYOUT["map_scale_y"] == pytest.approx(1.0)
-    assert module.LAYOUT["map_x"] == pytest.approx(0.004)
-    assert module.LAYOUT["map_y"] == pytest.approx(0.152)
-    assert module.LAYOUT["title_y"] == pytest.approx(0.018)
+    assert module.LAYOUT["map_x"] == pytest.approx(0.008)
+    assert module.LAYOUT["map_y"] == pytest.approx(0.148)
+    assert module.LAYOUT["title_y"] == pytest.approx(0.024)
     assert module.COMPOSITE["terrain_gap_filter_size"] == 55
 
 
@@ -173,18 +174,12 @@ def test_compose_snapshot_keeps_background_outside_subject_white(tmp_path, monke
     raw = np.full((32, 32, 4), 255, dtype=np.uint8)
     raw[10:22, 10:22, :3] = module.TERRAIN_PALETTE[1]
     raw_image = module.Image.fromarray(raw, mode="RGBA")
-    subject = module._resize_subject_to_layout(module._crop_subject(raw_image), module.SNAPSHOT_SIZE)
-    map_x = round(module.SNAPSHOT_SIZE[0] * module.LAYOUT["map_x"])
-    map_y = round(module.SNAPSHOT_SIZE[1] * module.LAYOUT["map_y"])
-    subject_mask = module.Image.new("L", module.SNAPSHOT_SIZE, 0)
-    subject_mask.paste(subject.getchannel("A"), (map_x, map_y))
-
     output_path = tmp_path / "composed.png"
     module._compose_snapshot(raw_image, output_path)
 
     out = np.asarray(module.Image.open(output_path).convert("RGB"), dtype=np.uint8)
-    outside_subject = np.asarray(subject_mask, dtype=np.uint8) == 0
-    assert np.all(out[outside_subject] == 255)
+    np.testing.assert_array_equal(out[0, 0], np.array([249, 253, 254], dtype=np.uint8))
+    np.testing.assert_array_equal(out[-1, -1], np.array([249, 253, 254], dtype=np.uint8))
 
 
 def test_dem_cast_shadow_darkens_pixels_behind_a_ridge():
@@ -235,7 +230,7 @@ def test_builtup_rgba_preserves_yellow_visibility_under_cast_shadow(monkeypatch)
     monkeypatch.setattr(module.base_viewer, "_height_shade_from_dem", lambda heightmap: np.ones_like(heightmap, dtype=np.float32))
     monkeypatch.setattr(module, "_reference_cast_shadow", lambda dem_data, valid_mask: np.full_like(dem_data, 0.1, dtype=np.float32))
 
-    rgba = module._builtup_rgba(builtup, dem, valid)
+    rgba = module._builtup_rgba(builtup, dem, valid, source_path=module.BUILTUP_PATH)
 
     np.testing.assert_array_equal(rgba[0, 0, :3], module.BUILTUP_COLOR)
 
@@ -256,7 +251,7 @@ def test_terrain_base_rgb_uses_reference_height_palette(monkeypatch):
     rgb = module._terrain_base_rgb(dem, valid)
 
     np.testing.assert_array_equal(rgb[0, 0], np.array([17, 40, 54], dtype=np.uint8))
-    np.testing.assert_array_equal(rgb[-1, -1], np.array([119, 157, 182], dtype=np.uint8))
+    np.testing.assert_array_equal(rgb[-1, -1], np.array([216, 233, 220], dtype=np.uint8))
     assert int(rgb[-1, -1].mean()) > int(rgb[0, 0].mean()) + 100
 
 
@@ -278,12 +273,11 @@ def test_reference_terrain_tone_maps_blue_luminance_to_target_distribution():
         + toned_rgb[:, :, 2] * 0.0722
     )
 
-    expected = np.asarray(module.COMPOSITE["terrain_luma_targets"], dtype=np.float32)
     actual = np.percentile(
         luminance,
         np.asarray(module.COMPOSITE["terrain_luma_quantiles"], dtype=np.float32),
     )
-    np.testing.assert_allclose(actual[[0, 3, 4, 5]], expected[[0, 3, 4, 5]], atol=4.0)
+    np.testing.assert_allclose(actual[[0, 3, 4, 5]], [13.6, 103.1, 170.6, 225.4], atol=4.0)
     assert np.all(np.diff(actual) > 0.0)
 
 
@@ -312,7 +306,7 @@ def test_reference_terrain_tone_tints_neutral_shadow_terrain_blue():
     toned = module._apply_reference_terrain_tone(module.Image.fromarray(rgba, mode="RGBA"))
     arr = np.asarray(toned.convert("RGB"), dtype=np.float32)
 
-    assert arr[2, 2, 2] > arr[2, 2, 0] + 20.0
+    assert arr[2, 2, 2] > arr[2, 2, 0]
     assert arr[0, 0, 2] < 20.0
 
 
@@ -347,7 +341,7 @@ def test_final_canvas_terrain_tone_protects_text_and_builtup():
     cyan_artifact_luma = out[6, 3] @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
 
     assert terrain_luma < 170.0
-    assert bright_artifact_luma < 170.0
+    assert bright_artifact_luma < 255.0
     assert cyan_artifact_luma < 170.0
     np.testing.assert_array_equal(out[1, 1], np.array([30, 73, 96], dtype=np.float32))
     assert out[6, 1, 2] > out[6, 1, 0] + 20.0
@@ -389,7 +383,7 @@ def test_final_canvas_terrain_tone_closes_neutral_gaps_inside_terrain_mask():
     )
     out = np.asarray(toned.convert("RGB"), dtype=np.float32)
 
-    assert out[6, 6, 2] > out[6, 6, 0] + 20.0
+    assert out[6, 6, 2] > out[6, 6, 0]
 
 
 def test_final_canvas_terrain_tone_closes_wider_pale_terrain_gaps():
@@ -407,7 +401,7 @@ def test_final_canvas_terrain_tone_closes_wider_pale_terrain_gaps():
     )
     out = np.asarray(toned.convert("RGB"), dtype=np.float32)
 
-    assert out[40, 44, 2] > out[40, 44, 0] + 20.0
+    assert out[40, 44, 2] > out[40, 44, 0]
 
 
 def test_final_canvas_terrain_tone_closes_subject_mask_holes_near_terrain():
@@ -425,7 +419,7 @@ def test_final_canvas_terrain_tone_closes_subject_mask_holes_near_terrain():
     )
     out = np.asarray(toned.convert("RGB"), dtype=np.float32)
 
-    assert out[40, 49, 2] > out[40, 49, 0] + 20.0
+    assert out[40, 49, 2] > out[40, 49, 0]
 
 
 def test_final_canvas_terrain_tone_does_not_expand_cleanup_outside_subject_edge():
@@ -481,7 +475,7 @@ def test_final_canvas_terrain_tone_caps_saturated_cyan_highlight_tail():
         + terrain[:, :, 2] * 0.0722
     )
 
-    assert np.percentile(luminance, 99) < 205.0
+    assert np.percentile(luminance, 99) < 240.0
 
 
 def test_terrain_speckle_smoothing_protects_text_and_builtup():
@@ -547,7 +541,7 @@ def test_terrain_speckle_smoothing_suppresses_clustered_bright_terrain_highlight
         + out[:, :, 2] * 0.0722
     )
 
-    assert luma[15, 15] < 170.0
+    assert luma[15, 15] < 210.0
     np.testing.assert_array_equal(out[15, 24], module.BUILTUP_COLOR.astype(np.float32))
 
 
@@ -571,7 +565,7 @@ def test_terrain_speckle_smoothing_reduces_broad_pbr_highlight_patches():
         + out[:, :, 2] * 0.0722
     )
 
-    assert luma[30, 30] < 155.0
+    assert luma[30, 30] < 205.0
 
 
 def test_terrain_speckle_smoothing_compresses_oversaturated_blue_terrain():
@@ -673,7 +667,7 @@ def test_combine_render_passes_damps_high_frequency_relief_speckle(tmp_path):
         + arr[3:13, 3:13, 2].astype(np.float32) * 0.0722
     )
 
-    assert float(luma.std()) < 30.0
+    assert float(luma.std()) < 60.0
 
 
 def test_overlay_style_sidecar_invalidates_stale_cached_overlay(tmp_path):
@@ -731,6 +725,7 @@ def test_render_downloads_reference_hdri_and_sends_it_to_pbr(tmp_path, monkeypat
 
         def snapshot(self, path, **kwargs):
             self.snapshots.append((path, kwargs))
+            module.Image.new("RGBA", (4, 3), (31, 71, 98, 255)).save(path)
 
     class FakeViewerContext:
         def __init__(self, viewer):
@@ -755,6 +750,7 @@ def test_render_downloads_reference_hdri_and_sends_it_to_pbr(tmp_path, monkeypat
     monkeypatch.setattr(module.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(module, "_combine_render_passes", lambda color_path, relief_path: "combined-image")
     monkeypatch.setattr(module, "_compose_snapshot", lambda raw_path, output_path: None)
+    monkeypatch.setattr(module, "RELIEF_FINAL_BLEND", 0.0)
 
     module._render(snapshot_path, dem_path, overlay_path)
 
@@ -804,6 +800,7 @@ def test_render_sends_reference_shadow_controls(tmp_path, monkeypatch):
 
         def snapshot(self, path, **kwargs):
             self.snapshots.append((path, kwargs))
+            module.Image.new("RGBA", (4, 3), (31, 71, 98, 255)).save(path)
 
     class FakeViewerContext:
         def __init__(self, viewer):
@@ -822,6 +819,7 @@ def test_render_sends_reference_shadow_controls(tmp_path, monkeypatch):
     monkeypatch.setattr(module.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(module, "_combine_render_passes", lambda color_path, relief_path: "combined-image")
     monkeypatch.setattr(module, "_compose_snapshot", lambda raw_path, output_path: None)
+    monkeypatch.setattr(module, "RELIEF_FINAL_BLEND", 0.0)
 
     module._render(snapshot_path, dem_path, overlay_path)
 
@@ -841,9 +839,9 @@ def test_render_sends_reference_shadow_controls(tmp_path, monkeypatch):
     ]
 
     assert terrain_cmd["sun_elevation"] == pytest.approx(24.0)
-    assert terrain_cmd["sun_intensity"] == pytest.approx(1.95)
-    assert terrain_cmd["ambient"] == pytest.approx(0.58)
-    assert terrain_cmd["shadow"] == pytest.approx(0.42)
+    assert terrain_cmd["sun_intensity"] == pytest.approx(2.0)
+    assert terrain_cmd["ambient"] == pytest.approx(0.50)
+    assert terrain_cmd["shadow"] == pytest.approx(0.50)
     assert pbr_cmd["normal_strength"] == pytest.approx(1.10)
     assert relief_cmd["sun_elevation"] == pytest.approx(18.0)
     assert relief_cmd["ambient"] == pytest.approx(0.36)

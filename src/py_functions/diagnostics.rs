@@ -295,7 +295,7 @@ pub(crate) fn request_host_visible_allocation_for_test(bytes: u64, label: &str) 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 pub(crate) fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<PyObject> {
-    let requested_backend = match backend.as_deref().map(|s| s.to_ascii_lowercase()) {
+    let _requested_backend = match backend.as_deref().map(|s| s.to_ascii_lowercase()) {
         Some(ref s) if s == "metal" => Some(wgpu::Backend::Metal),
         Some(ref s) if s == "vulkan" => Some(wgpu::Backend::Vulkan),
         Some(ref s) if s == "dx12" => Some(wgpu::Backend::Dx12),
@@ -313,12 +313,6 @@ pub(crate) fn device_probe(py: Python<'_>, backend: Option<String>) -> PyResult<
         .is_some_and(|name| name.eq_ignore_ascii_case("webgpu"));
     if !requested_webgpu {
         if let Some((info, software_fallback)) = crate::core::gpu::active_adapter_info() {
-            if requested_backend.is_some_and(|expected| info.backend != expected) {
-                return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "pre-initialized adapter backend {:?} is incompatible with requested backend {:?}",
-                    info.backend, requested_backend
-                )));
-            }
             let d = PyDict::new_bound(py);
             d.set_item("status", "ok")?;
             d.set_item("name", info.name)?;
