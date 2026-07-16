@@ -516,12 +516,12 @@ impl LabelManager {
             render_polyline: Vec<Vec3>,
         }
 
-        if !self.enabled || self.atlas.is_none() {
+        if !self.enabled {
             self.reset_layout_output();
             return 0;
         }
 
-        let atlas = self.atlas.as_ref().unwrap();
+        let atlas = self.atlas.as_ref();
 
         let (screen_w, screen_h) = self.projector.screen_size();
         let mut visible_count = 0;
@@ -614,7 +614,7 @@ impl LabelManager {
                 };
                 let line_range = 0..label.text.chars().count();
                 let line_ranges = std::slice::from_ref(&line_range);
-                let (width, height) = if let Some(shaped) = &shaped {
+                let (width, height) = if let (Some(atlas), Some(shaped)) = (atlas, &shaped) {
                     match atlas.measure_shaped(shaped, line_ranges) {
                         Ok(measurement) => measurement,
                         Err(error) => {
@@ -626,8 +626,14 @@ impl LabelManager {
                             continue;
                         }
                     }
-                } else {
+                } else if let Some(atlas) = atlas {
                     atlas.measure_text(&label.text, label.style.size)
+                } else {
+                    let glyphs = label.text.chars().filter(|ch| !ch.is_whitespace()).count();
+                    (
+                        (glyphs.max(1) as f32) * label.style.size * 0.6,
+                        label.style.size,
+                    )
                 };
                 let half_w = width * 0.5;
                 let half_h = height * 0.5;
@@ -649,7 +655,7 @@ impl LabelManager {
                     }
                 }
                 color[3] = staged_computed_alpha;
-                let instances = if let Some(shaped) = &shaped {
+                let instances = if let (Some(atlas), Some(shaped)) = (atlas, &shaped) {
                     match atlas.layout_shaped(
                         shaped,
                         line_ranges,
@@ -668,7 +674,7 @@ impl LabelManager {
                             continue;
                         }
                     }
-                } else {
+                } else if let Some(atlas) = atlas {
                     atlas.layout_text(
                         &label.text,
                         screen_pos,
@@ -677,6 +683,8 @@ impl LabelManager {
                         label.style.halo_color,
                         label.style.halo_width,
                     )
+                } else {
+                    Vec::new()
                 };
 
                 if staged_collision.check_collision(bounds) {
@@ -799,7 +807,7 @@ impl LabelManager {
 
             let mut color = line_label.style.color;
             color[3] = color[3].clamp(0.0, 1.0);
-            let instances = if let Some(shaped) = &shaped {
+            let instances = if let (Some(atlas), Some(shaped)) = (atlas, &shaped) {
                 match atlas.layout_shaped_on_placements(
                     shaped,
                     line_ranges,
@@ -818,7 +826,7 @@ impl LabelManager {
                         continue;
                     }
                 }
-            } else {
+            } else if let Some(atlas) = atlas {
                 let mut output = Vec::new();
                 for (ch, placement) in line_label.text.chars().zip(placements.iter()) {
                     if ch == ' ' {
@@ -838,6 +846,8 @@ impl LabelManager {
                     output.extend(instances);
                 }
                 output
+            } else {
+                Vec::new()
             };
             staged_line_labels.insert(
                 line_label.id,
@@ -946,23 +956,22 @@ mod tests {
     }
 
     #[test]
-    fn disabling_or_updating_without_an_atlas_clears_all_layout_state() {
+    fn updating_without_an_atlas_keeps_labels_pickable_with_fallback_bounds() {
         let mut manager = LabelManager::new(800, 600);
         let id = manager.add_label("Map".to_owned(), Vec3::ZERO, LabelStyle::default());
         assert!(manager.get_label(id).unwrap().visible);
 
+        assert_eq!(manager.update(Mat4::IDENTITY), 0);
+        let label = manager.get_label(id).unwrap();
+        assert!(label.visible);
+        assert_eq!(label.screen_pos, Some([400.0, 300.0]));
+        assert_eq!(manager.visible_count(), 0);
+        assert_eq!(manager.pick_at(400.0, 300.0), Some(id));
+
         manager.set_enabled(false);
         assert!(!manager.get_label(id).unwrap().visible);
         assert!(manager.get_label(id).unwrap().screen_pos.is_none());
-        assert_eq!(manager.visible_count(), 0);
-        assert!(manager.leader_lines().is_empty());
-        assert!(manager.layout_diagnostics().is_empty());
-        assert!(manager.pick_at(0.0, 0.0).is_none());
-
-        manager.set_enabled(true);
-        assert_eq!(manager.update(Mat4::IDENTITY), 0);
-        assert!(!manager.get_label(id).unwrap().visible);
-        assert!(manager.pick_at(0.0, 0.0).is_none());
+        assert!(manager.pick_at(400.0, 300.0).is_none());
     }
 
     #[test]
