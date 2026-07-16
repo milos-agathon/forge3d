@@ -171,7 +171,7 @@
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0030720001086592674,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.material_vt"
     },
     {
@@ -181,7 +181,7 @@
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.0030720001086592674,
       "label": "terrain.sun_visibility"
     },
     {
@@ -196,17 +196,17 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.04403200000524521,
+      "gpu_ms": 0.043007999658584595,
       "label": "terrain.main"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.resolve"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.0030720001086592674,
+      "gpu_ms": 0.002047999994829297,
       "label": "scene.main"
     },
     {
@@ -223,8 +223,8 @@
   "schema": "forge3d.render_certificate/1",
   "signature": {
     "alg": "ed25519",
-    "pubkey": "92f33f5957bd8532b7e878f34b95aabe077f8ab962cea2c4b06acf2c91491917",
-    "sig": "300efe9048fff43ef5b1036f7c79f82e4be5fe5435e656a4463d4d9374b09322d0c36051a05be89dcda031557440948490e9ed22155a96bfec5ffe6bcdd0c906",
+    "pubkey": "c1ba058fd0971c1aa985419f896a0dd71ba8ce46761d4c8ddc410bbcbc16d66e",
+    "sig": "3c0cad0c2995e8710abd09d0153308e6cd5f96183cd5801908f7e5d84e9968ca085ddafebf41b9cc83b1e17b1aae3f2feb5fb5349eae41ad6c10fc51d81d2703",
     "signed_fields": [
       "adapter",
       "allocations",

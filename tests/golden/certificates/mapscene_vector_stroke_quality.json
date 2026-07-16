@@ -149,7 +149,7 @@
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 1.6128000020980835,
+      "gpu_ms": 1.6117759943008423,
       "label": "terrain.shadow"
     },
     {
@@ -176,8 +176,8 @@
   "schema": "forge3d.render_certificate/1",
   "signature": {
     "alg": "ed25519",
-    "pubkey": "92f33f5957bd8532b7e878f34b95aabe077f8ab962cea2c4b06acf2c91491917",
-    "sig": "7edc9997ae28bb00f0ec7dcc61f59021b04d530943011b8172caa21c6f1621fb7bedbfc3ae75b2d1b1bd55bdb4f0d2d8db40cd36e1b7839902e56f1f0e47850a",
+    "pubkey": "c1ba058fd0971c1aa985419f896a0dd71ba8ce46761d4c8ddc410bbcbc16d66e",
+    "sig": "a216d5191cee3528247bab2858b4fc1bb8ad22252990086082c2898af1be733b44922ed2eb05417319f3b6c3e52bdb0427940bef06474df163eec8a71400220a",
     "signed_fields": [
       "adapter",
       "allocations",
