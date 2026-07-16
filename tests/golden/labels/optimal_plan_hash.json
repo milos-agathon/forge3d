@@ -1,8 +1,8 @@
 {
   "description": "CARTOGRAPHER-PRIME cross-device golden: sha256 of the canonical ridgeline label-plan payload, one entry per CI runner config; all three must be identical and match the recompiled plan.",
   "plan_hash": {
-    "macos-latest": "77ba64e2102c89dfe068cd0f331b54d241f03d30a37d3f61e3696c1df0a9f8d9",
-    "ubuntu-latest": "77ba64e2102c89dfe068cd0f331b54d241f03d30a37d3f61e3696c1df0a9f8d9",
-    "windows-latest": "77ba64e2102c89dfe068cd0f331b54d241f03d30a37d3f61e3696c1df0a9f8d9"
+    "macos-latest": "305ff575e5c6ace3398be368aecf07f898162d674f65bb365228d7022f568ede",
+    "ubuntu-latest": "305ff575e5c6ace3398be368aecf07f898162d674f65bb365228d7022f568ede",
+    "windows-latest": "305ff575e5c6ace3398be368aecf07f898162d674f65bb365228d7022f568ede"
   }
 }

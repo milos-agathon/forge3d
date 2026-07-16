@@ -120,7 +120,7 @@
     },
     {
       "path": "python/forge3d/data/fonts/atlas_latin_default.json",
-      "sha256": "4f5438bc61fd8dcd6a5841b0b7b0a1000cc21196eb4cc36fe922e1851e25ae01",
+      "sha256": "d28d280511fc89b5dae2cadb00f64ec48150561d59ceaeb5bc021d9c26b5dc67",
       "source_font_sha256": "3cdd82f05768b6101094b7daa24287053e07d6db5a21411d5076f5617f190e68"
     }
   ]

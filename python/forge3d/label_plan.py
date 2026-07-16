@@ -183,6 +183,10 @@ def _packaged_latin_font_path() -> str:
     return str(Path(__file__).resolve().parent / "data" / "fonts" / "NotoSansLatin-subset.ttf")
 
 
+def _stable_font_source(value: Any) -> str:
+    return str(value).replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+
+
 def _native_shape_label_glyphs(
     text: str,
     glyph_atlas: Any,
@@ -228,7 +232,9 @@ def _native_shape_label_glyphs(
         "render_mapping": "positioned_glyphs_by_id",
         "shaped_runs": payload["runs"],
         "compositor": "native_analytic_coverage",
-        "font_chain": list(payload.get("font_sources", font_paths)),
+        "font_chain": [
+            _stable_font_source(path) for path in payload.get("font_sources", font_paths)
+        ],
         "font_sha256": list(payload.get("font_sha256", ())),
     }
     return glyphs, details

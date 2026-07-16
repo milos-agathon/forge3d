@@ -172,7 +172,10 @@ def test_packaged_font_notices_map_every_binary_to_exact_hash_and_notice():
         assert entry["upstream"].startswith("https://github.com/google/fonts/")
         assert entry["sha256"] == hashlib.sha256(binary.read_bytes()).hexdigest()
     for name, expected_hash in notices["generated_assets"].items():
-        assert expected_hash == hashlib.sha256((font_dir / name).read_bytes()).hexdigest()
+        data = (font_dir / name).read_bytes()
+        if name.endswith(".json"):
+            data = data.replace(b"\r\n", b"\n")
+        assert expected_hash == hashlib.sha256(data).hexdigest()
 
 
 def test_font_inventory_covers_every_distributed_ttf_and_atlas_asset():
@@ -209,7 +212,10 @@ def test_font_inventory_covers_every_distributed_ttf_and_atlas_asset():
     for asset in inventory["generated_assets"]:
         path = root / asset["path"]
         assert path.is_file()
-        assert hashlib.sha256(path.read_bytes()).hexdigest() == asset["sha256"]
+        data = path.read_bytes()
+        if path.suffix == ".json":
+            data = data.replace(b"\r\n", b"\n")
+        assert hashlib.sha256(data).hexdigest() == asset["sha256"]
 
 
 def test_label_plan_normalizes_halo_typography_aliases():
