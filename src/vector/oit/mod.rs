@@ -72,6 +72,15 @@ impl WeightedOIT {
         &'pass self,
         encoder: &'pass mut wgpu::CommandEncoder,
     ) -> wgpu::RenderPass<'pass> {
+        self.begin_accumulation_timed(encoder, None)
+    }
+
+    /// Begin OIT accumulation with optional native render-pass timestamps.
+    pub fn begin_accumulation_timed<'pass>(
+        &'pass self,
+        encoder: &'pass mut wgpu::CommandEncoder,
+        timestamp_writes: Option<wgpu::RenderPassTimestampWrites<'pass>>,
+    ) -> wgpu::RenderPass<'pass> {
         encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("vf.Vector.OIT.AccumulationPass"),
             color_attachments: &[
@@ -106,7 +115,7 @@ impl WeightedOIT {
                 stencil_ops: None,
             }),
             occlusion_query_set: None,
-            timestamp_writes: None,
+            timestamp_writes,
         })
     }
 

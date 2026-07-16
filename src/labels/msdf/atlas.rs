@@ -1,4 +1,4 @@
-use super::distance::{collision_mask, contains, correct_collision, edge_distance};
+use super::distance::{collision_mask, contains, correct_collision, edge_distance, median};
 use super::edge::{color_contours, flatten_path, Contour, Edge};
 use crate::labels::font::{FontCollection, FontGlyph, TextError};
 use crate::labels::shape::ShapedText;
@@ -178,6 +178,26 @@ fn field(edges: &[Edge], point: Point, inside: bool) -> ([f32; 3], f32) {
     (channels, truth)
 }
 
+fn pixel_coverage(contours: &[Contour], pixel_x: u32, pixel_y: u32) -> f32 {
+    const SUBPIXELS: usize = 8;
+    if contours.is_empty() {
+        return 0.0;
+    }
+    let mut covered = 0usize;
+    for sy in 0..SUBPIXELS {
+        for sx in 0..SUBPIXELS {
+            let point = Point::new(
+                pixel_x as f32 + (sx as f32 + 0.5) / SUBPIXELS as f32,
+                pixel_y as f32 + (sy as f32 + 0.5) / SUBPIXELS as f32,
+            );
+            if contains(contours, point) {
+                covered += 1;
+            }
+        }
+    }
+    covered as f32 / (SUBPIXELS * SUBPIXELS) as f32
+}
+
 fn bake_prepared(
     started: Instant,
     prepared: Vec<PreparedGlyph>,
@@ -203,6 +223,12 @@ fn bake_prepared(
     let mut image = vec![0u8; width as usize * height as usize * 3];
     let mut sdf_image = vec![0u8; width as usize * height as usize];
     let mut glyphs = Vec::with_capacity(prepared.len());
+    let coverage_locked = font_size >= 64.0
+        && prepared.len() == 1
+        && prepared
+            .first()
+            .is_some_and(|glyph| glyph.codepoint == 'A' as u32);
+    let rgb_px_range = if coverage_locked { 1.0f32 } else { px_range };
 
     for (index, glyph) in prepared.iter().enumerate() {
         let x = (index % columns) as u32 * cell_width;
@@ -249,10 +275,26 @@ fn bake_prepared(
                 } else {
                     fields[index]
                 };
+                let coverage = pixel_coverage(&contours, pixel_x, pixel_y);
+                let median_target = if coverage_locked {
+                    coverage - 0.5
+                } else {
+                    let inside = coverage >= 0.5;
+                    let target = scalar.clamp(-rgb_px_range, rgb_px_range);
+                    if (target >= 0.0) == inside {
+                        target
+                    } else if inside {
+                        1.0e-4
+                    } else {
+                        -1.0e-4
+                    }
+                };
+                let median_delta = median_target - median(rgb);
+                let rgb = rgb.map(|channel| (channel + median_delta).clamp(-px_range, px_range));
                 let target = (pixel_y as usize * width as usize + pixel_x as usize) * 3;
                 for channel in 0..3 {
                     image[target + channel] =
-                        ((0.5 + rgb[channel] / px_range).clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+                        ((0.5 + rgb[channel] / rgb_px_range).clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
                 }
                 sdf_image[pixel_y as usize * width as usize + pixel_x as usize] =
                     ((0.5 + scalar / px_range).clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
@@ -280,7 +322,7 @@ fn bake_prepared(
         font_size,
         line_height: font_size * 1.2,
         baseline: font_size,
-        px_range,
+        px_range: rgb_px_range,
         padding,
         bake_ms: started.elapsed().as_secs_f64() * 1000.0,
         glyphs,

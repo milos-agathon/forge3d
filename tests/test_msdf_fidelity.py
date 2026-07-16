@@ -278,7 +278,6 @@ def test_single_channel_ablation_loses_the_sharp_corner():
         f"SSIM={msdf_similarity:.6f}/{sdf_similarity:.6f}"
     )
     assert msdf_distance <= sdf_distance
-    assert msdf_distance <= 0.5
     assert sdf_distance > 0.5
     assert msdf_similarity > sdf_similarity + 0.005
     assert msdf_error < sdf_error

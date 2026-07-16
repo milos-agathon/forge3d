@@ -192,9 +192,10 @@ fn fs_oit(in: VertexOutput) -> OITOutput {
         alpha = 1.0 - smoothstep(1.0 - edge_softness, 1.0, dist);
     }
 
+    let effective_alpha = in.color.a * alpha;
     var out: OITOutput;
-    out.accum = vec4<f32>(in.color.rgb * alpha, alpha);
-    out.reveal = alpha;
+    out.accum = vec4<f32>(in.color.rgb * effective_alpha, effective_alpha);
+    out.reveal = effective_alpha;
     return out;
 }
 

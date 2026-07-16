@@ -106,24 +106,7 @@ pub fn create_compose_pipeline(
                 },
                 count: None,
             },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None,
-            },
         ],
-    });
-
-    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        label: Some("vf.Vector.OIT.Sampler"),
-        address_mode_u: wgpu::AddressMode::ClampToEdge,
-        address_mode_v: wgpu::AddressMode::ClampToEdge,
-        address_mode_w: wgpu::AddressMode::ClampToEdge,
-        mag_filter: wgpu::FilterMode::Linear,
-        min_filter: wgpu::FilterMode::Linear,
-        mipmap_filter: wgpu::FilterMode::Nearest,
-        ..Default::default()
     });
 
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -137,10 +120,6 @@ pub fn create_compose_pipeline(
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: wgpu::BindingResource::TextureView(reveal_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::Sampler(&sampler),
             },
         ],
     });

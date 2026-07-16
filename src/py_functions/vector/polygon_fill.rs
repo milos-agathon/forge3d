@@ -168,7 +168,7 @@ pub(crate) fn vector_render_polygons_fill_py(
     let (device, queue) = gpu_device_queue()?;
 
     let mut renderer =
-        crate::vector::PolygonRenderer::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb)
+        crate::vector::PolygonRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm)
             .map_err(vector_runtime_err)?;
     let mut packed = Vec::with_capacity(polys.len());
     for poly in &polys {
