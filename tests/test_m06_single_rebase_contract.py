@@ -8,7 +8,6 @@ ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_ANCHOR_INVENTORY = {
     ("src/camera/mod.rs", "anchored_view", "constructor", 1),
     ("src/camera/mod.rs", "anchored_view", "rebase_call", 1),
-    ("src/labels/mod.rs", "update_with_camera", "constructor", 1),
     ("src/picking/terrain_query.rs", "<module>", "storage", 1),
     ("src/picking/terrain_query.rs", "<module>", "storage", 2),
     ("src/picking/terrain_query.rs", "<module>", "storage", 3),
@@ -55,7 +54,6 @@ EXPECTED_ANCHOR_INVENTORY = {
 
 LOCAL_NON_VIEWER_JUSTIFICATIONS = {
     ("src/camera/mod.rs", "anchored_view"): "stateless public camera helper",
-    ("src/labels/mod.rs", "update_with_camera"): "legacy local-label compatibility entry",
     ("src/picking/terrain_query.rs", "<module>"): "query results retain their producing anchor snapshot",
     ("src/picking/terrain_query.rs", "default"): "empty compatibility query result",
     ("src/picking/terrain_query.rs", "query_ray_heightfield"): "caller-supplied producing anchor snapshot",

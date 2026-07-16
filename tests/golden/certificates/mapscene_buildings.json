@@ -47,9 +47,9 @@
       "src/terrain/renderer/constructor.rs:454": 4,
       "src/terrain/renderer/constructor.rs:459": 16,
       "src/terrain/renderer/constructor.rs:460": 8,
-      "src/terrain/scatter.rs:1070": 3456,
-      "src/terrain/scatter.rs:1074": 768,
-      "src/terrain/scatter.rs:1133": 16384,
+      "src/terrain/scatter.rs:1080": 3456,
+      "src/terrain/scatter.rs:1084": 768,
+      "src/terrain/scatter.rs:1143": 16384,
       "sun_vis.uniform_buffer": 64,
       "terrain.ao_debug_fallback": 4,
       "terrain.coarse_ao": 256,
@@ -132,8 +132,8 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "e2282bfaf5fa",
-    "version": "1.32.0",
+    "git_sha": "0c4e6d0ebe21",
+    "version": "1.33.0",
     "wgsl_module_hashes": {
       "terrain.shadow_depth.shader": "0602d15a5f19f10e937f0a2b1af364f19cd4356ed1d5b55282b49b9f97fa32de",
       "terrain_pbr_pom.shader": "41ddb326e9824a26960838c84635ef149a46fd4a0cc05a2ae6321ee0d3b27b99"
@@ -142,37 +142,37 @@
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 0.004095999989658594,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.material_vt"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.004095999989658594,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.height_ao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.006144000217318535,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.sun_visibility"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 8.131584167480469,
+      "gpu_ms": 1.619968056678772,
       "label": "terrain.shadow"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0030720001086592674,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.sky"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.3246079981327057,
+      "gpu_ms": 0.04403200000524521,
       "label": "terrain.main"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.0030720001086592674,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.resolve"
     },
     {
@@ -184,8 +184,8 @@
   "schema": "forge3d.render_certificate/1",
   "signature": {
     "alg": "ed25519",
-    "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "fa81bbafac70978910012142d2245c143b8f3403550e29cafbd7a0b0127ab290b617be95107b7678bc6799fd9d0fa2eb640b252a81ca7e7b39c2007649963b0b",
+    "pubkey": "92f33f5957bd8532b7e878f34b95aabe077f8ab962cea2c4b06acf2c91491917",
+    "sig": "fd42596e60fde51c8ce2ceaff481cbe848da448c7eb908ca0778143ceb135f634c0dd0dce5d297491d4337f599057cdac19d43646752dfd6a5659de9aaad2506",
     "signed_fields": [
       "adapter",
       "allocations",

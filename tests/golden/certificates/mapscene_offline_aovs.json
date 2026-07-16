@@ -142,8 +142,8 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "e2282bfaf5fa",
-    "version": "1.32.0",
+    "git_sha": "0c4e6d0ebe21",
+    "version": "1.33.0",
     "wgsl_module_hashes": {
       "terrain.offline.accumulate.pipeline": "cd37fc252033f64ac13406bfef71e937c11a6087a120f416eb24ba5d79e61126",
       "terrain.offline.depth_expand.pipeline": "6f14fde673a2cf69e5df1329388f883aee883e06d863125faebfb2ff492f4b35",
@@ -157,7 +157,7 @@
   "passes": [
     {
       "draw_calls": 4,
-      "gpu_ms": 10.486783981323242,
+      "gpu_ms": 1.6926720142364502,
       "label": "terrain.offline.accumulate_batch"
     },
     {
@@ -169,8 +169,8 @@
   "schema": "forge3d.render_certificate/1",
   "signature": {
     "alg": "ed25519",
-    "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "4bd65eb9de85e37fbc696645826814c6b31d5fa5b73ce022b9795498df5926f894fc0c0c15bf5bd0d29ae0ba2d1056de2eb8d1eb73c6bef0714ebe7c08b66a06",
+    "pubkey": "92f33f5957bd8532b7e878f34b95aabe077f8ab962cea2c4b06acf2c91491917",
+    "sig": "8f3738ad087c6a6694c5e6d7d53e8dfa0b8ebd68f854bdaee5b10d7c3200275ed8970e05d0280d1a418007f4a9943ee13861f724df47661c260ed08cbb90b004",
     "signed_fields": [
       "adapter",
       "allocations",

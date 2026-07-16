@@ -1,6 +1,6 @@
 use super::value::device_delta;
 use super::PositioningGlyph;
-use ttf_parser::gpos::Anchor;
+use ttf_parser::gpos::Anchor as GposAnchor;
 use ttf_parser::Face;
 
 pub(super) fn attach(
@@ -8,8 +8,8 @@ pub(super) fn attach(
     buffer: &mut [PositioningGlyph],
     mark: usize,
     parent: usize,
-    mark_anchor: Anchor<'_>,
-    parent_anchor: Anchor<'_>,
+    mark_anchor: GposAnchor<'_>,
+    parent_anchor: GposAnchor<'_>,
     component: Option<u16>,
 ) -> Result<(), super::TextError> {
     let overflow = || super::TextError::MalformedOpenType("GPOS positioning overflow");
