@@ -16,8 +16,8 @@
 #	× wherever there is not.
 #  <comment> the format can change, but currently it shows:
 #	- the sample character name
-#	- (x) the Line_Break property value for the sample character and 
-#	  any other properties relevant to the algorithm, as described in 
+#	- (x) the Line_Break property value for the sample character and
+#	  any other properties relevant to the algorithm, as described in
 #	  LineBreakTest.html
 #	- [x] the rule that determines whether there is a break or not,
 #	   as listed in the Rules section of LineBreakTest.html
