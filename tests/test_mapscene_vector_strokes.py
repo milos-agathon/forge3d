@@ -222,33 +222,103 @@ def test_style_parser_accepts_line_dash_cap_join() -> None:
     assert not report.diagnostics
 
 
-def test_native_vector_oit_line_output_has_visible_alpha() -> None:
+def _center_pixel(image: np.ndarray) -> list[int]:
+    return np.asarray(image)[image.shape[0] // 2, image.shape[1] // 2].tolist()
+
+
+def test_native_vector_oit_line_and_point_preserve_exact_rgba() -> None:
     if not hasattr(f3d, "vector_render_oit_py") or not f3d.has_gpu():
         return
 
     line_image = f3d.vector_render_oit_py(
         64,
         48,
-        polylines=[[(-0.8, -0.8), (0.8, 0.8)]],
+        polylines=[[(-0.8, 0.0), (0.8, 0.0)]],
         polyline_rgba=[(0.0, 1.0, 0.0, 1.0)],
-        stroke_width=[3.0],
+        stroke_width=[8.0],
     )
     point_image = f3d.vector_render_oit_py(
         64,
         48,
         points_xy=[(0.0, 0.0)],
         point_rgba=[(1.0, 0.0, 0.0, 1.0)],
-        point_size=[8.0],
+        point_size=[16.0],
+    )
+    translucent = f3d.vector_render_oit_py(
+        64,
+        48,
+        points_xy=[(0.0, 0.0)],
+        point_rgba=[(0.0, 0.0, 1.0, 0.2)],
+        point_size=[16.0],
     )
 
     assert line_image.shape == (48, 64, 4)
-    assert int(np.max(line_image[..., 1])) > 0
-    assert int(np.max(line_image[..., 3])) > 0
+    np.testing.assert_allclose(_center_pixel(line_image), [0, 255, 0, 255], atol=1)
     assert 0 < np.count_nonzero(line_image[..., 3]) < line_image.shape[0] * line_image.shape[1] // 2
     assert point_image.shape == (48, 64, 4)
-    assert int(np.max(point_image[..., 0])) > 0
-    assert int(np.max(point_image[..., 3])) > 0
+    np.testing.assert_allclose(_center_pixel(point_image), [255, 0, 0, 255], atol=1)
+    np.testing.assert_allclose(_center_pixel(translucent), [0, 0, 255, 51], atol=1)
     assert np.count_nonzero(point_image[..., 3]) > 0
+
+
+def test_native_vector_oit_overlap_is_order_independent_with_exact_alpha() -> None:
+    if not hasattr(f3d, "vector_render_oit_py") or not f3d.has_gpu():
+        return
+
+    kwargs = {
+        "width": 64,
+        "height": 48,
+        "points_xy": [(0.0, 0.0), (0.0, 0.0)],
+        "point_size": [16.0, 16.0],
+    }
+    red_then_blue = f3d.vector_render_oit_py(
+        **kwargs,
+        point_rgba=[(1.0, 0.0, 0.0, 0.5), (0.0, 0.0, 1.0, 0.5)],
+    )
+    blue_then_red = f3d.vector_render_oit_py(
+        **kwargs,
+        point_rgba=[(0.0, 0.0, 1.0, 0.5), (1.0, 0.0, 0.0, 0.5)],
+    )
+
+    assert np.array_equal(red_then_blue, blue_then_red)
+    np.testing.assert_allclose(_center_pixel(red_then_blue), [128, 0, 128, 191], atol=1)
+
+
+def test_native_vector_oit_zero_alpha_writes_no_pixels() -> None:
+    if not hasattr(f3d, "vector_render_oit_py") or not f3d.has_gpu():
+        return
+
+    image = f3d.vector_render_oit_py(
+        64,
+        48,
+        points_xy=[(0.0, 0.0)],
+        point_rgba=[(1.0, 0.0, 0.0, 0.0)],
+        point_size=[16.0],
+    )
+
+    assert np.count_nonzero(image) == 0
+
+
+def test_native_vector_oit_repeated_frames_are_bitexact() -> None:
+    if not hasattr(f3d, "vector_render_oit_py") or not f3d.has_gpu():
+        return
+
+    frames = [
+        np.asarray(
+            f3d.vector_render_oit_py(
+                32,
+                24,
+                points_xy=[(0.0, 0.0)],
+                point_rgba=[(1.0, 0.5, 0.0, 1.0)],
+                point_size=[6.0],
+            )
+        ).copy()
+        for _ in range(4)
+    ]
+
+    assert all(np.array_equal(frames[0], frame) for frame in frames[1:])
+    assert 0 < np.count_nonzero(frames[0][..., 3]) < frames[0].shape[0] * frames[0].shape[1]
+    assert frames[0][0, 0].tolist() == [0, 0, 0, 0]
 
 
 def test_native_vector_oit_edl_output_has_visible_alpha() -> None:

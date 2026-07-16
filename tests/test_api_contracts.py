@@ -98,6 +98,8 @@ class TestNativeModuleSymbols:
         "DegradedCapability",
         # MENSURA M-05: structured raster-reprojection failure exception
         "TransformFailed",
+        # LITTERA: immutable native shaping result
+        "ShapedText",
     ]
 
     @pytest.mark.parametrize("cls_name", EXPECTED_CLASSES)
@@ -241,8 +243,11 @@ class TestNativeModuleSymbols:
         "load_building_footprints",
         "extract_building_heights",
         "estimate_local_utm",
-        # BOP-P3-03: dependency-backed complex text shaping
-        "shape_text",
+        # LITTERA: native text pipeline registration seam
+        "text_shape",
+        "rasterize_shaped_run",
+        "bake_msdf_atlas",
+        "bake_msdf_atlas_shaped",
         # CENSOR: global degradation sink
         "native_degradations",
         "clear_native_degradations",

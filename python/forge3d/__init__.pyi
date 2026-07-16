@@ -8,6 +8,7 @@ from typing import Tuple, Optional, Sequence, Any, Dict, List, Literal, Mapping,
 import os
 import numpy as np
 from . import gis
+from . import text as text
 from .graticule import GraticuleSpec, generate_graticule
 from .legend import Legend, LegendConfig
 from .map_plate import BBox, MapPlate, MapPlateConfig, PlateRegion
@@ -102,6 +103,7 @@ from .map_scene import (
     MapFurnitureLayer as MapFurnitureLayer,
     MapScene as MapScene,
     MapSceneNativeUnavailable as MapSceneNativeUnavailable,
+    MapSceneTextLayoutError as MapSceneTextLayoutError,
     BuildingLayer as MapSceneBuildingLayer,
     OrbitCamera as OrbitCamera,
     OutputSpec as OutputSpec,

@@ -1,0 +1,1818 @@
+[
+  {
+    "id": "hebrew-000",
+    "text": "שלום",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          8
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 43,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 19,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 9,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 43,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-001",
+    "text": "עולם",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          8
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 19,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 17,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 9,
+            "font_index": 0,
+            "cluster": 6,
+            "x_advance": 43,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-002",
+    "text": "מפה",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 40,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 14,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 37,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 38,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-003",
+    "text": "דרך",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 15,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 32,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 8,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 33,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-004",
+    "text": "עיר",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 36,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 22,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 16,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 15,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 32,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-005",
+    "text": "כתב",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 32,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 41,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-006",
+    "text": "בבב",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-007",
+    "text": "בבד",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 33,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-008",
+    "text": "בבה",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 38,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-009",
+    "text": "בבו",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 19,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-010",
+    "text": "בבי",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 22,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 16,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-011",
+    "text": "בבכ",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 32,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-012",
+    "text": "בבל",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-013",
+    "text": "בבמ",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 40,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-015",
+    "text": "בבע",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 36,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-016",
+    "text": "בבר",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 15,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 32,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-017",
+    "text": "בבש",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 43,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-018",
+    "text": "בבת",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 41,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-019",
+    "text": "בדב",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-020",
+    "text": "בדד",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 33,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-021",
+    "text": "בדה",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 38,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-022",
+    "text": "בדו",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 19,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-023",
+    "text": "בדי",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 22,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 16,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-024",
+    "text": "בדכ",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 32,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-025",
+    "text": "בדל",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 12,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 31,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-026",
+    "text": "בדמ",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 13,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 40,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-028",
+    "text": "בדע",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 5,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 36,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-029",
+    "text": "בדר",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 15,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 32,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-030",
+    "text": "בדש",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 16,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 43,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-031",
+    "text": "בדת",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 33,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 18,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 41,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-032",
+    "text": "בהב",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 35,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-033",
+    "text": "בהד",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 7,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 33,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-034",
+    "text": "בהה",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 38,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-035",
+    "text": "בהו",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 19,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 17,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-036",
+    "text": "בהי",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 22,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 16,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hebrew-037",
+    "text": "בהכ",
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12.0,
+    "options": {
+      "script": "hebr"
+    },
+    "runs": [
+      {
+        "text_range": [
+          0,
+          6
+        ],
+        "direction": "rtl",
+        "script": "hebr",
+        "language": null,
+        "bidi_levels": [
+          1,
+          1,
+          1
+        ],
+        "glyphs": [
+          {
+            "glyph_id": 6,
+            "font_index": 0,
+            "cluster": 0,
+            "x_advance": 35,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 10,
+            "font_index": 0,
+            "cluster": 2,
+            "x_advance": 38,
+            "x_offset": 0
+          },
+          {
+            "glyph_id": 11,
+            "font_index": 0,
+            "cluster": 4,
+            "x_advance": 32,
+            "x_offset": 0
+          }
+        ]
+      }
+    ]
+  }
+]

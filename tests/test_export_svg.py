@@ -218,9 +218,8 @@ class TestSvgGeneration:
         )
 
         svg = generate_svg(scene, include_labels=True)
-        assert '<text' in svg
-        assert 'Mountain Peak' in svg
-        assert 'font-size="14' in svg
+        assert '<path' in svg
+        assert '<text' not in svg
         assert validate_svg(svg)
 
     def test_label_halo_svg(self):
@@ -234,8 +233,8 @@ class TestSvgGeneration:
         )
 
         svg = generate_svg(scene)
-        # Should have two text elements (halo + main)
-        assert svg.count('<text') == 2
+        # Halo and fill are two copies of the same native outline path.
+        assert svg.count('<path') == 2
         assert 'stroke=' in svg  # Halo uses stroke
 
     def test_labels_disabled(self):
@@ -270,14 +269,14 @@ class TestSvgGeneration:
         assert '.12345' not in svg
 
     def test_xml_escape(self):
-        """Test XML escaping in labels."""
+        """Label source text is replaced entirely by safe outline geometry."""
         scene = VectorScene()
         scene.add_label(text="<Test & Label>", position=(50, 50), halo_width=0)
 
         svg = generate_svg(scene)
-        assert '&lt;Test' in svg
-        assert '&amp;' in svg
-        assert '&gt;' in svg
+        assert '<path' in svg
+        assert '<text' not in svg
+        assert '<Test & Label>' not in svg
         assert validate_svg(svg)
 
 
@@ -303,7 +302,8 @@ class TestSvgExport:
             assert '<svg' in content
             assert '<polygon' in content
             assert '<polyline' in content
-            assert '<text' in content
+            assert '<path' in content
+            assert '<text' not in content
             assert validate_svg(content)
         finally:
             path.unlink(missing_ok=True)
@@ -442,8 +442,9 @@ class TestIntegration:
         # Verify all elements present
         assert svg.count('<polygon') == 5
         assert svg.count('<polyline') == 3
-        # Labels have 2 text elements each (halo + main)
-        assert svg.count('<text') == 6
+        # Labels have 2 identical outline paths each (halo + main)
+        assert svg.count('<path') == 6
+        assert '<text' not in svg
 
         # Validate XML
         assert validate_svg(svg)

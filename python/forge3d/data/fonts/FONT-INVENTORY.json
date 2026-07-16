@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "subset_tool": {
+    "name": "fontTools pyftsubset",
+    "version": "4.58.5"
+  },
+  "upstream_revision": "google/fonts main branch, downloaded 2026-07-13",
+  "fonts": [
+    {
+      "name": "NotoSans-subset.ttf",
+      "sha256": "4d2f97d1ac7507089c27e3bd63b0b3bc07918122c8f5e72526d8aa593efd694a",
+      "archive_paths": [
+        "assets/fonts/NotoSans-subset.ttf"
+      ],
+      "upstream_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans%5Bwdth,wght%5D.ttf",
+      "copyright": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)",
+      "license_paths": [
+        "assets/fonts/NotoSans-OFL.txt"
+      ],
+      "subset_inputs": [
+        "tests/data/shaping/*.json"
+      ]
+    },
+    {
+      "name": "NotoSansLatin-subset.ttf",
+      "sha256": "3cdd82f05768b6101094b7daa24287053e07d6db5a21411d5076f5617f190e68",
+      "archive_paths": [
+        "assets/fonts/NotoSansLatin-subset.ttf",
+        "python/forge3d/data/fonts/NotoSansLatin-subset.ttf",
+        "forge3d/data/fonts/NotoSansLatin-subset.ttf"
+      ],
+      "upstream_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosans/NotoSans%5Bwdth,wght%5D.ttf",
+      "copyright": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)",
+      "license_paths": [
+        "assets/fonts/NotoSans-OFL.txt",
+        "python/forge3d/data/fonts/OFL-1.1.txt"
+      ],
+      "subset_inputs": [
+        "U+0020-007E"
+      ]
+    },
+    {
+      "name": "NotoSansArabic-subset.ttf",
+      "sha256": "65384a54d1272bb35b3780c480e353773f18965adaa8cf52dd8d6e358a521949",
+      "archive_paths": [
+        "assets/fonts/NotoSansArabic-subset.ttf",
+        "python/forge3d/data/fonts/NotoSansArabic-subset.ttf",
+        "forge3d/data/fonts/NotoSansArabic-subset.ttf"
+      ],
+      "upstream_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansarabic/NotoSansArabic%5Bwdth,wght%5D.ttf",
+      "copyright": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic)",
+      "license_paths": [
+        "assets/fonts/NotoSansArabic-OFL.txt",
+        "python/forge3d/data/fonts/OFL-1.1.txt"
+      ],
+      "subset_inputs": [
+        "tests/data/shaping/*.json"
+      ]
+    },
+    {
+      "name": "NotoSansDevanagari-subset.ttf",
+      "sha256": "d6509fc1f37caf01184e8f9a4f150b606f2164a90df6354258adac42e125fb7c",
+      "archive_paths": [
+        "assets/fonts/NotoSansDevanagari-subset.ttf",
+        "python/forge3d/data/fonts/NotoSansDevanagari-subset.ttf",
+        "forge3d/data/fonts/NotoSansDevanagari-subset.ttf"
+      ],
+      "upstream_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansdevanagari/NotoSansDevanagari%5Bwdth,wght%5D.ttf",
+      "copyright": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/devanagari)",
+      "license_paths": [
+        "assets/fonts/NotoSansDevanagari-OFL.txt",
+        "python/forge3d/data/fonts/OFL-1.1.txt"
+      ],
+      "subset_inputs": [
+        "tests/data/shaping/*.json"
+      ]
+    },
+    {
+      "name": "NotoSansHebrew-subset.ttf",
+      "sha256": "da63572372a6c876e38d9c17575527cab7752dd93dfa414fbbbb338d6ccca7e9",
+      "archive_paths": [
+        "assets/fonts/NotoSansHebrew-subset.ttf",
+        "python/forge3d/data/fonts/NotoSansHebrew-subset.ttf",
+        "forge3d/data/fonts/NotoSansHebrew-subset.ttf"
+      ],
+      "upstream_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanshebrew/NotoSansHebrew%5Bwdth,wght%5D.ttf",
+      "copyright": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/hebrew)",
+      "license_paths": [
+        "assets/fonts/NotoSansHebrew-OFL.txt",
+        "python/forge3d/data/fonts/OFL-1.1.txt"
+      ],
+      "subset_inputs": [
+        "tests/data/shaping/*.json"
+      ]
+    },
+    {
+      "name": "NotoSansSC-subset.ttf",
+      "sha256": "a366764f4a666e85ba791d0eef9bbda8eca4a96e70287037d6c81c6b90ff8190",
+      "archive_paths": [
+        "assets/fonts/NotoSansSC-subset.ttf",
+        "python/forge3d/data/fonts/NotoSansSC-subset.ttf",
+        "forge3d/data/fonts/NotoSansSC-subset.ttf"
+      ],
+      "upstream_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf",
+      "copyright": "Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'",
+      "license_paths": [
+        "assets/fonts/NotoSansSC-OFL.txt",
+        "python/forge3d/data/fonts/OFL-1.1.txt"
+      ],
+      "subset_inputs": [
+        "tests/data/shaping/*.json"
+      ]
+    }
+  ],
+  "generated_assets": [
+    {
+      "path": "python/forge3d/data/fonts/atlas_latin_default.png",
+      "sha256": "2360e58d97aa24d436693d3481e87b3728b76b4c1adeb453dbd87e2a4e7f0290",
+      "source_font_sha256": "3cdd82f05768b6101094b7daa24287053e07d6db5a21411d5076f5617f190e68"
+    },
+    {
+      "path": "python/forge3d/data/fonts/atlas_latin_default.json",
+      "sha256": "d28d280511fc89b5dae2cadb00f64ec48150561d59ceaeb5bc021d9c26b5dc67",
+      "source_font_sha256": "3cdd82f05768b6101094b7daa24287053e07d6db5a21411d5076f5617f190e68"
+    }
+  ]
+}

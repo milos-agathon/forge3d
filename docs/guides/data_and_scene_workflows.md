@@ -108,8 +108,8 @@ P1 typography support is explicit about what is available. Use
 `FontAtlas.from_font` for TTF/OTF atlas setup or typed asset diagnostics,
 `FontFallbackRange` for deterministic fallback declarations, and
 `TypographySettings` for kerning, tracking, line-height, multiline, and callout
-layout metadata. complex-script shaping is documented as a future design path
-and is not P1-blocking; unsupported Unicode coverage must be reported before
+layout metadata. Complex-script shaping uses the native LITTERA font-chain,
+bidi, positioned-outline, and analytic-coverage pipeline; unsupported Unicode coverage must be reported before
 render through typed diagnostics such as `unicode_coverage_gap` or
 `missing_glyphs`.
 

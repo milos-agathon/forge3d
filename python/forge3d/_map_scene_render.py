@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
+from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+import numpy as np
 
 from ._map_scene_common import _layer_id, _stable_hash
 from .style import evaluate_color_expr, evaluate_number_expr
@@ -156,6 +159,22 @@ def _blend_region(image: Any, mask: Any, color: tuple[int, int, int, int]) -> No
     image[..., 3] = np.clip(out_alpha * 255.0, 0.0, 255.0).astype(np.uint8)
 
 
+def _blend_rect(
+    image: Any, x0: int, y0: int, x1: int, y1: int, color: tuple[int, int, int, int]
+) -> None:
+    """Blend a solid rectangle without allocating a full-frame mask."""
+    height, width = image.shape[:2]
+    x0 = max(0, min(width, int(x0)))
+    x1 = max(0, min(width, int(x1)))
+    y0 = max(0, min(height, int(y0)))
+    y1 = max(0, min(height, int(y1)))
+    if x0 >= x1 or y0 >= y1:
+        return
+    import numpy as np
+
+    _blend_region(image[y0:y1, x0:x1], np.ones((y1 - y0, x1 - x0), dtype=np.float32), color)
+
+
 def _draw_pixel_block(image: Any, x: int, y: int, color: tuple[int, int, int, int], radius: int = 1) -> None:
     import numpy as np
 
@@ -164,9 +183,7 @@ def _draw_pixel_block(image: Any, x: int, y: int, color: tuple[int, int, int, in
     x1 = min(width, int(x) + radius + 1)
     y0 = max(0, int(y) - radius)
     y1 = min(height, int(y) + radius + 1)
-    mask = np.zeros((height, width), dtype=bool)
-    mask[y0:y1, x0:x1] = True
-    _blend_region(image, mask, color)
+    _blend_rect(image, x0, y0, x1, y1, color)
 
 
 def _draw_disc(image: Any, x: float, y: float, color: tuple[int, int, int, int], radius: float) -> None:
@@ -672,34 +689,95 @@ def _label_anchor(label: Any, width: int, height: int) -> tuple[int, int]:
     bounds = getattr(label, "screen_bounds", None) or getattr(label, "world_bounds", None)
     if bounds and len(bounds) >= 4:
         return _point_to_pixel(((float(bounds[0]) + float(bounds[2])) * 0.5, (float(bounds[1]) + float(bounds[3])) * 0.5), width, height)
-    return _point_to_pixel((len(str(getattr(label, "label_id", ""))) * 7, len(str(getattr(label, "text", ""))) * 5), width, height)
+    raise ValueError("accepted labels require a candidate anchor or explicit bounds")
 
 
-def _draw_text_fallback(
-    image: Any,
+def _text_font_chain(font_chain: Sequence[str] | None = None) -> list[str]:
+    root = Path(__file__).resolve().parent / "data" / "fonts"
+    bundled = [
+        root / name
+        for name in (
+            "NotoSansLatin-subset.ttf",
+            "NotoSansArabic-subset.ttf",
+            "NotoSansHebrew-subset.ttf",
+            "NotoSansDevanagari-subset.ttf",
+            "NotoSansSC-subset.ttf",
+        )
+    ]
+    return [*(str(path) for path in font_chain or ()), *(str(path) for path in bundled)]
+
+
+def _text_outline_metrics(
     text: str,
-    x: int,
-    y: int,
-    color: tuple[int, int, int, int],
-    halo: tuple[int, int, int, int],
-    halo_width_px: float = 1.0,
-) -> None:
-    halo_radius = max(0, int(round(float(halo_width_px))))
-    cursor = int(x)
-    for char in str(text):
-        code = ord(char)
-        for row in range(7):
-            for col in range(5):
-                edge = row in {0, 6} or col in {0, 4}
-                bit = (code >> ((row + col) % 6)) & 1
-                if edge or bit:
-                    _draw_pixel_block(image, cursor + col, int(y) + row, halo, radius=halo_radius)
-        for row in range(7):
-            for col in range(5):
-                bit = (code >> ((row * 5 + col) % 7)) & 1
-                if bit or row in {1, 5}:
-                    _draw_pixel_block(image, cursor + col, int(y) + row, color, radius=0)
-        cursor += 6
+    font_size: float,
+    font_chain: Sequence[str] | None = None,
+) -> tuple[int, int, tuple[float, float, float, float] | None]:
+    from .text import shape
+
+    shaped = shape(str(text), _text_font_chain(font_chain), float(font_size))
+    bounds = shaped.outline_bounds()
+    if bounds is None:
+        return 0, 0, None
+    x0, y0, x1, y1 = (float(value) for value in bounds)
+    width = max(1, int(np.ceil(x1 - x0)))
+    height = max(1, int(np.ceil(y1 - y0)))
+    return width, height, (x0, y0, x1, y1)
+
+
+def _text_anchor_for_visual_center(
+    center_x: float,
+    center_y: float,
+    font_size: float,
+    bounds: tuple[float, float, float, float],
+) -> tuple[int, int]:
+    x0, y0, x1, y1 = bounds
+    return (
+        int(round(float(center_x) - (x0 + x1) * 0.5)),
+        int(round(float(center_y) - float(font_size) - (y0 + y1) * 0.5)),
+    )
+
+
+def _composite_text_mask(image: Any, mask: Any, color: tuple[int, int, int, int]) -> None:
+    import numpy as np
+
+    coverage = np.asarray(mask, dtype=np.float32)[..., None]
+    source_alpha = coverage * (float(color[3]) / 255.0)
+    destination = np.asarray(image, dtype=np.float32) / 255.0
+    destination_alpha = destination[..., 3:4]
+    output_alpha = source_alpha + destination_alpha * (1.0 - source_alpha)
+    source_rgb = np.asarray(color[:3], dtype=np.float32).reshape(1, 1, 3) / 255.0
+    numerator = (
+        source_rgb * source_alpha
+        + destination[..., :3] * destination_alpha * (1.0 - source_alpha)
+    )
+    output_rgb = np.divide(
+        numerator,
+        output_alpha,
+        out=np.zeros_like(numerator),
+        where=output_alpha > 0.0,
+    )
+    image[..., :3] = np.clip(output_rgb * 255.0 + 0.5, 0, 255).astype(np.uint8)
+    image[..., 3] = np.clip(output_alpha[..., 0] * 255.0 + 0.5, 0, 255).astype(np.uint8)
+
+
+def _expanded_mask(mask: Any, radius: int) -> Any:
+    import numpy as np
+
+    source = np.asarray(mask, dtype=np.float32)
+    if radius <= 0:
+        return source
+    padded = np.pad(source, radius)
+    return np.maximum.reduce(
+        [
+            padded[
+                radius + dy : radius + dy + source.shape[0],
+                radius + dx : radius + dx + source.shape[1],
+            ]
+            for dy in range(-radius, radius + 1)
+            for dx in range(-radius, radius + 1)
+            if dx * dx + dy * dy <= radius * radius
+        ]
+    )
 
 
 def _draw_text(
@@ -710,24 +788,39 @@ def _draw_text(
     color: tuple[int, int, int, int],
     halo: tuple[int, int, int, int],
     halo_width_px: float = 1.0,
+    font_size: float = 12.0,
+    font_chain: Sequence[str] | None = None,
 ) -> None:
-    x, y = anchor
-    try:
-        import numpy as np
-        from PIL import Image, ImageDraw, ImageFont
+    from .text import rasterize_shaped_run, shape
 
-        pil = Image.fromarray(image, mode="RGBA")
-        draw = ImageDraw.Draw(pil)
-        font = ImageFont.load_default()
-        radius = max(0, int(round(float(halo_width_px))))
-        for dx in range(-radius, radius + 1):
-            for dy in range(-radius, radius + 1):
-                if dx or dy:
-                    draw.text((x + dx, y + dy), str(text), font=font, fill=halo)
-        draw.text((x, y), str(text), font=font, fill=color)
-        image[...] = np.asarray(pil, dtype=image.dtype)
-    except Exception:
-        _draw_text_fallback(image, str(text), x, y, color, halo, halo_width_px=halo_width_px)
+    import math
+
+    x, y = anchor
+    shaped = shape(str(text), _text_font_chain(font_chain), float(font_size))
+    bounds = shaped.outline_bounds()
+    if bounds is None:
+        return
+    radius = max(0, int(round(float(halo_width_px))))
+    padding = radius + 1
+    baseline_x = float(x)
+    baseline_y = float(y) + float(font_size)
+    image_height, image_width = image.shape[:2]
+    x0 = max(0, int(math.floor(baseline_x + float(bounds[0]))) - padding)
+    y0 = max(0, int(math.floor(baseline_y + float(bounds[1]))) - padding)
+    x1 = min(image_width, int(math.ceil(baseline_x + float(bounds[2]))) + padding)
+    y1 = min(image_height, int(math.ceil(baseline_y + float(bounds[3]))) + padding)
+    if x0 >= x1 or y0 >= y1:
+        return
+    mask = rasterize_shaped_run(
+        shaped,
+        x1 - x0,
+        y1 - y0,
+        origin=(baseline_x - x0, baseline_y - y0),
+    )
+    target = image[y0:y1, x0:x1]
+    if halo[3] > 0 and radius > 0:
+        _composite_text_mask(target, _expanded_mask(mask, radius), halo)
+    _composite_text_mask(target, mask, color)
 
 
 def _overlay_rgba(image: Any, overlay: Any, x: int, y: int) -> None:
@@ -1156,11 +1249,14 @@ def _draw_simple_legend(image: Any, options: Mapping[str, Any]) -> None:
     panel_h = len(rows) * 13 + 12
     x0 = width - panel_w - 12
     y0 = height - panel_h - 12
-    import numpy as np
-
-    mask = np.zeros((height, width), dtype=bool)
-    mask[max(0, y0) : min(height, y0 + panel_h), max(0, x0) : min(width, x0 + panel_w)] = True
-    _blend_region(image, mask, _color(options.get("background"), (255, 255, 255, 205)))
+    _blend_rect(
+        image,
+        x0,
+        y0,
+        x0 + panel_w,
+        y0 + panel_h,
+        _color(options.get("background"), (255, 255, 255, 205)),
+    )
     for index, row in enumerate(rows):
         y = y0 + 8 + index * 13
         swatch = _rgb(row, salt="legend")
@@ -1188,7 +1284,16 @@ def _compose_scale_bar(image: Any, recipe: Any, options: Mapping[str, Any]) -> N
             int(image.shape[1]),
             geodesic=bool(options.get("geodesic", cfg.geodesic)),
         )
-    overlay = ScaleBar(float(meters_per_pixel), config=cfg).render()
+    overlay, label, anchor = ScaleBar(float(meters_per_pixel), config=cfg).render_geometry()
+    _draw_text(
+        overlay,
+        label,
+        anchor,
+        color=cfg.label_color,
+        halo=(0, 0, 0, 0),
+        halo_width_px=0.0,
+        font_size=float(cfg.font_size),
+    )
     _place_overlay(
         image,
         overlay,
@@ -1208,7 +1313,17 @@ def _compose_north_arrow(image: Any, recipe: Any, options: Mapping[str, Any]) ->
         integer_fields=("size", "font_size", "border_width"),
     )
     cfg = NorthArrowConfig(**_config_kwargs(NorthArrowConfig, scaled_options))
-    overlay = NorthArrow(cfg).render()
+    overlay, label, anchor = NorthArrow(cfg).render_geometry()
+    if label is not None and anchor is not None:
+        _draw_text(
+            overlay,
+            label,
+            anchor,
+            color=cfg.color,
+            halo=(0, 0, 0, 0),
+            halo_width_px=0.0,
+            font_size=float(cfg.font_size),
+        )
     _place_overlay(
         image,
         overlay,
@@ -1417,6 +1532,10 @@ def _composite_recipe_layers(
                     color=text_color,
                     halo=halo_color,
                     halo_width_px=halo_width,
+                    font_size=_number(
+                        typography.get("size", typography.get("font_size")), 12.0
+                    ),
+                    font_chain=typography.get("font_chain"),
                 )
         elif isinstance(layer, layer_types.building_layer) and include_buildings:
             _draw_buildings(base, layer, width, height)

@@ -111,6 +111,11 @@ class MapSceneNativeUnavailable(RuntimeError):
     diagnostic: dict[str, Any] | None
     def __init__(self, blocks: Mapping[str, Any] | Sequence[Mapping[str, Any]]) -> None: ...
 
+class MapSceneTextLayoutError(RuntimeError):
+    diagnostics: list[dict[str, Any]]
+    diagnostic: dict[str, Any]
+    def __init__(self, diagnostic: Mapping[str, Any]) -> None: ...
+
 class CompiledScenePlan:
     recipe_hash: str
     camera_terrain_key: str

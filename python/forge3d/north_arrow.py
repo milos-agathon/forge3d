@@ -35,70 +35,87 @@ class NorthArrow:
 
     @_captured_cpu_render("python.north_arrow.render", "north_arrow.cpu", draw_calls=1)
     def render(self, *, certificate: bool | str = False) -> np.ndarray:
-        """Render the north arrow to an RGBA image."""
-        try:
-            from PIL import Image, ImageDraw, ImageFont
-        except ImportError:
-            from . import _degradation
+        """Render arrow geometry and the N label through native shaping."""
+        from ._map_scene_render import _draw_text
 
-            _degradation.record(
-                "optional_dependency_absent",
-                "north_arrow.pillow",
-                "Pillow is unavailable; the simplified unlabeled north arrow was used",
+        image, label, anchor = self.render_geometry()
+        cfg = self.config
+        if label is not None and anchor is not None:
+            _draw_text(
+                image,
+                label,
+                anchor,
+                color=cfg.color,
+                halo=(0, 0, 0, 0),
+                halo_width_px=0.0,
+                font_size=float(cfg.font_size),
             )
-            return self._render_simple()
+        return image
 
+    def render_geometry(self) -> tuple[np.ndarray, str | None, tuple[int, int] | None]:
+        """Return deterministic numpy geometry plus optional native-label metadata."""
         cfg = self.config
         size = cfg.size
         padding = 8
         total_size = size + 2 * padding
-        
-        img = Image.new("RGBA", (total_size, total_size), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
-        
-        # Draw background circle
-        draw.ellipse(
-            [padding // 2, padding // 2, total_size - padding // 2, total_size - padding // 2],
-            fill=cfg.background,
-            outline=cfg.border_color if cfg.border_width > 0 else None,
-            width=cfg.border_width,
-        )
-        
+        image = np.zeros((total_size, total_size, 4), dtype=np.uint8)
         cx, cy = total_size // 2, total_size // 2
+        yy, xx = np.mgrid[:total_size, :total_size]
+        radius = (total_size - padding) * 0.5
+        distance = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
+        image[distance <= radius] = cfg.background
+        if cfg.border_width > 0:
+            border = (distance <= radius) & (distance >= radius - cfg.border_width)
+            image[border] = cfg.border_color
         rot_rad = math.radians(cfg.rotation_deg)
-        
         if cfg.style == "arrow":
-            self._draw_arrow(draw, cx, cy, size, rot_rad, cfg)
+            self._draw_arrow(image, cx, cy, size, rot_rad, cfg)
         elif cfg.style == "compass":
-            self._draw_compass(draw, cx, cy, size, rot_rad, cfg)
+            self._draw_compass(image, cx, cy, size, rot_rad, cfg)
         else:
-            self._draw_simple(draw, cx, cy, size, rot_rad, cfg)
-        
-        # Draw "N" label
+            self._draw_simple(image, cx, cy, size, rot_rad, cfg)
         if cfg.show_n_label:
-            try:
-                font = ImageFont.truetype("DejaVuSans-Bold.ttf", cfg.font_size)
-            except OSError:
-                try:
-                    font = ImageFont.truetype("Arial Bold.ttf", cfg.font_size)
-                except OSError:
-                    try:
-                        font = ImageFont.truetype("Arial.ttf", cfg.font_size)
-                    except OSError:
-                        font = ImageFont.load_default()
-            
-            # Position N at top of arrow
+            from ._map_scene_render import _text_anchor_for_visual_center, _text_outline_metrics
+
             n_offset = size // 2 - 2
             nx = cx + n_offset * math.sin(rot_rad)
             ny = cy - n_offset * math.cos(rot_rad)
-            
-            bbox = draw.textbbox((0, 0), "N", font=font)
-            tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-            draw.text((nx - tw // 2, ny - th // 2 - 2), "N", font=font, fill=cfg.color)
-        
-        return np.array(img, dtype=np.uint8)
+            _label_width, _label_height, bounds = _text_outline_metrics("N", float(cfg.font_size))
+            anchor = (
+                _text_anchor_for_visual_center(nx, ny, float(cfg.font_size), bounds)
+                if bounds is not None
+                else (int(round(nx)), int(round(ny)))
+            )
+            return image, "N", anchor
+        return image, None, None
 
-    def _draw_arrow(self, draw, cx: int, cy: int, size: int, rot_rad: float, cfg: NorthArrowConfig):
+    @staticmethod
+    def _polygon(image: np.ndarray, points: list[tuple[float, float]], color: tuple[int, int, int, int]) -> None:
+        yy, xx = np.mgrid[: image.shape[0], : image.shape[1]]
+        inside = np.zeros(xx.shape, dtype=bool)
+        previous = points[-1]
+        for current in points:
+            x0, y0 = previous
+            x1, y1 = current
+            crossing = ((y0 > yy) != (y1 > yy)) & (
+                xx < (x1 - x0) * (yy - y0) / ((y1 - y0) + 1e-12) + x0
+            )
+            inside ^= crossing
+            previous = current
+        image[inside] = color
+
+    @staticmethod
+    def _line(image: np.ndarray, start: tuple[float, float], end: tuple[float, float], color: tuple[int, int, int, int], width: int) -> None:
+        yy, xx = np.mgrid[: image.shape[0], : image.shape[1]]
+        x0, y0 = start
+        x1, y1 = end
+        dx, dy = x1 - x0, y1 - y0
+        denominator = max(dx * dx + dy * dy, 1e-12)
+        t = np.clip(((xx - x0) * dx + (yy - y0) * dy) / denominator, 0.0, 1.0)
+        distance = np.hypot(xx - (x0 + t * dx), yy - (y0 + t * dy))
+        image[distance <= max(0.5, width * 0.5)] = color
+
+    def _draw_arrow(self, image: np.ndarray, cx: int, cy: int, size: int, rot_rad: float, cfg: NorthArrowConfig):
         """Draw classic north arrow style."""
         arrow_len = size // 2 - 8
         arrow_width = size // 6
@@ -123,16 +140,14 @@ class NorthArrow:
         tail_x = cx - arrow_len * 0.6 * math.sin(rot_rad)
         tail_y = cy + arrow_len * 0.6 * math.cos(rot_rad)
         
-        # Draw filled north half (dark)
-        draw.polygon([(tip_x, tip_y), (cx, cy), (bl_x, bl_y)], fill=cfg.color)
-        
-        # Draw outlined south half (light)
-        draw.polygon([(tip_x, tip_y), (cx, cy), (br_x, br_y)], fill=cfg.background, outline=cfg.color)
-        
-        # Draw tail
-        draw.line([(cx, cy), (tail_x, tail_y)], fill=cfg.color, width=2)
+        self._polygon(image, [(tip_x, tip_y), (cx, cy), (bl_x, bl_y)], cfg.color)
+        self._polygon(image, [(tip_x, tip_y), (cx, cy), (br_x, br_y)], cfg.background)
+        self._line(image, (tip_x, tip_y), (br_x, br_y), cfg.color, 1)
+        self._line(image, (br_x, br_y), (cx, cy), cfg.color, 1)
+        self._line(image, (cx, cy), (tip_x, tip_y), cfg.color, 1)
+        self._line(image, (cx, cy), (tail_x, tail_y), cfg.color, 2)
 
-    def _draw_compass(self, draw, cx: int, cy: int, size: int, rot_rad: float, cfg: NorthArrowConfig):
+    def _draw_compass(self, image: np.ndarray, cx: int, cy: int, size: int, rot_rad: float, cfg: NorthArrowConfig):
         """Draw compass rose style with N/S/E/W."""
         arrow_len = size // 2 - 12
         
@@ -151,13 +166,9 @@ class NorthArrow:
             br_x = cx - base_offset * math.sin(perp_angle)
             br_y = cy + base_offset * math.cos(perp_angle)
             
-            # Draw arrow
-            if label == "N":
-                draw.polygon([(tip_x, tip_y), (bl_x, bl_y), (br_x, br_y)], fill=cfg.color)
-            else:
-                draw.polygon([(tip_x, tip_y), (bl_x, bl_y), (br_x, br_y)], fill=cfg.color, outline=cfg.color)
+            self._polygon(image, [(tip_x, tip_y), (bl_x, bl_y), (br_x, br_y)], cfg.color)
 
-    def _draw_simple(self, draw, cx: int, cy: int, size: int, rot_rad: float, cfg: NorthArrowConfig):
+    def _draw_simple(self, image: np.ndarray, cx: int, cy: int, size: int, rot_rad: float, cfg: NorthArrowConfig):
         """Draw simple line arrow."""
         arrow_len = size // 2 - 8
         
@@ -167,7 +178,7 @@ class NorthArrow:
         tail_x = cx - arrow_len * 0.5 * math.sin(rot_rad)
         tail_y = cy + arrow_len * 0.5 * math.cos(rot_rad)
         
-        draw.line([(tail_x, tail_y), (tip_x, tip_y)], fill=cfg.color, width=3)
+        self._line(image, (tail_x, tail_y), (tip_x, tip_y), cfg.color, 3)
         
         # Arrowhead
         head_len = 10
@@ -177,21 +188,4 @@ class NorthArrow:
         rx = tip_x - head_len * math.sin(rot_rad + head_angle)
         ry = tip_y + head_len * math.cos(rot_rad + head_angle)
         
-        draw.polygon([(tip_x, tip_y), (lx, ly), (rx, ry)], fill=cfg.color)
-
-    def _render_simple(self) -> np.ndarray:
-        """Simple fallback rendering without PIL."""
-        cfg = self.config
-        size = cfg.size + 16
-        img = np.zeros((size, size, 4), dtype=np.uint8)
-        img[..., :] = cfg.background
-        
-        # Draw a simple triangle pointing up
-        cx, cy = size // 2, size // 2
-        for y in range(size):
-            for x in range(size):
-                dx, dy = x - cx, y - cy
-                if dy < 0 and abs(dx) < -dy // 2:
-                    img[y, x, :] = cfg.color
-        
-        return img
+        self._polygon(image, [(tip_x, tip_y), (lx, ly), (rx, ry)], cfg.color)

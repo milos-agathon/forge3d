@@ -7,9 +7,6 @@ var color_accumulation: texture_2d<f32>;
 @group(0) @binding(1)
 var reveal_accumulation: texture_2d<f32>;
 
-@group(0) @binding(2)
-var tex_sampler: sampler;
-
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -34,9 +31,13 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Sample accumulation buffers
-    let accum_color = textureSample(color_accumulation, tex_sampler, in.uv);
-    let reveal = textureSample(reveal_accumulation, tex_sampler, in.uv).r;
+    // Resolve one accumulation texel into the corresponding output pixel.
+    // These attachments have identical extents; filtering is both unnecessary
+    // and harmful here (Metal may return poison values for the float resolve
+    // sample). Fragment position is already in framebuffer pixel coordinates.
+    let pixel = vec2<i32>(in.clip_position.xy);
+    let accum_color = textureLoad(color_accumulation, pixel, 0);
+    let reveal = textureLoad(reveal_accumulation, pixel, 0).r;
     
     // Weighted OIT resolve
     // accum_color.rgb contains weighted color sum
@@ -61,19 +62,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // So final alpha = 1 - reveal
     let final_alpha = 1.0 - reveal;
     
-    // Apply tone mapping and gamma correction
-    final_color = reinhard_tonemap(final_color);
-    final_color = linear_to_srgb(final_color);
-    
     return vec4<f32>(final_color, final_alpha);
-}
-
-// Simple Reinhard tone mapping
-fn reinhard_tonemap(color: vec3<f32>) -> vec3<f32> {
-    return color / (1.0 + color);
-}
-
-// Linear to sRGB conversion
-fn linear_to_srgb(linear: vec3<f32>) -> vec3<f32> {
-    return pow(linear, vec3<f32>(1.0 / 2.2));
 }

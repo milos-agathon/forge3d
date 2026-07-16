@@ -7,7 +7,7 @@ def test_default_latin_font_atlas_loads_bundled_ascii_coverage():
     atlas = FontAtlas.default_latin()
 
     assert atlas.font_size == 24
-    assert atlas.line_height == 32
+    assert atlas.line_height == 28
     for char in (" ", "A", "Z", "a", "z", "0", "9"):
         assert atlas.covers(char), char
     assert {key: atlas.coverage[key] for key in ("start", "end", "name")} == {
@@ -15,7 +15,7 @@ def test_default_latin_font_atlas_loads_bundled_ascii_coverage():
         "end": 127,
         "name": "Basic Latin",
     }
-    assert atlas.coverage["atlas_kind"] == "sdf_font_atlas"
+    assert atlas.coverage["atlas_kind"] == "msdf_font_atlas"
     assert atlas.coverage["px_range"] > 0
     assert atlas.diagnostics == []
 
@@ -73,6 +73,19 @@ def test_typography_metrics_reflect_kerning_tracking_and_line_height():
     assert kerned_metrics["tracking"] == 2.0
 
 
+def test_typography_metrics_use_native_outline_bounds_not_character_count():
+    from forge3d.map_scene import TypographySettings
+
+    metrics = TypographySettings(font_size=32, kerning=True, tracking=0.0)
+
+    narrow = metrics.measure_text("iiiiii")
+    wide = metrics.measure_text("WWWWWW")
+
+    assert wide["width"] > narrow["width"] * 2
+    assert narrow["line_count"] == 1
+    assert wide["line_count"] == 1
+
+
 def test_typography_multiline_and_callout_layout_metadata_is_explicit():
     from forge3d.map_scene import TypographySettings
 
@@ -89,14 +102,14 @@ def test_typography_multiline_and_callout_layout_metadata_is_explicit():
     }
 
 
-def test_docs_record_complex_script_shaping_as_non_blocking_p1_deferral():
+def test_docs_record_live_complex_script_shaping_contract():
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
     workflow = (root / "docs/guides/data_and_scene_workflows.md").read_text(encoding="utf-8")
     api_reference = (root / "docs/api/api_reference.rst").read_text(encoding="utf-8")
 
-    assert "complex-script shaping" in workflow
-    assert "not P1-blocking" in workflow
+    assert "Complex-script shaping uses the native LITTERA" in workflow
+    assert "positioned-outline" in workflow
     assert "FontAtlas.default_latin" in api_reference
     assert "TypographySettings" in api_reference

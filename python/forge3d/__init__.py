@@ -583,6 +583,7 @@ from .map_scene import (
     MapFurnitureLayer,
     MapScene,
     MapSceneNativeUnavailable,
+    MapSceneTextLayoutError,
     BuildingLayer as MapSceneBuildingLayer,
     OrbitCamera,
     OutputSpec,
@@ -612,6 +613,7 @@ from .text_atlas import (
     save_atlas,
     validate_atlas_metrics,
 )
+from . import text as text
 
 # -----------------------------------------------------------------------------
 # Public API
@@ -620,6 +622,7 @@ __all__ = [
     # Version
     "__version__",
     "version",
+    "text",
     # Core rendering
     "Renderer",
     "PathTracer",
@@ -869,6 +872,7 @@ __all__ = [
     # Typed MapScene recipe contract
     "MapScene",
     "MapSceneNativeUnavailable",
+    "MapSceneTextLayoutError",
     "CompiledScenePlan",
     "SceneRecipe",
     "TerrainSource",

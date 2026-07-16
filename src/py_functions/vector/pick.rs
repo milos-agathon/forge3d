@@ -61,6 +61,7 @@ pub(crate) fn vector_render_pick_map_py(
     timing.end(&mut encoder, pick_scope, 1);
     timing.resolve(&mut encoder);
 
+    scene.flush_uploads();
     scene.queue.submit(Some(encoder.finish()));
     scene.device.poll(wgpu::Maintain::Wait);
     let result = read_u32_texture_to_py(
@@ -133,50 +134,62 @@ pub(crate) fn vector_render_oit_and_pick_py(
             &scene.device,
             width,
             height,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
+            wgpu::TextureFormat::Rgba8Unorm,
         )
         .map_err(vector_runtime_err)?;
         let (final_tex, final_view) =
             create_rgba_target(&scene.device, "vf.Vector.Combine.Final", width, height)?;
         let (pick_tex, pick_view) =
             create_pick_target(&scene.device, "vf.Vector.Combine.Pick", width, height)?;
-        let mut encoder = scene
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("vf.Vector.Combine.Encoder"),
-            });
-
-        // CENSOR F-04: live per-pass timing for the certificate; falls back to
-        // 0.0 pass records when TIMESTAMP_QUERY is not granted.
-        let mut timing = crate::core::gpu_timing::OneShotTiming::for_current_device();
-        let oit_scope = timing.begin(&mut encoder, "vector.oit");
+        prepare_oit_scene(&mut scene, width, height);
+        scene.flush_uploads();
+        let mut timing = VectorPassTiming::new(scene.device.clone(), &scene.queue, 3)?;
+        let accumulation_timing = timing.reserve("vector.oit", 1);
+        let compose_timing = timing.reserve("vector.oit.compose", 1);
+        let pick_timing = timing.reserve("vector.pick", 1);
+        let mut accumulation_encoder =
+            scene
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("vf.Vector.Combine.AccumulationEncoder"),
+                });
         {
-            let mut pass = oit.begin_accumulation(&mut encoder);
+            let mut pass = oit.begin_accumulation_timed(
+                &mut accumulation_encoder,
+                timing.render_pass_writes(accumulation_timing),
+            );
             render_oit_scene(&mut scene, &mut pass, width, height)?;
         }
-        timing.end(&mut encoder, oit_scope, 1);
-        let compose_scope = timing.begin(&mut encoder, "vector.oit.compose");
+        let accumulation_submission = scene.queue.submit(Some(accumulation_encoder.finish()));
+        scene.device.poll(wgpu::Maintain::WaitForSubmissionIndex(
+            accumulation_submission,
+        ));
+
+        let mut post_encoder =
+            scene
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("vf.Vector.Combine.PostEncoder"),
+                });
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut pass = post_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("vf.Vector.Combine.Compose"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &final_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
                 depth_stencil_attachment: None,
                 occlusion_query_set: None,
-                timestamp_writes: None,
+                timestamp_writes: timing.render_pass_writes(compose_timing),
             });
             oit.compose(&mut pass);
         }
-        timing.end(&mut encoder, compose_scope, 1);
-        let pick_scope = timing.begin(&mut encoder, "vector.pick");
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut pass = post_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("vf.Vector.Combine.PickPass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &pick_view,
@@ -193,7 +206,7 @@ pub(crate) fn vector_render_oit_and_pick_py(
                 })],
                 depth_stencil_attachment: None,
                 occlusion_query_set: None,
-                timestamp_writes: None,
+                timestamp_writes: timing.render_pass_writes(pick_timing),
             });
             render_pick_scene(
                 &mut scene,
@@ -203,10 +216,10 @@ pub(crate) fn vector_render_oit_and_pick_py(
                 base_pick_id.unwrap_or(1),
             )?;
         }
-        timing.end(&mut encoder, pick_scope, 1);
-        timing.resolve(&mut encoder);
+        timing.resolve(&mut post_encoder);
 
-        scene.queue.submit(Some(encoder.finish()));
+        scene.flush_uploads();
+        scene.queue.submit(Some(post_encoder.finish()));
         scene.device.poll(wgpu::Maintain::Wait);
 
         let rgba = read_rgba_texture_to_py(

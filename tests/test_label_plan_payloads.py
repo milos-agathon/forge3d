@@ -38,7 +38,13 @@ def test_render_and_export_payloads_preserve_real_plan_data():
         assert candidate_payload["bounds"] == payload["bounds"]
         assert candidate_payload["seed"] == 12
         assert candidate_payload["accepted"][0]["glyphs"] == list("Accepted")
-        assert candidate_payload["accepted"][0]["typography"] == {"family": "atlas", "size": 11}
+        typography = candidate_payload["accepted"][0]["typography"]
+        assert typography["family"] == "atlas"
+        assert typography["size"] == 11
+        assert typography["shaping"] == "littera"
+        assert typography["render_mapping"] == "positioned_glyphs_by_id"
+        assert typography["glyph_ids"]
+        assert typography["shaped_runs"][0]["glyphs"]
         assert candidate_payload["accepted"][0]["candidates"]
         assert candidate_payload["rejected"][0]["reason"] == "missing_glyph"
 

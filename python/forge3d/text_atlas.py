@@ -1,4 +1,4 @@
-"""SDF font atlas baking and validation utilities."""
+"""Compatibility adapters for the native RGB MSDF atlas baker."""
 
 from __future__ import annotations
 
@@ -19,49 +19,8 @@ class BakedAtlas:
     metrics: dict[str, Any]
 
 
-def _font(font_path: str | Path | None, font_size: int) -> Any:
-    from PIL import ImageFont
-
-    if font_path is not None:
-        return ImageFont.truetype(str(font_path), int(font_size))
-    try:
-        return ImageFont.truetype("DejaVuSans.ttf", int(font_size))
-    except Exception:
-        return ImageFont.load_default()
-
-
-def _glyph_bbox(font: Any, char: str) -> tuple[int, int, int, int]:
-    try:
-        bbox = font.getbbox(char)
-    except Exception:
-        bbox = None
-    if bbox is None:
-        width, height = font.getsize(char)
-        return (0, 0, int(width), int(height))
-    return tuple(int(value) for value in bbox)
-
-
-def _glyph_advance(font: Any, char: str, fallback: int) -> float:
-    try:
-        return float(font.getlength(char))
-    except Exception:
-        return float(fallback)
-
-
-def _sdf(mask: np.ndarray, px_range: int) -> np.ndarray:
-    inside = mask > 0
-    if not inside.any():
-        return np.full(mask.shape, 128, dtype=np.uint8)
-    try:
-        from scipy.ndimage import distance_transform_edt
-
-        dist_in = distance_transform_edt(inside)
-        dist_out = distance_transform_edt(~inside)
-        signed = dist_in - dist_out
-        sdf = 0.5 + signed / max(1.0, float(px_range) * 2.0)
-        return np.clip(sdf * 255.0, 0.0, 255.0).astype(np.uint8)
-    except Exception:
-        return np.where(inside, 255, 0).astype(np.uint8)
+def _default_font_path() -> Path:
+    return Path(__file__).resolve().parent / "data" / "fonts" / "NotoSansLatin-subset.ttf"
 
 
 def bake_atlas(
@@ -72,76 +31,53 @@ def bake_atlas(
     px_range: int = 8,
     padding: int = 4,
 ) -> BakedAtlas:
-    """Bake a single-channel SDF atlas image and metrics JSON payload."""
+    """Bake deterministic RGB MSDF glyphs through the native outline pipeline."""
+    from .text import bake_msdf_atlas
 
-    from PIL import Image, ImageDraw
-
-    glyphs = sorted({str(char)[0] for char in charset})
-    font = _font(font_path, int(font_size))
-    boxes = {char: _glyph_bbox(font, char) for char in glyphs}
-    max_w = max((box[2] - box[0] for box in boxes.values()), default=font_size)
-    max_h = max((box[3] - box[1] for box in boxes.values()), default=font_size)
-    cell_w = int(max_w + padding * 2 + px_range * 2)
-    cell_h = int(max_h + padding * 2 + px_range * 2)
-    columns = max(1, int(np.ceil(np.sqrt(max(1, len(glyphs))))))
-    rows = int(np.ceil(len(glyphs) / columns))
-    width = columns * cell_w
-    height = rows * cell_h
-    atlas = np.zeros((height, width, 4), dtype=np.uint8)
-    metrics: dict[str, Any] = {
-        "kind": "sdf_font_atlas",
-        "font_size": int(font_size),
-        "line_height": int(round(font_size * 4 / 3)),
-        "baseline": int(font_size),
-        "px_range": int(px_range),
-        "channels": 1,
-        "width": int(width),
-        "height": int(height),
-        "glyphs": {},
-    }
-
-    for index, char in enumerate(glyphs):
-        col = index % columns
-        row = index // columns
-        x = col * cell_w
-        y = row * cell_h
-        bbox = boxes[char]
-        glyph_w = max(1, bbox[2] - bbox[0])
-        glyph_h = max(1, bbox[3] - bbox[1])
-        mask_image = Image.new("L", (cell_w, cell_h), 0)
-        draw = ImageDraw.Draw(mask_image)
-        draw_x = padding + px_range - bbox[0]
-        draw_y = padding + px_range - bbox[1]
-        draw.text((draw_x, draw_y), char, font=font, fill=255)
-        sdf = _sdf(np.asarray(mask_image, dtype=np.uint8), int(px_range))
-        atlas[y : y + cell_h, x : x + cell_w, 0] = sdf
-        atlas[y : y + cell_h, x : x + cell_w, 1] = sdf
-        atlas[y : y + cell_h, x : x + cell_w, 2] = sdf
-        atlas[y : y + cell_h, x : x + cell_w, 3] = 255
-        metrics["glyphs"][str(ord(char))] = {
-            "x": int(x),
-            "y": int(y),
-            "w": int(cell_w),
-            "h": int(cell_h),
-            "ox": int(-padding - px_range),
-            "oy": int(-padding - px_range),
-            "adv": float(_glyph_advance(font, char, glyph_w)),
-        }
-
-    return BakedAtlas(image=atlas, metrics=metrics)
+    font = Path(font_path) if font_path is not None else _default_font_path()
+    characters = "".join(sorted({str(value)[0] for value in charset if str(value)}))
+    baked = bake_msdf_atlas(
+        [font], characters, float(font_size), float(px_range), int(padding)
+    )
+    metrics = dict(baked["metrics"])
+    font_source = (
+        str(font) if font_path is not None else "forge3d/data/fonts/NotoSansLatin-subset.ttf"
+    )
+    metrics["font_source"] = font_source
+    metrics["font_sources"] = [font_source]
+    return BakedAtlas(
+        image=np.asarray(baked["image"], dtype=np.uint8),
+        metrics=validate_atlas_metrics(metrics),
+    )
 
 
 def validate_atlas_metrics(metrics: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate atlas metrics and return a normalized dict."""
-
-    required_top = ("font_size", "line_height", "baseline", "glyphs")
+    """Validate native MSDF metadata and normalize glyph number fields."""
+    required_top = (
+        "kind",
+        "font_size",
+        "line_height",
+        "baseline",
+        "px_range",
+        "padding",
+        "channels",
+        "width",
+        "height",
+        "bake_ms",
+        "byte_count",
+        "font_source",
+        "glyphs",
+    )
     missing = [key for key in required_top if key not in metrics]
     if missing:
         raise ValueError(f"Atlas metrics missing field(s): {', '.join(missing)}")
-    glyphs = metrics.get("glyphs")
+    if metrics["kind"] != "msdf_font_atlas" or int(metrics["channels"]) != 3:
+        raise ValueError("Atlas metrics require kind='msdf_font_atlas' and channels=3")
+    glyphs = metrics["glyphs"]
     if not isinstance(glyphs, Mapping) or not glyphs:
         raise ValueError("Atlas metrics require a non-empty glyphs mapping")
     normalized = dict(metrics)
+    normalized["channels"] = 3
     normalized["glyphs"] = {}
     for key, value in glyphs.items():
         if not isinstance(value, Mapping):
@@ -151,27 +87,91 @@ def validate_atlas_metrics(metrics: Mapping[str, Any]) -> dict[str, Any]:
             if field not in value:
                 raise ValueError(f"Glyph {key!r} missing metric {field!r}")
             glyph[field] = float(value[field])
+        if "font_index" in value:
+            glyph["font_index"] = int(value["font_index"])
+        if "glyph_id" in value:
+            glyph["glyph_id"] = int(value["glyph_id"])
         normalized["glyphs"][str(int(key))] = glyph
+    glyphs_by_id = metrics.get("glyphs_by_id", {})
+    if glyphs_by_id:
+        if not isinstance(glyphs_by_id, Mapping):
+            raise ValueError("Atlas metrics glyphs_by_id must be a mapping")
+        normalized["glyphs_by_id"] = {}
+        for identity, value in glyphs_by_id.items():
+            if not isinstance(value, Mapping):
+                raise ValueError(f"Glyph identity {identity!r} metrics must be a mapping")
+            try:
+                font_index_text, glyph_id_text = str(identity).split(":", 1)
+                font_index = int(font_index_text)
+                glyph_id = int(glyph_id_text)
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    f"Glyph identity {identity!r} must be '<font_index>:<glyph_id>'"
+                ) from error
+            glyph = {}
+            for field in ("x", "y", "w", "h", "ox", "oy", "adv"):
+                if field not in value:
+                    raise ValueError(f"Glyph identity {identity!r} missing metric {field!r}")
+                glyph[field] = float(value[field])
+            if int(value.get("font_index", font_index)) != font_index:
+                raise ValueError(f"Glyph identity {identity!r} has mismatched font_index")
+            if int(value.get("glyph_id", glyph_id)) != glyph_id:
+                raise ValueError(f"Glyph identity {identity!r} has mismatched glyph_id")
+            glyph["font_index"] = font_index
+            glyph["glyph_id"] = glyph_id
+            normalized["glyphs_by_id"][f"{font_index}:{glyph_id}"] = glyph
+    unicode_map = metrics.get("unicode_map", {})
+    if unicode_map:
+        if not isinstance(unicode_map, Mapping):
+            raise ValueError("Atlas metrics unicode_map must be a mapping")
+        normalized["unicode_map"] = {
+            str(int(codepoint)): str(identity)
+            for codepoint, identity in unicode_map.items()
+        }
+    if "font_sources" in metrics:
+        sources = metrics["font_sources"]
+        if not isinstance(sources, Sequence) or isinstance(sources, (str, bytes)):
+            raise ValueError("Atlas metrics font_sources must be a sequence")
+        normalized["font_sources"] = [str(source) for source in sources]
+    if "font_sha256" in metrics:
+        hashes = metrics["font_sha256"]
+        if not isinstance(hashes, Sequence) or isinstance(hashes, (str, bytes)):
+            raise ValueError("Atlas metrics font_sha256 must be a sequence")
+        normalized_hashes = [str(value).lower() for value in hashes]
+        if any(len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value) for value in normalized_hashes):
+            raise ValueError("Atlas metrics font_sha256 entries must be lowercase SHA-256 hex")
+        if "font_sources" in normalized and len(normalized_hashes) != len(normalized["font_sources"]):
+            raise ValueError("Atlas metrics font_sources/font_sha256 lengths must match")
+        normalized["font_sha256"] = normalized_hashes
+    if "sdf_byte_count" in metrics:
+        normalized["sdf_byte_count"] = int(metrics["sdf_byte_count"])
     return normalized
 
 
-def save_atlas(atlas: BakedAtlas, png_path: str | Path, json_path: str | Path) -> tuple[Path, Path]:
-    """Save atlas image and metrics JSON."""
-
-    from PIL import Image
+def save_atlas(
+    atlas: BakedAtlas, png_path: str | Path, json_path: str | Path
+) -> tuple[Path, Path]:
+    """Save the RGB image with the in-tree encoder and canonical metadata JSON."""
+    from ._png import save_png
 
     png = Path(png_path)
     metrics = Path(json_path)
     png.parent.mkdir(parents=True, exist_ok=True)
     metrics.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(atlas.image, mode="RGBA").save(png)
-    metrics.write_text(json.dumps(validate_atlas_metrics(atlas.metrics), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    save_png(png, atlas.image)
+    canonical = validate_atlas_metrics(atlas.metrics)
+    # Runtime timing is useful diagnostics but is not part of atlas identity.
+    # Normalize it at the persistence boundary so independent processes write
+    # byte-identical canonical JSON without caller-side cleanup.
+    canonical["bake_ms"] = 0.0
+    metrics.write_text(
+        json.dumps(canonical, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     return png, metrics
 
 
 def load_atlas_metrics(path: str | Path) -> dict[str, Any]:
-    """Load and validate an atlas metrics JSON file."""
-
     return validate_atlas_metrics(json.loads(Path(path).read_text(encoding="utf-8")))
 
 

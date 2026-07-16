@@ -72,6 +72,22 @@ class LabelStyle:
         }
 
 
+class SvgTextStyleError(ValueError):
+    """A requested SVG typography setting has no packaged native outline."""
+
+    def __init__(self, reason: str, setting: str, value: str):
+        self.reason = reason
+        self.setting = setting
+        self.value = value
+        self.diagnostics = [{
+            "status": "diagnostic_block",
+            "reason": reason,
+            "setting": setting,
+            "value": value,
+        }]
+        super().__init__(f"unsupported SVG {setting} {value!r}")
+
+
 @dataclass
 class Polygon:
     """Polygon definition with exterior ring and optional holes."""
@@ -239,6 +255,7 @@ class VectorScene:
         halo_color: Tuple[float, float, float, float] = (1.0, 1.0, 1.0, 0.8),
         halo_width: float = 1.5,
         font_family: str = "sans-serif",
+        font_weight: str = "normal",
     ) -> None:
         """Add a text label to the scene.
 
@@ -250,6 +267,7 @@ class VectorScene:
             halo_color: RGBA halo color (0-1 range).
             halo_width: Halo width in pixels (0 = no halo).
             font_family: CSS font family.
+            font_weight: Packaged font weight (currently normal/400).
         """
         style = LabelStyle(
             font_size=font_size,
@@ -257,6 +275,7 @@ class VectorScene:
             halo_color=halo_color,
             halo_width=halo_width,
             font_family=font_family,
+            font_weight=font_weight,
         )
         self.labels.append(Label(text=text, position=position, style=style))
         self._bounds = None
@@ -338,14 +357,37 @@ def _project_to_screen(
     return (screen_x, screen_y)
 
 
-def _escape_xml(text: str) -> str:
-    """Escape text for XML."""
-    return (text
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-        .replace("'", "&apos;"))
+def _native_label_path(
+    text: str, font_size: float, font_family: str, font_weight: str, precision: int
+) -> tuple[str, tuple[float, float, float, float]]:
+    """Return native outline data and bounds without consulting host fonts."""
+    from .text import shape
+
+    root = Path(__file__).resolve().parent / "data" / "fonts"
+    requested = Path(font_family)
+    family_key = font_family.strip().lower()
+    if requested.is_file():
+        requested_fonts = [requested]
+    elif family_key in {"sans-serif", "noto sans", "noto-sans"}:
+        requested_fonts = []
+    else:
+        raise SvgTextStyleError("unsupported_font_family", "font_family", font_family)
+    if font_weight.strip().lower() not in {"normal", "400"}:
+        raise SvgTextStyleError("unsupported_font_weight", "font_weight", font_weight)
+    fonts = requested_fonts + [
+        root / name
+        for name in (
+            "NotoSansLatin-subset.ttf",
+            "NotoSansArabic-subset.ttf",
+            "NotoSansHebrew-subset.ttf",
+            "NotoSansDevanagari-subset.ttf",
+            "NotoSansSC-subset.ttf",
+        )
+    ]
+    shaped = shape(text, [str(path) for path in fonts], float(font_size))
+    path = shaped.svg_path(precision=max(0, min(8, int(precision))))
+    bounds = shaped.outline_bounds()
+    return path, bounds or (0.0, 0.0, 0.0, 0.0)
 
 
 def generate_svg(
@@ -456,14 +498,18 @@ def generate_svg(
                 bounds, width, height
             )
 
-            text = _escape_xml(label.text)
-            font_size = f"{style.font_size:.{precision}f}"
-
+            path, path_bounds = _native_label_path(
+                label.text,
+                style.font_size,
+                style.font_family,
+                style.font_weight,
+                precision,
+            )
+            tx = sx - (path_bounds[0] + path_bounds[2]) * 0.5
+            ty = sy - (path_bounds[1] + path_bounds[3]) * 0.5
             common_attrs = (
-                f'x="{sx:.{precision}f}" y="{sy:.{precision}f}" '
-                f'font-family="{style.font_family}" font-size="{font_size}" '
-                f'font-weight="{style.font_weight}" text-anchor="middle" '
-                f'dominant-baseline="middle"'
+                f'd="{path}" '
+                f'transform="translate({tx:.{precision}f} {ty:.{precision}f})"'
             )
 
             # Halo (stroke behind text)
@@ -471,13 +517,15 @@ def generate_svg(
                 halo_color = _color_to_css(style.halo_color)
                 halo_w = f"{style.halo_width * 2:.{precision}f}"
                 lines.append(
-                    f'  <text {common_attrs} fill="none" stroke="{halo_color}" '
-                    f'stroke-width="{halo_w}" stroke-linejoin="round">{text}</text>'
+                    f'  <path {common_attrs} fill="none" stroke="{halo_color}" '
+                    f'stroke-width="{halo_w}" stroke-linejoin="round"/>'
                 )
 
             # Main text
             text_color = _color_to_css(style.color)
-            lines.append(f'  <text {common_attrs} fill="{text_color}">{text}</text>')
+            lines.append(
+                f'  <path {common_attrs} fill="{text_color}" fill-rule="nonzero"/>'
+            )
 
     lines.append('</svg>')
     return '\n'.join(lines)
@@ -611,6 +659,7 @@ __all__ = [
     'VectorScene',
     'VectorStyle',
     'LabelStyle',
+    'SvgTextStyleError',
     'Polygon',
     'Polyline',
     'Label',

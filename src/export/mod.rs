@@ -20,7 +20,8 @@ pub use projection::{
 pub use svg::{vectors_to_svg, vectors_to_svg_screen_coords, SvgExportConfig};
 pub use svg_labels::{
     label_at_position, labels_to_svg_document, labels_to_svg_text, labels_to_svg_text_with_config,
-    LabelSvgConfig,
+    try_label_at_position, try_labels_to_svg_document, try_labels_to_svg_text_with_config,
+    LabelSvgConfig, SvgTextError,
 };
 
 #[cfg(test)]
@@ -151,8 +152,8 @@ mod tests {
 
         let svg_text = labels_to_svg_text(&labels);
 
-        assert!(svg_text.contains("<text"));
-        assert!(svg_text.contains("Test Label"));
-        assert!(svg_text.contains("font-size"));
+        assert!(!svg_text.contains("<text"));
+        assert!(svg_text.contains("<path"));
+        assert!(svg_text.contains("d=\"M"));
     }
 }

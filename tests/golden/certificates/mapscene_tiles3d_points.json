@@ -90,6 +90,8 @@
       "vf.Vector.OIT.ColorAccum": 81920,
       "vf.Vector.OIT.Depth": 40960,
       "vf.Vector.OIT.RevealAccum": 20480,
+      "vf.Vector.PassTiming.Readback": 48,
+      "vf.Vector.PassTiming.Resolve": 48,
       "vf.Vector.Point.DefaultTexture": 4,
       "vf.Vector.Point.InstanceBuffer": 45056,
       "vf.Vector.Point.PickUniform": 16,
@@ -137,20 +139,20 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "e2282bfaf5fa",
-    "version": "1.32.0",
+    "git_sha": "89bb84539357",
+    "version": "1.33.0",
     "wgsl_module_hashes": {
-      "point_instanced.wgsl": "20428a98dd6e168c5f7af6963ff8521fcae38e8a39e2cd76a8fa148ff889c032",
+      "point_instanced.wgsl": "e8159414ae314a3988323cde19c5f4e0ebbc61f01dead822d25e3b386f438dfc",
       "terrain.shadow_depth.shader": "0602d15a5f19f10e937f0a2b1af364f19cd4356ed1d5b55282b49b9f97fa32de",
       "terrain_pbr_pom.shader": "41ddb326e9824a26960838c84635ef149a46fd4a0cc05a2ae6321ee0d3b27b99",
-      "vf.Vector.OIT.Compose": "f7932527734887fe2772d634708a7333f9d381774e0465c3ec68ceb9f00ace87",
+      "vf.Vector.OIT.Compose": "934b46d4b65e4911a49ba0b29b6c2deea2662d8eac1db0cab40a78677a88122d",
       "vf.Vector.PointEDL": "7072f56a0ae357ab08cd6b4fc1f82573b3abf01db331b205f82c0596c678f8de"
     }
   },
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0030720001086592674,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.material_vt"
     },
     {
@@ -160,22 +162,22 @@
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0030720001086592674,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.sun_visibility"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 11.04691219329834,
+      "gpu_ms": 3.615744113922119,
       "label": "terrain.shadow"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0030720001086592674,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.sky"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.35942399501800537,
+      "gpu_ms": 2.062335968017578,
       "label": "terrain.main"
     },
     {
@@ -185,17 +187,17 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.05119999870657921,
+      "gpu_ms": 0.009216,
       "label": "vector.oit"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.021503999829292297,
+      "gpu_ms": 0.00304,
       "label": "vector.oit.compose"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.026623999699950218,
+      "gpu_ms": 0.003072,
       "label": "vector.edl"
     },
     {
@@ -208,7 +210,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "180acede7209a1202055afa3aafb28897a96758513c8734d6941a5d0066d8f5e7707968613118ce0a1d4065a65cef7d4329c7fb7244ae926c5ff284ec7e47508",
+    "sig": "1c77f0e8e94bfe3301ad4101d07fed992458260ca23dce1fb274abdeb6117b07c0360f431c12d1fbb85007cca71d5ffe29d7287d8b39cefc2670175a0d128d07",
     "signed_fields": [
       "adapter",
       "allocations",

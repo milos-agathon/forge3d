@@ -1,0 +1,36 @@
+{
+  "schema": "forge3d.font-notices.v1",
+  "license": "SIL Open Font License 1.1",
+  "license_file": "OFL-1.1.txt",
+  "fonts": {
+    "NotoSansArabic-subset.ttf": {
+      "copyright_notice": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic)",
+      "sha256": "65384a54d1272bb35b3780c480e353773f18965adaa8cf52dd8d6e358a521949",
+      "upstream": "https://github.com/google/fonts/tree/main/ofl/notosansarabic"
+    },
+    "NotoSansDevanagari-subset.ttf": {
+      "copyright_notice": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/devanagari)",
+      "sha256": "d6509fc1f37caf01184e8f9a4f150b606f2164a90df6354258adac42e125fb7c",
+      "upstream": "https://github.com/google/fonts/tree/main/ofl/notosansdevanagari"
+    },
+    "NotoSansHebrew-subset.ttf": {
+      "copyright_notice": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/hebrew)",
+      "sha256": "da63572372a6c876e38d9c17575527cab7752dd93dfa414fbbbb338d6ccca7e9",
+      "upstream": "https://github.com/google/fonts/tree/main/ofl/notosanshebrew"
+    },
+    "NotoSansLatin-subset.ttf": {
+      "copyright_notice": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)",
+      "sha256": "3cdd82f05768b6101094b7daa24287053e07d6db5a21411d5076f5617f190e68",
+      "upstream": "https://github.com/google/fonts/tree/main/ofl/notosans"
+    },
+    "NotoSansSC-subset.ttf": {
+      "copyright_notice": "Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'",
+      "sha256": "a366764f4a666e85ba791d0eef9bbda8eca4a96e70287037d6c81c6b90ff8190",
+      "upstream": "https://github.com/google/fonts/tree/main/ofl/notosanssc"
+    }
+  },
+  "generated_assets": {
+    "atlas_latin_default.json": "d28d280511fc89b5dae2cadb00f64ec48150561d59ceaeb5bc021d9c26b5dc67",
+    "atlas_latin_default.png": "2360e58d97aa24d436693d3481e87b3728b76b4c1adeb453dbd87e2a4e7f0290"
+  }
+}

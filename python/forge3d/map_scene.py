@@ -150,6 +150,20 @@ class MapSceneNativeUnavailable(RuntimeError):
         super().__init__(f"MapScene native rendering unavailable: {summary}")
 
 
+class MapSceneTextLayoutError(RuntimeError):
+    """Native label composition rejected an incomplete shaped-glyph payload."""
+
+    def __init__(self, diagnostic: Mapping[str, Any]):
+        self.diagnostic = dict(diagnostic)
+        self.diagnostics = [self.diagnostic]
+        super().__init__(
+            "MapScene text layout failed: "
+            f"layer={self.diagnostic.get('layer')} "
+            f"label={self.diagnostic.get('object_id')} "
+            f"reason={self.diagnostic.get('reason')}"
+        )
+
+
 @dataclass(frozen=True)
 class CompiledScenePlan:
     """Frozen output of ``MapScene.compile_plan()``.
@@ -623,18 +637,10 @@ def _mapscene_denoise_enabled(output: "OutputSpec" | None) -> bool:
     return output is not None and str(output.denoiser).lower() not in {"", "none", "off"}
 
 
-def _recipe_needs_label_depth(recipe: "SceneRecipe") -> bool:
-    return any(
-        isinstance(layer, LabelLayer) and str(layer.occlusion).lower() == "terrain"
-        for layer in recipe.layers
-    )
-
-
 def _mapscene_aov_settings(
     output: "OutputSpec" | None,
     *,
     force_guidance: bool = False,
-    force_depth: bool = False,
 ) -> Any | None:
     from .terrain_params import AovSettings
 
@@ -645,12 +651,12 @@ def _mapscene_aov_settings(
             "MapScene native terrain AOVs support only albedo, normal, and depth; "
             f"unsupported: {', '.join(unsupported)}"
         )
-    enabled = bool(requested) or bool(force_guidance) or bool(force_depth)
+    enabled = bool(requested) or bool(force_guidance)
     return AovSettings(
         enabled=enabled,
         albedo=("albedo" in requested) or force_guidance,
         normal=("normal" in requested) or force_guidance,
-        depth=("depth" in requested) or force_guidance or force_depth,
+        depth=("depth" in requested) or force_guidance,
         format="exr",
     )
 
@@ -1233,7 +1239,6 @@ def _build_mapscene_terrain_params(
         aov=_mapscene_aov_settings(
             output,
             force_guidance=denoise_enabled,
-            force_depth=_recipe_needs_label_depth(recipe),
         ),
         denoise=_mapscene_denoise_settings(output),
         screen_space=_mapscene_screen_space_settings(recipe),
@@ -1356,8 +1361,11 @@ def _render_terrain_renderer_result(
             if not needs_offline and hasattr(renderer, "set_scatter_batches")
             else None
         )
-        needs_label_depth = _recipe_needs_label_depth(recipe)
-        needs_aov = bool(output.aovs) or needs_label_depth or emit_provenance
+        # Label occlusion is already frozen by compile_plan()'s serialized
+        # camera/terrain sampler. Never retain a live GPU depth AOV merely
+        # because labels request terrain occlusion; render must be a pure
+        # consumer of that compiled plan.
+        needs_aov = bool(output.aovs) or emit_provenance
         if emit_provenance and needs_offline:
             raise RuntimeError(
                 "MapScene provenance emission requires the one-shot render path: "
@@ -2298,20 +2306,6 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
     from .text_atlas import default_latin_atlas_paths, load_atlas_metrics
 
     height, width = base.shape[:2]
-    atlas_png, atlas_json = default_latin_atlas_paths()
-    for layer in label_layers:
-        atlas_payload = _metadata_dict(layer.glyph_atlas)
-        image_path = atlas_payload.get("image_path")
-        metrics_path = atlas_payload.get("metrics_path") or atlas_payload.get("source_path")
-        if image_path and metrics_path and Path(str(image_path)).exists() and Path(str(metrics_path)).exists():
-            atlas_png, atlas_json = Path(str(image_path)), Path(str(metrics_path))
-            break
-    atlas = load_png_rgba(atlas_png)
-    metrics = load_atlas_metrics(atlas_json)
-    glyphs = metrics["glyphs"]
-    atlas_h, atlas_w = atlas.shape[:2]
-
-    native_scene = scene_cls(int(width), int(height))
     required = (
         "set_raster_overlay",
         "set_native_text_atlas",
@@ -2319,21 +2313,81 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
         "add_native_text_rect_uv_halo",
         "render_rgba",
     )
-    if not all(hasattr(native_scene, name) for name in required):
-        return base, False
-    if hasattr(native_scene, "disable_terrain"):
-        native_scene.disable_terrain()
-    native_scene.set_raster_overlay(np.ascontiguousarray(base, dtype=np.uint8), 1.0, None, None)
-    native_scene.set_native_text_atlas(atlas, int(metrics.get("channels", 1)), 1.0)
-    native_scene.enable_native_text()
-
-    glyph_count = 0
+    rendered_any = False
+    composited = np.ascontiguousarray(base, dtype=np.uint8)
     for layer in label_layers:
-        plan = plans.get(_layer_id(layer, "layer"))
-        if plan is None:
+        layer_id = _layer_id(layer, "layer")
+        plan = plans.get(layer_id)
+        if plan is None or not plan.accepted:
             continue
+
+        atlas_png, atlas_json = default_latin_atlas_paths()
+        atlas_payload = _metadata_dict(layer.glyph_atlas)
+        image_path = atlas_payload.get("image_path")
+        metrics_path = atlas_payload.get("metrics_path") or atlas_payload.get("source_path")
+        custom_atlas_bound = bool(
+            image_path
+            and metrics_path
+            and Path(str(image_path)).exists()
+            and Path(str(metrics_path)).exists()
+        )
+        if custom_atlas_bound:
+            atlas_png, atlas_json = Path(str(image_path)), Path(str(metrics_path))
+
+        atlas = load_png_rgba(atlas_png)
+        metrics = load_atlas_metrics(atlas_json)
+        glyphs_by_id = metrics.get("glyphs_by_id")
+        if not isinstance(glyphs_by_id, Mapping) or not glyphs_by_id:
+            raise MapSceneTextLayoutError({
+                "status": "diagnostic_block",
+                "reason": "shaped_atlas_required",
+                "layer": layer_id,
+                "object_id": None,
+                "required_metadata": "glyphs_by_id",
+            })
+        atlas_h, atlas_w = atlas.shape[:2]
+        atlas_font_size = float(metrics.get("font_size", 1.0))
+        if not math.isfinite(atlas_font_size) or atlas_font_size <= 0.0:
+            raise MapSceneTextLayoutError({
+                "status": "diagnostic_block",
+                "reason": "invalid_atlas_font_size",
+                "layer": layer_id,
+                "object_id": None,
+            })
+        atlas_hashes = tuple(str(value).lower() for value in metrics.get("font_sha256", ()))
+        if not atlas_hashes:
+            raise MapSceneTextLayoutError({
+                "status": "diagnostic_block",
+                "reason": "missing_atlas_font_identity",
+                "layer": layer_id,
+                "object_id": None,
+                "required_metadata": "font_sha256",
+            })
+
+        native_scene = scene_cls(int(width), int(height))
+        if not all(hasattr(native_scene, name) for name in required):
+            return composited, rendered_any
+        if hasattr(native_scene, "disable_terrain"):
+            native_scene.disable_terrain()
+        native_scene.set_raster_overlay(composited, 1.0, None, None)
+        native_scene.set_native_text_atlas(atlas, int(metrics.get("channels", 1)), 1.0)
+        native_scene.enable_native_text()
+
+        pending_text_rects: list[tuple[float, ...]] = []
         for accepted in plan.accepted:
             typography = dict(getattr(accepted, "typography", None) or {})
+            shaped_hashes = tuple(
+                str(value).lower() for value in typography.get("font_sha256", ())
+            )
+            if shaped_hashes != atlas_hashes:
+                raise MapSceneTextLayoutError({
+                    "status": "diagnostic_block",
+                    "reason": "atlas_font_mismatch",
+                    "layer": layer_id,
+                    "object_id": accepted.label_id,
+                    "expected_sha256": list(shaped_hashes),
+                    "atlas_sha256": list(atlas_hashes),
+                })
             text_color = _rgba01(
                 _render_color(typography.get("color") or typography.get("text_color"), (255, 255, 255, 255))
             )
@@ -2350,43 +2404,124 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
                 1.0,
             )
             anchor_x, anchor_y = _render_label_anchor(accepted, int(width), int(height))
-            cursor_x = float(anchor_x)
-            baseline_y = float(anchor_y)
-            glyph_sequence = tuple(getattr(accepted, "glyphs", None) or tuple(str(accepted.text)))
-            for char in glyph_sequence:
-                glyph = glyphs.get(str(ord(char)))
+            # The packaged atlas bake resolution is an implementation detail,
+            # not the public default label size. Keep MapScene's default at
+            # 12 px there. An explicitly bound custom atlas retains its own
+            # declared size unless typography overrides it.
+            render_size = _render_number(
+                typography.get("font_size", typography.get("size", typography.get("text_size"))),
+                atlas_font_size if custom_atlas_bound else 12.0,
+            )
+            if not math.isfinite(render_size) or render_size <= 0.0:
+                raise MapSceneTextLayoutError({
+                    "status": "diagnostic_block",
+                    "reason": "invalid_text_size",
+                    "layer": layer_id,
+                    "object_id": accepted.label_id,
+                    "font_size": render_size,
+                })
+            atlas_scale = render_size / atlas_font_size
+            positioned = tuple(getattr(accepted, "positioned_glyphs", ()) or ())
+            if not positioned:
+                raise MapSceneTextLayoutError({
+                    "status": "diagnostic_block",
+                    "reason": "missing_positioned_glyphs",
+                    "layer": layer_id,
+                    "object_id": accepted.label_id,
+                    "required_mapping": "font_index:glyph_id",
+                })
+            for positioned_glyph in positioned:
+                font_index = int(positioned_glyph["font_index"])
+                glyph_id = int(positioned_glyph["glyph_id"])
+                identity = f"{font_index}:{glyph_id}"
+                glyph = glyphs_by_id.get(identity)
                 if glyph is None:
+                    raise MapSceneTextLayoutError({
+                        "status": "diagnostic_block",
+                        "reason": "missing_shaped_glyph",
+                        "layer": layer_id,
+                        "object_id": accepted.label_id,
+                        "font_index": font_index,
+                        "glyph_id": glyph_id,
+                        "identity": identity,
+                    })
+                if not bool(positioned_glyph.get("has_outline", True)):
                     continue
-                x = cursor_x + float(glyph["ox"])
-                y = baseline_y + float(glyph["oy"])
-                w = float(glyph["w"])
-                h = float(glyph["h"])
-                u0 = float(glyph["x"]) / float(atlas_w)
-                v0 = float(glyph["y"]) / float(atlas_h)
-                u1 = (float(glyph["x"]) + w) / float(atlas_w)
-                v1 = (float(glyph["y"]) + h) / float(atlas_h)
-                native_scene.add_native_text_rect_uv_halo(
-                    x,
-                    y,
-                    w,
-                    h,
-                    u0,
-                    v0,
-                    u1,
-                    v1,
-                    *text_color,
-                    *halo_color,
-                    float(halo_width),
+                origin = positioned_glyph.get("origin")
+                if not isinstance(origin, Sequence) or len(origin) < 2:
+                    raise MapSceneTextLayoutError({
+                        "status": "diagnostic_block",
+                        "reason": "invalid_positioned_glyph",
+                        "layer": layer_id,
+                        "object_id": accepted.label_id,
+                        "identity": identity,
+                    })
+                try:
+                    glyph_x = float(glyph["x"])
+                    glyph_y = float(glyph["y"])
+                    glyph_w = float(glyph["w"])
+                    glyph_h = float(glyph["h"])
+                    x = float(anchor_x) + float(origin[0]) * render_size + float(glyph["ox"]) * atlas_scale
+                    y = float(anchor_y) + float(origin[1]) * render_size + float(glyph["oy"]) * atlas_scale
+                    w = glyph_w * atlas_scale
+                    h = glyph_h * atlas_scale
+                    u0 = glyph_x / float(atlas_w)
+                    v0 = glyph_y / float(atlas_h)
+                    u1 = (glyph_x + glyph_w) / float(atlas_w)
+                    v1 = (glyph_y + glyph_h) / float(atlas_h)
+                    halo_width_px = float(halo_width)
+                    rect = (
+                        x,
+                        y,
+                        w,
+                        h,
+                        u0,
+                        v0,
+                        u1,
+                        v1,
+                        *text_color,
+                        *halo_color,
+                        halo_width_px,
+                    )
+                    invalid_rect = (
+                        not all(math.isfinite(value) for value in rect)
+                        or w <= 0.0
+                        or h <= 0.0
+                        or not (0.0 <= u0 < u1 <= 1.0)
+                        or not (0.0 <= v0 < v1 <= 1.0)
+                        or halo_width_px < 0.0
+                    )
+                except (TypeError, ValueError, KeyError):
+                    invalid_rect = True
+                    rect = ()
+                if invalid_rect:
+                    raise MapSceneTextLayoutError({
+                        "status": "diagnostic_block",
+                        "reason": "invalid_text_rect",
+                        "layer": layer_id,
+                        "object_id": accepted.label_id,
+                        "identity": identity,
+                    })
+                pending_text_rects.append(
+                    rect
                 )
-                cursor_x += float(glyph["adv"])
-                glyph_count += 1
 
-    if glyph_count == 0:
-        return base, False
-    rgba = np.asarray(native_scene.render_rgba())
-    if rgba.ndim != 3 or rgba.shape[2] != 4:
-        raise RuntimeError("MapScene native text compositor returned an invalid RGBA image")
-    return np.ascontiguousarray(rgba.astype(np.uint8, copy=False)), True
+        if not pending_text_rects:
+            raise MapSceneTextLayoutError({
+                "status": "diagnostic_block",
+                "reason": "empty_positioned_render_stream",
+                "layer": layer_id,
+                "object_id": None,
+            })
+        for rect in pending_text_rects:
+            native_scene.add_native_text_rect_uv_halo(*rect)
+        rgba = np.asarray(native_scene.render_rgba())
+        if rgba.ndim != 3 or rgba.shape[2] != 4:
+            raise RuntimeError("MapScene native text compositor returned an invalid RGBA image")
+        composited = np.ascontiguousarray(rgba.astype(np.uint8, copy=False))
+        rendered_any = True
+
+    return composited, rendered_any
 
 
 def _needs_native_vector_composite(recipe: "SceneRecipe") -> bool:
@@ -3351,15 +3486,13 @@ class FontAtlas:
         from .text_atlas import default_latin_atlas_paths, load_atlas_metrics
 
         image_path, atlas_path = default_latin_atlas_paths()
-        if atlas_path.exists():
-            payload = load_atlas_metrics(atlas_path)
-            glyphs = {chr(int(key)) for key in payload.get("glyphs", {})}
-            source_path = str(atlas_path)
-        else:
-            fallback_path = Path(__file__).resolve().parents[2] / "assets" / "fonts" / "default_atlas.json"
-            payload = load_atlas_metrics(fallback_path) if fallback_path.exists() else {"font_size": 24, "line_height": 32, "baseline": 24}
-            glyphs = {chr(codepoint) for codepoint in range(32, 128)}
-            source_path = str(fallback_path) if fallback_path.exists() else None
+        if not image_path.is_file() or not atlas_path.is_file():
+            raise FileNotFoundError(
+                "packaged default MSDF atlas is incomplete; expected both "
+                f"{image_path.name} and {atlas_path.name}"
+            )
+        payload = load_atlas_metrics(atlas_path)
+        glyphs = {chr(int(key)) for key in payload.get("glyphs", {})}
         return cls(
             glyphs=glyphs,
             font_size=int(payload.get("font_size", 24)),
@@ -3369,11 +3502,11 @@ class FontAtlas:
                 "start": 32,
                 "end": 127,
                 "name": "Basic Latin",
-                "atlas_kind": payload.get("kind", "sdf_font_atlas"),
-                "image_path": str(image_path) if image_path.exists() else None,
+                "atlas_kind": payload["kind"],
+                "image_path": str(image_path),
                 "px_range": payload.get("px_range"),
             },
-            source_path=source_path,
+            source_path=str(atlas_path),
             fallbacks=fallbacks or (),
         )
 
@@ -3472,19 +3605,24 @@ class TypographySettings:
     halo_color: Sequence[float] | str | None = (1.0, 1.0, 1.0, 0.8)
 
     def measure_text(self, text: str) -> dict[str, Any]:
+        from ._map_scene_render import _text_font_chain
+        from .text import shape
+
         lines = str(text).splitlines() or [""]
-        char_width = float(self.font_size) * 0.6
+        font_chain = _text_font_chain()
         line_widths = []
         kerning_applied = False
         for line in lines:
-            width = len(line) * char_width
+            width = 0.0
             if line:
+                features = {} if self.kerning else {"kern": False}
+                shaped = shape(line, font_chain, float(self.font_size), features=features)
+                bounds = shaped.outline_bounds()
+                if bounds is not None:
+                    x0, _y0, x1, _y1 = (float(value) for value in bounds)
+                    width = max(0.0, x1 - x0)
+                kerning_applied = kerning_applied or (bool(self.kerning) and len(line) > 1)
                 width += len(line) * float(self.tracking)
-            if self.kerning:
-                pair_count = sum(1 for pair in zip(line, line[1:]) if "".join(pair) in {"AV", "VA", "To"})
-                if pair_count:
-                    width -= pair_count * float(self.font_size) * 0.1
-                    kerning_applied = True
             line_widths.append(max(0.0, width))
         line_height = float(self.line_height if self.line_height is not None else self.font_size * 4 / 3)
         return {
@@ -5900,6 +6038,7 @@ class MapScene:
 __all__ = [
     "MapScene",
     "MapSceneNativeUnavailable",
+    "MapSceneTextLayoutError",
     "CompiledScenePlan",
     "SceneRecipe",
     "TerrainSource",

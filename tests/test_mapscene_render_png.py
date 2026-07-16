@@ -526,26 +526,31 @@ def test_public_label_vector_render_is_deterministic_and_not_placeholder(tmp_pat
     if not terrain_rendering_available():
         pytest.skip("real MapScene label/vector render requires a terrain-capable GPU runtime")
 
-    first_path = tmp_path / "first.png"
-    second_path = tmp_path / "second.png"
-    first = _public_label_vector_scene(first_path)
-    second = _public_label_vector_scene(second_path)
+    paths = [tmp_path / f"frame-{index}.png" for index in range(4)]
+    scenes = [_public_label_vector_scene(path) for path in paths]
+    reports = [scene.render() for scene in scenes]
 
-    first_report = first.render()
-    second_report = second.render()
+    assert all(report.status == "ok" for report in reports)
+    assert all(scene.last_render_backend == "gpu_terrain" for scene in scenes)
+    accepted = [
+        scene.compiled_label_plans["labels"].to_dict()["accepted"]
+        for scene in scenes
+    ]
+    assert accepted == [accepted[0]] * len(accepted)
+    image_bytes = [path.read_bytes() for path in paths]
+    assert image_bytes == [image_bytes[0]] * len(image_bytes)
 
-    assert first_report.status == "ok"
-    assert second_report.status == "ok"
-    assert first.last_render_backend == "gpu_terrain"
-    assert second.last_render_backend == "gpu_terrain"
-    assert first.compiled_label_plans["labels"].to_dict()["accepted"] == second.compiled_label_plans["labels"].to_dict()["accepted"]
-    assert first_path.read_bytes() == second_path.read_bytes()
+    rgba = f3d.png_to_numpy(paths[-1])
+    opaque_magenta = np.all(rgba == np.array([255, 0, 255, 255], dtype=np.uint8), axis=2)
+    assert not np.any(opaque_magenta), (
+        "repeated MapScene renders must not expose Metal's timestamp-corruption marker"
+    )
 
     # SUTURA: the CPU placeholder renderer no longer exists at all.
     assert not hasattr(map_scene, "_render_source_derived_rgba")
 
 
-def test_gpu_backend_uses_native_sdf_text_for_labels(tmp_path, monkeypatch):
+def test_gpu_backend_uses_native_msdf_text_for_labels(tmp_path, monkeypatch):
     scene = f3d.MapScene(
         terrain=f3d.TerrainSource(
             data=np.zeros((8, 8), dtype=np.float32),
@@ -571,12 +576,12 @@ def test_gpu_backend_uses_native_sdf_text_for_labels(tmp_path, monkeypatch):
             )
         ],
     )
-    calls: dict[str, object] = {"glyphs": 0}
+    calls: dict[str, object] = {"glyphs": 0, "rects": []}
 
     def fake_terrain(_recipe, _heightmap):
         rgba = np.zeros((64, 80, 4), dtype=np.uint8)
         rgba[..., 3] = 255
-        return rgba
+        return map_scene._MapSceneNativeRenderResult(rgba=rgba)
 
     class FakeNativeTextScene:
         def __init__(self, width, height):
@@ -602,6 +607,7 @@ def test_gpu_backend_uses_native_sdf_text_for_labels(tmp_path, monkeypatch):
         def add_native_text_rect_uv_halo(self, *args):
             calls["glyphs"] = int(calls["glyphs"]) + 1
             calls["last_glyph_arg_count"] = len(args)
+            calls["rects"].append(tuple(args))
 
         def render_rgba(self):
             assert self.base is not None
@@ -609,7 +615,7 @@ def test_gpu_backend_uses_native_sdf_text_for_labels(tmp_path, monkeypatch):
 
     import forge3d._map_scene_render as render_helpers
 
-    monkeypatch.setattr(map_scene, "_render_terrain_renderer_rgba", fake_terrain)
+    monkeypatch.setattr(map_scene, "_render_terrain_renderer_result", fake_terrain)
     monkeypatch.setattr(map_scene, "_native_scene_class", lambda: FakeNativeTextScene)
     monkeypatch.setattr(
         render_helpers,
@@ -624,9 +630,439 @@ def test_gpu_backend_uses_native_sdf_text_for_labels(tmp_path, monkeypatch):
     assert calls["scene_size"] == (80, 64)
     assert calls["terrain_disabled"] is True
     assert calls["base_shape"] == (64, 80, 4)
-    assert calls["atlas_channels"] == 1
+    assert calls["atlas_channels"] == 3
     assert calls["glyphs"] == 2
     assert calls["last_glyph_arg_count"] == 17
+
+    from forge3d.text_atlas import default_latin_atlas_paths, load_atlas_metrics
+
+    metrics = load_atlas_metrics(default_latin_atlas_paths()[1])
+    accepted = scene.compiled_label_plans["labels"].accepted[0]
+    positioned = [glyph for glyph in accepted.positioned_glyphs if glyph["has_outline"]]
+    anchor_x, anchor_y = map_scene._render_label_anchor(accepted, 80, 64)
+    render_size = 12.0
+    atlas_scale = render_size / metrics["font_size"]
+    expected = []
+    for item in positioned:
+        glyph = metrics["glyphs_by_id"][f'{item["font_index"]}:{item["glyph_id"]}']
+        expected.append((
+            anchor_x + item["origin"][0] * render_size + glyph["ox"] * atlas_scale,
+            anchor_y + item["origin"][1] * render_size + glyph["oy"] * atlas_scale,
+            glyph["w"] * atlas_scale,
+            glyph["h"] * atlas_scale,
+            glyph["x"] / metrics["width"],
+            glyph["y"] / metrics["height"],
+            (glyph["x"] + glyph["w"]) / metrics["width"],
+            (glyph["y"] + glyph["h"]) / metrics["height"],
+        ))
+    rects = calls["rects"]
+    assert len(rects) == len(expected)
+    for actual, expected_rect in zip(rects, expected):
+        assert actual[:8] == pytest.approx(expected_rect)
+
+
+def test_native_label_compositor_uses_explicit_positioned_line_ranges(monkeypatch):
+    layer = f3d.LabelLayer(
+        layer_id="labels",
+        labels=[{
+            "id": "wrapped",
+            "kind": "point",
+            "text": "ABCD",
+            "line_ranges": [[0, 2], [2, 4]],
+            "geometry": {"type": "Point", "coordinates": (20.0, 12.0, 0.0)},
+        }],
+        glyph_atlas={"glyphs": list("ABCD")},
+    )
+    plan = f3d.LabelPlan.compile(
+        labels=layer.labels,
+        camera={},
+        viewport=(80, 64),
+        glyph_atlas=layer.glyph_atlas,
+    )
+    assert plan.accepted
+    accepted = plan.accepted[0]
+    assert list(accepted.line_ranges) == [(0, 2), (2, 4)]
+    assert sorted({glyph["line_index"] for glyph in accepted.positioned_glyphs}) == [0, 1]
+
+    calls = {"rects": []}
+
+    class FakeNativeTextScene:
+        def __init__(self, *_args):
+            pass
+
+        def disable_terrain(self):
+            pass
+
+        def set_raster_overlay(self, *_args):
+            pass
+
+        def set_native_text_atlas(self, *_args):
+            pass
+
+        def enable_native_text(self):
+            pass
+
+        def add_native_text_rect_uv_halo(self, *args):
+            calls["rects"].append(args)
+
+        def render_rgba(self):
+            return np.zeros((64, 80, 4), dtype=np.uint8)
+
+    monkeypatch.setattr(map_scene, "_native_scene_class", lambda: FakeNativeTextScene)
+    recipe = f3d.SceneRecipe(
+        terrain=f3d.TerrainSource(data=np.zeros((2, 2), dtype=np.float32)),
+        camera=f3d.OrbitCamera(),
+        lighting=f3d.LightingPreset(),
+        output=f3d.OutputSpec(width=80, height=64),
+        layers=[layer],
+    )
+
+    map_scene._composite_native_label_layers(
+        np.zeros((64, 80, 4), dtype=np.uint8), recipe, {"labels": plan}
+    )
+
+    assert len(calls["rects"]) == len(
+        [glyph for glyph in accepted.positioned_glyphs if glyph["has_outline"]]
+    )
+    line_y = {
+        glyph["line_index"]: glyph["origin"][1]
+        for glyph in accepted.positioned_glyphs
+        if glyph["has_outline"]
+    }
+    assert line_y[1] > line_y[0]
+    rendered_y = {round(rect[1], 6) for rect in calls["rects"]}
+    assert len(rendered_y) >= 2
+
+
+def test_native_label_compositor_rejects_missing_shaped_identity(monkeypatch):
+    layer = f3d.LabelLayer(
+        layer_id="labels",
+        labels=[{
+            "id": "ligature",
+            "kind": "point",
+            "text": "office",
+            "geometry": {"type": "Point", "coordinates": (20.0, 12.0, 0.0)},
+        }],
+        glyph_atlas={"glyphs": list("office")},
+    )
+    plan = f3d.LabelPlan.compile(
+        labels=layer.labels,
+        camera={},
+        viewport=(80, 64),
+        glyph_atlas=layer.glyph_atlas,
+    )
+    assert plan.accepted
+    original = plan.accepted[0].positioned_glyphs[0]
+    plan.accepted[0].positioned_glyphs = ({**original, "glyph_id": 65535},)
+
+    class FakeNativeTextScene:
+        def __init__(self, *_args):
+            pass
+
+        def disable_terrain(self):
+            pass
+
+        def set_raster_overlay(self, *_args):
+            pass
+
+        def set_native_text_atlas(self, *_args):
+            pass
+
+        def enable_native_text(self):
+            pass
+
+        def add_native_text_rect_uv_halo(self, *_args):
+            raise AssertionError("missing shaped identity must fail before drawing")
+
+        def render_rgba(self):
+            return np.zeros((64, 80, 4), dtype=np.uint8)
+
+    monkeypatch.setattr(map_scene, "_native_scene_class", lambda: FakeNativeTextScene)
+    recipe = f3d.SceneRecipe(
+        terrain=f3d.TerrainSource(data=np.zeros((2, 2), dtype=np.float32)),
+        camera=f3d.OrbitCamera(),
+        lighting=f3d.LightingPreset(),
+        output=f3d.OutputSpec(width=80, height=64),
+        layers=[layer],
+    )
+
+    with pytest.raises(f3d.MapSceneTextLayoutError) as caught:
+        map_scene._composite_native_label_layers(
+            np.zeros((64, 80, 4), dtype=np.uint8), recipe, {"labels": plan}
+        )
+
+    assert caught.value.diagnostic["reason"] == "missing_shaped_glyph"
+    assert caught.value.diagnostic["identity"] == "0:65535"
+
+
+def test_native_label_compositor_rejects_late_missing_identity_before_any_append(monkeypatch):
+    from forge3d.text_atlas import default_latin_atlas_paths, load_atlas_metrics
+
+    metrics = load_atlas_metrics(default_latin_atlas_paths()[1])
+    glyph_ids = [key.split(":") for key in sorted(metrics["glyphs_by_id"])[:2]]
+    assert len(glyph_ids) == 2
+    positioned = [
+        {
+            "font_index": int(font_index),
+            "glyph_id": int(glyph_id),
+            "line_index": 0,
+            "cluster": index,
+            "origin": [float(index), 0.0],
+            "advance": [1.0, 0.0],
+            "has_outline": True,
+        }
+        for index, (font_index, glyph_id) in enumerate(glyph_ids)
+    ]
+    positioned[-1] = {**positioned[-1], "glyph_id": 65535}
+    candidate = {
+        "candidate_id": "word:center",
+        "candidate_type": "center",
+        "anchor": [20.0, 12.0, 0.0],
+        "score": 0.0,
+        "bounds": [20.0, 12.0, 44.0, 24.0],
+        "terrain_sample": {},
+        "details": {},
+        "ordering_key": "word:center",
+    }
+    plan = f3d.LabelPlan.from_dict({
+        "payload_version": 2,
+        "accepted": [{
+            "label_id": "word",
+            "source_id": "word",
+            "text": "Map",
+            "geometry_type": "Point",
+            "candidate": candidate,
+            "candidates": [candidate],
+            "priority_class": "default",
+            "screen_bounds": [20.0, 12.0, 44.0, 24.0],
+            "world_bounds": [20.0, 12.0, 0.0, 44.0, 24.0, 0.0],
+            "typography": {
+                "render_mapping": "positioned_glyphs_by_id",
+                "font_sha256": metrics["font_sha256"],
+            },
+            "glyphs": ["M", "a"],
+            "positioned_glyphs": positioned,
+            "ordering_key": "word",
+        }],
+        "rejected": [],
+        "diagnostics": [],
+        "rationale": [],
+    })
+    layer = f3d.LabelLayer(layer_id="labels", labels=[])
+    calls = {"appends": 0}
+
+    class FakeNativeTextScene:
+        def __init__(self, *_args):
+            pass
+
+        def disable_terrain(self):
+            pass
+
+        def set_raster_overlay(self, *_args):
+            pass
+
+        def set_native_text_atlas(self, *_args):
+            pass
+
+        def enable_native_text(self):
+            pass
+
+        def add_native_text_rect_uv_halo(self, *_args):
+            calls["appends"] += 1
+
+        def render_rgba(self):
+            raise AssertionError("late missing glyph must fail before rendering")
+
+    monkeypatch.setattr(map_scene, "_native_scene_class", lambda: FakeNativeTextScene)
+    recipe = f3d.SceneRecipe(
+        terrain=f3d.TerrainSource(data=np.zeros((2, 2), dtype=np.float32)),
+        camera=f3d.OrbitCamera(),
+        lighting=f3d.LightingPreset(),
+        output=f3d.OutputSpec(width=80, height=64),
+        layers=[layer],
+    )
+
+    with pytest.raises(f3d.MapSceneTextLayoutError) as caught:
+        map_scene._composite_native_label_layers(
+            np.zeros((64, 80, 4), dtype=np.uint8), recipe, {"labels": plan}
+        )
+
+    assert caught.value.diagnostic["reason"] == "missing_shaped_glyph"
+    assert calls["appends"] == 0
+
+
+@pytest.mark.parametrize("bad_origin", ([float("nan"), 0.0], ["bad", 0.0]))
+def test_native_label_compositor_rejects_late_invalid_rect_before_any_append(
+    monkeypatch, bad_origin
+):
+    layer = f3d.LabelLayer(
+        layer_id="labels",
+        labels=[{
+            "id": "word",
+            "kind": "point",
+            "text": "AB",
+            "geometry": {"type": "Point", "coordinates": (20.0, 12.0, 0.0)},
+        }],
+        glyph_atlas={"glyphs": list("AB")},
+    )
+    plan = f3d.LabelPlan.compile(
+        labels=layer.labels,
+        camera={},
+        viewport=(80, 64),
+        glyph_atlas=layer.glyph_atlas,
+    )
+    positioned = [dict(glyph) for glyph in plan.accepted[0].positioned_glyphs]
+    positioned[-1]["origin"] = bad_origin
+    plan.accepted[0].positioned_glyphs = tuple(positioned)
+    calls = {"appends": 0}
+
+    class FakeNativeTextScene:
+        def __init__(self, *_args):
+            pass
+
+        def disable_terrain(self):
+            pass
+
+        def set_raster_overlay(self, *_args):
+            pass
+
+        def set_native_text_atlas(self, *_args):
+            pass
+
+        def enable_native_text(self):
+            pass
+
+        def add_native_text_rect_uv_halo(self, *_args):
+            calls["appends"] += 1
+
+        def render_rgba(self):
+            raise AssertionError("invalid positioned glyph must fail before rendering")
+
+    monkeypatch.setattr(map_scene, "_native_scene_class", lambda: FakeNativeTextScene)
+    recipe = f3d.SceneRecipe(
+        terrain=f3d.TerrainSource(data=np.zeros((2, 2), dtype=np.float32)),
+        camera=f3d.OrbitCamera(),
+        lighting=f3d.LightingPreset(),
+        output=f3d.OutputSpec(width=80, height=64),
+        layers=[layer],
+    )
+
+    with pytest.raises(f3d.MapSceneTextLayoutError) as caught:
+        map_scene._composite_native_label_layers(
+            np.zeros((64, 80, 4), dtype=np.uint8), recipe, {"labels": plan}
+        )
+
+    assert caught.value.diagnostic["reason"] == "invalid_text_rect"
+    assert calls["appends"] == 0
+
+
+@pytest.mark.parametrize("glyph_patch", ({"w": 0}, {"x": 10_000}))
+def test_native_label_compositor_rejects_invalid_atlas_uv_before_any_append(
+    monkeypatch, glyph_patch
+):
+    from forge3d import text_atlas
+
+    real_load_atlas_metrics = text_atlas.load_atlas_metrics
+    atlas_metrics = real_load_atlas_metrics(text_atlas.default_latin_atlas_paths()[1])
+
+    def load_bad_metrics(path):
+        metrics = real_load_atlas_metrics(path)
+        identity = sorted(metrics["glyphs_by_id"])[0]
+        metrics["glyphs_by_id"] = {
+            key: ({**value, **glyph_patch} if key == identity else value)
+            for key, value in metrics["glyphs_by_id"].items()
+        }
+        metrics["glyphs"] = {
+            key: ({**value, **glyph_patch} if key == identity else value)
+            for key, value in metrics["glyphs"].items()
+        }
+        return metrics
+
+    monkeypatch.setattr(text_atlas, "load_atlas_metrics", load_bad_metrics)
+    font_index, glyph_id = (int(part) for part in sorted(atlas_metrics["glyphs_by_id"])[0].split(":"))
+    candidate = {
+        "candidate_id": "word:center",
+        "candidate_type": "center",
+        "anchor": [20.0, 12.0, 0.0],
+        "score": 0.0,
+        "bounds": [20.0, 12.0, 44.0, 24.0],
+        "terrain_sample": {},
+        "details": {},
+        "ordering_key": "word:center",
+    }
+    plan = f3d.LabelPlan.from_dict({
+        "payload_version": 2,
+        "accepted": [{
+            "label_id": "word",
+            "source_id": "word",
+            "text": "A",
+            "geometry_type": "Point",
+            "candidate": candidate,
+            "candidates": [candidate],
+            "priority_class": "default",
+            "screen_bounds": [20.0, 12.0, 44.0, 24.0],
+            "world_bounds": [20.0, 12.0, 0.0, 44.0, 24.0, 0.0],
+            "typography": {
+                "render_mapping": "positioned_glyphs_by_id",
+                "font_sha256": atlas_metrics["font_sha256"],
+            },
+            "glyphs": ["A"],
+            "positioned_glyphs": [{
+                "font_index": font_index,
+                "glyph_id": glyph_id,
+                "line_index": 0,
+                "cluster": 0,
+                "origin": [0.0, 0.0],
+                "advance": [1.0, 0.0],
+                "has_outline": True,
+            }],
+            "ordering_key": "word",
+        }],
+        "rejected": [],
+        "diagnostics": [],
+        "rationale": [],
+    })
+    layer = f3d.LabelLayer(layer_id="labels", labels=[])
+    calls = {"appends": 0}
+
+    class FakeNativeTextScene:
+        def __init__(self, *_args):
+            pass
+
+        def disable_terrain(self):
+            pass
+
+        def set_raster_overlay(self, *_args):
+            pass
+
+        def set_native_text_atlas(self, *_args):
+            pass
+
+        def enable_native_text(self):
+            pass
+
+        def add_native_text_rect_uv_halo(self, *_args):
+            calls["appends"] += 1
+
+        def render_rgba(self):
+            raise AssertionError("invalid atlas UV must fail before rendering")
+
+    monkeypatch.setattr(map_scene, "_native_scene_class", lambda: FakeNativeTextScene)
+    recipe = f3d.SceneRecipe(
+        terrain=f3d.TerrainSource(data=np.zeros((2, 2), dtype=np.float32)),
+        camera=f3d.OrbitCamera(),
+        lighting=f3d.LightingPreset(),
+        output=f3d.OutputSpec(width=80, height=64),
+        layers=[layer],
+    )
+
+    with pytest.raises(f3d.MapSceneTextLayoutError) as caught:
+        map_scene._composite_native_label_layers(
+            np.zeros((64, 80, 4), dtype=np.uint8), recipe, {"labels": plan}
+        )
+
+    assert caught.value.diagnostic["reason"] == "invalid_text_rect"
+    assert calls["appends"] == 0
 
 
 def test_native_scene_render_rgba_draws_raster_overlay_and_sdf_text():

@@ -187,8 +187,8 @@ def test_mapscene_scale_bar_config_scales_with_output_dpi(monkeypatch, tmp_path)
         def compute_meters_per_pixel(*_args, **_kwargs):
             return 1.0
 
-        def render(self):
-            return np.zeros((4, 6, 4), dtype=np.uint8)
+        def render_geometry(self):
+            return np.zeros((4, 6, 4), dtype=np.uint8), "1 m", (0, 0)
 
     monkeypatch.setattr(scale_bar_module, "ScaleBar", RecordingScaleBar)
     furniture = f3d.MapFurnitureLayer(

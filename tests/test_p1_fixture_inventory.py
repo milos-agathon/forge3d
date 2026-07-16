@@ -56,7 +56,7 @@ def test_p1_font_and_building_fixtures_are_available_or_synthesizable(tmp_path):
         "end": 127,
         "name": "Basic Latin",
     }
-    assert atlas.coverage["atlas_kind"] == "sdf_font_atlas"
+    assert atlas.coverage["atlas_kind"] == "msdf_font_atlas"
     assert atlas.coverage["px_range"] > 0
     assert Path(atlas.coverage["image_path"]).exists()
 
