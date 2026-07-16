@@ -73,6 +73,19 @@ def test_typography_metrics_reflect_kerning_tracking_and_line_height():
     assert kerned_metrics["tracking"] == 2.0
 
 
+def test_typography_metrics_use_native_outline_bounds_not_character_count():
+    from forge3d.map_scene import TypographySettings
+
+    metrics = TypographySettings(font_size=32, kerning=True, tracking=0.0)
+
+    narrow = metrics.measure_text("iiiiii")
+    wide = metrics.measure_text("WWWWWW")
+
+    assert wide["width"] > narrow["width"] * 2
+    assert narrow["line_count"] == 1
+    assert wide["line_count"] == 1
+
+
 def test_typography_multiline_and_callout_layout_metadata_is_explicit():
     from forge3d.map_scene import TypographySettings
 

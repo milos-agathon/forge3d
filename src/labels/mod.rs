@@ -503,54 +503,71 @@ impl LabelManager {
         selected_ids: Option<&std::collections::HashSet<u64>>,
         anchor: &crate::camera::Anchor,
     ) -> usize {
+        struct StagedLabelState {
+            screen_pos: [f32; 2],
+            depth: f32,
+            horizon_angle: f32,
+            computed_alpha: f32,
+            render_pos: Vec3,
+        }
+
+        struct StagedLineState {
+            glyph_positions: Vec<GlyphPlacement>,
+            render_polyline: Vec<Vec3>,
+        }
+
         if !self.enabled || self.atlas.is_none() {
             self.reset_layout_output();
             return 0;
         }
 
-        self.reset_layout_output();
         let atlas = self.atlas.as_ref().unwrap();
 
         let (screen_w, screen_h) = self.projector.screen_size();
         let mut visible_count = 0;
         let fonts = self.fonts.clone();
-        let layout_diagnostics = &mut self.layout_diagnostics;
+        let mut staged_collision =
+            LabelRTree::new(screen_w.round() as u32, screen_h.round() as u32);
+        let mut staged_instances = Vec::new();
+        let mut staged_leader_lines = Vec::new();
+        let mut staged_diagnostics = Vec::new();
+        let mut staged_labels: HashMap<LabelId, StagedLabelState> = HashMap::new();
+        let mut staged_line_labels: HashMap<LabelId, StagedLineState> = HashMap::new();
 
         // Collect labels and sort by priority (higher priority first)
-        let mut sorted_labels: Vec<_> = self.labels.values_mut().collect();
+        let mut sorted_labels: Vec<_> = self.labels.values().collect();
         sorted_labels.sort_by_key(|label| std::cmp::Reverse(label.style.priority));
 
         for label in sorted_labels {
-            label.render_pos = anchor.to_render_vec3(label.world_pos);
+            let render_pos = anchor.to_render_vec3(label.world_pos);
             // Skip if we've reached max visible
             if visible_count >= self.max_visible_labels {
-                label.visible = false;
                 continue;
             }
 
             // Scale filtering: check zoom range
             if self.current_zoom < label.style.min_zoom || self.current_zoom > label.style.max_zoom
             {
-                label.visible = false;
-                label.screen_pos = None;
                 continue;
             }
 
             // Project world position to screen
-            let projected = self.projector.project(label.render_pos, view_proj);
+            let projected = self.projector.project(render_pos, view_proj);
 
             if let Some((mut screen_pos, depth)) = projected {
-                label.depth = depth;
+                let staged_depth = depth;
+                let staged_horizon_angle;
+                let mut staged_computed_alpha;
 
-                // Compute horizon angle for fade
+                // Compute horizon angle for fade without mutating label state
                 let horizon_alpha = if let Some(cam_pos) = camera_pos {
-                    let to_label = label.render_pos - cam_pos;
+                    let to_label = render_pos - cam_pos;
                     let horizontal_dist =
                         (to_label.x * to_label.x + to_label.z * to_label.z).sqrt();
                     let angle_deg = (to_label.y / horizontal_dist.max(0.001))
                         .atan()
                         .to_degrees();
-                    label.horizon_angle = angle_deg;
+                    staged_horizon_angle = angle_deg;
 
                     // Fade based on horizon angle
                     let fade_start = label.style.horizon_fade_angle;
@@ -560,17 +577,16 @@ impl LabelManager {
                         1.0
                     }
                 } else {
-                    label.horizon_angle = 90.0;
+                    staged_horizon_angle = 90.0;
                     1.0
                 };
 
-                label.computed_alpha = horizon_alpha * label.style.color[3];
+                staged_computed_alpha = horizon_alpha * label.style.color[3];
 
                 // Apply offset
                 let anchor_screen = screen_pos;
                 screen_pos[0] += label.style.offset[0];
                 screen_pos[1] += label.style.offset[1];
-                label.screen_pos = Some(screen_pos);
 
                 // Shape once and keep the exact fallback face / GSUB glyph identities
                 // for both collision bounds and GPU instance construction.
@@ -585,12 +601,11 @@ impl LabelManager {
                     ) {
                         Ok(shaped) => Some(shaped),
                         Err(error) => {
-                            layout_diagnostics.push(LabelLayoutDiagnostic {
+                            staged_diagnostics.push(LabelLayoutDiagnostic {
                                 label_id: label.id,
                                 stage: "shape",
                                 reason: error.to_string(),
                             });
-                            label.visible = false;
                             continue;
                         }
                     }
@@ -603,12 +618,11 @@ impl LabelManager {
                     match atlas.measure_shaped(shaped, line_ranges) {
                         Ok(measurement) => measurement,
                         Err(error) => {
-                            layout_diagnostics.push(LabelLayoutDiagnostic {
+                            staged_diagnostics.push(LabelLayoutDiagnostic {
                                 label_id: label.id,
                                 stage: "measure",
                                 reason: error,
                             });
-                            label.visible = false;
                             continue;
                         }
                     }
@@ -631,10 +645,10 @@ impl LabelManager {
                 if let Some(selected) = selected_ids {
                     if selected.contains(&label.id.0) {
                         color = [1.0, 0.8, 0.0, 1.0];
-                        label.computed_alpha = 1.0;
+                        staged_computed_alpha = 1.0;
                     }
                 }
-                color[3] = label.computed_alpha;
+                color[3] = staged_computed_alpha;
                 let instances = if let Some(shaped) = &shaped {
                     match atlas.layout_shaped(
                         shaped,
@@ -646,12 +660,11 @@ impl LabelManager {
                     ) {
                         Ok(instances) => instances,
                         Err(error) => {
-                            layout_diagnostics.push(LabelLayoutDiagnostic {
+                            staged_diagnostics.push(LabelLayoutDiagnostic {
                                 label_id: label.id,
                                 stage: "layout",
                                 reason: error,
                             });
-                            label.visible = false;
                             continue;
                         }
                     }
@@ -666,45 +679,41 @@ impl LabelManager {
                     )
                 };
 
-                if !self.collision_rtree.try_insert(label.id.0, bounds) {
-                    label.visible = false;
+                if staged_collision.check_collision(bounds) {
                     continue;
                 }
-                label.visible = true;
+                if !staged_collision.try_insert(label.id.0, bounds) {
+                    continue;
+                }
+
+                staged_labels.insert(
+                    label.id,
+                    StagedLabelState {
+                        screen_pos,
+                        depth: staged_depth,
+                        horizon_angle: staged_horizon_angle,
+                        computed_alpha: staged_computed_alpha,
+                        render_pos,
+                    },
+                );
                 visible_count += 1;
                 if label.style.flags.leader
                     && (label.style.offset[0].abs() > 1.0 || label.style.offset[1].abs() > 1.0)
                 {
-                    self.leader_lines.push(create_leader_line(
+                    staged_leader_lines.push(create_leader_line(
                         anchor_screen,
                         screen_pos,
                         label.style.halo_color,
                         1.5,
                     ));
                 }
-                self.visible_instances.extend(instances);
-            } else {
-                label.screen_pos = None;
-                label.visible = false;
+                staged_instances.extend(instances);
             }
         }
 
         // Process line labels
-        for line_label in self.line_labels.values_mut() {
-            if line_label.render_polyline.len() != line_label.polyline.len() {
-                line_label
-                    .render_polyline
-                    .resize(line_label.polyline.len(), Vec3::ZERO);
-            }
-            for (render, world) in line_label
-                .render_polyline
-                .iter_mut()
-                .zip(line_label.polyline.iter().copied())
-            {
-                *render = anchor.to_render_vec3(world);
-            }
+        for line_label in self.line_labels.values() {
             if visible_count >= self.max_visible_labels {
-                line_label.visible = false;
                 continue;
             }
 
@@ -712,9 +721,15 @@ impl LabelManager {
             if self.current_zoom < line_label.style.min_zoom
                 || self.current_zoom > line_label.style.max_zoom
             {
-                line_label.visible = false;
                 continue;
             }
+
+            let render_polyline = line_label
+                .polyline
+                .iter()
+                .copied()
+                .map(|world| anchor.to_render_vec3(world))
+                .collect::<Vec<_>>();
 
             let shaped = if let Some(fonts) = &fonts {
                 match shape::shape(
@@ -727,12 +742,11 @@ impl LabelManager {
                 ) {
                     Ok(shaped) => Some(shaped),
                     Err(error) => {
-                        layout_diagnostics.push(LabelLayoutDiagnostic {
+                        staged_diagnostics.push(LabelLayoutDiagnostic {
                             label_id: line_label.id,
                             stage: "shape",
                             reason: error.to_string(),
                         });
-                        line_label.visible = false;
                         continue;
                     }
                 }
@@ -745,12 +759,11 @@ impl LabelManager {
                 match positioned::positioned_glyphs(shaped, line_ranges) {
                     Ok(glyphs) => Some(glyphs),
                     Err(error) => {
-                        layout_diagnostics.push(LabelLayoutDiagnostic {
+                        staged_diagnostics.push(LabelLayoutDiagnostic {
                             label_id: line_label.id,
                             stage: "position",
                             reason: error.to_string(),
                         });
-                        line_label.visible = false;
                         continue;
                     }
                 }
@@ -765,7 +778,7 @@ impl LabelManager {
 
             // Compute placements
             let placements = compute_line_label_placement(
-                &line_label.render_polyline,
+                &render_polyline,
                 &line_label.text,
                 &advances,
                 view_proj,
@@ -776,12 +789,11 @@ impl LabelManager {
             );
 
             if placements.is_empty() {
-                layout_diagnostics.push(LabelLayoutDiagnostic {
+                staged_diagnostics.push(LabelLayoutDiagnostic {
                     label_id: line_label.id,
                     stage: "placement",
                     reason: "line has no valid glyph placements".to_owned(),
                 });
-                line_label.visible = false;
                 continue;
             }
 
@@ -798,12 +810,11 @@ impl LabelManager {
                 ) {
                     Ok(instances) => instances,
                     Err(error) => {
-                        layout_diagnostics.push(LabelLayoutDiagnostic {
+                        staged_diagnostics.push(LabelLayoutDiagnostic {
                             label_id: line_label.id,
                             stage: "layout",
                             reason: error,
                         });
-                        line_label.visible = false;
                         continue;
                     }
                 }
@@ -828,11 +839,46 @@ impl LabelManager {
                 }
                 output
             };
-            line_label.glyph_positions = placements;
-            line_label.visible = true;
+            staged_line_labels.insert(
+                line_label.id,
+                StagedLineState {
+                    glyph_positions: placements,
+                    render_polyline,
+                },
+            );
             visible_count += 1;
-            self.visible_instances.extend(instances);
+            staged_instances.extend(instances);
         }
+
+        for label in self.labels.values_mut() {
+            label.visible = false;
+            label.screen_pos = None;
+        }
+        for line_label in self.line_labels.values_mut() {
+            line_label.visible = false;
+            line_label.glyph_positions.clear();
+        }
+        for (id, state) in staged_labels {
+            if let Some(label) = self.labels.get_mut(&id) {
+                label.depth = state.depth;
+                label.horizon_angle = state.horizon_angle;
+                label.computed_alpha = state.computed_alpha;
+                label.render_pos = state.render_pos;
+                label.screen_pos = Some(state.screen_pos);
+                label.visible = true;
+            }
+        }
+        for (id, state) in staged_line_labels {
+            if let Some(line_label) = self.line_labels.get_mut(&id) {
+                line_label.glyph_positions = state.glyph_positions;
+                line_label.render_polyline = state.render_polyline;
+                line_label.visible = true;
+            }
+        }
+        self.collision_rtree = staged_collision;
+        self.visible_instances = staged_instances;
+        self.leader_lines = staged_leader_lines;
+        self.layout_diagnostics = staged_diagnostics;
 
         self.visible_instances.len()
     }
@@ -917,5 +963,21 @@ mod tests {
         assert_eq!(manager.update(Mat4::IDENTITY), 0);
         assert!(!manager.get_label(id).unwrap().visible);
         assert!(manager.pick_at(0.0, 0.0).is_none());
+    }
+
+    #[test]
+    fn label_manager_layout_writes_to_staged_collision_before_commit() {
+        let source = include_str!("mod.rs");
+        let persistent_insert = ["self.collision_rtree", ".try_insert"].concat();
+
+        assert!(
+            !source.contains(&persistent_insert),
+            "layout must not mutate the persistent collision tree before commit"
+        );
+        assert!(source.contains("staged_collision.try_insert"));
+        assert!(source.contains("self.collision_rtree = staged_collision"));
+        assert!(source.contains("self.visible_instances = staged_instances"));
+        assert!(source.contains("self.leader_lines = staged_leader_lines"));
+        assert!(source.contains("self.layout_diagnostics = staged_diagnostics"));
     }
 }

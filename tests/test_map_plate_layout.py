@@ -5,15 +5,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from forge3d.map_plate import MapPlate, MapPlateConfig, BBox, PlateRegion
+from forge3d._png import decode_png
+from forge3d.map_plate import BBox, MapPlate, MapPlateConfig, MapPlateDependencyError, PlateRegion
 from forge3d.legend import Legend, LegendConfig
 from forge3d.scale_bar import ScaleBar, ScaleBarConfig
-
-try:
-    from PIL import Image
-    HAS_PIL = True
-except ImportError:
-    HAS_PIL = False
 
 pytestmark = pytest.mark.usefixtures("pro_license")
 
@@ -111,6 +106,19 @@ class TestMapPlateTitle:
         assert plate._title.text == "Test Title"
         assert plate._title.font_size == 20
 
+    def test_title_allocation_uses_native_outline_bounds(self):
+        narrow = MapPlate(MapPlateConfig(width=400, height=300))
+        wide = MapPlate(MapPlateConfig(width=400, height=300))
+        narrow.add_title("iiiiii", font_size=32)
+        wide.add_title("WWWWWW", font_size=32)
+
+        narrow_title = narrow._render_title()
+        wide_title = wide._render_title()
+
+        assert narrow_title is not None
+        assert wide_title is not None
+        assert wide_title.shape[1] > narrow_title.shape[1] * 2
+
 
 class TestMapPlateExport:
     def test_export_png(self, tmp_path):
@@ -118,15 +126,58 @@ class TestMapPlateExport:
         output_path = tmp_path / "test_plate.png"
         plate.export_png(output_path)
         assert output_path.exists()
-        if HAS_PIL:
-            img = Image.open(output_path)
-            assert img.size == (200, 150)
+        assert decode_png(output_path.read_bytes()).shape == (150, 200, 4)
 
     def test_export_jpeg(self, tmp_path):
         plate = MapPlate(MapPlateConfig(width=200, height=150))
         output_path = tmp_path / "test_plate.jpg"
         plate.export_jpeg(output_path)
         assert output_path.exists()
+
+    def test_png_and_resize_work_without_pillow(self, tmp_path, monkeypatch):
+        import builtins
+
+        original_import = builtins.__import__
+
+        def block_pil(name, *args, **kwargs):
+            if name == "PIL" or name.startswith("PIL."):
+                raise ImportError("blocked")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", block_pil)
+        plate = MapPlate(MapPlateConfig(width=40, height=30, margin=(5, 5, 5, 5)))
+        source = np.zeros((4, 4, 4), dtype=np.uint8)
+        source[..., 0] = 200
+        source[..., 3] = 255
+        plate.set_map_region(source, BBox(0, 0, 1, 1))
+        inset = np.zeros((2, 2, 4), dtype=np.uint8)
+        inset[..., 1] = 255
+        inset[..., 3] = 255
+        plate.add_inset(inset, size=(8, 6), border_width=0)
+
+        output = plate.compose()
+        path = tmp_path / "plate.png"
+        plate.export_png(path)
+
+        assert output[15, 20, 0] == 200
+        assert np.count_nonzero(output[..., 1] == 255) >= 8 * 6
+        assert decode_png(path.read_bytes()).shape == (30, 40, 4)
+
+    def test_jpeg_missing_pillow_is_structured(self, tmp_path, monkeypatch):
+        import builtins
+
+        original_import = builtins.__import__
+
+        def block_pil(name, *args, **kwargs):
+            if name == "PIL" or name.startswith("PIL."):
+                raise ImportError("blocked")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", block_pil)
+        plate = MapPlate(MapPlateConfig(width=20, height=10))
+
+        with pytest.raises(MapPlateDependencyError, match="JPEG export requires Pillow"):
+            plate.export_jpeg(tmp_path / "plate.jpg")
 
 
 class TestLegendConfig:
@@ -205,6 +256,20 @@ class TestLegendGeneration:
         img = legend.render()
         assert img.shape[1] >= 100
 
+    def test_legend_allocation_uses_native_outline_bounds(self, sample_colormap):
+        narrow = Legend(
+            sample_colormap,
+            domain=(0, 0),
+            config=LegendConfig(tick_count=1, label_format="iiiiii", label_suffix="", font_size=32),
+        ).render()
+        wide = Legend(
+            sample_colormap,
+            domain=(0, 0),
+            config=LegendConfig(tick_count=1, label_format="WWWWWW", label_suffix="", font_size=32),
+        ).render()
+
+        assert wide.shape[1] > narrow.shape[1] * 1.2
+
     def test_legend_gradient_converts_linear_rgb_to_display_srgb(self):
         linear_gray = np.tile(np.array([[0.25, 0.25, 0.25, 1.0]], dtype=np.float32), (2, 1))
         legend = Legend(
@@ -273,6 +338,22 @@ class TestScaleBarRender:
             sb = ScaleBar(meters_per_pixel=100, config=ScaleBarConfig(units=units))
             img = sb.render()
             assert img.shape[0] > 0
+
+    def test_scale_bar_allocation_uses_native_outline_bounds(self, monkeypatch):
+        from forge3d import scale_bar as scale_bar_module
+
+        monkeypatch.setattr(scale_bar_module, "UNIT_LABELS", {**scale_bar_module.UNIT_LABELS, "km": "iiiiii"})
+        narrow = ScaleBar(
+            meters_per_pixel=100,
+            config=ScaleBarConfig(units="km", width_px=10, font_size=32, padding=4),
+        ).render_geometry()[0]
+        monkeypatch.setattr(scale_bar_module, "UNIT_LABELS", {**scale_bar_module.UNIT_LABELS, "km": "WWWWWW"})
+        wide = ScaleBar(
+            meters_per_pixel=100,
+            config=ScaleBarConfig(units="km", width_px=10, font_size=32, padding=4),
+        ).render_geometry()[0]
+
+        assert wide.shape[1] > narrow.shape[1] * 2
 
 
 class TestMapPlateIntegration:

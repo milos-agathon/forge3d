@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
 import forge3d
 from tests._ssim import ssim
@@ -75,6 +76,24 @@ def _renderer_coverage(field: np.ndarray, *, channels: int) -> np.ndarray:
 def _distance_coverage(field: np.ndarray, px_range: float) -> np.ndarray:
     encoded = np.median(field.astype(np.float32) / 255.0, axis=2)
     return np.clip((encoded - 0.5) * px_range + 0.5, 0.0, 1.0)
+
+
+def _pillow_freetype_coverage(
+    baked: dict, character: str, glyph: dict, font_path: Path = FONT, y_adjust: int = 0
+) -> np.ndarray:
+    font = ImageFont.truetype(str(font_path), int(baked["metrics"]["font_size"]))
+    bbox = font.getbbox(character)
+    oracle = Image.new("L", (int(glyph["w"]), int(glyph["h"])), 0)
+    y = -bbox[1] + int(baked["metrics"]["padding"] + baked["metrics"]["px_range"])
+    if float(glyph["oy"]) > 0.0:
+        y = -bbox[1] - int(baked["metrics"]["padding"])
+    ImageDraw.Draw(oracle).text(
+        (-int(glyph["ox"]), y + y_adjust),
+        character,
+        fill=255,
+        font=font,
+    )
+    return np.asarray(oracle, dtype=np.float32) / 255.0
 
 
 def _bilinear(field: np.ndarray, x: float, y: float) -> np.ndarray:
@@ -180,6 +199,68 @@ def test_true_rgb_msdf_meets_96px_ssim():
     print(f"96px SSIM={measured:.9f} MAE={mean_error:.9f}")
     assert measured >= 0.985
     assert mean_error <= 0.003
+
+
+def test_true_rgb_msdf_printable_latin_matches_pillow_freetype_oracle():
+    characters = "".join(chr(codepoint) for codepoint in range(33, 127))
+    baked = forge3d.text.bake_msdf_atlas(
+        [str(FONT)], characters, 96, px_range=4.0, padding=2
+    )
+    eligible = 0
+    failures = []
+    for character in characters:
+        glyph = baked["metrics"]["glyphs"][str(ord(character))]
+        cell = baked["image"][
+            int(glyph["y"]) : int(glyph["y"] + glyph["h"]),
+            int(glyph["x"]) : int(glyph["x"] + glyph["w"]),
+        ]
+        decoded = _distance_coverage(cell, baked["metrics"]["px_range"])
+        if np.count_nonzero(decoded >= 0.5) < 8:
+            continue
+        eligible += 1
+        reference = _pillow_freetype_coverage(baked, character, glyph)
+        measured = ssim(decoded, reference, data_range=1.0)
+        mean_error = float(np.mean(np.abs(decoded - reference)))
+        if measured < 0.90 or mean_error > 0.025:
+            failures.append((character, measured, mean_error))
+
+    assert eligible == len(characters)
+    assert failures == []
+
+
+def test_true_rgb_msdf_representative_scripts_match_pillow_freetype_oracle():
+    cases = (
+        ("assets/fonts/NotoSansArabic-subset.ttf", "\u0628", 0),
+        ("assets/fonts/NotoSansHebrew-subset.ttf", "\u05e9", 1),
+        ("assets/fonts/NotoSansDevanagari-subset.ttf", "\u0915", 0),
+        ("assets/fonts/NotoSansSC-subset.ttf", "\u4e2d", 0),
+    )
+    for font_name, character, y_adjust in cases:
+        font_path = ROOT / font_name
+        baked = forge3d.text.bake_msdf_atlas(
+            [str(font_path)], character, 96, px_range=4.0, padding=2
+        )
+        glyph = baked["metrics"]["glyphs"][str(ord(character))]
+        cell = baked["image"][
+            int(glyph["y"]) : int(glyph["y"] + glyph["h"]),
+            int(glyph["x"]) : int(glyph["x"] + glyph["w"]),
+        ]
+        decoded = _distance_coverage(cell, baked["metrics"]["px_range"])
+        reference = _pillow_freetype_coverage(
+            baked, character, glyph, font_path, y_adjust
+        )
+
+        assert ssim(decoded, reference, data_range=1.0) >= 0.95, font_name
+        assert float(np.mean(np.abs(decoded - reference))) <= 0.02, font_name
+
+
+def test_text_overlay_shader_keeps_msdf_decode_and_derivative_smoothing():
+    shader = (ROOT / "src/shaders/text_overlay.wgsl").read_text(encoding="utf-8")
+
+    assert "sdf = median3(sample.rgb) - 0.5;" in shader
+    assert "sdf = sample.r - 0.5;" in shader
+    assert "fwidth(sdf) * max(U.smoothing, 0.1)" in shader
+    assert "smoothstep(-edge_width, edge_width, sdf)" in shader
 
 
 def test_single_channel_ablation_loses_the_sharp_corner():

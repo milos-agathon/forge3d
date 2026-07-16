@@ -6,6 +6,8 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+import numpy as np
+
 from ._map_scene_common import _layer_id, _stable_hash
 from .style import evaluate_color_expr, evaluate_number_expr
 
@@ -687,7 +689,7 @@ def _label_anchor(label: Any, width: int, height: int) -> tuple[int, int]:
     bounds = getattr(label, "screen_bounds", None) or getattr(label, "world_bounds", None)
     if bounds and len(bounds) >= 4:
         return _point_to_pixel(((float(bounds[0]) + float(bounds[2])) * 0.5, (float(bounds[1]) + float(bounds[3])) * 0.5), width, height)
-    return _point_to_pixel((len(str(getattr(label, "label_id", ""))) * 7, len(str(getattr(label, "text", ""))) * 5), width, height)
+    raise ValueError("accepted labels require a candidate anchor or explicit bounds")
 
 
 def _text_font_chain(font_chain: Sequence[str] | None = None) -> list[str]:
@@ -703,6 +705,36 @@ def _text_font_chain(font_chain: Sequence[str] | None = None) -> list[str]:
         )
     ]
     return [*(str(path) for path in font_chain or ()), *(str(path) for path in bundled)]
+
+
+def _text_outline_metrics(
+    text: str,
+    font_size: float,
+    font_chain: Sequence[str] | None = None,
+) -> tuple[int, int, tuple[float, float, float, float] | None]:
+    from .text import shape
+
+    shaped = shape(str(text), _text_font_chain(font_chain), float(font_size))
+    bounds = shaped.outline_bounds()
+    if bounds is None:
+        return 0, 0, None
+    x0, y0, x1, y1 = (float(value) for value in bounds)
+    width = max(1, int(np.ceil(x1 - x0)))
+    height = max(1, int(np.ceil(y1 - y0)))
+    return width, height, (x0, y0, x1, y1)
+
+
+def _text_anchor_for_visual_center(
+    center_x: float,
+    center_y: float,
+    font_size: float,
+    bounds: tuple[float, float, float, float],
+) -> tuple[int, int]:
+    x0, y0, x1, y1 = bounds
+    return (
+        int(round(float(center_x) - (x0 + x1) * 0.5)),
+        int(round(float(center_y) - float(font_size) - (y0 + y1) * 0.5)),
+    )
 
 
 def _composite_text_mask(image: Any, mask: Any, color: tuple[int, int, int, int]) -> None:

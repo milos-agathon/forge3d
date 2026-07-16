@@ -106,8 +106,10 @@ def test_public_payload_keeps_integer_conformance_and_adds_positioning_provenanc
         "font_sources",
         "font_sha256",
         "runs",
+        "line_ranges",
         "positioned_glyphs",
     }
+    assert payload["line_ranges"] == [[0, 3]]
     assert set(payload["runs"][0]["glyphs"][0]) == {
         "glyph_id",
         "font_index",

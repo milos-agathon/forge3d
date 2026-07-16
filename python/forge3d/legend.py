@@ -111,13 +111,11 @@ class Legend:
     @_captured_cpu_render("python.legend.render", "legend.cpu", draw_calls=1)
     def render(self, *, certificate: bool | str = False) -> np.ndarray:
         """Render geometry plus every label through packaged native text."""
-        from ._map_scene_render import _draw_text
+        from ._map_scene_render import _draw_text, _text_outline_metrics
 
         def extent(text: str, size: int) -> tuple[int, int]:
-            return (
-                max(1, int(np.ceil(len(text) * size * 0.68))),
-                max(1, int(np.ceil(size * 1.3))),
-            )
+            width, height, _bounds = _text_outline_metrics(text, float(size))
+            return width, max(height, max(1, int(np.ceil(size * 1.3))))
 
         cfg = self.config
         bar = self._render_gradient_bar()

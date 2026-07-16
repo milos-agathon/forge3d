@@ -110,7 +110,12 @@ impl PyShapedText {
         self.inner.size
     }
 
-    fn to_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+    #[pyo3(signature = (line_ranges = None))]
+    fn to_dict(
+        &self,
+        py: Python<'_>,
+        line_ranges: Option<Vec<(usize, usize)>>,
+    ) -> PyResult<PyObject> {
         let output = PyDict::new_bound(py);
         output.set_item("text", &self.inner.text)?;
         output.set_item("size", self.inner.size)?;
@@ -162,8 +167,13 @@ impl PyShapedText {
             runs.append(item)?;
         }
         output.set_item("runs", runs)?;
-        let range = 0..self.inner.text.chars().count();
-        let positioned = positioned_glyphs(&self.inner, std::slice::from_ref(&range))
+        let ranges = concrete_line_ranges(&self.inner, line_ranges)?;
+        let line_ranges = PyList::empty_bound(py);
+        for range in &ranges {
+            line_ranges.append([range.start, range.end])?;
+        }
+        output.set_item("line_ranges", line_ranges)?;
+        let positioned = positioned_glyphs(&self.inner, &ranges)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
         let positioned_output = PyList::empty_bound(py);
         for glyph in positioned {
@@ -219,9 +229,13 @@ fn concrete_line_ranges(
     shaped: &ShapedText,
     line_ranges: Option<Vec<(usize, usize)>>,
 ) -> PyResult<Vec<Range<usize>>> {
-    let count = shaped.text.chars().count();
     let ranges = line_ranges
-        .unwrap_or_else(|| vec![(0, count)])
+        .unwrap_or_else(|| {
+            default_line_ranges(&shaped.text)
+                .into_iter()
+                .map(|range| (range.start, range.end))
+                .collect()
+        })
         .into_iter()
         .map(|(start, end)| start..end)
         .collect::<Vec<_>>();
@@ -229,6 +243,35 @@ fn concrete_line_ranges(
         return Err(PyValueError::new_err("line_ranges must not be empty"));
     }
     Ok(ranges)
+}
+
+fn is_mandatory_break(character: char) -> bool {
+    matches!(
+        character,
+        '\n' | '\r' | '\u{0085}' | '\u{2028}' | '\u{2029}'
+    )
+}
+
+fn default_line_ranges(text: &str) -> Vec<Range<usize>> {
+    let characters = text.chars().collect::<Vec<_>>();
+    let mut ranges = Vec::new();
+    let mut start = 0usize;
+    let mut index = 0usize;
+    while index < characters.len() {
+        if !is_mandatory_break(characters[index]) {
+            index += 1;
+            continue;
+        }
+        ranges.push(start..index);
+        if characters[index] == '\r' && characters.get(index + 1) == Some(&'\n') {
+            index += 2;
+        } else {
+            index += 1;
+        }
+        start = index;
+    }
+    ranges.push(start..characters.len());
+    ranges
 }
 
 fn feature_settings(
@@ -502,10 +545,46 @@ fn baked_msdf_to_py(py: Python<'_>, baked: &BakedMsdfAtlas) -> PyResult<PyObject
 
 #[cfg(test)]
 mod tests {
-    use super::text_error_diagnostic;
+    use super::{default_line_ranges, text_error_diagnostic};
+    use crate::labels::font::{FontCollection, FontRequest};
+    use crate::labels::positioned::positioned_glyphs;
+    use crate::labels::shape;
     use crate::labels::shape::TextError;
     use pyo3::prelude::*;
+    use std::sync::Arc;
     use ttf_parser::Tag;
+
+    #[test]
+    fn default_line_ranges_split_on_mandatory_break_controls() {
+        assert_eq!(default_line_ranges("בד\nשב"), vec![0..2, 3..5]);
+        assert_eq!(default_line_ranges("A\r\nB"), vec![0..1, 3..4]);
+        assert_eq!(default_line_ranges("A"), vec![0..1]);
+    }
+
+    #[test]
+    fn mandatory_break_default_ranges_produce_two_positioned_lines() {
+        let fonts = Arc::new(
+            FontCollection::load(&[FontRequest::from_bytes(
+                "NotoSansHebrew-subset.ttf",
+                include_bytes!("../../assets/fonts/NotoSansHebrew-subset.ttf").to_vec(),
+            )])
+            .unwrap(),
+        );
+        let shaped = shape::shape("בד\nשב", fonts, 16.0, None, None, &[]).unwrap();
+        let ranges = default_line_ranges(&shaped.text);
+        let positioned = positioned_glyphs(&shaped, &ranges).unwrap();
+
+        assert_eq!(ranges, vec![0..2, 3..5]);
+        assert!(positioned.iter().all(|glyph| glyph.cluster != 4));
+        assert_eq!(
+            positioned
+                .iter()
+                .map(|glyph| glyph.line_index)
+                .collect::<Vec<_>>(),
+            vec![0, 0, 1, 1]
+        );
+        assert_ne!(positioned[0].origin[1], positioned[2].origin[1]);
+    }
 
     #[test]
     fn all_non_font_text_error_families_have_stable_reasons() {

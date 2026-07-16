@@ -11,6 +11,7 @@ from typing import Literal
 import numpy as np
 
 from ._license import _check_pro_access
+from ._png import save_png
 
 PositionAnchor = Literal[
     "top", "bottom", "left", "right",
@@ -113,6 +114,21 @@ class NorthArrowElement:
     position: PositionAnchor = "top-right"
 
 
+class MapPlateDependencyError(RuntimeError):
+    """Raised when an optional map-plate export dependency is unavailable."""
+
+
+def _resize_nearest(image: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+    """Deterministic in-tree resize. `size` is (width, height)."""
+    new_w, new_h = (max(1, int(size[0])), max(1, int(size[1])))
+    src_h, src_w = image.shape[:2]
+    if (src_w, src_h) == (new_w, new_h):
+        return image
+    x = np.minimum((np.arange(new_w) * src_w / new_w).astype(np.int64), src_w - 1)
+    y = np.minimum((np.arange(new_h) * src_h / new_h).astype(np.int64), src_h - 1)
+    return np.ascontiguousarray(image[y[:, None], x])
+
+
 class MapPlate:
     """[Pro] Compose a map plate with title, legend, scale bar, and insets."""
 
@@ -211,17 +227,27 @@ class MapPlate:
         """Render title text through the packaged native shaping pipeline."""
         if self._title is None:
             return None
-        from ._map_scene_render import _draw_text
+        from ._map_scene_render import _draw_text, _text_font_chain
+        from .text import shape
 
         font_size = self._title.font_size
-        tw = max(1, int(np.ceil(len(self._title.text) * font_size * 0.68)))
-        th = max(1, int(np.ceil(font_size * 1.35)))
         padding = 10
-        image = np.zeros((th + padding * 2, tw + padding * 2, 4), dtype=np.uint8)
+        shaped = shape(self._title.text, _text_font_chain(), float(font_size))
+        bounds = shaped.outline_bounds()
+        if bounds is None:
+            return np.zeros((padding * 2, padding * 2, 4), dtype=np.uint8)
+        x0, y0, x1, y1 = (float(value) for value in bounds)
+        tw = max(1, int(np.ceil(x1 - x0)))
+        th = max(1, int(np.ceil(y1 - y0)))
+        image = np.zeros((th + padding * 2 + 2, tw + padding * 2 + 2, 4), dtype=np.uint8)
+        anchor = (
+            int(round(padding - x0)),
+            int(round(padding - float(font_size) - y0)),
+        )
         _draw_text(
             image,
             self._title.text,
-            (padding, padding),
+            anchor,
             color=self._title.color,
             halo=(0, 0, 0, 0),
             halo_width_px=0.0,
@@ -275,15 +301,8 @@ class MapPlate:
             mh, mw = self._map_image.shape[:2]
             rw, rh = map_region.width, map_region.height
             scale = min(rw / mw, rh / mh)
-            new_w, new_h = int(mw * scale), int(mh * scale)
-            try:
-                from PIL import Image
-                pil_img = Image.fromarray(self._map_image)
-                pil_img = pil_img.resize((new_w, new_h), Image.LANCZOS)
-                resized = np.array(pil_img)
-            except ImportError:
-                resized = self._map_image
-                new_w, new_h = mw, mh
+            new_w, new_h = max(1, int(mw * scale)), max(1, int(mh * scale))
+            resized = _resize_nearest(self._map_image, (new_w, new_h))
             x = map_region.x0 + (rw - new_w) // 2
             y = map_region.y0 + (rh - new_h) // 2
             self._blit(canvas, resized, x, y)
@@ -326,13 +345,7 @@ class MapPlate:
         for inset in self._insets:
             inset_img = inset.image
             if inset.size is not None:
-                try:
-                    from PIL import Image
-                    pil_img = Image.fromarray(inset_img)
-                    pil_img = pil_img.resize(inset.size, Image.LANCZOS)
-                    inset_img = np.array(pil_img)
-                except ImportError:
-                    pass
+                inset_img = _resize_nearest(inset_img, inset.size)
             ih, iw = inset_img.shape[:2]
             ix, iy = self._position_element(
                 (iw, ih), inset.position, map_region, margin=15
@@ -351,9 +364,8 @@ class MapPlate:
         Outside CENSOR's render-certificate scope: this writes a composed
         image; it does not execute a new render.
         """
-        from PIL import Image
         composed = self.compose()
-        Image.fromarray(composed).save(str(path))
+        save_png(path, composed)
 
     def export_jpeg(self, path: Path | str, quality: int = 90) -> None:
         """Compose and export a JPEG.
@@ -361,7 +373,10 @@ class MapPlate:
         Outside CENSOR's render-certificate scope: this writes a composed
         image; it does not execute a new render.
         """
-        from PIL import Image
+        try:
+            from PIL import Image
+        except Exception as error:
+            raise MapPlateDependencyError("JPEG export requires Pillow") from error
         composed = self.compose()
         rgb = composed[..., :3]
         Image.fromarray(rgb).save(str(path), quality=quality)

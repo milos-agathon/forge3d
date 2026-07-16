@@ -8,11 +8,13 @@ mod pick;
 mod polygon_fill;
 mod readback;
 mod render;
+#[cfg(all(feature = "extension-module", feature = "weighted-oit"))]
 mod timing;
 
 use inputs::*;
 use readback::*;
 use render::*;
+#[cfg(all(feature = "extension-module", feature = "weighted-oit"))]
 use timing::*;
 
 pub(crate) use basic::*;

@@ -75,10 +75,17 @@ class NorthArrow:
         else:
             self._draw_simple(image, cx, cy, size, rot_rad, cfg)
         if cfg.show_n_label:
+            from ._map_scene_render import _text_anchor_for_visual_center, _text_outline_metrics
+
             n_offset = size // 2 - 2
             nx = cx + n_offset * math.sin(rot_rad)
             ny = cy - n_offset * math.cos(rot_rad)
-            anchor = (int(round(nx - cfg.font_size * 0.35)), int(round(ny - cfg.font_size * 0.8)))
+            _label_width, _label_height, bounds = _text_outline_metrics("N", float(cfg.font_size))
+            anchor = (
+                _text_anchor_for_visual_center(nx, ny, float(cfg.font_size), bounds)
+                if bounds is not None
+                else (int(round(nx)), int(round(ny)))
+            )
             return image, "N", anchor
         return image, None, None
 

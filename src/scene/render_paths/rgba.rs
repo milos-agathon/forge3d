@@ -112,13 +112,13 @@ impl Scene {
             return Ok(());
         }
 
-        let refl_scope = if self.reflections_enabled {
-            scene_ts_begin(timing, encoder, "scene.reflections")
+        let reflection_timestamps = if self.reflections_enabled && self.reflection_renderer.is_some() {
+            scene_render_pass_timestamps(timing, "scene.reflections", 1)
         } else {
             None
         };
-        self.render_reflections(encoder).map_err(reflection_err)?;
-        scene_ts_end(timing, encoder, refl_scope, 0);
+        self.render_reflections(encoder, reflection_timestamps)
+            .map_err(reflection_err)?;
 
         let cloud_shadow_scope = if self.cloud_shadows_enabled {
             scene_ts_begin(timing, encoder, "scene.cloud_shadows")
@@ -428,13 +428,13 @@ impl Scene {
             scene_ts_end(timing, encoder, ssao_scope, 0);
         }
 
-        let clouds_scope = if self.clouds_enabled {
-            scene_ts_begin(timing, encoder, "scene.clouds")
+        let cloud_timestamps = if self.clouds_enabled && self.cloud_renderer.is_some() {
+            scene_render_pass_timestamps(timing, "scene.clouds", 1)
         } else {
             None
         };
-        self.render_clouds(encoder).map_err(cloud_render_err)?;
-        scene_ts_end(timing, encoder, clouds_scope, 0);
+        self.render_clouds(encoder, cloud_timestamps)
+            .map_err(cloud_render_err)?;
 
         let dof_scope = if self.dof_enabled {
             scene_ts_begin(timing, encoder, "scene.dof")

@@ -62,19 +62,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // So final alpha = 1 - reveal
     let final_alpha = 1.0 - reveal;
     
-    // Apply tone mapping and gamma correction
-    final_color = reinhard_tonemap(final_color);
-    final_color = linear_to_srgb(final_color);
-    
     return vec4<f32>(final_color, final_alpha);
-}
-
-// Simple Reinhard tone mapping
-fn reinhard_tonemap(color: vec3<f32>) -> vec3<f32> {
-    return color / (1.0 + color);
-}
-
-// Linear to sRGB conversion
-fn linear_to_srgb(linear: vec3<f32>) -> vec3<f32> {
-    return pow(linear, vec3<f32>(1.0 / 2.2));
 }

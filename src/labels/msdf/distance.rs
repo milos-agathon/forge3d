@@ -238,6 +238,28 @@ mod tests {
     }
 
     #[test]
+    fn containment_uses_closing_edge_to_reject_left_outside_points() {
+        let contour = Contour {
+            points: vec![
+                Point::new(0.0, 0.0),
+                Point::new(4.0, 0.0),
+                Point::new(4.0, 4.0),
+                Point::new(0.0, 4.0),
+                Point::new(0.0, 0.0),
+            ],
+        };
+
+        assert!(contains(
+            std::slice::from_ref(&contour),
+            Point::new(0.5, 2.0)
+        ));
+        assert!(!contains(
+            std::slice::from_ref(&contour),
+            Point::new(-0.5, 2.0)
+        ));
+    }
+
+    #[test]
     fn spatial_collision_mask_distinguishes_clean_and_clashing_neighbors() {
         let contour = Contour {
             points: vec![
@@ -286,6 +308,18 @@ mod tests {
             std::slice::from_ref(&far_contour),
             &far_edges,
             &false_near_boundary,
+            3,
+            3,
+            Point::new(0.0, 0.0),
+        )
+        .into_iter()
+        .any(|value| value));
+
+        let clean_far_outside = vec![[-20.0; 3]; 9];
+        assert!(!collision_mask(
+            std::slice::from_ref(&far_contour),
+            &far_edges,
+            &clean_far_outside,
             3,
             3,
             Point::new(0.0, 0.0),

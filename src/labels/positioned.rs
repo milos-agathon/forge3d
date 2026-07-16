@@ -1,5 +1,6 @@
 use crate::labels::shape::bidi::{resolve_bidi, visual_order_groups, BidiError};
 use crate::labels::shape::{ShapedGlyph, ShapedText, TextError};
+use crate::labels::unicode::{bidi_class, line_break_class, BidiClass, LineBreakClass};
 use lyon_path::{math::point, Event, Path};
 use std::collections::HashMap;
 use std::fmt;
@@ -113,11 +114,16 @@ fn attachment_root(glyphs: &[ShapedGlyph], index: usize) -> usize {
     index
 }
 
+fn is_logical_mark(character: char) -> bool {
+    matches!(bidi_class(character), BidiClass::Nsm)
+        || matches!(line_break_class(character), LineBreakClass::Cm)
+}
+
 /// Build base-plus-attached-mark groups in logical glyph order.
 ///
 /// UAX #9 L3 requires a combining mark to remain after its base even when L2 reverses
-/// the source characters. Grouping on the GPOS attachment graph before visual traversal
-/// makes the base the reorder unit while retaining the original mark order within it.
+/// the source characters. The GPOS attachment graph refines explicit mark placement,
+/// but unattached Unicode marks still group with their preceding logical base.
 fn glyph_groups(shaped: &ShapedText) -> Vec<GlyphGroup<'_>> {
     let byte_to_character: HashMap<usize, usize> = shaped
         .text
@@ -125,6 +131,7 @@ fn glyph_groups(shaped: &ShapedText) -> Vec<GlyphGroup<'_>> {
         .enumerate()
         .map(|(character, (byte, _))| (byte, character))
         .collect();
+    let characters = shaped.text.chars().collect::<Vec<_>>();
     let mut groups = Vec::new();
     for run in &shaped.runs {
         let mut roots = Vec::new();
@@ -149,6 +156,14 @@ fn glyph_groups(shaped: &ShapedText) -> Vec<GlyphGroup<'_>> {
                     })
                     .map(|(_, glyph)| glyph),
             );
+            if is_logical_mark(characters[character]) {
+                if let Some(base) = groups.iter_mut().rfind(|group: &&mut GlyphGroup<'_>| {
+                    !is_logical_mark(characters[group.logical_character])
+                }) {
+                    base.glyphs.extend(glyphs);
+                    continue;
+                }
+            }
             groups.push(GlyphGroup {
                 logical_character: character,
                 glyphs,
@@ -186,7 +201,7 @@ pub fn positioned_glyphs(
                 .position(|range| range.contains(&character))
         })
         .collect();
-    let mut cursors = vec![0.0f32; line_ranges.len()];
+    let mut cursors = vec![[0.0f32, 0.0f32]; line_ranges.len()];
     let mut output = Vec::new();
 
     for group_index in visual_groups {
@@ -209,9 +224,10 @@ pub fn positioned_glyphs(
             let glyph_id = mirrored.map_or(glyph.glyph_id, |value| value.glyph_id.0);
             let metrics = shaped.fonts.metrics(font_index)?;
             let scale = shaped.size / f32::from(metrics.units_per_em);
-            let x = cursors[line_index] + glyph.x_offset as f32 * shaped.size / 64.0;
+            let line_origin_y = line_index as f32 * shaped.size * 1.2;
+            let x = cursors[line_index][0] + glyph.x_offset as f32 * shaped.size / 64.0;
             let y =
-                line_index as f32 * shaped.size * 1.2 - glyph.y_offset as f32 * shaped.size / 64.0;
+                line_origin_y + cursors[line_index][1] - glyph.y_offset as f32 * shaped.size / 64.0;
             let advance = [
                 glyph.x_advance as f32 * shaped.size / 64.0,
                 glyph.y_advance as f32 * shaped.size / 64.0,
@@ -230,7 +246,8 @@ pub fn positioned_glyphs(
                 advance,
                 path,
             });
-            cursors[line_index] += advance[0];
+            cursors[line_index][0] += advance[0];
+            cursors[line_index][1] += advance[1];
         }
     }
     Ok(output)
@@ -489,5 +506,128 @@ mod tests {
             advances,
             vec![[16.0, 0.0], [16.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
         );
+    }
+
+    #[test]
+    fn rtl_unattached_combining_mark_stays_after_logical_base_per_uax9_l3() {
+        let fonts = Arc::new(
+            FontCollection::load(&[FontRequest::from_bytes(
+                "NotoSansArabic-subset.ttf",
+                include_bytes!("../../assets/fonts/NotoSansArabic-subset.ttf").to_vec(),
+            )])
+            .unwrap(),
+        );
+        let base = fonts.glyph_for('ب').unwrap().glyph_id.0;
+        let trailing = fonts.glyph_for('ت').unwrap().glyph_id.0;
+        let shaped = ShapedText {
+            text: "ب\u{064E}ت".to_owned(),
+            runs: vec![ShapedRun {
+                text_range: 0..6,
+                glyphs: vec![
+                    ShapedGlyph {
+                        glyph_id: base,
+                        font_index: 0,
+                        cluster: 0,
+                        x_advance: 64,
+                        y_advance: 0,
+                        x_offset: 0,
+                        y_offset: 0,
+                        attached_to: None,
+                    },
+                    ShapedGlyph {
+                        glyph_id: base,
+                        font_index: 0,
+                        cluster: 2,
+                        x_advance: 0,
+                        y_advance: 0,
+                        x_offset: 0,
+                        y_offset: 0,
+                        attached_to: None,
+                    },
+                    ShapedGlyph {
+                        glyph_id: trailing,
+                        font_index: 0,
+                        cluster: 4,
+                        x_advance: 64,
+                        y_advance: 0,
+                        x_offset: 0,
+                        y_offset: 0,
+                        attached_to: None,
+                    },
+                ],
+                bidi_levels: vec![1, 1, 1],
+                direction: Direction::RightToLeft,
+                script: Tag::from_bytes(b"arab"),
+                language: None,
+            }],
+            levels: vec![1, 1, 1],
+            legal_breaks: vec![0, 3],
+            face_descriptors: fonts.descriptors(),
+            fonts,
+            size: 16.0,
+        };
+
+        let line = 0..3;
+        let positioned = positioned_glyphs(&shaped, std::slice::from_ref(&line)).unwrap();
+        let clusters: Vec<_> = positioned.iter().map(|glyph| glyph.cluster).collect();
+
+        assert_eq!(clusters, vec![4, 0, 2]);
+    }
+
+    #[test]
+    fn positioned_cursor_applies_x_and_y_advance_once() {
+        let fonts = Arc::new(
+            FontCollection::load(&[FontRequest::from_bytes(
+                "NotoSansLatin-subset.ttf",
+                include_bytes!("../../assets/fonts/NotoSansLatin-subset.ttf").to_vec(),
+            )])
+            .unwrap(),
+        );
+        let a = fonts.glyph_for('A').unwrap().glyph_id.0;
+        let b = fonts.glyph_for('B').unwrap().glyph_id.0;
+        let shaped = ShapedText {
+            text: "AB".to_owned(),
+            runs: vec![ShapedRun {
+                text_range: 0..2,
+                glyphs: vec![
+                    ShapedGlyph {
+                        glyph_id: a,
+                        font_index: 0,
+                        cluster: 0,
+                        x_advance: 64,
+                        y_advance: 32,
+                        x_offset: 16,
+                        y_offset: 8,
+                        attached_to: None,
+                    },
+                    ShapedGlyph {
+                        glyph_id: b,
+                        font_index: 0,
+                        cluster: 1,
+                        x_advance: 64,
+                        y_advance: 0,
+                        x_offset: 0,
+                        y_offset: 0,
+                        attached_to: None,
+                    },
+                ],
+                bidi_levels: vec![0, 0],
+                direction: Direction::LeftToRight,
+                script: Tag::from_bytes(b"latn"),
+                language: None,
+            }],
+            levels: vec![0, 0],
+            legal_breaks: vec![0, 2],
+            face_descriptors: fonts.descriptors(),
+            fonts,
+            size: 16.0,
+        };
+
+        let ranges: Vec<std::ops::Range<usize>> = std::iter::once(0..2).collect();
+        let positioned = positioned_glyphs(&shaped, &ranges).unwrap();
+
+        assert_eq!(positioned[0].origin, [4.0, -2.0]);
+        assert_eq!(positioned[0].advance, [16.0, 8.0]);
+        assert_eq!(positioned[1].origin, [16.0, 8.0]);
     }
 }

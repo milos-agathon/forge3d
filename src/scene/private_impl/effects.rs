@@ -2,6 +2,7 @@ impl Scene {
     pub(super) fn render_reflections(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
+        timestamp_writes: Option<wgpu::RenderPassTimestampWrites<'_>>,
     ) -> Result<(), String> {
         let camera_pos = self.extract_camera_position();
         let camera_target = self.extract_camera_target();
@@ -48,7 +49,7 @@ impl Scene {
             .write_buffer(&self.ubo, 0, bytemuck::bytes_of(&reflection_uniforms));
 
         {
-            let mut rp = renderer.begin_reflection_pass(encoder);
+            let mut rp = renderer.begin_reflection_pass(encoder, timestamp_writes);
             crate::core::shader_registry::record_shader_use(if g.device.limits().max_bind_groups
                 >= 6
             {

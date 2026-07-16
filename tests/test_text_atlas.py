@@ -175,6 +175,43 @@ def test_packaged_font_notices_map_every_binary_to_exact_hash_and_notice():
         assert expected_hash == hashlib.sha256((font_dir / name).read_bytes()).hexdigest()
 
 
+def test_font_inventory_covers_every_distributed_ttf_and_atlas_asset():
+    root = Path(".")
+    inventory = json.loads((root / "python/forge3d/data/fonts/FONT-INVENTORY.json").read_text(encoding="utf-8"))
+    ttf_paths = {
+        path.as_posix()
+        for directory in (root / "assets/fonts", root / "python/forge3d/data/fonts")
+        for path in directory.glob("*.ttf")
+    }
+    inventory_ttf_paths = {
+        path
+        for record in inventory["fonts"]
+        for path in record["archive_paths"]
+        if path.startswith("assets/") or path.startswith("python/")
+    }
+
+    assert inventory["subset_tool"] == {"name": "fontTools pyftsubset", "version": "4.58.5"}
+    assert inventory_ttf_paths == ttf_paths
+    for record in inventory["fonts"]:
+        repo_paths = [
+            root / path
+            for path in record["archive_paths"]
+            if path.startswith("assets/") or path.startswith("python/")
+        ]
+        assert repo_paths
+        assert record["upstream_url"].startswith("https://raw.githubusercontent.com/google/fonts/")
+        assert record["copyright"]
+        assert record["subset_inputs"]
+        assert all((root / path).is_file() for path in record["license_paths"])
+        for path in repo_paths:
+            assert hashlib.sha256(path.read_bytes()).hexdigest() == record["sha256"]
+
+    for asset in inventory["generated_assets"]:
+        path = root / asset["path"]
+        assert path.is_file()
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == asset["sha256"]
+
+
 def test_label_plan_normalizes_halo_typography_aliases():
     from forge3d.label_plan import LabelPlan
 

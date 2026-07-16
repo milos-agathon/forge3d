@@ -130,6 +130,8 @@ class ScaleBar:
 
     def render_geometry(self) -> tuple[np.ndarray, str, tuple[int, int]]:
         """Return deterministic bar geometry plus native-label placement metadata."""
+        from ._map_scene_render import _text_outline_metrics
+
         cfg = self.config
         bar_width = cfg.width_px - 2 * cfg.padding
         max_distance = bar_width * self.meters_per_pixel
@@ -143,8 +145,8 @@ class ScaleBar:
             label = f"{int(display_distance)} {unit_label}"
         else:
             label = f"{display_distance:.1f} {unit_label}"
-        label_width = max(1, int(math.ceil(len(label) * cfg.font_size * 0.62)))
-        label_height = max(1, int(math.ceil(cfg.font_size * 1.25)))
+        label_width, outline_height, bounds = _text_outline_metrics(label, float(cfg.font_size))
+        label_height = max(outline_height, max(1, int(math.ceil(cfg.font_size * 1.25))))
         total_width = max(actual_bar_px + 2 * cfg.padding, label_width + 2 * cfg.padding)
         total_height = cfg.padding + cfg.bar_height + 4 + label_height + cfg.padding
         image = np.empty((total_height, total_width, 4), dtype=np.uint8)
@@ -168,5 +170,7 @@ class ScaleBar:
         image[bar_y, bar_x:x1] = cfg.border_color
         image[max(bar_y, y1 - 1), bar_x:x1] = cfg.border_color
         label_x = max(0, bar_x + (actual_bar_px - label_width) // 2)
+        if bounds is not None:
+            label_x = max(0, int(round(label_x - float(bounds[0]))))
         label_y = bar_y + cfg.bar_height + 4
         return image, label, (label_x, label_y)

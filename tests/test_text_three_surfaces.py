@@ -153,6 +153,15 @@ def test_furniture_text_has_no_pillow_or_system_font_route():
         assert "PIL" not in source
 
 
+def test_text_layout_has_no_character_count_anchor_or_size_estimates():
+    render_source = (ROOT / "python" / "forge3d" / "_map_scene_render.py").read_text(encoding="utf-8")
+    north_source = (ROOT / "python" / "forge3d" / "north_arrow.py").read_text(encoding="utf-8")
+
+    assert "len(str(getattr(label" not in render_source
+    assert "font_size * 0.35" not in north_source
+    assert "font_size * 0.8" not in north_source
+
+
 def test_scale_bar_and_north_arrow_call_shared_native_text(monkeypatch):
     from forge3d import _map_scene_render
     from forge3d.north_arrow import NorthArrow

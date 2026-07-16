@@ -19,6 +19,7 @@ from .diagnostics import (
 
 
 PAYLOAD_VERSION = 2
+SUPPORTED_PAYLOAD_VERSIONS = (1, PAYLOAD_VERSION)
 REJECTION_REASONS = (
     "collision",
     "outside_view",
@@ -58,6 +59,33 @@ def _json_safe(value: Any) -> Any:
 
 def _stable_json(value: Any) -> str:
     return json.dumps(_json_safe(value), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def _payload_version(value: Any) -> int:
+    try:
+        version = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"unsupported label plan payload_version: {value!r}") from error
+    if version not in SUPPORTED_PAYLOAD_VERSIONS:
+        raise ValueError(f"unsupported label plan payload_version: {version}")
+    return version
+
+
+def _migrate_payload_v1_to_v2(data: Mapping[str, Any]) -> dict[str, Any]:
+    migrated = dict(data)
+    migrated["payload_version"] = PAYLOAD_VERSION
+    accepted = []
+    for raw_label in migrated.get("accepted") or ():
+        label = dict(raw_label)
+        label.setdefault("positioned_glyphs", [])
+        typography = dict(label.get("typography") or {})
+        if not label["positioned_glyphs"]:
+            typography["render_mapping"] = "legacy_codepoints_not_renderable"
+        label["typography"] = typography
+        accepted.append(label)
+    migrated["accepted"] = accepted
+    migrated.setdefault("rationale", [])
+    return migrated
 
 
 def _stable_unit_interval(*parts: Any) -> float:
@@ -155,7 +183,11 @@ def _packaged_latin_font_path() -> str:
     return str(Path(__file__).resolve().parent / "data" / "fonts" / "NotoSansLatin-subset.ttf")
 
 
-def _native_shape_label_glyphs(text: str, glyph_atlas: Any) -> tuple[list[str] | None, Mapping[str, Any]] | None:
+def _native_shape_label_glyphs(
+    text: str,
+    glyph_atlas: Any,
+    line_ranges: Sequence[Sequence[int]] | None = None,
+) -> tuple[list[str] | None, Mapping[str, Any]] | None:
     font_paths = _font_paths_from_glyph_atlas(glyph_atlas)
     if not font_paths:
         return None
@@ -171,9 +203,15 @@ def _native_shape_label_glyphs(text: str, glyph_atlas: Any) -> tuple[list[str] |
             "native_reason": native_reason,
             "diagnostics": diagnostics,
         }
-    payload = shaped.to_dict()
+    resolved_ranges = (
+        [tuple(int(value) for value in item) for item in line_ranges]
+        if line_ranges is not None
+        else None
+    )
+    payload = shaped.to_dict(resolved_ranges)
     glyph_records = [glyph for run in payload["runs"] for glyph in run["glyphs"]]
     positioned = [dict(glyph) for glyph in payload.get("positioned_glyphs", ())]
+    line_ranges = [list(item) for item in payload.get("line_ranges", ())]
     glyphs = list(text)
     if not glyphs:
         return None
@@ -185,6 +223,7 @@ def _native_shape_label_glyphs(text: str, glyph_atlas: Any) -> tuple[list[str] |
         "font_indices": [glyph["font_index"] for glyph in glyph_records],
         "clusters": [glyph["cluster"] for glyph in glyph_records],
         "advances": [glyph["x_advance"] for glyph in glyph_records],
+        "line_ranges": line_ranges,
         "positioned_glyphs": positioned,
         "render_mapping": "positioned_glyphs_by_id",
         "shaped_runs": payload["runs"],
@@ -233,12 +272,18 @@ def _requires_complex_shaping(text: str) -> bool:
     )
 
 
-def _shape_label_glyphs(text: str, glyph_atlas: Any | None = None) -> tuple[list[str] | None, Mapping[str, Any]]:
-    native_shaped = _native_shape_label_glyphs(text, glyph_atlas)
+def _shape_label_glyphs(
+    text: str,
+    glyph_atlas: Any | None = None,
+    line_ranges: Sequence[Sequence[int]] | None = None,
+) -> tuple[list[str] | None, Mapping[str, Any]]:
+    native_shaped = _native_shape_label_glyphs(text, glyph_atlas, line_ranges)
     if native_shaped is not None:
         return native_shaped
     if not _requires_complex_shaping(text):
-        packaged = _native_shape_label_glyphs(text, {"font_path": _packaged_latin_font_path()})
+        packaged = _native_shape_label_glyphs(
+            text, {"font_path": _packaged_latin_font_path()}, line_ranges
+        )
         if packaged is not None:
             glyphs, details = packaged
             if glyphs is not None:
@@ -759,6 +804,7 @@ class AcceptedLabel:
     world_bounds: Sequence[float] | None = None
     typography: Mapping[str, Any] | None = None
     glyphs: Sequence[str] = field(default_factory=tuple)
+    line_ranges: Sequence[Sequence[int]] = field(default_factory=tuple)
     positioned_glyphs: Sequence[Mapping[str, Any]] = field(default_factory=tuple)
     ordering_key: str | None = None
 
@@ -783,6 +829,9 @@ class AcceptedLabel:
         )
         self.typography = _json_safe(_normalize_typography(self.typography))
         self.glyphs = tuple(str(glyph) for glyph in self.glyphs)
+        self.line_ranges = tuple(
+            (int(item[0]), int(item[1])) for item in self.line_ranges
+        )
         self.positioned_glyphs = tuple(_json_safe(dict(glyph)) for glyph in self.positioned_glyphs)
         self.ordering_key = self.ordering_key or self.label_id
 
@@ -799,6 +848,7 @@ class AcceptedLabel:
             "world_bounds": list(self.world_bounds) if self.world_bounds is not None else None,
             "typography": dict(self.typography or {}),
             "glyphs": list(self.glyphs),
+            "line_ranges": [list(item) for item in self.line_ranges],
             "positioned_glyphs": [dict(glyph) for glyph in self.positioned_glyphs],
             "ordering_key": self.ordering_key,
         }
@@ -817,6 +867,7 @@ class AcceptedLabel:
             world_bounds=data.get("world_bounds"),
             typography=data.get("typography") or {},
             glyphs=data.get("glyphs") or (),
+            line_ranges=data.get("line_ranges") or (),
             positioned_glyphs=data.get("positioned_glyphs") or (),
             ordering_key=data.get("ordering_key"),
         )
@@ -1005,7 +1056,9 @@ class LabelPlan:
             source_id = str(record.get("source_id", label_id))
             text = str(record.get("text", ""))
             ordering_key = f"{label_id}:{source_id}:{_stable_json(record)}"
-            glyph_sequence, shaping_details = _shape_label_glyphs(text, glyph_atlas)
+            glyph_sequence, shaping_details = _shape_label_glyphs(
+                text, glyph_atlas, record.get("line_ranges")
+            )
 
             if not text.strip():
                 rejected.append(
@@ -1270,10 +1323,11 @@ class LabelPlan:
                         **{
                             key: value
                             for key, value in shaping_details.items()
-                            if key != "positioned_glyphs"
+                            if key not in {"line_ranges", "positioned_glyphs"}
                         },
                     },
                     glyphs=list(glyph_sequence),
+                    line_ranges=shaping_details.get("line_ranges", ()),
                     positioned_glyphs=shaping_details.get("positioned_glyphs", ()),
                     ordering_key=ordering_key,
                 )
@@ -1323,13 +1377,17 @@ class LabelPlan:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "LabelPlan":
+        version = _payload_version(data.get("payload_version", PAYLOAD_VERSION))
+        if version == 1:
+            data = _migrate_payload_v1_to_v2(data)
+            version = PAYLOAD_VERSION
         return cls(
             accepted=data.get("accepted") or (),
             rejected=data.get("rejected") or (),
             diagnostics=data.get("diagnostics") or (),
             bounds=data.get("bounds") or {},
             seed=int(data.get("seed", 0)),
-            payload_version=int(data.get("payload_version", PAYLOAD_VERSION)),
+            payload_version=version,
             rationale=data.get("rationale") or (),
         )
 
@@ -1692,6 +1750,7 @@ __all__ = [
     "LabelCandidate",
     "LabelPlan",
     "PAYLOAD_VERSION",
+    "SUPPORTED_PAYLOAD_VERSIONS",
     "PriorityClass",
     "REJECTION_REASONS",
     "RejectedLabel",

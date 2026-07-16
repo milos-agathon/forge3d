@@ -347,6 +347,16 @@ mod tests {
     }
 
     #[test]
+    fn cyclic_start_rotation_preserves_sharp_corner_edge_colors() {
+        let contour = square();
+        let mut unique = contour.points[..contour.points.len() - 1].to_vec();
+        unique.rotate_left(1);
+        unique.push(unique[0]);
+        let rotated = Contour { points: unique };
+        assert_eq!(color_map(&contour), color_map(&rotated));
+    }
+
+    #[test]
     fn multiple_contours_do_not_restart_the_same_color_phase() {
         let left = square();
         let right = Contour {
