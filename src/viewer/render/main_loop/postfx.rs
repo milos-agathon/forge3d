@@ -10,6 +10,7 @@ impl Viewer {
         gi: &mut ScreenSpaceEffectsManager,
         encoder: &mut wgpu::CommandEncoder,
         zv: &wgpu::TextureView,
+        target_view: &wgpu::TextureView,
     ) {
         // If SSR is enabled, compute the pre-tonemap lighting now so SSR can sample it
         if gi.is_enabled(crate::core::screen_space_effects::ScreenSpaceEffect::SSR) {
@@ -157,8 +158,8 @@ impl Viewer {
             };
             // Prepare comp uniform (mode, far)
             let params: [f32; 4] = [
-                mode_u32 as f32,
                 self.viz_depth_max_override.unwrap_or(self.view_config.zfar),
+                mode_u32 as f32,
                 0.0,
                 0.0,
             ];
@@ -184,21 +185,45 @@ impl Viewer {
                 self.comp_uniform = Some(ub);
                 self.comp_uniform.as_ref().unwrap()
             };
+            let fog_view = if self.fog_enabled {
+                &self.fog_output_view
+            } else {
+                &self.fog_zero_view
+            };
+            let Some(comp_key) = self.ensure_composite_bind_group(
+                &gi.gbuffer().depth_view,
+                fog_view,
+                buf_ref,
+                src_view,
+            ) else {
+                return;
+            };
+            {
+                let comp_bind_group_cache = self.comp_bind_group_cache.borrow();
+                let comp_bg = comp_bind_group_cache
+                    .get(&comp_key)
+                    .expect("composite bind group cache populated");
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("viewer.comp.pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: target_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                pass.set_pipeline(comp_pl);
+                pass.set_bind_group(0, comp_bg, &[]);
+                pass.draw(0..3, 0..1);
+            }
+
             // If a snapshot is requested, render the composite to an offscreen texture too
             if self.snapshot_request.is_some() {
-                let fog_view = if self.fog_enabled {
-                    &self.fog_output_view
-                } else {
-                    &self.fog_zero_view
-                };
-                let Some(comp_key) = self.ensure_composite_bind_group(
-                    &gi.gbuffer().depth_view,
-                    fog_view,
-                    buf_ref,
-                    src_view,
-                ) else {
-                    return;
-                };
                 let comp_bind_group_cache = self.comp_bind_group_cache.borrow();
                 let comp_bg = comp_bind_group_cache
                     .get(&comp_key)

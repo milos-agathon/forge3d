@@ -179,6 +179,7 @@ impl Viewer {
             // GBuffer resources
             geom_bind_group_layout: gbuf.geom_bind_group_layout,
             geom_pipeline: gbuf.geom_pipeline,
+            object_overlay_pipeline: gbuf.object_overlay_pipeline,
             geom_camera_buffer: gbuf.geom_camera_buffer,
             geom_bind_group: gbuf.geom_bind_group,
             geom_vb: gbuf.geom_vb,

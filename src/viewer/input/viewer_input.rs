@@ -369,6 +369,7 @@ impl Viewer {
                 if let Err(error) = tv.handle_keys(&anchor, forward, right, up) {
                     eprintln!("[viewer] terrain key camera rejected: {error}");
                 }
+                #[cfg(feature = "enable-gpu-instancing")]
                 tv.tick_scatter_time(dt);
             }
         } else if pc_active {

@@ -1,4 +1,5 @@
 use super::ScreenRenderFlags;
+use crate::core::resource_tracker::tracked_create_texture;
 use crate::viewer::terrain::ViewerTerrainScene;
 
 impl ViewerTerrainScene {
@@ -6,10 +7,8 @@ impl ViewerTerrainScene {
         &mut self,
         width: u32,
         height: u32,
-    ) -> ScreenRenderFlags {
-        if let Err(e) = self.ensure_depth(width, height) {
-            eprintln!("[terrain] depth target allocation failed: {e}");
-        }
+    ) -> anyhow::Result<ScreenRenderFlags> {
+        self.ensure_depth(width, height)?;
 
         if self.pbr_config.enabled && self.pbr_pipeline.is_none() {
             if let Err(e) = self.init_pbr_pipeline(self.surface_format) {
@@ -29,6 +28,10 @@ impl ViewerTerrainScene {
         }
 
         let use_pbr = self.pbr_config.enabled && self.pbr_pipeline.is_some();
+        let needs_taa = self
+            .taa_renderer
+            .as_ref()
+            .is_some_and(crate::core::taa::TaaRenderer::is_enabled);
         let needs_dof = self.pbr_config.dof.enabled;
         let needs_post_process = self.pbr_config.lens_effects.enabled
             && (self.pbr_config.lens_effects.distortion.abs() > 0.001
@@ -48,7 +51,14 @@ impl ViewerTerrainScene {
             });
         }
 
-        if (needs_post_process || needs_volumetrics) && self.post_process.is_none() {
+        if let Some(taa) = self.taa_renderer.as_mut() {
+            taa.resize(&self.device, width, height)?;
+        }
+        if needs_taa {
+            self.ensure_taa_velocity_texture(width, height)?;
+        }
+
+        if (needs_taa || needs_post_process || needs_volumetrics) && self.post_process.is_none() {
             self.init_post_process();
         }
         if (needs_dof || needs_dof_scratch) && self.dof_pass.is_none() {
@@ -83,18 +93,72 @@ impl ViewerTerrainScene {
             }
         }
 
-        if needs_post_process || needs_volumetrics {
+        if needs_taa || needs_post_process || needs_volumetrics {
             if let Some(ref mut pp) = self.post_process {
                 let _ = pp.get_intermediate_view(width, height, self.surface_format);
             }
         }
 
-        ScreenRenderFlags {
+        Ok(ScreenRenderFlags {
             use_pbr,
+            needs_taa,
             needs_dof,
             needs_post_process,
             needs_volumetrics,
             needs_denoise,
+        })
+    }
+
+    fn ensure_taa_velocity_texture(&mut self, width: u32, height: u32) -> anyhow::Result<()> {
+        if self.taa_velocity_view.is_some() && self.taa_velocity_size == (width, height) {
+            return Ok(());
         }
+
+        let texture = tracked_create_texture(
+            &self.device,
+            &wgpu::TextureDescriptor {
+                label: Some("terrain_taa.zero_velocity"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rg16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+        )?;
+
+        let bytes_per_pixel = 4u32;
+        let row_bytes = width.saturating_mul(bytes_per_pixel);
+        let padded_row_bytes = row_bytes.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        let data = vec![0u8; padded_row_bytes as usize * height as usize];
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &data,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(padded_row_bytes),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        self.taa_velocity_view = Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
+        self.taa_velocity_texture = Some(texture);
+        self.taa_velocity_size = (width, height);
+        Ok(())
     }
 }

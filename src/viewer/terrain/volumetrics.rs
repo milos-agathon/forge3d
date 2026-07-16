@@ -339,8 +339,10 @@ impl VolumetricsPass {
                 config.half_res,
             )?);
         } else if let Some(atlas) = self.density_volume_atlas.as_mut() {
+            let atlas_allocation_id = atlas.report.atlas_allocation_id;
             atlas.metadata = data.metadata;
             atlas.report = data.report;
+            atlas.report.atlas_allocation_id = atlas_allocation_id;
             atlas.report.raymarch_steps = config.steps;
             atlas.report.half_res = config.half_res;
         }

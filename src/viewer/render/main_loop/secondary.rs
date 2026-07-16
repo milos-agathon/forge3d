@@ -132,7 +132,7 @@ impl Viewer {
         };
 
         let frame = self.current_frame_camera();
-        if let Some(ref mut tv) = self.terrain_viewer {
+        if let Some(mut tv) = self.terrain_viewer.take() {
             if tv.has_terrain() {
                 eprintln!("[DEBUG main_loop] terrain_viewer path, has_terrain=true, snapshot_request={:?}, terrain_snap_size={:?}",
                 self.snapshot_request.is_some(), terrain_snap_size);
@@ -180,6 +180,41 @@ impl Viewer {
                     }
                 }
             }
+
+            if terrain_rendered {
+                if self.geom_bind_group.is_none() {
+                    self.ensure_geometry_bind_group_fallback();
+                }
+                if let Some(depth_view) = tv.screen_depth_view() {
+                    self.render_object_overlay(
+                        &mut encoder,
+                        view,
+                        depth_view,
+                        wgpu::LoadOp::Load,
+                        self.config.width,
+                        self.config.height,
+                    );
+                }
+                if let Some(snap_tex) = self.pending_snapshot_tex.take() {
+                    let snap_w = snap_tex.width();
+                    let snap_h = snap_tex.height();
+                    let snap_view = snap_tex.create_view(&wgpu::TextureViewDescriptor::default());
+                    if let Some(depth_tex) = self.create_object_overlay_depth(snap_w, snap_h) {
+                        let depth_view =
+                            depth_tex.create_view(&wgpu::TextureViewDescriptor::default());
+                        self.render_object_overlay(
+                            &mut encoder,
+                            &snap_view,
+                            &depth_view,
+                            wgpu::LoadOp::Clear(1.0),
+                            snap_w,
+                            snap_h,
+                        );
+                    }
+                    self.pending_snapshot_tex = Some(snap_tex);
+                }
+            }
+            self.terrain_viewer = Some(tv);
         }
 
         #[cfg(feature = "extension-module")]

@@ -68,13 +68,19 @@ def test_object_vertices_stay_local_and_translation_is_anchored_once():
     frame = _read("src/viewer/render/main_loop/frame_anchor.rs")
     assert "frame.anchor.model_offset(self.object_translation)" in frame
     geometry = _read("src/viewer/render/main_loop/geometry/pass.rs")
-    assert geometry.count("anchored_object_model(frame)") == 1
+    geometry_pass = geometry.split(
+        "pub(in crate::viewer::render::main_loop) fn render_object_overlay",
+        1,
+    )[0]
+    assert geometry_pass.count("anchored_object_model(frame)") == 1
+    assert "frame.anchor.model_offset" not in geometry
 
 
 def test_object_preflight_ignores_unloaded_identity_placeholder():
     preflight = _read("src/viewer/event_loop/command_preflight.rs")
     assert "let object_present = !self.object_source_positions.is_empty()" in preflight
-    assert "if object_present {\n            validate_points(&anchor, CoordRole::Object, [object_translation])?;" in preflight
+    assert "let object_is_world_placed = object_transform_requested" in preflight
+    assert "if object_present && object_is_world_placed" in preflight
     assert "} else if object_transform_requested {\n            object_translation" in preflight
     assert "else if !(object_transform_requested && requested_general_pose.is_none())" in preflight
 

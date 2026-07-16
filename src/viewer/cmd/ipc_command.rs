@@ -140,10 +140,10 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             viewer.object_rotation = candidate_rotation.normalize();
             viewer.object_scale = candidate_scale;
             viewer.transform_version += 1;
-            let is_identity = viewer.object_translation == glam::DVec3::ZERO
-                && viewer.object_rotation == glam::Quat::IDENTITY
-                && viewer.object_scale == glam::Vec3::ONE;
-            update_ipc_transform_stats(viewer.transform_version, is_identity);
+            update_ipc_transform_stats(
+                viewer.transform_version,
+                viewer.object_transform_is_identity(),
+            );
             true
         }
         _ => false,

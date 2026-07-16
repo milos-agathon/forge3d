@@ -196,6 +196,9 @@ impl ViewerTerrainScene {
             // P1.4: TAA support
             taa_renderer: None,
             taa_jitter: crate::core::jitter::JitterState::new(),
+            taa_velocity_texture: None,
+            taa_velocity_view: None,
+            taa_velocity_size: (0, 0),
             terrain_revision_counter: 0,
             #[cfg(feature = "enable-gpu-instancing")]
             scatter_renderer,

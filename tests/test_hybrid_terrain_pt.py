@@ -11,6 +11,11 @@
 import os
 import sys
 from pathlib import Path
+import ast
+import inspect
+import json
+import subprocess
+import tempfile
 
 import numpy as np
 import pytest
@@ -41,6 +46,8 @@ ENV_I = 0.35
 ALBEDO = (0.55, 0.52, 0.48)
 VARIANCE_THRESHOLD = 1e-3
 MAX_FRAMES = 512
+WARM_WHITE = (1.0, 0.97, 0.92)
+REQUIRED = "<required>"
 
 
 def _dem():
@@ -77,6 +84,182 @@ def _require_gpu():
         pytest.skip(
             "Hybrid terrain PT requires a terrain-capable hardware-backed forge3d runtime"
         )
+
+
+def _stub_function(stub_name, function_name):
+    pkg = Path(f3d.__file__).resolve().parent
+    node = ast.parse((pkg / stub_name).read_text(encoding="utf-8-sig"))
+    for item in node.body:
+        if isinstance(item, ast.FunctionDef) and item.name == function_name:
+            return item
+    raise AssertionError(f"{stub_name} missing {function_name}")
+
+
+def _ann_text(annotation):
+    return ast.unparse(annotation) if annotation is not None else ""
+
+
+def _stub_model(fn):
+    pos_defaults = [None] * (len(fn.args.args) - len(fn.args.defaults)) + list(fn.args.defaults)
+    rows = []
+    for arg, default in zip(fn.args.args, pos_defaults):
+        rows.append(
+            (
+                arg.arg,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                REQUIRED if default is None else ast.unparse(default),
+                _ann_text(arg.annotation),
+            )
+        )
+    for arg, default in zip(fn.args.kwonlyargs, fn.args.kw_defaults):
+        rows.append(
+            (
+                arg.arg,
+                inspect.Parameter.KEYWORD_ONLY,
+                REQUIRED if default is None else ast.unparse(default),
+                _ann_text(arg.annotation),
+            )
+        )
+    return rows
+
+
+def _runtime_model(sig):
+    rows = []
+    for param in sig.parameters.values():
+        default = REQUIRED if param.default is inspect._empty else param.default
+        annotation = "" if param.annotation is inspect._empty else str(param.annotation)
+        if len(annotation) >= 2 and annotation[0] in "'\"" and annotation[-1] == annotation[0]:
+            annotation = annotation[1:-1]
+        rows.append((param.name, param.kind, default, annotation))
+    return rows
+
+
+def _raster_parity_metrics(dem, out):
+    import math
+
+    depth = out["depth"]
+    normal = out["normal"]
+    hits = np.isfinite(depth)
+    session = f3d.Session(window=False)
+    renderer = f3d.TerrainRenderer(session)
+    ms = f3d.MaterialSet.custom(ALBEDO, 0.0, 0.8, 1.0, 0.0, 4.0)
+    with tempfile.NamedTemporaryFile(suffix=".hdr", delete=False) as tmp:
+        tmp.close()
+        with open(tmp.name, "wb") as fh:
+            fh.write(b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 4 +X 8\n")
+            fh.write(bytes([128, 128, 128, 128]) * 32)
+        env_maps = f3d.IBL.from_hdr(tmp.name, intensity=1.0)
+    os.unlink(tmp.name)
+    from forge3d.terrain_params import make_terrain_params_config
+
+    eye_pt = np.array(CAM["origin"])
+    eye_ras = np.array([eye_pt[0], eye_pt[2], eye_pt[1]])
+    radius = float(np.linalg.norm(eye_ras))
+    theta = math.degrees(math.acos(eye_ras[1] / radius))
+    phi = math.degrees(math.atan2(eye_ras[2], eye_ras[0]))
+    clip_far = 400.0
+    config = make_terrain_params_config(
+        size_px=(SIZE, SIZE),
+        render_scale=1.0,
+        terrain_span=SPAN,
+        msaa_samples=1,
+        z_scale=RELIEF,
+        exposure=1.0,
+        domain=(0.0, 1.0),
+        light_azimuth_deg=SUN_AZ,
+        light_elevation_deg=SUN_EL,
+        sun_intensity=SUN_I,
+        ibl_enabled=True,
+        colormap_strength=0.0,
+        camera_mode="mesh",
+        cam_radius=radius,
+        cam_phi_deg=phi,
+        cam_theta_deg=theta,
+        fov_y_deg=CAM["fov_y"],
+        clip=(5.0, clip_far),
+    )
+    params = f3d.TerrainRenderParams(config)
+    _, aov_frame = renderer.render_with_aov(ms, env_maps, params, dem)
+    ras_n = aov_frame.normal()[::-1]
+    ras_d = aov_frame.depth()[::-1]
+    ras_a = aov_frame.albedo()[::-1]
+    ras_hit = (np.linalg.norm(ras_n, axis=-1) > 0.5) & (ras_d > 1e-6)
+    both = hits & ras_hit
+    iou = both.sum() / max((hits | ras_hit).sum(), 1)
+
+    ys2, xs2 = np.nonzero(both)
+    half_h = np.tan(np.radians(CAM["fov_y"]) / 2.0)
+    ndc_x2 = (xs2 + 0.5) / SIZE * 2 - 1
+    ndc_y2 = 1 - (ys2 + 0.5) / SIZE * 2
+    cosang = 1.0 / np.sqrt(1 + (ndc_x2 * half_h) ** 2 + (ndc_y2 * half_h) ** 2)
+    t_ras = ras_d[ys2, xs2] * clip_far / cosang
+    depth_err = np.abs(t_ras - depth[ys2, xs2])
+
+    rn = ras_n.copy()
+    rn[..., 0] *= -1.0
+    dot2 = np.clip((normal[both] * rn[both]).sum(-1), -1, 1)
+    ang2 = np.degrees(np.arccos(dot2))
+
+    alb_lin_ref = ((np.array(ALBEDO) + 0.055) / 1.055) ** 2.4
+    alb_err = np.abs(ras_a[both] - alb_lin_ref[None, :]).mean()
+    return {
+        "iou": float(iou),
+        "median_depth_err": float(np.median(depth_err)),
+        "median_normal_err": float(np.median(ang2)),
+        "albedo_err": float(alb_err),
+        "cam_dist": float(np.linalg.norm(np.array(CAM["origin"]))),
+    }
+
+
+def _raster_parity_metrics_in_subprocess():
+    code = r"""
+import json
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path.cwd() / "tests"))
+import test_hybrid_terrain_pt as t
+dem = t._dem()
+out = t.hybrid_render_terrain_reference(dem, t.SIZE, t.SIZE, t.CAM, **t._scene_kwargs(dem))
+print("FORGE3D_RASTER_PARITY_JSON=" + json.dumps(t._raster_parity_metrics(dem, out)), flush=True)
+"""
+    env = os.environ.copy()
+    repo = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=str(repo),
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=240,
+    )
+    assert result.returncode == 0, (
+        "raster parity subprocess failed\n"
+        f"returncode={result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    for line in result.stdout.splitlines():
+        if line.startswith("FORGE3D_RASTER_PARITY_JSON="):
+            return json.loads(line.split("=", 1)[1])
+    raise AssertionError(f"raster parity subprocess produced no metrics:\n{result.stdout}\n{result.stderr}")
+
+
+def _assert_raster_parity_metrics(metrics):
+    print(
+        f"TERRAIN PT vs raster (mesh mode): hit IoU {metrics['iou']:.3f}; "
+        f"depth median err {metrics['median_depth_err']:.2f} wu "
+        f"({metrics['median_depth_err'] / metrics['cam_dist'] * 100:.1f}% of view distance); "
+        f"normal median err {metrics['median_normal_err']:.2f} deg; "
+        f"albedo mean abs err {metrics['albedo_err']:.4f} (linear)"
+    )
+    assert metrics["iou"] > 0.6, f"PT/raster terrain coverage IoU too low: {metrics['iou']:.3f}"
+    assert metrics["median_depth_err"] < 10.0, (
+        f"median depth error {metrics['median_depth_err']:.2f} world units vs raster"
+    )
+    assert metrics["median_normal_err"] < 15.0, (
+        f"median normal angular error {metrics['median_normal_err']:.2f} deg vs raster"
+    )
+    assert metrics["albedo_err"] < 0.01, (
+        f"albedo mismatch vs raster linear base color: {metrics['albedo_err']:.4f}"
+    )
 
 
 @pytest.fixture(scope="module")
@@ -197,94 +380,7 @@ def test_aov_parity_with_rasterizer(reference):
     assert np.percentile(ang, 95) < 15.0
 
     # ---- TIER 2: cross-renderer comparison at the mirrored camera ----
-    import math
-    import os
-    import tempfile
-
-    session = f3d.Session(window=False)
-    renderer = f3d.TerrainRenderer(session)
-    ms = f3d.MaterialSet.custom(ALBEDO, 0.0, 0.8, 1.0, 0.0, 4.0)
-    with tempfile.NamedTemporaryFile(suffix=".hdr", delete=False) as tmp:
-        tmp.close()
-        with open(tmp.name, "wb") as fh:
-            fh.write(b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 4 +X 8\n")
-            fh.write(bytes([128, 128, 128, 128]) * 32)
-        env_maps = f3d.IBL.from_hdr(tmp.name, intensity=1.0)
-    os.unlink(tmp.name)
-    from forge3d.terrain_params import make_terrain_params_config
-
-    # PT camera eye (y-up) -> raster orbit in the raster's Z-up world:
-    # (x, y_height, z_ground)_pt maps to (x, z_ground, y_height)_raster.
-    eye_pt = np.array(CAM["origin"])
-    eye_ras = np.array([eye_pt[0], eye_pt[2], eye_pt[1]])
-    R = float(np.linalg.norm(eye_ras))
-    theta = math.degrees(math.acos(eye_ras[1] / R))
-    phi = math.degrees(math.atan2(eye_ras[2], eye_ras[0]))
-    clip_far = 400.0
-    config = make_terrain_params_config(
-        size_px=(SIZE, SIZE),
-        render_scale=1.0,
-        terrain_span=SPAN,
-        msaa_samples=1,
-        z_scale=RELIEF,
-        exposure=1.0,
-        domain=(0.0, 1.0),
-        light_azimuth_deg=SUN_AZ,
-        light_elevation_deg=SUN_EL,
-        sun_intensity=SUN_I,
-        ibl_enabled=True,
-        colormap_strength=0.0,
-        camera_mode="mesh",
-        cam_radius=R,
-        cam_phi_deg=phi,
-        cam_theta_deg=theta,
-        fov_y_deg=CAM["fov_y"],
-        clip=(5.0, clip_far),
-    )
-    params = f3d.TerrainRenderParams(config)
-    _, aov_frame = renderer.render_with_aov(ms, env_maps, params, dem)
-    # Established raster AOV conventions (see docstring): vertical image flip.
-    ras_n = aov_frame.normal()[::-1]
-    ras_d = aov_frame.depth()[::-1]
-    ras_a = aov_frame.albedo()[::-1]
-    ras_hit = (np.linalg.norm(ras_n, axis=-1) > 0.5) & (ras_d > 1e-6)
-    both = hits & ras_hit
-    iou = both.sum() / max((hits | ras_hit).sum(), 1)
-
-    # Depth: raster stores view-depth/far; convert to ray distance.
-    ys2, xs2 = np.nonzero(both)
-    ndc_x2 = (xs2 + 0.5) / SIZE * 2 - 1
-    ndc_y2 = 1 - (ys2 + 0.5) / SIZE * 2
-    cosang = 1.0 / np.sqrt(1 + (ndc_x2 * half_h) ** 2 + (ndc_y2 * half_h) ** 2)
-    t_ras = ras_d[ys2, xs2] * clip_far / cosang
-    depth_err = np.abs(t_ras - depth[ys2, xs2])
-
-    # Normals: raster world (-x, y, z) maps onto the PT frame.
-    rn = ras_n.copy()
-    rn[..., 0] *= -1.0
-    dot2 = np.clip((normal[both] * rn[both]).sum(-1), -1, 1)
-    ang2 = np.degrees(np.arccos(dot2))
-
-    # Albedo: raster stores linear (piecewise sRGB decode of base color).
-    alb_lin_ref = ((np.array(ALBEDO) + 0.055) / 1.055) ** 2.4
-    alb_err = np.abs(ras_a[both] - alb_lin_ref[None, :]).mean()
-
-    cam_dist = float(np.linalg.norm(np.array(CAM["origin"])))
-    print(
-        f"TERRAIN PT vs raster (mesh mode): hit IoU {iou:.3f}; "
-        f"depth median err {np.median(depth_err):.2f} wu "
-        f"({np.median(depth_err) / cam_dist * 100:.1f}% of view distance); "
-        f"normal median err {np.median(ang2):.2f} deg; "
-        f"albedo mean abs err {alb_err:.4f} (linear)"
-    )
-    assert iou > 0.6, f"PT/raster terrain coverage IoU too low: {iou:.3f}"
-    assert np.median(depth_err) < 10.0, (
-        f"median depth error {np.median(depth_err):.2f} world units vs raster"
-    )
-    assert np.median(ang2) < 15.0, (
-        f"median normal angular error {np.median(ang2):.2f} deg vs raster"
-    )
-    assert alb_err < 0.01, f"albedo mismatch vs raster linear base color: {alb_err:.4f}"
+    _assert_raster_parity_metrics(_raster_parity_metrics_in_subprocess())
 
 
 
@@ -360,6 +456,260 @@ def test_trust_boundary_validation():
             dem, 64, 64, CAM,
             **{**kw, "mesh_vertices": np.zeros((3, 3), dtype=np.float32)},
         )
+
+
+def test_sun_color_signature_stubs_and_native_order():
+    required = REQUIRED
+    po = inspect.Parameter.POSITIONAL_OR_KEYWORD
+    ko = inspect.Parameter.KEYWORD_ONLY
+    wrapper_runtime = [
+        ("heightmap", po, required, "np.ndarray"),
+        ("width", po, required, "int"),
+        ("height", po, required, "int"),
+        ("camera", po, None, "dict | None"),
+        ("spacing", ko, (1.0, 1.0), "tuple[float, float]"),
+        ("exaggeration", ko, 1.0, "float"),
+        ("albedo", ko, (0.6, 0.6, 0.6), "tuple[float, float, float]"),
+        ("sun_azimuth_deg", ko, 315.0, "float"),
+        ("sun_elevation_deg", ko, 45.0, "float"),
+        ("sun_intensity", ko, 2.5, "float"),
+        ("sun_color", ko, WARM_WHITE, "Sequence[float] | np.ndarray"),
+        ("env_map", ko, None, "np.ndarray | None"),
+        ("env_intensity", ko, 0.35, "float"),
+        ("mesh_vertices", ko, None, "np.ndarray | None"),
+        ("mesh_indices", ko, None, "np.ndarray | None"),
+        ("spp", ko, 1, "int"),
+        ("max_frames", ko, 512, "int"),
+        ("min_frames", ko, 32, "int"),
+        ("variance_threshold", ko, 1e-3, "float"),
+        ("seed", ko, 7, "int"),
+        ("certificate", ko, False, "bool | str"),
+    ]
+    wrapper_stub = [
+        (name, kind, required if default == required else "...", ann)
+        for name, kind, default, ann in wrapper_runtime
+    ]
+    wrapper_stub[3] = ("camera", po, "...", "dict | None")
+    wrapper_stub[4] = ("spacing", ko, "...", "Tuple[float, float]")
+    wrapper_stub[6] = ("albedo", ko, "...", "Tuple[float, float, float]")
+    wrapper_stub[-1] = ("certificate", ko, "...", "bool | str | None")
+
+    native_runtime = [
+        ("heightmap", po, required, ""),
+        ("width", po, required, ""),
+        ("height", po, required, ""),
+        ("cam", po, required, ""),
+        ("spacing", po, Ellipsis, ""),
+        ("exaggeration", po, 1.0, ""),
+        ("albedo", po, Ellipsis, ""),
+        ("sun_azimuth_deg", po, 315.0, ""),
+        ("sun_elevation_deg", po, 45.0, ""),
+        ("sun_intensity", po, 2.5, ""),
+        ("env_map", po, None, ""),
+        ("env_intensity", po, 0.35, ""),
+        ("mesh_vertices", po, None, ""),
+        ("mesh_indices", po, None, ""),
+        ("spp", po, 1, ""),
+        ("max_frames", po, 512, ""),
+        ("min_frames", po, 32, ""),
+        ("variance_threshold", po, 1e-3, ""),
+        ("seed", po, 7, ""),
+        ("certificate", po, None, ""),
+        ("sun_color", po, None, ""),
+    ]
+    native_stub = [
+        (name, po, required if default == required else "...", ann)
+        for name, _, default, ann in [
+            ("heightmap", po, required, "np.ndarray"),
+            ("width", po, required, "int"),
+            ("height", po, required, "int"),
+            ("cam", po, required, "Dict[str, Any]"),
+            ("spacing", po, "...", "Tuple[float, float]"),
+            ("exaggeration", po, "...", "float"),
+            ("albedo", po, "...", "Tuple[float, float, float]"),
+            ("sun_azimuth_deg", po, "...", "float"),
+            ("sun_elevation_deg", po, "...", "float"),
+            ("sun_intensity", po, "...", "float"),
+            ("env_map", po, "...", "Optional[np.ndarray]"),
+            ("env_intensity", po, "...", "float"),
+            ("mesh_vertices", po, "...", "Optional[np.ndarray]"),
+            ("mesh_indices", po, "...", "Optional[np.ndarray]"),
+            ("spp", po, "...", "int"),
+            ("max_frames", po, "...", "int"),
+            ("min_frames", po, "...", "int"),
+            ("variance_threshold", po, "...", "float"),
+            ("seed", po, "...", "int"),
+            ("certificate", po, "...", "bool | str | PathLikeStr | None"),
+            ("sun_color", po, "...", "Optional[Sequence[float] | np.ndarray]"),
+        ]
+    ]
+
+    psig = inspect.signature(hybrid_render_terrain_reference)
+    assert _runtime_model(psig) == wrapper_runtime
+
+    from forge3d import _forge3d as _native
+
+    nsig = inspect.signature(_native.hybrid_render_terrain_reference)
+    assert _runtime_model(nsig) == native_runtime
+
+    assert _stub_model(_stub_function("path_tracing.pyi", "hybrid_render_terrain_reference")) == wrapper_stub
+    assert _stub_model(_stub_function("__init__.pyi", "hybrid_render_terrain_reference")) == native_stub
+
+
+def test_terrain_reference_bridge_uses_crate_root_pyo3_types():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "py_functions"
+        / "path_tracing"
+        / "terrain_reference.rs"
+    ).read_text(encoding="utf-8")
+    assert "use super::super::super::*;" in source
+    assert "pyo3::types::" not in source
+
+
+def test_sun_color_rejects_malformed_before_gpu_work():
+    dem = np.zeros((4, 4), dtype=np.float32)
+    bad_values = [
+        (1.0, float("nan"), 1.0),
+        (1.0, float("inf"), 1.0),
+        (1.0, -0.1, 1.0),
+        (1.0, 1.0),
+        (1.0, 1.0, 1.0, 1.0),
+        0.5,
+        "abc",
+        ("0.5", "0.9", "0.8"),
+        bytearray([1, 1, 1]),
+        memoryview(bytes([1, 1, 1])),
+    ]
+    for bad in bad_values:
+        with pytest.raises(ValueError):
+            hybrid_render_terrain_reference(
+                dem, 8, 8, CAM, sun_color=bad, max_frames=4, min_frames=2
+            )
+
+
+def test_sun_color_native_boundary_rejects_malformed():
+    from forge3d import _forge3d as _native
+
+    dem = np.zeros((4, 4), dtype=np.float32)
+    fast = {"max_frames": 4, "min_frames": 2, "variance_threshold": 1e30}
+    bad_values = [
+        (1.0, -1.0, 1.0),
+        (1.0, float("nan"), 1.0),
+        (1.0, float("inf"), 1.0),
+        (1.0, 1.0),
+        (1.0, 1.0, 1.0, 1.0),
+        0.5,
+        "abc",
+        ("0.5", "0.9", "0.8"),
+        np.float64(0.5),
+        np.array([1.0, 1.0]),
+        bytearray([1, 1, 1]),
+        memoryview(bytes([1, 1, 1])),
+    ]
+    for bad in bad_values:
+        with pytest.raises(ValueError):
+            _native.hybrid_render_terrain_reference(dem, 8, 8, CAM, sun_color=bad, **fast)
+
+
+def test_sun_color_valid_sequences_and_zero_are_accepted():
+    _require_gpu()
+    dem = np.zeros((4, 4), dtype=np.float32)
+    valid = [
+        (0.0, 0.0, 0.0),
+        [1.0, 0.97, 0.92],
+        (1.5, 1.0, 0.7),
+        np.array([1.5, 1.0, 0.7]),
+    ]
+    for sun_color in valid:
+        hybrid_render_terrain_reference(
+            dem,
+            8,
+            8,
+            CAM,
+            sun_color=sun_color,
+            sun_intensity=0.0,
+            max_frames=4,
+            min_frames=2,
+            variance_threshold=1e30,
+        )
+
+    from forge3d import _forge3d as _native
+
+    for sun_color in valid:
+        _native.hybrid_render_terrain_reference(
+            dem,
+            8,
+            8,
+            CAM,
+            sun_color=sun_color,
+            sun_intensity=0.0,
+            max_frames=4,
+            min_frames=2,
+            variance_threshold=1e30,
+        )
+
+
+def test_sun_color_valid_input_does_not_suppress_unrelated_failures(monkeypatch):
+    import forge3d.path_tracing as pt
+
+    class BrokenNative:
+        @staticmethod
+        def hybrid_render_terrain_reference(*args, **kwargs):
+            raise RuntimeError("invalid device adapter state should propagate")
+
+    monkeypatch.setattr(pt, "_NATIVE", BrokenNative())
+    dem = np.zeros((2, 2), dtype=np.float32)
+    with pytest.raises(RuntimeError, match="adapter state"):
+        pt.hybrid_render_terrain_reference(
+            dem,
+            8,
+            8,
+            CAM,
+            sun_color=[1.0, 1.0, 1.0],
+            max_frames=4,
+            min_frames=2,
+            variance_threshold=1e30,
+        )
+
+
+def test_sun_color_live_control_changes_output(reference):
+    dem, out_default = reference
+    out_blue = hybrid_render_terrain_reference(
+        dem, SIZE, SIZE, CAM, **{**_scene_kwargs(dem), "sun_color": (0.2, 0.3, 1.5)}
+    )
+    diff = float(
+        np.abs(
+            out_default["rgba"][..., :3].astype(np.float64)
+            - out_blue["rgba"][..., :3].astype(np.float64)
+        ).mean()
+    )
+    print(f"\nTERRAIN PT sun_color control: mean abs RGB delta {diff:.3f}")
+    assert diff > 1.0
+
+
+def test_zero_sun_color_render_succeeds_and_removes_direct_sun():
+    _require_gpu()
+    dem = _dem()
+    kw = {**_scene_kwargs(dem), "max_frames": 32, "min_frames": 2, "variance_threshold": 1e30}
+    default = hybrid_render_terrain_reference(dem, 128, 128, CAM, **kw)
+    zero = hybrid_render_terrain_reference(
+        dem,
+        128,
+        128,
+        CAM,
+        **{**kw, "sun_color": (0.0, 0.0, 0.0)},
+    )
+    assert zero["rgba"].shape == (128, 128, 4)
+    assert zero["rgba"].dtype == np.uint8
+    assert np.isfinite(zero["depth"]).any()
+    default_rgb = default["rgba"][..., :3].astype(np.float64)
+    zero_rgb = zero["rgba"][..., :3].astype(np.float64)
+    diff = float(np.abs(default_rgb - zero_rgb).mean())
+    print(f"\nTERRAIN PT zero sun_color: mean abs RGB delta {diff:.3f}")
+    assert diff > 0.5
+    assert float(zero_rgb.mean()) < float(default_rgb.mean())
 
 
 def test_mixed_scene_mesh_and_terrain():

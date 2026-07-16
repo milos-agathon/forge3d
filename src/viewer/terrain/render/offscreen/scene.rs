@@ -1,4 +1,5 @@
 use super::SnapshotRenderState;
+#[cfg(feature = "enable-gpu-instancing")]
 use crate::viewer::terrain::scene::scatter::render_scatter_batches;
 use crate::viewer::terrain::vector_overlay;
 use crate::viewer::terrain::ViewerTerrainScene;

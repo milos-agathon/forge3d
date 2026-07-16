@@ -4,10 +4,10 @@
 
 use std::io;
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use winit::event::{ElementState, Event, WindowEvent};
-use winit::event_loop::{EventLoop, EventLoopBuilder, EventLoopProxy};
+use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::WindowBuilder;
 
@@ -185,6 +185,8 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
                         }
                         Err(wgpu::SurfaceError::Timeout) => {
                             eprintln!("Surface timeout!");
+                            std::thread::sleep(Duration::from_millis(4));
+                            window.request_redraw();
                         }
                     }
                 }
@@ -221,9 +223,11 @@ pub fn run_viewer(config: ViewerConfig) -> Result<(), Box<dyn std::error::Error>
 /// Run the viewer with an IPC server for non-blocking Python control.
 /// Prints `FORGE3D_VIEWER_READY port=<PORT>` when the server is listening.
 pub fn run_viewer_with_ipc(
-    config: ViewerConfig,
+    mut config: ViewerConfig,
     ipc_config: ipc::IpcServerConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    config.vsync = false;
+
     // Clear any stale commands and stats
     if let Ok(mut q) = get_ipc_queue().lock() {
         q.clear();
@@ -289,8 +293,11 @@ pub fn run_viewer_with_ipc(
     let fatal_for_loop = Arc::clone(&fatal_error);
 
     event_loop.run(move |event, elwt| {
-        // ControlFlow::Poll for IPC mode - responsive command handling
-        elwt.set_control_flow(winit::event_loop::ControlFlow::Poll);
+        // IPC needs prompt command handling, but an unthrottled Poll loop can
+        // request redraws faster than the swapchain releases presentable images.
+        elwt.set_control_flow(ControlFlow::WaitUntil(
+            Instant::now() + Duration::from_millis(8),
+        ));
 
         match event {
             Event::Resumed => {
@@ -428,6 +435,8 @@ pub fn run_viewer_with_ipc(
                         }
                         Err(wgpu::SurfaceError::Timeout) => {
                             eprintln!("Surface timeout!");
+                            std::thread::sleep(Duration::from_millis(4));
+                            window.request_redraw();
                         }
                     }
                 }

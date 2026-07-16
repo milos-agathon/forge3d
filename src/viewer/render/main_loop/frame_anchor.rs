@@ -14,6 +14,12 @@ impl Viewer {
         })
     }
 
+    pub(crate) fn object_transform_is_identity(&self) -> bool {
+        self.object_translation == glam::DVec3::ZERO
+            && self.object_rotation == glam::Quat::IDENTITY
+            && self.object_scale == glam::Vec3::ONE
+    }
+
     fn focus_for_frame(frame: FrameCamera) -> DVec3 {
         match frame.kind {
             ActiveCameraKind::Terrain => {

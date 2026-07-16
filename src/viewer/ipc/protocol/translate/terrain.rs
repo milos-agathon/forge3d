@@ -7,12 +7,13 @@ use crate::viewer::viewer_enums::{
     ViewerVolumetricsConfig,
 };
 
+#[cfg(feature = "enable-gpu-instancing")]
+use super::super::payloads::IpcScatterWind;
 use super::super::payloads::{
     IpcDenoiseConfig, IpcDensityVolumeConfig, IpcDofConfig, IpcHeightAoConfig,
-    IpcLensEffectsConfig, IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcScatterWind,
-    IpcSkyConfig, IpcSunVisConfig, IpcTerrainScatterBatch, IpcTerrainScatterBlend,
-    IpcTerrainScatterContact, IpcTerrainScatterLevel, IpcTonemapConfig, IpcVectorOverlayConfig,
-    IpcVolumetricsConfig,
+    IpcLensEffectsConfig, IpcMaterialLayerConfig, IpcMotionBlurConfig, IpcSkyConfig,
+    IpcSunVisConfig, IpcTerrainScatterBatch, IpcTerrainScatterBlend, IpcTerrainScatterContact,
+    IpcTerrainScatterLevel, IpcTonemapConfig, IpcVectorOverlayConfig, IpcVolumetricsConfig,
 };
 use super::super::request::IpcRequest;
 
@@ -328,6 +329,7 @@ pub(super) fn map_terrain_scatter_batch(
             })
             .transpose()?
             .unwrap_or_default(),
+        #[cfg(feature = "enable-gpu-instancing")]
         hlod_config: config
             .hlod
             .as_ref()

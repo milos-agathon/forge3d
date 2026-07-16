@@ -8,6 +8,39 @@
 
 use super::super::super::*;
 
+#[cfg(feature = "extension-module")]
+fn extract_sun_color(obj: &Bound<'_, PyAny>) -> PyResult<[f32; 3]> {
+    let reject =
+        || PyValueError::new_err("sun_color must be exactly three finite, non-negative numbers");
+    if obj.is_instance_of::<PyString>()
+        || obj.is_instance_of::<PyBytes>()
+        || obj.is_instance_of::<PyByteArray>()
+        || obj.is_instance_of::<PyMemoryView>()
+    {
+        return Err(reject());
+    }
+
+    let mut out = [0.0f32; 3];
+    let mut count = 0usize;
+    for item in obj.iter().map_err(|_| reject())? {
+        let item = item.map_err(|_| reject())?;
+        if count == 3
+            || item.is_instance_of::<PyString>()
+            || item.is_instance_of::<PyBytes>()
+            || item.is_instance_of::<PyByteArray>()
+            || item.is_instance_of::<PyMemoryView>()
+        {
+            return Err(reject());
+        }
+        out[count] = item.extract::<f32>().map_err(|_| reject())?;
+        count += 1;
+    }
+    if count != 3 || out.iter().any(|c| !c.is_finite() || *c < 0.0) {
+        return Err(reject());
+    }
+    Ok(out)
+}
+
 /// Render a converged path-traced reference of a real DEM under sun + IBL,
 /// optionally mixed with mesh geometry (terrain stays a first-class primitive
 /// of the shared hybrid traversal).
@@ -42,13 +75,14 @@ use super::super::super::*;
     variance_threshold = 1e-3,
     seed = 7u32,
     certificate = None,
+    sun_color = None,
 ))]
 pub(crate) fn hybrid_render_terrain_reference(
     py: Python<'_>,
     heightmap: numpy::PyReadonlyArray2<'_, f32>,
     width: u32,
     height: u32,
-    cam: &Bound<'_, pyo3::types::PyDict>,
+    cam: &Bound<'_, PyDict>,
     spacing: (f32, f32),
     exaggeration: f32,
     albedo: (f32, f32, f32),
@@ -65,9 +99,15 @@ pub(crate) fn hybrid_render_terrain_reference(
     variance_threshold: f32,
     seed: u32,
     certificate: Option<Bound<'_, PyAny>>,
+    sun_color: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
     use crate::path_tracing::hybrid_compute::{HybridPathTracer, TerrainReferenceDesc};
     use numpy::PyArray1;
+
+    let sun_color = match sun_color.as_ref() {
+        None => [1.0, 0.97, 0.92],
+        Some(obj) => extract_sun_color(obj)?,
+    };
 
     let certificate_capture =
         crate::core::certificate::begin_render_capture("hybrid_render_terrain_reference");
@@ -154,6 +194,7 @@ pub(crate) fn hybrid_render_terrain_reference(
         sun_azimuth_deg,
         sun_elevation_deg,
         sun_intensity,
+        sun_color,
         env_map: env,
         env_intensity,
         mesh,
@@ -169,7 +210,7 @@ pub(crate) fn hybrid_render_terrain_reference(
     let tracer = HybridPathTracer::new()?;
     let out = tracer.render_terrain_reference(&desc)?;
 
-    let d = pyo3::types::PyDict::new_bound(py);
+    let d = PyDict::new_bound(py);
     let rgba = PyArray1::<u8>::from_vec_bound(py, out.rgba).reshape([
         height as usize,
         width as usize,

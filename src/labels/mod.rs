@@ -399,12 +399,7 @@ impl LabelManager {
             return 0;
         }
 
-        if self.atlas.is_none() {
-            self.visible_instances.clear();
-            return 0;
-        }
-
-        let atlas = self.atlas.as_ref().unwrap();
+        let atlas = self.atlas.as_ref();
         self.collision_rtree.clear();
         self.visible_instances.clear();
         self.leader_lines.clear();
@@ -469,7 +464,16 @@ impl LabelManager {
                 label.screen_pos = Some(screen_pos);
 
                 // Calculate label bounds
-                let (width, height) = atlas.measure_text(&label.text, label.style.size);
+                let (width, height) = atlas.map_or_else(
+                    || {
+                        let glyphs = label.text.chars().filter(|ch| !ch.is_whitespace()).count();
+                        (
+                            (glyphs.max(1) as f32) * label.style.size * 0.6,
+                            label.style.size,
+                        )
+                    },
+                    |atlas| atlas.measure_text(&label.text, label.style.size),
+                );
                 let half_w = width * 0.5;
                 let half_h = height * 0.5;
 
@@ -513,15 +517,17 @@ impl LabelManager {
                     color[3] = label.computed_alpha;
 
                     // Generate text instances for this label
-                    let instances = atlas.layout_text(
-                        &label.text,
-                        screen_pos,
-                        label.style.size,
-                        color,
-                        label.style.halo_color,
-                        label.style.halo_width,
-                    );
-                    self.visible_instances.extend(instances);
+                    if let Some(atlas) = atlas {
+                        let instances = atlas.layout_text(
+                            &label.text,
+                            screen_pos,
+                            label.style.size,
+                            color,
+                            label.style.halo_color,
+                            label.style.halo_width,
+                        );
+                        self.visible_instances.extend(instances);
+                    }
                 } else {
                     label.visible = false;
                 }
@@ -593,18 +599,20 @@ impl LabelManager {
                 if ch == ' ' {
                     continue;
                 }
-                let mut instances = atlas.layout_text(
-                    &ch.to_string(),
-                    placement.screen_pos,
-                    line_label.style.size,
-                    color,
-                    line_label.style.halo_color,
-                    line_label.style.halo_width,
-                );
-                for instance in &mut instances {
-                    instance.rotation = placement.rotation;
+                if let Some(atlas) = atlas {
+                    let mut instances = atlas.layout_text(
+                        &ch.to_string(),
+                        placement.screen_pos,
+                        line_label.style.size,
+                        color,
+                        line_label.style.halo_color,
+                        line_label.style.halo_width,
+                    );
+                    for instance in &mut instances {
+                        instance.rotation = placement.rotation;
+                    }
+                    self.visible_instances.extend(instances);
                 }
-                self.visible_instances.extend(instances);
             }
         }
 

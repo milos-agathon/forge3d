@@ -43,6 +43,8 @@ impl Viewer {
         let mut general_eye = current.eye_world;
         let mut general_target = current.target_world;
         let mut object_translation = self.object_translation;
+        let mut object_rotation = self.object_rotation;
+        let mut object_scale = self.object_scale;
         let object_present = !self.object_source_positions.is_empty();
         let mut object_transform_requested = false;
         let mut requested_terrain_path: Option<&str> = None;
@@ -120,10 +122,20 @@ impl Viewer {
                     general_eye = DVec3::from(*eye);
                     general_target = DVec3::from(*target);
                 }
-                ViewerCmd::SetTransform { translation, .. } => {
+                ViewerCmd::SetTransform {
+                    translation,
+                    rotation_quat,
+                    scale,
+                } => {
                     object_transform_requested = true;
                     if let Some(translation) = translation {
                         object_translation = DVec3::from(*translation);
+                    }
+                    if let Some(rotation) = rotation_quat {
+                        object_rotation = glam::Quat::from_array(*rotation);
+                    }
+                    if let Some(scale) = scale {
+                        object_scale = Vec3::from(*scale);
                     }
                 }
                 _ => {}
@@ -198,7 +210,11 @@ impl Viewer {
             CoordRole::Content,
             self.label_manager.world_points(),
         )?;
-        if object_present {
+        let object_is_world_placed = object_transform_requested
+            || object_translation != DVec3::ZERO
+            || object_rotation != glam::Quat::IDENTITY
+            || object_scale != Vec3::ONE;
+        if object_present && object_is_world_placed {
             validate_points(&anchor, CoordRole::Object, [object_translation])?;
         }
 

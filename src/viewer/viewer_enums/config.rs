@@ -325,5 +325,6 @@ pub struct ViewerTerrainScatterBatchConfig {
     pub levels: Vec<ViewerTerrainScatterLevelConfig>,
     #[cfg(feature = "enable-gpu-instancing")]
     pub wind: ScatterWindSettingsNative,
+    #[cfg(feature = "enable-gpu-instancing")]
     pub hlod_config: Option<crate::terrain::scatter::HlodConfig>,
 }

@@ -84,6 +84,7 @@ pub struct Viewer {
     // GBuffer geometry pipeline and resources
     pub(crate) geom_bind_group_layout: Option<BindGroupLayout>,
     pub(crate) geom_pipeline: Option<RenderPipeline>,
+    pub(crate) object_overlay_pipeline: Option<RenderPipeline>,
     pub(crate) geom_camera_buffer: Option<TrackedBuffer>,
     pub(crate) geom_bind_group: Option<BindGroup>,
     pub(crate) geom_vb: Option<TrackedBuffer>,

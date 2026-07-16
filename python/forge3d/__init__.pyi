@@ -1384,6 +1384,7 @@ def hybrid_render_terrain_reference(
     variance_threshold: float = ...,
     seed: int = ...,
     certificate: bool | str | PathLikeStr | None = ...,
+    sun_color: Optional[Sequence[float] | np.ndarray] = ...,
 ) -> Dict[str, Any]: ...
 
 def render_offscreen_rgba(

@@ -802,7 +802,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             exposure,
             u.pbr_params.y,
         );
-        color = overlay.rgb * preserve_display;
+        let overlay_display_rgb = pow(
+            max(overlay.rgb, vec3<f32>(0.0)),
+            vec3<f32>(1.0 / 2.2),
+        );
+        let preserve_display_rgb = overlay_display_rgb * preserve_display;
+        color = pow(
+            clamp(preserve_display_rgb, vec3<f32>(0.0), vec3<f32>(1.0)),
+            vec3<f32>(2.2),
+        );
     } else {
         // Apply exposure and tonemapping
         color = color * exposure;

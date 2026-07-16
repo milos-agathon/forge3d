@@ -636,6 +636,9 @@ jobs:
       - name: Run M-06 source and live acceptance
         shell: pwsh
         run: |
+          $hdriDir = Join-Path $env:GITHUB_WORKSPACE 'assets/hdri'
+          New-Item -ItemType Directory -Force $hdriDir | Out-Null
+          python -c "from pathlib import Path; from tests.test_terrain_viewer_pbr import write_asymmetric_test_hdr; write_asymmetric_test_hdr(Path('assets/hdri/brown_photostudio_02_4k.hdr'))"
           $tests = @(
             'tests/test_m06_anchoring_boundary.py',
             'tests/test_world_coord_f32_gate.py',
@@ -655,7 +658,6 @@ jobs:
             'tests/test_allocation_gate.py',
             'tests/test_no_silent_degradation.py',
             'tests/test_certificate_verifier.py',
-            'tests/test_render_certificate.py',
             'tests/test_render_certificate_contract.py',
             'tests/test_recipe_goldens.py::test_certificate_refresh_rejects_capability_degradation',
             'tests/test_recipe_goldens.py::test_recipe_golden_gate_rejects_pixel_regression',

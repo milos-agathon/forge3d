@@ -232,6 +232,10 @@ impl ViewerTerrainScene {
             crate::core::taa::TaaRenderer::history_allocation_ids,
         )
     }
+
+    pub(crate) fn screen_depth_view(&self) -> Option<&wgpu::TextureView> {
+        self.depth_view.as_ref()
+    }
 }
 
 /// Simple terrain scene for interactive viewer
@@ -320,6 +324,9 @@ pub struct ViewerTerrainScene {
     // P1.4: TAA support for terrain viewer
     pub(super) taa_renderer: Option<crate::core::taa::TaaRenderer>,
     pub(super) taa_jitter: crate::core::jitter::JitterState,
+    pub(super) taa_velocity_texture: Option<TrackedTexture>,
+    pub(super) taa_velocity_view: Option<wgpu::TextureView>,
+    pub(super) taa_velocity_size: (u32, u32),
     pub(super) terrain_revision_counter: u64,
     #[cfg(feature = "enable-gpu-instancing")]
     pub(super) scatter_renderer: crate::render::mesh_instanced::MeshInstancedRenderer,

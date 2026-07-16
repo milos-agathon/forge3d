@@ -38,7 +38,7 @@ impl Viewer {
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         self.prepare_frame_anchor();
         let (output, view, snapshot_dimensions, mut encoder) = self.prepare_render_frame()?;
-        let availability = self.render_geometry_stage(&mut encoder);
+        let availability = self.render_geometry_stage(&mut encoder, &view);
         encoder = self.render_secondary_paths(encoder, &view, snapshot_dimensions, availability);
         self.finish_render_frame(encoder, output);
         Ok(())

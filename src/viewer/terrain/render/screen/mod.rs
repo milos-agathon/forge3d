@@ -7,6 +7,7 @@ use super::*;
 
 pub(super) struct ScreenRenderFlags {
     pub(super) use_pbr: bool,
+    pub(super) needs_taa: bool,
     pub(super) needs_dof: bool,
     pub(super) needs_post_process: bool,
     pub(super) needs_volumetrics: bool,
@@ -42,7 +43,13 @@ impl ViewerTerrainScene {
             return false;
         }
 
-        let flags = self.prepare_screen_resources(width, height);
+        let flags = match self.prepare_screen_resources(width, height) {
+            Ok(flags) => flags,
+            Err(err) => {
+                eprintln!("[terrain] screen resource preparation failed: {err:#}");
+                return false;
+            }
+        };
         let state = self.build_screen_render_state(encoder, width, height, &flags, frame);
 
         let has_vector_overlays = self.prepare_screen_overlays();
