@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -102,3 +105,59 @@ def test_query_osm_features_cache_payload_accepts_json_string():
     )
 
     assert result["osm_json"]["elements"][0]["tags"]["amenity"] == "cafe"
+
+
+def test_query_osm_features_explicit_endpoint_and_cache(tmp_path: Path):
+    body = json.dumps(_payload()).encode("utf-8")
+
+    class Handler(BaseHTTPRequestHandler):
+        requests = 0
+
+        def do_GET(self):
+            type(self).requests += 1
+            assert "data=%5Bout%3Ajson%5D" in self.path
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    endpoint = f"http://127.0.0.1:{server.server_port}/api/interpreter"
+    try:
+        first = gis.query_osm_features(
+            (0.0, 0.0, 1.0, 1.0),
+            {"building": True},
+            cache={"cache_dir": str(tmp_path)},
+            endpoint=endpoint,
+            timeout=2.0,
+        )
+        second = gis.query_osm_features(
+            (0.0, 0.0, 1.0, 1.0),
+            {"building": True},
+            cache={"cache_dir": str(tmp_path)},
+            endpoint=endpoint,
+            timeout=2.0,
+        )
+        scene = gis.prepare_osm_scene(
+            (0.0, 0.0, 1.0, 1.0),
+            tags={"building": True},
+            cache={"cache_dir": str(tmp_path)},
+            endpoint=endpoint,
+            timeout=2.0,
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    assert first["remote"]["status"] == "fetched"
+    assert second["remote"]["status"] == "hit"
+    assert second["remote"]["from_cache"] is True
+    assert scene["layers"]["buildings"]["feature_count"] == 1
+    assert scene["remote"]["status"] == "hit"
+    assert Handler.requests == 1

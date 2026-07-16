@@ -447,13 +447,10 @@ pub fn load_boundary(
     path: impl AsRef<Path>,
     layer: Option<String>,
     where_clause: Option<String>,
+    union: bool,
+    dst_crs: Option<CrsSpec>,
 ) -> GisResult<Value> {
-    if where_clause.is_some() {
-        return Err(GisError::InvalidArgument(
-            "unsupported_option: load_boundary where filtering is not implemented".to_string(),
-        ));
-    }
-    let source = read_vector(
+    let mut source = read_vector(
         path,
         VectorReadOptions {
             layer,
@@ -462,6 +459,38 @@ pub fn load_boundary(
             limit: None,
         },
     )?;
+    let source_count = source.features.len();
+    if let Some(predicate) = where_clause.as_deref() {
+        let mut filtered = Vec::with_capacity(source.features.len());
+        for feature in source.features.drain(..) {
+            if feature_matches_where(&feature, predicate)? {
+                filtered.push(feature);
+            }
+        }
+        source.features = filtered;
+        source.info.feature_count = source.features.len() as u64;
+        source.info.geometry_type = geometry_type_for_features(&source.features);
+        source.info.schema = infer_schema(&source.features);
+        source.info.bounds = bounds_for_features(&source.features).map(RasterBounds::tuple);
+        source.info.is_georeferenced = source.info.bounds.is_some()
+            && (source.info.crs_wkt.is_some() || source.info.crs_authority.is_some());
+    }
+    if let Some(dst_crs) = dst_crs {
+        let result = reproject_vector(
+            VectorReprojectInput::Features {
+                features: source.features,
+                info: Some(source.info),
+                geojson_crs: None,
+            },
+            dst_crs,
+            None,
+        )?;
+        source = VectorReadResult {
+            features: result.features,
+            info: result.info,
+            warnings: result.warnings,
+        };
+    }
     let mut warnings = source.warnings.clone();
 
     if source.features.is_empty() {
@@ -471,17 +500,25 @@ pub fn load_boundary(
             "load_boundary source has zero features",
             Some("features"),
         );
-        return load_boundary_result_value(&source, None, warnings, false);
+        return load_boundary_result_value(
+            &source,
+            None,
+            warnings,
+            source_count != 0,
+            source_count,
+            where_clause.as_deref(),
+            union,
+        );
     }
 
     for feature in &source.features {
         validate_polygonal_geometry_value(feature_geometry(feature)?, "load_boundary")?;
     }
 
-    let changed = source.features.len() > 1;
+    let changed = source_count != source.features.len() || (union && source.features.len() > 1);
     let geometry = if source.features.len() == 1 {
         Some(feature_geometry(&source.features[0])?.clone())
-    } else {
+    } else if union {
         crate::gis::geometry::topology::require_topology_backend("load_boundary")?;
         let geometries = source
             .features
@@ -495,6 +532,15 @@ pub fn load_boundary(
             None => false,
         };
         union_polygonal_geometry_values(&geometries, "load_boundary", geographic)?
+    } else {
+        Some(json!({
+            "type": "GeometryCollection",
+            "geometries": source
+                .features
+                .iter()
+                .map(feature_geometry)
+                .collect::<GisResult<Vec<_>>>()?,
+        }))
     };
 
     if let Some(geometry) = geometry.as_ref() {
@@ -512,7 +558,92 @@ pub fn load_boundary(
         }
     }
 
-    load_boundary_result_value(&source, geometry, warnings, changed)
+    load_boundary_result_value(
+        &source,
+        geometry,
+        warnings,
+        changed,
+        source_count,
+        where_clause.as_deref(),
+        union,
+    )
+}
+
+fn feature_matches_where(feature: &Value, expression: &str) -> GisResult<bool> {
+    const OPERATORS: [&str; 7] = [">=", "<=", "!=", "==", "=", ">", "<"];
+    let expression = expression.trim();
+    let (operator, offset) = OPERATORS
+        .iter()
+        .find_map(|operator| expression.find(operator).map(|offset| (*operator, offset)))
+        .ok_or_else(|| {
+            GisError::InvalidArgument(
+                "unsupported_option: load_boundary where must be a single comparison".to_string(),
+            )
+        })?;
+    let field = expression[..offset].trim();
+    let raw_expected = expression[offset + operator.len()..].trim();
+    if field.is_empty() || raw_expected.is_empty() {
+        return Err(GisError::InvalidArgument(
+            "unsupported_option: load_boundary where comparison is incomplete".to_string(),
+        ));
+    }
+    let expected = parse_where_literal(raw_expected)?;
+    let actual = feature
+        .get("properties")
+        .and_then(Value::as_object)
+        .and_then(|properties| properties.get(field));
+    Ok(match (actual, operator) {
+        (Some(actual), "=" | "==") => json_values_equal(actual, &expected),
+        (Some(actual), "!=") => !json_values_equal(actual, &expected),
+        (Some(actual), ">" | ">=" | "<" | "<=") => {
+            let Some(left) = actual.as_f64() else {
+                return Ok(false);
+            };
+            let Some(right) = expected.as_f64() else {
+                return Ok(false);
+            };
+            match operator {
+                ">" => left > right,
+                ">=" => left >= right,
+                "<" => left < right,
+                "<=" => left <= right,
+                _ => unreachable!(),
+            }
+        }
+        (None, "!=") => true,
+        _ => false,
+    })
+}
+
+fn parse_where_literal(value: &str) -> GisResult<Value> {
+    if (value.starts_with('\'') && value.ends_with('\''))
+        || (value.starts_with('"') && value.ends_with('"'))
+    {
+        return Ok(Value::String(value[1..value.len() - 1].to_string()));
+    }
+    match value.to_ascii_lowercase().as_str() {
+        "true" => return Ok(Value::Bool(true)),
+        "false" => return Ok(Value::Bool(false)),
+        "null" | "none" => return Ok(Value::Null),
+        _ => {}
+    }
+    let numeric = value.parse::<f64>().map_err(|_| {
+        GisError::InvalidArgument(format!(
+            "unsupported_option: invalid load_boundary where literal {value:?}"
+        ))
+    })?;
+    Number::from_f64(numeric).map(Value::Number).ok_or_else(|| {
+        GisError::InvalidArgument(
+            "unsupported_option: load_boundary where literal must be finite".to_string(),
+        )
+    })
+}
+
+fn json_values_equal(left: &Value, right: &Value) -> bool {
+    match (left.as_f64(), right.as_f64()) {
+        (Some(left), Some(right)) => left == right,
+        _ => left == right,
+    }
 }
 
 struct ClipSourceData {
@@ -538,6 +669,24 @@ struct DissolveGroup {
     properties: Map<String, Value>,
     geometries: Vec<Value>,
     input_geometry_type: String,
+}
+
+/// Fold each feature's embedded `info` CRS metadata into `seed`. Every
+/// declared CRS must agree with the collection-level metadata and with each
+/// other, so a mixed-CRS FeatureCollection raises `crs_mismatch` instead of
+/// reaching the topology backend under the collection-level declaration.
+fn merge_feature_level_crs(
+    features: &[Value],
+    seed: Option<CrsSpec>,
+    label: &str,
+) -> GisResult<Option<CrsSpec>> {
+    let mut crs = seed;
+    for feature in features {
+        if let Some(info) = feature.get("info") {
+            crs = compatible_metadata_crs(crs, crs_spec_from_info_json(info)?, label)?;
+        }
+    }
+    Ok(crs)
 }
 
 fn resolve_clip_source(source: &Value) -> GisResult<ClipSourceData> {
@@ -581,6 +730,7 @@ fn resolve_clip_source(source: &Value) -> GisResult<ClipSourceData> {
     let info = object.get("info");
     let info_crs = info.map(crs_spec_from_info_json).transpose()?.flatten();
     let metadata_crs = compatible_metadata_crs(info_crs, geojson_crs(source)?, "source")?;
+    let metadata_crs = merge_feature_level_crs(&features, metadata_crs, "source")?;
     let crs = metadata_crs.ok_or_else(|| {
         GisError::MissingCrs("missing_crs: vector source has no CRS metadata".to_string())
     })?;
@@ -651,6 +801,7 @@ fn resolve_dissolve_source(source: &Value) -> GisResult<DissolveSourceData> {
     let info = object.get("info");
     let info_crs = info.map(crs_spec_from_info_json).transpose()?.flatten();
     let crs = compatible_metadata_crs(info_crs, geojson_crs(source)?, "source")?;
+    let crs = merge_feature_level_crs(&features, crs, "source")?;
     let mut warnings = dissolve_metadata_warnings(object, info);
     if crs.is_none() {
         warning_once(
@@ -947,6 +1098,9 @@ fn load_boundary_result_value(
     geometry: Option<Value>,
     warnings: Vec<RasterWarning>,
     changed: bool,
+    source_count: usize,
+    where_clause: Option<&str>,
+    union: bool,
 ) -> GisResult<Value> {
     Ok(json!({
         "geometry": geometry.clone().unwrap_or(Value::Null),
@@ -955,7 +1109,15 @@ fn load_boundary_result_value(
             "features": source.features.clone(),
         },
         "info": vector_info_json(&source.info),
-        "operation": load_boundary_operation_json(&source.info, geometry.as_ref(), &warnings, changed),
+        "operation": load_boundary_operation_json(
+            &source.info,
+            geometry.as_ref(),
+            &warnings,
+            changed,
+            source_count,
+            where_clause,
+            union,
+        ),
         "warnings": warnings_json(&warnings),
     }))
 }
@@ -1065,6 +1227,9 @@ fn load_boundary_operation_json(
     geometry: Option<&Value>,
     warnings: &[RasterWarning],
     changed: bool,
+    source_count: usize,
+    where_clause: Option<&str>,
+    union: bool,
 ) -> Value {
     let output_geometry_type = geometry
         .map(geometry_type_from_value)
@@ -1073,9 +1238,12 @@ fn load_boundary_operation_json(
         "name": "load_boundary",
         "input_geometry_type": info.geometry_type,
         "output_geometry_type": output_geometry_type,
-        "input_count": info.feature_count,
+        "input_count": source_count,
+        "filtered_count": info.feature_count,
         "output_count": usize::from(geometry.is_some()),
         "changed": changed,
+        "where": where_clause,
+        "union": union,
         "crs": crs_json_from_info(info),
         "warnings": warnings_json(warnings),
     })
@@ -2257,14 +2425,17 @@ mod py {
         json_to_py(py, &result)
     }
 
-    #[pyfunction(name = "load_boundary", signature = (path, *, layer = None, r#where = None))]
+    #[pyfunction(name = "load_boundary", signature = (path, *, layer = None, r#where = None, union = true, dst_crs = None))]
     pub fn load_boundary_py(
         py: Python<'_>,
         path: String,
         layer: Option<String>,
         r#where: Option<String>,
+        union: bool,
+        dst_crs: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyObject> {
-        let result = load_boundary(path, layer, r#where)?;
+        let dst_crs = crate::gis::extract_crs(dst_crs)?;
+        let result = load_boundary(path, layer, r#where, union, dst_crs)?;
         json_to_py(py, &result)
     }
 

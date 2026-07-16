@@ -133,6 +133,42 @@ def test_rasterize_vectors_attribute_burn_fill_and_dtype():
     assert result["burned_pixels"] == 4
 
 
+def test_rasterize_vectors_per_feature_burn_values_and_merge_alg():
+    left = {
+        "type": "Polygon",
+        "coordinates": [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]],
+    }
+    right = {
+        "type": "Polygon",
+        "coordinates": [[[1, 1], [3, 1], [3, 3], [1, 3], [1, 1]]],
+    }
+    source = _fc([_feature(left), _feature(right)])
+
+    replaced = gis.rasterize_vectors(
+        source, _target_info(), burn_values=[2, 5], merge_alg="replace"
+    )
+    added = gis.rasterize_vectors(
+        source, _target_info(), burn_values=[2, 5], merge_alg="add"
+    )
+
+    assert replaced["array"][2, 1] == 5
+    assert added["array"][2, 1] == 7
+    assert replaced["merge_alg"] == "replace"
+    assert added["merge_alg"] == "add"
+
+
+def test_rasterize_vectors_burn_value_contract_errors():
+    source = _fc([_feature(_square()), _feature(_square())])
+    with pytest.raises(ValueError, match="burn_values length"):
+        gis.rasterize_vectors(source, _target_info(), burn_values=[1, 2, 3])
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        gis.rasterize_vectors(
+            source, _target_info(), burn_values=[1, 2], attribute="burn"
+        )
+    with pytest.raises(ValueError, match="merge_alg"):
+        gis.rasterize_vectors(source, _target_info(), merge_alg="max")
+
+
 def test_rasterize_vectors_all_touched_cell_touch_semantics():
     source = _fc([_feature(_tiny_boundary_square())])
     target = _target_info(width=3, height=3, transform=(1.0, 0.0, 0.0, 0.0, -1.0, 3.0))

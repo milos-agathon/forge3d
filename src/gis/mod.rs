@@ -709,6 +709,70 @@ pub fn calculate_default_transform_py(
 }
 
 #[cfg(feature = "extension-module")]
+#[pyfunction(name = "warped_vrt_info", signature = (source, dst_crs, *, resampling = None, resolution = None))]
+pub fn warped_vrt_info_py(
+    py: Python<'_>,
+    source: &Bound<'_, PyAny>,
+    dst_crs: &Bound<'_, PyAny>,
+    resampling: Option<&str>,
+    resolution: Option<&Bound<'_, PyAny>>,
+) -> PyResult<PyObject> {
+    use pyo3::IntoPy;
+
+    let method = warp::ResamplingMethod::parse(resampling)?;
+    let (source_info, _) = extract_raster_info_source(source)?;
+    let src_crs = crate::gis::crs::require_crs(&source_info)?;
+    let dst_crs = extract_required_crs(Some(dst_crs))?;
+    let source_bounds = crate::gis::affine::raster_bounds(&source_info)?;
+    let dst_bounds = crate::gis::crs::transform_bounds(source_bounds, &src_crs, &dst_crs)?;
+    let (width, height) = if let Some(resolution) = resolution {
+        match extract_resample_target(resolution)? {
+            warp::ResampleTarget::Shape { height, width } => (width, height),
+            warp::ResampleTarget::Resolution { x, y } => (
+                ((dst_bounds.right - dst_bounds.left) / x).ceil().max(1.0) as u32,
+                ((dst_bounds.top - dst_bounds.bottom) / y).ceil().max(1.0) as u32,
+            ),
+        }
+    } else {
+        (source_info.width, source_info.height)
+    };
+    let transform = crate::gis::affine::transform_from_bounds(dst_bounds, width, height)?;
+    let mut info = RasterInfo::new(
+        source_info.path.clone().into(),
+        width,
+        height,
+        source_info.band_count,
+    );
+    info.driver = "VRT".to_string();
+    info.dtype_per_band = source_info.dtype_per_band.clone();
+    info.crs_wkt = dst_crs.wkt.clone();
+    info.crs_authority = crate::gis::crs::authority_map(&dst_crs);
+    info.transform = Some(transform.tuple());
+    info.bounds = Some(dst_bounds.tuple());
+    info.resolution = Some(transform.resolution());
+    info.nodata_per_band = source_info.nodata_per_band.clone();
+    info.height_system = source_info.height_system.clone();
+    info.is_georeferenced = true;
+
+    let dict = PyDict::new_bound(py);
+    dict.set_item("info", raster_info_to_py_dict(py, &info)?)?;
+    dict.set_item("driver", "VRT")?;
+    dict.set_item("is_virtual", true)?;
+    dict.set_item("materialized", false)?;
+    dict.set_item("resampling", method.name())?;
+    dict.set_item(
+        "src_crs",
+        crs_inspection_to_py(py, &crate::gis::crs::inspect_crs_spec(&src_crs, "crs"))?,
+    )?;
+    dict.set_item(
+        "dst_crs",
+        crs_inspection_to_py(py, &crate::gis::crs::inspect_crs_spec(&dst_crs, "crs"))?,
+    )?;
+    dict.set_item("warnings", warnings_to_py(py, &[])?)?;
+    Ok(dict.into_py(py))
+}
+
+#[cfg(feature = "extension-module")]
 #[pyfunction(name = "read_raster_window", signature = (path, bounds_or_window, *, boundless = false, masked = false))]
 pub fn read_raster_window_py(
     py: Python<'_>,

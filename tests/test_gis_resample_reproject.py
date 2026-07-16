@@ -196,6 +196,28 @@ def test_calculate_default_transform_returns_grid_and_crs_metadata(tmp_path: Pat
     assert result["transform"][4] < 0.0
 
 
+def test_warped_vrt_info_returns_virtual_grid_without_materializing(tmp_path: Path):
+    path = tmp_path / "virtual_source.tif"
+    info = _write(
+        path,
+        np.ones((2, 2), dtype=np.float32),
+        crs="EPSG:4326",
+        transform=(1.0, 0.0, -1.0, 0.0, -1.0, 1.0),
+    )
+
+    result = gis.warped_vrt_info(info, "EPSG:3857", resampling="bilinear")
+
+    assert result["driver"] == "VRT"
+    assert result["is_virtual"] is True
+    assert result["materialized"] is False
+    assert result["resampling"] == "bilinear"
+    assert result["info"]["crs_authority"] == {"name": "EPSG", "code": "3857"}
+    assert result["info"]["width"] == 2
+    assert result["info"]["height"] == 2
+    with pytest.raises(ValueError, match="resampling_required"):
+        gis.warped_vrt_info(info, "EPSG:3857")
+
+
 def test_reprojection_failures_are_stable(tmp_path: Path):
     missing_crs = tmp_path / "missing_crs.tif"
     invalid_dst = tmp_path / "invalid_dst.tif"

@@ -12,12 +12,14 @@ use super::math::unwrap_dateline;
 use super::measure::MeasureMode;
 use super::model::{Geometry, NormalizedInput};
 
-/// Decide geographic vs planar handling from an explicit CRS. EPSG:4326 =>
-/// geographic; a known projected CRS (EPSG-coded or a custom projected-method
-/// definition) => planar; a non-WGS84 geographic CRS, a geocentric CRS, an
-/// unclassified code, or an unidentifiable CRS is a stable error (see
-/// `crs::epsg_crs_kind`).
-pub(crate) fn geographic_from_spec(spec: &CrsSpec) -> GisResult<bool> {
+/// Shared EPSG classification for the geometry surface. EPSG:4326 =>
+/// geodesic/geographic WGS84 handling; a known projected CRS (EPSG-coded or a
+/// custom projected-method definition) => planar; a non-WGS84 geographic CRS,
+/// a geocentric CRS, an unclassified code, or an unidentifiable CRS is a
+/// stable error naming `operation` (see `crs::epsg_crs_kind`). Treating a
+/// degree-axis CRS as planar would report degrees as metres, so only these
+/// two outcomes exist.
+fn classify_crs(spec: &CrsSpec, operation: &str) -> GisResult<MeasureMode> {
     use crate::gis::crs::EpsgCrsKind;
     // A custom projected-method CRS ({"method": "aea", ...} =>
     // CrsSpec::from_projection) is planar by construction: every supported
@@ -25,71 +27,46 @@ pub(crate) fn geographic_from_spec(spec: &CrsSpec) -> GisResult<bool> {
     // plane. It carries no EPSG authority, so it must be classified before
     // the EPSG-code requirement below.
     if spec.projection.is_some() {
-        return Ok(false);
+        return Ok(MeasureMode::Planar);
     }
     let Some(code) = crate::gis::crs::epsg_code(spec) else {
-        return Err(GisError::InvalidCrs(
-            "invalid_crs: geometry operation requires an EPSG-identified CRS to determine \
+        return Err(GisError::InvalidCrs(format!(
+            "invalid_crs: {operation} requires an EPSG-identified CRS to determine \
              geographic-versus-planar handling"
-                .to_string(),
-        ));
+        )));
     };
     match crate::gis::crs::epsg_crs_kind(code) {
-        EpsgCrsKind::GeographicWgs84 => Ok(true),
-        EpsgCrsKind::Projected => Ok(false),
-        // Treating a geographic CRS as planar would report degrees as metres,
-        // and only WGS84 is supported for geodesic/dateline handling.
+        EpsgCrsKind::GeographicWgs84 => Ok(MeasureMode::GeodesicWgs84),
+        EpsgCrsKind::Projected => Ok(MeasureMode::Planar),
         EpsgCrsKind::Geographic => Err(GisError::InvalidCrs(format!(
-            "invalid_crs: geographic CRS EPSG:{code} is not supported for geometry \
-             operations; only EPSG:4326 is handled geographically"
+            "invalid_crs: geographic CRS EPSG:{code} is not supported for {operation}; \
+             only EPSG:4326 is handled geographically (geodesic metres, dateline-aware)"
         ))),
         EpsgCrsKind::Geocentric => Err(GisError::InvalidCrs(format!(
             "invalid_crs: geocentric CRS EPSG:{code} has 3D Cartesian axes and is not \
-             supported for 2D geometry operations"
+             supported for {operation}"
         ))),
         EpsgCrsKind::Unclassified => Err(GisError::InvalidCrs(format!(
             "invalid_crs: EPSG:{code} is not in the built-in geographic/projected \
-             classification table; geometry operations support EPSG:4326 and the curated \
+             classification table; {operation} supports EPSG:4326 and the curated \
              projected CRSs"
         ))),
     }
+}
+
+/// Decide geographic vs planar handling from an explicit CRS.
+pub(crate) fn geographic_from_spec(spec: &CrsSpec) -> GisResult<bool> {
+    Ok(matches!(
+        classify_crs(spec, "geometry operations")?,
+        MeasureMode::GeodesicWgs84
+    ))
 }
 
 /// Resolve the measurement mode for a CRS. Geographic coordinates are only
 /// measured geodesically (metres / m²) and only for WGS84; any other
 /// geographic CRS raises rather than silently returning square degrees.
 pub fn measure_mode_for_crs(spec: &CrsSpec) -> GisResult<MeasureMode> {
-    use crate::gis::crs::EpsgCrsKind;
-    // Custom projected-method CRSs are planar by construction (see
-    // `geographic_from_spec`) and are measured in their Cartesian CRS units.
-    if spec.projection.is_some() {
-        return Ok(MeasureMode::Planar);
-    }
-    let Some(code) = crate::gis::crs::epsg_code(spec) else {
-        return Err(GisError::InvalidCrs(
-            "invalid_crs: geometry_measure requires an EPSG-identified CRS to determine \
-             measurement units"
-                .to_string(),
-        ));
-    };
-    match crate::gis::crs::epsg_crs_kind(code) {
-        EpsgCrsKind::GeographicWgs84 => Ok(MeasureMode::GeodesicWgs84),
-        EpsgCrsKind::Projected => Ok(MeasureMode::Planar),
-        // Planar math on a degree-axis CRS would report degrees as metres.
-        EpsgCrsKind::Geographic => Err(GisError::InvalidCrs(format!(
-            "invalid_crs: geometry_measure supports geodesic measurement only on EPSG:4326; \
-             geographic CRS EPSG:{code} would yield degree-based lengths/areas"
-        ))),
-        EpsgCrsKind::Geocentric => Err(GisError::InvalidCrs(format!(
-            "invalid_crs: geocentric CRS EPSG:{code} has 3D Cartesian axes and is not \
-             supported for 2D geometry measurement"
-        ))),
-        EpsgCrsKind::Unclassified => Err(GisError::InvalidCrs(format!(
-            "invalid_crs: EPSG:{code} is not in the built-in geographic/projected \
-             classification table; geometry_measure supports EPSG:4326 and the curated \
-             projected CRSs"
-        ))),
-    }
+    classify_crs(spec, "geometry_measure")
 }
 
 /// Parse the embedded (`info`-derived) CRS metadata carried on a geometry input

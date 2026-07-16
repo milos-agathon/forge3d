@@ -147,6 +147,12 @@ else:
     class DegradedCapability(RuntimeError):
         """Raised when a required GPU capability is unavailable or degraded."""
 
+if _NATIVE_MODULE is not None and hasattr(_NATIVE_MODULE, "TransformFailed"):
+    TransformFailed = _NATIVE_MODULE.TransformFailed
+else:
+    class TransformFailed(RuntimeError):
+        """Raised when GIS reprojection cannot transform one or more pixels."""
+
 
 class _NativeSymbolMissing(AttributeError):
     """Raised when a native-only forge3d symbol is accessed but unavailable.
@@ -668,6 +674,7 @@ __all__ = [
     # CENSOR: typed GPU-error exceptions
     "MemoryBudgetExceeded",
     "DegradedCapability",
+    "TransformFailed",
     # Configuration
     "RendererConfig",
     "TerrainRenderParamsConfig",

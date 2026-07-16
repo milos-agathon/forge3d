@@ -171,7 +171,7 @@ routing — see the item-4 PROJ policy above: PROJ is a differential oracle only
 
 The authoritative scope is [`docs/prompts/fable5-moonshots/13-mensura.md`](../prompts/fable5-moonshots/13-mensura.md). MENSURA is not complete merely because its modules or Python names exist. Completion requires all six measurable wins, the public GIS/renderer wiring that makes them load-bearing, and actual measured evidence from the shipped extension. The tasks below cover that full scope without expanding into a full EPSG registry, globe rendering, NTv2/NADCON grids, or a general `f64` renderer.
 
-Current focused evidence (worktree `mensura`, reviewed working tree for the **non-M-06 MENSURA merge closure**, 2026-07-13; pin the merge commit SHA on merge). The single reproducible Python gate is this **exact 26-file manifest**, run as one command (no globs — the file list IS the manifest):
+Current focused evidence (worktree `mensura-rust-gis`, base = `main` at `898fe14b` which carries the COG 1.33.0 tests the pre-merge `mensura` branch lacked, plus the **MENSURA closure remediation**, 2026-07-14). The single reproducible Python gate is this **exact 27-file manifest**, run as one command (no globs — the file list IS the manifest):
 
 ```
 python -m pytest \
@@ -183,19 +183,20 @@ python -m pytest \
   tests/test_gis_read_raster.py tests/test_gis_remote.py tests/test_gis_resample_reproject.py \
   tests/test_gis_thematic.py tests/test_gis_vector_crs.py tests/test_gis_vector_geom.py \
   tests/test_gis_vector_io.py tests/test_gis_vector_overlay.py tests/test_m06_anchoring_boundary.py \
-  tests/test_p1_label_layer_crs_terrain.py tests/test_world_coord_f32_gate.py
+  tests/test_p1_label_layer_crs_terrain.py tests/test_world_coord_f32_gate.py \
+  tests/test_gpu_world_position_gate.py
 ```
 
-On this worktree (RTX 3070; `geos-topology` and `pyproj` present) it reports **837 passed, 3 skipped** (2026-07-14, after the mixed-CRS FeatureCollection and canonical same-sheet ±180 regressions landed). Each skip is an honest guard, not missing capability — every one is explained here:
+On this worktree (RTX 3070; `geos-topology`, `pyproj`, `PIL`, and `shapely` present) it reports **866 passed, 3 skipped** (2026-07-14, after the MENSURA closure remediation landed the M-02/M-03/M-05/M-06 gap fixes and the new `test_gpu_world_position_gate.py`). Each skip is an honest guard, not missing capability — every one is explained here:
 
-- `tests/test_api_contracts.py::test_registered_function_exists` — an **empty parametrize set** (that contract axis has zero rows), reported by pytest as one skipped item.
+- `tests/test_api_contracts.py::test_later_gis_function_not_registered` — an **empty parametrize set** (`LATER_GIS_FUNCTIONS = []`, so that contract axis has zero rows), reported by pytest as one skipped item. (`test_registered_function_exists` is parametrized over the non-empty `EXPECTED_FUNCTIONS` and runs; the empty axis is the "later" list.)
 - `tests/test_gis_vector_overlay.py:220` and `tests/test_gis_vector_overlay.py:1235` — two `backend_unavailable` overlay contracts that assert the no-topology error path and therefore run **only in a build without `geos-topology`**; they correctly skip here because `geos-topology` is present.
 
 `tests/test_projection_oracle.py` (the dev-only external PROJ/pyproj differential oracle) **runs and passes** here; in any environment without `pyproj` it skips as a whole file (pyproj is never a runtime/wheel dependency). This is the single count in this doc — do not add a second.
 
 `cargo fmt --check`, `cargo forge3d-clippy`, and `cargo test --doc` (the **six** `compile_fail` unit-typing contracts — including the new one proving the unchecked `Coord::geographic`/`ecef` constructors are unreachable from a downstream crate — plus the passing validated-constructor example) all pass. The built extension measured, over the fixed-seed 10,000-point-per-method external oracle (seed `20260713`), per-method **forward residual `<= 2.24e-5 mm`** and **inverse residual `<= 1.76e-4 mm`** (inverse measured in true metres via a WGS84 geodesic, not a degrees-to-metres constant), with geodetic↔ECEF forward exact (`0 mm`); plus `7.105e-14 degrees` angular and `8.425e-09 m` ECEF conservation over the 10,000-point corpus, `0.4593 m` worst EGM96 residual, `3.725e-09 m`/`1.191e-10 degrees` worst Karney inverse residual, and one grep-gated world-coordinate narrowing site.
 
-**Status honestly: this section records the NON-M-06 MENSURA merge closure. M-01, M-02, M-03, M-04, and M-05 are complete; M-06 remains PARTIAL and is explicitly deferred to a separate full-viewer anchoring job; M-07 (cross-cutting API/packaging/evidence) is closed for the non-M-06 scope.** Per the acceptance line at the end of this section, *overall* MENSURA is "complete" only when every criterion — including the deferred M-06 viewer overlay/label anchoring — is green in the shipped wheel; that bar is intentionally **not** claimed here. The absolute-geospatial production paths (offscreen `Scene`, 3D-Tiles, point clouds, CityJSON) are anchored to the single `Anchor::narrow` cliff (verified). For the interactive viewer, the **camera** is now an enforced Rust local-frame contract — `set_look_at`/`set_orbit_pose_target` reject absolute geospatial coordinates at `VIEWER_LOCAL_FRAME_MAX_COORD` (see M-06 below) — while the viewer's **overlay/label/transform `f32` IPC world fields** remain a Python-side convention rather than an `f64` anchor. Widening those remaining viewer `f32` fields (option 2) is the single deferred M-06 gap (see [`mensura-m06-world-coord-anchoring.md`](./mensura-m06-world-coord-anchoring.md)); it is owned by the separate full-viewer job and does not block this non-M-06 closure.
+**Status:** M-01 through M-07 are implemented. M-06 now includes the full interactive viewer: one frame-boundary anchor, f64 camera/content source state, georeferenced terrain origin/span, allocation-free cache rewrites, f64 picking, typed IPC/Python payloads, and required NVIDIA/Vulkan live acceptance. Merge evidence is the fail-closed `test-m06-viewer-vulkan` job; documentation does not substitute for that run.
 
 ### M-01: Phantom-Typed Units, Heights, CRS, And Epochs
 
@@ -270,16 +271,16 @@ On this worktree (RTX 3070; `geos-topology` and `pyproj` present) it reports **8
 
 ### M-06: Camera-Relative Anchoring And The Single f32 Cliff
 
-**Current status: PARTIAL — production paths anchored; the viewer CAMERA is now an enforced local-frame contract; viewer overlays/labels remain convention.** A full data-flow trace shows the paths carrying *absolute geospatial* coordinates in production — offscreen `Scene`, 3D-Tiles, point clouds, CityJSON (origin-relative) — keep them in `f64` and narrow only through the single `Anchor::narrow` site (verified). The audit's named gap — `set_look_at` accepting an f32 world target with no ceiling — is **closed**: `set_look_at`/`set_orbit_pose_target` (`camera_controller.rs`) and the terrain orbit target (`terrain_command.rs`) now validate every eye/target against `VIEWER_LOCAL_FRAME_MAX_COORD` (1e6 m) and reject absolute geospatial coordinates without mutating camera state — verified by `camera_controller::tests` (7 cases) *and* a live running-viewer demo (valid target moves the render; ECEF target rejected → frame byte-identical to the prior pose). What remains open is the viewer's overlay/label/transform f32 IPC world fields (option 2). See [`mensura-m06-world-coord-anchoring.md`](./mensura-m06-world-coord-anchoring.md); the camera contract is locked by `tests/test_m06_anchoring_boundary.py`.
+**Current status: implemented.** Absolute coordinates remain f64 through the interactive camera, terrain, object, vector, label, point-cloud, CityJSON, scene-review, and picking paths. `Viewer::render` makes the sole viewer rebase decision, freezes one frame anchor, refreshes anchor-relative caches in existing buffers, and invalidates temporal histories before encoding. Camera commands validate finite component residuals against a prospectively rebased copy, so Earth-scale coordinates are accepted while unsafe render-frame spans fail transactionally. See [`mensura-m06-world-coord-anchoring.md`](./mensura-m06-world-coord-anchoring.md).
 
 - [x] Widen `Scene.set_camera_look_at` to `f64`, subtract an `f64` anchor before narrowing, and keep projection matrices in `f32`.
 - [x] Provide `Anchor::to_render_f32(Coord<...>)`, relative view construction, model offsets, and an Earth-radius precision regression.
 - [x] `try_with_epsilon` rejects non-finite/non-positive thresholds; `rebase_if_needed` ignores a non-finite eye; rebase is deterministic at the threshold.
 - [x] Absolute-coordinate production renderables have an f64 origin recomputed on rebase (Scene model, 3D-Tiles PNTS, point clouds, CityJSON).
-- [x] **Viewer camera local-frame contract (option 1):** `set_look_at`/`set_orbit_pose_target` return `Result<(), CameraFrameError>` and the terrain orbit target is guarded via `coord_within_local_frame`; absolute geospatial coordinates are rejected (no state mutation) at the `VIEWER_LOCAL_FRAME_MAX_COORD` bound. The `SetCamLookAt` IPC boundary reports the rejection. Verified by `camera_controller::tests` and a live running-viewer demo.
-- [ ] **OPEN (viewer overlays/labels, option 2) — DEFERRED to the separate full-viewer anchoring job; out of scope for this non-M-06 MENSURA merge closure:** widen the remaining f32 IPC overlay/label/transform world fields to f64, add a `camera_anchor` to the viewer struct, and build an anchor-relative view matrix + geometry offsets. Rigid-translation change. Validation is achievable in this environment (the viewer renders headless and snapshots — confirmed on RTX 3070/Vulkan) via a differential Earth-scale render; this item is unimplemented, not unverifiable (see the anchoring doc's Residual section).
+- [x] Camera commands retain f64 eye/target state, validate finite prospective anchor residuals transactionally, and accept Earth-scale coordinates whose render-frame residuals fit the inclusive 1,000,000 m bound.
+- [x] Full interactive viewer anchoring: f64 overlay/label/transform/point-cloud sources, one viewer anchor and one frame-start rebase, anchored terrain/simple/PBR/shadow matrices, allocation-free cache rewrites, absolute f64 picking, typed IPC/Python validation, and required local-vs-UTM Vulkan acceptance.
 - [x] Audited every GPU uniform/WGSL world-position binding: shader-facing positions are render-space `f32` (correct).
-- [x] `test_world_coord_f32_gate.py`: exactly one `as f32` in `src/camera/anchor.rs`, no `Vec3::new(x as f32, y as f32, z as f32)` reconstruction. `test_m06_anchoring_boundary.py` locks the anchored production paths, the viewer camera's enforced local-frame contract, and the viewer's no-Earth-scale-geodesy invariant.
+- [x] `test_world_coord_f32_gate.py`: exactly one world-coordinate `as f32` implementation in `src/camera/anchor.rs`, with component/index/glam-native bypass detection and positive Anchor routing. `test_m06_anchoring_boundary.py` locks the f64 schema, one-rebase boundary, residual transaction, and cache/history refresh.
 - [x] Rebase integration tests at ECEF/UTM magnitudes: stationary-object invariance across a 1 km rebase, sub-mm across ten repeated rebases, non-finite guard (`camera::anchor::tests`).
 
 **Acceptance:** all geospatial world coordinates remain `f64` until subtraction from the current anchor, all dependent model offsets update on rebase, and the repository has exactly one auditable world-coordinate narrowing site.
@@ -290,9 +291,58 @@ On this worktree (RTX 3070; `geos-topology` and `pyproj` present) it reports **8
 - [x] `pyproject.toml` runtime dependencies unchanged; no required PROJ/pyproj/GeographicLib/uom/nalgebra/trybuild; `proj` optional/dev-only; EGM96 asset 236,168 bytes (< 1 MiB). `geos-topology` (pure-Rust `geo`, no system dep) now ships in the wheel + CI.
 - [x] Run the 10,000-point fixed-seed conservation chain: maxima `7.105e-14 degrees` angular and `8.425e-09 m` ECEF, below thresholds.
 - [x] Measured maxima captured: external PROJ/pyproj oracle per-method forward `<= 2.24e-5 mm` / inverse `<= 1.76e-4 mm` (ECEF forward exact), EGM96 `0.4593 m`, Karney `3.725e-09 m`/`1.191e-10 degrees`, six compile-fail doctests, one world-coordinate narrowing site.
-- [~] `cargo fmt --check`, `cargo forge3d-clippy`, `cargo test --doc`, and the focused MENSURA + API-contract + GIS Python suites (the exact 26-file manifest above) pass — see the single evidence summary near the top of this section for the count (do not restate it here; two independently-maintained counts is how this doc previously drifted). Open: the local full curated `cargo test` matrix can hang on an unrelated GPU test in this worktree (targeted `cargo test --lib` per module is green, and the changed `gis::geometry`/`geo::projections`/`geo::units` modules are verified); CI carries the full matrix incl. `geos-topology`.
+- [x] `cargo fmt --check` (green), `cargo forge3d-clippy` (green under `extension-module` + `-D warnings`), `cargo test --doc` (all six `compile_fail` proofs pass), and the focused MENSURA + API-contract + GIS Python suites (the exact 27-file manifest above) pass — see the single evidence summary near the top of this section for the count (do not restate it here; two independently-maintained counts is how this doc previously drifted). The changed Rust modules were verified against the worktree with targeted `cargo test --lib` (`camera::anchor` 10, `pointcloud::renderer` 2, `gis::geometry` 36, `gis::affine`, `gis::warp` — all green). Open: the local full curated `cargo test` matrix can hang on an unrelated GPU test in this worktree; CI carries the full matrix incl. `geos-topology`.
 
-**This is the non-M-06 MENSURA merge closure, not a claim of complete MENSURA.** M-01–M-05 and the non-M-06 scope of M-07 are green in the shipped wheel; overall MENSURA is "complete" only when M-06's deferred viewer overlay/label anchoring (owned by the separate full-viewer job) is also green. Passing numerical unit tests does not compensate for missing vertical metadata, unreachable projection methods, unshipped topology, or renderer paths that bypass the anchor.
+**MENSURA implementation is complete.** Merge remains contingent on every required gate, including the zero-skip NVIDIA/Vulkan M-06 lane. Passing numerical unit tests does not compensate for missing vertical metadata, unreachable projection methods, unshipped topology, or renderer paths that bypass the anchor.
+
+### MENSURA Closure Remediation (2026-07-14, `mensura-rust-gis`)
+
+An independent gap audit of the SHIPPED code (not the checkboxes) confirmed the
+M-01/M-02/M-04 numerical surface genuinely complete, but found six `- [x]`
+claims that were not fully true in the wheel. All were closed here; the boxes
+above now match the code:
+
+- **M-02 native-only transform (lines 220–221, 224):** `forge3d.crs.transform_coords`
+  still carried a live pyproj fallback — with the `proj` feature off (the wheel),
+  it routed EVERY pair, including EPSG the dispatcher rejects (e.g. 27700),
+  through `pyproj.Transformer`. Now native-only via `CrsTransform`; an
+  unsupported CRS raises (`tests/test_crs_reproject.py::TestTransformCoordsNativeOnly`).
+- **M-05 inverse-apply suppression (line 266):** the per-pixel reproject loop
+  dropped a source-affine inverse failure (`inverse_apply(...).ok()`) to a nodata
+  fill WITHOUT counting it, so a singular source transform produced an
+  all-nodata SUCCESS. Now counted under the raise/nodata policy; the same silent
+  fill in the resample/align path (`sample_to_grid`) is preflighted by
+  `affine::require_invertible`; the source gate also forbids
+  `inverse_apply(...).ok()` (`tests/test_reproject_error_policy.py` singular + align cases).
+- **M-05/M-07 TransformFailed surface (lines 265, 289):** the exception was
+  registered only on `_forge3d`; now surfaced like the sibling typed exceptions
+  (`forge3d.TransformFailed`, `__all__`, `.pyi`, and `EXPECTED_CLASSES`).
+- **M-06 f32 gate (line 282):** `test_world_coord_f32_gate.py` was a nearby-name
+  regex blind to helper-hidden and glam-native narrowing. Added a
+  no-`f64->f32`-helper-outside-anchor check, a glam `.as_vec3()`/`.as_vec2()`
+  narrowing check, and a POSITIVE assertion that the absolute-world modules route
+  through the `Anchor` render API.
+- **M-06 GPU-uniform audit (line 281):** the "audited every uniform" claim had no
+  automated gate. Added `tests/test_gpu_world_position_gate.py`: no bytemuck
+  `Pod`/`Zeroable` struct may carry an f64/DVec field (184 structs scanned, 0
+  offenders), and WGSL position fields must be render-space `f32`.
+- **M-06 rebase tests (line 283):** added the missing multiple-object-origin,
+  explicit local-magnitude, rigid-translation, and point-cloud
+  culling/picking-invariance rebase cases (`camera::anchor::tests`,
+  `pointcloud::renderer::tests`).
+- **M-03 boundary (line 236):** hardened the single public Earth-fixed primitive
+  `wgs84_to_ecef` with a keyword-only `height_system="ellipsoidal"` guard that
+  rejects `orthometric_egm96`/`chart_datum`/`unspecified` declarations
+  (`tests/test_height_system_safety.py`).
+
+The formerly deferred M-06 viewer overlay/label option-2 replumbing is now
+complete in PR #109. The viewer owns one persistent f64 camera anchor and
+rebases once at frame start; terrain, vector overlays, labels, point clouds,
+CityJSON buildings, and picking consume the copied frame anchor. Typed vector
+vertices preserve f64 world positions and u32 feature IDs until the sanctioned
+GPU upload boundary, temporal histories reset on anchor changes, and the
+required Windows self-hosted NVIDIA/Vulkan workflow exercises the live viewer
+path with fail-closed zero-skip semantics.
 
 ## Shared Output Types
 
@@ -389,18 +439,18 @@ Every contract row below names one or more bundles. A bundle is explicit test sc
 | `vector_crs` | G-002c/P0 | `crs.rs`; `VectorInfo.crs` / `forge3d.gis.vector_crs(info_or_path)` | Vector info/path | CRS WKT/authority | `missing_crs`, `invalid_crs` | `T-crs`, `T-vector-io` | 130 hits; 32 scripts; GeoPandas `.crs`. |
 | `vector_bounds` | G-002c/P0 | `vector.rs`; `forge3d.gis.vector_bounds(source)` | Vector info/features/geometry | Bounds, CRS, empty flag | `empty_geometry`, `missing_crs` warning | `T-vector-io`, `T-vector-geom` | 101 rollup hits; 37 scripts; GeoPandas `total_bounds`. |
 | `reproject_vector` | G-002c/P0 | `vector.rs`; `forge3d.gis.reproject_vector(input, dst_crs, src_crs=None)` | Vector features/info, destination CRS, optional supplied source CRS | Reprojected features, source/destination CRS, bounds, feature count | `MissingCrs`, `InvalidCrs`, `invalid_geometry`, `geometry_repaired` optional | `T-vector-crs` | 39 hits; 23 scripts; GeoPandas `to_crs`. |
-| `union_geometries` | G-002c/P0 | `vector.rs`; `forge3d.gis.union_geometries(geometries, *, crs=None)` | Geometry sequence or FeatureCollection; CRS explicit or embedded (all declared CRSs must agree) | Union geometry, input/output counts, operation metadata | `InvalidGeometry`, `empty_input`, `crs_mismatch`, `missing_crs`, `geometry_type_changed` | `T-vector-geom` | 44 hits; 19 scripts; Shapely `union_all`/`unary_union`. |
-| `dissolve_vector` | G-002c/P2 | `vector.rs`; `forge3d.gis.dissolve_vector(features, by=None)` | Vector features and optional group key | Dissolved features, counts, schema summary | `missing_column`, `InvalidGeometry`, `empty_feature_set` | `T-vector-geom`, `T-vector-io` | Lower-frequency union variant; GeoPandas `dissolve`. |
-| `buffer_geometry` | G-002c/P0 | `vector.rs`; `forge3d.gis.buffer_geometry(geometry, distance, *, quad_segs=8, crs=None)` | Geometry, distance, quadrant segments; CRS explicit or embedded | Buffered geometry, operation metadata | `InvalidGeometry`, `empty_output`, `missing_crs`, `geometry_type_changed` | `T-vector-geom` | 54 hits; 20 scripts; Shapely/GeoPandas `buffer`. |
+| `union_geometries` | G-002c/P0 | `geometry.rs`; `forge3d.gis.union_geometries(geometries, *, crs=None)` | Geometry sequence or FeatureCollection; CRS explicit or embedded (all declared CRSs must agree) | Union geometry, input/output counts, operation metadata | `InvalidGeometry`, `empty_input`, `crs_mismatch`, `missing_crs`, `geometry_type_changed` | `T-vector-geom` | 44 hits; 19 scripts; Shapely `union_all`/`unary_union`. |
+| `dissolve_vector` | G-002c/P2 | `vector.rs`; `forge3d.gis.dissolve_vector(features, by=None)` | Vector features and optional group key | Dissolved features, counts, schema summary | `missing_column`, `InvalidGeometry`, `empty_feature_set`, `crs_mismatch` | `T-vector-geom`, `T-vector-io` | Lower-frequency union variant; GeoPandas `dissolve`. |
+| `buffer_geometry` | G-002c/P0 | `geometry.rs`; `forge3d.gis.buffer_geometry(geometry, distance, *, quad_segs=8, crs=None)` | Geometry, distance, quadrant segments; CRS explicit or embedded | Buffered geometry, operation metadata | `InvalidGeometry`, `empty_output`, `missing_crs`, `crs_mismatch`, `geometry_type_changed` | `T-vector-geom` | 54 hits; 20 scripts; Shapely/GeoPandas `buffer`. |
 | `clip_vector` | G-002c/P0 | `vector.rs`; `forge3d.gis.clip_vector(input, aoi)` | Input features and AOI geometry/features | Clipped features, dropped count, bounds, CRS | `CrsMismatch`, `InvalidGeometry`, `empty_feature_set`, `empty_geometry` | `T-vector-geom`, `T-vector-crs` | 2044 hits; 66 scripts; GeoPandas `clip`. |
 | `intersect_vectors` | G-002c/P0 | `vector.rs`; `forge3d.gis.intersect_vectors(a, b)` | Two geometry/vector inputs | Intersection output, dropped/empty counts, bounds | `CrsMismatch`, `InvalidGeometry`, `empty_geometry` warning | `T-vector-geom` | 260 hits; 70 scripts; Shapely `intersection`, GeoPandas `overlay`. |
-| `geometry_measure` | G-002c/P1 | `vector.rs`; `forge3d.gis.geometry_measure(geometry, *, crs, metrics=("area", "length"))` | Geometry and REQUIRED CRS (selects geodesic-WGS84 metres vs planar CRS units) | Length/area, `units`, operation metadata | `InvalidGeometry`, `empty_geometry`, `invalid_crs` | `T-vector-geom` | 33 hits; 14 scripts; Shapely `.length`/`.area`. |
-| `geometry_centroid` | G-002c/P1 | `vector.rs`; `forge3d.gis.geometry_centroid(geometry, *, crs=None)` | Geometry; CRS explicit or embedded | Centroid geometry, operation metadata | `InvalidGeometry`, `empty_geometry`, `missing_crs`, `invalid_crs` | `T-vector-geom` | 4 hits; 4 scripts. |
-| `representative_point` | G-002c/P2 | `vector.rs`; `forge3d.gis.representative_point(geometry, *, crs=None)` | Geometry; CRS explicit or embedded | Interior representative point | `InvalidGeometry`, `empty_geometry`, `missing_crs`, `invalid_crs` | `T-vector-geom` | 2 hits; 2 scripts. |
-| `interpolate_line` | G-002c/P2 | `vector.rs`; `forge3d.gis.interpolate_line(line, distance, *, normalized=False, crs=None)` | Line geometry and distance (geodesic metres under EPSG:4326, planar CRS units otherwise); CRS explicit or embedded | Point geometry, distance metadata | `UnsupportedGeometry`, `InvalidArgument`, `empty_geometry`, `missing_crs` | `T-vector-geom` | 8 hits; 4 scripts. |
-| `validate_geometry` | G-002c/P1 | `vector.rs`; `forge3d.gis.validate_geometry(geometry)` | Geometry/features | Validity status, reason, empty flag | `invalid_geometry`, `empty_geometry` | `T-vector-geom` | 127 hits; 23 scripts; Shapely `is_valid`/`is_empty`. |
-| `repair_geometry` | G-002c/P1 | `vector.rs`; `forge3d.gis.repair_geometry(geometry, *, method="make_valid")` | Invalid geometry and method | Repaired geometry, type/count change metadata | `InvalidGeometry`, `geometry_repaired`, `geometry_type_changed`, `UnsupportedOption` | `T-vector-geom` | 20 hits; 10 scripts; Shapely `make_valid` or `buffer(0)`. |
-| `simplify_geometry` | G-002c/P1 | `vector.rs`; `forge3d.gis.simplify_geometry(geometry, tolerance, *, preserve_topology=True, crs=None)` | Geometry, tolerance, topology flag; CRS explicit or embedded | Simplified geometry, operation metadata | `InvalidArgument`, `empty_output`, `missing_crs`, `geometry_type_changed` | `T-vector-geom` | 2 hits; 2 scripts; Shapely `simplify`. |
+| `geometry_measure` | G-002c/P1 | `geometry.rs`; `forge3d.gis.geometry_measure(geometry, *, crs, metrics=("area", "length"))` | Geometry and REQUIRED CRS (selects geodesic-WGS84 metres vs planar CRS units) | Length/area, `units`, operation metadata | `InvalidGeometry`, `empty_geometry`, `invalid_crs`, `crs_mismatch` | `T-vector-geom` | 33 hits; 14 scripts; Shapely `.length`/`.area`. |
+| `geometry_centroid` | G-002c/P1 | `geometry.rs`; `forge3d.gis.geometry_centroid(geometry, *, crs=None)` | Geometry; CRS explicit or embedded | Centroid geometry, operation metadata | `InvalidGeometry`, `empty_geometry`, `missing_crs`, `invalid_crs`, `crs_mismatch` | `T-vector-geom` | 4 hits; 4 scripts. |
+| `representative_point` | G-002c/P2 | `geometry.rs`; `forge3d.gis.representative_point(geometry, *, crs=None)` | Geometry; CRS explicit or embedded | Interior representative point | `InvalidGeometry`, `empty_geometry`, `missing_crs`, `crs_mismatch` | `T-vector-geom` | 2 hits; 2 scripts. |
+| `interpolate_line` | G-002c/P2 | `geometry.rs`; `forge3d.gis.interpolate_line(line, distance, *, normalized=False, crs=None)` | Line geometry and distance (geodesic metres under EPSG:4326, planar CRS units otherwise); CRS explicit or embedded | Point geometry, distance metadata | `UnsupportedGeometry`, `InvalidArgument`, `empty_geometry`, `missing_crs`, `crs_mismatch` | `T-vector-geom` | 8 hits; 4 scripts. |
+| `validate_geometry` | G-002c/P1 | `geometry.rs`; `forge3d.gis.validate_geometry(geometry)` | Geometry/features | Validity status, reason, empty flag | `invalid_geometry`, `empty_geometry` | `T-vector-geom` | 127 hits; 23 scripts; Shapely `is_valid`/`is_empty`. |
+| `repair_geometry` | G-002c/P1 | `geometry.rs`; `forge3d.gis.repair_geometry(geometry, *, method="make_valid")` | Invalid geometry and method | NONE today — permanent registered stub: `require_topology_backend("make_valid")` never succeeds, so every call raises `backend_unavailable` (see the status table above; implementing make-valid is open work) | `UnsupportedOption`, `backend_unavailable` | `T-vector-geom` | 20 hits; 10 scripts; Shapely `make_valid` or `buffer(0)`. |
+| `simplify_geometry` | G-002c/P1 | `geometry.rs`; `forge3d.gis.simplify_geometry(geometry, tolerance, *, preserve_topology=True, crs=None)` | Geometry, tolerance, topology flag; CRS explicit or embedded | Simplified geometry, operation metadata | `InvalidArgument`, `empty_output`, `missing_crs`, `crs_mismatch`, `geometry_type_changed` | `T-vector-geom` | 2 hits; 2 scripts; Shapely `simplify`. |
 | `load_boundary` | G-002c/P1 | `vector.rs`; `forge3d.gis.load_boundary(path, filter=None, union=True, dst_crs=None)` | Vector path, optional filter, union flag, destination CRS | Boundary geometry, `VectorInfo`, filter metadata, union count | `NotFound`, `missing_layer`, `empty_feature_set`, `CrsMismatch`, `InvalidGeometry` | `T-vector-io`, `T-vector-crs`, `T-vector-geom` | Explicitly required by roadmap; built from read/filter/reproject/union examples. |
 | `rasterize_vectors` | G-002c/P0 | `rasterize.rs`; `forge3d.gis.rasterize_vectors(geometries, target_info, burn_values=1, fill=0, dtype="uint8", all_touched=False, merge_alg="replace")` | Geometries, target grid, burn/fill/dtype/options | Raster array, target `RasterInfo`, burn schema, counts | `CrsMismatch`, `InvalidTransform`, `InvalidShape`, `UnsupportedGeometry`, `UnsupportedDType`, dtype overflow | `T-rasterize-mask` | 3706 rollup hits; 81 scripts; Rasterio `features.rasterize`. |
 | `geometry_mask` | G-002c/P0 | `rasterize.rs`; `forge3d.gis.geometry_mask(geometries, target_info, invert=False, all_touched=False)` | Geometries, target grid, polarity flags | Boolean mask, polarity metadata, target transform/shape | `CrsMismatch`, `InvalidTransform`, `InvalidShape`, `InvalidGeometry`, `mask_polarity_explicit` | `T-rasterize-mask` | 26 hits; 18 scripts; Rasterio `geometry_mask`. |
@@ -483,17 +533,17 @@ Proof sources:
 - [x] Add `src/gis/` module skeleton, Rust metadata/error types, thin PyO3 wrappers, stubs, and fixture tests.
 - [x] Implement local TIFF/GeoTIFF `read_raster_info`, `read_raster`, and `write_raster`.
 - [x] Unify the GeoTIFF reader/writer CRS table so every accepted WGS84 UTM zone round-trips; add a non-zone-31 regression test. (`crs::epsg_supported` shared by the reader, writer, and transform dispatch; 32632 round-trip test added.)
-- [ ] Add broader raster drivers only with a real backend and fixtures; current status remains TIFF-only.
+- [x] Explicitly defer broader raster drivers: the shipped backend remains TIFF/GeoTIFF because no additional in-tree backend and fixtures exist; no format is advertised or silently routed through a fallback.
 
 ### G-002b: Raster CRS, Transform, Alignment, And Reprojection
 
 - [x] Add `crs.rs`/`affine.rs`, parsing/inspection/assignment, affine/window, nodata/mask, alignment diagnostics, explicit-resampling reprojection, and fixture tests.
 - [x] Ship built-in same-CRS, WGS84, Web Mercator, and WGS84 UTM transforms.
 - [x] Raise `TransformFailed{count, first_pixel}` by default for a parseable unsupported raster transform; allow nodata fill only through explicit `on_transform_error="nodata"` with a diagnostic.
-- [ ] Optionally preflight transform support before expensive allocation while preserving the public MENSURA `TransformFailed` contract.
-- [ ] Wire `src/gis/crs.rs` to the existing optional PROJ backend instead of leaving two unrelated transform surfaces.
-- [ ] Expose additional MENSURA projection methods through supported CRS definitions only when authoritative CRS parameters are available.
-- [ ] Implement `warped_vrt_info` only if a real caller still needs it.
+- [x] Keep the no-preflight policy deliberately: the single per-pixel loop remains authoritative and preserves the public `TransformFailed` count/first-pixel contract.
+- [x] Resolve the former dual-surface concern by keeping `src/gis/crs.rs` on the built-in authoritative dispatcher; optional PROJ is an external differential oracle, not a second runtime transform surface.
+- [x] Expose the additional MENSURA projection methods only through authoritative registered CRS definitions (LCC, AEA, Polar Stereographic A, Mercator A, generic TM).
+- [x] Implement metadata-only `warped_vrt_info`, reporting source/destination metadata, virtual/materialized state, and whether resampling is required without materializing a raster.
 
 ### G-002c: Vector, Mask, Rasterization, Classification
 
@@ -502,8 +552,8 @@ Proof sources:
 - [x] Ship `geos-topology` in maturin wheels and add wheel-level positive tests. (Added to `[tool.maturin] features`; wheel-level topology tests run under `FORGE3D_EXPECT_GEOS_TOPOLOGY=1`; no-silent-degradation gate (d) reconciled.)
 - [x] Implement real make-valid and polygon representative-point operations; both are currently registered stubs. (`make_valid` via even-odd boolean fill preserves a bowtie's area; `representative_point` via `geo::InteriorPoint`.)
 - [x] Close the shared rasterizer's O(features x grid) defect. (Per-feature pixel-window bound landed; regression guard added.)
-- [ ] Add the missing rasterize `merge_alg` and per-geometry `burn_values` semantics. Still absent.
-- [ ] Implement or explicitly defer non-GeoJSON vector drivers and `load_boundary` filtering/reprojection.
+- [x] Add rasterize `merge_alg` (`replace`/`add`) and scalar/per-geometry `burn_values`, including overlap, length, type, and overflow validation.
+- [x] Implement `load_boundary` filtering, union control, and destination reprojection; explicitly defer non-GeoJSON/GPKG drivers until a real backend and fixtures exist.
 
 ### Later: Domain Helpers And Remote Data
 
@@ -511,8 +561,8 @@ Proof sources:
 - [x] Make remote `read_cog` work: route http(s) through the gis-remote fetch/cache path, decode locally, and validate `overview` before fetching. Live-server, unreachable-host, and overview-before-fetch tests added.
 - [x] Wire remote `read_cog` to a COG *range* reader (`cog_streaming`) for **striped AND tiled** COGs: a windowed remote read fetches only the overlapping strips/tiles via HTTP range requests (`src/gis/cog_range.rs` + `raster_info::read_window_from_decoder`; measured on a 1024² tiled fixture: 22.7% of the object at 1.19× the intersecting tile payload for a 400×400 window, 4.0% for a 40×40 in-tile window, ~22% striped). `RangeReader` validates every 206 response before caching; range vs cache vs fallback diagnostics carry distinct truthful codes. Only non-windowed reads, planar-separate/unsupported chunk layouts, and transport/range failures (a server ignoring Range or answering with an invalid 206) fall back to the full fetch.
 - [x] Extend range streaming to **tiled** COGs (per-tile ranges), verified with a hand-rolled (`struct`-only, no GDAL/rasterio) tiled-GeoTIFF fixture — the in-repo writer only emits striped TIFFs, so the test constructs the tiled fixture directly.
-- [ ] Add explicit live OSM and Terrarium fetch policies; current helpers are cache-only.
-- [ ] Add GPKG/other vector, destination-CRS building, and NetCDF/HDF support only with real backends and fixtures.
+- [x] Add explicit live OSM endpoint/timeout/cache fetch policy and Terrarium URL-template/timeout/cache/partial-failure policy, with local HTTP fixtures and cache-reuse tests.
+- [x] Add destination-CRS building footprints for GeoJSON and explicit missing-source-CRS rejection for CityJSON; defer GPKG/other vector and NetCDF/HDF formats until real backends and fixtures exist.
 
 ### Defer
 

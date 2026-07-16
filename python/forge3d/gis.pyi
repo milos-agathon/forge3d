@@ -286,6 +286,8 @@ def load_boundary(
     *,
     layer: str | None = ...,
     where: str | None = ...,
+    union: bool = ...,
+    dst_crs: str | int | dict[str, Any] | None = ...,
 ) -> dict[str, Any]: ...
 
 
@@ -295,9 +297,11 @@ def rasterize_vectors(
     *,
     value: float = ...,
     attribute: str | None = ...,
+    burn_values: float | list[float] | tuple[float, ...] | None = ...,
     dtype: str = ...,
     fill: float = ...,
     all_touched: bool = ...,
+    merge_alg: str = ...,
 ) -> dict[str, Any]: ...
 
 
@@ -526,6 +530,15 @@ def calculate_default_transform(
 ) -> dict[str, Any]: ...
 
 
+def warped_vrt_info(
+    source: os.PathLike[str] | str | RasterInfo,
+    dst_crs: str | int | dict[str, Any],
+    *,
+    resampling: str | None = ...,
+    resolution: float | tuple[float, float] | tuple[int, int] | dict[str, Any] | None = ...,
+) -> dict[str, Any]: ...
+
+
 def window_from_bounds(
     info_or_path: os.PathLike[str] | str | RasterInfo,
     bounds: tuple[float, float, float, float] | dict[str, Any],
@@ -591,6 +604,9 @@ def query_osm_features(
     aoi: tuple[float, float, float, float],
     tags: dict[str, Any],
     cache: dict[str, Any] | None = ...,
+    *,
+    endpoint: str | None = ...,
+    timeout: float | None = ...,
 ) -> dict[str, Any]: ...
 
 
@@ -610,6 +626,9 @@ def prepare_osm_scene(
     aoi: tuple[float, float, float, float],
     tags: dict[str, Any] | None = ...,
     cache: dict[str, Any] | None = ...,
+    *,
+    endpoint: str | None = ...,
+    timeout: float | None = ...,
 ) -> dict[str, Any]: ...
 
 
@@ -646,6 +665,9 @@ def build_terrarium_dem(
     bounds: tuple[float, float, float, float],
     zoom: int,
     cache: os.PathLike[str] | str | dict[str, Any] | None = ...,
+    *,
+    url_template: str | None = ...,
+    timeout: float | None = ...,
 ) -> dict[str, Any]: ...
 
 

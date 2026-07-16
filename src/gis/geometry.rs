@@ -45,6 +45,27 @@ pub(crate) struct PolygonalClipMask {
     geometry: Geometry,
 }
 
+/// Canonical ±180 contract: EVERY geographic output is split at the
+/// antimeridian with longitudes wrapped into [-180, 180] — including outputs
+/// from same-sheet inputs (e.g. 175..185) that never needed unwrapping.
+/// Planar outputs pass through untouched.
+fn canonical_output(geometry: Geometry, geographic: bool) -> Geometry {
+    if geographic {
+        antimeridian::split_at_antimeridian(&geometry)
+    } else {
+        geometry
+    }
+}
+
+/// Point-output companion of `canonical_output`: geographic longitudes are
+/// wrapped into (-180, 180].
+fn canonical_point(mut point: Coord, geographic: bool) -> Coord {
+    if geographic {
+        point.x = math::wrap_lon(point.x);
+    }
+    point
+}
+
 pub fn validate_geometry(source: &Value) -> GisResult<Value> {
     Ok(validate_geometry_value(source))
 }
@@ -146,13 +167,10 @@ pub fn representative_point(source: &Value, crs: Option<CrsSpec>) -> GisResult<V
         .ok_or_else(model::empty_geometry_error)?;
     let geographic = resolve_geographic(&input, crs.as_ref())?;
     let (geometries, _) = dateline_normalized(core::slice::from_ref(geometry), geographic);
-    let mut point = representative_for_geometry(&geometries[0], geographic)?;
-    if geographic {
-        // Canonical output contract: geographic longitudes always land in
-        // (-180, 180], even when the input was authored on one continuous
-        // sheet (e.g. 175..185) and never needed unwrapping.
-        point.x = math::wrap_lon(point.x);
-    }
+    let point = canonical_point(
+        representative_for_geometry(&geometries[0], geographic)?,
+        geographic,
+    );
     let operation = operation_value(
         "representative_point",
         &input.input_geometry_type,
@@ -201,11 +219,7 @@ pub fn interpolate_line(
         )));
     }
     let target = normalized_target_distance(distance, normalized, total)?;
-    let mut point = interpolate_lines(&lines, target, geographic)?;
-    if geographic {
-        // Canonical output contract: see `representative_point`.
-        point.x = math::wrap_lon(point.x);
-    }
+    let point = canonical_point(interpolate_lines(&lines, target, geographic)?, geographic);
     let operation = operation_value(
         "interpolate_line",
         &input.input_geometry_type,
@@ -249,13 +263,7 @@ pub fn union_geometries(source: &Value, crs: Option<CrsSpec>) -> GisResult<Value
     validate_input_or_error(&input)?;
     let geographic = resolve_geographic(&input, crs.as_ref())?;
     let (geometries, _) = dateline_normalized(&input.geometries, geographic);
-    let mut geometry = union_polygonal(&geometries)?;
-    if geographic {
-        // Canonical ±180 contract: EVERY geographic output is split at the
-        // antimeridian with longitudes wrapped into (-180, 180], including
-        // same-sheet inputs (175..185) that never needed unwrapping.
-        geometry = antimeridian::split_at_antimeridian(&geometry);
-    }
+    let geometry = canonical_output(union_polygonal(&geometries)?, geographic);
     let output_geometry_type = geometry.geometry_type();
     let type_changed = output_geometry_type != input.input_geometry_type;
     let warnings = if type_changed {
@@ -317,20 +325,16 @@ pub fn buffer_geometry(
     // topology output.
     if distance == 0.0 && matches!(geometry, Geometry::Polygon(_) | Geometry::MultiPolygon(_)) {
         let (mut geometries, _) = dateline_normalized(core::slice::from_ref(geometry), geographic);
-        let mut output = geometries.remove(0);
-        if geographic {
-            // Canonical ±180 contract (see `union_geometries`).
-            output = antimeridian::split_at_antimeridian(&output);
-        }
+        let output = canonical_output(geometries.remove(0), geographic);
         let changed = &output != geometry;
         return buffer_geometry_output(&input, output, changed);
     }
 
     let (geometries, _) = dateline_normalized(core::slice::from_ref(geometry), geographic);
-    let mut output = buffer_topology(&geometries[0], distance, quad_segs as usize)?;
-    if geographic {
-        output = antimeridian::split_at_antimeridian(&output);
-    }
+    let output = canonical_output(
+        buffer_topology(&geometries[0], distance, quad_segs as usize)?,
+        geographic,
+    );
     buffer_geometry_output(&input, output, true)
 }
 
@@ -354,11 +358,10 @@ pub fn simplify_geometry(
         .ok_or_else(model::empty_geometry_error)?;
     let geographic = resolve_geographic(&input, crs.as_ref())?;
     let (geometries, _) = dateline_normalized(core::slice::from_ref(geometry), geographic);
-    let mut output = simplify_topology(&geometries[0], tolerance, preserve_topology)?;
-    if geographic {
-        // Canonical ±180 contract (see `union_geometries`).
-        output = antimeridian::split_at_antimeridian(&output);
-    }
+    let output = canonical_output(
+        simplify_topology(&geometries[0], tolerance, preserve_topology)?,
+        geographic,
+    );
     simplify_geometry_output(&input, output, &input.crs)
 }
 
@@ -436,11 +439,7 @@ pub(crate) fn union_polygonal_geometry_values(
         geometries.push(geometry.clone());
     }
     let (geometries, _) = dateline_normalized(&geometries, geographic);
-    let mut output = union_polygonal(&geometries)?;
-    if geographic {
-        // Canonical ±180 contract (see `union_geometries`).
-        output = antimeridian::split_at_antimeridian(&output);
-    }
+    let output = canonical_output(union_polygonal(&geometries)?, geographic);
     if output.is_empty() {
         Ok(None)
     } else {
@@ -491,13 +490,13 @@ fn intersect_polygonal_geometry_values_for_operation(
             math::align_parts_to_sheet(&mut both[1], reference);
         }
     }
-    let mut output = intersection_polygonal(&both[0], &both[1], operation)?;
-    if geographic {
-        // Canonical ±180 contract: split unconditionally — two operands on
-        // the SAME non-canonical sheet (both 175..185) need neither unwrap
-        // nor sheet alignment, yet their result still crosses ±180.
-        output = antimeridian::split_at_antimeridian(&output);
-    }
+    // Canonicalize unconditionally — two operands on the SAME non-canonical
+    // sheet (both 175..185) need neither unwrap nor sheet alignment, yet
+    // their result still crosses ±180.
+    let output = canonical_output(
+        intersection_polygonal(&both[0], &both[1], operation)?,
+        geographic,
+    );
     if output.is_empty() {
         Ok(None)
     } else {

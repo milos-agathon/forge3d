@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use serde_json::{json, Map, Value};
 
@@ -136,6 +137,8 @@ pub fn query_osm_features_value(
     aoi: RasterBounds,
     tags: &Value,
     cache: Option<&Value>,
+    endpoint: Option<&str>,
+    timeout: Option<f64>,
 ) -> GisResult<Value> {
     let query = overpass_query(aoi, tags)?;
     if let Some(payload) = cache.and_then(|cache| cache.get("osm_json")) {
@@ -157,9 +160,57 @@ pub fn query_osm_features_value(
         out.insert("warnings".to_string(), Value::Array(Vec::new()));
         return Ok(Value::Object(out));
     }
-    Err(GisError::BackendUnavailable(
-        "backend_unavailable: explicit Overpass endpoint or cache payload required; no hidden default downloads".to_string(),
-    ))
+    let endpoint = endpoint
+        .or_else(|| cache.and_then(|cache| cache.get("endpoint")).and_then(Value::as_str))
+        .ok_or_else(|| {
+            GisError::BackendUnavailable(
+                "backend_unavailable: explicit Overpass endpoint or cache payload required; no hidden default downloads".to_string(),
+            )
+        })?;
+    crate::gis::remote::ensure_remote_url(endpoint)?;
+    let separator = if endpoint.contains('?') { '&' } else { '?' };
+    let url = format!("{endpoint}{separator}data={}", percent_encode_query(&query));
+    let cache_dir = cache
+        .and_then(|cache| cache.get("cache_dir"))
+        .and_then(Value::as_str)
+        .map(PathBuf::from);
+    let (bytes, remote) =
+        crate::gis::remote::fetch_remote_geodata_payload(&url, cache_dir.as_deref(), timeout)?;
+    let osm_json = serde_json::from_slice::<Value>(&bytes).map_err(|err| {
+        GisError::InvalidArgument(format!("malformed_payload: invalid OSM JSON: {err}"))
+    })?;
+    if osm_json.get("elements").and_then(Value::as_array).is_none() {
+        return Err(GisError::InvalidArgument(
+            "malformed_payload: Overpass response must include an elements array".to_string(),
+        ));
+    }
+    Ok(json!({
+        "osm_json": osm_json,
+        "query": query,
+        "bounds": aoi.tuple(),
+        "remote": {
+            "url": remote.url,
+            "status": remote.status,
+            "from_cache": remote.from_cache,
+            "cache_path": remote.cache_path,
+            "byte_size": remote.byte_size,
+            "checksum": remote.checksum,
+        },
+        "warnings": warnings_to_json(&remote.warnings),
+    }))
+}
+
+fn percent_encode_query(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 fn overpass_query(aoi: RasterBounds, tags: &Value) -> GisResult<String> {
@@ -328,12 +379,14 @@ mod py {
         json_to_py(py, &result)
     }
 
-    #[pyfunction(name = "query_osm_features", signature = (aoi, tags, cache = None))]
+    #[pyfunction(name = "query_osm_features", signature = (aoi, tags, cache = None, *, endpoint = None, timeout = None))]
     pub fn query_osm_features_py(
         py: Python<'_>,
         aoi: (f64, f64, f64, f64),
         tags: &Bound<'_, PyAny>,
         cache: Option<&Bound<'_, PyAny>>,
+        endpoint: Option<String>,
+        timeout: Option<f64>,
     ) -> PyResult<PyObject> {
         let aoi = validate_bounds_tuple(aoi, true)?;
         let tags = py_to_json(tags)?;
@@ -358,7 +411,9 @@ mod py {
             })
             .transpose()?
             .flatten();
-        let result = query_osm_features_value(aoi, &tags, cache.as_ref())?;
+        let result = py.allow_threads(|| {
+            query_osm_features_value(aoi, &tags, cache.as_ref(), endpoint.as_deref(), timeout)
+        })?;
         json_to_py(py, &result)
     }
 }

@@ -27,6 +27,7 @@ pub(crate) use crate::gis::raster_read::read_raster_data;
 pub(crate) use crate::gis::raster_values::{
     copy_window, f64_to_raster_data, raster_to_f64, valid_mask,
 };
+#[cfg(feature = "cog_streaming")]
 pub(crate) use crate::gis::raster_window::read_window_from_decoder;
 
 #[derive(Debug, Clone)]
@@ -159,14 +160,11 @@ pub(crate) fn raster_info_from_decoder<R: std::io::Read + std::io::Seek>(
         ));
     }
 
-    // A valid affine transform without CRS is still a usable, unlabeled
-    // Cartesian world transform. CRS presence describes authority metadata;
-    // it is not required for coordinate anchoring.
-    info.is_georeferenced = info.transform.is_some();
+    info.is_georeferenced = has_crs && info.transform.is_some();
     if !info.is_georeferenced {
         info.warnings.push(RasterWarning::new(
             WARNING_NOT_GEOREFERENCED,
-            "raster has no valid affine transform",
+            "raster is not fully georeferenced",
             None,
         ));
     }
@@ -517,6 +515,47 @@ mod tests {
             RasterData::U8(values) => assert_eq!(values, vec![99, 12, 14, 99]),
             other => panic!("unexpected dtype: {:?}", other),
         }
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn read_raster_info_preserves_projected_epsg_outside_legacy_three_code_subset() {
+        let path = temp_tif("epsg_2154_metadata");
+        let array = RasterArray::new(RasterData::U8(vec![1, 2, 3, 4]), &[1, 2, 2])
+            .expect("test raster shape");
+        write_raster(
+            &path,
+            array,
+            WriteRasterOptions {
+                crs: Some(CrsSpec::from_string("EPSG:2154".to_string()).expect("valid crs")),
+                transform: Some(
+                    AffineTransform::new([2.0, 0.0, 700_000.0, 0.0, -2.0, 6_600_000.0])
+                        .expect("valid transform"),
+                ),
+                nodata: vec![None],
+                driver: "GTiff".to_string(),
+                overwrite: true,
+                creation_options: CreationOptions::default(),
+                creation_options_explicit: false,
+                like_info: None,
+                height_system: crate::gis::types::HEIGHT_SYSTEM_UNSPECIFIED.to_string(),
+            },
+        )
+        .expect("write metadata fixture");
+
+        let info = read_raster_info(&path).expect("read arbitrary authority metadata");
+        assert_eq!(
+            info.crs_authority,
+            Some(std::collections::HashMap::from([
+                ("name".to_string(), "EPSG".to_string()),
+                ("code".to_string(), "2154".to_string()),
+            ]))
+        );
+        assert!(
+            info.crs_wkt.is_none(),
+            "metadata reader must not synthesize WKT"
+        );
 
         let _ = fs::remove_file(path);
     }

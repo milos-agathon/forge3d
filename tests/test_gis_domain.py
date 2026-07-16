@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import struct
+import threading
 import zlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import numpy as np
@@ -96,6 +98,10 @@ def test_load_building_footprints_geojson_cityjson_and_height_extraction(tmp_pat
     assert heights["heights_m"][0] == pytest.approx(3.6576)
     assert heights["attributes"][0] == "height"
 
+    projected = gis.load_building_footprints(_fc([building]), dst_crs="EPSG:3857")
+    assert projected["crs"]["authority"] == {"name": "EPSG", "code": "3857"}
+    assert projected["bounds"][2] > 100_000
+
     cityjson = {
         "type": "CityJSON",
         "vertices": [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 0, 0]],
@@ -110,6 +116,8 @@ def test_load_building_footprints_geojson_cityjson_and_height_extraction(tmp_pat
     cityjson_result = gis.load_building_footprints(cityjson)
     assert cityjson_result["feature_count"] == 1
     assert cityjson_result["features"][0]["properties"]["measuredHeight"] == 8
+    with pytest.raises(ValueError, match="missing_crs"):
+        gis.load_building_footprints(cityjson, dst_crs="EPSG:3857")
 
     gpkg = tmp_path / "buildings.gpkg"
     gpkg.write_bytes(b"not really gpkg")
@@ -157,6 +165,54 @@ def test_build_terrarium_dem_from_explicit_cached_tile(tmp_path: Path):
 
     with pytest.raises(RuntimeError, match="cache_miss|missing_tile"):
         gis.build_terrarium_dem((-10.0, -10.0, 10.0, 10.0), 0, cache={"cache_dir": tmp_path / "empty"})
+
+
+def test_build_terrarium_dem_fetches_explicit_url_template_and_caches(tmp_path: Path):
+    tile = tmp_path / "source.png"
+    _write_png(tile, np.array([[[128, 0, 0], [128, 1, 0]]], dtype=np.uint8))
+    body = tile.read_bytes()
+
+    class Handler(BaseHTTPRequestHandler):
+        requests = 0
+
+        def do_GET(self):
+            type(self).requests += 1
+            assert self.path == "/0/0/0.png"
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    cache_dir = tmp_path / "cache"
+    template = f"http://127.0.0.1:{server.server_port}/{{z}}/{{x}}/{{y}}.png"
+    try:
+        fetched = gis.build_terrarium_dem(
+            (-10.0, -10.0, 10.0, 10.0),
+            0,
+            cache={"cache_dir": str(cache_dir)},
+            url_template=template,
+            timeout=2.0,
+        )
+        cached = gis.build_terrarium_dem(
+            (-10.0, -10.0, 10.0, 10.0),
+            0,
+            cache={"cache_dir": str(cache_dir)},
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+    np.testing.assert_array_equal(fetched["array"], cached["array"])
+    assert fetched["manifest"][0]["status"] == "fetched"
+    assert cached["manifest"][0]["status"] == "hit"
+    assert Handler.requests == 1
 
 
 def test_read_gridded_dataset_and_subset_grid(tmp_path: Path):

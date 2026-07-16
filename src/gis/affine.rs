@@ -227,6 +227,25 @@ pub fn translated_transform(
     ])
 }
 
+/// Reject a source transform whose linear part is singular (det ~ 0) up front.
+///
+/// A singular transform cannot be inverted, so a resample/align that mapped
+/// destination pixels back through it would silently fill EVERY pixel with
+/// nodata and report success. Callers that resample without a per-pixel
+/// raise/nodata policy (e.g. `align_raster_to`) preflight this so the failure
+/// is an explicit `InvalidTransform`, never a silent all-nodata output.
+pub fn require_invertible(transform: AffineTransform) -> GisResult<()> {
+    let det = transform.a * transform.e - transform.b * transform.d;
+    if !det.is_finite() || det.abs() <= f64::EPSILON {
+        return Err(GisError::InvalidTransform(
+            "invalid_transform: source transform is singular (non-invertible); \
+             its linear part has a zero determinant"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn inverse_apply(transform: AffineTransform, x: f64, y: f64) -> GisResult<(f64, f64)> {
     let det = transform.a * transform.e - transform.b * transform.d;
     if !det.is_finite() || det.abs() <= f64::EPSILON {

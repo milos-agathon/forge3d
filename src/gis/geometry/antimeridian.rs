@@ -80,6 +80,14 @@ fn split_line(pts: &[Coord]) -> Vec<Vec<Coord>> {
         }
     }
     segments.push(cur);
+    // A line TOUCHING ±180 at a vertex is not a crossing, but the per-vertex
+    // wrap flips an exact -180 endpoint to +180 and the cut then lands at
+    // t = 0 or 1, leaving a zero-length piece. Drop such degenerate pieces so
+    // the touching line comes back whole.
+    segments.retain(|seg| seg.len() >= 2 && seg.windows(2).any(|w| w[0] != w[1]));
+    if segments.is_empty() {
+        return vec![wrap_all(pts)];
+    }
     segments
 }
 
@@ -176,6 +184,21 @@ fn normalize_piece(ring: Vec<Coord>) -> Vec<Coord> {
         .collect()
 }
 
+/// Coherent single-polygon fallback for a ring that wrapped edges flagged as
+/// "crossing" but that straddles no antimeridian copy: each ring is unwrapped
+/// onto its own continuous sheet, then shifted by a whole 360° multiple into
+/// [-180, 180]. The naive per-vertex wrap would flip an exact -180 boundary
+/// vertex to +180 and fabricate a world-spanning edge — a [-180, -175] ring
+/// touches the antimeridian but does not cross it.
+fn coherent_polygon(rings: &[Vec<Coord>]) -> Geometry {
+    Geometry::Polygon(
+        rings
+            .iter()
+            .map(|ring| normalize_piece(unwrap_ring(ring)))
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 fn signed_area(ring: &[Coord]) -> f64 {
     let mut s = 0.0;
@@ -204,7 +227,8 @@ fn split_polygon(rings: &[Vec<Coord>]) -> Geometry {
     let k = ((minx - 180.0) / 360.0).floor() as i64 + 1;
     let m = 180.0 + 360.0 * k as f64;
     if !(m > minx && m < maxx) {
-        return Geometry::Polygon(wrapped());
+        // Touches (or merely wraps incoherently at) ±180 without crossing.
+        return coherent_polygon(rings);
     }
     let west = clip_ring(&outer, m, true).map(normalize_piece);
     let east = clip_ring(&outer, m, false).map(normalize_piece);
@@ -216,7 +240,8 @@ fn split_polygon(rings: &[Vec<Coord>]) -> Geometry {
         sides.push((vec![e], 1.0)); // east sits above it
     }
     if sides.len() < 2 {
-        return Geometry::Polygon(wrapped());
+        // One side degenerated to a sliver on the meridian: not a real split.
+        return coherent_polygon(rings);
     }
     // Assign each hole to the side(s) it clips into, preserving hole winding.
     for hole in &rings[1..] {
@@ -382,6 +407,52 @@ mod tests {
         ];
         let g = split_at_antimeridian(&Geometry::Polygon(vec![ring.clone()]));
         assert_eq!(g, Geometry::Polygon(vec![ring]));
+    }
+
+    #[test]
+    fn polygon_touching_minus_180_is_identity() {
+        // A [-180, -175] ring TOUCHES the antimeridian without crossing it.
+        // The naive per-vertex wrap flipped the exact -180 vertices to +180
+        // and returned a ring with a 355° edge (the world-spanning
+        // complement); the coherent fallback must return it unchanged.
+        let ring = vec![
+            c(-180.0, 10.0),
+            c(-175.0, 10.0),
+            c(-175.0, -10.0),
+            c(-180.0, -10.0),
+            c(-180.0, 10.0),
+        ];
+        let g = split_at_antimeridian(&Geometry::Polygon(vec![ring.clone()]));
+        assert_eq!(g, Geometry::Polygon(vec![ring]));
+    }
+
+    #[test]
+    fn polygon_touching_plus_180_is_identity() {
+        let ring = vec![
+            c(175.0, 10.0),
+            c(180.0, 10.0),
+            c(180.0, -10.0),
+            c(175.0, -10.0),
+            c(175.0, 10.0),
+        ];
+        let g = split_at_antimeridian(&Geometry::Polygon(vec![ring.clone()]));
+        assert_eq!(g, Geometry::Polygon(vec![ring]));
+    }
+
+    #[test]
+    fn line_touching_minus_180_is_not_split() {
+        // Same boundary case for polylines: the cut would land at t = 0 and
+        // leave a zero-length piece; the line must come back whole.
+        let g = split_at_antimeridian(&Geometry::LineString(vec![c(-180.0, 0.0), c(-175.0, 1.0)]));
+        assert_eq!(
+            g,
+            Geometry::LineString(vec![c(-180.0, 0.0), c(-175.0, 1.0)])
+        );
+        let g = split_at_antimeridian(&Geometry::LineString(vec![c(-175.0, 1.0), c(-180.0, 0.0)]));
+        assert_eq!(
+            g,
+            Geometry::LineString(vec![c(-175.0, 1.0), c(-180.0, 0.0)])
+        );
     }
 
     #[test]

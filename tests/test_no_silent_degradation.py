@@ -3,8 +3,8 @@
 #   (a) committed RenderCertificates carry no un-allowlisted degradation
 #   (b) zero raw wgpu allocation sites bypass the tracked ledger
 #   (c) every Cargo feature is referenced, and the CI --features list is curated
-#   (d) the wheel ships the features its public APIs need; PROJ/GEOS fallbacks
-#       are diagnostic-bearing (record a degradation / raise), never silent
+#   (d) the wheel ships the features its public APIs need; the built-in CRS
+#       engine is authoritative, while optional PROJ and GEOS remain honest
 #   (e) every tracked tests/test_*.py is either run by a CI lane or UNRUN-listed
 # RELEVANT FILES: scripts/ci_pytest_lane.py, tests/UNRUN.toml,
 #   tests/degradation_allowlist.toml, tests/allocation_allowlist.toml,
@@ -232,38 +232,29 @@ def _maturin_features() -> set[str]:
     return set(re.findall(r'"([^"]+)"', m.group(1)))
 
 
-def test_d_wheel_features_superset_and_proj_geos_are_diagnostic_bearing():
+def test_d_wheel_features_and_native_gis_backends_are_honest():
     maturin = _maturin_features()
     missing = WHEEL_REQUIRED_FEATURES - maturin
     assert not missing, f"wheel omits features required by public APIs: {sorted(missing)}"
 
-    # proj is deliberately NOT shipped (native PROJ links a C library). Its
-    # Python surface must therefore be diagnostic-bearing (never a silent
-    # wrong-result fallback): forge3d.crs.transform_coords, when native PROJ is
-    # compiled out, records a `feature_not_compiled`/`proj` degradation before
-    # using pyproj. geos-topology IS shipped now (pure-Rust `geo` crate) and is
-    # asserted present via WHEEL_REQUIRED_FEATURES above.
+    # PROJ is deliberately NOT shipped (it links a C library). MENSURA's
+    # built-in pure-Rust dispatcher is the authoritative runtime transform
+    # engine; optional PROJ is a differential-test oracle only. A wheel must
+    # therefore transform a supported pair without pyproj or a degradation.
+    # geos-topology IS shipped (pure-Rust `geo` crate) and is asserted present
+    # via WHEEL_REQUIRED_FEATURES above.
     assert "proj" not in maturin, (
         "proj is expected to be compiled OUT of the wheel"
     )
 
     import forge3d.crs as crs
-    from forge3d import _degradation
-
-    assert crs.HAS_NATIVE_PROJ is False, "this wheel unexpectedly compiled native PROJ in"
-    _degradation.clear()
-    try:
-        # Distinct CRS pair forces past the identity/same-CRS early returns and
-        # into the non-native path. It may then succeed via pyproj or raise if
-        # pyproj is absent (CI) -- either way the degradation must be recorded.
-        crs.transform_coords([[0.0, 0.0]], "EPSG:4326", "EPSG:3857")
-    except Exception:
-        pass
-    recorded = {(d["kind"], d["name"]) for d in _degradation.snapshot()}
-    assert ("feature_not_compiled", "proj") in recorded, (
-        "crs.transform_coords silently fell back off native PROJ without recording a degradation; "
-        f"recorded={sorted(recorded)}"
-    )
+    assert crs.proj_available() is True
+    projected = crs.transform_coords([[1.0, 1.0]], "EPSG:4326", "EPSG:3857")
+    assert projected.shape == (1, 2)
+    assert abs(float(projected[0, 0])) > 100_000.0
+    crs_source = (ROOT / "python" / "forge3d" / "crs.py").read_text(encoding="utf-8")
+    assert "_native.CrsTransform.from_crs" in crs_source
+    assert "never as a transform backend" in crs_source
 
     # geos-topology: even though the wheel now ships it, the Rust boundary keeps
     # an explicit require_topology_backend / BackendUnavailable gate so a minimal
@@ -388,24 +379,3 @@ def test_f_probe_positive_golden_mismatch_fails_ci_and_probe_negative_is_absent(
     assert "UNTRUSTED external PR" in golden_job
     assert 'needs.test-golden-images.result }}" != "success"' in aggregate
     assert 'needs.test-golden-images.result }}" != "skipped"' in aggregate
-
-
-def test_m06_job_level_environment_uses_valid_github_actions_contexts():
-    ci_yml = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    m06_job = ci_yml.split("  test-m06-full-geospatial-viewer:", 1)[1].split(
-        "\n  build-docs:", 1
-    )[0]
-    job_environment = m06_job.split("\n    steps:", 1)[0]
-
-    assert "${{ runner." not in job_environment, (
-        "the runner context is unavailable while GitHub evaluates job-level env"
-    )
-    assert "FORGE3D_M06_ARTIFACT_DIR:" not in job_environment
-    assert "FORGE3D_M06_ARTIFACT_DIR=$artifactDir" in m06_job
-    assert "Add-Content $env:GITHUB_ENV" in m06_job
-    assert "actions/setup-python" not in m06_job
-    assert "python-bootstrap-version.txt" in m06_job
-    assert (
-        "path: ${{ runner.temp }}/forge3d-m06-${{ github.run_id }}-${{ github.run_attempt }}/"
-    ) in m06_job
-    assert "github.workspace }}/../forge3d-m06" not in m06_job

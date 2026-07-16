@@ -32,6 +32,10 @@ pub fn decode_terrarium_rgb(data: &[u8], height: usize, width: usize) -> GisResu
 
 pub fn decode_terrarium_png(path: &Path) -> GisResult<RasterArray> {
     let bytes = std::fs::read(path)?;
+    decode_terrarium_png_bytes(&bytes)
+}
+
+pub fn decode_terrarium_png_bytes(bytes: &[u8]) -> GisResult<RasterArray> {
     let image = image::load_from_memory(&bytes)
         .map_err(|err| GisError::InvalidRaster(format!("malformed_payload: invalid PNG: {err}")))?
         .to_rgb8();
@@ -87,18 +91,33 @@ mod py {
         terrarium_result_to_py(py, &array, Vec::new())
     }
 
-    #[pyfunction(name = "build_terrarium_dem", signature = (bounds, zoom, cache = None))]
+    #[pyfunction(name = "build_terrarium_dem", signature = (bounds, zoom, cache = None, *, url_template = None, timeout = None))]
     pub fn build_terrarium_dem_py(
         py: Python<'_>,
         bounds: (f64, f64, f64, f64),
         zoom: i64,
         cache: Option<&Bound<'_, PyAny>>,
+        url_template: Option<String>,
+        timeout: Option<f64>,
     ) -> PyResult<PyObject> {
-        let cache_dir = cache_dir(cache)?.ok_or_else(|| {
-            GisError::InvalidRaster(
+        let (cache_dir, cached_template) = cache_policy(cache)?;
+        let url_template = url_template.or(cached_template);
+        if cache_dir.is_none() && url_template.is_none() {
+            return Err(GisError::InvalidRaster(
                 "cache_miss: build_terrarium_dem requires cache_dir with explicit cached tiles or url_template".to_string(),
             )
-        })?;
+            .into());
+        }
+        if let Some(template) = url_template.as_deref() {
+            for placeholder in ["{z}", "{x}", "{y}"] {
+                if !template.contains(placeholder) {
+                    return Err(GisError::InvalidArgument(format!(
+                        "invalid_argument: Terrarium url_template is missing {placeholder}"
+                    ))
+                    .into());
+                }
+            }
+        }
         let bounds = validate_bounds_tuple(bounds, true)?;
         let crs = CrsSpec::from_string("EPSG:4326".to_string())?;
         let index = slippy_tiles(bounds, zoom, &crs)?;
@@ -106,16 +125,68 @@ mod py {
         let mut manifest = Vec::new();
         let mut warnings = Vec::new();
         for tile in &index.tiles {
-            let path = cache_dir
-                .join(tile.z.to_string())
-                .join(tile.x.to_string())
-                .join(format!("{}.png", tile.y));
-            if path.exists() {
+            let path = cache_dir.as_ref().map(|cache_dir| {
+                cache_dir
+                    .join(tile.z.to_string())
+                    .join(tile.x.to_string())
+                    .join(format!("{}.png", tile.y))
+            });
+            if path.as_ref().is_some_and(|path| path.exists()) {
+                let path = path.as_ref().expect("checked above");
                 let array = decode_terrarium_png(&path)?;
-                manifest.push((tile.z, tile.x, tile.y, path, "hit".to_string()));
+                manifest.push((tile.z, tile.x, tile.y, path.clone(), "hit".to_string()));
                 decoded.push((tile.x, tile.y, array));
+            } else if let Some(template) = url_template.as_deref() {
+                let url = template
+                    .replace("{z}", &tile.z.to_string())
+                    .replace("{x}", &tile.x.to_string())
+                    .replace("{y}", &tile.y.to_string());
+                let fetched = py.allow_threads(|| {
+                    crate::gis::remote::fetch_remote_geodata_payload(&url, None, timeout)
+                });
+                match fetched {
+                    Ok((bytes, _remote)) => {
+                        let array = super::decode_terrarium_png_bytes(&bytes)?;
+                        if let Some(path) = path.as_ref() {
+                            if let Some(parent) = path.parent() {
+                                std::fs::create_dir_all(parent)?;
+                            }
+                            let temp = path.with_extension("png.tmp");
+                            std::fs::write(&temp, &bytes)?;
+                            std::fs::rename(&temp, path)?;
+                        }
+                        manifest.push((
+                            tile.z,
+                            tile.x,
+                            tile.y,
+                            path.unwrap_or_else(|| PathBuf::from(url)),
+                            "fetched".to_string(),
+                        ));
+                        decoded.push((tile.x, tile.y, array));
+                    }
+                    Err(error) => {
+                        warnings.push(RasterWarning::new(
+                            "missing_tile",
+                            format!("missing_tile: failed to fetch {url}: {error}"),
+                            Some("tiles"),
+                        ));
+                        manifest.push((
+                            tile.z,
+                            tile.x,
+                            tile.y,
+                            path.unwrap_or_else(|| PathBuf::from(url)),
+                            "missing_tile".to_string(),
+                        ));
+                    }
+                }
             } else {
-                manifest.push((tile.z, tile.x, tile.y, path, "missing_tile".to_string()));
+                manifest.push((
+                    tile.z,
+                    tile.x,
+                    tile.y,
+                    path.expect("cache_dir exists when no template"),
+                    "missing_tile".to_string(),
+                ));
             }
         }
         if decoded.is_empty() {
@@ -148,24 +219,32 @@ mod py {
         Ok(dict.into_py(py))
     }
 
-    fn cache_dir(cache: Option<&Bound<'_, PyAny>>) -> PyResult<Option<PathBuf>> {
+    fn cache_policy(
+        cache: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<(Option<PathBuf>, Option<String>)> {
         let Some(cache) = cache else {
-            return Ok(None);
+            return Ok((None, None));
         };
         if cache.is_none() {
-            return Ok(None);
+            return Ok((None, None));
         }
         if let Ok(path) = cache.extract::<String>() {
-            return Ok(Some(PathBuf::from(path)));
+            return Ok((Some(PathBuf::from(path)), None));
         }
         let dict = cache.downcast::<PyDict>().map_err(|_| {
             GisError::InvalidArgument(
                 "invalid_argument: cache must be None, path, or dict with cache_dir".to_string(),
             )
         })?;
-        dict.get_item("cache_dir")?
+        let cache_dir = dict
+            .get_item("cache_dir")?
             .map(|value| value.extract::<String>().map(PathBuf::from))
-            .transpose()
+            .transpose()?;
+        let url_template = dict
+            .get_item("url_template")?
+            .map(|value| value.extract::<String>())
+            .transpose()?;
+        Ok((cache_dir, url_template))
     }
 
     fn mosaic(

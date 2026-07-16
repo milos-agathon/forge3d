@@ -216,6 +216,10 @@ pub fn align_raster_to(
         ));
     }
     let source_transform = require_transform(&loaded.info)?;
+    // A singular source transform cannot be inverted, so sample_to_grid would
+    // silently fill every pixel with nodata and report success. Reject it here
+    // (M-05 no-silent-suppression, resample/align path).
+    crate::gis::affine::require_invertible(source_transform)?;
     let target_transform = require_transform(target)?;
     let diagnostics = alignment_diagnostics(&loaded.info, target);
     let array = sample_to_grid(
@@ -330,16 +334,25 @@ pub fn reproject_raster(
     for row in 0..height {
         for col in 0..width {
             let (x, y) = dst_transform.apply(col as f64 + 0.5, row as f64 + 0.5);
-            let src_rc = match transform_point(x, y, &dst_crs, &src_crs) {
-                Ok((sx, sy)) => crate::gis::affine::inverse_apply(source_transform, sx, sy).ok(),
-                Err(_) => {
-                    failure_count += 1;
-                    if first_pixel.is_none() {
-                        first_pixel = Some((row, col));
-                    }
-                    None
+            // A destination pixel fails to map back to source space if EITHER
+            // the CRS transform OR the source affine inverse fails (a singular
+            // source transform makes every inverse fail). BOTH failure modes
+            // are counted under the same policy: an inverse-apply failure must
+            // never be silently dropped to a nodata fill, which would let a
+            // singular source transform report an all-nodata SUCCESS
+            // (M-05: no default-value transform suppression).
+            let mut src_rc = None;
+            if let Ok((sx, sy)) = transform_point(x, y, &dst_crs, &src_crs) {
+                if let Ok(rc) = crate::gis::affine::inverse_apply(source_transform, sx, sy) {
+                    src_rc = Some(rc);
                 }
-            };
+            }
+            if src_rc.is_none() {
+                failure_count += 1;
+                if first_pixel.is_none() {
+                    first_pixel = Some((row, col));
+                }
+            }
             for band in 0..bands {
                 let value = src_rc.and_then(|(src_col, src_row)| {
                     sample_band(
@@ -475,20 +488,27 @@ fn sample_to_grid(
         for row in 0..height_usize {
             for col in 0..width_usize {
                 let (x, y) = target_transform.apply(col as f64 + 0.5, row as f64 + 0.5);
-                let value = crate::gis::affine::inverse_apply(source_transform, x, y)
-                    .ok()
-                    .and_then(|(src_col, src_row)| {
-                        sample_band(
-                            &src,
-                            array,
-                            band,
-                            src_col - 0.5,
-                            src_row - 0.5,
-                            method,
-                            nodata.get(band).copied().flatten(),
-                        )
-                    })
-                    .unwrap_or(fill);
+                // `source_transform` is preflighted invertible by the caller
+                // (align_raster_to::require_invertible), so inverse_apply cannot
+                // fail here; a None from sample_band is a legitimate out-of-source
+                // pixel and falls to the band's nodata fill (never a suppressed
+                // transform failure).
+                let mut value = fill;
+                if let Ok((src_col, src_row)) =
+                    crate::gis::affine::inverse_apply(source_transform, x, y)
+                {
+                    if let Some(sampled) = sample_band(
+                        &src,
+                        array,
+                        band,
+                        src_col - 0.5,
+                        src_row - 0.5,
+                        method,
+                        nodata.get(band).copied().flatten(),
+                    ) {
+                        value = sampled;
+                    }
+                }
                 out[band * width_usize * height_usize + row * width_usize + col] = value;
             }
         }
