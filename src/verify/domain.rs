@@ -94,6 +94,12 @@ impl Interval {
         self.may_neg_zero || (self.has_finite() && self.lo <= 0.0 && self.hi >= 0.0)
     }
 
+    fn may_subnormal(self) -> bool {
+        self.has_finite()
+            && ((self.hi > 0.0 && self.lo < f32::MIN_POSITIVE)
+                || (self.lo < 0.0 && self.hi > -f32::MIN_POSITIVE))
+    }
+
     fn with_input_ftz(mut self) -> Self {
         if !self.has_finite() {
             return self;
@@ -236,6 +242,7 @@ impl Interval {
     }
 
     pub(crate) fn min(self, rhs: Self) -> Self {
+        let may_choose_either_subnormal = self.may_subnormal() && rhs.may_subnormal();
         let self_ = self.with_input_ftz();
         let rhs = rhs.with_input_ftz();
         if self_.may_nan || rhs.may_nan || self_.has_infinity() || rhs.has_infinity() {
@@ -244,14 +251,20 @@ impl Interval {
         if !self_.has_finite() || !rhs.has_finite() {
             return self_.join(rhs);
         }
-        bounds(
+        let result = bounds(
             self_.lo.min(rhs.lo) as f64,
             self_.hi.min(rhs.hi) as f64,
             self_.may_nan || rhs.may_nan,
-        )
+        );
+        if may_choose_either_subnormal {
+            result.join(self_).join(rhs)
+        } else {
+            result
+        }
     }
 
     pub(crate) fn max(self, rhs: Self) -> Self {
+        let may_choose_either_subnormal = self.may_subnormal() && rhs.may_subnormal();
         let self_ = self.with_input_ftz();
         let rhs = rhs.with_input_ftz();
         if self_.may_nan || rhs.may_nan || self_.has_infinity() || rhs.has_infinity() {
@@ -260,11 +273,16 @@ impl Interval {
         if !self_.has_finite() || !rhs.has_finite() {
             return self_.join(rhs);
         }
-        bounds(
+        let result = bounds(
             self_.lo.max(rhs.lo) as f64,
             self_.hi.max(rhs.hi) as f64,
             self_.may_nan || rhs.may_nan,
-        )
+        );
+        if may_choose_either_subnormal {
+            result.join(self_).join(rhs)
+        } else {
+            result
+        }
     }
 
     pub(crate) fn clamp(self, low: Self, high: Self) -> Self {
@@ -595,6 +613,31 @@ mod tests {
         assert!(interval.may_pos_inf);
         assert!(interval.may_neg_inf);
         assert!(interval.may_neg_zero);
+    }
+
+    fn assert_not_top(interval: Interval) {
+        assert_ne!((interval.lo, interval.hi), (-f32::MAX, f32::MAX));
+    }
+
+    fn directed_ulp(value: f32, upward: bool) -> f32 {
+        if upward {
+            step_up(value, NATIVE_OP_ULPS)
+        } else {
+            step_down(value, NATIVE_OP_ULPS)
+        }
+    }
+
+    fn inverse_sqrt_alternative(value: f32, upward: bool) -> f32 {
+        directed_ulp((1.0_f64 / (value as f64).sqrt()) as f32, upward)
+    }
+
+    fn division_alternative(numerator: f32, denominator: f32, upward: bool) -> f32 {
+        directed_ulp((numerator as f64 / denominator as f64) as f32, upward)
+    }
+
+    fn inherited_sqrt_alternative(value: f32, choices: u32) -> f32 {
+        let reciprocal_root = inverse_sqrt_alternative(value, choices & 1 != 0);
+        division_alternative(1.0, reciprocal_root, choices & 2 != 0)
     }
 
     fn step_down(mut value: f32, count: usize) -> f32 {
@@ -943,6 +986,28 @@ mod tests {
     }
 
     #[test]
+    fn subnormal_min_max_and_clamp_keep_permitted_operands() {
+        let one = f32::from_bits(1);
+        let two = f32::from_bits(2);
+        let three = f32::from_bits(3);
+
+        assert_contains(Interval::constant(two).min(Interval::constant(one)), two);
+        assert_contains(Interval::constant(-two).max(Interval::constant(-one)), -two);
+
+        let positive =
+            Interval::constant(two).clamp(Interval::constant(one), Interval::constant(three));
+        for legal in [0.0, -0.0, one, two, three] {
+            assert_contains(positive, legal);
+        }
+
+        let negative =
+            Interval::constant(-two).clamp(Interval::constant(-three), Interval::constant(-one));
+        for legal in [0.0, -0.0, -one, -two, -three] {
+            assert_contains(negative, legal);
+        }
+    }
+
+    #[test]
     fn one_million_deterministic_samples_are_contained() {
         let mut rng = Rng(0x4d59_5df4_d0f3_3173);
         for sample in 0..1_000_000 {
@@ -981,13 +1046,25 @@ mod tests {
             };
             let at = Interval::new(0.0, 1.0);
             let t = rng.finite(at.lo, at.hi);
+            let root_interval = Interval::new(rng.finite(0.5, 2.0), rng.finite(2.5, 10.0));
+            let root_value = rng.finite(root_interval.lo, root_interval.hi);
 
             assert_contains(ax.add(ay), x + y);
             assert_contains(ax.sub(ay), x - y);
             assert_contains(ax.mul(ay), x * y);
             assert_contains(ax.div(ay), x / y);
-            assert_contains(ax.sqrt(), x.sqrt());
-            assert_contains(ax.inverse_sqrt(), 1.0 / x.sqrt());
+            let abstract_sqrt = root_interval.sqrt();
+            let abstract_inverse_sqrt = root_interval.inverse_sqrt();
+            assert_not_top(abstract_sqrt);
+            assert_not_top(abstract_inverse_sqrt);
+            assert_contains(
+                abstract_sqrt,
+                inherited_sqrt_alternative(root_value, rng.next_u32()),
+            );
+            assert_contains(
+                abstract_inverse_sqrt,
+                inverse_sqrt_alternative(root_value, rng.next_u32() & 1 != 0),
+            );
             assert_contains(ax.min(ay), x.min(y));
             assert_contains(ax.max(ay), x.max(y));
             assert_contains(
@@ -1013,16 +1090,28 @@ mod tests {
             assert_contains(refined_x, x);
             assert_contains(refined_y, y);
 
-            let concrete = [x, y, t];
-            let abstracted = [ax, ay, at];
+            let abstracted = [
+                Interval::new(0.5, 1.0),
+                Interval::new(1.0, 2.0),
+                Interval::new(2.0, 4.0),
+            ];
+            let concrete = abstracted.map(|interval| rng.finite(interval.lo, interval.hi));
             let concrete_dot = concrete.iter().map(|v| v * v).sum::<f32>();
             assert_contains(dot(&abstracted, &abstracted), concrete_dot);
-            let concrete_length = concrete_dot.sqrt();
-            for (component, concrete) in normalize(&abstracted)
-                .into_iter()
-                .zip(concrete.map(|v| v / concrete_length))
-            {
-                assert_contains(component, concrete);
+            let length = inherited_sqrt_alternative(concrete_dot, rng.next_u32());
+            let normalized = normalize(&abstracted);
+            for (component, concrete) in normalized.into_iter().zip(concrete) {
+                assert_not_top(component);
+                assert_contains(
+                    component,
+                    division_alternative(concrete, length, rng.next_u32() & 1 != 0),
+                );
+            }
+
+            if sample & 0x3fff == 0 {
+                let subnormal = Interval::constant(f32::from_bits(1));
+                assert_contains(subnormal.sqrt(), 0.0);
+                assert!(subnormal.inverse_sqrt().may_pos_inf);
             }
         }
     }
