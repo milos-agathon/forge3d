@@ -119,11 +119,63 @@ def test_slippy_tile_index_known_zoom_schema_and_sorting():
 
 
 def test_slippy_tile_index_clamps_web_mercator_latitude():
+    from forge3d._forge3d import clear_native_degradations, native_degradations
+
+    clear_native_degradations()
     result = gis.slippy_tile_index((-10.0, 84.0, 10.0, 89.0), 2)
 
     assert "invalid_bounds" in _codes(result)
     assert result["bounds_wgs84"][3] == pytest.approx(85.05112878)
     assert result["tile_count"] > 0
+    assert native_degradations() == [
+        {
+            "kind": "input_clamped",
+            "name": "web_mercator_latitude",
+            "consequence": "latitude bounds were clamped to the Web Mercator valid range",
+        }
+    ]
+    clear_native_degradations()
+
+
+def test_slippy_tile_index_does_not_record_normal_or_refused_bounds():
+    from forge3d._forge3d import clear_native_degradations, native_degradations
+
+    clear_native_degradations()
+    normal = gis.slippy_tile_index((-10.0, -20.0, 10.0, 20.0), 2)
+    assert "invalid_bounds" not in _codes(normal)
+    assert native_degradations() == []
+
+    # Antimeridian bounds are handled as an explicit split, not latitude clamp.
+    split = gis.slippy_tile_index((170.0, -10.0, -170.0, 10.0), 2)
+    assert split["antimeridian_split"] is True
+    assert native_degradations() == []
+
+    with pytest.raises(ValueError, match="antimeridian_bounds_unsupported"):
+        gis.web_mercator_bounds((170.0, -10.0, -170.0, 10.0), "EPSG:4326")
+    assert native_degradations() == []
+
+
+def test_clamp_visibility_assertion_rejects_a_silent_implementation():
+    """Negative control: a warning without the CENSOR record must fail red."""
+
+    def assert_visible(result, degradations):
+        assert "invalid_bounds" in _codes(result)
+        assert any(
+            item["kind"] == "input_clamped" and item["name"] == "web_mercator_latitude"
+            for item in degradations
+        ), "Web Mercator clamp warning was emitted without a CENSOR degradation record"
+
+    silent_result = {
+        "warnings": [
+            {
+                "code": "invalid_bounds",
+                "message": "latitude was clamped to the Web Mercator valid range",
+                "field": "bounds",
+            }
+        ]
+    }
+    with pytest.raises(AssertionError, match="without a CENSOR degradation record"):
+        assert_visible(silent_result, [])
 
 
 def test_slippy_tile_index_antimeridian_split():
