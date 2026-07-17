@@ -211,8 +211,14 @@ fn validate_contract_references(
     for reference in contract.invariants.iter().flat_map(invariant_references) {
         anyhow::ensure!(valid(reference), "unknown invariant reference {reference}");
     }
-    validate_invariant_directions(module, root, contract)?;
+    validate_invariant_directions(module, root, &known, contract)?;
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum ResolvedReference {
+    Type(naga::Handle<naga::Type>),
+    Scalar(naga::Scalar),
 }
 
 fn reference_resolves(
@@ -221,8 +227,17 @@ fn reference_resolves(
     known: &BTreeSet<String>,
     reference: &str,
 ) -> bool {
+    resolve_reference_type(module, root, known, reference).is_some()
+}
+
+fn resolve_reference_type(
+    module: &naga::Module,
+    root: &naga::Function,
+    known: &BTreeSet<String>,
+    reference: &str,
+) -> Option<ResolvedReference> {
     if known.contains(reference) {
-        return true;
+        return known_symbol_type(module, root, reference).map(ResolvedReference::Type);
     }
     let Some(base) = known
         .iter()
@@ -231,11 +246,9 @@ fn reference_resolves(
         })
         .max_by_key(|name| name.len())
     else {
-        return false;
+        return None;
     };
-    let Some(ty) = known_symbol_type(module, root, base) else {
-        return false;
-    };
+    let ty = known_symbol_type(module, root, base)?;
     resolve_type_suffix(module, ty, &reference[base.len()..])
 }
 
@@ -293,19 +306,19 @@ fn resolve_type_suffix(
     module: &naga::Module,
     mut ty: naga::Handle<naga::Type>,
     mut suffix: &str,
-) -> bool {
+) -> Option<ResolvedReference> {
     while !suffix.is_empty() {
         if let Some(rest) = suffix.strip_prefix("[]") {
             ty = match module.types[ty].inner {
                 naga::TypeInner::Array { base, .. }
                 | naga::TypeInner::BindingArray { base, .. } => base,
-                _ => return false,
+                _ => return None,
             };
             suffix = rest;
             continue;
         }
         let Some(rest) = suffix.strip_prefix('.') else {
-            return false;
+            return None;
         };
         let end = rest.find(['.', '[']).unwrap_or(rest.len());
         let member = &rest[..end];
@@ -316,24 +329,25 @@ fn resolve_type_suffix(
                     .iter()
                     .find(|candidate| candidate.name.as_deref() == Some(member))
                 else {
-                    return false;
+                    return None;
                 };
                 ty = found.ty;
             }
-            naga::TypeInner::Vector { size, .. } => {
+            naga::TypeInner::Vector { size, scalar } => {
                 let component = match member {
                     "x" | "r" => 1,
                     "y" | "g" => 2,
                     "z" | "b" => 3,
                     "w" | "a" => 4,
-                    _ => return false,
+                    _ => return None,
                 };
                 let width = match size {
                     naga::VectorSize::Bi => 2,
                     naga::VectorSize::Tri => 3,
                     naga::VectorSize::Quad => 4,
                 };
-                return component <= width && suffix.is_empty();
+                return (component <= width && suffix.is_empty())
+                    .then_some(ResolvedReference::Scalar(*scalar));
             }
             naga::TypeInner::Image { dim, arrayed, .. } => {
                 let valid = match member {
@@ -343,26 +357,116 @@ fn resolve_type_suffix(
                     "layers" => *arrayed,
                     _ => false,
                 };
-                return valid && suffix.is_empty();
+                return (valid && suffix.is_empty()).then_some(ResolvedReference::Scalar(
+                    naga::Scalar {
+                        kind: naga::ScalarKind::Uint,
+                        width: 4,
+                    },
+                ));
             }
             naga::TypeInner::Array {
                 size: naga::ArraySize::Dynamic,
                 ..
-            } => return member == "length" && suffix.is_empty(),
-            _ => return false,
+            } => {
+                return (member == "length" && suffix.is_empty()).then_some(
+                    ResolvedReference::Scalar(naga::Scalar {
+                        kind: naga::ScalarKind::Uint,
+                        width: 4,
+                    }),
+                )
+            }
+            _ => return None,
         }
     }
-    true
+    Some(ResolvedReference::Type(ty))
 }
 
 fn validate_invariant_directions(
     module: &naga::Module,
     root: &naga::Function,
+    known: &BTreeSet<String>,
     contract: &EntryContract,
 ) -> anyhow::Result<()> {
     let kind = |name: &str| contract.inputs.iter().find(|input| input.name() == name);
+    let resolved = |name: &str| {
+        resolve_reference_type(module, root, known, name)
+            .with_context(|| format!("invariant reference {name} has no Naga type"))
+    };
     for invariant in &contract.invariants {
         match invariant {
+            InvariantContract::GreaterEqual { value, .. } => {
+                anyhow::ensure!(
+                    numeric_shape(module, resolved(value)?).is_some_and(|shape| shape.lanes == 1),
+                    "ge operand {value} is not a numeric scalar"
+                );
+            }
+            InvariantContract::AbsGreaterEqual { value, .. } => {
+                anyhow::ensure!(
+                    numeric_shape(module, resolved(value)?).is_some_and(|shape| {
+                        shape.lanes == 1
+                            && matches!(
+                                shape.kind,
+                                naga::ScalarKind::Float | naga::ScalarKind::Sint
+                            )
+                    }),
+                    "abs_ge operand {value} is not a signed numeric scalar"
+                );
+            }
+            InvariantContract::NormGreaterEqual { value, .. } => {
+                anyhow::ensure!(
+                    numeric_shape(module, resolved(value)?).is_some_and(|shape| {
+                        shape.lanes > 1 && shape.kind == naga::ScalarKind::Float
+                    }),
+                    "norm_ge operand {value} is not a floating-point vector"
+                );
+            }
+            InvariantContract::DistanceGreaterEqual { left, right, .. } => {
+                let left_shape = numeric_shape(module, resolved(left)?);
+                let right_shape = numeric_shape(module, resolved(right)?);
+                anyhow::ensure!(
+                    left_shape == right_shape
+                        && left_shape.is_some_and(|shape| {
+                            shape.lanes > 1 && shape.kind == naga::ScalarKind::Float
+                        }),
+                    "distance_ge operands {left} and {right} are not compatible float vectors"
+                );
+            }
+            InvariantContract::SumAbsGreaterEqual { left, right, .. }
+            | InvariantContract::DifferenceGreaterEqual { left, right, .. } => {
+                let left_shape = numeric_shape(module, resolved(left)?);
+                let right_shape = numeric_shape(module, resolved(right)?);
+                anyhow::ensure!(
+                    left_shape == right_shape
+                        && left_shape.is_some_and(|shape| {
+                            matches!(shape.kind, naga::ScalarKind::Float | naga::ScalarKind::Sint)
+                        }),
+                    "relational operands {left} and {right} have incompatible dimensions or types"
+                );
+            }
+            InvariantContract::DimensionsCover {
+                texture,
+                width,
+                height,
+            } => {
+                anyhow::ensure!(
+                    image_shape(module, resolved(texture)?).is_some(),
+                    "dimensions_cover target {texture} is not a texture"
+                );
+                for dimension in [width, height] {
+                    anyhow::ensure!(
+                        is_unsigned_scalar(module, resolved(dimension)?),
+                        "dimensions_cover value {dimension} is not an unsigned scalar"
+                    );
+                }
+            }
+            InvariantContract::SameDimensions { left, right } => {
+                let left_shape = image_shape(module, resolved(left)?);
+                let right_shape = image_shape(module, resolved(right)?);
+                anyhow::ensure!(
+                    left_shape.is_some() && left_shape == right_shape,
+                    "same_dimensions operands {left} and {right} are not compatible textures"
+                );
+            }
             InvariantContract::CountWithin { count, buffer } => {
                 anyhow::ensure!(
                     matches!(kind(buffer), Some(InputContract::Buffer { .. })),
@@ -379,17 +483,9 @@ fn validate_invariant_directions(
                     ),
                     "count_within count {count} is not a numeric value"
                 );
-                let count_ty = known_symbol_type(module, root, count)
-                    .with_context(|| format!("count_within count {count} has no Naga type"))?;
                 anyhow::ensure!(
-                    matches!(
-                        module.types[count_ty].inner,
-                        naga::TypeInner::Scalar(naga::Scalar {
-                            kind: naga::ScalarKind::Uint | naga::ScalarKind::Sint,
-                            ..
-                        })
-                    ),
-                    "count_within count {count} is not an integer scalar"
+                    is_unsigned_scalar(module, resolved(count)?),
+                    "count_within count {count} is not an unsigned integer scalar"
                 );
             }
             InvariantContract::IndicesWithin { indices, target } => {
@@ -414,17 +510,173 @@ fn validate_invariant_directions(
                     "indices_within source {indices} does not contain integer indices"
                 );
             }
-            InvariantContract::LengthAtLeastProduct { buffer, .. }
-            | InvariantContract::LengthAtLeastProductMaxOne { buffer, .. } => {
+            InvariantContract::LengthAtLeastProduct {
+                buffer,
+                width,
+                height,
+            } => {
                 anyhow::ensure!(
                     matches!(kind(buffer), Some(InputContract::Buffer { .. })),
                     "length invariant target {buffer} is not a buffer"
                 );
+                for factor in [width, height] {
+                    anyhow::ensure!(
+                        is_unsigned_scalar(module, resolved(factor)?),
+                        "length factor {factor} is not an unsigned scalar"
+                    );
+                }
             }
-            _ => {}
+            InvariantContract::LengthAtLeastProductCastU32 {
+                buffer,
+                width,
+                height,
+            } => {
+                anyhow::ensure!(
+                    matches!(kind(buffer), Some(InputContract::Buffer { .. })),
+                    "length invariant target {buffer} is not a buffer"
+                );
+                for factor in [width, height] {
+                    anyhow::ensure!(
+                        numeric_shape(module, resolved(factor)?).is_some_and(|shape| {
+                            shape.lanes == 1 && shape.kind == naga::ScalarKind::Float
+                        }),
+                        "u32-cast length factor {factor} is not a float scalar"
+                    );
+                }
+            }
+            InvariantContract::LengthAtLeastProductMaxOne {
+                buffer, factors, ..
+            } => {
+                anyhow::ensure!(
+                    matches!(kind(buffer), Some(InputContract::Buffer { .. })),
+                    "length invariant target {buffer} is not a buffer"
+                );
+                for factor in factors {
+                    anyhow::ensure!(
+                        is_unsigned_scalar(module, resolved(factor)?),
+                        "length factor {factor} is not an unsigned scalar"
+                    );
+                }
+            }
+            InvariantContract::AdditiveTextureBudget {
+                output,
+                diffuse,
+                indirect,
+                specular,
+                reflection,
+                maximum,
+            } => {
+                let shapes = [output, diffuse, indirect, specular, reflection]
+                    .into_iter()
+                    .map(|name| resolved(name).map(|reference| image_shape(module, reference)))
+                    .collect::<anyhow::Result<Vec<_>>>()?
+                    .into_iter()
+                    .collect::<Option<Vec<_>>>();
+                let Some(shapes) = shapes else {
+                    bail!("additive_texture_budget operands must all be textures");
+                };
+                anyhow::ensure!(
+                    shapes.iter().all(|shape| *shape == shapes[0]),
+                    "additive_texture_budget textures have incompatible dimensions"
+                );
+                anyhow::ensure!(
+                    matches!(
+                        image_class(module, resolved(output)?),
+                        Some(naga::ImageClass::Storage {
+                            format: naga::StorageFormat::Rgba16Float,
+                            ..
+                        })
+                    ),
+                    "additive texture budget output is not rgba16float storage"
+                );
+                for source in [diffuse, indirect, specular, reflection] {
+                    anyhow::ensure!(
+                        matches!(
+                            image_class(module, resolved(source)?),
+                            Some(naga::ImageClass::Sampled {
+                                kind: naga::ScalarKind::Float,
+                                ..
+                            })
+                        ),
+                        "additive texture budget source {source} is not float-sampled"
+                    );
+                }
+                let output_max = contract
+                    .outputs
+                    .iter()
+                    .find(|range| range.name == *output)
+                    .map(|range| range.max)
+                    .context("additive texture budget output has no output range")?;
+                anyhow::ensure!(
+                    *maximum >= 0.0 && *maximum <= 65_504.0 && output_max >= *maximum,
+                    "additive texture budget exceeds the rgba16float output range"
+                );
+            }
         }
     }
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct NumericShape {
+    kind: naga::ScalarKind,
+    width: u8,
+    lanes: u8,
+}
+
+fn numeric_shape(module: &naga::Module, reference: ResolvedReference) -> Option<NumericShape> {
+    let (scalar, lanes) = match reference {
+        ResolvedReference::Scalar(scalar) => (scalar, 1),
+        ResolvedReference::Type(ty) => match module.types[ty].inner {
+            naga::TypeInner::Scalar(scalar) => (scalar, 1),
+            naga::TypeInner::Vector { size, scalar } => {
+                let lanes = match size {
+                    naga::VectorSize::Bi => 2,
+                    naga::VectorSize::Tri => 3,
+                    naga::VectorSize::Quad => 4,
+                };
+                (scalar, lanes)
+            }
+            _ => return None,
+        },
+    };
+    (!matches!(
+        scalar.kind,
+        naga::ScalarKind::Bool | naga::ScalarKind::AbstractInt | naga::ScalarKind::AbstractFloat
+    ))
+    .then_some(NumericShape {
+        kind: scalar.kind,
+        width: scalar.width,
+        lanes,
+    })
+}
+
+fn is_unsigned_scalar(module: &naga::Module, reference: ResolvedReference) -> bool {
+    numeric_shape(module, reference)
+        .is_some_and(|shape| shape.lanes == 1 && shape.kind == naga::ScalarKind::Uint)
+}
+
+fn image_shape(
+    module: &naga::Module,
+    reference: ResolvedReference,
+) -> Option<(naga::ImageDimension, bool)> {
+    let ResolvedReference::Type(ty) = reference else {
+        return None;
+    };
+    match module.types[ty].inner {
+        naga::TypeInner::Image { dim, arrayed, .. } => Some((dim, arrayed)),
+        _ => None,
+    }
+}
+
+fn image_class(module: &naga::Module, reference: ResolvedReference) -> Option<naga::ImageClass> {
+    let ResolvedReference::Type(ty) = reference else {
+        return None;
+    };
+    match module.types[ty].inner {
+        naga::TypeInner::Image { class, .. } => Some(class),
+        _ => None,
+    }
 }
 
 fn storage_array_element(module: &naga::Module, name: &str) -> Option<naga::Handle<naga::Type>> {
@@ -466,6 +718,11 @@ fn invariant_references(invariant: &InvariantContract) -> Vec<&str> {
             width,
             height,
         }
+        | InvariantContract::LengthAtLeastProductCastU32 {
+            buffer,
+            width,
+            height,
+        }
         | InvariantContract::DimensionsCover {
             texture: buffer,
             width,
@@ -478,6 +735,14 @@ fn invariant_references(invariant: &InvariantContract) -> Vec<&str> {
         } => std::iter::once(buffer.as_str())
             .chain(factors.iter().map(String::as_str))
             .collect(),
+        InvariantContract::AdditiveTextureBudget {
+            output,
+            diffuse,
+            indirect,
+            specular,
+            reflection,
+            ..
+        } => vec![output, diffuse, indirect, specular, reflection],
         InvariantContract::CountWithin { count, buffer } => vec![count, buffer],
     }
 }
@@ -607,6 +872,7 @@ fn invariant_bounds_texture(invariant: &InvariantContract, name: &str) -> bool {
 fn invariant_bounds_buffer(invariant: &InvariantContract, name: &str) -> bool {
     match invariant {
         InvariantContract::LengthAtLeastProduct { buffer, .. } => buffer == name,
+        InvariantContract::LengthAtLeastProductCastU32 { buffer, .. } => buffer == name,
         InvariantContract::LengthAtLeastProductMaxOne { buffer, .. } => buffer == name,
         InvariantContract::CountWithin { buffer, .. } => buffer == name,
         InvariantContract::IndicesWithin { target, .. } => target == name,
@@ -978,10 +1244,23 @@ pub(crate) enum InvariantContract {
         width: String,
         height: String,
     },
+    LengthAtLeastProductCastU32 {
+        buffer: String,
+        width: String,
+        height: String,
+    },
     LengthAtLeastProductMaxOne {
         buffer: String,
         constant: u32,
         factors: Vec<String>,
+    },
+    AdditiveTextureBudget {
+        output: String,
+        diffuse: String,
+        indirect: String,
+        specular: String,
+        reflection: String,
+        maximum: f32,
     },
     DimensionsCover {
         texture: String,
@@ -1319,6 +1598,13 @@ fn parse_invariants(value: &str) -> anyhow::Result<Vec<InvariantContract>> {
                         height: nonempty(height)?,
                     })
                 }
+                ["length_product_u32_cast", buffer, width, height] => {
+                    Ok(InvariantContract::LengthAtLeastProductCastU32 {
+                        buffer: nonempty(buffer)?,
+                        width: nonempty(width)?,
+                        height: nonempty(height)?,
+                    })
+                }
                 ["length_product_max1", buffer, constant, factors @ ..] if !factors.is_empty() => {
                     Ok(InvariantContract::LengthAtLeastProductMaxOne {
                         buffer: nonempty(buffer)?,
@@ -1329,6 +1615,22 @@ fn parse_invariants(value: &str) -> anyhow::Result<Vec<InvariantContract>> {
                             .collect::<anyhow::Result<Vec<_>>>()?,
                     })
                 }
+                [
+                    "additive_texture_budget",
+                    output,
+                    diffuse,
+                    indirect,
+                    specular,
+                    reflection,
+                    maximum,
+                ] => Ok(InvariantContract::AdditiveTextureBudget {
+                    output: nonempty(output)?,
+                    diffuse: nonempty(diffuse)?,
+                    indirect: nonempty(indirect)?,
+                    specular: nonempty(specular)?,
+                    reflection: nonempty(reflection)?,
+                    maximum: finite(maximum)?,
+                }),
                 ["dimensions_cover", texture, width, height] => {
                     Ok(InvariantContract::DimensionsCover {
                         texture: nonempty(texture)?,
@@ -1745,6 +2047,103 @@ expiry = "2027-01-17"
     }
 
     #[test]
+    fn every_invariant_operator_rejects_wrong_naga_operand_types() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let water_source =
+            std::fs::read_to_string(root.join("src/shaders/water_surface.wgsl")).unwrap();
+        let water_module = naga::front::wgsl::parse_str(&water_source).unwrap();
+        let water =
+            std::fs::read_to_string(root.join("shaders/contracts/water_surface.toml")).unwrap();
+        for invalid in [
+            "norm_ge:in.view_distance:0.000001",
+            "ge:in.normal:0",
+            "abs_ge:in.normal:0",
+            "distance_ge:in.normal:in.view_distance:0.000001",
+            "sum_abs_ge:in.normal:in.view_distance:0.000001",
+            "difference_ge:in.normal:in.view_distance:0.000001",
+        ] {
+            let mutation =
+                water.replace("invariants = [", &format!("invariants = [\"{invalid}\", "));
+            let contract = parse_contract(&mutation).unwrap();
+            assert!(
+                validate_contract_semantics(&water_module, "fs_main", &contract.entries[0])
+                    .is_err(),
+                "accepted invalid invariant {invalid}"
+            );
+        }
+
+        let hybrid_source = super::super::preprocess_hybrid_shader();
+        let hybrid_module = naga::front::wgsl::parse_str(&hybrid_source).unwrap();
+        let hybrid =
+            std::fs::read_to_string(root.join("shaders/contracts/hybrid_terrain_traversal.toml"))
+                .unwrap();
+        for (from, to) in [
+            (
+                "dimensions_cover:terrain_height_tex:terrain.dims.x:terrain.dims.y",
+                "dimensions_cover:terrain_height_tex:terrain.dims:terrain.dims.y",
+            ),
+            (
+                "dimensions_cover:terrain_height_tex:terrain.dims.x:terrain.dims.y",
+                "same_dimensions:terrain_height_tex:uniforms.width",
+            ),
+            (
+                "count_within:hybrid_uniforms.mesh_index_count:mesh_indices",
+                "count_within:lighting.light_dir:mesh_indices",
+            ),
+            (
+                "length_product:accum_hdr:uniforms.width:uniforms.height",
+                "length_product:accum_hdr:uniforms.cam_forward:uniforms.height",
+            ),
+            (
+                "indices_within:mesh_indices:mesh_vertices",
+                "indices_within:mesh_vertices:mesh_indices",
+            ),
+        ] {
+            let contract = parse_contract(&hybrid.replace(from, to)).unwrap();
+            assert!(
+                validate_contract_semantics(&hybrid_module, "main_terrain", &contract.entries[0])
+                    .is_err(),
+                "accepted invalid invariant {to}"
+            );
+        }
+
+        let terrain_source = super::super::preprocess_terrain_shader();
+        let terrain_module = naga::front::wgsl::parse_str(&terrain_source).unwrap();
+        let terrain =
+            std::fs::read_to_string(root.join("shaders/contracts/terrain_pbr_pom.toml")).unwrap();
+        let invalid_max_one = terrain.replace(
+            "terrain_vt_uniforms.config2.y:terrain_vt_uniforms.config2.x",
+            "input.world_normal:terrain_vt_uniforms.config2.x",
+        );
+        let contract = parse_contract(&invalid_max_one).unwrap();
+        assert!(
+            validate_contract_semantics(&terrain_module, "fs_main", &contract.entries[0]).is_err()
+        );
+        let invalid_cast_product = terrain.replace(
+            "probe_grid.grid_params.z:probe_grid.grid_params.w",
+            "input.world_normal:probe_grid.grid_params.w",
+        );
+        let contract = parse_contract(&invalid_cast_product).unwrap();
+        assert!(
+            validate_contract_semantics(&terrain_module, "fs_main", &contract.entries[0]).is_err()
+        );
+
+        let gi_source =
+            std::fs::read_to_string(root.join("src/shaders/gi/composite.wgsl")).unwrap();
+        let gi_module = naga::front::wgsl::parse_str(&gi_source).unwrap();
+        let gi = std::fs::read_to_string(root.join("shaders/contracts/gi_composite.toml")).unwrap();
+        let invalid_budget = gi.replace(
+            "spec_base_texture:ssr_texture:65504",
+            "spec_base_texture:gi_params.ssr_weight:65504",
+        );
+        let contract = parse_contract(&invalid_budget).unwrap();
+        assert!(
+            validate_contract_semantics(&gi_module, "cs_gi_composite", &contract.entries[0])
+                .is_err()
+        );
+    }
+
+    #[test]
     fn entry_contract_contains_only_reachable_argument_members() {
         let source = r#"
 struct Input { used: f32, unused: f32 }
@@ -1842,13 +2241,23 @@ fn consume(input: Input) -> f32 { return input.used; }
         )
         .unwrap();
         let entry = &contract.entries[0];
-        let max = |name| match entry.input(name).unwrap() {
-            InputContract::Texture { range, .. } => range.max,
-            _ => panic!("{name} is not a texture"),
+        assert_eq!(entry.outputs[0].max, 65_504.0);
+        let budget = entry
+            .invariants
+            .iter()
+            .find_map(|invariant| match invariant {
+                InvariantContract::AdditiveTextureBudget { maximum, .. } => Some(*maximum),
+                _ => None,
+            });
+        assert_eq!(budget, Some(65_504.0));
+
+        let within_budget = |diffuse: f32, ssgi: f32, specular: f32, reflection: f32| {
+            diffuse + ssgi + specular.max(reflection) <= budget.unwrap()
         };
-        let conservative_rgb_max = max("diffuse_base_texture")
-            + max("ssgi_texture")
-            + max("spec_base_texture").max(max("ssr_texture"));
-        assert!(entry.outputs[0].max >= conservative_rgb_max);
+        assert!(within_budget(65_504.0, 0.0, 0.0, 0.0));
+        assert!(within_budget(0.0, 65_504.0, 0.0, 0.0));
+        assert!(within_budget(32_752.0, 16_376.0, 16_376.0, 10_000.0));
+        assert!(within_budget(0.0, 0.0, 65_504.0, 65_504.0));
+        assert!(!within_budget(65_504.0, 65_504.0, 65_504.0, 65_504.0));
     }
 }
