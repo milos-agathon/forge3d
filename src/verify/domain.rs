@@ -394,10 +394,14 @@ impl Interval {
         comparison: Comparison,
         truth: bool,
     ) -> Option<(Self, Self)> {
-        let left_ftz = self.ftz_subnormal_hull();
-        let right_ftz = rhs.ftz_subnormal_hull();
         let self_ = self.with_input_ftz();
         let rhs = rhs.with_input_ftz();
+        let left_ftz = self
+            .ftz_subnormal_hull()
+            .filter(|&ftz| comparison_branch_feasible(ftz, rhs, comparison, truth));
+        let right_ftz = rhs
+            .ftz_subnormal_hull()
+            .filter(|&ftz| comparison_branch_feasible(self_, ftz, comparison, truth));
         let refined = if !truth
             && (self_.may_nan || rhs.may_nan)
             && matches!(
@@ -596,6 +600,45 @@ fn refine_ordered(left: Interval, right: Interval, strict: bool) -> Option<(Inte
     left.may_nan = false;
     right.may_nan = false;
     viable(left, right)
+}
+
+fn comparison_branch_feasible(
+    left: Interval,
+    right: Interval,
+    comparison: Comparison,
+    truth: bool,
+) -> bool {
+    if (left.may_nan || right.may_nan)
+        && match comparison {
+            Comparison::Ne => truth,
+            Comparison::Eq => !truth,
+            _ => !truth,
+        }
+    {
+        return true;
+    }
+    if left.has_infinity() || right.has_infinity() {
+        return true;
+    }
+    if !left.has_finite() || !right.has_finite() {
+        return left.may_neg_zero || right.may_neg_zero;
+    }
+    match (comparison, truth) {
+        (Comparison::Lt, true) => left.lo < right.hi,
+        (Comparison::Lt, false) => left.hi >= right.lo,
+        (Comparison::Le, true) => left.lo <= right.hi,
+        (Comparison::Le, false) => left.hi > right.lo,
+        (Comparison::Gt, true) => left.hi > right.lo,
+        (Comparison::Gt, false) => left.lo <= right.hi,
+        (Comparison::Ge, true) => left.hi >= right.lo,
+        (Comparison::Ge, false) => left.lo < right.hi,
+        (Comparison::Eq, true) | (Comparison::Ne, false) => {
+            left.lo <= right.hi && right.lo <= left.hi
+        }
+        (Comparison::Eq, false) | (Comparison::Ne, true) => {
+            left.lo != left.hi || right.lo != right.hi || left.lo != right.lo
+        }
+    }
 }
 
 fn viable(left: Interval, right: Interval) -> Option<(Interval, Interval)> {
@@ -991,6 +1034,15 @@ mod tests {
             assert_contains(refined_zero, 0.0);
             assert_contains(refined_zero, -0.0);
         }
+    }
+
+    #[test]
+    fn refinement_restores_subnormals_only_when_the_branch_can_use_them() {
+        let (left, right) = Interval::new(-1.0, 10.0)
+            .refine(Interval::new(5.0, 20.0), Comparison::Eq, true)
+            .unwrap();
+        assert_eq!((left.lo, left.hi), (5.0, 10.0));
+        assert_eq!((right.lo, right.hi), (5.0, 10.0));
     }
 
     #[test]
