@@ -118,13 +118,7 @@ pub(crate) fn validate_contract_semantics(
     }
 
     let mut expected = BTreeMap::new();
-    for (index, argument) in root.arguments.iter().enumerate() {
-        let name = argument
-            .name
-            .clone()
-            .unwrap_or_else(|| format!("arg{index}"));
-        add_value_leaves(module, argument.ty, &name, &mut expected);
-    }
+    collect_argument_inputs(module, root, &mut expected);
     for function in std::iter::once(root).chain(functions.iter().copied()) {
         collect_global_inputs(module, function, &mut expected)?;
     }
@@ -182,24 +176,20 @@ pub(crate) fn validate_contract_semantics(
     let all_functions: Vec<_> = std::iter::once(root)
         .chain(functions.iter().copied())
         .collect();
-    validate_contract_references(&expected, &outputs, contract)?;
+    validate_contract_references(module, root, &expected, &outputs, contract)?;
     validate_resource_shapes(module, &all_functions, contract)?;
     Ok(())
 }
 
 fn validate_contract_references(
+    module: &naga::Module,
+    root: &naga::Function,
     inputs: &BTreeMap<String, ExpectedKind>,
     outputs: &BTreeSet<String>,
     contract: &EntryContract,
 ) -> anyhow::Result<()> {
     let known: BTreeSet<_> = inputs.keys().chain(outputs.iter()).cloned().collect();
-    let valid = |reference: &str| {
-        known.contains(reference)
-            || known.iter().any(|name| {
-                reference.starts_with(&format!("{name}."))
-                    || reference.starts_with(&format!("{name}["))
-            })
-    };
+    let valid = |reference: &str| reference_resolves(module, root, &known, reference);
     for input in &contract.inputs {
         match input {
             InputContract::Texture { dimensions, .. } => {
@@ -221,7 +211,241 @@ fn validate_contract_references(
     for reference in contract.invariants.iter().flat_map(invariant_references) {
         anyhow::ensure!(valid(reference), "unknown invariant reference {reference}");
     }
+    validate_invariant_directions(module, root, contract)?;
     Ok(())
+}
+
+fn reference_resolves(
+    module: &naga::Module,
+    root: &naga::Function,
+    known: &BTreeSet<String>,
+    reference: &str,
+) -> bool {
+    if known.contains(reference) {
+        return true;
+    }
+    let Some(base) = known
+        .iter()
+        .filter(|name| {
+            reference.starts_with(&format!("{name}.")) || reference.starts_with(&format!("{name}["))
+        })
+        .max_by_key(|name| name.len())
+    else {
+        return false;
+    };
+    let Some(ty) = known_symbol_type(module, root, base) else {
+        return false;
+    };
+    resolve_type_suffix(module, ty, &reference[base.len()..])
+}
+
+fn known_symbol_type(
+    module: &naga::Module,
+    root: &naga::Function,
+    name: &str,
+) -> Option<naga::Handle<naga::Type>> {
+    let (head, tail) = name.split_once('.').map_or((name, ""), |parts| parts);
+    if let Some(argument) = root
+        .arguments
+        .iter()
+        .find(|argument| argument.name.as_deref() == Some(head))
+    {
+        return traverse_named_members(module, argument.ty, tail);
+    }
+    if let Some((_, global)) = module
+        .global_variables
+        .iter()
+        .find(|(_, global)| global.name.as_deref() == Some(head))
+    {
+        return traverse_named_members(module, global.ty, tail);
+    }
+    let result = root.result.as_ref()?;
+    let naga::TypeInner::Struct { members, .. } = &module.types[result.ty].inner else {
+        return None;
+    };
+    members
+        .iter()
+        .find(|member| member.name.as_deref() == Some(name))
+        .map(|member| member.ty)
+}
+
+fn traverse_named_members(
+    module: &naga::Module,
+    mut ty: naga::Handle<naga::Type>,
+    path: &str,
+) -> Option<naga::Handle<naga::Type>> {
+    if path.is_empty() {
+        return Some(ty);
+    }
+    for name in path.split('.') {
+        let naga::TypeInner::Struct { members, .. } = &module.types[ty].inner else {
+            return None;
+        };
+        ty = members
+            .iter()
+            .find(|member| member.name.as_deref() == Some(name))?
+            .ty;
+    }
+    Some(ty)
+}
+
+fn resolve_type_suffix(
+    module: &naga::Module,
+    mut ty: naga::Handle<naga::Type>,
+    mut suffix: &str,
+) -> bool {
+    while !suffix.is_empty() {
+        if let Some(rest) = suffix.strip_prefix("[]") {
+            ty = match module.types[ty].inner {
+                naga::TypeInner::Array { base, .. }
+                | naga::TypeInner::BindingArray { base, .. } => base,
+                _ => return false,
+            };
+            suffix = rest;
+            continue;
+        }
+        let Some(rest) = suffix.strip_prefix('.') else {
+            return false;
+        };
+        let end = rest.find(['.', '[']).unwrap_or(rest.len());
+        let member = &rest[..end];
+        suffix = &rest[end..];
+        match &module.types[ty].inner {
+            naga::TypeInner::Struct { members, .. } => {
+                let Some(found) = members
+                    .iter()
+                    .find(|candidate| candidate.name.as_deref() == Some(member))
+                else {
+                    return false;
+                };
+                ty = found.ty;
+            }
+            naga::TypeInner::Vector { size, .. } => {
+                let component = match member {
+                    "x" | "r" => 1,
+                    "y" | "g" => 2,
+                    "z" | "b" => 3,
+                    "w" | "a" => 4,
+                    _ => return false,
+                };
+                let width = match size {
+                    naga::VectorSize::Bi => 2,
+                    naga::VectorSize::Tri => 3,
+                    naga::VectorSize::Quad => 4,
+                };
+                return component <= width && suffix.is_empty();
+            }
+            naga::TypeInner::Image { dim, arrayed, .. } => {
+                let valid = match member {
+                    "width" => true,
+                    "height" => !matches!(dim, naga::ImageDimension::D1),
+                    "depth" => matches!(dim, naga::ImageDimension::D3),
+                    "layers" => *arrayed,
+                    _ => false,
+                };
+                return valid && suffix.is_empty();
+            }
+            naga::TypeInner::Array {
+                size: naga::ArraySize::Dynamic,
+                ..
+            } => return member == "length" && suffix.is_empty(),
+            _ => return false,
+        }
+    }
+    true
+}
+
+fn validate_invariant_directions(
+    module: &naga::Module,
+    root: &naga::Function,
+    contract: &EntryContract,
+) -> anyhow::Result<()> {
+    let kind = |name: &str| contract.inputs.iter().find(|input| input.name() == name);
+    for invariant in &contract.invariants {
+        match invariant {
+            InvariantContract::CountWithin { count, buffer } => {
+                anyhow::ensure!(
+                    matches!(kind(buffer), Some(InputContract::Buffer { .. })),
+                    "count_within target {buffer} is not a buffer"
+                );
+                anyhow::ensure!(
+                    !matches!(
+                        kind(count),
+                        Some(
+                            InputContract::Buffer { .. }
+                                | InputContract::Texture { .. }
+                                | InputContract::Sampler(_)
+                        )
+                    ),
+                    "count_within count {count} is not a numeric value"
+                );
+                let count_ty = known_symbol_type(module, root, count)
+                    .with_context(|| format!("count_within count {count} has no Naga type"))?;
+                anyhow::ensure!(
+                    matches!(
+                        module.types[count_ty].inner,
+                        naga::TypeInner::Scalar(naga::Scalar {
+                            kind: naga::ScalarKind::Uint | naga::ScalarKind::Sint,
+                            ..
+                        })
+                    ),
+                    "count_within count {count} is not an integer scalar"
+                );
+            }
+            InvariantContract::IndicesWithin { indices, target } => {
+                anyhow::ensure!(
+                    matches!(kind(indices), Some(InputContract::Buffer { .. })),
+                    "indices_within source {indices} is not a buffer"
+                );
+                anyhow::ensure!(
+                    matches!(kind(target), Some(InputContract::Buffer { .. })),
+                    "indices_within target {target} is not a buffer"
+                );
+                let element = storage_array_element(module, indices)
+                    .with_context(|| format!("indices_within source {indices} is not an array"))?;
+                anyhow::ensure!(
+                    matches!(
+                        module.types[element].inner,
+                        naga::TypeInner::Scalar(naga::Scalar {
+                            kind: naga::ScalarKind::Uint | naga::ScalarKind::Sint,
+                            ..
+                        })
+                    ),
+                    "indices_within source {indices} does not contain integer indices"
+                );
+            }
+            InvariantContract::LengthAtLeastProduct { buffer, .. }
+            | InvariantContract::LengthAtLeastProductMaxOne { buffer, .. } => {
+                anyhow::ensure!(
+                    matches!(kind(buffer), Some(InputContract::Buffer { .. })),
+                    "length invariant target {buffer} is not a buffer"
+                );
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn storage_array_element(module: &naga::Module, name: &str) -> Option<naga::Handle<naga::Type>> {
+    let (_, global) = module
+        .global_variables
+        .iter()
+        .find(|(_, global)| global.name.as_deref() == Some(name))?;
+    array_element(module, global.ty)
+}
+
+fn array_element(
+    module: &naga::Module,
+    ty: naga::Handle<naga::Type>,
+) -> Option<naga::Handle<naga::Type>> {
+    match &module.types[ty].inner {
+        naga::TypeInner::Array { base, .. } | naga::TypeInner::BindingArray { base, .. } => {
+            Some(*base)
+        }
+        naga::TypeInner::Struct { members, .. } => array_element(module, members.last()?.ty),
+        _ => None,
+    }
 }
 
 fn invariant_references(invariant: &InvariantContract) -> Vec<&str> {
@@ -249,6 +473,11 @@ fn invariant_references(invariant: &InvariantContract) -> Vec<&str> {
         } => {
             vec![buffer, width, height]
         }
+        InvariantContract::LengthAtLeastProductMaxOne {
+            buffer, factors, ..
+        } => std::iter::once(buffer.as_str())
+            .chain(factors.iter().map(String::as_str))
+            .collect(),
         InvariantContract::CountWithin { count, buffer } => vec![count, buffer],
     }
 }
@@ -378,8 +607,9 @@ fn invariant_bounds_texture(invariant: &InvariantContract, name: &str) -> bool {
 fn invariant_bounds_buffer(invariant: &InvariantContract, name: &str) -> bool {
     match invariant {
         InvariantContract::LengthAtLeastProduct { buffer, .. } => buffer == name,
+        InvariantContract::LengthAtLeastProductMaxOne { buffer, .. } => buffer == name,
         InvariantContract::CountWithin { buffer, .. } => buffer == name,
-        InvariantContract::IndicesWithin { indices, target } => indices == name || target == name,
+        InvariantContract::IndicesWithin { target, .. } => target == name,
         _ => false,
     }
 }
@@ -394,31 +624,110 @@ fn input_kind(input: &InputContract) -> ExpectedKind {
     }
 }
 
-fn add_value_leaves(
+fn collect_argument_inputs(
     module: &naga::Module,
-    ty: naga::Handle<naga::Type>,
-    prefix: &str,
+    function: &naga::Function,
     out: &mut BTreeMap<String, ExpectedKind>,
 ) {
-    match &module.types[ty].inner {
-        naga::TypeInner::Struct { members, .. } => {
-            for (index, member) in members.iter().enumerate() {
-                let name = member.name.as_deref().unwrap_or("unnamed");
-                let suffix = index_suffix(name, index);
-                add_value_leaves(module, member.ty, &format!("{prefix}.{name}{suffix}"), out);
-            }
-        }
-        _ => {
-            out.insert(prefix.into(), ExpectedKind::Value);
+    let mut paths = BTreeSet::new();
+    let identity: Vec<_> = function
+        .arguments
+        .iter()
+        .enumerate()
+        .map(|(index, _)| Some((index as u32, Vec::new())))
+        .collect();
+    collect_mapped_argument_paths(module, function, function, &identity, &mut paths, 0);
+    for path in &paths {
+        if !paths
+            .iter()
+            .any(|other| other.starts_with(&format!("{path}.")))
+        {
+            out.insert(path.clone(), ExpectedKind::Value);
         }
     }
 }
 
-fn index_suffix(name: &str, index: usize) -> String {
-    if name == "unnamed" {
-        format!("{index}")
-    } else {
-        String::new()
+fn collect_mapped_argument_paths(
+    module: &naga::Module,
+    root: &naga::Function,
+    function: &naga::Function,
+    mapping: &[Option<(u32, Vec<u32>)>],
+    paths: &mut BTreeSet<String>,
+    depth: usize,
+) {
+    if depth > module.functions.len() {
+        return;
+    }
+    for (handle, _) in function.expressions.iter() {
+        let Some((local_argument, indices)) = argument_access(function, handle) else {
+            continue;
+        };
+        let Some(Some((root_argument, prefix))) = mapping.get(local_argument as usize) else {
+            continue;
+        };
+        let Some(argument) = root.arguments.get(*root_argument as usize) else {
+            continue;
+        };
+        let mut full_path = prefix.clone();
+        full_path.extend(indices);
+        let name = argument
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("arg{root_argument}"));
+        if matches!(
+            module.types[argument.ty].inner,
+            naga::TypeInner::Struct { .. }
+        ) {
+            if let Some(path) = named_member_path(module, argument.ty, &full_path) {
+                paths.insert(format!("{name}.{path}"));
+            }
+        } else {
+            paths.insert(name);
+        }
+    }
+
+    let mut calls = Vec::new();
+    walk_statements(&function.body, &mut |statement| {
+        if let naga::Statement::Call {
+            function,
+            arguments,
+            ..
+        } = statement
+        {
+            calls.push((*function, arguments.clone()));
+        }
+    });
+    for (callee_handle, actuals) in calls {
+        let callee = &module.functions[callee_handle];
+        let callee_mapping: Vec<_> = actuals
+            .iter()
+            .map(|actual| {
+                let (local_argument, indices) = argument_access(function, *actual)?;
+                let (root_argument, prefix) = mapping.get(local_argument as usize)?.as_ref()?;
+                let mut full_path = prefix.clone();
+                full_path.extend(indices);
+                Some((*root_argument, full_path))
+            })
+            .collect();
+        collect_mapped_argument_paths(module, root, callee, &callee_mapping, paths, depth + 1);
+    }
+}
+
+fn argument_access(
+    function: &naga::Function,
+    handle: naga::Handle<naga::Expression>,
+) -> Option<(u32, Vec<u32>)> {
+    match function.expressions[handle] {
+        naga::Expression::FunctionArgument(index) => Some((index, Vec::new())),
+        naga::Expression::AccessIndex { base, index } => {
+            let (argument, mut path) = argument_access(function, base)?;
+            path.push(index);
+            Some((argument, path))
+        }
+        naga::Expression::Access { base, .. } | naga::Expression::Load { pointer: base } => {
+            argument_access(function, base)
+        }
+        _ => None,
     }
 }
 
@@ -668,6 +977,11 @@ pub(crate) enum InvariantContract {
         buffer: String,
         width: String,
         height: String,
+    },
+    LengthAtLeastProductMaxOne {
+        buffer: String,
+        constant: u32,
+        factors: Vec<String>,
     },
     DimensionsCover {
         texture: String,
@@ -1003,6 +1317,16 @@ fn parse_invariants(value: &str) -> anyhow::Result<Vec<InvariantContract>> {
                         buffer: nonempty(buffer)?,
                         width: nonempty(width)?,
                         height: nonempty(height)?,
+                    })
+                }
+                ["length_product_max1", buffer, constant, factors @ ..] if !factors.is_empty() => {
+                    Ok(InvariantContract::LengthAtLeastProductMaxOne {
+                        buffer: nonempty(buffer)?,
+                        constant: positive_u32(constant, "length product constant")?,
+                        factors: factors
+                            .iter()
+                            .map(|factor| nonempty(factor))
+                            .collect::<anyhow::Result<Vec<_>>>()?,
                     })
                 }
                 ["dimensions_cover", texture, width, height] => {
@@ -1406,5 +1730,125 @@ expiry = "2027-01-17"
                 validate_contract_semantics(&module, "fs_overlay", &mutated.entries[0]).is_err()
             );
         }
+    }
+
+    #[test]
+    fn semantic_references_reject_bogus_suffixes() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let source = std::fs::read_to_string(root.join("src/shaders/water_surface.wgsl")).unwrap();
+        let module = naga::front::wgsl::parse_str(&source).unwrap();
+        let text = std::fs::read_to_string(root.join("shaders/contracts/water_surface.toml"))
+            .unwrap()
+            .replace("norm_ge:in.normal:", "norm_ge:in.normal.zebra:");
+        let contract = parse_contract(&text).unwrap();
+        assert!(validate_contract_semantics(&module, "fs_main", &contract.entries[0]).is_err());
+    }
+
+    #[test]
+    fn entry_contract_contains_only_reachable_argument_members() {
+        let source = r#"
+struct Input { used: f32, unused: f32 }
+fn consume(input: Input) -> f32 { return input.used; }
+@fragment fn main(input: Input) -> @location(0) f32 {
+    return consume(input);
+}
+"#;
+        let module = naga::front::wgsl::parse_str(source).unwrap();
+        let contract_text = VALID
+            .replace("demo", "main")
+            .replace("outputs = [\"color:0:1\"]", "outputs = [\"location0:0:1\"]")
+            .replace("invariants = [\"ge:params.count:1\"]", "invariants = []")
+            .replace(
+                "\"value:arg:-1:1\", \"uniform:params:0:8\", \"texture:image:0:1:2:min1:min1\", \"buffer:data:-2:2:4\", \"sampler:samp\"",
+                "\"value:input.used:-1:1\"",
+            );
+        let contract = parse_contract(&contract_text).unwrap();
+        validate_contract_semantics(&module, "main", &contract.entries[0]).unwrap();
+
+        let extra = parse_contract(&contract_text.replace(
+            "\"value:input.used:-1:1\"",
+            "\"value:input.used:-1:1\", \"value:input.unused:-1:1\"",
+        ))
+        .unwrap();
+        assert!(validate_contract_semantics(&module, "main", &extra.entries[0]).is_err());
+
+        let omitted = parse_contract(&contract_text.replace("input.used", "input.unused")).unwrap();
+        assert!(validate_contract_semantics(&module, "main", &omitted.entries[0]).is_err());
+    }
+
+    #[test]
+    fn indices_relation_does_not_bound_the_indices_buffer_length() {
+        let source = r#"
+@group(0) @binding(0) var<storage, read> indices: array<u32>;
+@group(0) @binding(1) var<storage, read> vertices: array<f32>;
+@fragment fn main(@location(0) index: u32) -> @location(0) f32 {
+    return vertices[indices[index]];
+}
+"#;
+        let module = naga::front::wgsl::parse_str(source).unwrap();
+        let contract_text = VALID
+            .replace("demo", "main")
+            .replace(
+                "\"value:arg:-1:1\", \"uniform:params:0:8\", \"texture:image:0:1:2:min1:min1\", \"buffer:data:-2:2:4\", \"sampler:samp\"",
+                "\"value:index:0:0\", \"buffer:indices:0:4294967000:dynamic\", \"buffer:vertices:-1:1:dynamic\"",
+            )
+            .replace(
+                "invariants = [\"ge:params.count:1\"]",
+                "invariants = [\"indices_within:indices:vertices\"]",
+            );
+        let contract = parse_contract(&contract_text).unwrap();
+        assert!(validate_contract_semantics(&module, "main", &contract.entries[0]).is_err());
+
+        let float_indices = source
+            .replace("array<u32>", "array<f32>")
+            .replace("vertices[indices[index]]", "vertices[u32(indices[index])]");
+        let float_module = naga::front::wgsl::parse_str(&float_indices).unwrap();
+        let typed_contract = parse_contract(&contract_text.replace(
+            "indices_within:indices:vertices",
+            "count_within:index:indices\", \"indices_within:indices:vertices",
+        ))
+        .unwrap();
+        assert!(
+            validate_contract_semantics(&float_module, "main", &typed_contract.entries[0]).is_err()
+        );
+    }
+
+    #[test]
+    fn hybrid_contract_bounds_index_and_target_arrays_directionally() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let contract = parse_contract(
+            &std::fs::read_to_string(root.join("shaders/contracts/hybrid_terrain_traversal.toml"))
+                .unwrap(),
+        )
+        .unwrap();
+        let invariants = &contract.entries[0].invariants;
+        assert!(invariants.iter().any(|invariant| matches!(
+            invariant,
+            InvariantContract::CountWithin { count, buffer }
+                if count == "hybrid_uniforms.mesh_index_count" && buffer == "mesh_indices"
+        )));
+        assert!(invariants.iter().any(|invariant| matches!(
+            invariant,
+            InvariantContract::IndicesWithin { indices, target }
+                if indices == "mesh_indices" && target == "mesh_vertices"
+        )));
+    }
+
+    #[test]
+    fn gi_output_range_covers_all_additive_sources() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let contract = parse_contract(
+            &std::fs::read_to_string(root.join("shaders/contracts/gi_composite.toml")).unwrap(),
+        )
+        .unwrap();
+        let entry = &contract.entries[0];
+        let max = |name| match entry.input(name).unwrap() {
+            InputContract::Texture { range, .. } => range.max,
+            _ => panic!("{name} is not a texture"),
+        };
+        let conservative_rgb_max = max("diffuse_base_texture")
+            + max("ssgi_texture")
+            + max("spec_base_texture").max(max("ssr_texture"));
+        assert!(entry.outputs[0].max >= conservative_rgb_max);
     }
 }
