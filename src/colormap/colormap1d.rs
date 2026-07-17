@@ -68,9 +68,13 @@ impl Colormap1D {
         let lut_data = interpolate_colormap(&stops_sorted, &colors, domain, resolution)?;
 
         let ctx = crate::core::gpu::try_ctx()?;
-        let lut =
-            crate::terrain::ColormapLUT::new_single_palette(&ctx.device, &ctx.queue, &lut_data)
-                .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        let lut = crate::terrain::ColormapLUT::new_single_palette(
+            &ctx.device,
+            &ctx.queue,
+            &ctx.adapter,
+            &lut_data,
+        )
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
         Ok(Self {
             lut: Arc::new(lut),
