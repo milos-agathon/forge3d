@@ -1894,7 +1894,12 @@ class TerrainRenderParams:
     # P6.1: Color space correctness toggles (defaults to False for P5 compatibility)
     colormap_srgb: bool = False  # Use Rgba8UnormSrgb for colormap texture (correct sampling)
     output_srgb_eotf: bool = False  # Use exact linear_to_srgb() instead of pow-gamma
-    # P7: Camera projection mode ("screen" = fullscreen triangle, "mesh" = perspective grid)
+    # P7: Camera projection mode ("screen" = fullscreen triangle, "mesh" = perspective grid).
+    # "mesh:zup" selects the Z-up orbit camera: mesh terrain lives in the world
+    # XY plane with heights along +Z, so the legacy Y-up orbit renders oblique
+    # views rolled (its up vector is a grid axis). With zup, cam_theta_deg is
+    # the polar angle from +Z (0 = top-down, 90 = horizon) and cam_phi_deg the
+    # azimuth within the terrain plane; plain "mesh" keeps legacy output.
     camera_mode: str = "screen"
     # P7: Debug mode for projection probes (0=normal, 40=view-depth, 41=NDC depth, 42=view-pos XYZ)
     debug_mode: int = 0
@@ -2130,7 +2135,7 @@ def make_terrain_params_config(
     cam_phi_deg: float = 135.0,
     cam_theta_deg: float = 45.0,
     fov_y_deg: float = 55.0,
-    camera_mode: str = "screen",  # "screen" (fullscreen triangle) or "mesh" (perspective grid)
+    camera_mode: str = "screen",  # "screen", "mesh", or "mesh:zup" (Z-up orbit, see TerrainParams)
     debug_mode: int = 0,  # 0=normal, 40=view-depth probe, 41=NDC depth, 42=view-pos XYZ
     clip: Optional[Tuple[float, float]] = None,
     height_curve_mode: str = "linear",
