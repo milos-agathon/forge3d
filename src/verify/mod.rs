@@ -6,6 +6,8 @@
 //! the committed contracts. Unhandled syntax or missing load-bearing guards
 //! returns `unproven`; there is no ignore mechanism.
 
+pub(crate) mod domain;
+
 use serde::Serialize;
 use serde_json::json;
 use std::collections::BTreeSet;
