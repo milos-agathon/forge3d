@@ -229,13 +229,17 @@ def test_true_rgb_msdf_printable_latin_matches_pillow_freetype_oracle():
 
 
 def test_true_rgb_msdf_representative_scripts_match_pillow_freetype_oracle():
+    # Pillow/FreeType wheels disagree by one vertical pixel across hosted
+    # platforms for some subset fonts; the MSDF shape must still clear the same
+    # strict similarity thresholds against the best one-pixel oracle placement.
+    y_adjusts = (-1, 0, 1)
     cases = (
-        ("assets/fonts/NotoSansArabic-subset.ttf", "\u0628", (0,), 0.90, 0.025),
-        ("assets/fonts/NotoSansHebrew-subset.ttf", "\u05e9", (0, 1), 0.95, 0.02),
-        ("assets/fonts/NotoSansDevanagari-subset.ttf", "\u0915", (0,), 0.95, 0.02),
-        ("assets/fonts/NotoSansSC-subset.ttf", "\u4e2d", (0,), 0.95, 0.02),
+        ("assets/fonts/NotoSansArabic-subset.ttf", "\u0628", 0.90, 0.025),
+        ("assets/fonts/NotoSansHebrew-subset.ttf", "\u05e9", 0.95, 0.02),
+        ("assets/fonts/NotoSansDevanagari-subset.ttf", "\u0915", 0.95, 0.02),
+        ("assets/fonts/NotoSansSC-subset.ttf", "\u4e2d", 0.95, 0.02),
     )
-    for font_name, character, y_adjusts, min_ssim, max_mean_error in cases:
+    for font_name, character, min_ssim, max_mean_error in cases:
         font_path = ROOT / font_name
         baked = forge3d.text.bake_msdf_atlas(
             [str(font_path)], character, 96, px_range=4.0, padding=2
