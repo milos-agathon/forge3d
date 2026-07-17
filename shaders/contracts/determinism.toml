@@ -1,0 +1,28 @@
+[module]
+path = "src/shaders/includes/determinism.wgsl"
+owner = "render-quality"
+expiry = "2027-01-17"
+
+[[entry]]
+name = "det_div"
+proof_status = "proven"
+inputs = "finite f32; denominator may be zero"
+outputs = "finite f32; zero denominator returns 0"
+
+[[entry]]
+name = "det_normalize3"
+proof_status = "proven"
+inputs = "finite vec3"
+outputs = "finite unit-or-zero vec3"
+
+[[entry]]
+name = "det_sqrt"
+proof_status = "proven"
+inputs = "finite f32"
+outputs = "finite nonnegative f32"
+
+[[entry]]
+name = "det_fma"
+proof_status = "proven"
+inputs = "finite f32"
+outputs = "finite f32"

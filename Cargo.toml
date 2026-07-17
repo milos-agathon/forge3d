@@ -22,6 +22,8 @@ crate-type = ["lib", "cdylib"]
 default = ["images", "enable-gpu-instancing", "enable-staging-rings"]
 # Enable this when building the Python extension (maturin will pass this feature).
 extension-module = ["pyo3/extension-module"]
+# Debug-only runtime contract assertions for proven shader inputs.
+shader-contract-asserts = []
 # Optional async/double-buffered readback (R9)
 async_readback = ["dep:tokio"]
 weighted-oit = []
@@ -59,6 +61,7 @@ pyo3  = { version = "0.21.2", features = ["abi3-py310", "macros", "multiple-pyme
 numpy = "0.21"
 ndarray = "0.15"
 wgpu = "0.19"
+naga = { version = "=0.19.2", features = ["wgsl-in"] }
 winit = "0.29"
 pollster = "0.3"
 bytemuck = { version = "1", features = ["derive"] }

@@ -120,6 +120,7 @@ _NATIVE_ONLY_EXPORTS = (
         "abort_render_execution_capture",  # CENSOR: Python-render capture abort
         "sign_render_certificate_digest",  # CENSOR: native Ed25519 signer
         "request_host_visible_allocation_for_test",  # CENSOR: budget-enforce test helper
+        "shader_report",  # PROBATUM: WGSL proof report
 )
 
 if _NATIVE_MODULE is not None:
@@ -254,7 +255,7 @@ from .viewer import (
     open_viewer,
     open_viewer_async,
 )
-from . import viewer_ipc, colors, interactive, datasets, widgets, smoke
+from . import viewer_ipc, colors, interactive, datasets, widgets, smoke, verify
 from .datasets import (
     available as available_datasets,
     bundled as bundled_datasets,
@@ -623,6 +624,7 @@ __all__ = [
     "__version__",
     "version",
     "text",
+    "verify",
     # Core rendering
     "Renderer",
     "PathTracer",
@@ -674,6 +676,7 @@ __all__ = [
     "sign_render_certificate_digest",
     # CENSOR: budget-enforce test helper
     "request_host_visible_allocation_for_test",
+    "shader_report",
     # CENSOR: typed GPU-error exceptions
     "MemoryBudgetExceeded",
     "DegradedCapability",

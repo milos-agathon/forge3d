@@ -26,5 +26,6 @@ pub(super) fn register_diagnostics_py_functions(m: &Bound<'_, PyModule>) -> PyRe
     m.add_function(wrap_pyfunction!(finish_render_execution_capture, m)?)?;
     m.add_function(wrap_pyfunction!(abort_render_execution_capture, m)?)?;
     m.add_function(wrap_pyfunction!(sign_render_certificate_digest, m)?)?;
+    m.add_function(wrap_pyfunction!(shader_report, m)?)?;
     Ok(())
 }

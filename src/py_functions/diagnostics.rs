@@ -485,3 +485,18 @@ pub(crate) fn capabilities(py: Python<'_>) -> PyResult<PyObject> {
     d.set_item("limits", lim)?;
     Ok(d.into())
 }
+
+// ---------------------------------------------------------
+// PROBATUM: static WGSL proof report
+// ---------------------------------------------------------
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (mode = None))]
+pub(crate) fn shader_report(py: Python<'_>, mode: Option<String>) -> PyResult<PyObject> {
+    let value = crate::verify::shader_report(mode.as_deref())
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    let json = serde_json::to_string(&value)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    let json_mod = py.import_bound("json")?;
+    Ok(json_mod.call_method1("loads", (json,))?.into())
+}

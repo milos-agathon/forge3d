@@ -139,6 +139,7 @@ from .style import (
     vector_overlay_configs_from_style,
 )
 from . import smoke
+from . import verify
 from .path_tracing import ExperimentalSyntheticOutput
 
 PathLikeStr = os.PathLike[str] | str
@@ -1344,6 +1345,9 @@ def sign_render_certificate_digest(seed: bytes, digest: bytes) -> tuple[str, str
 
 # CENSOR: budget-enforce test helper (raises MemoryBudgetExceeded when over budget)
 def request_host_visible_allocation_for_test(bytes: int, label: str) -> None: ...
+
+# PROBATUM: WGSL proof report
+def shader_report(mode: str | None = ...) -> Dict[str, Any]: ...
 
 # CARTOGRAPHER-PRIME: bounded-optimal, silhouette-aware label declutter
 class LabelRationale:

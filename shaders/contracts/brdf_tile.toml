@@ -1,0 +1,10 @@
+[module]
+path = "src/shaders/brdf_tile.wgsl"
+owner = "offscreen"
+expiry = "2027-01-17"
+
+[[entry]]
+name = "fs_main"
+proof_status = "proven"
+inputs = "finite BRDF params"
+outputs = "finite rgba in [0, 1]"
