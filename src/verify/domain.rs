@@ -22,6 +22,10 @@ pub(crate) enum Comparison {
     Ne,
 }
 
+// Vulkan permits about 2.5 ULP for native f32 divide/sqrt/inverseSqrt
+// (see shaders/includes/determinism.wgsl); three outward ULPs cover that contract.
+const NATIVE_OP_ULPS: usize = 3;
+
 impl Interval {
     pub(crate) fn new(lo: f32, hi: f32) -> Self {
         assert!(lo.is_finite() && hi.is_finite() && lo <= hi);
@@ -89,6 +93,20 @@ impl Interval {
         self.may_neg_zero || (self.has_finite() && self.lo <= 0.0 && self.hi >= 0.0)
     }
 
+    fn with_input_ftz(mut self) -> Self {
+        if !self.has_finite() {
+            return self;
+        }
+        if self.lo > 0.0 && self.lo < f32::MIN_POSITIVE {
+            self.lo = 0.0;
+        }
+        if self.hi < 0.0 && self.hi > -f32::MIN_POSITIVE {
+            self.hi = -0.0;
+            self.may_neg_zero = true;
+        }
+        self
+    }
+
     pub(crate) fn has_exceptional_values(&self) -> bool {
         self.may_nan || self.may_pos_inf || self.may_neg_inf || self.may_neg_zero
     }
@@ -108,97 +126,138 @@ impl Interval {
     }
 
     pub(crate) fn add(self, rhs: Self) -> Self {
-        if self.has_infinity() || rhs.has_infinity() {
+        let self_ = self.with_input_ftz();
+        let rhs = rhs.with_input_ftz();
+        if self_.has_infinity() || rhs.has_infinity() {
             return Self::top(true);
         }
         bounds(
-            self.lo as f64 + rhs.lo as f64,
-            self.hi as f64 + rhs.hi as f64,
-            self.may_nan || rhs.may_nan,
+            self_.lo as f64 + rhs.lo as f64,
+            self_.hi as f64 + rhs.hi as f64,
+            self_.may_nan || rhs.may_nan,
         )
     }
 
     pub(crate) fn sub(self, rhs: Self) -> Self {
-        if self.has_infinity() || rhs.has_infinity() {
+        let self_ = self.with_input_ftz();
+        let rhs = rhs.with_input_ftz();
+        if self_.has_infinity() || rhs.has_infinity() {
             return Self::top(true);
         }
         bounds(
-            self.lo as f64 - rhs.hi as f64,
-            self.hi as f64 - rhs.lo as f64,
-            self.may_nan || rhs.may_nan,
+            self_.lo as f64 - rhs.hi as f64,
+            self_.hi as f64 - rhs.lo as f64,
+            self_.may_nan || rhs.may_nan,
         )
     }
 
     pub(crate) fn mul(self, rhs: Self) -> Self {
-        if self.has_infinity() || rhs.has_infinity() {
+        let self_ = self.with_input_ftz();
+        let rhs = rhs.with_input_ftz();
+        if self_.has_infinity() || rhs.has_infinity() {
             return Self::top(true);
         }
         let products = [
-            self.lo as f64 * rhs.lo as f64,
-            self.lo as f64 * rhs.hi as f64,
-            self.hi as f64 * rhs.lo as f64,
-            self.hi as f64 * rhs.hi as f64,
+            self_.lo as f64 * rhs.lo as f64,
+            self_.lo as f64 * rhs.hi as f64,
+            self_.hi as f64 * rhs.lo as f64,
+            self_.hi as f64 * rhs.hi as f64,
         ];
-        from_candidates(&products, self.may_nan || rhs.may_nan)
+        from_candidates(&products, self_.may_nan || rhs.may_nan)
     }
 
     pub(crate) fn div(self, rhs: Self) -> Self {
+        let self_ = self.with_input_ftz();
+        let rhs = rhs.with_input_ftz();
         if rhs.may_zero() {
             return Self::top(true);
         }
-        if self.has_infinity() || rhs.has_infinity() {
+        if self_.has_infinity() || rhs.has_infinity() {
             return Self::top(true);
         }
         let quotients = [
-            self.lo as f64 / rhs.lo as f64,
-            self.lo as f64 / rhs.hi as f64,
-            self.hi as f64 / rhs.lo as f64,
-            self.hi as f64 / rhs.hi as f64,
+            self_.lo as f64 / rhs.lo as f64,
+            self_.lo as f64 / rhs.hi as f64,
+            self_.hi as f64 / rhs.lo as f64,
+            self_.hi as f64 / rhs.hi as f64,
         ];
-        from_candidates(&quotients, self.may_nan || rhs.may_nan)
+        expand_ulps(
+            from_candidates(&quotients, self_.may_nan || rhs.may_nan),
+            NATIVE_OP_ULPS,
+        )
     }
 
     pub(crate) fn sqrt(self) -> Self {
-        let may_nan = self.may_nan || self.may_neg_inf || (self.has_finite() && self.lo < 0.0);
-        let mut result = if self.has_finite() && self.hi >= 0.0 {
-            bounds(self.lo.max(0.0) as f64, self.hi as f64, may_nan).map_bounds(f64::sqrt)
+        let input = self.with_input_ftz();
+        let may_nan = input.may_nan || input.may_neg_inf || (input.has_finite() && input.lo < 0.0);
+        let mut result = if input.has_finite() && input.hi >= 0.0 {
+            bounds(
+                (input.lo.max(0.0) as f64).sqrt(),
+                (input.hi as f64).sqrt(),
+                may_nan,
+            )
         } else {
             Self::exceptional(may_nan, false, false, false)
         };
-        result.may_pos_inf |= self.may_pos_inf;
-        result.may_neg_zero |= self.may_neg_zero;
-        result
+        result.may_pos_inf |= input.may_pos_inf;
+        result.may_neg_zero |= input.may_neg_zero;
+        expand_ulps(result, NATIVE_OP_ULPS)
     }
 
     pub(crate) fn inverse_sqrt(self) -> Self {
-        Self::constant(1.0).div(self.sqrt())
+        let input = self.with_input_ftz();
+        let may_nan = input.may_nan || input.may_neg_inf || (input.has_finite() && input.lo < 0.0);
+        let mut result = if input.has_finite() && input.hi > 0.0 {
+            let smallest = if input.lo > 0.0 {
+                input.lo
+            } else {
+                f32::from_bits(1)
+            };
+            bounds(
+                1.0 / (input.hi as f64).sqrt(),
+                1.0 / (smallest as f64).sqrt(),
+                may_nan,
+            )
+        } else {
+            Self::exceptional(may_nan, false, false, false)
+        };
+        result.may_pos_inf |= input.has_finite() && input.lo <= 0.0 && input.hi >= 0.0;
+        result.may_neg_inf |= input.may_neg_zero;
+        if input.may_pos_inf {
+            result = result.join(Self::constant(0.0));
+        }
+        expand_ulps(result, NATIVE_OP_ULPS)
     }
 
     pub(crate) fn min(self, rhs: Self) -> Self {
-        if self.has_infinity() || rhs.has_infinity() {
-            return Self::top(self.may_nan || rhs.may_nan);
+        let self_ = self.with_input_ftz();
+        let rhs = rhs.with_input_ftz();
+        if self_.has_infinity() || rhs.has_infinity() {
+            return Self::top(self_.may_nan || rhs.may_nan);
         }
-        if !self.has_finite() || !rhs.has_finite() {
-            return self.join(rhs);
+        if !self_.has_finite() || !rhs.has_finite() {
+            return self_.join(rhs);
         }
         bounds(
-            self.lo.min(rhs.lo) as f64,
-            self.hi.min(rhs.hi) as f64,
-            self.may_nan || rhs.may_nan,
+            self_.lo.min(rhs.lo) as f64,
+            self_.hi.min(rhs.hi) as f64,
+            self_.may_nan || rhs.may_nan,
         )
     }
 
     pub(crate) fn max(self, rhs: Self) -> Self {
-        if self.has_infinity() || rhs.has_infinity() {
-            return Self::top(self.may_nan || rhs.may_nan);
+        let self_ = self.with_input_ftz();
+        let rhs = rhs.with_input_ftz();
+        if self_.has_infinity() || rhs.has_infinity() {
+            return Self::top(self_.may_nan || rhs.may_nan);
         }
-        if !self.has_finite() || !rhs.has_finite() {
-            return self.join(rhs);
+        if !self_.has_finite() || !rhs.has_finite() {
+            return self_.join(rhs);
         }
         bounds(
-            self.lo.max(rhs.lo) as f64,
-            self.hi.max(rhs.hi) as f64,
-            self.may_nan || rhs.may_nan,
+            self_.lo.max(rhs.lo) as f64,
+            self_.hi.max(rhs.hi) as f64,
+            self_.may_nan || rhs.may_nan,
         )
     }
 
@@ -223,12 +282,15 @@ impl Interval {
     }
 
     pub(crate) fn fma(self, multiplier: Self, addend: Self) -> Self {
-        if self.has_infinity() || multiplier.has_infinity() || addend.has_infinity() {
+        let self_ = self.with_input_ftz();
+        let multiplier = multiplier.with_input_ftz();
+        let addend = addend.with_input_ftz();
+        if self_.has_infinity() || multiplier.has_infinity() || addend.has_infinity() {
             return Self::top(true);
         }
         let mut candidates = [0.0; 8];
         let mut index = 0;
-        for left in [self.lo, self.hi] {
+        for left in [self_.lo, self_.hi] {
             for right in [multiplier.lo, multiplier.hi] {
                 for addend in [addend.lo, addend.hi] {
                     candidates[index] = left as f64 * right as f64 + addend as f64;
@@ -238,7 +300,7 @@ impl Interval {
         }
         from_candidates(
             &candidates,
-            self.may_nan || multiplier.may_nan || addend.may_nan,
+            self_.may_nan || multiplier.may_nan || addend.may_nan,
         )
     }
 
@@ -261,7 +323,7 @@ impl Interval {
 
     pub(crate) fn widen(self, next: Self) -> Self {
         if !self.has_finite() {
-            return next;
+            return self.join(next);
         }
         let joined = self.join(next);
         Self {
@@ -314,17 +376,6 @@ impl Interval {
         }
     }
 
-    fn map_bounds(self, map: impl Fn(f64) -> f64) -> Self {
-        if !self.has_finite() {
-            return self;
-        }
-        let mut result = bounds(map(self.lo as f64), map(self.hi as f64), self.may_nan);
-        result.may_pos_inf |= self.may_pos_inf;
-        result.may_neg_inf |= self.may_neg_inf;
-        result.may_neg_zero |= self.may_neg_zero;
-        result
-    }
-
     fn with_bounds(mut self, lo: f32, hi: f32) -> Self {
         self.lo = lo;
         self.hi = hi;
@@ -358,14 +409,14 @@ fn bounds(lo: f64, hi: f64, may_nan: bool) -> Interval {
     let may_pos_inf = hi > f32::MAX as f64;
     let lo = lower_f32(lo.max(-(f32::MAX as f64)));
     let hi = upper_f32(hi.min(f32::MAX as f64));
-    Interval {
+    include_result_ftz(Interval {
         lo,
         hi,
         may_nan,
         may_pos_inf,
         may_neg_inf,
         may_neg_zero: lo <= 0.0 && hi >= 0.0,
-    }
+    })
 }
 
 fn from_candidates(values: &[f64], may_nan: bool) -> Interval {
@@ -390,6 +441,43 @@ fn upper_f32(value: f64) -> f32 {
     } else {
         rounded
     }
+}
+
+fn include_result_ftz(mut interval: Interval) -> Interval {
+    if !interval.has_finite() {
+        return interval;
+    }
+    if interval.lo > 0.0 && interval.lo < f32::MIN_POSITIVE {
+        interval.lo = 0.0;
+    }
+    if interval.hi < 0.0 && interval.hi > -f32::MIN_POSITIVE {
+        interval.hi = -0.0;
+        interval.may_neg_zero = true;
+    }
+    interval
+}
+
+fn expand_ulps(mut interval: Interval, count: usize) -> Interval {
+    if !interval.has_finite() {
+        return interval;
+    }
+    for _ in 0..count {
+        let lo = next_down(interval.lo);
+        if lo == f32::NEG_INFINITY {
+            interval.lo = -f32::MAX;
+            interval.may_neg_inf = true;
+        } else {
+            interval.lo = lo;
+        }
+        let hi = next_up(interval.hi);
+        if hi == f32::INFINITY {
+            interval.hi = f32::MAX;
+            interval.may_pos_inf = true;
+        } else {
+            interval.hi = hi;
+        }
+    }
+    include_result_ftz(interval)
 }
 
 fn next_down(value: f32) -> f32 {
@@ -417,6 +505,13 @@ fn next_up(value: f32) -> f32 {
 }
 
 fn refine_ordered(left: Interval, right: Interval, strict: bool) -> Option<(Interval, Interval)> {
+    if left.has_infinity() || right.has_infinity() {
+        let mut left = left;
+        let mut right = right;
+        left.may_nan = false;
+        right.may_nan = false;
+        return viable(left, right);
+    }
     let left_hi = if strict {
         left.hi.min(next_down(right.hi))
     } else {
@@ -470,6 +565,20 @@ mod tests {
             interval.contains(concrete),
             "{interval:?} does not contain {concrete:?}"
         );
+    }
+
+    fn step_down(mut value: f32, count: usize) -> f32 {
+        for _ in 0..count {
+            value = next_down(value);
+        }
+        value
+    }
+
+    fn step_up(mut value: f32, count: usize) -> f32 {
+        for _ in 0..count {
+            value = next_up(value);
+        }
+        value
     }
 
     #[test]
@@ -575,22 +684,165 @@ mod tests {
     }
 
     #[test]
+    fn native_ops_include_the_vulkan_accuracy_envelope() {
+        let div_exact = 1.0_f32 / 3.0;
+        let div = Interval::constant(1.0).div(Interval::constant(3.0));
+        assert!(div.lo <= step_down(div_exact, 3));
+        assert!(div.hi >= step_up(div_exact, 3));
+
+        let sqrt_exact = 2.0_f32.sqrt();
+        let sqrt = Interval::constant(2.0).sqrt();
+        assert!(sqrt.lo <= step_down(sqrt_exact, 3));
+        assert!(sqrt.hi >= step_up(sqrt_exact, 3));
+
+        let inverse_exact = 1.0 / 2.0_f32.sqrt();
+        let inverse = Interval::constant(2.0).inverse_sqrt();
+        assert!(inverse.lo <= step_down(inverse_exact, 3));
+        assert!(inverse.hi >= step_up(inverse_exact, 3));
+    }
+
+    #[test]
+    fn subnormal_inputs_and_results_include_ftz_zeros() {
+        let positive_subnormal = f32::from_bits(1);
+        let negative_subnormal = -positive_subnormal;
+        assert_contains(
+            Interval::constant(positive_subnormal).add(Interval::constant(0.0)),
+            0.0,
+        );
+        assert_contains(
+            Interval::constant(negative_subnormal).add(Interval::constant(0.0)),
+            -0.0,
+        );
+        assert_contains(
+            Interval::constant(f32::MIN_POSITIVE).mul(Interval::constant(0.5)),
+            0.0,
+        );
+        assert_contains(
+            Interval::constant(-f32::MIN_POSITIVE).mul(Interval::constant(0.5)),
+            -0.0,
+        );
+        assert!(
+            Interval::constant(1.0)
+                .div(Interval::constant(positive_subnormal))
+                .may_pos_inf
+        );
+    }
+
+    #[test]
+    fn widening_preserves_exceptional_only_states() {
+        for (exceptional, expected) in [
+            (
+                Interval::exceptional(true, false, false, false),
+                (true, false, false, false),
+            ),
+            (
+                Interval::exceptional(false, true, false, false),
+                (false, true, false, false),
+            ),
+            (
+                Interval::exceptional(false, false, true, false),
+                (false, false, true, false),
+            ),
+            (
+                Interval::exceptional(false, false, false, true),
+                (false, false, false, true),
+            ),
+        ] {
+            let widened = exceptional.widen(Interval::new(1.0, 2.0));
+            assert_eq!(
+                (
+                    widened.may_nan,
+                    widened.may_pos_inf,
+                    widened.may_neg_inf,
+                    widened.may_neg_zero,
+                ),
+                expected,
+            );
+            assert_contains(widened, 1.5);
+        }
+    }
+
+    #[test]
+    fn ordered_refinement_preserves_feasible_infinite_branches() {
+        let zero = Interval::constant(0.0);
+        let positive_inf = Interval::constant(f32::INFINITY);
+        let negative_inf = Interval::constant(f32::NEG_INFINITY);
+
+        let (left, right) = zero.refine(positive_inf, Comparison::Lt, true).unwrap();
+        assert_contains(left, 0.0);
+        assert_contains(right, f32::INFINITY);
+
+        let (left, right) = negative_inf.refine(zero, Comparison::Lt, true).unwrap();
+        assert_contains(left, f32::NEG_INFINITY);
+        assert_contains(right, 0.0);
+    }
+
+    #[test]
+    fn exceptional_boundaries_remain_contained_and_unproven() {
+        let spanning_zero = Interval::new(-1.0, 1.0);
+        let near_zero = Interval::new(f32::from_bits(1), f32::MIN_POSITIVE);
+        assert!(Interval::constant(1.0).div(spanning_zero).may_nan);
+        assert!(Interval::constant(1.0).div(near_zero).may_pos_inf);
+        assert!(Interval::new(-4.0, -1.0).sqrt().may_nan);
+        assert!(Interval::new(-4.0, -1.0).inverse_sqrt().may_nan);
+        assert!(
+            Interval::constant(f32::MAX)
+                .mul(Interval::constant(2.0))
+                .may_pos_inf
+        );
+        assert!(
+            Interval::constant(f32::NAN)
+                .add(Interval::constant(f32::INFINITY))
+                .may_nan
+        );
+    }
+
+    #[test]
     fn one_million_deterministic_samples_are_contained() {
         let mut rng = Rng(0x4d59_5df4_d0f3_3173);
-        for _ in 0..1_000_000 {
-            let x = rng.finite(-100.0, 100.0);
-            let y = rng.finite(0.25, 100.0);
-            let t = rng.finite(0.0, 1.0);
-            let ax = Interval::constant(x);
-            let ay = Interval::constant(y);
-            let at = Interval::constant(t);
+        for sample in 0..1_000_000 {
+            let (ax, x, ay, y) = match sample & 0x3fff {
+                0 => (
+                    Interval::new(-f32::MIN_POSITIVE, f32::MIN_POSITIVE),
+                    f32::from_bits(1),
+                    Interval::new(-1.0, 1.0),
+                    -0.0,
+                ),
+                1 => (
+                    Interval::new(f32::MAX / 2.0, f32::MAX),
+                    f32::MAX,
+                    Interval::new(2.0, 3.0),
+                    3.0,
+                ),
+                2 => (
+                    Interval::new(-1.0, 1.0).join(Interval::constant(f32::NAN)),
+                    f32::NAN,
+                    Interval::new(1.0, 2.0).join(Interval::constant(f32::INFINITY)),
+                    f32::INFINITY,
+                ),
+                3 => (
+                    Interval::new(-4.0, -1.0),
+                    -2.0,
+                    Interval::new(f32::from_bits(1), f32::MIN_POSITIVE),
+                    f32::from_bits(1),
+                ),
+                _ => {
+                    let ax = Interval::new(rng.finite(-100.0, -1.0), rng.finite(1.0, 100.0));
+                    let ay = Interval::new(rng.finite(0.25, 10.0), rng.finite(10.0, 100.0));
+                    let x = rng.finite(ax.lo, ax.hi);
+                    let y = rng.finite(ay.lo, ay.hi);
+                    (ax, x, ay, y)
+                }
+            };
+            let at = Interval::new(0.0, 1.0);
+            let t = rng.finite(at.lo, at.hi);
 
             assert_contains(ax.add(ay), x + y);
             assert_contains(ax.sub(ay), x - y);
             assert_contains(ax.mul(ay), x * y);
             assert_contains(ax.div(ay), x / y);
-            assert_contains(ay.sqrt(), y.sqrt());
-            assert_contains(ay.inverse_sqrt(), 1.0 / y.sqrt());
+            assert_contains(ax.sqrt(), x.sqrt());
+            assert_contains(ax.inverse_sqrt(), 1.0 / x.sqrt());
             assert_contains(ax.min(ay), x.min(y));
             assert_contains(ax.max(ay), x.max(y));
             assert_contains(
@@ -604,8 +856,20 @@ mod tests {
             );
             assert_contains(ax.fma(ay, at), x.mul_add(y, t));
 
+            let joined = ax.join(ay);
+            assert_contains(joined, x);
+            assert_contains(joined, y);
+            let widened = ax.widen(ay);
+            assert_contains(widened, x);
+            assert_contains(widened, y);
+            let (refined_x, refined_y) = ax
+                .refine(ay, Comparison::Lt, x < y)
+                .expect("the sampled comparison must remain feasible");
+            assert_contains(refined_x, x);
+            assert_contains(refined_y, y);
+
             let concrete = [x, y, t];
-            let abstracted = concrete.map(Interval::constant);
+            let abstracted = [ax, ay, at];
             let concrete_dot = concrete.iter().map(|v| v * v).sum::<f32>();
             assert_contains(dot(&abstracted, &abstracted), concrete_dot);
             let concrete_length = concrete_dot.sqrt();
