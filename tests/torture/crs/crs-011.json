@@ -4,8 +4,9 @@
   },
   "family": "crs",
   "id": "crs-011",
+  "notes": "distinct adversarial input crs-011",
   "operation": "gis_parse_crs",
   "payload": {
-    "crs": "EPSG:4326"
+    "crs": "EPSG:32612"
   }
 }

@@ -4,13 +4,14 @@
   },
   "family": "dems",
   "id": "dems-013",
+  "notes": "distinct DEM pathology variant 3",
   "operation": "dem_derive_water_mask",
   "payload": {
     "array": {
       "dtype": "float32",
-      "fill": 0,
+      "fill": 0.5,
       "shape": [
-        2,
+        4,
         2
       ]
     }

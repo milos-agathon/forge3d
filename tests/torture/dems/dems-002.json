@@ -6,6 +6,7 @@
   },
   "family": "dems",
   "id": "dems-002",
+  "notes": "distinct DEM pathology variant 1",
   "operation": "dem_derive_water_mask",
   "payload": {
     "array": {

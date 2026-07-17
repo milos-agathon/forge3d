@@ -4,11 +4,29 @@
   },
   "family": "geometry",
   "id": "geometry-050",
+  "notes": "empty/undersized line variant with 4 coordinate records",
   "operation": "gis_validate_geometry",
   "payload": {
     "geometry": {
-      "coordinates": [],
-      "type": "MultiPolygon"
+      "coordinates": [
+        [
+          0.0504,
+          -0.0504
+        ],
+        [
+          0.0504,
+          -0.0504
+        ],
+        [
+          0.0504,
+          -0.0504
+        ],
+        [
+          0.0504,
+          -0.0504
+        ]
+      ],
+      "type": "LineString"
     }
   }
 }

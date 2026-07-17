@@ -4,6 +4,7 @@
   },
   "family": "rasters",
   "id": "rasters-043",
+  "notes": "distinct adversarial input rasters-043",
   "operation": "gis_classify_raster",
   "payload": {
     "array": {
@@ -11,7 +12,7 @@
       "pattern": "checker",
       "shape": [
         3,
-        3
+        4
       ]
     },
     "bins": [

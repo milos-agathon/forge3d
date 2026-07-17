@@ -4,6 +4,7 @@
   },
   "family": "rasters",
   "id": "rasters-041",
+  "notes": "distinct adversarial input rasters-041",
   "operation": "gis_classify_raster",
   "payload": {
     "array": {
@@ -14,7 +15,7 @@
           "-f32_max"
         ],
         [
-          1,
+          1.005636,
           -1
         ]
       ]

@@ -6,12 +6,18 @@
   },
   "family": "geometry",
   "id": "geometry-100",
+  "notes": "empty/undersized line variant with 1 coordinate records",
   "operation": "gis_representative_point",
   "payload": {
     "crs": "EPSG:4326",
     "geometry": {
-      "coordinates": [],
-      "type": "MultiPolygon"
+      "coordinates": [
+        [
+          0.10010000000000001,
+          -0.10010000000000001
+        ]
+      ],
+      "type": "LineString"
     }
   }
 }

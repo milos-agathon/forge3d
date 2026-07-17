@@ -4,16 +4,21 @@
   },
   "family": "geometry",
   "id": "geometry-133",
-  "operation": "gis_buffer_geometry",
+  "notes": "positive and negative f32 subnormal coordinates",
+  "operation": "gis_validate_geometry",
   "payload": {
-    "crs": "EPSG:3857",
-    "distance": 0.30000000000000004,
     "geometry": {
       "coordinates": [
-        -3,
-        1.0
+        [
+          "subnormal",
+          "-subnormal"
+        ],
+        [
+          0,
+          0
+        ]
       ],
-      "type": "Point"
+      "type": "LineString"
     }
   }
 }

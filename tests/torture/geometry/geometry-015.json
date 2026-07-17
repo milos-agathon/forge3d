@@ -6,12 +6,13 @@
   },
   "family": "geometry",
   "id": "geometry-015",
+  "notes": "distinct adversarial input geometry-015",
   "operation": "gis_validate_geometry",
   "payload": {
     "geometry": {
       "coordinates": [
         "nan",
-        0
+        0.002074
       ],
       "type": "Point"
     }

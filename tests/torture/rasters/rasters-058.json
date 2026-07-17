@@ -4,6 +4,7 @@
   },
   "family": "rasters",
   "id": "rasters-058",
+  "notes": "distinct adversarial input rasters-058",
   "operation": "gis_apply_nodata",
   "payload": {
     "array": {
@@ -19,6 +20,6 @@
         ]
       ]
     },
-    "nodata": 0
+    "nodata": -10057.0
   }
 }

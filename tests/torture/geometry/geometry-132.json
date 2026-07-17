@@ -4,14 +4,13 @@
   },
   "family": "geometry",
   "id": "geometry-132",
-  "operation": "gis_buffer_geometry",
+  "notes": "extreme finite coordinates",
+  "operation": "gis_validate_geometry",
   "payload": {
-    "crs": "EPSG:3857",
-    "distance": 0.2,
     "geometry": {
       "coordinates": [
-        -4,
-        0.5
+        1e+308,
+        -1e+308
       ],
       "type": "Point"
     }

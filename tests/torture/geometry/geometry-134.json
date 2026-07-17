@@ -4,16 +4,53 @@
   },
   "family": "geometry",
   "id": "geometry-134",
-  "operation": "gis_buffer_geometry",
+  "notes": "both polar caps in one geometry",
+  "operation": "gis_validate_geometry",
   "payload": {
-    "crs": "EPSG:3857",
-    "distance": 0.4,
     "geometry": {
       "coordinates": [
-        -2,
-        1.5
+        [
+          [
+            [
+              0,
+              90
+            ],
+            [
+              120,
+              89
+            ],
+            [
+              -120,
+              89
+            ],
+            [
+              0,
+              90
+            ]
+          ]
+        ],
+        [
+          [
+            [
+              0,
+              -90
+            ],
+            [
+              120,
+              -89
+            ],
+            [
+              -120,
+              -89
+            ],
+            [
+              0,
+              -90
+            ]
+          ]
+        ]
       ],
-      "type": "Point"
+      "type": "MultiPolygon"
     }
   }
 }

@@ -4,13 +4,14 @@
   },
   "family": "rasters",
   "id": "rasters-057",
+  "notes": "distinct adversarial input rasters-057",
   "operation": "gis_apply_nodata",
   "payload": {
     "array": {
       "dtype": "float32",
       "values": [
         [
-          0
+          0.007828
         ]
       ]
     },

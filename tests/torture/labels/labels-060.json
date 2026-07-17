@@ -1,17 +1,18 @@
 {
   "expect": {
     "class": "error",
-    "match": "font not found",
-    "type": "TextShapingError"
+    "match": "exceeds the safe limit",
+    "type": "ValueError"
   },
   "family": "labels",
   "id": "labels-060",
-  "operation": "text_shape",
+  "notes": "safe-limit boundary refusal with antipodal anchors",
+  "operation": "label_plan_compile",
   "payload": {
-    "fonts": [
-      "missing-font.ttf"
-    ],
-    "size": 256,
-    "text": "\u0928\u092e\u0938\u094d\u0924\u0947"
+    "anchor_count": 100001,
+    "height": 4096,
+    "width": 4096,
+    "x": -180,
+    "y": -90
   }
 }

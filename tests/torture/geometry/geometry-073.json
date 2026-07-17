@@ -6,6 +6,7 @@
   },
   "family": "geometry",
   "id": "geometry-073",
+  "notes": "distinct adversarial input geometry-073",
   "operation": "gis_geometry_centroid",
   "payload": {
     "crs": "EPSG:4326",
@@ -13,23 +14,23 @@
       "coordinates": [
         [
           [
-            0,
+            0.010039,
             0
           ],
           [
-            1,
+            1.010039,
             1
           ],
           [
-            0,
+            0.010039,
             1
           ],
           [
-            1,
+            1.010039,
             0
           ],
           [
-            0,
+            0.010039,
             0
           ]
         ]

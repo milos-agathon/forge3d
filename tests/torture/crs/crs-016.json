@@ -6,8 +6,9 @@
   },
   "family": "crs",
   "id": "crs-016",
+  "notes": "distinct adversarial input crs-016",
   "operation": "gis_parse_crs",
   "payload": {
-    "crs": "EPSG:999999"
+    "crs": "invalid-crs-16"
   }
 }

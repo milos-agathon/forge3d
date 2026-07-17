@@ -6,12 +6,13 @@
   },
   "family": "crs",
   "id": "crs-070",
+  "notes": "distinct adversarial input crs-070",
   "operation": "gis_transform_bounds",
   "payload": {
     "bounds": [
-      170,
+      170.009609,
       -10,
-      -170,
+      -169.990391,
       10
     ],
     "densify": null,

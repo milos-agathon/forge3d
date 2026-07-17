@@ -1,28 +1,28 @@
 {
   "expect": {
     "class": "error",
-    "match": "terrain,",
-    "type": "TypeError"
+    "match": "z_scale produces non-finite scaled heights",
+    "type": "ValueError"
   },
   "family": "viewer_scene",
   "id": "viewer_scene-018",
-  "operation": "map_scene_validate",
+  "notes": "absurd terrain z_scale is a structured refusal, not an overflowed scene",
+  "operation": "terrain_scatter_source",
   "payload": {
-    "crs": "EPSG:4326",
-    "height": 32,
-    "metadata": {
-      "height": 2,
-      "source_id": "scene-1",
-      "width": 2
-    },
-    "terrain": {
+    "array": {
       "dtype": "float32",
-      "pattern": "ramp",
-      "shape": [
-        1,
-        8
+      "values": [
+        [
+          0.0,
+          1.0
+        ],
+        [
+          2.0,
+          3.0
+        ]
       ]
     },
-    "width": 33
+    "terrain_width": 100.0,
+    "z_scale": 1e+308
   }
 }

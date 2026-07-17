@@ -6,11 +6,12 @@
   },
   "family": "crs",
   "id": "crs-030",
+  "notes": "distinct adversarial input crs-030",
   "operation": "gis_parse_crs",
   "payload": {
     "crs": {
       "authority": "EPSG",
-      "code": "4326"
+      "code": "invalid-30"
     }
   }
 }

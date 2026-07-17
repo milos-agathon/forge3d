@@ -4,11 +4,19 @@
   },
   "family": "geometry",
   "id": "geometry-044",
+  "notes": "distinct adversarial input geometry-044",
   "operation": "gis_validate_geometry",
   "payload": {
     "geometry": {
-      "coordinates": [],
-      "type": "LineString"
+      "coordinates": [
+        [
+          [
+            0.006103999999999999,
+            0.006103999999999999
+          ]
+        ]
+      ],
+      "type": "Polygon"
     }
   }
 }

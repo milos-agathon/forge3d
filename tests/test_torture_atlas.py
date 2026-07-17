@@ -11,12 +11,13 @@ from forge3d._native import NATIVE_AVAILABLE
 
 from _torture import (
     TORTURE_ROOT,
-    classify_case,
-    expectation_errors,
+    TortureWorker,
+    evaluate_case,
     format_scoreboard,
     load_cases,
     scoreboard,
 )
+from tests._fuzz import replay_case, shrink_validation_transcript
 
 
 pytestmark = pytest.mark.skipif(
@@ -35,6 +36,24 @@ def test_torture_manifest_is_complete():
     assert manifest["total_cases"] == 500
     assert manifest["semantic_value_cases"] >= 50
     assert sum(1 for case in cases if case.get("semantic")) == manifest["semantic_value_cases"]
+    assert all(
+        case.get("expect", {}).get("type")
+        for case in cases
+        if case.get("expect", {}).get("class") in {"error", "structured_error"}
+    ), "every expected error must lock its Python exception type"
+
+    signatures = {
+        json.dumps(
+            {
+                "operation": case["operation"],
+                "payload": case.get("payload", {}),
+                "expect": case.get("expect", {}),
+            },
+            sort_keys=True,
+        )
+        for case in cases
+    }
+    assert len(signatures) == len(cases), "torture descriptors must exercise distinct inputs"
 
 
 def test_torture_atlas_all_cases_green(tmp_path, capsys):
@@ -42,13 +61,14 @@ def test_torture_atlas_all_cases_green(tmp_path, capsys):
     outcomes = []
     failures = []
 
-    for case in cases:
-        outcome = classify_case(case, tmp_path=tmp_path)
-        errors = expectation_errors(case, outcome)
-        if errors:
-            outcome = {**outcome, "class": "wrong_value", "expectation_errors": errors}
-            failures.append((case["id"], case.get("_path"), errors, outcome))
-        outcomes.append(outcome)
+    with TortureWorker() as worker:
+        for case in cases:
+            outcome = evaluate_case(case, tmp_path=tmp_path, worker=worker)
+            if outcome["class"] == "wrong_value":
+                failures.append(
+                    (case["id"], case.get("_path"), outcome["expectation_errors"], outcome)
+                )
+            outcomes.append(outcome)
 
     board = scoreboard(outcomes)
     print("TERMINUS atlas scoreboard:", format_scoreboard(board))
@@ -66,7 +86,59 @@ def test_torture_atlas_all_cases_green(tmp_path, capsys):
 
 def test_torture_atlas_deterministic(tmp_path):
     cases = load_cases()
-    first = [classify_case(case, tmp_path=tmp_path) for case in cases]
-    second = [classify_case(case, tmp_path=tmp_path) for case in cases]
+    with TortureWorker() as worker:
+        first = [evaluate_case(case, tmp_path=tmp_path, worker=worker) for case in cases]
+    with TortureWorker() as worker:
+        second = [evaluate_case(case, tmp_path=tmp_path, worker=worker) for case in cases]
     assert scoreboard(first) == scoreboard(second)
-    assert [case["class"] for case in first] == [case["class"] for case in second]
+    assert first == second
+
+
+def test_torture_worker_classifies_timeout_and_process_death(tmp_path):
+    with TortureWorker() as worker:
+        hang = worker.classify(
+            {
+                "operation": "_harness_sleep",
+                "payload": {"seconds": 1.0},
+                "watchdog_seconds": 0.05,
+            },
+            tmp_path,
+        )
+        crash = worker.classify(
+            {"operation": "_harness_exit", "payload": {"code": 86}},
+            tmp_path,
+        )
+    assert hang["class"] == "hang"
+    assert crash["class"] == "panic"
+    assert "exit_code=86" in crash["message"]
+
+
+def test_fuzzer_seed_replay_and_shrinker_are_deterministic():
+    assert replay_case(42, 137) == replay_case(42, 137)
+    transcript = shrink_validation_transcript()
+    assert "shrink before=" in transcript
+    assert "shrink after=" in transcript
+    assert '"values": [[1.2345, 2.3456], [3.4567, 4.5678]]' in transcript
+    assert '"values": [[1.0]]' in transcript
+
+
+def test_fuzzer_projection_cases_stay_inside_area_of_use():
+    for index in range(2_000):
+        case = replay_case(42, index)
+        if case["family"] != "crs":
+            continue
+        payload = case["payload"]
+        assert payload["src_crs"] == "EPSG:4326"
+        x = float(payload["x"])
+        y = float(payload["y"])
+        if payload["dst_crs"] == "EPSG:3857":
+            assert -170.0 <= x <= 170.0
+            assert -80.0 <= y <= 80.0
+        elif payload["dst_crs"] == "EPSG:32631":
+            assert 0.0 <= x <= 6.0
+            assert 0.0 <= y <= 80.0
+        elif payload["dst_crs"] == "EPSG:32733":
+            assert 12.0 <= x <= 18.0
+            assert -80.0 <= y <= 0.0
+        else:  # pragma: no cover - generator contract guard
+            raise AssertionError(f"unexpected fuzz destination CRS: {payload['dst_crs']}")

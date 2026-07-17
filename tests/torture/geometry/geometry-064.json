@@ -6,12 +6,20 @@
   },
   "family": "geometry",
   "id": "geometry-064",
+  "notes": "distinct adversarial input geometry-064",
   "operation": "gis_geometry_centroid",
   "payload": {
     "crs": "EPSG:4326",
     "geometry": {
-      "coordinates": [],
-      "type": "LineString"
+      "coordinates": [
+        [
+          [
+            0.008787,
+            0.008787
+          ]
+        ]
+      ],
+      "type": "Polygon"
     }
   }
 }

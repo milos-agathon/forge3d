@@ -4,12 +4,13 @@
   },
   "family": "crs",
   "id": "crs-069",
+  "notes": "distinct adversarial input crs-069",
   "operation": "gis_transform_bounds",
   "payload": {
     "bounds": [
+      -0.990528,
       -1,
-      -1,
-      1,
+      1.009472,
       1
     ],
     "densify": 4,

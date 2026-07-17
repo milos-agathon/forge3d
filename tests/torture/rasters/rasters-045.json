@@ -6,6 +6,7 @@
   },
   "family": "rasters",
   "id": "rasters-045",
+  "notes": "distinct adversarial input rasters-045",
   "operation": "gis_classify_raster",
   "payload": {
     "array": {
@@ -18,6 +19,7 @@
       1,
       2
     ],
+    "nodata": -10044.0,
     "out_dtype": "uint16"
   }
 }

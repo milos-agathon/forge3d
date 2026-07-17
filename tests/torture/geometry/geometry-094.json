@@ -1,17 +1,25 @@
 {
   "expect": {
     "class": "error",
-    "match": "InvalidGeometry",
-    "type": "ValueError"
+    "match": "BackendUnavailable",
+    "type": "RuntimeError"
   },
   "family": "geometry",
   "id": "geometry-094",
+  "notes": "distinct adversarial input geometry-094",
   "operation": "gis_representative_point",
   "payload": {
     "crs": "EPSG:4326",
     "geometry": {
-      "coordinates": [],
-      "type": "LineString"
+      "coordinates": [
+        [
+          [
+            0.012896999999999999,
+            0.012896999999999999
+          ]
+        ]
+      ],
+      "type": "Polygon"
     }
   }
 }

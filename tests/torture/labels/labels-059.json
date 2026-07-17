@@ -1,17 +1,18 @@
 {
   "expect": {
     "class": "error",
-    "match": "missing glyph U+0645; font chain tried",
-    "type": "TextShapingError"
+    "match": "exceeds the safe limit",
+    "type": "ValueError"
   },
   "family": "labels",
   "id": "labels-059",
-  "operation": "text_shape",
+  "notes": "one-million-anchor bounded refusal",
+  "operation": "label_plan_compile",
   "payload": {
-    "fonts": [
-      "assets/fonts/NotoSansHebrew-subset.ttf"
-    ],
-    "size": 12,
-    "text": "\u0645\u0631\u062d\u0628\u0627"
+    "anchor_count": 1000000,
+    "height": 256,
+    "width": 256,
+    "x": 180,
+    "y": 90
   }
 }

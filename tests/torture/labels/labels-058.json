@@ -1,17 +1,16 @@
 {
   "expect": {
-    "class": "error",
-    "match": "missing glyph U+05D1; font chain tried",
-    "type": "TextShapingError"
+    "class": "ok"
   },
   "family": "labels",
   "id": "labels-058",
-  "operation": "text_shape",
+  "notes": "south-pole anchors in a one-pixel frame",
+  "operation": "label_plan_compile",
   "payload": {
-    "fonts": [
-      "assets/fonts/NotoSansArabic-subset.ttf"
-    ],
-    "size": 8,
-    "text": "\u05d1\u05d3\u05d9\u05e7\u05d4"
+    "anchor_count": 2,
+    "height": 1,
+    "width": 1,
+    "x": 0,
+    "y": -90
   }
 }

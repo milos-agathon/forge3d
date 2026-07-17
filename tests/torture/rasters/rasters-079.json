@@ -1,33 +1,17 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "structured_error",
+    "match": "no image file directories",
+    "type": "RuntimeError"
   },
   "family": "rasters",
   "id": "rasters-079",
-  "operation": "gis_write_raster",
+  "notes": "COG constructor rejects a zero first-IFD offset without panic",
+  "operation": "cog_dataset_open",
   "payload": {
-    "array": {
-      "dtype": "float32",
-      "values": [
-        [
-          "nan",
-          "nan"
-        ],
-        [
-          "nan",
-          "nan"
-        ]
-      ]
-    },
-    "crs": null,
-    "name": "raster_18",
-    "transform": [
-      1e+308,
-      0,
-      0,
-      0,
-      -1,
-      2
-    ]
+    "cache_budget_mb": 1,
+    "cache_size_mb": 1,
+    "hex": "49492a00000000000000000000000000",
+    "name": "classic-tiff-empty-ifd"
   }
 }

@@ -4,11 +4,12 @@
   },
   "family": "rasters",
   "id": "rasters-042",
+  "notes": "distinct adversarial input rasters-042",
   "operation": "gis_classify_raster",
   "payload": {
     "array": {
       "dtype": "float32",
-      "fill": 7,
+      "fill": 7.005773,
       "shape": [
         2,
         3

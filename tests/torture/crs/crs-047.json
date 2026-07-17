@@ -4,11 +4,12 @@
   },
   "family": "crs",
   "id": "crs-047",
+  "notes": "distinct adversarial input crs-047",
   "operation": "gis_transform_point",
   "payload": {
     "dst_crs": "EPSG:4326",
     "src_crs": "EPSG:3857",
-    "x": 45,
-    "y": 10
+    "x": 45.006458,
+    "y": 10.006458
   }
 }

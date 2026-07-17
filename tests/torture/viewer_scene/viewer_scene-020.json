@@ -1,35 +1,36 @@
 {
   "expect": {
-    "class": "error",
-    "match": "terrain,",
-    "type": "TypeError"
+    "checks": [
+      {
+        "equals": 1,
+        "path": [
+          "point_count"
+        ]
+      },
+      {
+        "equals": 6,
+        "path": [
+          "packed",
+          "size"
+        ]
+      }
+    ],
+    "class": "ok"
   },
   "family": "viewer_scene",
   "id": "viewer_scene-020",
-  "operation": "map_scene_validate",
+  "notes": "point-cloud anchor at the geographic pole",
+  "operation": "point_buffer",
   "payload": {
-    "crs": "EPSG:4326",
-    "height": 32,
-    "metadata": {
-      "height": 2,
-      "source_id": "scene-3",
-      "width": 2
-    },
-    "terrain": {
-      "dtype": "float32",
-      "values": [
-        [
-          "nan",
-          1,
-          2
-        ],
-        [
-          3,
-          "nan",
-          4
-        ]
-      ]
-    },
-    "width": 35
+    "colors": [
+      255,
+      255,
+      255
+    ],
+    "positions": [
+      0,
+      90,
+      0
+    ]
   }
 }

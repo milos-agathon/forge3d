@@ -6,8 +6,9 @@
   },
   "family": "crs",
   "id": "crs-017",
+  "notes": "distinct adversarial input crs-017",
   "operation": "gis_parse_crs",
   "payload": {
-    "crs": "not-a-crs"
+    "crs": "invalid-crs-17"
   }
 }

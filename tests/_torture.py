@@ -7,11 +7,15 @@ place that maps a descriptor operation onto forge3d's public Python surface.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from collections.abc import Sequence
 import json
 import math
+import multiprocessing
+import os
 from pathlib import Path
 import signal
 import sys
+import time
 from typing import Any, Iterable
 
 import numpy as np
@@ -23,6 +27,50 @@ DEFAULT_WATCHDOG_SECONDS = 10.0
 
 class TortureTimeout(TimeoutError):
     """Raised when a torture case exceeds its watchdog budget."""
+
+
+class _GeneratedLabels:
+    """Compact sequence used to exercise oversized label-input refusal."""
+
+    def __init__(self, count: int, anchor: tuple[float, float]) -> None:
+        self._count = count
+        self._anchor = anchor
+
+    def __len__(self) -> int:
+        return self._count
+
+    def __iter__(self):
+        for index in range(self._count):
+            yield {
+                "id": f"generated-{index}",
+                "text": "A",
+                "geometry": {"type": "Point", "coordinates": self._anchor},
+            }
+
+
+class _GeneratedRing(Sequence):
+    """Lazy regular ring whose length can be rejected before materialization."""
+
+    def __init__(self, count: int, radius: float, lon0: float, lat0: float) -> None:
+        self._count = count
+        self._radius = radius
+        self._lon0 = lon0
+        self._lat0 = lat0
+
+    def __len__(self) -> int:
+        return self._count + 1 if self._count else 0
+
+    def __getitem__(self, index: int) -> list[float]:
+        if index < 0:
+            index += len(self)
+        if not 0 <= index < len(self):
+            raise IndexError(index)
+        source_index = 0 if index == self._count else index
+        angle = 2.0 * math.pi * source_index / self._count
+        return [
+            self._lon0 + self._radius * math.cos(angle),
+            self._lat0 + self._radius * math.sin(angle),
+        ]
 
 
 def load_cases(root: Path = TORTURE_ROOT) -> list[dict[str, Any]]:
@@ -122,11 +170,16 @@ def _geometry(payload: dict[str, Any]) -> dict[str, Any]:
         radius = float(payload.get("radius", 1.0))
         lon0 = float(payload.get("lon0", 0.0))
         lat0 = float(payload.get("lat0", 0.0))
-        points = []
-        for index in range(count):
-            angle = 2.0 * math.pi * index / count
-            points.append([lon0 + radius * math.cos(angle), lat0 + radius * math.sin(angle)])
-        points.append(points[0])
+        if count > 250_000:
+            points = _GeneratedRing(count, radius, lon0, lat0)
+        elif count < 1:
+            points: list[list[float]] = []
+        else:
+            angles = np.linspace(0.0, 2.0 * math.pi, count, endpoint=False)
+            points = np.column_stack(
+                (lon0 + radius * np.cos(angles), lat0 + radius * np.sin(angles))
+            ).tolist()
+            points.append(points[0])
         return {"type": "Polygon", "coordinates": [points]}
     raise KeyError(f"unknown geometry payload: {payload}")
 
@@ -166,6 +219,25 @@ def execute_payload(operation: str, payload: dict[str, Any], tmp_path: Path | No
         return gis.validate_geometry(_geometry(payload))
     if operation == "gis_geometry_measure":
         return gis.geometry_measure(_geometry(payload), crs=payload.get("crs", "EPSG:4326"))
+    if operation == "gis_geometry_wrap_invariance":
+        geometry = _geometry(payload)
+        shift = float(payload.get("shift", 360.0))
+        shifted = json.loads(json.dumps(geometry))
+
+        def shift_coordinates(value: Any) -> None:
+            if not isinstance(value, list):
+                return
+            if len(value) >= 2 and all(isinstance(item, (int, float)) for item in value[:2]):
+                value[0] = float(value[0]) + shift
+                return
+            for item in value:
+                shift_coordinates(item)
+
+        shift_coordinates(shifted.get("coordinates"))
+        return {
+            "original": gis.geometry_measure(geometry, crs=payload.get("crs", "EPSG:4326")),
+            "shifted": gis.geometry_measure(shifted, crs=payload.get("crs", "EPSG:4326")),
+        }
     if operation == "gis_geometry_centroid":
         return gis.geometry_centroid(_geometry(payload), crs=payload.get("crs"))
     if operation == "gis_representative_point":
@@ -340,6 +412,40 @@ def execute_payload(operation: str, payload: dict[str, Any], tmp_path: Path | No
         )
         data = shaped.to_dict() if hasattr(shaped, "to_dict") else {}
         return {"glyph_count": len(data.get("glyphs", ())), "text": data.get("text")}
+    if operation == "label_plan_compile":
+        labels = _GeneratedLabels(
+            int(payload["anchor_count"]),
+            (float(payload.get("x", 0.0)), float(payload.get("y", 90.0))),
+        )
+        plan = f3d.LabelPlan.compile(
+            labels=labels,
+            camera={},
+            viewport=(int(payload.get("width", 256)), int(payload.get("height", 256))),
+            glyph_atlas={"glyphs": ["A"]},
+            declutter="greedy",
+        )
+        return {"accepted": len(plan.accepted), "rejected": len(plan.rejected)}
+    if operation == "terrain_scatter_source":
+        from forge3d.terrain_scatter import TerrainScatterSource
+
+        source = TerrainScatterSource(
+            _array(payload["array"], default_dtype="float32"),
+            z_scale=float(payload.get("z_scale", 1.0)),
+            terrain_width=float(payload.get("terrain_width", 100.0)),
+        )
+        return {
+            "shape": list(source.heightmap.shape),
+            "scaled_finite": bool(np.all(np.isfinite(source._scaled_heights))),
+        }
+    if operation == "point_buffer":
+        from forge3d import _forge3d
+
+        point_buffer = _forge3d.PointBuffer(
+            _decode_nested(payload.get("positions", [])),
+            _decode_nested(payload.get("colors")),
+        )
+        packed = point_buffer.create_gpu_buffer()
+        return {"point_count": point_buffer.point_count, "packed": packed}
     if operation == "output_spec":
         output = f3d.OutputSpec(
             width=int(payload["width"]),
@@ -377,6 +483,11 @@ def execute_payload(operation: str, payload: dict[str, Any], tmp_path: Path | No
         import forge3d.viewer as viewer
 
         return {"samples": viewer.set_msaa(int(payload["samples"]))}
+    if operation == "_harness_sleep":
+        time.sleep(float(payload["seconds"]))
+        return {"slept": float(payload["seconds"])}
+    if operation == "_harness_exit":
+        os._exit(int(payload.get("code", 86)))
     raise KeyError(f"unknown torture operation: {operation}")
 
 
@@ -395,6 +506,8 @@ def classify_case(case: dict[str, Any], tmp_path: Path | None = None) -> dict[st
     except BaseException as exc:  # noqa: BLE001 - classification is the contract.
         if _is_panic_exception(exc):
             cls = "panic"
+        elif not isinstance(exc, Exception):
+            raise
         else:
             cls = "structured_error"
         return {
@@ -404,6 +517,106 @@ def classify_case(case: dict[str, Any], tmp_path: Path | None = None) -> dict[st
             "message": str(exc),
             "diagnostics": normalize_result(getattr(exc, "diagnostics", None)),
         }
+
+
+def _worker_loop(connection: Any) -> None:
+    """Execute public-API calls in one reusable crash-isolation process."""
+    while True:
+        request = connection.recv()
+        if request is None:
+            return
+        case, tmp_path = request
+        outcome = classify_case(case, Path(tmp_path) if tmp_path else None)
+        connection.send(outcome)
+
+
+class TortureWorker:
+    """Portable watchdog that also detects native aborts and process death."""
+
+    def __init__(self) -> None:
+        self._context = multiprocessing.get_context("spawn")
+        self._parent: Any = None
+        self._process: Any = None
+        self._start()
+
+    def _start(self) -> None:
+        parent, child = self._context.Pipe()
+        process = self._context.Process(target=_worker_loop, args=(child,), daemon=True)
+        process.start()
+        child.close()
+        self._parent = parent
+        self._process = process
+
+    def _stop(self, *, terminate: bool) -> None:
+        if self._process is None:
+            return
+        if terminate and self._process.is_alive():
+            self._process.terminate()
+        elif self._process.is_alive():
+            try:
+                self._parent.send(None)
+            except (BrokenPipeError, EOFError, OSError):
+                pass
+        self._process.join(timeout=2.0)
+        if self._process.is_alive():
+            self._process.kill()
+            self._process.join(timeout=2.0)
+        self._parent.close()
+        self._parent = None
+        self._process = None
+
+    def classify(self, case: dict[str, Any], tmp_path: Path | None = None) -> dict[str, Any]:
+        timeout = float(case.get("watchdog_seconds", DEFAULT_WATCHDOG_SECONDS))
+        if self._process is None or not self._process.is_alive():
+            self._stop(terminate=True)
+            self._start()
+        try:
+            self._parent.send((case, str(tmp_path) if tmp_path else None))
+        except (BrokenPipeError, EOFError, OSError) as exc:
+            exit_code = self._process.exitcode
+            self._stop(terminate=True)
+            self._start()
+            return {
+                "class": "panic",
+                "error_type": "WorkerProcessDied",
+                "message": f"torture worker died before request delivery: exit_code={exit_code}: {exc}",
+            }
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self._parent.poll(min(0.05, max(0.0, deadline - time.monotonic()))):
+                try:
+                    return self._parent.recv()
+                except EOFError:
+                    break
+            if not self._process.is_alive():
+                break
+
+        exit_code = self._process.exitcode
+        if self._process.is_alive():
+            self._stop(terminate=True)
+            self._start()
+            return {
+                "class": "hang",
+                "error_type": "TortureTimeout",
+                "message": f"torture case exceeded {timeout:.3f}s process watchdog",
+            }
+        self._stop(terminate=True)
+        self._start()
+        return {
+            "class": "panic",
+            "error_type": "WorkerProcessDied",
+            "message": f"torture worker exited without an outcome: exit_code={exit_code}",
+        }
+
+    def close(self) -> None:
+        self._stop(terminate=False)
+
+    def __enter__(self) -> "TortureWorker":
+        return self
+
+    def __exit__(self, _exc_type: Any, _exc: Any, _traceback: Any) -> None:
+        self.close()
 
 
 def normalize_result(value: Any) -> Any:
@@ -457,10 +670,14 @@ def expectation_errors(case: dict[str, Any], outcome: dict[str, Any]) -> list[st
     expected_class = expect.get("class", "ok")
     if expected_class == "error":
         expected_class = "structured_error"
-    if outcome.get("class") != expected_class:
+    if expected_class == "error_or_value":
+        allowed_classes = {"ok", "structured_error"}
+    else:
+        allowed_classes = {expected_class}
+    if outcome.get("class") not in allowed_classes:
         return [f"class {outcome.get('class')} != expected {expected_class}: {outcome}"]
 
-    if expected_class == "structured_error":
+    if outcome.get("class") == "structured_error":
         error_type = expect.get("type")
         if error_type and outcome.get("error_type") != error_type:
             errors.append(f"error_type {outcome.get('error_type')} != {error_type}")
@@ -468,7 +685,7 @@ def expectation_errors(case: dict[str, Any], outcome: dict[str, Any]) -> list[st
         if match and match not in outcome.get("message", ""):
             errors.append(f"error message does not contain {match!r}: {outcome.get('message')!r}")
 
-    for check in expect.get("checks", ()):
+    for check in expect.get("checks", ()) if outcome.get("class") == "ok" else ():
         actual = get_path(outcome["result"], check["path"])
         if "equals" in check and actual != check["equals"]:
             errors.append(f"{check['path']} actual {actual!r} != {check['equals']!r}")
@@ -483,7 +700,59 @@ def expectation_errors(case: dict[str, Any], outcome: dict[str, Any]) -> list[st
             errors.append(f"{check['path']} actual {actual!r} < {check['min']!r}")
         if "max" in check and float(actual) > float(check["max"]):
             errors.append(f"{check['path']} actual {actual!r} > {check['max']!r}")
+    errors.extend(property_errors(case, outcome))
     return errors
+
+
+def property_errors(case: dict[str, Any], outcome: dict[str, Any]) -> list[str]:
+    if outcome.get("class") != "ok":
+        return []
+    property_name = case.get("property")
+    result = outcome.get("result", {})
+    payload = case.get("payload", {})
+    if property_name == "projection_roundtrip":
+        roundtrip = result.get("roundtrip", ())
+        if len(roundtrip) != 2:
+            return [f"projection roundtrip result missing: {result!r}"]
+        tolerance = float(case.get("property_tolerance", 1.0e-6))
+        dx = abs(float(roundtrip[0]) - float(payload["x"]))
+        dy = abs(float(roundtrip[1]) - float(payload["y"]))
+        if not math.isfinite(dx) or not math.isfinite(dy) or dx > tolerance or dy > tolerance:
+            return [f"projection roundtrip drift dx={dx} dy={dy} tolerance={tolerance}"]
+    elif property_name == "area_wrap_invariance":
+        tolerance = float(case.get("property_tolerance", 1.0e-8))
+        for metric in ("area", "length"):
+            original = float(result["original"][metric])
+            shifted = float(result["shifted"][metric])
+            scale = max(1.0, abs(original), abs(shifted))
+            if not math.isfinite(original) or not math.isfinite(shifted):
+                return [f"{metric} wrap result is non-finite: {original}, {shifted}"]
+            if abs(original - shifted) > tolerance * scale:
+                return [
+                    f"{metric} changed under longitude wrapping: {original} != {shifted} "
+                    f"(relative tolerance {tolerance})"
+                ]
+    elif property_name == "normalized_unit_interval":
+        summary = result.get("array", result)
+        if summary.get("finite_count", 0):
+            minimum = float(summary["min"])
+            maximum = float(summary["max"])
+            if minimum < -1.0e-6 or maximum > 1.0 + 1.0e-6:
+                return [f"normalized raster outside [0, 1]: min={minimum} max={maximum}"]
+    return []
+
+
+def evaluate_case(
+    case: dict[str, Any],
+    tmp_path: Path | None = None,
+    *,
+    worker: TortureWorker | None = None,
+) -> dict[str, Any]:
+    outcome = worker.classify(case, tmp_path) if worker else classify_case(case, tmp_path)
+    errors = expectation_errors(case, outcome)
+    if errors:
+        return {**outcome, "class": "wrong_value", "expectation_errors": errors}
+    return outcome
 
 
 def scoreboard(outcomes: Iterable[dict[str, Any]]) -> dict[str, int]:

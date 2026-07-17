@@ -4,6 +4,7 @@
   },
   "family": "rasters",
   "id": "rasters-044",
+  "notes": "distinct adversarial input rasters-044",
   "operation": "gis_classify_raster",
   "payload": {
     "array": {
@@ -11,7 +12,7 @@
       "pattern": "ramp",
       "shape": [
         4,
-        4
+        5
       ]
     },
     "bins": [

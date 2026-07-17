@@ -6,6 +6,7 @@
   },
   "family": "geometry",
   "id": "geometry-093",
+  "notes": "distinct adversarial input geometry-093",
   "operation": "gis_representative_point",
   "payload": {
     "crs": "EPSG:4326",
@@ -13,23 +14,23 @@
       "coordinates": [
         [
           [
-            0,
+            0.012759999999999999,
             0
           ],
           [
-            1,
+            1.01276,
             1
           ],
           [
-            0,
+            0.012759999999999999,
             1
           ],
           [
-            1,
+            1.01276,
             0
           ],
           [
-            0,
+            0.012759999999999999,
             0
           ]
         ]

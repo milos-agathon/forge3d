@@ -102,7 +102,9 @@ impl PyCogDataset {
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to read tile: {:?}", e)))?;
 
         let header = self.reader.header();
-        let ifd = header.select_ifd_for_lod(lod);
+        let ifd = header
+            .select_ifd_for_lod(lod)
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to select IFD: {:?}", e)))?;
         let tile_width = ifd.tile_width as usize;
         let tile_height = ifd.tile_height as usize;
 

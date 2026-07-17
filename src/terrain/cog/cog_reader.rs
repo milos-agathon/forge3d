@@ -148,7 +148,7 @@ impl CogHeightReader {
 
     /// Read a specific tile at given LOD.
     pub fn read_tile(&self, tile_x: u32, tile_y: u32, lod: u32) -> Result<Vec<f32>, CogError> {
-        let ifd = self.header.select_ifd_for_lod(lod);
+        let ifd = self.header.select_ifd_for_lod(lod)?;
 
         let cache_key = (tile_x, tile_y, lod);
         if let Some(cached) = self.cache.get(&cache_key) {
@@ -195,8 +195,12 @@ impl CogHeightReader {
             )
         })?;
 
-        let tile_size = (tile_width * tile_height) as usize;
-        let memory_bytes = tile_size * std::mem::size_of::<f32>();
+        let tile_size = (tile_width as usize)
+            .checked_mul(tile_height as usize)
+            .ok_or_else(|| CogError::InvalidIfd("tile element count overflow".into()))?;
+        let memory_bytes = tile_size
+            .checked_mul(std::mem::size_of::<f32>())
+            .ok_or_else(|| CogError::InvalidIfd("tile byte size overflow".into()))?;
         self.cache.insert(cache_key, heights.clone(), memory_bytes);
 
         Ok(heights)
@@ -209,7 +213,7 @@ impl CogHeightReader {
         tile_y: u32,
         lod: u32,
     ) -> Result<Vec<f32>, CogError> {
-        let ifd = self.header.select_ifd_for_lod(lod);
+        let ifd = self.header.select_ifd_for_lod(lod)?;
 
         let cache_key = (tile_x, tile_y, lod);
         if let Some(cached) = self.cache.get(&cache_key) {
@@ -246,8 +250,12 @@ impl CogHeightReader {
             ifd.predictor,
         )?;
 
-        let tile_size = (ifd.tile_width * ifd.tile_height) as usize;
-        let memory_bytes = tile_size * std::mem::size_of::<f32>();
+        let tile_size = (ifd.tile_width as usize)
+            .checked_mul(ifd.tile_height as usize)
+            .ok_or_else(|| CogError::InvalidIfd("tile element count overflow".into()))?;
+        let memory_bytes = tile_size
+            .checked_mul(std::mem::size_of::<f32>())
+            .ok_or_else(|| CogError::InvalidIfd("tile byte size overflow".into()))?;
         self.cache.insert(cache_key, heights.clone(), memory_bytes);
 
         Ok(heights)
@@ -417,7 +425,9 @@ fn decode_heights(
     tile_height: u32,
     predictor: u16,
 ) -> Result<Vec<f32>, CogError> {
-    let pixel_count = (tile_width * tile_height) as usize;
+    let pixel_count = (tile_width as usize)
+        .checked_mul(tile_height as usize)
+        .ok_or_else(|| CogError::InvalidIfd("tile element count overflow".into()))?;
     let mut heights = Vec::with_capacity(pixel_count);
     let bytes_per_sample = (bits_per_sample as usize + 7) / 8;
     let data = apply_predictor(data, predictor, bytes_per_sample, tile_width, tile_height)?;
@@ -425,11 +435,14 @@ fn decode_heights(
 
     match (bits_per_sample, sample_format) {
         (32, SAMPLE_FORMAT_FLOAT) => {
-            if data.len() < pixel_count * 4 {
+            let needed = pixel_count
+                .checked_mul(4)
+                .ok_or_else(|| CogError::InvalidIfd("f32 tile byte size overflow".into()))?;
+            if data.len() < needed {
                 return Err(CogError::InvalidIfd(format!(
                     "Data too short: {} < {}",
                     data.len(),
-                    pixel_count * 4
+                    needed
                 )));
             }
             for i in 0..pixel_count {
@@ -437,7 +450,11 @@ fn decode_heights(
             }
         }
         (64, SAMPLE_FORMAT_FLOAT) => {
-            if data.len() < pixel_count * 8 {
+            if data.len()
+                < pixel_count
+                    .checked_mul(8)
+                    .ok_or_else(|| CogError::InvalidIfd("f64 tile byte size overflow".into()))?
+            {
                 return Err(CogError::InvalidIfd("Data too short for f64".into()));
             }
             for i in 0..pixel_count {
@@ -445,7 +462,11 @@ fn decode_heights(
             }
         }
         (16, SAMPLE_FORMAT_UINT) => {
-            if data.len() < pixel_count * 2 {
+            if data.len()
+                < pixel_count
+                    .checked_mul(2)
+                    .ok_or_else(|| CogError::InvalidIfd("u16 tile byte size overflow".into()))?
+            {
                 return Err(CogError::InvalidIfd("Data too short for u16".into()));
             }
             for i in 0..pixel_count {
@@ -454,7 +475,11 @@ fn decode_heights(
             }
         }
         (16, SAMPLE_FORMAT_INT) => {
-            if data.len() < pixel_count * 2 {
+            if data.len()
+                < pixel_count
+                    .checked_mul(2)
+                    .ok_or_else(|| CogError::InvalidIfd("i16 tile byte size overflow".into()))?
+            {
                 return Err(CogError::InvalidIfd("Data too short for i16".into()));
             }
             for i in 0..pixel_count {
@@ -463,7 +488,11 @@ fn decode_heights(
             }
         }
         (32, SAMPLE_FORMAT_INT) => {
-            if data.len() < pixel_count * 4 {
+            if data.len()
+                < pixel_count
+                    .checked_mul(4)
+                    .ok_or_else(|| CogError::InvalidIfd("i32 tile byte size overflow".into()))?
+            {
                 return Err(CogError::InvalidIfd("Data too short for i32".into()));
             }
             for i in 0..pixel_count {
@@ -532,8 +561,12 @@ fn apply_predictor(
         )));
     }
 
-    let row_bytes = tile_width as usize * bytes_per_sample;
-    let needed = row_bytes * tile_height as usize;
+    let row_bytes = (tile_width as usize)
+        .checked_mul(bytes_per_sample)
+        .ok_or_else(|| CogError::InvalidIfd("predictor row size overflow".into()))?;
+    let needed = row_bytes
+        .checked_mul(tile_height as usize)
+        .ok_or_else(|| CogError::InvalidIfd("predictor payload size overflow".into()))?;
     if data.len() < needed {
         return Err(CogError::InvalidIfd(format!(
             "Data too short for predictor: {} < {}",

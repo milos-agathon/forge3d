@@ -6,13 +6,14 @@
   },
   "family": "geometry",
   "id": "geometry-065",
+  "notes": "distinct adversarial input geometry-065",
   "operation": "gis_geometry_centroid",
   "payload": {
     "crs": "EPSG:4326",
     "geometry": {
       "coordinates": [
         "nan",
-        0
+        0.008924
       ],
       "type": "Point"
     }

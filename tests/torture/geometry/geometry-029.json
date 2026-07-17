@@ -6,6 +6,7 @@
   },
   "family": "geometry",
   "id": "geometry-029",
+  "notes": "distinct adversarial input geometry-029",
   "operation": "gis_validate_geometry",
   "payload": {
     "geometry": {
@@ -13,19 +14,19 @@
         [
           [
             "inf",
+            0.004011
+          ],
+          [
+            1.004011,
             0
           ],
           [
-            1,
-            0
-          ],
-          [
-            1,
+            1.004011,
             1
           ],
           [
             "inf",
-            0
+            0.004011
           ]
         ]
       ],

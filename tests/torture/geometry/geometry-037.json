@@ -4,25 +4,26 @@
   },
   "family": "geometry",
   "id": "geometry-037",
+  "notes": "distinct adversarial input geometry-037",
   "operation": "gis_validate_geometry",
   "payload": {
     "geometry": {
       "coordinates": [
         [
           [
-            0,
+            0.0051259999999999995,
             -90
           ],
           [
-            120,
+            120.005126,
             -89.5
           ],
           [
-            -120,
+            -119.994874,
             -89.5
           ],
           [
-            0,
+            0.0051259999999999995,
             -90
           ]
         ]

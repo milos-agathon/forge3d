@@ -6,6 +6,7 @@
   },
   "family": "geometry",
   "id": "geometry-069",
+  "notes": "distinct adversarial input geometry-069",
   "operation": "gis_geometry_centroid",
   "payload": {
     "crs": "EPSG:4326",
@@ -14,19 +15,19 @@
         [
           [
             "inf",
+            0.009472
+          ],
+          [
+            1.009472,
             0
           ],
           [
-            1,
-            0
-          ],
-          [
-            1,
+            1.009472,
             1
           ],
           [
             "inf",
-            0
+            0.009472
           ]
         ]
       ],

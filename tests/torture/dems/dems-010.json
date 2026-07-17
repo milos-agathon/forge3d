@@ -4,6 +4,7 @@
   },
   "family": "dems",
   "id": "dems-010",
+  "notes": "distinct DEM pathology variant 2",
   "operation": "dem_derive_water_mask",
   "payload": {
     "array": {
@@ -11,13 +12,13 @@
       "values": [
         [
           "nan",
-          1,
-          2
+          2,
+          3
         ],
         [
-          3,
+          4,
           "nan",
-          4
+          5
         ]
       ]
     }
