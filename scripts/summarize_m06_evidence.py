@@ -91,11 +91,14 @@ def build_summary(artifact_dir: Path) -> dict[str, Any]:
         and adapter.get("backend") == "vulkan"
         and adapter.get("device_type") == "discretegpu"
     )
+    expected_head = run_context.get("head_sha") or os.environ.get("GITHUB_SHA")
+    exact_head = bool(expected_head and checked_out and expected_head == checked_out)
     summary = {
         "schema_version": 1,
         "repository": run_context.get("repository") or os.environ.get("GITHUB_REPOSITORY"),
-        "head_sha": run_context.get("head_sha") or os.environ.get("GITHUB_SHA"),
+        "head_sha": expected_head,
         "checked_out_head": checked_out,
+        "exact_head": exact_head,
         "run_id": run_context.get("run_id") or os.environ.get("GITHUB_RUN_ID"),
         "run_attempt": run_context.get("run_attempt") or os.environ.get("GITHUB_RUN_ATTEMPT"),
         "runner": {
@@ -110,11 +113,14 @@ def build_summary(artifact_dir: Path) -> dict[str, Any]:
             "backend": "vulkan",
             "device_type": "discretegpu",
             "zero_skip_junit": True,
+            "exact_head": True,
         },
         "adapter": adapter,
         "junit": junit,
         "exit_codes": exit_codes,
-        "status": "pass" if adapter_ok and junit.get("zero_skip_clean") else "incomplete",
+        "status": "pass"
+        if adapter_ok and junit.get("zero_skip_clean") and exact_head
+        else "incomplete",
     }
     return summary
 
@@ -129,6 +135,7 @@ def markdown_summary(summary: dict[str, Any]) -> str:
         f"- status: {summary['status']}",
         f"- head_sha: {summary.get('head_sha')}",
         f"- checked_out_head: {summary.get('checked_out_head')}",
+        f"- exact_head: {str(summary.get('exact_head')).lower()}",
         f"- runner: {runner.get('name')} ({runner.get('os')}, {runner.get('arch')})",
         (
             "- adapter: "
@@ -154,6 +161,7 @@ def github_notice(summary: dict[str, Any]) -> str:
         f"status={summary['status']} "
         f"head_sha={summary.get('head_sha')} "
         f"checked_out_head={summary.get('checked_out_head')} "
+        f"exact_head={str(summary.get('exact_head')).lower()} "
         f"adapter={adapter.get('name')} "
         f"vendor={adapter.get('vendor_hex')} "
         f"backend={adapter.get('backend')} "
@@ -189,7 +197,7 @@ def main() -> int:
     print(markdown_summary(summary))
     if os.environ.get("GITHUB_ACTIONS") == "true":
         print(github_notice(summary))
-    return 0
+    return 0 if summary["status"] == "pass" else 1
 
 
 if __name__ == "__main__":

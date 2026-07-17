@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -9,6 +10,7 @@ from scripts.assert_junit_zero_skips import JUnitValidationError, verify_junit
 from scripts.summarize_m06_evidence import (
     build_summary,
     github_notice,
+    main as summarize_m06_main,
     markdown_summary,
     write_summary,
 )
@@ -189,6 +191,7 @@ def test_m06_evidence_summary_extracts_adapter_and_junit_counts(tmp_path):
     summary = write_summary(tmp_path)
 
     assert summary["status"] == "pass"
+    assert summary["exact_head"] is True
     assert summary["adapter"]["vendor_hex"] == "0x10de"
     assert summary["adapter"]["backend"] == "vulkan"
     assert summary["junit"] == {
@@ -206,5 +209,53 @@ def test_m06_evidence_summary_extracts_adapter_and_junit_counts(tmp_path):
     annotation = github_notice(summary)
     assert annotation.startswith("::notice title=M-06 exact-head evidence::")
     assert "head_sha=abc123" in annotation
+    assert "checked_out_head=abc123 exact_head=true" in annotation
     assert "adapter=NVIDIA GeForce RTX 3070" in annotation
     assert "tests=2 failures=0 errors=0 skipped=0" in annotation
+
+
+def test_m06_evidence_summary_fails_closed_on_synthetic_merge_checkout(tmp_path, monkeypatch):
+    (tmp_path / "run-context.json").write_text(
+        json.dumps({"head_sha": "pr-head"}), encoding="utf-8"
+    )
+    (tmp_path / "checked-out-head.txt").write_text("synthetic-merge\n", encoding="utf-8")
+    (tmp_path / "adapter-probe.json").write_text(
+        json.dumps(
+            {
+                "probe": {
+                    "name": "NVIDIA GeForce RTX 3070",
+                    "vendor": 0x10DE,
+                    "backend": "vulkan",
+                    "device_type": "discretegpu",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "junit.xml").write_text(
+        '<testsuite tests="1" failures="0" errors="0" skipped="0">'
+        '<testcase classname="m06" name="acceptance"/>'
+        "</testsuite>",
+        encoding="utf-8",
+    )
+
+    summary = build_summary(tmp_path)
+
+    assert summary["exact_head"] is False
+    assert summary["status"] == "incomplete"
+    assert "exact_head=false" in github_notice(summary)
+    monkeypatch.setattr(sys, "argv", ["summarize_m06_evidence.py", str(tmp_path)])
+    assert summarize_m06_main() == 1
+
+
+def test_ci_checkout_steps_pin_pull_requests_to_the_exact_head():
+    workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text(
+        encoding="utf-8"
+    )
+    checkout_steps = workflow.split("- uses: actions/checkout@v4")[1:]
+    exact_ref = "ref: ${{ github.event.pull_request.head.sha || github.sha }}"
+
+    assert len(checkout_steps) == 11
+    for index, tail in enumerate(checkout_steps, start=1):
+        step = tail.split("\n\n", 1)[0]
+        assert exact_ref in step, f"checkout step {index} is not exact-head pinned"

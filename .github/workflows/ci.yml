@@ -34,6 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Detect visual golden changes
@@ -83,6 +84,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -144,6 +147,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -205,6 +210,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Build wheel
         uses: PyO3/maturin-action@v1
@@ -239,6 +246,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           # COG/mapscene fixtures under assets/ and tests/data are Git LFS
           # objects; without lfs the lane reads pointer files and fails with
           # InvalidTiffHeader (found by the first exhaustive-lane CI run).
@@ -301,6 +309,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: actions/setup-python@v4
         with:
@@ -349,6 +359,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -402,6 +414,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           # COG/mapscene fixtures under assets/ and tests/data are Git LFS
           # objects; without lfs the lane reads pointer files and fails with
           # InvalidTiffHeader (found by the first exhaustive-lane CI run).
@@ -528,6 +541,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           lfs: true
       - name: Verify runner Python
         run: python --version
@@ -605,6 +619,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           lfs: true
 
       - name: Capture checkout and LFS provenance
@@ -781,6 +796,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
