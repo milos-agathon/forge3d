@@ -671,6 +671,23 @@ mod tests {
     }
 
     #[test]
+    fn decode_heights_rejects_short_f64_payload_without_panic() {
+        let err = decode_heights(
+            &[0, 0, 0, 0, 0, 0, 0],
+            64,
+            SAMPLE_FORMAT_FLOAT,
+            1,
+            1,
+            TIFF_PREDICTOR_NONE,
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(err, CogError::InvalidIfd(message) if message.contains("Data too short for f64"))
+        );
+    }
+
+    #[test]
     fn predictor_rejects_short_horizontal_payload_without_panic() {
         let err = apply_predictor(&[0, 1, 2], TIFF_PREDICTOR_HORIZONTAL, 2, 2, 1).unwrap_err();
 
