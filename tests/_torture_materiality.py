@@ -30,21 +30,36 @@ GENERIC_RATIONALE = re.compile(
 )
 
 
+def _numeric_value(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        token = value.strip().lower()
+        special = {
+            "nan": math.nan,
+            "inf": math.inf,
+            "+inf": math.inf,
+            "-inf": -math.inf,
+            "f32_max": 3.4028235e38,
+            "-f32_max": -3.4028235e38,
+            "subnormal": 1.0e-45,
+            "-subnormal": -1.0e-45,
+        }
+        if token in special:
+            return special[token]
+        try:
+            return float(token)
+        except ValueError:
+            return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
 def _number_category(value: Any) -> str:
-    if isinstance(value, str) and value in {
-        "nan",
-        "inf",
-        "+inf",
-        "-inf",
-        "f32_max",
-        "-f32_max",
-        "subnormal",
-        "-subnormal",
-    }:
-        return value
-    if not isinstance(value, (int, float)) or isinstance(value, bool):
+    number = _numeric_value(value)
+    if number is None:
         return type(value).__name__
-    number = float(value)
     if math.isnan(number):
         return "nan"
     if math.isinf(number):
@@ -73,6 +88,8 @@ def _number_category(value: Any) -> str:
 
 def _shape_partition(shape: list[int] | tuple[int, ...]) -> str:
     dims = tuple(int(item) for item in shape)
+    if any(item < 0 for item in dims):
+        return "ragged"
     if not dims or any(item == 0 for item in dims):
         return "empty"
     if len(dims) == 1:
@@ -91,49 +108,78 @@ def _shape_partition(shape: list[int] | tuple[int, ...]) -> str:
     return "rectangular_small" if max(rows, cols) <= 16 else "rectangular_large"
 
 
-def _array_signature(spec: Any) -> dict[str, Any]:
+def _nested_shape(value: Any) -> list[int]:
+    if not isinstance(value, list):
+        return []
+    if not value:
+        return [0]
+    child_shapes = [_nested_shape(item) for item in value]
+    first = child_shapes[0]
+    if all(shape == first for shape in child_shapes):
+        return [len(value), *first]
+    return [len(value), -1]
+
+
+def _flatten_values(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        flattened: list[Any] = []
+        for item in value:
+            flattened.extend(_flatten_values(item))
+        return flattened
+    return [value]
+
+
+def _array_values(spec: Any) -> Any:
+    if isinstance(spec, dict) and "values" in spec:
+        return spec["values"]
+    if isinstance(spec, list):
+        return spec
+    return None
+
+
+def _array_shape(spec: Any) -> list[int]:
+    if isinstance(spec, dict):
+        if "shape" in spec:
+            return [int(value) for value in spec["shape"]]
+        if "values" in spec:
+            return _nested_shape(spec["values"])
+        return []
+    if isinstance(spec, list):
+        return _nested_shape(spec)
+    return []
+
+
+def _array_signature(spec: Any, *, default_dtype: str = "float64") -> dict[str, Any]:
     if not isinstance(spec, dict):
-        return {"representation": type(spec).__name__}
-    dtype = str(spec.get("dtype", "float64"))
-    if "shape" in spec:
-        shape = [int(value) for value in spec["shape"]]
-    elif "values" in spec and isinstance(spec["values"], list):
-        values = spec["values"]
-        if values and isinstance(values[0], list):
-            shape = [len(values), min((len(row) for row in values), default=0)]
+        if isinstance(spec, list):
+            dtype = default_dtype
+            shape = _array_shape(spec)
         else:
-            shape = [len(values)]
+            return {"representation": type(spec).__name__}
     else:
-        shape = []
+        dtype = str(spec.get("dtype", default_dtype))
+        shape = _array_shape(spec)
     signature: dict[str, Any] = {"dtype": dtype, "shape": _shape_partition(shape)}
-    if "pattern" in spec:
+    values = _array_values(spec)
+    if isinstance(spec, dict) and "pattern" in spec:
         signature["variability"] = str(spec["pattern"])
-    elif "fill" in spec:
+    elif isinstance(spec, dict) and "fill" in spec:
         signature["variability"] = "constant"
         signature["value_class"] = _number_category(spec["fill"])
-    elif "arange" in spec:
+    elif isinstance(spec, dict) and "arange" in spec:
         signature["variability"] = "arange"
         signature["range_classes"] = [_number_category(value) for value in spec["arange"]]
-    elif "values" in spec:
-        flat: list[Any] = []
-
-        def visit(value: Any) -> None:
-            if isinstance(value, list):
-                for item in value:
-                    visit(item)
-            else:
-                flat.append(value)
-
-        visit(spec["values"])
+    elif values is not None:
+        flat = _flatten_values(values)
         classes = [_number_category(value) for value in flat]
         unique = sorted(set(classes))
         if not flat:
             variability = "empty"
-        elif all(item in {"nan", "+inf", "-inf", "inf"} for item in classes):
+        elif all(item in {"nan", "+inf", "-inf"} for item in classes):
             variability = "all_non_finite"
-        elif any(item in {"nan", "+inf", "-inf", "inf"} for item in classes):
+        elif any(item in {"nan", "+inf", "-inf"} for item in classes):
             variability = "mixed_finiteness"
-        elif len({json.dumps(value, sort_keys=True) for value in flat}) == 1:
+        elif len({_number_category(value) + ":" + str(_numeric_value(value)) for value in flat}) == 1:
             variability = "constant"
         else:
             variability = "variable"
@@ -141,6 +187,48 @@ def _array_signature(spec: Any) -> dict[str, Any]:
     else:
         signature["variability"] = "implicit"
     return signature
+
+
+def _vector_coordinate_gate(spec: Any, *, min_rows: int) -> dict[str, Any]:
+    shape = _array_shape(spec)
+    shape_info = {"shape": _shape_partition(shape), "rank": len(shape)}
+    if any(value < 0 for value in shape):
+        return {"validation": "array_coercion_error", **shape_info}
+    if len(shape) != 2 or shape[1] != 2:
+        return {"validation": "shape_error", **shape_info}
+    if shape[0] < min_rows:
+        return {"validation": "too_few_vertices", **shape_info}
+    return {"validation": f"valid_min_{min_rows}_nx2"}
+
+
+def _size_gate(value: Any) -> dict[str, Any]:
+    number = _numeric_value(value)
+    if number is None:
+        return {"validation": "float_coercion_error", "category": _number_category(value)}
+    if number <= 0.0:
+        return {"validation": "non_positive_refusal"}
+    return {"validation": "reachable", "category": _number_category(value)}
+
+
+def _vector_sized_payload_signature(
+    payload: dict[str, Any],
+    *,
+    coordinate_key: str,
+    size_key: str,
+    default_size: float,
+    min_rows: int,
+) -> dict[str, Any]:
+    coordinate_spec = payload.get(coordinate_key, [])
+    coordinate_gate = _vector_coordinate_gate(coordinate_spec, min_rows=min_rows)
+    size_gate = _size_gate(payload.get(size_key, default_size))
+    if coordinate_gate["validation"] != f"valid_min_{min_rows}_nx2":
+        return {coordinate_key: coordinate_gate}
+    if size_gate["validation"] != "reachable":
+        return {coordinate_key: coordinate_gate, size_key: size_gate}
+    return {
+        coordinate_key: _array_signature(coordinate_spec, default_dtype="float64"),
+        size_key: size_gate,
+    }
 
 
 def _geographic_locus(points: list[tuple[float, float]]) -> str:
@@ -267,6 +355,22 @@ def _bounds_partition(bounds: Any) -> dict[str, Any]:
 
 
 def _normalized_payload(operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if operation == "vector_add_points":
+        return _vector_sized_payload_signature(
+            payload,
+            coordinate_key="positions",
+            size_key="point_size",
+            default_size=4.0,
+            min_rows=1,
+        )
+    if operation == "vector_add_lines":
+        return _vector_sized_payload_signature(
+            payload,
+            coordinate_key="path",
+            size_key="stroke_width",
+            default_size=1.0,
+            min_rows=2,
+        )
     result: dict[str, Any] = {}
     for key, value in sorted(payload.items()):
         if key in {"name", "source_id"}:
@@ -292,9 +396,11 @@ def _normalized_payload(operation: str, payload: dict[str, Any]) -> dict[str, An
                 result[key] = value
             else:
                 result[key] = _number_category(value)
+        elif isinstance(value, str) and _numeric_value(value) is not None:
+            result[key] = _number_category(value)
         elif isinstance(value, list):
             result[key] = [
-                _number_category(item) if isinstance(item, (int, float)) else item for item in value
+                _number_category(item) if _numeric_value(item) is not None else item for item in value
             ]
         elif isinstance(value, dict):
             result[key] = {
@@ -312,10 +418,10 @@ def _normalized_payload(operation: str, payload: dict[str, Any]) -> dict[str, An
 
 def semantic_signature(case: dict[str, Any]) -> dict[str, Any]:
     expect = case.get("expect", {"class": "ok"})
+    expected_class = "structured_error" if expect.get("class") == "error" else expect.get("class", "ok")
     oracle = {
-        "class": "structured_error" if expect.get("class") == "error" else expect.get("class", "ok"),
+        "class": expected_class,
         "type": expect.get("type"),
-        "match": expect.get("match"),
         "checks": expect.get("checks", []),
         "property": case.get("property"),
         "property_tolerance": case.get("property_tolerance"),

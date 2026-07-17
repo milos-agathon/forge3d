@@ -4,7 +4,7 @@
   },
   "family": "geometry",
   "id": "geometry-114",
-  "notes": "three-point polyline with negative size refusal exercises polyline validation",
+  "notes": "three-point polyline with unit width reaches polyline insertion",
   "operation": "vector_add_lines",
   "payload": {
     "path": {
@@ -24,6 +24,6 @@
         ]
       ]
     },
-    "stroke_width": -1.0
+    "stroke_width": 1.0
   }
 }

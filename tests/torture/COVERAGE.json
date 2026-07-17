@@ -773,13 +773,13 @@
     {
       "boundary": "ordinary",
       "case_id": "crs-071",
-      "distinguishing_feature": "{\"dst_crs\":\"EPSG:3857\",\"src_crs\":\"EPSG:4326\",\"x\":\"inf\",\"y\":\"zero\"}",
+      "distinguishing_feature": "{\"dst_crs\":\"EPSG:3857\",\"src_crs\":\"EPSG:4326\",\"x\":\"+inf\",\"y\":\"zero\"}",
       "expected_outcome": "error_or_value",
       "family": "crs",
-      "input_partition": "gis_transform_point:{\"dst_crs\":\"EPSG:3857\",\"src_crs\":\"EPSG:4326\",\"x\":\"inf\",\"y\":\"zero\"}",
+      "input_partition": "gis_transform_point:{\"dst_crs\":\"EPSG:3857\",\"src_crs\":\"EPSG:4326\",\"x\":\"+inf\",\"y\":\"zero\"}",
       "operation": "gis_transform_point",
       "oracle_kind": "completion_classification",
-      "pathology": "none"
+      "pathology": "non_finite"
     },
     {
       "boundary": "ordinary",
@@ -1037,10 +1037,10 @@
     {
       "boundary": "ordinary",
       "case_id": "dems-005",
-      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "ok",
       "family": "dems",
-      "input_partition": "dem_derive_water_mask:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "dem_derive_water_mask:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "dem_derive_water_mask",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1103,10 +1103,10 @@
     {
       "boundary": "ordinary",
       "case_id": "dems-011",
-      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"ordinary\",\"unit\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"ordinary\",\"unit\"],\"variability\":\"variable\"}}",
       "expected_outcome": "ok",
       "family": "dems",
-      "input_partition": "dem_derive_water_mask:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"ordinary\",\"unit\"],\"variability\":\"variable\"}}",
+      "input_partition": "dem_derive_water_mask:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"ordinary\",\"unit\"],\"variability\":\"variable\"}}",
       "operation": "dem_derive_water_mask",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1169,10 +1169,10 @@
     {
       "boundary": "ordinary",
       "case_id": "dems-017",
-      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"ordinary\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"ordinary\"],\"variability\":\"variable\"}}",
       "expected_outcome": "ok",
       "family": "dems",
-      "input_partition": "dem_derive_water_mask:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"ordinary\"],\"variability\":\"variable\"}}",
+      "input_partition": "dem_derive_water_mask:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"ordinary\"],\"variability\":\"variable\"}}",
       "operation": "dem_derive_water_mask",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1180,10 +1180,10 @@
     {
       "boundary": "ordinary",
       "case_id": "dems-018",
-      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"inf\",\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"+inf\",\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "expected_outcome": "error_or_value",
       "family": "dems",
-      "input_partition": "dem_derive_water_mask:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"inf\",\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "input_partition": "dem_derive_water_mask:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"+inf\",\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "operation": "dem_derive_water_mask",
       "oracle_kind": "completion_classification",
       "pathology": "non_finite"
@@ -1191,10 +1191,10 @@
     {
       "boundary": "ordinary",
       "case_id": "dems-019",
-      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "dems",
-      "input_partition": "dem_derive_water_mask:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "dem_derive_water_mask:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "dem_derive_water_mask",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1411,10 +1411,10 @@
     {
       "boundary": "ordinary",
       "case_id": "dems-039",
-      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"inf\",\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"},\"method\":\"minmax\"}",
+      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"+inf\",\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"},\"method\":\"minmax\"}",
       "expected_outcome": "error_or_value",
       "family": "dems",
-      "input_partition": "gis_normalize_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"inf\",\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"},\"method\":\"minmax\"}",
+      "input_partition": "gis_normalize_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"+inf\",\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"},\"method\":\"minmax\"}",
       "operation": "gis_normalize_raster",
       "oracle_kind": "completion_classification",
       "pathology": "non_finite"
@@ -1422,10 +1422,10 @@
     {
       "boundary": "ordinary",
       "case_id": "dems-040",
-      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"inf\",\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"},\"method\":\"unsupported\"}",
+      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"+inf\",\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"},\"method\":\"unsupported\"}",
       "expected_outcome": "error_or_value",
       "family": "dems",
-      "input_partition": "gis_normalize_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"inf\",\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"},\"method\":\"unsupported\"}",
+      "input_partition": "gis_normalize_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"+inf\",\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"},\"method\":\"unsupported\"}",
       "operation": "gis_normalize_raster",
       "oracle_kind": "completion_classification",
       "pathology": "non_finite"
@@ -1433,10 +1433,10 @@
     {
       "boundary": "ordinary",
       "case_id": "dems-041",
-      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"method\":\"minmax\"}",
+      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"method\":\"minmax\"}",
       "expected_outcome": "error_or_value",
       "family": "dems",
-      "input_partition": "gis_normalize_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"method\":\"minmax\"}",
+      "input_partition": "gis_normalize_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"method\":\"minmax\"}",
       "operation": "gis_normalize_raster",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1444,10 +1444,10 @@
     {
       "boundary": "ordinary",
       "case_id": "dems-042",
-      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"method\":\"unsupported\"}",
+      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"method\":\"unsupported\"}",
       "expected_outcome": "error_or_value",
       "family": "dems",
-      "input_partition": "gis_normalize_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"method\":\"unsupported\"}",
+      "input_partition": "gis_normalize_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"method\":\"unsupported\"}",
       "operation": "gis_normalize_raster",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1741,13 +1741,13 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-009",
-      "distinguishing_feature": "{\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"inf\",\"zero\"],\"type\":\"Polygon\"}}",
+      "distinguishing_feature": "{\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"+inf\",\"zero\"],\"type\":\"Polygon\"}}",
       "expected_outcome": "structured_error",
       "family": "geometry",
-      "input_partition": "gis_validate_geometry:{\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"inf\",\"zero\"],\"type\":\"Polygon\"}}",
+      "input_partition": "gis_validate_geometry:{\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"+inf\",\"zero\"],\"type\":\"Polygon\"}}",
       "operation": "gis_validate_geometry",
       "oracle_kind": "typed_structured_error",
-      "pathology": "malformed"
+      "pathology": "malformed+non_finite"
     },
     {
       "boundary": "ordinary",
@@ -1763,10 +1763,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-011",
-      "distinguishing_feature": "{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"validation\":\"non_positive_refusal\"},\"positions\":{\"validation\":\"valid_min_1_nx2\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"validation\":\"non_positive_refusal\"},\"positions\":{\"validation\":\"valid_min_1_nx2\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1774,10 +1774,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-012",
-      "distinguishing_feature": "{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1785,10 +1785,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-013",
-      "distinguishing_feature": "{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1818,10 +1818,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-016",
-      "distinguishing_feature": "{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1829,10 +1829,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-017",
-      "distinguishing_feature": "{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1840,10 +1840,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-018",
-      "distinguishing_feature": "{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"zero\"],\"variability\":\"constant\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "non_finite"
@@ -1851,13 +1851,13 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-019",
-      "distinguishing_feature": "{\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"fractional\",\"inf\"],\"type\":\"Polygon\"}}",
+      "distinguishing_feature": "{\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"+inf\",\"fractional\"],\"type\":\"Polygon\"}}",
       "expected_outcome": "structured_error",
       "family": "geometry",
-      "input_partition": "gis_validate_geometry:{\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"fractional\",\"inf\"],\"type\":\"Polygon\"}}",
+      "input_partition": "gis_validate_geometry:{\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"+inf\",\"fractional\"],\"type\":\"Polygon\"}}",
       "operation": "gis_validate_geometry",
       "oracle_kind": "typed_structured_error",
-      "pathology": "malformed"
+      "pathology": "malformed+non_finite"
     },
     {
       "boundary": "ordinary",
@@ -1873,10 +1873,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-021",
-      "distinguishing_feature": "{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1884,10 +1884,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-022",
-      "distinguishing_feature": "{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"near_zero\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"near_zero\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1895,10 +1895,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-023",
-      "distinguishing_feature": "{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1906,10 +1906,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-024",
-      "distinguishing_feature": "{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1917,10 +1917,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-025",
-      "distinguishing_feature": "{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1928,10 +1928,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-026",
-      "distinguishing_feature": "{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"geographic_limit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "non_finite"
@@ -1939,10 +1939,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-027",
-      "distinguishing_feature": "{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1950,10 +1950,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-028",
-      "distinguishing_feature": "{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"near_zero\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"near_zero\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1961,10 +1961,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-029",
-      "distinguishing_feature": "{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1983,10 +1983,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-031",
-      "distinguishing_feature": "{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -1994,10 +1994,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-032",
-      "distinguishing_feature": "{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2005,10 +2005,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-033",
-      "distinguishing_feature": "{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"single_row\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "non_finite"
@@ -2016,10 +2016,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-034",
-      "distinguishing_feature": "{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2027,10 +2027,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-035",
-      "distinguishing_feature": "{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"near_zero\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"near_zero\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2038,10 +2038,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-036",
-      "distinguishing_feature": "{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2049,10 +2049,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-037",
-      "distinguishing_feature": "{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2060,10 +2060,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-038",
-      "distinguishing_feature": "{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2071,10 +2071,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-039",
-      "distinguishing_feature": "{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "non_finite"
@@ -2093,10 +2093,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-041",
-      "distinguishing_feature": "{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2104,10 +2104,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-042",
-      "distinguishing_feature": "{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"near_zero\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"near_zero\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2115,10 +2115,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-043",
-      "distinguishing_feature": "{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2126,10 +2126,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-044",
-      "distinguishing_feature": "{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2137,10 +2137,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-045",
-      "distinguishing_feature": "{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2148,10 +2148,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-046",
-      "distinguishing_feature": "{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\"],\"variability\":\"constant\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "non_finite"
@@ -2159,10 +2159,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-047",
-      "distinguishing_feature": "{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2170,10 +2170,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-048",
-      "distinguishing_feature": "{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"near_zero\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"near_zero\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2181,10 +2181,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-049",
-      "distinguishing_feature": "{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2291,13 +2291,13 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-059",
-      "distinguishing_feature": "{\"crs\":\"EPSG:4326\",\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"inf\",\"zero\"],\"type\":\"Polygon\"}}",
+      "distinguishing_feature": "{\"crs\":\"EPSG:4326\",\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"+inf\",\"zero\"],\"type\":\"Polygon\"}}",
       "expected_outcome": "structured_error",
       "family": "geometry",
-      "input_partition": "gis_geometry_centroid:{\"crs\":\"EPSG:4326\",\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"inf\",\"zero\"],\"type\":\"Polygon\"}}",
+      "input_partition": "gis_geometry_centroid:{\"crs\":\"EPSG:4326\",\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"+inf\",\"zero\"],\"type\":\"Polygon\"}}",
       "operation": "gis_geometry_centroid",
       "oracle_kind": "typed_structured_error",
-      "pathology": "malformed"
+      "pathology": "malformed+non_finite"
     },
     {
       "boundary": "ordinary",
@@ -2313,10 +2313,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-061",
-      "distinguishing_feature": "{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2324,10 +2324,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-062",
-      "distinguishing_feature": "{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2335,10 +2335,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-063",
-      "distinguishing_feature": "{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "non_finite"
@@ -2368,10 +2368,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-066",
-      "distinguishing_feature": "{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "non_finite"
@@ -2379,10 +2379,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-067",
-      "distinguishing_feature": "{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"near_zero\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"near_zero\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "non_finite"
@@ -2390,10 +2390,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-068",
-      "distinguishing_feature": "{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "non_finite"
@@ -2401,13 +2401,13 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-069",
-      "distinguishing_feature": "{\"crs\":\"EPSG:4326\",\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"fractional\",\"inf\"],\"type\":\"Polygon\"}}",
+      "distinguishing_feature": "{\"crs\":\"EPSG:4326\",\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"+inf\",\"fractional\"],\"type\":\"Polygon\"}}",
       "expected_outcome": "structured_error",
       "family": "geometry",
-      "input_partition": "gis_geometry_centroid:{\"crs\":\"EPSG:4326\",\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"fractional\",\"inf\"],\"type\":\"Polygon\"}}",
+      "input_partition": "gis_geometry_centroid:{\"crs\":\"EPSG:4326\",\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"+inf\",\"fractional\"],\"type\":\"Polygon\"}}",
       "operation": "gis_geometry_centroid",
       "oracle_kind": "typed_structured_error",
-      "pathology": "malformed"
+      "pathology": "malformed+non_finite"
     },
     {
       "boundary": "ordinary",
@@ -2423,10 +2423,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-071",
-      "distinguishing_feature": "{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "non_finite"
@@ -2434,10 +2434,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-072",
-      "distinguishing_feature": "{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "non_finite"
@@ -2445,10 +2445,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-073",
-      "distinguishing_feature": "{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"nan\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "non_finite"
@@ -2456,65 +2456,65 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-074",
-      "distinguishing_feature": "{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"+inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"+inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
-      "pathology": "none"
+      "pathology": "non_finite"
     },
     {
       "boundary": "ordinary",
       "case_id": "geometry-075",
-      "distinguishing_feature": "{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"near_zero\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"+inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"near_zero\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"+inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
-      "pathology": "none"
+      "pathology": "non_finite"
     },
     {
       "boundary": "ordinary",
       "case_id": "geometry-076",
-      "distinguishing_feature": "{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"+inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"+inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
-      "pathology": "none"
+      "pathology": "non_finite"
     },
     {
       "boundary": "ordinary",
       "case_id": "geometry-077",
-      "distinguishing_feature": "{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"+inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"+inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
-      "pathology": "none"
+      "pathology": "non_finite"
     },
     {
       "boundary": "ordinary",
       "case_id": "geometry-078",
-      "distinguishing_feature": "{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"+inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"+inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
-      "pathology": "none"
+      "pathology": "non_finite"
     },
     {
       "boundary": "ordinary",
       "case_id": "geometry-079",
-      "distinguishing_feature": "{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"+inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"+inf\",\"unit\",\"zero\"],\"variability\":\"mixed_finiteness\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "non_finite"
@@ -2621,13 +2621,13 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-089",
-      "distinguishing_feature": "{\"crs\":\"EPSG:4326\",\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"inf\",\"zero\"],\"type\":\"Polygon\"}}",
+      "distinguishing_feature": "{\"crs\":\"EPSG:4326\",\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"+inf\",\"zero\"],\"type\":\"Polygon\"}}",
       "expected_outcome": "structured_error",
       "family": "geometry",
-      "input_partition": "gis_representative_point:{\"crs\":\"EPSG:4326\",\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"inf\",\"zero\"],\"type\":\"Polygon\"}}",
+      "input_partition": "gis_representative_point:{\"crs\":\"EPSG:4326\",\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"+inf\",\"zero\"],\"type\":\"Polygon\"}}",
       "operation": "gis_representative_point",
       "oracle_kind": "typed_structured_error",
-      "pathology": "malformed"
+      "pathology": "malformed+non_finite"
     },
     {
       "boundary": "ordinary",
@@ -2643,10 +2643,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-091",
-      "distinguishing_feature": "{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2654,10 +2654,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-092",
-      "distinguishing_feature": "{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"near_zero\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"near_zero\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2665,10 +2665,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-093",
-      "distinguishing_feature": "{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2698,10 +2698,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-096",
-      "distinguishing_feature": "{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2709,10 +2709,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-097",
-      "distinguishing_feature": "{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2720,10 +2720,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-098",
-      "distinguishing_feature": "{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "non_finite"
@@ -2731,13 +2731,13 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-099",
-      "distinguishing_feature": "{\"crs\":\"EPSG:4326\",\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"fractional\",\"inf\"],\"type\":\"Polygon\"}}",
+      "distinguishing_feature": "{\"crs\":\"EPSG:4326\",\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"+inf\",\"fractional\"],\"type\":\"Polygon\"}}",
       "expected_outcome": "structured_error",
       "family": "geometry",
-      "input_partition": "gis_representative_point:{\"crs\":\"EPSG:4326\",\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"fractional\",\"inf\"],\"type\":\"Polygon\"}}",
+      "input_partition": "gis_representative_point:{\"crs\":\"EPSG:4326\",\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"+inf\",\"fractional\"],\"type\":\"Polygon\"}}",
       "operation": "gis_representative_point",
       "oracle_kind": "typed_structured_error",
-      "pathology": "malformed"
+      "pathology": "malformed+non_finite"
     },
     {
       "boundary": "ordinary",
@@ -2775,10 +2775,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-103",
-      "distinguishing_feature": "{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-subnormal\",\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"unit\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-subnormal\",\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"unit\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2786,10 +2786,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-104",
-      "distinguishing_feature": "{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-subnormal\",\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"near_zero\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"zero\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-subnormal\",\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"near_zero\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2797,10 +2797,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-105",
-      "distinguishing_feature": "{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-subnormal\",\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-subnormal\",\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"fractional\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2808,10 +2808,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-106",
-      "distinguishing_feature": "{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-subnormal\",\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-subnormal\",\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"ordinary\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2819,10 +2819,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-107",
-      "distinguishing_feature": "{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-subnormal\",\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"large\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-subnormal\",\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"large\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2830,10 +2830,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-108",
-      "distinguishing_feature": "{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-subnormal\",\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
+      "distinguishing_feature": "{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_points:{\"point_size\":\"nan\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"-subnormal\",\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
+      "input_partition": "vector_add_points:{\"point_size\":{\"category\":\"nan\",\"validation\":\"reachable\"},\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"subnormal\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "vector_add_points",
       "oracle_kind": "completion_classification",
       "pathology": "non_finite"
@@ -2841,10 +2841,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-109",
-      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"unit\"}",
+      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":{\"category\":\"unit\",\"validation\":\"reachable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"unit\"}",
+      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":{\"category\":\"unit\",\"validation\":\"reachable\"}}",
       "operation": "vector_add_lines",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2852,10 +2852,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-110",
-      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"zero\"}",
+      "distinguishing_feature": "{\"path\":{\"validation\":\"valid_min_2_nx2\"},\"stroke_width\":{\"validation\":\"non_positive_refusal\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"zero\"}",
+      "input_partition": "vector_add_lines:{\"path\":{\"validation\":\"valid_min_2_nx2\"},\"stroke_width\":{\"validation\":\"non_positive_refusal\"}}",
       "operation": "vector_add_lines",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2863,10 +2863,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-111",
-      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"fractional\"}",
+      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":{\"category\":\"fractional\",\"validation\":\"reachable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"fractional\"}",
+      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":{\"category\":\"fractional\",\"validation\":\"reachable\"}}",
       "operation": "vector_add_lines",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2874,10 +2874,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-112",
-      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"ordinary\"}",
+      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":{\"category\":\"ordinary\",\"validation\":\"reachable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"ordinary\"}",
+      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":{\"category\":\"ordinary\",\"validation\":\"reachable\"}}",
       "operation": "vector_add_lines",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2885,10 +2885,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-113",
-      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"large\"}",
+      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":{\"category\":\"large\",\"validation\":\"reachable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"large\"}",
+      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":{\"category\":\"large\",\"validation\":\"reachable\"}}",
       "operation": "vector_add_lines",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -2896,10 +2896,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-114",
-      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"unit\"}",
+      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":{\"category\":\"unit\",\"validation\":\"reachable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"unit\"}",
+      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":{\"category\":\"unit\",\"validation\":\"reachable\"}}",
       "operation": "vector_add_lines",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -3105,10 +3105,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-133",
-      "distinguishing_feature": "{\"geometry\":{\"locus\":\"ordinary\",\"point_count\":1,\"special_coordinates\":[\"-subnormal\",\"subnormal\"],\"type\":\"LineString\"}}",
+      "distinguishing_feature": "{\"geometry\":{\"locus\":\"ordinary\",\"point_count\":1,\"special_coordinates\":[\"subnormal\"],\"type\":\"LineString\"}}",
       "expected_outcome": "ok",
       "family": "geometry",
-      "input_partition": "gis_validate_geometry:{\"geometry\":{\"locus\":\"ordinary\",\"point_count\":1,\"special_coordinates\":[\"-subnormal\",\"subnormal\"],\"type\":\"LineString\"}}",
+      "input_partition": "gis_validate_geometry:{\"geometry\":{\"locus\":\"ordinary\",\"point_count\":1,\"special_coordinates\":[\"subnormal\"],\"type\":\"LineString\"}}",
       "operation": "gis_validate_geometry",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -3138,10 +3138,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-136",
-      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"zero\"}",
+      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":{\"category\":\"near_zero\",\"validation\":\"reachable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"zero\"}",
+      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":{\"category\":\"near_zero\",\"validation\":\"reachable\"}}",
       "operation": "vector_add_lines",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -3149,10 +3149,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-137",
-      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"fractional\"}",
+      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":{\"category\":\"fractional\",\"validation\":\"reachable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"fractional\"}",
+      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":{\"category\":\"fractional\",\"validation\":\"reachable\"}}",
       "operation": "vector_add_lines",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -3160,10 +3160,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-138",
-      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"ordinary\"}",
+      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":{\"category\":\"ordinary\",\"validation\":\"reachable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"ordinary\"}",
+      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":{\"category\":\"ordinary\",\"validation\":\"reachable\"}}",
       "operation": "vector_add_lines",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -3171,10 +3171,10 @@
     {
       "boundary": "ordinary",
       "case_id": "geometry-139",
-      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"large\"}",
+      "distinguishing_feature": "{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":{\"category\":\"large\",\"validation\":\"reachable\"}}",
       "expected_outcome": "error_or_value",
       "family": "geometry",
-      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":\"large\"}",
+      "input_partition": "vector_add_lines:{\"path\":{\"dtype\":\"float64\",\"shape\":\"rectangular_small\",\"value_classes\":[\"ordinary\",\"unit\",\"zero\"],\"variability\":\"variable\"},\"stroke_width\":{\"category\":\"large\",\"validation\":\"reachable\"}}",
       "operation": "vector_add_lines",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -3908,10 +3908,10 @@
     {
       "boundary": "ordinary",
       "case_id": "rasters-006",
-      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\"],\"variability\":\"variable\"},\"method\":\"percentile\"}",
+      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\"],\"variability\":\"variable\"},\"method\":\"percentile\"}",
       "expected_outcome": "structured_error",
       "family": "rasters",
-      "input_partition": "gis_normalize_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\"],\"variability\":\"variable\"},\"method\":\"percentile\"}",
+      "input_partition": "gis_normalize_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\"],\"variability\":\"variable\"},\"method\":\"percentile\"}",
       "operation": "gis_normalize_raster",
       "oracle_kind": "typed_structured_error",
       "pathology": "malformed"
@@ -4018,10 +4018,10 @@
     {
       "boundary": "ordinary",
       "case_id": "rasters-016",
-      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\"],\"variability\":\"variable\"},\"method\":\"minmax\"}",
+      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\"],\"variability\":\"variable\"},\"method\":\"minmax\"}",
       "expected_outcome": "ok",
       "family": "rasters",
-      "input_partition": "gis_normalize_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\"],\"variability\":\"variable\"},\"method\":\"minmax\"}",
+      "input_partition": "gis_normalize_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\"],\"variability\":\"variable\"},\"method\":\"minmax\"}",
       "operation": "gis_normalize_raster",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -4183,10 +4183,10 @@
     {
       "boundary": "ordinary",
       "case_id": "rasters-031",
-      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\"],\"variability\":\"variable\"},\"bins\":[\"unit\",\"zero\",\"unit\",\"ordinary\"],\"out_dtype\":\"uint16\"}",
+      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\"],\"variability\":\"variable\"},\"bins\":[\"unit\",\"zero\",\"unit\",\"ordinary\"],\"out_dtype\":\"uint16\"}",
       "expected_outcome": "ok",
       "family": "rasters",
-      "input_partition": "gis_classify_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\"],\"variability\":\"variable\"},\"bins\":[\"unit\",\"zero\",\"unit\",\"ordinary\"],\"out_dtype\":\"uint16\"}",
+      "input_partition": "gis_classify_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\"],\"variability\":\"variable\"},\"bins\":[\"unit\",\"zero\",\"unit\",\"ordinary\"],\"out_dtype\":\"uint16\"}",
       "operation": "gis_classify_raster",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -4293,10 +4293,10 @@
     {
       "boundary": "ordinary",
       "case_id": "rasters-041",
-      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"ordinary\",\"unit\"],\"variability\":\"variable\"},\"bins\":[\"unit\",\"zero\",\"unit\",\"ordinary\"],\"out_dtype\":\"uint16\"}",
+      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"ordinary\",\"unit\"],\"variability\":\"variable\"},\"bins\":[\"unit\",\"zero\",\"unit\",\"ordinary\"],\"out_dtype\":\"uint16\"}",
       "expected_outcome": "ok",
       "family": "rasters",
-      "input_partition": "gis_classify_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"ordinary\",\"unit\"],\"variability\":\"variable\"},\"bins\":[\"unit\",\"zero\",\"unit\",\"ordinary\"],\"out_dtype\":\"uint16\"}",
+      "input_partition": "gis_classify_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"ordinary\",\"unit\"],\"variability\":\"variable\"},\"bins\":[\"unit\",\"zero\",\"unit\",\"ordinary\"],\"out_dtype\":\"uint16\"}",
       "operation": "gis_classify_raster",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -4403,10 +4403,10 @@
     {
       "boundary": "ordinary",
       "case_id": "rasters-051",
-      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\"],\"variability\":\"variable\"},\"nodata\":null}",
+      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\"],\"variability\":\"variable\"},\"nodata\":null}",
       "expected_outcome": "ok",
       "family": "rasters",
-      "input_partition": "gis_apply_nodata:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\"],\"variability\":\"variable\"},\"nodata\":null}",
+      "input_partition": "gis_apply_nodata:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\"],\"variability\":\"variable\"},\"nodata\":null}",
       "operation": "gis_apply_nodata",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -4568,10 +4568,10 @@
     {
       "boundary": "ordinary",
       "case_id": "rasters-066",
-      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\"],\"variability\":\"variable\"},\"crs\":\"EPSG:4326\",\"transform\":[\"unit\",\"zero\",\"geographic_limit\",\"zero\",\"unit\",\"ordinary\"]}",
+      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\"],\"variability\":\"variable\"},\"crs\":\"EPSG:4326\",\"transform\":[\"unit\",\"zero\",\"geographic_limit\",\"zero\",\"unit\",\"ordinary\"]}",
       "expected_outcome": "ok",
       "family": "rasters",
-      "input_partition": "gis_write_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\"],\"variability\":\"variable\"},\"crs\":\"EPSG:4326\",\"transform\":[\"unit\",\"zero\",\"geographic_limit\",\"zero\",\"unit\",\"ordinary\"]}",
+      "input_partition": "gis_write_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\"],\"variability\":\"variable\"},\"crs\":\"EPSG:4326\",\"transform\":[\"unit\",\"zero\",\"geographic_limit\",\"zero\",\"unit\",\"ordinary\"]}",
       "operation": "gis_write_raster",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -4656,10 +4656,10 @@
     {
       "boundary": "ordinary",
       "case_id": "rasters-074",
-      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\"],\"variability\":\"variable\"},\"crs\":\"EPSG:4326\",\"transform\":[\"fractional\",\"zero\",\"ordinary\",\"zero\",\"fractional\",\"ordinary\"]}",
+      "distinguishing_feature": "{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\"],\"variability\":\"variable\"},\"crs\":\"EPSG:4326\",\"transform\":[\"fractional\",\"zero\",\"ordinary\",\"zero\",\"fractional\",\"ordinary\"]}",
       "expected_outcome": "ok",
       "family": "rasters",
-      "input_partition": "gis_write_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"unit\"],\"variability\":\"variable\"},\"crs\":\"EPSG:4326\",\"transform\":[\"fractional\",\"zero\",\"ordinary\",\"zero\",\"fractional\",\"ordinary\"]}",
+      "input_partition": "gis_write_raster:{\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"f32_extreme\",\"unit\"],\"variability\":\"variable\"},\"crs\":\"EPSG:4326\",\"transform\":[\"fractional\",\"zero\",\"ordinary\",\"zero\",\"fractional\",\"ordinary\"]}",
       "operation": "gis_write_raster",
       "oracle_kind": "completion_classification",
       "pathology": "none"
@@ -5481,21 +5481,21 @@
     {
       "boundary": "ordinary",
       "case_id": "viewer_scene-019",
-      "distinguishing_feature": "{\"colors\":null,\"positions\":{\"representation\":\"list\"}}",
+      "distinguishing_feature": "{\"colors\":null,\"positions\":{\"dtype\":\"float64\",\"shape\":\"empty\",\"value_classes\":[],\"variability\":\"empty\"}}",
       "expected_outcome": "ok",
       "family": "viewer_scene",
-      "input_partition": "point_buffer:{\"colors\":null,\"positions\":{\"representation\":\"list\"}}",
+      "input_partition": "point_buffer:{\"colors\":null,\"positions\":{\"dtype\":\"float64\",\"shape\":\"empty\",\"value_classes\":[],\"variability\":\"empty\"}}",
       "operation": "point_buffer",
       "oracle_kind": "exact_behavioral_checks",
-      "pathology": "none"
+      "pathology": "empty"
     },
     {
       "boundary": "ordinary",
       "case_id": "viewer_scene-020",
-      "distinguishing_feature": "{\"colors\":[\"large\",\"large\",\"large\"],\"positions\":{\"representation\":\"list\"}}",
+      "distinguishing_feature": "{\"colors\":[\"large\",\"large\",\"large\"],\"positions\":{\"dtype\":\"float64\",\"shape\":\"vector\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
       "expected_outcome": "ok",
       "family": "viewer_scene",
-      "input_partition": "point_buffer:{\"colors\":[\"large\",\"large\",\"large\"],\"positions\":{\"representation\":\"list\"}}",
+      "input_partition": "point_buffer:{\"colors\":[\"large\",\"large\",\"large\"],\"positions\":{\"dtype\":\"float64\",\"shape\":\"vector\",\"value_classes\":[\"ordinary\",\"zero\"],\"variability\":\"variable\"}}",
       "operation": "point_buffer",
       "oracle_kind": "exact_behavioral_checks",
       "pathology": "none"

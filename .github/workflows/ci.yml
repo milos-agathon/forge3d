@@ -319,7 +319,25 @@ jobs:
       - name: Run two deterministic 10k passes
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
-        run: python -m tests._fuzz --cases 10000 --seed 42 --tmp-dir target/terminus-fuzz
+        run: |
+          set -o pipefail
+          mkdir -p target/terminus-fuzz-evidence
+          python -m tests._fuzz \
+            --cases 10000 \
+            --seed 42 \
+            --tmp-dir target/terminus-fuzz \
+            --summary-json target/terminus-fuzz-evidence/terminus-fuzz-summary.json \
+            --summary-markdown target/terminus-fuzz-evidence/terminus-fuzz-summary.md \
+            2>&1 | tee target/terminus-fuzz-evidence/terminus-fuzz.log
+          cat target/terminus-fuzz-evidence/terminus-fuzz-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload TERMINUS fuzzer evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terminus-fuzzer-evidence
+          path: target/terminus-fuzz-evidence/
+          if-no-files-found: error
 
   # ============================================================================
   # Linux aarch64 Wheel Smoke Test (QEMU)
@@ -720,6 +738,18 @@ jobs:
           "pytest=$pytestCode`njunit_verifier=$verifyCode" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/test-exit-codes.txt"
           if ($pytestCode -ne 0) { exit $pytestCode }
           if ($verifyCode -ne 0) { exit $verifyCode }
+
+      - name: Summarize public M-06 evidence
+        if: always()
+        shell: pwsh
+        run: |
+          python scripts/summarize_m06_evidence.py "$env:FORGE3D_M06_ARTIFACT_DIR" *>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/public-evidence-summary.log"
+          $summaryCode = $LASTEXITCODE
+          "public_summary=$summaryCode" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/public-evidence-summary-exit-code.txt"
+          if (Test-Path "$env:FORGE3D_M06_ARTIFACT_DIR/m06-public-evidence-summary.md") {
+            Get-Content "$env:FORGE3D_M06_ARTIFACT_DIR/m06-public-evidence-summary.md" | Add-Content $env:GITHUB_STEP_SUMMARY
+          }
+          exit $summaryCode
 
       - name: Finalize evidence manifest
         if: always()

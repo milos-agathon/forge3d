@@ -344,12 +344,50 @@ def failure_preserving_shrink_proof(seed: int, index: int) -> dict[str, Any]:
     return {"initial": initial, "minimal": minimal, "accepted": accepted}
 
 
+def _write_summary_files(
+    summary: dict[str, Any],
+    *,
+    json_path: Path | None,
+    markdown_path: Path | None,
+) -> None:
+    if json_path is not None:
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(
+            json.dumps(summary, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    if markdown_path is not None:
+        markdown_path.parent.mkdir(parents=True, exist_ok=True)
+        first = summary["first_pass"]
+        second = summary["second_pass"]
+        markdown_path.write_text(
+            "\n".join(
+                [
+                    "# TERMINUS Fuzzer Evidence",
+                    "",
+                    f"- seed: {summary['seed']}",
+                    f"- cases: {summary['cases']}",
+                    f"- first_pass: {format_scoreboard(first['scoreboard'])}",
+                    f"- first_digest: {first['digest']}",
+                    f"- second_pass: {format_scoreboard(second['scoreboard'])}",
+                    f"- second_digest: {second['digest']}",
+                    f"- matching_digest: {str(summary['matching_digest']).lower()}",
+                    f"- accepted: {str(summary['accepted']).lower()}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cases", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--tmp-dir", type=Path, default=Path("target/terminus-fuzz"))
     parser.add_argument("--replay-index", type=int)
+    parser.add_argument("--summary-json", type=Path)
+    parser.add_argument("--summary-markdown", type=Path)
     args = parser.parse_args(argv)
 
     if not NATIVE_AVAILABLE:
@@ -384,9 +422,27 @@ def main(argv: list[str] | None = None) -> int:
 
     if first != second or first_digest != second_digest:
         print("fuzz outcomes are not deterministic", file=sys.stderr)
-        return 1
-    if first.get("panic", 0) or first.get("hang", 0) or first.get("wrong_value", 0):
+        accepted = False
+    elif first.get("panic", 0) or first.get("hang", 0) or first.get("wrong_value", 0):
         print("fuzz found panic/hang/property failures", file=sys.stderr)
+        accepted = False
+    else:
+        accepted = True
+    summary = {
+        "seed": args.seed,
+        "cases": args.cases,
+        "first_pass": {"scoreboard": first, "digest": first_digest},
+        "second_pass": {"scoreboard": second, "digest": second_digest},
+        "matching_digest": first_digest == second_digest,
+        "accepted": accepted,
+        "shrink_transcript": transcripts[0] if transcripts else shrink_validation_transcript(),
+    }
+    _write_summary_files(
+        summary,
+        json_path=args.summary_json,
+        markdown_path=args.summary_markdown,
+    )
+    if not accepted:
         return 1
     return 0
 

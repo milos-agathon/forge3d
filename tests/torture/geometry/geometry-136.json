@@ -4,7 +4,7 @@
   },
   "family": "geometry",
   "id": "geometry-136",
-  "notes": "three-point polyline with zero size refusal exercises polyline validation",
+  "notes": "three-point polyline with tiny positive width reaches polyline insertion",
   "operation": "vector_add_lines",
   "payload": {
     "path": {
@@ -24,6 +24,6 @@
         ]
       ]
     },
-    "stroke_width": 0.0
+    "stroke_width": 1e-08
   }
 }

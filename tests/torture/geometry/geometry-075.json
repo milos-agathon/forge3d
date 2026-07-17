@@ -4,10 +4,10 @@
   },
   "family": "geometry",
   "id": "geometry-075",
-  "notes": "positive-infinity point set with zero size refusal exercises point-shape and size validation",
+  "notes": "positive-infinity point set with tiny positive size reaches coordinate validation",
   "operation": "vector_add_points",
   "payload": {
-    "point_size": 0.0,
+    "point_size": 1e-08,
     "positions": {
       "dtype": "float64",
       "values": [

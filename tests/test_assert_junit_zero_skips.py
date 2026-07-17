@@ -1,10 +1,12 @@
 """Adversarial fixtures for the required-lane JUnit verifier."""
 
+import json
 from pathlib import Path
 
 import pytest
 
 from scripts.assert_junit_zero_skips import JUnitValidationError, verify_junit
+from scripts.summarize_m06_evidence import build_summary, markdown_summary, write_summary
 
 
 def _write(tmp_path: Path, body: str) -> Path:
@@ -119,3 +121,80 @@ def test_declared_and_actual_totals_must_agree(tmp_path):
     )
     with pytest.raises(JUnitValidationError, match="contradictory tests"):
         verify_junit(path)
+
+
+def test_m06_evidence_summary_extracts_adapter_and_junit_counts(tmp_path):
+    (tmp_path / "run-context.json").write_text(
+        json.dumps(
+            {
+                "repository": "milos-agathon/forge3d",
+                "head_sha": "abc123",
+                "run_id": "42",
+                "run_attempt": "1",
+                "runner_name": "forge3d-rtx3070",
+                "runner_os": "Windows",
+                "runner_arch": "X64",
+                "required_labels": ["self-hosted", "Windows", "forge3d-gpu", "gpu-nvidia"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "checked-out-head.txt").write_text("abc123\n", encoding="utf-8")
+    (tmp_path / "adapter-probe.json").write_text(
+        json.dumps(
+            {
+                "requested_backend": "vulkan",
+                "probe": {
+                    "name": "NVIDIA GeForce RTX 3070",
+                    "vendor": 0x10DE,
+                    "device": 1234,
+                    "backend": "Vulkan",
+                    "device_type": "DiscreteGpu",
+                    "driver": "test-driver",
+                    "driver_info": "test-info",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "viewer-adapter.json").write_text(
+        json.dumps(
+            {
+                "validated_identity": {
+                    "name": "NVIDIA GeForce RTX 3070",
+                    "vendor": 0x10DE,
+                    "device": 1234,
+                    "backend": "vulkan",
+                    "device_type": "discretegpu",
+                    "driver": "test-driver",
+                    "driver_info": "test-info",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "junit.xml").write_text(
+        '<testsuite tests="2" failures="0" errors="0" skipped="0">'
+        '<testcase classname="a" name="one"/>'
+        '<testcase classname="a" name="two"/>'
+        "</testsuite>",
+        encoding="utf-8",
+    )
+
+    summary = write_summary(tmp_path)
+
+    assert summary["status"] == "pass"
+    assert summary["adapter"]["vendor_hex"] == "0x10de"
+    assert summary["adapter"]["backend"] == "vulkan"
+    assert summary["junit"] == {
+        "exists": True,
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "zero_skip_clean": True,
+    }
+    assert (tmp_path / "m06-public-evidence-summary.json").is_file()
+    rendered = markdown_summary(build_summary(tmp_path))
+    assert "tests=2 failures=0 errors=0 skipped=0" in rendered
+    assert "vendor=0x10de backend=vulkan" in rendered

@@ -66,13 +66,20 @@ def test_every_torture_case_has_material_executable_coverage():
     assert errors == [], "TERMINUS materiality gate failed:\n" + "\n".join(errors)
 
 
-def _materiality_case(case_id, payload, *, notes="specific test rationale"):
+def _materiality_case(
+    case_id,
+    payload,
+    *,
+    operation="gis_validate_geometry",
+    expect=None,
+    notes="specific test rationale",
+):
     return {
         "id": case_id,
         "family": "geometry",
-        "operation": "gis_validate_geometry",
+        "operation": operation,
         "payload": payload,
-        "expect": {"class": "ok"},
+        "expect": expect or {"class": "ok"},
         "notes": notes,
     }
 
@@ -127,6 +134,94 @@ def test_materiality_rejects_note_or_identifier_only_uniqueness():
     cases = [
         _materiality_case("metadata-a", payload, notes="first explanation"),
         _materiality_case("metadata-b", payload, notes="second explanation"),
+    ]
+    errors = validate_materiality(cases, _coverage_entries(*cases))
+    assert any("materiality collision" in error for error in errors)
+
+
+def test_materiality_rejects_numeric_string_only_uniqueness():
+    base = {
+        "src_crs": "EPSG:4326",
+        "dst_crs": "EPSG:3857",
+        "x": 1.0,
+        "y": 2.0,
+    }
+    equivalent = {**base, "x": "1.0", "y": "2.0"}
+    cases = [
+        _materiality_case("numeric-a", base, operation="gis_transform_point"),
+        _materiality_case("numeric-b", equivalent, operation="gis_transform_point"),
+    ]
+    errors = validate_materiality(cases, _coverage_entries(*cases))
+    assert any("materiality collision" in error for error in errors)
+
+
+def test_materiality_rejects_raw_array_only_uniqueness():
+    raw = {"positions": [[0.0, 0.0], [1.0, 1.0]], "point_size": 4.0}
+    values = {
+        "positions": {"dtype": "float64", "values": [[0.0, 0.0], [1.0, 1.0]]},
+        "point_size": 4.0,
+    }
+    cases = [
+        _materiality_case("array-a", raw, operation="vector_add_points"),
+        _materiality_case("array-b", values, operation="vector_add_points"),
+    ]
+    errors = validate_materiality(cases, _coverage_entries(*cases))
+    assert any("materiality collision" in error for error in errors)
+
+
+def test_materiality_rejects_error_message_match_only_uniqueness():
+    payload = {"geometry": {"type": "Point", "coordinates": ["nan", 0.0]}}
+    cases = [
+        _materiality_case(
+            "match-a",
+            payload,
+            expect={"class": "error", "type": "ValueError", "match": "invalid"},
+        ),
+        _materiality_case(
+            "match-b",
+            payload,
+            expect={"class": "error", "type": "ValueError", "match": "invalid_argument"},
+        ),
+    ]
+    errors = validate_materiality(cases, _coverage_entries(*cases))
+    assert any("materiality collision" in error for error in errors)
+
+
+def test_materiality_rejects_unreachable_vector_point_positions():
+    cases = [
+        _materiality_case(
+            "point-size-a",
+            {"positions": {"dtype": "float64", "values": [[0.0, 0.0]]}, "point_size": 0.0},
+            operation="vector_add_points",
+        ),
+        _materiality_case(
+            "point-size-b",
+            {"positions": {"dtype": "float64", "values": [[180.0, 0.0]]}, "point_size": -1.0},
+            operation="vector_add_points",
+        ),
+    ]
+    errors = validate_materiality(cases, _coverage_entries(*cases))
+    assert any("materiality collision" in error for error in errors)
+
+
+def test_materiality_rejects_unreachable_vector_line_paths():
+    cases = [
+        _materiality_case(
+            "line-width-a",
+            {
+                "path": {"dtype": "float64", "values": [[0.0, 0.0], [1.0, 1.0]]},
+                "stroke_width": 0.0,
+            },
+            operation="vector_add_lines",
+        ),
+        _materiality_case(
+            "line-width-b",
+            {
+                "path": {"dtype": "float64", "values": [[0.0, 0.0], [1.0, 1.0], [2.0, 0.0]]},
+                "stroke_width": -1.0,
+            },
+            operation="vector_add_lines",
+        ),
     ]
     errors = validate_materiality(cases, _coverage_entries(*cases))
     assert any("materiality collision" in error for error in errors)

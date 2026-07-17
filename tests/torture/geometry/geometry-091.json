@@ -4,10 +4,10 @@
   },
   "family": "geometry",
   "id": "geometry-091",
-  "notes": "f32-extreme point set with negative size refusal exercises point-shape and size validation",
+  "notes": "f32-extreme point set with unit size reaches coordinate validation",
   "operation": "vector_add_points",
   "payload": {
-    "point_size": -1.0,
+    "point_size": 1.0,
     "positions": {
       "dtype": "float64",
       "values": [
