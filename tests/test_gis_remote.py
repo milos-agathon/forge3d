@@ -11,6 +11,7 @@ import threading
 from pathlib import Path
 
 import pytest
+from _loopback import bind_loopback_or_skip
 
 import forge3d.gis as gis
 from forge3d._native import NATIVE_AVAILABLE
@@ -48,7 +49,7 @@ def _serve(body: bytes, *, content_type: str = "application/geo+json", status: i
     _Handler.body = body
     _Handler.content_type = content_type
     _Handler.status = status
-    server = _Server(("127.0.0.1", 0), _Handler)
+    server = bind_loopback_or_skip(_Server, _Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, f"http://127.0.0.1:{server.server_address[1]}/data.geojson"

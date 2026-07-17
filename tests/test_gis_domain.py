@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from _loopback import bind_loopback_or_skip
 
 import forge3d.gis as gis
 from forge3d._native import NATIVE_AVAILABLE
@@ -187,7 +188,7 @@ def test_build_terrarium_dem_fetches_explicit_url_template_and_caches(tmp_path: 
         def log_message(self, *_args):
             pass
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = bind_loopback_or_skip(ThreadingHTTPServer, Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     cache_dir = tmp_path / "cache"

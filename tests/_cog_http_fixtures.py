@@ -14,6 +14,7 @@ import threading
 from pathlib import Path
 
 import numpy as np
+from _loopback import bind_loopback_or_skip
 
 
 def _serve_bytes(body: bytes, *, content_type: str = "image/tiff"):
@@ -32,7 +33,7 @@ def _serve_bytes(body: bytes, *, content_type: str = "image/tiff"):
     class _Server(socketserver.TCPServer):
         allow_reuse_address = True
 
-    server = _Server(("127.0.0.1", 0), _Handler)
+    server = bind_loopback_or_skip(_Server, _Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, f"http://127.0.0.1:{server.server_address[1]}/data.tif"
 
@@ -94,7 +95,7 @@ def _serve_range(body: bytes, *, unit: str = "bytes"):
         allow_reuse_address = True
         daemon_threads = True
 
-    server = _Server(("127.0.0.1", 0), _Handler)
+    server = bind_loopback_or_skip(_Server, _Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, f"http://127.0.0.1:{server.server_address[1]}/data.tif", served
 
@@ -123,7 +124,7 @@ def _serve_no_range(body: bytes):
         allow_reuse_address = True
         daemon_threads = True
 
-    server = _Server(("127.0.0.1", 0), _Handler)
+    server = bind_loopback_or_skip(_Server, _Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, f"http://127.0.0.1:{server.server_address[1]}/data.tif"
 
@@ -194,7 +195,7 @@ def _serve_bad_range(body: bytes, mode: str):
         allow_reuse_address = True
         daemon_threads = True
 
-    server = _Server(("127.0.0.1", 0), _Handler)
+    server = bind_loopback_or_skip(_Server, _Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, f"http://127.0.0.1:{server.server_address[1]}/data.tif", served
 
