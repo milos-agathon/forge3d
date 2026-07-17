@@ -448,9 +448,15 @@ fn validate_invariant_directions(
                 width,
                 height,
             } => {
+                let shape = image_shape(module, resolved(texture)?);
                 anyhow::ensure!(
-                    image_shape(module, resolved(texture)?).is_some(),
-                    "dimensions_cover target {texture} is not a texture"
+                    shape.is_some_and(|(dimension, _)| matches!(
+                        dimension,
+                        naga::ImageDimension::D2
+                            | naga::ImageDimension::D3
+                            | naga::ImageDimension::Cube
+                    )),
+                    "dimensions_cover target {texture} has no height dimension"
                 );
                 for dimension in [width, height] {
                     anyhow::ensure!(
@@ -809,10 +815,9 @@ fn validate_resource_shapes(
                         dimensions
                             .iter()
                             .all(|dimension| matches!(dimension, DimensionContract::Symbol(_)))
-                            || contract
-                                .invariants
-                                .iter()
-                                .any(|invariant| invariant_bounds_texture(invariant, input.name())),
+                            || contract.invariants.iter().any(|invariant| {
+                                invariant_bounds_texture(invariant, input.name(), dimensions.len())
+                            }),
                         "textureLoad resource {} needs symbolic dimensions or a dimension relation",
                         input.name()
                     );
@@ -861,9 +866,11 @@ fn has_runtime_array(module: &naga::Module, ty: naga::Handle<naga::Type>) -> boo
     }
 }
 
-fn invariant_bounds_texture(invariant: &InvariantContract, name: &str) -> bool {
+fn invariant_bounds_texture(invariant: &InvariantContract, name: &str, rank: usize) -> bool {
     match invariant {
-        InvariantContract::DimensionsCover { texture, .. } => texture == name,
+        // `dimensions_cover` is deliberately XY-only. Array layers and 3D
+        // depth require symbolic dimensions or a full `same_dimensions` fact.
+        InvariantContract::DimensionsCover { texture, .. } => texture == name && rank == 2,
         InvariantContract::SameDimensions { left, right } => left == name || right == name,
         _ => false,
     }
@@ -2141,6 +2148,48 @@ expiry = "2027-01-17"
             validate_contract_semantics(&gi_module, "cs_gi_composite", &contract.entries[0])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn dimensions_cover_requires_an_image_with_width_and_height() {
+        let contract_text = r#"
+[module]
+path = "src/shaders/test.wgsl"
+owner = "render-quality"
+expiry = "2027-01-17"
+
+[[entry]]
+name = "main"
+proof_status = "proven"
+inputs = ["uniform:dims:1:16", "texture:image:0:1:2:min1:min1"]
+outputs = ["location0:0:1"]
+invariants = ["dimensions_cover:image:dims.x:dims.y"]
+"#;
+        let source_2d = r#"
+@group(0) @binding(0) var image: texture_2d<f32>;
+@group(0) @binding(1) var<uniform> dims: vec2<u32>;
+@fragment fn main() -> @location(0) vec4<f32> {
+    return textureLoad(image, vec2<i32>(i32(dims.x), i32(dims.y)), 0);
+}
+"#;
+        let module_2d = naga::front::wgsl::parse_str(source_2d).unwrap();
+        let contract_2d = parse_contract(contract_text).unwrap();
+        validate_contract_semantics(&module_2d, "main", &contract_2d.entries[0]).unwrap();
+
+        let source_1d = r#"
+@group(0) @binding(0) var image: texture_1d<f32>;
+@group(0) @binding(1) var<uniform> dims: vec2<u32>;
+@fragment fn main() -> @location(0) vec4<f32> {
+    let coordinate = i32(dims.x + dims.y * 0u);
+    return textureLoad(image, coordinate, 0);
+}
+"#;
+        let module_1d = naga::front::wgsl::parse_str(source_1d).unwrap();
+        let contract_1d = parse_contract(
+            &contract_text.replace("texture:image:0:1:2:min1:min1", "texture:image:0:1:1:min1"),
+        )
+        .unwrap();
+        assert!(validate_contract_semantics(&module_1d, "main", &contract_1d.entries[0]).is_err());
     }
 
     #[test]
