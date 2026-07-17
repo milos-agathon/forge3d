@@ -1,0 +1,13 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "Unsupported MSAA sample count",
+    "type": "ValueError"
+  },
+  "family": "viewer_scene",
+  "id": "viewer_scene-011",
+  "operation": "viewer_set_msaa",
+  "payload": {
+    "samples": 3
+  }
+}

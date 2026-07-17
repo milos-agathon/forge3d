@@ -1,0 +1,34 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "geometry",
+  "id": "geometry-066",
+  "operation": "gis_geometry_centroid",
+  "payload": {
+    "crs": "EPSG:4326",
+    "geometry": {
+      "coordinates": [
+        [
+          [
+            0,
+            90
+          ],
+          [
+            120,
+            89.5
+          ],
+          [
+            -120,
+            89.5
+          ],
+          [
+            0,
+            90
+          ]
+        ]
+      ],
+      "type": "Polygon"
+    }
+  }
+}

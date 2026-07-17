@@ -1,0 +1,14 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "geometry",
+  "id": "geometry-014",
+  "operation": "gis_validate_geometry",
+  "payload": {
+    "geometry": {
+      "coordinates": [],
+      "type": "LineString"
+    }
+  }
+}

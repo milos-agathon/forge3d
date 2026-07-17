@@ -1,0 +1,37 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "geometry",
+  "id": "geometry-023",
+  "operation": "gis_validate_geometry",
+  "payload": {
+    "geometry": {
+      "coordinates": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            0,
+            0
+          ]
+        ]
+      ],
+      "type": "Polygon"
+    }
+  }
+}

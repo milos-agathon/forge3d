@@ -1,0 +1,30 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "rasters",
+  "id": "rasters-041",
+  "operation": "gis_classify_raster",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": [
+        [
+          "f32_max",
+          "-f32_max"
+        ],
+        [
+          1,
+          -1
+        ]
+      ]
+    },
+    "bins": [
+      -1,
+      0,
+      1,
+      2
+    ],
+    "out_dtype": "uint16"
+  }
+}

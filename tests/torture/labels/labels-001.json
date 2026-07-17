@@ -1,0 +1,14 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "text",
+    "type": "TextShapingError"
+  },
+  "family": "labels",
+  "id": "labels-001",
+  "operation": "text_shape",
+  "payload": {
+    "size": 0,
+    "text": ""
+  }
+}

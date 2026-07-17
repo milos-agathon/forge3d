@@ -1,0 +1,22 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "rasters",
+  "id": "rasters-059",
+  "operation": "gis_apply_nodata",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": [
+        [
+          0,
+          "nan",
+          2,
+          3
+        ]
+      ]
+    },
+    "nodata": null
+  }
+}

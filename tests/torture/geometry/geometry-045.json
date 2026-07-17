@@ -1,0 +1,19 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidGeometry",
+    "type": "ValueError"
+  },
+  "family": "geometry",
+  "id": "geometry-045",
+  "operation": "gis_validate_geometry",
+  "payload": {
+    "geometry": {
+      "coordinates": [
+        "nan",
+        0
+      ],
+      "type": "Point"
+    }
+  }
+}

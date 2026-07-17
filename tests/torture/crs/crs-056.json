@@ -1,0 +1,16 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidBounds",
+    "type": "ValueError"
+  },
+  "family": "crs",
+  "id": "crs-056",
+  "operation": "gis_transform_point",
+  "payload": {
+    "dst_crs": "EPSG:3857",
+    "src_crs": "EPSG:4326",
+    "x": 0,
+    "y": -90
+  }
+}

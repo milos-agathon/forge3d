@@ -1,0 +1,28 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "terrain,",
+    "type": "TypeError"
+  },
+  "family": "viewer_scene",
+  "id": "viewer_scene-019",
+  "operation": "map_scene_validate",
+  "payload": {
+    "crs": "EPSG:4326",
+    "height": 32,
+    "metadata": {
+      "height": 2,
+      "source_id": "scene-2",
+      "width": 2
+    },
+    "terrain": {
+      "dtype": "float32",
+      "pattern": "ramp",
+      "shape": [
+        8,
+        1
+      ]
+    },
+    "width": 34
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidGeometry",
+    "type": "ValueError"
+  },
+  "family": "geometry",
+  "id": "geometry-065",
+  "operation": "gis_geometry_centroid",
+  "payload": {
+    "crs": "EPSG:4326",
+    "geometry": {
+      "coordinates": [
+        "nan",
+        0
+      ],
+      "type": "Point"
+    }
+  }
+}

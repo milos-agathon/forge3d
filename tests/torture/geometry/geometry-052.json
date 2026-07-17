@@ -1,0 +1,38 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "geometry",
+  "id": "geometry-052",
+  "operation": "gis_geometry_centroid",
+  "payload": {
+    "crs": "EPSG:4326",
+    "geometry": {
+      "coordinates": [
+        [
+          [
+            179,
+            -10
+          ],
+          [
+            -179,
+            -10
+          ],
+          [
+            -179,
+            10
+          ],
+          [
+            179,
+            10
+          ],
+          [
+            179,
+            -10
+          ]
+        ]
+      ],
+      "type": "Polygon"
+    }
+  }
+}

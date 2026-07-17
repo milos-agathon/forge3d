@@ -112,16 +112,49 @@ pub async fn parse_cog_header(reader: &RangeReader) -> Result<CogHeader, CogErro
     let (is_big_endian, is_bigtiff) = parse_tiff_header(&header_bytes)?;
 
     let first_ifd_offset = if is_bigtiff {
+        if header_bytes.len() < 16 {
+            return Err(CogError::InvalidTiffHeader(
+                "BigTIFF header too short for first IFD offset".into(),
+            ));
+        }
         if is_big_endian {
-            u64::from_be_bytes(header_bytes[8..16].try_into().unwrap())
+            u64::from_be_bytes([
+                header_bytes[8],
+                header_bytes[9],
+                header_bytes[10],
+                header_bytes[11],
+                header_bytes[12],
+                header_bytes[13],
+                header_bytes[14],
+                header_bytes[15],
+            ])
         } else {
-            u64::from_le_bytes(header_bytes[8..16].try_into().unwrap())
+            u64::from_le_bytes([
+                header_bytes[8],
+                header_bytes[9],
+                header_bytes[10],
+                header_bytes[11],
+                header_bytes[12],
+                header_bytes[13],
+                header_bytes[14],
+                header_bytes[15],
+            ])
         }
     } else {
         let offset = if is_big_endian {
-            u32::from_be_bytes(header_bytes[4..8].try_into().unwrap())
+            u32::from_be_bytes([
+                header_bytes[4],
+                header_bytes[5],
+                header_bytes[6],
+                header_bytes[7],
+            ])
         } else {
-            u32::from_le_bytes(header_bytes[4..8].try_into().unwrap())
+            u32::from_le_bytes([
+                header_bytes[4],
+                header_bytes[5],
+                header_bytes[6],
+                header_bytes[7],
+            ])
         };
         offset as u64
     };
@@ -386,9 +419,19 @@ fn read_u32(data: &[u8], offset: usize, big_endian: bool) -> u32 {
         return 0;
     }
     if big_endian {
-        u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap())
+        u32::from_be_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ])
     } else {
-        u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
+        u32::from_le_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ])
     }
 }
 
@@ -397,9 +440,27 @@ fn read_u64(data: &[u8], offset: usize, big_endian: bool) -> u64 {
         return 0;
     }
     if big_endian {
-        u64::from_be_bytes(data[offset..offset + 8].try_into().unwrap())
+        u64::from_be_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+            data[offset + 4],
+            data[offset + 5],
+            data[offset + 6],
+            data[offset + 7],
+        ])
     } else {
-        u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap())
+        u64::from_le_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+            data[offset + 4],
+            data[offset + 5],
+            data[offset + 6],
+            data[offset + 7],
+        ])
     }
 }
 

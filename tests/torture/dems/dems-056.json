@@ -1,0 +1,20 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "Shape",
+    "type": "ValueError"
+  },
+  "family": "dems",
+  "id": "dems-056",
+  "operation": "dem_derive_water_mask",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "pattern": "ramp",
+      "shape": [
+        1,
+        8
+      ]
+    }
+  }
+}

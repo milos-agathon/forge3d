@@ -1,0 +1,20 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidBounds",
+    "type": "ValueError"
+  },
+  "family": "crs",
+  "id": "crs-081",
+  "operation": "gis_slippy_tile_index",
+  "payload": {
+    "bounds": [
+      0,
+      0,
+      0,
+      1
+    ],
+    "crs": "EPSG:4326",
+    "zoom": 0
+  }
+}

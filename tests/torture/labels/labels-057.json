@@ -1,0 +1,14 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "missing glyph U+0072; font chain tried",
+    "type": "TextShapingError"
+  },
+  "family": "labels",
+  "id": "labels-057",
+  "operation": "text_shape",
+  "payload": {
+    "size": 1,
+    "text": "terminus"
+  }
+}

@@ -27,8 +27,8 @@ fn tag_string(tag: Tag) -> String {
 
 fn diagnostic<'py>(py: Python<'py>, reason: &str) -> Bound<'py, PyDict> {
     let value = PyDict::new_bound(py);
-    value.set_item("status", "diagnostic_block").unwrap();
-    value.set_item("reason", reason).unwrap();
+    let _ = value.set_item("status", "diagnostic_block");
+    let _ = value.set_item("reason", reason);
     value
 }
 
@@ -46,16 +46,14 @@ fn font_error_diagnostic<'py>(py: Python<'py>, error: &FontError) -> Bound<'py, 
     match error {
         FontError::MissingGlyph { codepoint, sources } => {
             let value = diagnostic(py, "missing_glyph");
-            value
-                .set_item("codepoint", format!("U+{codepoint:04X}"))
-                .unwrap();
-            value.set_item("font_chain", sources).unwrap();
+            let _ = value.set_item("codepoint", format!("U+{codepoint:04X}"));
+            let _ = value.set_item("font_chain", sources);
             value
         }
         FontError::InvalidFont { source, face_index } => {
             let value = diagnostic(py, "malformed_font");
-            value.set_item("font", source).unwrap();
-            value.set_item("face_index", face_index).unwrap();
+            let _ = value.set_item("font", source);
+            let _ = value.set_item("face_index", face_index);
             value
         }
         _ => diagnostic(py, "malformed_font"),
@@ -71,25 +69,25 @@ fn text_error_diagnostic<'py>(py: Python<'py>, error: &TextError) -> Bound<'py, 
             script,
         } => {
             let value = diagnostic(py, "unsupported_lookup");
-            value.set_item("table", table).unwrap();
-            value.set_item("lookup_type", lookup_type).unwrap();
-            value.set_item("script", tag_string(*script)).unwrap();
+            let _ = value.set_item("table", table);
+            let _ = value.set_item("lookup_type", lookup_type);
+            let _ = value.set_item("script", tag_string(*script));
             value
         }
         TextError::InvalidSize => diagnostic(py, "invalid_size"),
         TextError::UnsupportedScript(script) => {
             let value = diagnostic(py, "unsupported_script");
-            value.set_item("script", script).unwrap();
+            let _ = value.set_item("script", script);
             value
         }
         TextError::Bidi(message) => {
             let value = diagnostic(py, "bidi_error");
-            value.set_item("message", message).unwrap();
+            let _ = value.set_item("message", message);
             value
         }
         TextError::MalformedOpenType(kind) if kind.contains("tag") => {
             let value = diagnostic(py, "malformed_tag");
-            value.set_item("kind", kind).unwrap();
+            let _ = value.set_item("kind", kind);
             value
         }
         TextError::OutOfBounds { .. } | TextError::MalformedOpenType(_) => {
@@ -285,8 +283,8 @@ fn feature_settings(
         .map(|(tag, enabled)| {
             let bytes: [u8; 4] = tag.as_bytes().try_into().map_err(|_| {
                 let value = diagnostic(py, "malformed_tag");
-                value.set_item("kind", "feature").unwrap();
-                value.set_item("tag", &tag).unwrap();
+                let _ = value.set_item("kind", "feature");
+                let _ = value.set_item("tag", &tag);
                 exception_with_diagnostic::<PyValueError>(
                     py,
                     format!("feature tag must be 4 bytes: {tag:?}"),
@@ -319,7 +317,7 @@ fn load_fonts(py: Python<'_>, font_chain: Vec<String>) -> PyResult<Arc<FontColle
                 "font_io_error"
             };
             let value = diagnostic(py, reason);
-            value.set_item("font", path).unwrap();
+            let _ = value.set_item("font", path);
             exception_with_diagnostic::<PyValueError>(
                 py,
                 format!("failed to inspect font {path}: {error}"),
@@ -334,9 +332,17 @@ fn load_fonts(py: Python<'_>, font_chain: Vec<String>) -> PyResult<Arc<FontColle
         let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.into());
         key.push((canonical.display().to_string(), metadata.len(), modified));
     }
-    if let Some(fonts) = FONT_CACHE.lock().unwrap().get(&key).cloned() {
+    let cache = FONT_CACHE.lock().map_err(|_| {
+        exception_with_diagnostic::<PyValueError>(
+            py,
+            "font cache lock poisoned".to_owned(),
+            diagnostic(py, "font_cache_poisoned"),
+        )
+    })?;
+    if let Some(fonts) = cache.get(&key).cloned() {
         return Ok(fonts);
     }
+    drop(cache);
 
     let requests = font_chain
         .into_iter()
@@ -348,7 +354,7 @@ fn load_fonts(py: Python<'_>, font_chain: Vec<String>) -> PyResult<Arc<FontColle
                     "font_io_error"
                 };
                 let value = diagnostic(py, reason);
-                value.set_item("font", &path).unwrap();
+                let _ = value.set_item("font", &path);
                 exception_with_diagnostic::<PyValueError>(
                     py,
                     format!("failed to read font {path}: {error}"),
@@ -367,7 +373,16 @@ fn load_fonts(py: Python<'_>, font_chain: Vec<String>) -> PyResult<Arc<FontColle
                 font_error_diagnostic(py, &error),
             )
         })?;
-    FONT_CACHE.lock().unwrap().insert(key, Arc::clone(&fonts));
+    FONT_CACHE
+        .lock()
+        .map_err(|_| {
+            exception_with_diagnostic::<PyValueError>(
+                py,
+                "font cache lock poisoned".to_owned(),
+                diagnostic(py, "font_cache_poisoned"),
+            )
+        })?
+        .insert(key, Arc::clone(&fonts));
     Ok(fonts)
 }
 

@@ -1,0 +1,17 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidArgument",
+    "type": "ValueError"
+  },
+  "family": "rasters",
+  "id": "rasters-020",
+  "operation": "gis_normalize_raster",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": []
+    },
+    "method": "zscore"
+  }
+}

@@ -433,8 +433,7 @@ fn decode_heights(
                 )));
             }
             for i in 0..pixel_count {
-                let bytes: [u8; 4] = data[i * 4..(i + 1) * 4].try_into().unwrap();
-                heights.push(f32::from_le_bytes(bytes));
+                heights.push(f32::from_le_bytes(read_le_bytes4(data, i * 4)));
             }
         }
         (64, SAMPLE_FORMAT_FLOAT) => {
@@ -442,8 +441,7 @@ fn decode_heights(
                 return Err(CogError::InvalidIfd("Data too short for f64".into()));
             }
             for i in 0..pixel_count {
-                let bytes: [u8; 8] = data[i * 8..(i + 1) * 8].try_into().unwrap();
-                heights.push(f64::from_le_bytes(bytes) as f32);
+                heights.push(f64::from_le_bytes(read_le_bytes8(data, i * 8)) as f32);
             }
         }
         (16, SAMPLE_FORMAT_UINT) => {
@@ -451,8 +449,7 @@ fn decode_heights(
                 return Err(CogError::InvalidIfd("Data too short for u16".into()));
             }
             for i in 0..pixel_count {
-                let bytes: [u8; 2] = data[i * 2..(i + 1) * 2].try_into().unwrap();
-                let val = u16::from_le_bytes(bytes);
+                let val = u16::from_le_bytes(read_le_bytes2(data, i * 2));
                 heights.push(val as f32);
             }
         }
@@ -461,8 +458,7 @@ fn decode_heights(
                 return Err(CogError::InvalidIfd("Data too short for i16".into()));
             }
             for i in 0..pixel_count {
-                let bytes: [u8; 2] = data[i * 2..(i + 1) * 2].try_into().unwrap();
-                let val = i16::from_le_bytes(bytes);
+                let val = i16::from_le_bytes(read_le_bytes2(data, i * 2));
                 heights.push(val as f32);
             }
         }
@@ -471,8 +467,7 @@ fn decode_heights(
                 return Err(CogError::InvalidIfd("Data too short for i32".into()));
             }
             for i in 0..pixel_count {
-                let bytes: [u8; 4] = data[i * 4..(i + 1) * 4].try_into().unwrap();
-                let val = i32::from_le_bytes(bytes);
+                let val = i32::from_le_bytes(read_le_bytes4(data, i * 4));
                 heights.push(val as f32);
             }
         }
@@ -556,18 +551,18 @@ fn apply_predictor(
             match bytes_per_sample {
                 1 => out[cur] = out[cur].wrapping_add(out[prev]),
                 2 => {
-                    let a = u16::from_le_bytes(out[prev..prev + 2].try_into().unwrap());
-                    let b = u16::from_le_bytes(out[cur..cur + 2].try_into().unwrap());
+                    let a = u16::from_le_bytes(read_le_bytes2(&out, prev));
+                    let b = u16::from_le_bytes(read_le_bytes2(&out, cur));
                     out[cur..cur + 2].copy_from_slice(&b.wrapping_add(a).to_le_bytes());
                 }
                 4 => {
-                    let a = u32::from_le_bytes(out[prev..prev + 4].try_into().unwrap());
-                    let b = u32::from_le_bytes(out[cur..cur + 4].try_into().unwrap());
+                    let a = u32::from_le_bytes(read_le_bytes4(&out, prev));
+                    let b = u32::from_le_bytes(read_le_bytes4(&out, cur));
                     out[cur..cur + 4].copy_from_slice(&b.wrapping_add(a).to_le_bytes());
                 }
                 8 => {
-                    let a = u64::from_le_bytes(out[prev..prev + 8].try_into().unwrap());
-                    let b = u64::from_le_bytes(out[cur..cur + 8].try_into().unwrap());
+                    let a = u64::from_le_bytes(read_le_bytes8(&out, prev));
+                    let b = u64::from_le_bytes(read_le_bytes8(&out, cur));
                     out[cur..cur + 8].copy_from_slice(&b.wrapping_add(a).to_le_bytes());
                 }
                 _ => unreachable!(),
@@ -575,6 +570,32 @@ fn apply_predictor(
         }
     }
     Ok(out)
+}
+
+fn read_le_bytes2(data: &[u8], offset: usize) -> [u8; 2] {
+    [data[offset], data[offset + 1]]
+}
+
+fn read_le_bytes4(data: &[u8], offset: usize) -> [u8; 4] {
+    [
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
+    ]
+}
+
+fn read_le_bytes8(data: &[u8], offset: usize) -> [u8; 8] {
+    [
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
+        data[offset + 4],
+        data[offset + 5],
+        data[offset + 6],
+        data[offset + 7],
+    ]
 }
 
 #[cfg(test)]

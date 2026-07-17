@@ -1,0 +1,36 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidGeometry",
+    "type": "ValueError"
+  },
+  "family": "geometry",
+  "id": "geometry-079",
+  "operation": "gis_geometry_centroid",
+  "payload": {
+    "crs": "EPSG:4326",
+    "geometry": {
+      "coordinates": [
+        [
+          [
+            "inf",
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            "inf",
+            0
+          ]
+        ]
+      ],
+      "type": "Polygon"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidGeometry",
+    "type": "ValueError"
+  },
+  "family": "geometry",
+  "id": "geometry-039",
+  "operation": "gis_validate_geometry",
+  "payload": {
+    "geometry": {
+      "coordinates": [
+        [
+          [
+            "inf",
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            1,
+            1
+          ],
+          [
+            "inf",
+            0
+          ]
+        ]
+      ],
+      "type": "Polygon"
+    }
+  }
+}

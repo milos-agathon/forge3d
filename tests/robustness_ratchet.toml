@@ -1,0 +1,39 @@
+[meta]
+measured_for = "TERMINUS 34 torture atlas"
+reachable_modules = "src/gis,src/vector,src/labels,src/py_functions,src/terrain"
+count_policy = "Rust production code only; excludes #[cfg(test)] modules and test fixture files."
+step0_raw_panic = 14
+step0_raw_unwrap = 381
+step0_raw_expect = 100
+step0_reachable_panic_unwrap = 94
+required_panic_unwrap_reduction_pct = 30.0
+
+[[modules]]
+module = "gis"
+panic = 0
+unwrap = 9
+expect = 6
+
+[[modules]]
+module = "labels"
+panic = 0
+unwrap = 10
+expect = 4
+
+[[modules]]
+module = "py_functions"
+panic = 0
+unwrap = 3
+expect = 8
+
+[[modules]]
+module = "terrain"
+panic = 1
+unwrap = 26
+expect = 5
+
+[[modules]]
+module = "vector"
+panic = 0
+unwrap = 8
+expect = 4

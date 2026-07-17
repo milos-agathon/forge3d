@@ -1,0 +1,13 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidCrs",
+    "type": "ValueError"
+  },
+  "family": "crs",
+  "id": "crs-027",
+  "operation": "gis_parse_crs",
+  "payload": {
+    "crs": "not-a-crs"
+  }
+}

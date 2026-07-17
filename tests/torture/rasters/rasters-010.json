@@ -1,0 +1,17 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidShape",
+    "type": "ValueError"
+  },
+  "family": "rasters",
+  "id": "rasters-010",
+  "operation": "gis_normalize_raster",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": []
+    },
+    "method": "minmax"
+  }
+}

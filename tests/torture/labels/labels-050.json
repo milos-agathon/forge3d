@@ -1,0 +1,15 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "labels",
+  "id": "labels-050",
+  "operation": "text_shape",
+  "payload": {
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 256,
+    "text": "\u0645\u0631\u062d\u0628\u0627"
+  }
+}

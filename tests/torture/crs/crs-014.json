@@ -1,0 +1,13 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidCrs",
+    "type": "ValueError"
+  },
+  "family": "crs",
+  "id": "crs-014",
+  "operation": "gis_parse_crs",
+  "payload": {
+    "crs": "EPSG:3413"
+  }
+}

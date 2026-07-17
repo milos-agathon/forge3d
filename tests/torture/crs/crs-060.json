@@ -1,0 +1,14 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "crs",
+  "id": "crs-060",
+  "operation": "gis_transform_point",
+  "payload": {
+    "dst_crs": "EPSG:32733",
+    "src_crs": "EPSG:4326",
+    "x": 15,
+    "y": -0.001
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "OutputSpec",
+    "type": "ValueError"
+  },
+  "family": "viewer_scene",
+  "id": "viewer_scene-003",
+  "operation": "output_spec",
+  "payload": {
+    "aovs": [
+      "albedo"
+    ],
+    "bit_depth": 12,
+    "height": 64,
+    "samples": 4,
+    "width": 0
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "expect": {
+    "checks": [
+      {
+        "approx": 583932413223.7312,
+        "path": [
+          "area"
+        ],
+        "tolerance": 0.001
+      },
+      {
+        "approx": 3514466.025124564,
+        "path": [
+          "length"
+        ],
+        "tolerance": 1e-06
+      }
+    ],
+    "class": "ok"
+  },
+  "family": "semantic",
+  "id": "semantic-013",
+  "notes": "dateline geodesic area/perimeter oracle",
+  "operation": "gis_geometry_measure",
+  "payload": {
+    "crs": "EPSG:4326",
+    "east": -175,
+    "generated": "dateline_box",
+    "north": -8,
+    "south": -12,
+    "west": 173
+  },
+  "semantic": true
+}

@@ -1,0 +1,19 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "geometry",
+  "id": "geometry-134",
+  "operation": "gis_buffer_geometry",
+  "payload": {
+    "crs": "EPSG:3857",
+    "distance": 0.4,
+    "geometry": {
+      "coordinates": [
+        -2,
+        1.5
+      ],
+      "type": "Point"
+    }
+  }
+}

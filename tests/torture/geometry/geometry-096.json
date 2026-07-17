@@ -1,0 +1,36 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "BackendUnavailable",
+    "type": "RuntimeError"
+  },
+  "family": "geometry",
+  "id": "geometry-096",
+  "operation": "gis_representative_point",
+  "payload": {
+    "crs": "EPSG:4326",
+    "geometry": {
+      "coordinates": [
+        [
+          [
+            0,
+            90
+          ],
+          [
+            120,
+            89.5
+          ],
+          [
+            -120,
+            89.5
+          ],
+          [
+            0,
+            90
+          ]
+        ]
+      ],
+      "type": "Polygon"
+    }
+  }
+}

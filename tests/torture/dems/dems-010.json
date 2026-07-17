@@ -1,0 +1,25 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "dems",
+  "id": "dems-010",
+  "operation": "dem_derive_water_mask",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": [
+        [
+          "nan",
+          1,
+          2
+        ],
+        [
+          3,
+          "nan",
+          4
+        ]
+      ]
+    }
+  }
+}
