@@ -1,5 +1,5 @@
 use anyhow::{bail, Context};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -39,13 +39,26 @@ pub(crate) enum InputContract {
     Uniform(RangeContract),
     Texture {
         range: RangeContract,
-        dimensions: Vec<u32>,
+        dimensions: Vec<DimensionContract>,
     },
     Buffer {
         range: RangeContract,
-        min_length: u32,
+        length: BufferLength,
     },
     Sampler(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DimensionContract {
+    Minimum(u32),
+    Symbol(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BufferLength {
+    Fixed(u32),
+    Dynamic,
+    Symbol(String),
 }
 
 impl InputContract {
@@ -65,6 +78,563 @@ pub(crate) struct RangeContract {
     pub max: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExpectedKind {
+    Value,
+    Uniform,
+    Texture,
+    Buffer,
+    Sampler,
+}
+
+pub(crate) fn validate_contract_semantics(
+    module: &naga::Module,
+    entry_name: &str,
+    contract: &EntryContract,
+) -> anyhow::Result<()> {
+    let (root, is_entry) = module
+        .entry_points
+        .iter()
+        .find(|entry| entry.name == entry_name)
+        .map(|entry| (&entry.function, true))
+        .or_else(|| {
+            module
+                .functions
+                .iter()
+                .find(|(_, function)| function.name.as_deref() == Some(entry_name))
+                .map(|(_, function)| (function, false))
+        })
+        .with_context(|| format!("Naga module has no function {entry_name:?}"))?;
+
+    let mut functions = Vec::new();
+    let mut pending = called_functions(&root.body);
+    let mut seen = BTreeSet::new();
+    while let Some(handle) = pending.pop() {
+        if seen.insert(handle.index()) {
+            let function = &module.functions[handle];
+            pending.extend(called_functions(&function.body));
+            functions.push(function);
+        }
+    }
+
+    let mut expected = BTreeMap::new();
+    for (index, argument) in root.arguments.iter().enumerate() {
+        let name = argument
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("arg{index}"));
+        add_value_leaves(module, argument.ty, &name, &mut expected);
+    }
+    for function in std::iter::once(root).chain(functions.iter().copied()) {
+        collect_global_inputs(module, function, &mut expected)?;
+    }
+
+    let actual: BTreeMap<_, _> = contract
+        .inputs
+        .iter()
+        .map(|input| (input.name().to_string(), input_kind(input)))
+        .collect();
+    let missing: Vec<_> = expected
+        .keys()
+        .filter(|name| !actual.contains_key(*name))
+        .cloned()
+        .collect();
+    let extra: Vec<_> = actual
+        .keys()
+        .filter(|name| !expected.contains_key(*name))
+        .cloned()
+        .collect();
+    let wrong_kind: Vec<_> = expected
+        .iter()
+        .filter_map(|(name, kind)| {
+            actual
+                .get(name)
+                .filter(|actual| *actual != kind)
+                .map(|actual| format!("{name}: expected {kind:?}, got {actual:?}"))
+        })
+        .collect();
+    anyhow::ensure!(
+        missing.is_empty() && extra.is_empty() && wrong_kind.is_empty(),
+        "contract input mismatch; missing={missing:?}, extra={extra:?}, wrong_kind={wrong_kind:?}"
+    );
+    let mut outputs = BTreeSet::new();
+    if let Some(result) = &root.result {
+        add_output_leaves(
+            module,
+            result.ty,
+            result.binding.as_ref(),
+            is_entry,
+            &mut outputs,
+        );
+    }
+    for function in std::iter::once(root).chain(functions.iter().copied()) {
+        collect_written_globals(module, function, &mut outputs);
+    }
+    let actual_outputs: BTreeSet<_> = contract
+        .outputs
+        .iter()
+        .map(|range| range.name.clone())
+        .collect();
+    anyhow::ensure!(
+        outputs == actual_outputs,
+        "contract output mismatch; expected={outputs:?}, actual={actual_outputs:?}"
+    );
+    let all_functions: Vec<_> = std::iter::once(root)
+        .chain(functions.iter().copied())
+        .collect();
+    validate_contract_references(&expected, &outputs, contract)?;
+    validate_resource_shapes(module, &all_functions, contract)?;
+    Ok(())
+}
+
+fn validate_contract_references(
+    inputs: &BTreeMap<String, ExpectedKind>,
+    outputs: &BTreeSet<String>,
+    contract: &EntryContract,
+) -> anyhow::Result<()> {
+    let known: BTreeSet<_> = inputs.keys().chain(outputs.iter()).cloned().collect();
+    let valid = |reference: &str| {
+        known.contains(reference)
+            || known.iter().any(|name| {
+                reference.starts_with(&format!("{name}."))
+                    || reference.starts_with(&format!("{name}["))
+            })
+    };
+    for input in &contract.inputs {
+        match input {
+            InputContract::Texture { dimensions, .. } => {
+                for dimension in dimensions {
+                    if let DimensionContract::Symbol(symbol) = dimension {
+                        anyhow::ensure!(valid(symbol), "unknown texture dimension symbol {symbol}");
+                    }
+                }
+            }
+            InputContract::Buffer {
+                length: BufferLength::Symbol(symbol),
+                ..
+            } => {
+                anyhow::ensure!(valid(symbol), "unknown buffer length symbol {symbol}");
+            }
+            _ => {}
+        }
+    }
+    for reference in contract.invariants.iter().flat_map(invariant_references) {
+        anyhow::ensure!(valid(reference), "unknown invariant reference {reference}");
+    }
+    Ok(())
+}
+
+fn invariant_references(invariant: &InvariantContract) -> Vec<&str> {
+    match invariant {
+        InvariantContract::GreaterEqual { value, .. }
+        | InvariantContract::AbsGreaterEqual { value, .. }
+        | InvariantContract::NormGreaterEqual { value, .. } => vec![value],
+        InvariantContract::SumAbsGreaterEqual { left, right, .. }
+        | InvariantContract::DifferenceGreaterEqual { left, right, .. }
+        | InvariantContract::DistanceGreaterEqual { left, right, .. }
+        | InvariantContract::SameDimensions { left, right }
+        | InvariantContract::IndicesWithin {
+            indices: left,
+            target: right,
+        } => vec![left, right],
+        InvariantContract::LengthAtLeastProduct {
+            buffer,
+            width,
+            height,
+        }
+        | InvariantContract::DimensionsCover {
+            texture: buffer,
+            width,
+            height,
+        } => {
+            vec![buffer, width, height]
+        }
+        InvariantContract::CountWithin { count, buffer } => vec![count, buffer],
+    }
+}
+
+fn validate_resource_shapes(
+    module: &naga::Module,
+    functions: &[&naga::Function],
+    contract: &EntryContract,
+) -> anyhow::Result<()> {
+    let mut image_loads = BTreeSet::new();
+    let mut length_queries = BTreeSet::new();
+    for function in functions {
+        for (_, expression) in function.expressions.iter() {
+            let root = match expression {
+                naga::Expression::ImageLoad { image, .. } => global_access(function, *image),
+                naga::Expression::ArrayLength(pointer) => global_access(function, *pointer),
+                _ => None,
+            };
+            if let Some((handle, _)) = root {
+                if let Some(name) = &module.global_variables[handle].name {
+                    match expression {
+                        naga::Expression::ImageLoad { .. } => {
+                            image_loads.insert(name.clone());
+                        }
+                        naga::Expression::ArrayLength(_) => {
+                            length_queries.insert(name.clone());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    for input in &contract.inputs {
+        let Some((_, global)) = module
+            .global_variables
+            .iter()
+            .find(|(_, global)| global.name.as_deref() == Some(input.name()))
+        else {
+            continue;
+        };
+        match input {
+            InputContract::Texture { dimensions, .. } => {
+                let naga::TypeInner::Image { dim, arrayed, .. } = module.types[global.ty].inner
+                else {
+                    bail!(
+                        "{} is contracted as a texture but Naga disagrees",
+                        input.name()
+                    );
+                };
+                let rank = match dim {
+                    naga::ImageDimension::D1 => 1,
+                    naga::ImageDimension::D2 | naga::ImageDimension::Cube => 2,
+                    naga::ImageDimension::D3 => 3,
+                } + usize::from(arrayed);
+                anyhow::ensure!(
+                    dimensions.len() == rank,
+                    "{} texture rank mismatch",
+                    input.name()
+                );
+                if image_loads.contains(input.name()) {
+                    anyhow::ensure!(
+                        dimensions
+                            .iter()
+                            .all(|dimension| matches!(dimension, DimensionContract::Symbol(_)))
+                            || contract
+                                .invariants
+                                .iter()
+                                .any(|invariant| invariant_bounds_texture(invariant, input.name())),
+                        "textureLoad resource {} needs symbolic dimensions or a dimension relation",
+                        input.name()
+                    );
+                }
+            }
+            InputContract::Buffer { length, .. } if has_runtime_array(module, global.ty) => {
+                anyhow::ensure!(
+                    !matches!(length, BufferLength::Fixed(_)),
+                    "runtime array {} must use the explicit dynamic length",
+                    input.name()
+                );
+                anyhow::ensure!(
+                    matches!(length, BufferLength::Symbol(_))
+                        || length_queries.contains(input.name())
+                        || contract
+                            .invariants
+                            .iter()
+                            .any(|invariant| invariant_bounds_buffer(invariant, input.name())),
+                    "runtime array {} has no length/count/index relation",
+                    input.name()
+                );
+            }
+            InputContract::Buffer { length, .. } => {
+                anyhow::ensure!(
+                    !matches!(length, BufferLength::Dynamic | BufferLength::Symbol(_)),
+                    "fixed buffer {} is marked dynamic",
+                    input.name()
+                );
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn has_runtime_array(module: &naga::Module, ty: naga::Handle<naga::Type>) -> bool {
+    match &module.types[ty].inner {
+        naga::TypeInner::Array {
+            size: naga::ArraySize::Dynamic,
+            ..
+        } => true,
+        naga::TypeInner::Struct { members, .. } => members
+            .last()
+            .is_some_and(|member| has_runtime_array(module, member.ty)),
+        _ => false,
+    }
+}
+
+fn invariant_bounds_texture(invariant: &InvariantContract, name: &str) -> bool {
+    match invariant {
+        InvariantContract::DimensionsCover { texture, .. } => texture == name,
+        InvariantContract::SameDimensions { left, right } => left == name || right == name,
+        _ => false,
+    }
+}
+
+fn invariant_bounds_buffer(invariant: &InvariantContract, name: &str) -> bool {
+    match invariant {
+        InvariantContract::LengthAtLeastProduct { buffer, .. } => buffer == name,
+        InvariantContract::CountWithin { buffer, .. } => buffer == name,
+        InvariantContract::IndicesWithin { indices, target } => indices == name || target == name,
+        _ => false,
+    }
+}
+
+fn input_kind(input: &InputContract) -> ExpectedKind {
+    match input {
+        InputContract::Value(_) => ExpectedKind::Value,
+        InputContract::Uniform(_) => ExpectedKind::Uniform,
+        InputContract::Texture { .. } => ExpectedKind::Texture,
+        InputContract::Buffer { .. } => ExpectedKind::Buffer,
+        InputContract::Sampler(_) => ExpectedKind::Sampler,
+    }
+}
+
+fn add_value_leaves(
+    module: &naga::Module,
+    ty: naga::Handle<naga::Type>,
+    prefix: &str,
+    out: &mut BTreeMap<String, ExpectedKind>,
+) {
+    match &module.types[ty].inner {
+        naga::TypeInner::Struct { members, .. } => {
+            for (index, member) in members.iter().enumerate() {
+                let name = member.name.as_deref().unwrap_or("unnamed");
+                let suffix = index_suffix(name, index);
+                add_value_leaves(module, member.ty, &format!("{prefix}.{name}{suffix}"), out);
+            }
+        }
+        _ => {
+            out.insert(prefix.into(), ExpectedKind::Value);
+        }
+    }
+}
+
+fn index_suffix(name: &str, index: usize) -> String {
+    if name == "unnamed" {
+        format!("{index}")
+    } else {
+        String::new()
+    }
+}
+
+fn collect_global_inputs(
+    module: &naga::Module,
+    function: &naga::Function,
+    out: &mut BTreeMap<String, ExpectedKind>,
+) -> anyhow::Result<()> {
+    let mut uniform_paths = BTreeMap::<naga::Handle<naga::GlobalVariable>, BTreeSet<String>>::new();
+    for (handle, _) in function.expressions.iter() {
+        let Some((global_handle, indices)) = global_access(function, handle) else {
+            continue;
+        };
+        let global = &module.global_variables[global_handle];
+        if global.binding.is_none() && !matches!(global.space, naga::AddressSpace::PushConstant) {
+            continue;
+        }
+        if !global_is_readable(module, global) {
+            continue;
+        }
+        let name = global
+            .name
+            .as_deref()
+            .context("reachable global has no WGSL name")?;
+        match global_kind(module, global) {
+            ExpectedKind::Uniform => {
+                if let Some(path) = named_member_path(module, global.ty, &indices) {
+                    uniform_paths
+                        .entry(global_handle)
+                        .or_default()
+                        .insert(format!("{name}.{path}"));
+                } else if !matches!(
+                    module.types[global.ty].inner,
+                    naga::TypeInner::Struct { .. }
+                ) {
+                    out.insert(name.into(), ExpectedKind::Uniform);
+                }
+            }
+            kind => {
+                out.insert(name.into(), kind);
+            }
+        }
+    }
+    for paths in uniform_paths.into_values() {
+        for path in &paths {
+            if !paths
+                .iter()
+                .any(|other| other.starts_with(&format!("{path}.")))
+            {
+                out.insert(path.clone(), ExpectedKind::Uniform);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn global_is_readable(module: &naga::Module, global: &naga::GlobalVariable) -> bool {
+    match global.space {
+        naga::AddressSpace::Storage { access } => access.contains(naga::StorageAccess::LOAD),
+        naga::AddressSpace::Handle => match module.types[global.ty].inner {
+            naga::TypeInner::Image {
+                class: naga::ImageClass::Storage { access, .. },
+                ..
+            } => access.contains(naga::StorageAccess::LOAD),
+            _ => true,
+        },
+        _ => true,
+    }
+}
+
+fn global_kind(module: &naga::Module, global: &naga::GlobalVariable) -> ExpectedKind {
+    match global.space {
+        naga::AddressSpace::Uniform | naga::AddressSpace::PushConstant => ExpectedKind::Uniform,
+        naga::AddressSpace::Storage { .. } => ExpectedKind::Buffer,
+        naga::AddressSpace::Handle => match module.types[global.ty].inner {
+            naga::TypeInner::Sampler { .. } => ExpectedKind::Sampler,
+            naga::TypeInner::Image { .. } => ExpectedKind::Texture,
+            _ => ExpectedKind::Value,
+        },
+        _ => ExpectedKind::Value,
+    }
+}
+
+fn global_access(
+    function: &naga::Function,
+    handle: naga::Handle<naga::Expression>,
+) -> Option<(naga::Handle<naga::GlobalVariable>, Vec<u32>)> {
+    match function.expressions[handle] {
+        naga::Expression::GlobalVariable(global) => Some((global, Vec::new())),
+        naga::Expression::AccessIndex { base, index } => {
+            let (global, mut path) = global_access(function, base)?;
+            path.push(index);
+            Some((global, path))
+        }
+        naga::Expression::Access { base, .. } | naga::Expression::Load { pointer: base } => {
+            global_access(function, base)
+        }
+        _ => None,
+    }
+}
+
+fn named_member_path(
+    module: &naga::Module,
+    mut ty: naga::Handle<naga::Type>,
+    indices: &[u32],
+) -> Option<String> {
+    let mut names = Vec::new();
+    for &index in indices {
+        match &module.types[ty].inner {
+            naga::TypeInner::Struct { members, .. } => {
+                let member = members.get(index as usize)?;
+                names.push(member.name.clone()?);
+                ty = member.ty;
+            }
+            naga::TypeInner::Array { base, .. } => ty = *base,
+            _ => break,
+        }
+    }
+    (!names.is_empty()).then(|| names.join("."))
+}
+
+fn called_functions(block: &naga::Block) -> Vec<naga::Handle<naga::Function>> {
+    let mut calls = Vec::new();
+    walk_statements(block, &mut |statement| {
+        if let naga::Statement::Call { function, .. } = statement {
+            calls.push(*function);
+        }
+    });
+    calls
+}
+
+fn collect_written_globals(
+    module: &naga::Module,
+    function: &naga::Function,
+    outputs: &mut BTreeSet<String>,
+) {
+    walk_statements(&function.body, &mut |statement| {
+        let root = match statement {
+            naga::Statement::Store { pointer, .. } | naga::Statement::Atomic { pointer, .. } => {
+                global_access(function, *pointer)
+            }
+            naga::Statement::ImageStore { image, .. } => global_access(function, *image),
+            _ => None,
+        };
+        if let Some((handle, _)) = root {
+            let global = &module.global_variables[handle];
+            let externally_observable = matches!(
+                global.space,
+                naga::AddressSpace::Storage { .. } | naga::AddressSpace::Handle
+            );
+            if externally_observable {
+                if let Some(name) = &global.name {
+                    outputs.insert(name.clone());
+                }
+            }
+        }
+    });
+}
+
+fn walk_statements(block: &naga::Block, visit: &mut impl FnMut(&naga::Statement)) {
+    for statement in block {
+        visit(statement);
+        match statement {
+            naga::Statement::Block(block) => walk_statements(block, visit),
+            naga::Statement::If { accept, reject, .. } => {
+                walk_statements(accept, visit);
+                walk_statements(reject, visit);
+            }
+            naga::Statement::Switch { cases, .. } => {
+                for case in cases {
+                    walk_statements(&case.body, visit);
+                }
+            }
+            naga::Statement::Loop {
+                body, continuing, ..
+            } => {
+                walk_statements(body, visit);
+                walk_statements(continuing, visit);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn add_output_leaves(
+    module: &naga::Module,
+    ty: naga::Handle<naga::Type>,
+    binding: Option<&naga::Binding>,
+    is_entry: bool,
+    outputs: &mut BTreeSet<String>,
+) {
+    match &module.types[ty].inner {
+        naga::TypeInner::Struct { members, .. } => {
+            for member in members {
+                if let Some(name) = &member.name {
+                    outputs.insert(name.clone());
+                }
+            }
+        }
+        _ if is_entry => {
+            outputs.insert(binding_name(binding));
+        }
+        _ => {
+            outputs.insert("return".into());
+        }
+    }
+}
+
+fn binding_name(binding: Option<&naga::Binding>) -> String {
+    match binding {
+        Some(naga::Binding::Location { location, .. }) => format!("location{location}"),
+        Some(naga::Binding::BuiltIn(builtin)) => format!("builtin:{builtin:?}"),
+        None => "return".into(),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum InvariantContract {
     GreaterEqual {
@@ -73,6 +643,15 @@ pub(crate) enum InvariantContract {
     },
     AbsGreaterEqual {
         value: String,
+        minimum: f32,
+    },
+    NormGreaterEqual {
+        value: String,
+        minimum: f32,
+    },
+    DistanceGreaterEqual {
+        left: String,
+        right: String,
         minimum: f32,
     },
     SumAbsGreaterEqual {
@@ -266,6 +845,7 @@ pub(crate) fn parse_ledger(text: &str) -> anyhow::Result<Vec<LedgerRow>> {
         }
     }
     let mut paths = BTreeSet::new();
+    let mut unique_reasons = BTreeSet::new();
     rows.into_iter()
         .zip(reasons)
         .map(|(row, reason)| {
@@ -282,6 +862,17 @@ pub(crate) fn parse_ledger(text: &str) -> anyhow::Result<Vec<LedgerRow>> {
             {
                 bail!("ledger reason for {path} does not identify a verifier imprecision");
             }
+            let module = path
+                .strip_prefix("src/shaders/")
+                .context("ledger path is outside src/shaders")?;
+            anyhow::ensure!(
+                reason.starts_with(&format!("{module}: ")),
+                "ledger reason for {path} is not module-specific"
+            );
+            anyhow::ensure!(
+                unique_reasons.insert(reason.clone()),
+                "duplicate ledger reason {reason}"
+            );
             let owner = nonempty(required(row.owner, "unproven.owner")?, "unproven.owner")?;
             let expiry = required(row.expiry, "unproven.expiry")?;
             validate_unexpired(&expiry)?;
@@ -313,13 +904,19 @@ fn parse_inputs(value: &str) -> anyhow::Result<Vec<InputContract>> {
                         range: range(name, min, max)?,
                         dimensions: dimensions
                             .iter()
-                            .map(|value| positive_u32(value, "texture dimension"))
+                            .map(|value| parse_dimension(value))
                             .collect::<anyhow::Result<_>>()?,
                     }
                 }
                 ["buffer", name, min, max, length] => InputContract::Buffer {
                     range: range(name, min, max)?,
-                    min_length: positive_u32(length, "buffer length")?,
+                    length: if *length == "dynamic" {
+                        BufferLength::Dynamic
+                    } else if length.parse::<u32>().is_err() {
+                        BufferLength::Symbol(parse_symbol(length, "buffer length")?)
+                    } else {
+                        BufferLength::Fixed(positive_u32(length, "buffer length")?)
+                    },
                 },
                 ["sampler", name] if !name.is_empty() => InputContract::Sampler((*name).into()),
                 _ => bail!("malformed input {item:?}"),
@@ -378,6 +975,17 @@ fn parse_invariants(value: &str) -> anyhow::Result<Vec<InvariantContract>> {
                     value: nonempty(value)?,
                     minimum: finite(minimum)?,
                 }),
+                ["norm_ge", value, minimum] => Ok(InvariantContract::NormGreaterEqual {
+                    value: nonempty(value)?,
+                    minimum: finite(minimum)?,
+                }),
+                ["distance_ge", left, right, minimum] => {
+                    Ok(InvariantContract::DistanceGreaterEqual {
+                        left: nonempty(left)?,
+                        right: nonempty(right)?,
+                        minimum: finite(minimum)?,
+                    })
+                }
                 ["sum_abs_ge", left, right, minimum] => Ok(InvariantContract::SumAbsGreaterEqual {
                     left: nonempty(left)?,
                     right: nonempty(right)?,
@@ -524,6 +1132,33 @@ fn positive_u32(value: &str, name: &str) -> anyhow::Result<u32> {
     Ok(value)
 }
 
+fn parse_dimension(value: &str) -> anyhow::Result<DimensionContract> {
+    if let Some(minimum) = value.strip_prefix("min") {
+        return Ok(DimensionContract::Minimum(positive_u32(
+            minimum,
+            "texture minimum dimension",
+        )?));
+    }
+    if value.parse::<u32>().is_ok() {
+        bail!("texture dimensions are symbolic or explicit minima (for example min1)");
+    }
+    Ok(DimensionContract::Symbol(parse_symbol(
+        value,
+        "texture dimension",
+    )?))
+}
+
+fn parse_symbol(value: &str, kind: &str) -> anyhow::Result<String> {
+    if value.is_empty()
+        || !value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.'))
+    {
+        bail!("invalid symbolic {kind} {value:?}");
+    }
+    Ok(value.into())
+}
+
 fn validate_path(path: &str) -> anyhow::Result<()> {
     if !path.starts_with("src/shaders/") && !path.starts_with("tests/data/shader_proofs/") {
         bail!("invalid shader path {path}");
@@ -601,7 +1236,7 @@ expiry = "2027-01-17"
 [[entry]]
 name = "main"
 proof_status = "proven"
-inputs = ["value:arg:-1:1", "uniform:params:0:8", "texture:image:0:1:2:1:1", "buffer:data:-2:2:4", "sampler:samp"]
+inputs = ["value:arg:-1:1", "uniform:params:0:8", "texture:image:0:1:2:min1:min1", "buffer:data:-2:2:4", "sampler:samp"]
 outputs = ["color:0:1"]
 invariants = ["ge:params.count:1"]
 requires_guards = ["max(denom, 1e-6)"]
@@ -627,9 +1262,10 @@ requires_guards = ["max(denom, 1e-6)"]
         .is_err());
         assert!(parse_contract(&VALID.replace("value:arg:-1:1", "value:arg:2:1")).is_err());
         assert!(parse_contract(&VALID.replace("value:arg:-1:1", "value:arg:NaN:1")).is_err());
-        assert!(parse_contract(
-            &VALID.replace("texture:image:0:1:2:1:1", "texture:image:0:1:2:0:1")
-        )
+        assert!(parse_contract(&VALID.replace(
+            "texture:image:0:1:2:min1:min1",
+            "texture:image:0:1:2:min0:min1"
+        ))
         .is_err());
         assert!(
             parse_contract(&VALID.replace("buffer:data:-2:2:4", "buffer:data:-2:2:0")).is_err()
@@ -649,7 +1285,7 @@ requires_guards = ["max(denom, 1e-6)"]
     #[test]
     fn contract_requires_explicit_inputs_and_outputs() {
         assert!(parse_contract(&VALID.replace(
-            "inputs = [\"value:arg:-1:1\", \"uniform:params:0:8\", \"texture:image:0:1:2:1:1\", \"buffer:data:-2:2:4\", \"sampler:samp\"]\n",
+            "inputs = [\"value:arg:-1:1\", \"uniform:params:0:8\", \"texture:image:0:1:2:min1:min1\", \"buffer:data:-2:2:4\", \"sampler:samp\"]\n",
             ""
         ))
         .is_err());
@@ -659,7 +1295,7 @@ requires_guards = ["max(denom, 1e-6)"]
     const LEDGER: &str = r#"
 [[unproven]]
 path = "src/shaders/a.wgsl"
-reason = "texture gather precision is not modeled"
+reason = "a.wgsl: texture gather precision is not modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 "#;
@@ -670,14 +1306,15 @@ expiry = "2027-01-17"
         assert_eq!(rows[0].path, "src/shaders/a.wgsl");
         assert!(parse_ledger(&LEDGER.replace("reason =", "unknown =")).is_err());
         assert!(parse_ledger(&LEDGER.replace("owner = \"render-quality\"\n", "")).is_err());
-        assert!(parse_ledger(
-            &LEDGER.replace("texture gather precision is not modeled", "too vague")
-        )
+        assert!(parse_ledger(&LEDGER.replace(
+            "a.wgsl: texture gather precision is not modeled",
+            "too vague"
+        ))
         .is_err());
         assert!(parse_ledger(&format!("{LEDGER}\n{LEDGER}")).is_err());
         assert!(parse_ledger(&LEDGER.replace("2027-01-17", "2020-01-01")).is_err());
         assert!(parse_ledger(&LEDGER.replace(
-            "texture gather precision is not modeled",
+            "a.wgsl: texture gather precision is not modeled",
             "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
         ))
         .is_err());
@@ -719,5 +1356,55 @@ expiry = "2027-01-17"
             .collect();
         assert_eq!(contract_names, source_names);
         assert_eq!(contract_names.len(), 31);
+    }
+
+    #[test]
+    fn real_sidecar_rejects_omitted_renamed_and_bogus_members() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let source = std::fs::read_to_string(root.join("src/shaders/line_aa.wgsl")).unwrap();
+        let module = naga::front::wgsl::parse_str(&source).unwrap();
+        let text = std::fs::read_to_string(root.join("shaders/contracts/line_aa.toml")).unwrap();
+        let contract = parse_contract(&text).unwrap();
+        validate_contract_semantics(&module, "fs_main", &contract.entries[0]).unwrap();
+
+        for mutation in [
+            text.replace(", \"uniform:uniforms.cap_style:0:2\"", ""),
+            text.replace("uniform:uniforms.cap_style", "uniform:uniforms.cap_stile"),
+            text.replace(
+                "inputs = [",
+                "inputs = [\"uniform:not_a_shader_symbol:0:1\", ",
+            ),
+        ] {
+            let mutated = parse_contract(&mutation);
+            assert!(
+                mutated.is_err()
+                    || validate_contract_semantics(
+                        &module,
+                        "fs_main",
+                        &mutated.unwrap().entries[0]
+                    )
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn real_sidecar_rejects_omitted_and_renamed_resources() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let source = std::fs::read_to_string(root.join("src/shaders/overlays.wgsl")).unwrap();
+        let module = naga::front::wgsl::parse_str(&source).unwrap();
+        let text = std::fs::read_to_string(root.join("shaders/contracts/overlays.toml")).unwrap();
+        let contract = parse_contract(&text).unwrap();
+        validate_contract_semantics(&module, "fs_overlay", &contract.entries[0]).unwrap();
+
+        for mutation in [
+            text.replace(", \"texture:overlay_tex:0:1:2:min1:min1\"", ""),
+            text.replace("texture:overlay_tex:", "texture:overlay_texture:"),
+        ] {
+            let mutated = parse_contract(&mutation).unwrap();
+            assert!(
+                validate_contract_semantics(&module, "fs_overlay", &mutated.entries[0]).is_err()
+            );
+        }
     }
 }

@@ -240,7 +240,8 @@ fn verify_source(
                 .iter()
                 .find(|candidate| candidate.name == entry)
         });
-    let parsed_by_naga = naga::front::wgsl::parse_str(source).is_ok();
+    let naga_module = naga::front::wgsl::parse_str(source);
+    let parsed_by_naga = naga_module.is_ok();
 
     if let Err(error) = &contract_text {
         alarms.push(Alarm {
@@ -297,6 +298,16 @@ fn verify_source(
         });
     }
     if let Some(contract) = entry_contract {
+        if let Ok(module) = &naga_module {
+            if let Err(error) = contract::validate_contract_semantics(module, entry, contract) {
+                alarms.push(Alarm {
+                    file: contract_path.to_string(),
+                    line: 1,
+                    kind: "contract_semantic".to_string(),
+                    detail: error.to_string(),
+                });
+            }
+        }
         alarms.extend(check_divisions(path, source, contract));
         alarms.extend(check_required_guards(path, source, contract));
     }
@@ -399,7 +410,7 @@ fn check_required_guards(
             && contract
                 .invariants
                 .iter()
-                .any(|value| matches!(value, contract::InvariantContract::GreaterEqual { value, minimum } if value == "prev.a" && *minimum == 0.0));
+                .any(|value| matches!(value, contract::InvariantContract::GreaterEqual { value, minimum } if value == "accum_hdr[].a" && *minimum == 0.0));
         if !has_acc_proof {
             alarms.push(Alarm {
                 file: path.to_string(),

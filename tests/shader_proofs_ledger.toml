@@ -2,666 +2,666 @@
 
 [[unproven]]
 path = "src/shaders/adjudication_raster.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "adjudication_raster.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ao_from_aovs.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ao_from_aovs.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/bloom_blur_h.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "bloom_blur_h.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/bloom_blur_v.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "bloom_blur_v.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/bloom_brightpass.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "bloom_brightpass.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/bloom_composite.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "bloom_composite.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/ashikhmin_shirley.wgsl"
-reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
+reason = "brdf/ashikhmin_shirley.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/common.wgsl"
-reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
+reason = "brdf/common.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/cook_torrance.wgsl"
-reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
+reason = "brdf/cook_torrance.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/disney_principled.wgsl"
-reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
+reason = "brdf/disney_principled.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/dispatch.wgsl"
-reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
+reason = "brdf/dispatch.wgsl: entry varying and uniform-member ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/lambert.wgsl"
-reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
+reason = "brdf/lambert.wgsl: entry varying and uniform-member ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/minnaert.wgsl"
-reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
+reason = "brdf/minnaert.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/oren_nayar.wgsl"
-reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
+reason = "brdf/oren_nayar.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/phong.wgsl"
-reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
+reason = "brdf/phong.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/toon.wgsl"
-reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
+reason = "brdf/toon.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/ward.wgsl"
-reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
+reason = "brdf/ward.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/bvh_refit.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "bvh_refit.wgsl: storage-buffer index and count relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/clipmap_lod_select.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "clipmap_lod_select.wgsl: storage-buffer index and count relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/cloud_shadows.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "cloud_shadows.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/clouds.wgsl"
-reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
+reason = "clouds.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/csm.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "csm.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/culling_compute.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "culling_compute.wgsl: storage-buffer index and count relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/denoise_atrous.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "denoise_atrous.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/dof.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "dof.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/extrusion.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "extrusion.wgsl: storage-buffer index and count relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/filters/bilateral_separable.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "filters/bilateral_separable.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/filters/edge_aware_upsample.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "filters/edge_aware_upsample.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/fog_upsample.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "fog_upsample.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/gbuffer/common.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "gbuffer/common.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/gi/debug.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "gi/debug.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ground_plane.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "ground_plane.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/heightfield_ao.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "heightfield_ao.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/heightfield_sun_vis.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "heightfield_sun_vis.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/hybrid_kernel.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "hybrid_kernel.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/hybrid_traversal.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "hybrid_traversal.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/hzb_build.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "hzb_build.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ibl_brdf.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ibl_brdf.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ibl_equirect.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ibl_equirect.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ibl_prefilter.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ibl_prefilter.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ibl.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ibl.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/lbvh_link.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "lbvh_link.wgsl: storage-buffer index and count relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/lbvh_morton.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "lbvh_morton.wgsl: storage-buffer index and count relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/lighting_ibl.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "lighting_ibl.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/lighting.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "lighting.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/lights.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "lights.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/mesh_basic.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "mesh_basic.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/mesh_instanced.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "mesh_instanced.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/moment_generation.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "moment_generation.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/normal_mapping_vertex.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "normal_mapping_vertex.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/offline_accumulate.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "offline_accumulate.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/offline_depth_expand.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "offline_depth_expand.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/offline_depth_extract.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "offline_depth_extract.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/offline_luminance.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "offline_luminance.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/offline_resolve.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "offline_resolve.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/oit_compose.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "oit_compose.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/oit_dual_source_compose.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "oit_dual_source_compose.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/oit_dual_source.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "oit_dual_source.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pbr.wgsl"
-reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
+reason = "pbr.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/planar_reflections.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "planar_reflections.wgsl: entry varying and uniform-member ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/point_edl.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "point_edl.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/point_instanced.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "point_instanced.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/point_spot_lights.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "point_spot_lights.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/postprocess_tonemap.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "postprocess_tonemap.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pt_intersect.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "pt_intersect.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pt_kernel.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "pt_kernel.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pt_raygen.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "pt_raygen.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pt_restir_init.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "pt_restir_init.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pt_restir_spatial.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "pt_restir_spatial.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pt_restir_temporal.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "pt_restir_temporal.wgsl: storage-buffer index and count relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pt_scatter.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "pt_scatter.wgsl: storage-buffer index and count relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pt_shade.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "pt_shade.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pt_shadow.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "pt_shadow.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/radix_sort_pairs.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "radix_sort_pairs.wgsl: storage-buffer index and count relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/restir_spatial.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "restir_spatial.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/restir_temporal.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "restir_temporal.wgsl: storage-buffer index and count relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/sdf_operations.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "sdf_operations.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/sdf_primitives.wgsl"
-reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
+reason = "sdf_primitives.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/shadow_blur.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "shadow_blur.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/shadows.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "shadows.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/sky.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "sky.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/soft_light_radius.wgsl"
-reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
+reason = "soft_light_radius.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssao.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ssao.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssao/common.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ssao/common.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssao/composite.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ssao/composite.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssao/gtao.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ssao/gtao.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssao/ssao.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ssao/ssao.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssgi/composite.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ssgi/composite.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssgi/resolve_temporal.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ssgi/resolve_temporal.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssgi/shade.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ssgi/shade.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssgi/trace.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ssgi/trace.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssr/composite.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ssr/composite.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssr/fallback_env.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ssr/fallback_env.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssr/shade.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ssr/shade.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssr/temporal.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ssr/temporal.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssr/trace.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "ssr/trace.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/taa.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "taa.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/temporal/resolve_ao.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "temporal/resolve_ao.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/terrain_blit.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "terrain_blit.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/terrain_minimal.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "terrain_minimal.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/terrain_noise.wgsl"
-reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
+reason = "terrain_noise.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/terrain_normal_blit.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "terrain_normal_blit.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/terrain_probes.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "terrain_probes.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/terrain_shadow_depth.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "terrain_shadow_depth.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/terrain.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "terrain.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/text_overlay.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "text_overlay.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/tone_map.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "tone_map.wgsl: entry varying and uniform-member ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/tonemap_terrain_offline.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "tonemap_terrain_offline.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/velocity.wgsl"
-reason = "entry-point varying and uniform-field ranges are not yet modeled"
+reason = "velocity.wgsl: entry varying and uniform-member ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/viewer_volumetrics.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "viewer_volumetrics.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/volumetric.wgsl"
-reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
+reason = "volumetric.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"

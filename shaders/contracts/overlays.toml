@@ -6,6 +6,6 @@ expiry = "2027-01-17"
 [[entry]]
 name = "fs_overlay"
 proof_status = "proven"
-inputs = ["value:in:0:1", "uniform:U:-65536:65536", "texture:overlay_tex:0:1:2:1:1", "sampler:overlay_samp", "texture:height_tex:-65536:65536:2:1:1", "sampler:height_samp", "buffer:PageTable:0:4294967000:1", "texture:depth_tex:0:1:2:1:1", "sampler:depth_samp"]
+inputs = ["value:in.pos:-65536:65536", "value:in.uv:0:1", "uniform:U.contour_color:0:1", "uniform:U.contour_params:-65536:65536", "uniform:U.depth_params:-65536:65536", "uniform:U.halo_color:0:1", "uniform:U.halo_params:-65536:65536", "uniform:U.overlay_params:-65536:65536", "uniform:U.overlay_uv:-65536:65536", "texture:overlay_tex:0:1:2:min1:min1", "sampler:overlay_samp", "texture:height_tex:-65536:65536:2:min1:min1", "sampler:height_samp", "buffer:PageTable:0:4294967000:dynamic", "texture:depth_tex:0:1:2:min1:min1", "sampler:depth_samp"]
 outputs = ["location0:0:1"]
-invariants = ["count_within:U.page_table_count:PageTable"]
+invariants = []
