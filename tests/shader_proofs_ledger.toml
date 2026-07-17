@@ -2,666 +2,666 @@
 
 [[unproven]]
 path = "src/shaders/adjudication_raster.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ao_from_aovs.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/bloom_blur_h.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/bloom_blur_v.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/bloom_brightpass.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/bloom_composite.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/ashikhmin_shirley.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/common.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/cook_torrance.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/disney_principled.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/dispatch.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/lambert.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/minnaert.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/oren_nayar.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/phong.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/toon.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/brdf/ward.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/bvh_refit.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/clipmap_lod_select.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/cloud_shadows.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/clouds.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/csm.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/culling_compute.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/denoise_atrous.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/dof.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/extrusion.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/filters/bilateral_separable.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/filters/edge_aware_upsample.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/fog_upsample.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/gbuffer/common.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/gi/debug.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ground_plane.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/heightfield_ao.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/heightfield_sun_vis.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/hybrid_kernel.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/hybrid_traversal.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/hzb_build.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ibl_brdf.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ibl_equirect.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ibl_prefilter.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ibl.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/lbvh_link.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/lbvh_morton.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/lighting_ibl.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/lighting.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/lights.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/mesh_basic.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/mesh_instanced.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/moment_generation.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/normal_mapping_vertex.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/offline_accumulate.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/offline_depth_expand.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/offline_depth_extract.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/offline_luminance.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/offline_resolve.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/oit_compose.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/oit_dual_source_compose.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/oit_dual_source.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pbr.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/planar_reflections.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/point_edl.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/point_instanced.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/point_spot_lights.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/postprocess_tonemap.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pt_intersect.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pt_kernel.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pt_raygen.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pt_restir_init.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pt_restir_spatial.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pt_restir_temporal.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pt_scatter.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pt_shade.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/pt_shadow.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/radix_sort_pairs.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/restir_spatial.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/restir_temporal.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/sdf_operations.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/sdf_primitives.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "dynamic storage indexing and loop bounds are not yet modeled precisely"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/shadow_blur.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/shadows.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/sky.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/soft_light_radius.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssao.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssao/common.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssao/composite.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssao/gtao.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssao/ssao.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssgi/composite.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssgi/resolve_temporal.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssgi/shade.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssgi/trace.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssr/composite.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssr/fallback_env.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssr/shade.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssr/temporal.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/ssr/trace.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/taa.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/temporal/resolve_ao.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/terrain_blit.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/terrain_minimal.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/terrain_noise.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "native transcendental and nonlinear shading envelopes are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/terrain_normal_blit.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/terrain_probes.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/terrain_shadow_depth.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/terrain.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/text_overlay.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/tone_map.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/tonemap_terrain_offline.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/velocity.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "entry-point varying and uniform-field ranges are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/viewer_volumetrics.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
 path = "src/shaders/volumetric.wgsl"
-reason = "outside PROBATUM v1 proven ratchet; conservative abstract domain not yet precise enough for this module"
+reason = "texture dimensions, sampling ranges, and cross-pass invariants are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"

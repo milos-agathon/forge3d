@@ -6,5 +6,5 @@ expiry = "2027-01-17"
 [[entry]]
 name = "unguarded_zero_div"
 proof_status = "must_reject"
-inputs = "denom = [-1.0, 1.0]"
-outputs = "unproven"
+inputs = ["value:denom:-1:1"]
+outputs = ["return:-3.4028234e38:3.4028234e38"]

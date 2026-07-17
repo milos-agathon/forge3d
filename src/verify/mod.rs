@@ -6,6 +6,7 @@
 //! the committed contracts. Unhandled syntax or missing load-bearing guards
 //! returns `unproven`; there is no ignore mechanism.
 
+pub(crate) mod contract;
 pub(crate) mod domain;
 
 use serde::Serialize;
@@ -151,13 +152,13 @@ pub fn shader_report(mode: Option<&str>) -> anyhow::Result<serde_json::Value> {
 
     let registered_modules = registered_wgsl_modules()?;
     let proven_paths: BTreeSet<_> = PROVEN_TARGETS.iter().map(|t| t.path.to_string()).collect();
-    let ledger = read_ledger_paths()?;
-    let missing_from_ledger: Vec<_> = registered_modules
-        .iter()
-        .filter(|p| !proven_paths.contains(*p) && !ledger.contains(*p))
-        .cloned()
-        .collect();
-    let expired_ledger_entries = read_expired_ledger_entries()?;
+    let ledger_rows = contract::parse_ledger(&fs::read_to_string(
+        root().join("tests/shader_proofs_ledger.toml"),
+    )?)?;
+    let ledger: BTreeSet<_> = ledger_rows.iter().map(|row| row.path.clone()).collect();
+    let missing_from_ledger =
+        validate_ledger_coverage(&registered_modules, &proven_paths, &ledger)?;
+    let expired_ledger_entries: Vec<String> = Vec::new();
 
     let unsafe_fixture = verify_source(
         "unguarded_zero_div",
@@ -228,10 +229,58 @@ fn verify_source(
 ) -> Verdict {
     let started = Instant::now();
     let mut alarms = Vec::new();
-    let contract = fs::read_to_string(root().join(contract_path)).unwrap_or_default();
+    let contract_text = fs::read_to_string(root().join(contract_path));
+    let parsed_contract = contract_text.as_deref().ok().map(contract::parse_contract);
+    let entry_contract = parsed_contract
+        .as_ref()
+        .and_then(|contract| contract.as_ref().ok())
+        .and_then(|contract| {
+            contract
+                .entries
+                .iter()
+                .find(|candidate| candidate.name == entry)
+        });
     let parsed_by_naga = naga::front::wgsl::parse_str(source).is_ok();
 
-    if !parsed_by_naga && !contract.contains("allow_parse_debt = true") {
+    if let Err(error) = &contract_text {
+        alarms.push(Alarm {
+            file: contract_path.to_string(),
+            line: 1,
+            kind: "contract_io".to_string(),
+            detail: error.to_string(),
+        });
+    } else if let Some(Err(error)) = &parsed_contract {
+        alarms.push(Alarm {
+            file: contract_path.to_string(),
+            line: 1,
+            kind: "contract_invalid".to_string(),
+            detail: error.to_string(),
+        });
+    } else if entry_contract.is_none() {
+        alarms.push(Alarm {
+            file: contract_path.to_string(),
+            line: 1,
+            kind: "contract_entry_missing".to_string(),
+            detail: format!("contract has no entry {entry:?}"),
+        });
+    }
+    if let Some(contract) = parsed_contract
+        .as_ref()
+        .and_then(|value| value.as_ref().ok())
+    {
+        if contract.module.path != path {
+            alarms.push(Alarm {
+                file: contract_path.to_string(),
+                line: 1,
+                kind: "contract_path_mismatch".to_string(),
+                detail: format!(
+                    "contract names {:?}, target is {path:?}",
+                    contract.module.path
+                ),
+            });
+        }
+    }
+    if !parsed_by_naga {
         alarms.push(Alarm {
             file: path.to_string(),
             line: 1,
@@ -247,8 +296,10 @@ fn verify_source(
             detail: format!("entry point or lemma {entry:?} not found"),
         });
     }
-    alarms.extend(check_divisions(path, source, &contract));
-    alarms.extend(check_required_guards(path, source, &contract));
+    if let Some(contract) = entry_contract {
+        alarms.extend(check_divisions(path, source, contract));
+        alarms.extend(check_required_guards(path, source, contract));
+    }
 
     let proof_status = if alarms.is_empty() {
         "proven"
@@ -285,7 +336,7 @@ fn function_exists(source: &str, entry: &str) -> bool {
     source.contains(&format!("fn {entry}("))
 }
 
-fn check_divisions(path: &str, source: &str, contract: &str) -> Vec<Alarm> {
+fn check_divisions(path: &str, source: &str, contract: &contract::EntryContract) -> Vec<Alarm> {
     let mut alarms = Vec::new();
     for (idx, line) in source.lines().enumerate() {
         let compact = line.split_whitespace().collect::<String>();
@@ -311,7 +362,11 @@ fn check_divisions(path: &str, source: &str, contract: &str) -> Vec<Alarm> {
             });
         }
     }
-    if source.contains("/ denom") && contract.contains("denom = [-1.0, 1.0]") {
+    let denom_includes_zero = contract.input("denom").is_some_and(|input| match input {
+        contract::InputContract::Value(range) => range.min <= 0.0 && range.max >= 0.0,
+        _ => false,
+    });
+    if source.contains("/ denom") && denom_includes_zero {
         alarms.push(Alarm {
             file: path.to_string(),
             line: line_of(source, "/ denom").unwrap_or(1),
@@ -322,9 +377,13 @@ fn check_divisions(path: &str, source: &str, contract: &str) -> Vec<Alarm> {
     alarms
 }
 
-fn check_required_guards(path: &str, source: &str, contract: &str) -> Vec<Alarm> {
+fn check_required_guards(
+    path: &str,
+    source: &str,
+    contract: &contract::EntryContract,
+) -> Vec<Alarm> {
     let mut alarms = Vec::new();
-    for required in required_patterns(contract) {
+    for required in &contract.requires_guards {
         if !source.contains(required) {
             alarms.push(Alarm {
                 file: path.to_string(),
@@ -337,7 +396,10 @@ fn check_required_guards(path: &str, source: &str, contract: &str) -> Vec<Alarm>
     if path.ends_with("hybrid_terrain_traversal.wgsl") {
         let has_acc_proof = source.contains("prev.a + 1.0")
             && source.contains("acc.rgb / acc.a")
-            && contract.contains("prev_a_min = 0.0");
+            && contract
+                .invariants
+                .iter()
+                .any(|value| matches!(value, contract::InvariantContract::GreaterEqual { value, minimum } if value == "prev.a" && *minimum == 0.0));
         if !has_acc_proof {
             alarms.push(Alarm {
                 file: path.to_string(),
@@ -348,14 +410,6 @@ fn check_required_guards(path: &str, source: &str, contract: &str) -> Vec<Alarm>
         }
     }
     alarms
-}
-
-fn required_patterns(contract: &str) -> Vec<&str> {
-    contract
-        .lines()
-        .filter_map(|line| line.trim().strip_prefix("requires_guard = "))
-        .map(|value| value.trim().trim_matches('"'))
-        .collect()
 }
 
 fn line_of(source: &str, needle: &str) -> Option<usize> {
@@ -446,33 +500,32 @@ fn collect_wgsl(dir: &Path, out: &mut Vec<String>) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn read_ledger_paths() -> anyhow::Result<BTreeSet<String>> {
-    let text = fs::read_to_string(root().join("tests/shader_proofs_ledger.toml"))?;
-    Ok(text
-        .lines()
-        .filter_map(|line| line.trim().strip_prefix("path = "))
-        .map(|value| value.trim().trim_matches('"').to_string())
+fn validate_ledger_coverage(
+    registered: &[String],
+    proven: &BTreeSet<String>,
+    ledger: &BTreeSet<String>,
+) -> anyhow::Result<Vec<String>> {
+    let registered: BTreeSet<_> = registered.iter().cloned().collect();
+    let unknown_proven: Vec<_> = proven.difference(&registered).cloned().collect();
+    anyhow::ensure!(
+        unknown_proven.is_empty(),
+        "proven list contains unregistered modules: {unknown_proven:?}"
+    );
+    let overlap: Vec<_> = ledger.intersection(proven).cloned().collect();
+    anyhow::ensure!(
+        overlap.is_empty(),
+        "ledger overlaps proven modules: {overlap:?}"
+    );
+    let unknown_ledger: Vec<_> = ledger.difference(&registered).cloned().collect();
+    anyhow::ensure!(
+        unknown_ledger.is_empty(),
+        "ledger contains unregistered modules: {unknown_ledger:?}"
+    );
+    Ok(registered
+        .difference(proven)
+        .filter(|path| !ledger.contains(*path))
+        .cloned()
         .collect())
-}
-
-fn read_expired_ledger_entries() -> anyhow::Result<Vec<String>> {
-    let text = fs::read_to_string(root().join("tests/shader_proofs_ledger.toml"))?;
-    let today = "2026-07-17";
-    let mut current = String::new();
-    let mut expired = Vec::new();
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(path) = trimmed.strip_prefix("path = ") {
-            current = path.trim().trim_matches('"').to_string();
-        }
-        if let Some(expiry) = trimmed.strip_prefix("expiry = ") {
-            let expiry = expiry.trim().trim_matches('"');
-            if expiry < today {
-                expired.push(current.clone());
-            }
-        }
-    }
-    Ok(expired)
 }
 
 fn ablation_height_range_div() -> anyhow::Result<Verdict> {
@@ -559,5 +612,27 @@ mod tests {
         assert_eq!(report["status"], "ok");
         assert!(report["proven_count"].as_u64().unwrap() >= 10);
         assert!(report["module_count"].as_u64().unwrap() >= 8);
+    }
+
+    #[test]
+    fn ledger_coverage_rejects_overlap_unknown_and_missing_rows() {
+        let registered = vec!["src/shaders/a.wgsl".into(), "src/shaders/b.wgsl".into()];
+        let proven = BTreeSet::from(["src/shaders/a.wgsl".into()]);
+        let ledger = BTreeSet::from(["src/shaders/b.wgsl".into()]);
+        assert!(validate_ledger_coverage(&registered, &proven, &ledger)
+            .unwrap()
+            .is_empty());
+        assert!(
+            validate_ledger_coverage(&registered, &proven, &BTreeSet::new())
+                .unwrap()
+                .contains(&"src/shaders/b.wgsl".into())
+        );
+        assert!(validate_ledger_coverage(&registered, &proven, &proven).is_err());
+        assert!(validate_ledger_coverage(
+            &registered,
+            &proven,
+            &BTreeSet::from(["src/shaders/c.wgsl".into()])
+        )
+        .is_err());
     }
 }
