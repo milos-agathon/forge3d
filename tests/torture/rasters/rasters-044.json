@@ -4,7 +4,7 @@
   },
   "family": "rasters",
   "id": "rasters-044",
-  "notes": "distinct adversarial input rasters-044",
+  "notes": "Exercises gis_classify_raster partition {\"array\":{\"dtype\":\"float32\",\"shape\":\"rectangular_small\",\"variability\":\"ramp\"},\"bins\":[\"unit\",\"zero\",\"unit\",\"ordinary\"],\"out_dtype\":\"uint16\"} with ok oracle",
   "operation": "gis_classify_raster",
   "payload": {
     "array": {

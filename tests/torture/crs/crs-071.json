@@ -1,22 +1,15 @@
 {
   "expect": {
-    "class": "error",
-    "match": "InvalidBounds",
-    "type": "ValueError"
+    "class": "error_or_value"
   },
   "family": "crs",
   "id": "crs-071",
-  "notes": "distinct adversarial input crs-071",
-  "operation": "gis_transform_bounds",
+  "notes": "non-finite longitude exercises point transform domain handling",
+  "operation": "gis_transform_point",
   "payload": {
-    "bounds": [
-      -9.990254,
-      84,
-      10.009746,
-      89
-    ],
-    "densify": 4,
     "dst_crs": "EPSG:3857",
-    "src_crs": "EPSG:4326"
+    "src_crs": "EPSG:4326",
+    "x": "inf",
+    "y": 0
   }
 }

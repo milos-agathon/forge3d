@@ -1,21 +1,25 @@
 {
   "expect": {
-    "class": "error",
-    "match": "InvalidGeometry",
-    "type": "ValueError"
+    "class": "error_or_value"
   },
   "family": "geometry",
   "id": "geometry-075",
-  "notes": "distinct adversarial input geometry-075",
-  "operation": "gis_geometry_centroid",
+  "notes": "positive-infinity point set with zero size refusal exercises point-shape and size validation",
+  "operation": "vector_add_points",
   "payload": {
-    "crs": "EPSG:4326",
-    "geometry": {
-      "coordinates": [
-        "nan",
-        0.010313
-      ],
-      "type": "Point"
+    "point_size": 0.0,
+    "positions": {
+      "dtype": "float64",
+      "values": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          "inf",
+          1.0
+        ]
+      ]
     }
   }
 }

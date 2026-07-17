@@ -4,7 +4,7 @@
   },
   "family": "crs",
   "id": "crs-043",
-  "notes": "distinct adversarial input crs-043",
+  "notes": "Exercises gis_transform_point partition {\"dst_crs\":\"EPSG:32631\",\"src_crs\":\"EPSG:4326\",\"x\":\"geographic_limit\",\"y\":\"fractional\"} with ok oracle",
   "operation": "gis_transform_point",
   "payload": {
     "dst_crs": "EPSG:32631",

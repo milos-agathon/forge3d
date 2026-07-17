@@ -1,30 +1,25 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "geometry",
   "id": "geometry-112",
-  "operation": "gis_interpolate_line",
+  "notes": "minimum two-point line with ordinary size exercises polyline validation",
+  "operation": "vector_add_lines",
   "payload": {
-    "crs": "EPSG:4326",
-    "distance": 0.7857142857142857,
-    "geometry": {
-      "coordinates": [
+    "path": {
+      "dtype": "float64",
+      "values": [
         [
-          179,
-          0
+          0.0,
+          0.0
         ],
         [
-          -179,
-          0
-        ],
-        [
-          178,
-          1
+          1.0,
+          1.0
         ]
-      ],
-      "type": "LineString"
+      ]
     },
-    "normalized": true
+    "stroke_width": 4.0
   }
 }

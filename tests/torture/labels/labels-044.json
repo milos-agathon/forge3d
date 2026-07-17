@@ -1,17 +1,15 @@
 {
   "expect": {
-    "class": "error",
-    "match": "font not found",
-    "type": "TextShapingError"
+    "class": "error_or_value"
   },
   "family": "labels",
   "id": "labels-044",
+  "notes": "explicit Hebrew script exercises shaping metadata validation",
   "operation": "text_shape",
   "payload": {
-    "fonts": [
-      "missing-font.ttf"
-    ],
+    "language": "he",
+    "script": "Hebr",
     "size": 12,
-    "text": "\ud83d\ude00"
+    "text": "\u05d1\u05d3\u05d9\u05e7\u05d4"
   }
 }

@@ -6,7 +6,7 @@
   },
   "family": "crs",
   "id": "crs-049",
-  "notes": "distinct adversarial input crs-049",
+  "notes": "Exercises gis_transform_point partition {\"dst_crs\":\"EPSG:3413\",\"src_crs\":\"EPSG:4326\",\"x\":\"beyond_f32\",\"y\":\"fractional\"} with error oracle",
   "operation": "gis_transform_point",
   "payload": {
     "dst_crs": "EPSG:3413",

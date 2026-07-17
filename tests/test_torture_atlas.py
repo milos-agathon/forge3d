@@ -17,7 +17,8 @@ from _torture import (
     load_cases,
     scoreboard,
 )
-from tests._fuzz import replay_case, shrink_validation_transcript
+from tests._fuzz import failure_preserving_shrink_proof, replay_case, shrink_validation_transcript
+from tests._torture_materiality import derive_coverage, validate_materiality
 
 
 pytestmark = pytest.mark.skipif(
@@ -54,6 +55,112 @@ def test_torture_manifest_is_complete():
         for case in cases
     }
     assert len(signatures) == len(cases), "torture descriptors must exercise distinct inputs"
+
+
+def _coverage():
+    return json.loads((TORTURE_ROOT / "COVERAGE.json").read_text(encoding="utf-8"))["cases"]
+
+
+def test_every_torture_case_has_material_executable_coverage():
+    errors = validate_materiality(load_cases(), _coverage())
+    assert errors == [], "TERMINUS materiality gate failed:\n" + "\n".join(errors)
+
+
+def _materiality_case(case_id, payload, *, notes="specific test rationale"):
+    return {
+        "id": case_id,
+        "family": "geometry",
+        "operation": "gis_validate_geometry",
+        "payload": payload,
+        "expect": {"class": "ok"},
+        "notes": notes,
+    }
+
+
+def _coverage_entries(*cases):
+    return [derive_coverage(case) for case in cases]
+
+
+def test_materiality_rejects_translated_rotated_or_reversed_polygons():
+    square = {
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+        }
+    }
+    translated = {
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[[11, 21], [11, 20], [10, 20], [10, 21], [11, 21]]],
+        }
+    }
+    cases = [_materiality_case("square-a", square), _materiality_case("square-b", translated)]
+    errors = validate_materiality(cases, _coverage_entries(*cases))
+    assert any("materiality collision" in error for error in errors)
+
+
+def test_materiality_rejects_irrelevant_constant_dem_fill_changes():
+    cases = [
+        {
+            "id": "dem-a",
+            "family": "dems",
+            "operation": "dem_derive_water_mask",
+            "payload": {"array": {"shape": [4, 4], "fill": 0.25, "dtype": "float32"}},
+            "expect": {"class": "ok"},
+            "notes": "positive finite constant DEM",
+        },
+        {
+            "id": "dem-b",
+            "family": "dems",
+            "operation": "dem_derive_water_mask",
+            "payload": {"array": {"shape": [8, 8], "fill": 0.75, "dtype": "float32"}},
+            "expect": {"class": "ok"},
+            "notes": "another positive finite constant DEM",
+        },
+    ]
+    errors = validate_materiality(cases, _coverage_entries(*cases))
+    assert any("materiality collision" in error for error in errors)
+
+
+def test_materiality_rejects_note_or_identifier_only_uniqueness():
+    payload = {"geometry": {"type": "Point", "coordinates": [0, 0]}}
+    cases = [
+        _materiality_case("metadata-a", payload, notes="first explanation"),
+        _materiality_case("metadata-b", payload, notes="second explanation"),
+    ]
+    errors = validate_materiality(cases, _coverage_entries(*cases))
+    assert any("materiality collision" in error for error in errors)
+
+
+def test_materiality_accepts_different_pathology_boundary_and_oracle():
+    valid = _materiality_case(
+        "valid-square",
+        {
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0, 0], [2, 0], [2, 1], [0, 1], [0, 0]]],
+            }
+        },
+    )
+    invalid = {
+        **_materiality_case(
+            "non-finite-point",
+            {"geometry": {"type": "Point", "coordinates": ["nan", 0]}},
+        ),
+        "expect": {"class": "error", "type": "ValueError", "match": "InvalidGeometry"},
+    }
+    errors = validate_materiality([valid, invalid], _coverage_entries(valid, invalid))
+    assert errors == []
+
+
+def test_materiality_rejects_generic_rationale_even_for_unique_payload():
+    case = _materiality_case(
+        "generic",
+        {"geometry": {"type": "Point", "coordinates": [0, 0]}},
+        notes="distinct adversarial input 17",
+    )
+    errors = validate_materiality([case], _coverage_entries(case))
+    assert any("generic padding rationale" in error for error in errors)
 
 
 def test_torture_atlas_all_cases_green(tmp_path, capsys):
@@ -115,11 +222,20 @@ def test_torture_worker_classifies_timeout_and_process_death(tmp_path):
 
 def test_fuzzer_seed_replay_and_shrinker_are_deterministic():
     assert replay_case(42, 137) == replay_case(42, 137)
+    first = failure_preserving_shrink_proof(42, 137)
+    second = failure_preserving_shrink_proof(42, 137)
+    assert first == second
+    assert first["initial"]["payload"]["array"]["values"] != [[2.0]]
+    assert first["minimal"]["payload"]["array"]["values"] == [[2.0]]
+    assert all(
+        any(float(value) > 1.0 for row in case["payload"]["array"]["values"] for value in row)
+        for case in first["accepted"]
+    )
     transcript = shrink_validation_transcript()
     assert "shrink before=" in transcript
     assert "shrink after=" in transcript
-    assert '"values": [[1.2345, 2.3456], [3.4567, 4.5678]]' in transcript
-    assert '"values": [[1.0]]' in transcript
+    assert '"values": [[2.0]]' in transcript
+    assert "failure_preserved=true" in transcript
 
 
 def test_fuzzer_projection_cases_stay_inside_area_of_use():

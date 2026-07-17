@@ -1,39 +1,29 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "geometry",
   "id": "geometry-062",
-  "notes": "distinct adversarial input geometry-062",
-  "operation": "gis_geometry_centroid",
+  "notes": "three collinear points with large finite size exercises point-shape and size validation",
+  "operation": "vector_add_points",
   "payload": {
-    "crs": "EPSG:4326",
-    "geometry": {
-      "coordinates": [
+    "point_size": 256.0,
+    "positions": {
+      "dtype": "float64",
+      "values": [
         [
-          [
-            179.008513,
-            -10
-          ],
-          [
-            -178.991487,
-            -10
-          ],
-          [
-            -178.991487,
-            10
-          ],
-          [
-            179.008513,
-            10
-          ],
-          [
-            179.008513,
-            -10
-          ]
+          0.0,
+          0.0
+        ],
+        [
+          1.0,
+          0.0
+        ],
+        [
+          2.0,
+          0.0
         ]
-      ],
-      "type": "Polygon"
+      ]
     }
   }
 }

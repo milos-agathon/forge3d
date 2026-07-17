@@ -1,27 +1,25 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "dems",
   "id": "dems-048",
-  "notes": "distinct DEM pathology variant 8",
-  "operation": "dem_derive_water_mask",
+  "notes": "float64 DEM exercises DEM normalization method 'unsupported'",
+  "operation": "gis_normalize_raster",
   "payload": {
     "array": {
-      "dtype": "float32",
+      "dtype": "float64",
       "values": [
         [
-          "nan",
-          "nan",
-          "nan",
-          "nan",
-          "nan",
-          "nan",
-          "nan",
-          "nan",
-          "nan"
+          0.25,
+          0.5
+        ],
+        [
+          0.75,
+          1.0
         ]
       ]
-    }
+    },
+    "method": "unsupported"
   }
 }

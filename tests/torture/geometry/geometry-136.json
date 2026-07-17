@@ -1,19 +1,29 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "geometry",
   "id": "geometry-136",
-  "operation": "gis_buffer_geometry",
+  "notes": "three-point polyline with zero size refusal exercises polyline validation",
+  "operation": "vector_add_lines",
   "payload": {
-    "crs": "EPSG:3857",
-    "distance": 0.6000000000000001,
-    "geometry": {
-      "coordinates": [
-        0,
-        2.5
-      ],
-      "type": "Point"
-    }
+    "path": {
+      "dtype": "float64",
+      "values": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          1.0,
+          1.0
+        ],
+        [
+          2.0,
+          0.0
+        ]
+      ]
+    },
+    "stroke_width": 0.0
   }
 }

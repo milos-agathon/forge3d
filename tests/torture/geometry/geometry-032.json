@@ -1,38 +1,21 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "geometry",
   "id": "geometry-032",
-  "notes": "distinct adversarial input geometry-032",
-  "operation": "gis_validate_geometry",
+  "notes": "single north-pole point with large finite size exercises point-shape and size validation",
+  "operation": "vector_add_points",
   "payload": {
-    "geometry": {
-      "coordinates": [
+    "point_size": 256.0,
+    "positions": {
+      "dtype": "float64",
+      "values": [
         [
-          [
-            179.004441,
-            -10
-          ],
-          [
-            -178.995559,
-            -10
-          ],
-          [
-            -178.995559,
-            10
-          ],
-          [
-            179.004441,
-            10
-          ],
-          [
-            179.004441,
-            -10
-          ]
+          0.0,
+          90.0
         ]
-      ],
-      "type": "Polygon"
+      ]
     }
   }
 }

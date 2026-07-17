@@ -6,7 +6,7 @@
   },
   "family": "geometry",
   "id": "geometry-069",
-  "notes": "distinct adversarial input geometry-069",
+  "notes": "Exercises gis_geometry_centroid partition {\"crs\":\"EPSG:4326\",\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"fractional\",\"inf\"],\"type\":\"Polygon\"}} with error oracle",
   "operation": "gis_geometry_centroid",
   "payload": {
     "crs": "EPSG:4326",

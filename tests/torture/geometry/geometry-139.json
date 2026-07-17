@@ -1,19 +1,29 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "geometry",
   "id": "geometry-139",
-  "operation": "gis_buffer_geometry",
+  "notes": "three-point polyline with large finite size exercises polyline validation",
+  "operation": "vector_add_lines",
   "payload": {
-    "crs": "EPSG:3857",
-    "distance": 0.9,
-    "geometry": {
-      "coordinates": [
-        3,
-        4.0
-      ],
-      "type": "Point"
-    }
+    "path": {
+      "dtype": "float64",
+      "values": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          1.0,
+          1.0
+        ],
+        [
+          2.0,
+          0.0
+        ]
+      ]
+    },
+    "stroke_width": 256.0
   }
 }

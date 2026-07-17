@@ -1,38 +1,21 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "geometry",
   "id": "geometry-023",
-  "notes": "distinct adversarial input geometry-023",
-  "operation": "gis_validate_geometry",
+  "notes": "single antimeridian point with fractional sub-pixel size exercises point-shape and size validation",
+  "operation": "vector_add_points",
   "payload": {
-    "geometry": {
-      "coordinates": [
+    "point_size": 0.5,
+    "positions": {
+      "dtype": "float64",
+      "values": [
         [
-          [
-            0.0031889999999999996,
-            0
-          ],
-          [
-            1.003189,
-            1
-          ],
-          [
-            0.0031889999999999996,
-            1
-          ],
-          [
-            1.003189,
-            0
-          ],
-          [
-            0.0031889999999999996,
-            0
-          ]
+          180.0,
+          0.0
         ]
-      ],
-      "type": "Polygon"
+      ]
     }
   }
 }

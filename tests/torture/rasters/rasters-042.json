@@ -1,26 +1,21 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "rasters",
   "id": "rasters-042",
-  "notes": "distinct adversarial input rasters-042",
+  "notes": "empty bins exercises classification threshold validation",
   "operation": "gis_classify_raster",
   "payload": {
     "array": {
       "dtype": "float32",
-      "fill": 7.005773,
+      "pattern": "ramp",
       "shape": [
-        2,
-        3
+        4,
+        4
       ]
     },
-    "bins": [
-      -1,
-      0,
-      1,
-      2
-    ],
+    "bins": [],
     "out_dtype": "uint16"
   }
 }

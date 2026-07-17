@@ -290,26 +290,58 @@ def replay_case(seed: int, index: int) -> dict[str, Any]:
 
 
 def shrink_validation_transcript() -> str:
-    demo = {
-        "id": "shrinker-validation-raster",
+    proof = failure_preserving_shrink_proof(seed=42, index=137)
+    return (
+        "shrink before="
+        + json.dumps(proof["initial"], sort_keys=True)
+        + "\nshrink after="
+        + json.dumps(proof["minimal"], sort_keys=True)
+        + "\nfailure_preserved=true"
+    )
+
+
+def _shrinker_self_test_case(seed: int, index: int) -> dict[str, Any]:
+    """Return a deterministic deliberately-failing shrinker fixture.
+
+    This is not a production defect. The test property says every raster value
+    must be <= 1, while the seeded fixture deliberately retains a 2 at [0, 0].
+    """
+
+    rng = np.random.default_rng(seed)
+    noise = rng.integers(-1, 2, size=(index % 3 + 2, index % 4 + 2)).astype(float)
+    noise[0, 0] = 2.0
+    return {
+        "id": f"shrinker-self-test-{seed}-{index}",
         "family": "rasters",
         "operation": "gis_normalize_raster",
         "payload": {
-            "array": {"values": [[1.2345, 2.3456], [3.4567, 4.5678]], "dtype": "float32"},
+            "array": {"values": noise.tolist(), "dtype": "float32"},
             "method": "minmax",
         },
         "expect": {"class": "error_or_value"},
     }
-    shrunk = shrink_case(
-        demo,
-        lambda candidate: bool(candidate["payload"]["array"]["values"]),
-    )
-    return (
-        "shrink before="
-        + json.dumps(demo, sort_keys=True)
-        + "\nshrink after="
-        + json.dumps(shrunk, sort_keys=True)
-    )
+
+
+def _violates_shrinker_self_test_property(case: dict[str, Any]) -> bool:
+    values = case["payload"]["array"]["values"]
+    return any(float(value) > 1.0 for row in values for value in row)
+
+
+def failure_preserving_shrink_proof(seed: int, index: int) -> dict[str, Any]:
+    initial = _shrinker_self_test_case(seed, index)
+    accepted: list[dict[str, Any]] = []
+
+    def still_fails(candidate: dict[str, Any]) -> bool:
+        failing = _violates_shrinker_self_test_property(candidate)
+        if failing:
+            accepted.append(json.loads(json.dumps(candidate)))
+        return failing
+
+    assert _violates_shrinker_self_test_property(initial)
+    minimal = shrink_case(json.loads(json.dumps(initial)), still_fails)
+    assert accepted and all(_violates_shrinker_self_test_property(case) for case in accepted)
+    assert minimal["payload"]["array"]["values"] == [[2.0]]
+    return {"initial": initial, "minimal": minimal, "accepted": accepted}
 
 
 def main(argv: list[str] | None = None) -> int:

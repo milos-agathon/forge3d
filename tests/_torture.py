@@ -76,7 +76,7 @@ class _GeneratedRing(Sequence):
 def load_cases(root: Path = TORTURE_ROOT) -> list[dict[str, Any]]:
     cases = []
     for path in sorted(root.glob("**/*.json")):
-        if path.name == "MANIFEST.json":
+        if path.name in {"MANIFEST.json", "COVERAGE.json"}:
             continue
         data = json.loads(path.read_text(encoding="utf-8"))
         data["_path"] = path

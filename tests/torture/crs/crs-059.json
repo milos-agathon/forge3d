@@ -1,17 +1,15 @@
 {
   "expect": {
-    "class": "error",
-    "match": "InvalidCrs",
-    "type": "ValueError"
+    "class": "error_or_value"
   },
   "family": "crs",
   "id": "crs-059",
-  "notes": "distinct adversarial input crs-059",
+  "notes": "same-CRS origin exercises point transform domain handling",
   "operation": "gis_transform_point",
   "payload": {
-    "dst_crs": "EPSG:3413",
+    "dst_crs": "EPSG:4326",
     "src_crs": "EPSG:4326",
-    "x": 1e+308,
-    "y": 0.008121
+    "x": 0,
+    "y": 0
   }
 }

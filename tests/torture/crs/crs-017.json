@@ -6,7 +6,7 @@
   },
   "family": "crs",
   "id": "crs-017",
-  "notes": "distinct adversarial input crs-017",
+  "notes": "Exercises gis_parse_crs partition {\"crs\":\"invalid-crs-17\"} with error oracle",
   "operation": "gis_parse_crs",
   "payload": {
     "crs": "invalid-crs-17"

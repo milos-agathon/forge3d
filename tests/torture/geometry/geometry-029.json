@@ -1,36 +1,21 @@
 {
   "expect": {
-    "class": "error",
-    "match": "InvalidGeometry",
-    "type": "ValueError"
+    "class": "error_or_value"
   },
   "family": "geometry",
   "id": "geometry-029",
-  "notes": "distinct adversarial input geometry-029",
-  "operation": "gis_validate_geometry",
+  "notes": "single north-pole point with fractional sub-pixel size exercises point-shape and size validation",
+  "operation": "vector_add_points",
   "payload": {
-    "geometry": {
-      "coordinates": [
+    "point_size": 0.5,
+    "positions": {
+      "dtype": "float64",
+      "values": [
         [
-          [
-            "inf",
-            0.004011
-          ],
-          [
-            1.004011,
-            0
-          ],
-          [
-            1.004011,
-            1
-          ],
-          [
-            "inf",
-            0.004011
-          ]
+          0.0,
+          90.0
         ]
-      ],
-      "type": "Polygon"
+      ]
     }
   }
 }

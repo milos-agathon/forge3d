@@ -1,24 +1,20 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "dems",
   "id": "dems-029",
-  "notes": "distinct DEM pathology variant 5",
-  "operation": "dem_derive_water_mask",
+  "notes": "single-row ramp DEM exercises DEM normalization method 'unsupported'",
+  "operation": "gis_normalize_raster",
   "payload": {
     "array": {
       "dtype": "float32",
-      "values": [
-        [
-          "f32_max",
-          "-f32_max"
-        ],
-        [
-          4,
-          5
-        ]
+      "pattern": "ramp",
+      "shape": [
+        1,
+        8
       ]
-    }
+    },
+    "method": "unsupported"
   }
 }

@@ -1,34 +1,25 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "geometry",
   "id": "geometry-037",
-  "notes": "distinct adversarial input geometry-037",
-  "operation": "gis_validate_geometry",
+  "notes": "Exercises vector_add_points partition {\"point_size\":\"ordinary\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}} with error_or_value oracle",
+  "operation": "vector_add_points",
   "payload": {
-    "geometry": {
-      "coordinates": [
+    "point_size": 4.0,
+    "positions": {
+      "dtype": "float64",
+      "values": [
         [
-          [
-            0.0051259999999999995,
-            -90
-          ],
-          [
-            120.005126,
-            -89.5
-          ],
-          [
-            -119.994874,
-            -89.5
-          ],
-          [
-            0.0051259999999999995,
-            -90
-          ]
+          0.0,
+          0.0
+        ],
+        [
+          1.0,
+          1.0
         ]
-      ],
-      "type": "Polygon"
+      ]
     }
   }
 }

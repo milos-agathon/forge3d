@@ -4,7 +4,7 @@
   },
   "family": "crs",
   "id": "crs-021",
-  "notes": "distinct adversarial input crs-021",
+  "notes": "Exercises gis_parse_crs partition {\"crs\":\"EPSG:32622\"} with ok oracle",
   "operation": "gis_parse_crs",
   "payload": {
     "crs": "EPSG:32622"

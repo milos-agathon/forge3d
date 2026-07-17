@@ -1,24 +1,25 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "dems",
   "id": "dems-047",
-  "notes": "distinct DEM pathology variant 8",
-  "operation": "dem_derive_water_mask",
+  "notes": "float64 DEM exercises DEM normalization method 'minmax'",
+  "operation": "gis_normalize_raster",
   "payload": {
     "array": {
-      "dtype": "float32",
+      "dtype": "float64",
       "values": [
         [
-          "f32_max",
-          "-f32_max"
+          0.25,
+          0.5
         ],
         [
-          7,
-          8
+          0.75,
+          1.0
         ]
       ]
-    }
+    },
+    "method": "minmax"
   }
 }

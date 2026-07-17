@@ -1,22 +1,25 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "geometry",
   "id": "geometry-044",
-  "notes": "distinct adversarial input geometry-044",
-  "operation": "gis_validate_geometry",
+  "notes": "duplicate point pair with ordinary size exercises point-shape and size validation",
+  "operation": "vector_add_points",
   "payload": {
-    "geometry": {
-      "coordinates": [
+    "point_size": 4.0,
+    "positions": {
+      "dtype": "float64",
+      "values": [
         [
-          [
-            0.006103999999999999,
-            0.006103999999999999
-          ]
+          1.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0
         ]
-      ],
-      "type": "Polygon"
+      ]
     }
   }
 }

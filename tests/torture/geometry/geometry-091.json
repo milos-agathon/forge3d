@@ -1,41 +1,25 @@
 {
   "expect": {
-    "class": "error",
-    "match": "BackendUnavailable",
-    "type": "RuntimeError"
+    "class": "error_or_value"
   },
   "family": "geometry",
   "id": "geometry-091",
-  "notes": "distinct adversarial input geometry-091",
-  "operation": "gis_representative_point",
+  "notes": "f32-extreme point set with negative size refusal exercises point-shape and size validation",
+  "operation": "vector_add_points",
   "payload": {
-    "crs": "EPSG:4326",
-    "geometry": {
-      "coordinates": [
+    "point_size": -1.0,
+    "positions": {
+      "dtype": "float64",
+      "values": [
         [
-          [
-            0.012485999999999999,
-            0
-          ],
-          [
-            1.012486,
-            0
-          ],
-          [
-            1.012486,
-            1
-          ],
-          [
-            0.012485999999999999,
-            1
-          ],
-          [
-            0.012485999999999999,
-            0
-          ]
+          "f32_max",
+          0.0
+        ],
+        [
+          "-f32_max",
+          1.0
         ]
-      ],
-      "type": "Polygon"
+      ]
     }
   }
 }

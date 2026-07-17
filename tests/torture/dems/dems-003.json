@@ -6,7 +6,7 @@
   },
   "family": "dems",
   "id": "dems-003",
-  "notes": "distinct DEM pathology variant 1",
+  "notes": "Exercises dem_derive_water_mask partition {\"array\":{\"dtype\":\"float32\",\"shape\":\"single_column\",\"variability\":\"ramp\"}} with error oracle",
   "operation": "dem_derive_water_mask",
   "payload": {
     "array": {

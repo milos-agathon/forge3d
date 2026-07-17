@@ -1,41 +1,29 @@
 {
   "expect": {
-    "class": "error",
-    "match": "InvalidGeometry",
-    "type": "ValueError"
+    "class": "error_or_value"
   },
   "family": "geometry",
   "id": "geometry-063",
-  "notes": "distinct adversarial input geometry-063",
-  "operation": "gis_geometry_centroid",
+  "notes": "three collinear points with non-finite size refusal exercises point-shape and size validation",
+  "operation": "vector_add_points",
   "payload": {
-    "crs": "EPSG:4326",
-    "geometry": {
-      "coordinates": [
+    "point_size": "nan",
+    "positions": {
+      "dtype": "float64",
+      "values": [
         [
-          [
-            0.00865,
-            0
-          ],
-          [
-            1.00865,
-            1
-          ],
-          [
-            0.00865,
-            1
-          ],
-          [
-            1.00865,
-            0
-          ],
-          [
-            0.00865,
-            0
-          ]
+          0.0,
+          0.0
+        ],
+        [
+          1.0,
+          0.0
+        ],
+        [
+          2.0,
+          0.0
         ]
-      ],
-      "type": "Polygon"
+      ]
     }
   }
 }

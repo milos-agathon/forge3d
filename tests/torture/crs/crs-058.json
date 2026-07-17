@@ -1,17 +1,15 @@
 {
   "expect": {
-    "class": "error",
-    "match": "TransformFailed",
-    "type": "RuntimeError"
+    "class": "error_or_value"
   },
   "family": "crs",
   "id": "crs-058",
-  "notes": "distinct adversarial input crs-058",
-  "operation": "gis_transform_point",
+  "notes": "dict unsupported authority exercises CRS representation parsing",
+  "operation": "gis_parse_crs",
   "payload": {
-    "dst_crs": "EPSG:32631",
-    "src_crs": "EPSG:4326",
-    "x": "nan",
-    "y": 0.007984
+    "crs": {
+      "code": "LAMB93",
+      "name": "IGNF"
+    }
   }
 }

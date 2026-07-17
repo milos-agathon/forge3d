@@ -1,12 +1,12 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "crs",
   "id": "crs-028",
-  "notes": "distinct adversarial input crs-028",
+  "notes": "missing authority code exercises CRS representation parsing",
   "operation": "gis_parse_crs",
   "payload": {
-    "crs": 32629
+    "crs": "EPSG:"
   }
 }

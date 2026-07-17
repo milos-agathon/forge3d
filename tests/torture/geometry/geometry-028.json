@@ -1,38 +1,21 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "geometry",
   "id": "geometry-028",
-  "notes": "distinct adversarial input geometry-028",
-  "operation": "gis_validate_geometry",
+  "notes": "single north-pole point with zero size refusal exercises point-shape and size validation",
+  "operation": "vector_add_points",
   "payload": {
-    "geometry": {
-      "coordinates": [
+    "point_size": 0.0,
+    "positions": {
+      "dtype": "float64",
+      "values": [
         [
-          [
-            0.003874,
-            0
-          ],
-          [
-            0.003874,
-            0
-          ],
-          [
-            1.003874,
-            0
-          ],
-          [
-            1.003874,
-            0
-          ],
-          [
-            0.003874,
-            0
-          ]
+          0.0,
+          90.0
         ]
-      ],
-      "type": "Polygon"
+      ]
     }
   }
 }

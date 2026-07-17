@@ -6,7 +6,7 @@
   },
   "family": "crs",
   "id": "crs-074",
-  "notes": "distinct adversarial input crs-074",
+  "notes": "Exercises gis_transform_bounds partition {\"bounds\":{\"classes\":[\"fractional\",\"zero\",\"fractional\",\"unit\"],\"shape\":\"zero_extent\"},\"densify\":null,\"dst_crs\":\"EPSG:3857\",\"src_crs\":\"EPSG:4326\"} with error oracle",
   "operation": "gis_transform_bounds",
   "payload": {
     "bounds": [

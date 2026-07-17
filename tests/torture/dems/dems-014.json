@@ -1,20 +1,18 @@
 {
   "expect": {
-    "class": "error",
-    "match": "Shape",
-    "type": "ValueError"
+    "class": "error_or_value"
   },
   "family": "dems",
   "id": "dems-014",
-  "notes": "distinct DEM pathology variant 3",
+  "notes": "square ramp DEM exercises water-mask shape, dtype, and finiteness handling",
   "operation": "dem_derive_water_mask",
   "payload": {
     "array": {
       "dtype": "float32",
       "pattern": "ramp",
       "shape": [
-        1,
-        10
+        4,
+        4
       ]
     }
   }

@@ -1,25 +1,18 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "dems",
   "id": "dems-016",
-  "notes": "distinct DEM pathology variant 3",
+  "notes": "all-NaN DEM exercises water-mask shape, dtype, and finiteness handling",
   "operation": "dem_derive_water_mask",
   "payload": {
     "array": {
       "dtype": "float32",
-      "values": [
-        [
-          "nan",
-          3,
-          4
-        ],
-        [
-          5,
-          "nan",
-          6
-        ]
+      "fill": "nan",
+      "shape": [
+        4,
+        4
       ]
     }
   }

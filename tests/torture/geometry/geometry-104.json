@@ -1,30 +1,25 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "geometry",
   "id": "geometry-104",
-  "operation": "gis_interpolate_line",
+  "notes": "subnormal point set with zero size refusal exercises point-shape and size validation",
+  "operation": "vector_add_points",
   "payload": {
-    "crs": "EPSG:4326",
-    "distance": 0.21428571428571427,
-    "geometry": {
-      "coordinates": [
+    "point_size": 0.0,
+    "positions": {
+      "dtype": "float64",
+      "values": [
         [
-          179,
-          0
+          "subnormal",
+          "-subnormal"
         ],
         [
-          -179,
-          0
-        ],
-        [
-          178,
-          1
+          0.0,
+          0.0
         ]
-      ],
-      "type": "LineString"
-    },
-    "normalized": true
+      ]
+    }
   }
 }

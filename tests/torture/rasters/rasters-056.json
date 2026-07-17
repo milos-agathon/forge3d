@@ -4,7 +4,7 @@
   },
   "family": "rasters",
   "id": "rasters-056",
-  "notes": "distinct adversarial input rasters-056",
+  "notes": "Exercises gis_apply_nodata partition {\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"ordinary\"],\"variability\":\"variable\"},\"nodata\":\"zero\"} with ok oracle",
   "operation": "gis_apply_nodata",
   "payload": {
     "array": {

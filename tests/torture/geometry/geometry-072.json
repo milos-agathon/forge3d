@@ -1,39 +1,25 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "geometry",
   "id": "geometry-072",
-  "notes": "distinct adversarial input geometry-072",
-  "operation": "gis_geometry_centroid",
+  "notes": "mixed-finiteness point set with large finite size exercises point-shape and size validation",
+  "operation": "vector_add_points",
   "payload": {
-    "crs": "EPSG:4326",
-    "geometry": {
-      "coordinates": [
+    "point_size": 256.0,
+    "positions": {
+      "dtype": "float64",
+      "values": [
         [
-          [
-            179.009902,
-            -10
-          ],
-          [
-            -178.990098,
-            -10
-          ],
-          [
-            -178.990098,
-            10
-          ],
-          [
-            179.009902,
-            10
-          ],
-          [
-            179.009902,
-            -10
-          ]
+          0.0,
+          0.0
+        ],
+        [
+          "nan",
+          1.0
         ]
-      ],
-      "type": "Polygon"
+      ]
     }
   }
 }

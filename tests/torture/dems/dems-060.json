@@ -1,29 +1,26 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "dems",
   "id": "dems-060",
-  "notes": "distinct DEM pathology variant 10",
-  "operation": "dem_derive_water_mask",
+  "notes": "single-column ramp DEM exercises terrain nodata policy 'bad'",
+  "operation": "terrain_source",
   "payload": {
     "array": {
       "dtype": "float32",
-      "values": [
-        [
-          "nan",
-          "nan",
-          "nan",
-          "nan",
-          "nan",
-          "nan",
-          "nan",
-          "nan",
-          "nan",
-          "nan",
-          "nan"
-        ]
+      "pattern": "ramp",
+      "shape": [
+        8,
+        1
       ]
-    }
+    },
+    "crs": "EPSG:4326",
+    "metadata": {
+      "height": 2,
+      "source_id": "terminus-materiality",
+      "width": 2
+    },
+    "nodata_policy": "bad"
   }
 }

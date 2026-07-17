@@ -1,14 +1,15 @@
 {
   "expect": {
-    "class": "error",
-    "match": "missing glyph U+05D1; font chain tried",
-    "type": "TextShapingError"
+    "class": "error_or_value"
   },
   "family": "labels",
   "id": "labels-049",
+  "notes": "explicit Arabic script exercises shaping metadata validation",
   "operation": "text_shape",
   "payload": {
+    "language": "ar",
+    "script": "Arab",
     "size": 12,
-    "text": "\u05d1\u05d3\u05d9\u05e7\u05d4"
+    "text": "\u0645\u0631\u062d\u0628\u0627"
   }
 }

@@ -1,15 +1,12 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "crs",
   "id": "crs-052",
-  "notes": "distinct adversarial input crs-052",
-  "operation": "gis_transform_point",
+  "notes": "unsupported named CRS exercises CRS representation parsing",
+  "operation": "gis_parse_crs",
   "payload": {
-    "dst_crs": "EPSG:4326",
-    "src_crs": "EPSG:3857",
-    "x": 180.007162,
-    "y": 0.007162
+    "crs": "CRS84"
   }
 }

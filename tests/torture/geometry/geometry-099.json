@@ -6,7 +6,7 @@
   },
   "family": "geometry",
   "id": "geometry-099",
-  "notes": "distinct adversarial input geometry-099",
+  "notes": "Exercises gis_representative_point partition {\"crs\":\"EPSG:4326\",\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"fractional\",\"inf\"],\"type\":\"Polygon\"}} with error oracle",
   "operation": "gis_representative_point",
   "payload": {
     "crs": "EPSG:4326",

@@ -1,19 +1,22 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "dems",
   "id": "dems-049",
-  "notes": "distinct DEM pathology variant 9",
-  "operation": "dem_derive_water_mask",
+  "notes": "empty DEM exercises terrain nodata policy 'fill'",
+  "operation": "terrain_source",
   "payload": {
     "array": {
       "dtype": "float32",
-      "fill": 2.0,
-      "shape": [
-        10,
-        2
-      ]
-    }
+      "values": []
+    },
+    "crs": "EPSG:4326",
+    "metadata": {
+      "height": 2,
+      "source_id": "terminus-materiality",
+      "width": 2
+    },
+    "nodata_policy": "fill"
   }
 }

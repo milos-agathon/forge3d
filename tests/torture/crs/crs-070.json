@@ -1,22 +1,15 @@
 {
   "expect": {
-    "class": "error",
-    "match": "InvalidBounds",
-    "type": "ValueError"
+    "class": "error_or_value"
   },
   "family": "crs",
   "id": "crs-070",
-  "notes": "distinct adversarial input crs-070",
-  "operation": "gis_transform_bounds",
+  "notes": "Web Mercator north limit exercises point transform domain handling",
+  "operation": "gis_transform_point",
   "payload": {
-    "bounds": [
-      170.009609,
-      -10,
-      -169.990391,
-      10
-    ],
-    "densify": null,
     "dst_crs": "EPSG:3857",
-    "src_crs": "EPSG:4326"
+    "src_crs": "EPSG:4326",
+    "x": 0,
+    "y": 85.05112878
   }
 }

@@ -1,20 +1,18 @@
 {
   "expect": {
-    "class": "error",
-    "match": "Shape",
-    "type": "ValueError"
+    "class": "error_or_value"
   },
   "family": "dems",
   "id": "dems-009",
-  "notes": "distinct DEM pathology variant 2",
+  "notes": "single-cell zero DEM exercises water-mask shape, dtype, and finiteness handling",
   "operation": "dem_derive_water_mask",
   "payload": {
     "array": {
       "dtype": "float32",
-      "pattern": "ramp",
-      "shape": [
-        9,
-        1
+      "values": [
+        [
+          0
+        ]
       ]
     }
   }

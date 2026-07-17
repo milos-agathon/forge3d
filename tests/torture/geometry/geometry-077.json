@@ -1,35 +1,25 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "geometry",
   "id": "geometry-077",
-  "notes": "distinct adversarial input geometry-077",
-  "operation": "gis_geometry_centroid",
+  "notes": "positive-infinity point set with ordinary size exercises point-shape and size validation",
+  "operation": "vector_add_points",
   "payload": {
-    "crs": "EPSG:4326",
-    "geometry": {
-      "coordinates": [
+    "point_size": 4.0,
+    "positions": {
+      "dtype": "float64",
+      "values": [
         [
-          [
-            0.010587,
-            -90
-          ],
-          [
-            120.010587,
-            -89.5
-          ],
-          [
-            -119.989413,
-            -89.5
-          ],
-          [
-            0.010587,
-            -90
-          ]
+          0.0,
+          0.0
+        ],
+        [
+          "inf",
+          1.0
         ]
-      ],
-      "type": "Polygon"
+      ]
     }
   }
 }

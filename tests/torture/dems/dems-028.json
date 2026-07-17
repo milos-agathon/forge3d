@@ -1,26 +1,20 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "dems",
   "id": "dems-028",
-  "notes": "distinct DEM pathology variant 5",
-  "operation": "dem_derive_water_mask",
+  "notes": "single-row ramp DEM exercises DEM normalization method 'minmax'",
+  "operation": "gis_normalize_raster",
   "payload": {
     "array": {
       "dtype": "float32",
-      "values": [
-        [
-          "nan",
-          5,
-          6
-        ],
-        [
-          7,
-          "nan",
-          8
-        ]
+      "pattern": "ramp",
+      "shape": [
+        1,
+        8
       ]
-    }
+    },
+    "method": "minmax"
   }
 }

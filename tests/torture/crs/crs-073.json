@@ -6,7 +6,7 @@
   },
   "family": "crs",
   "id": "crs-073",
-  "notes": "distinct adversarial input crs-073",
+  "notes": "Exercises gis_transform_bounds partition {\"bounds\":{\"classes\":[\"geographic_limit\",\"ordinary\",\"large\",\"ordinary\"],\"shape\":\"web_mercator_clamp\"},\"densify\":\"ordinary\",\"dst_crs\":\"EPSG:3857\",\"src_crs\":\"EPSG:4326\"} with error oracle",
   "operation": "gis_transform_bounds",
   "payload": {
     "bounds": [

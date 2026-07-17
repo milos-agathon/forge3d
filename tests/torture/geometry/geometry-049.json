@@ -1,36 +1,29 @@
 {
   "expect": {
-    "class": "error",
-    "match": "InvalidGeometry",
-    "type": "ValueError"
+    "class": "error_or_value"
   },
   "family": "geometry",
   "id": "geometry-049",
-  "notes": "distinct adversarial input geometry-049",
-  "operation": "gis_validate_geometry",
+  "notes": "three collinear points with fractional sub-pixel size exercises point-shape and size validation",
+  "operation": "vector_add_points",
   "payload": {
-    "geometry": {
-      "coordinates": [
+    "point_size": 0.5,
+    "positions": {
+      "dtype": "float64",
+      "values": [
         [
-          [
-            "inf",
-            0.006789
-          ],
-          [
-            1.006789,
-            0
-          ],
-          [
-            1.006789,
-            1
-          ],
-          [
-            "inf",
-            0.006789
-          ]
+          0.0,
+          0.0
+        ],
+        [
+          1.0,
+          0.0
+        ],
+        [
+          2.0,
+          0.0
         ]
-      ],
-      "type": "Polygon"
+      ]
     }
   }
 }

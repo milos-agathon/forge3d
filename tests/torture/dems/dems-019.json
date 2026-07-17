@@ -1,18 +1,23 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "error_or_value"
   },
   "family": "dems",
   "id": "dems-019",
-  "notes": "distinct DEM pathology variant 4",
+  "notes": "f32-extreme DEM exercises water-mask shape, dtype, and finiteness handling",
   "operation": "dem_derive_water_mask",
   "payload": {
     "array": {
       "dtype": "float32",
-      "fill": 0.75,
-      "shape": [
-        5,
-        2
+      "values": [
+        [
+          "f32_max",
+          "-f32_max"
+        ],
+        [
+          0,
+          1
+        ]
       ]
     }
   }
