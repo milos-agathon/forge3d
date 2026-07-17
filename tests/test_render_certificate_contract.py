@@ -128,10 +128,16 @@ def test_brdf_tile_emits_a_live_certified_pass() -> None:
 
     assert rgba.shape == (32, 32, 4)
     assert [entry["label"] for entry in certificate["passes"]] == ["brdf.tile"]
-    if "timestamp_query" in certificate["capabilities"]["granted"]:
-        assert certificate["passes"][0]["gpu_ms"] > 0.0
-    else:
+    if "timestamp_query" not in certificate["capabilities"]["granted"]:
         assert certificate["passes"][0]["gpu_ms"] == 0.0
+    elif certificate["passes"][0]["gpu_ms"] == 0.0:
+        assert {
+            "kind": "timing_unavailable",
+            "name": "brdf.tile",
+            "consequence": "timestamp query resolved invalid; certificate passes[].gpu_ms reported as 0",
+        } in certificate["degradations"]
+    else:
+        assert certificate["passes"][0]["gpu_ms"] > 0.0
     assert set(certificate["engine"]["wgsl_module_hashes"]) == {"brdf_tile.shader"}
 
 

@@ -202,9 +202,16 @@ class TestBloomSceneRoundTrip:
         import numpy as np
 
         scene.disable_bloom()
+        scene.set_ssgi_settings(
+            _native.SSGISettings(ray_steps=96, ray_radius=12.0, intensity=6.0)
+        )
+        scene.enable_ssgi()
         baseline = np.asarray(scene.render_rgba()).copy()
 
-        scene.set_bloom_settings(threshold=0.1, softness=1.0, strength=2.5, radius=4.0)
+        # The default Scene can render only the low-luminance clear color on
+        # hosted/software adapters. A zero threshold still proves enabled bloom
+        # mutates rendered pixels without depending on terrain brightness.
+        scene.set_bloom_settings(threshold=0.0, softness=1.0, strength=2.5, radius=4.0)
         scene.enable_bloom()
         bloomed = np.asarray(scene.render_rgba())
 

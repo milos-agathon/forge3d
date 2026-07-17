@@ -50,6 +50,10 @@ impl TimestampResources {
         }
     }
 
+    pub(crate) fn enabled(&self) -> bool {
+        self.query_set.is_some()
+    }
+
     pub(crate) fn timestamp_writes(&self) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
         self.query_set
             .as_ref()

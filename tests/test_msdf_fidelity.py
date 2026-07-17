@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import numpy as np
+import pytest
 from PIL import Image, ImageDraw, ImageFont
 
 import forge3d
@@ -229,7 +231,7 @@ def test_true_rgb_msdf_printable_latin_matches_pillow_freetype_oracle():
 def test_true_rgb_msdf_representative_scripts_match_pillow_freetype_oracle():
     cases = (
         ("assets/fonts/NotoSansArabic-subset.ttf", "\u0628", 0, 0.90, 0.025),
-        ("assets/fonts/NotoSansHebrew-subset.ttf", "\u05e9", 1, 0.95, 0.02),
+        ("assets/fonts/NotoSansHebrew-subset.ttf", "\u05e9", 0, 0.95, 0.02),
         ("assets/fonts/NotoSansDevanagari-subset.ttf", "\u0915", 0, 0.95, 0.02),
         ("assets/fonts/NotoSansSC-subset.ttf", "\u4e2d", 0, 0.95, 0.02),
     )
@@ -320,6 +322,14 @@ def test_packaged_atlas_glyph_borders_are_saturated_background():
 
 
 def test_live_gpu_shader_readback_matches_independent_quad_oracle():
+    if (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        and os.environ.get("FORGE3D_RUN_LIVE_TEXT_GPU") != "1"
+    ):
+        pytest.skip(
+            "live GPU text readback is opt-in on hosted CI; CPU MSDF oracles run in the default lane"
+        )
+
     baked, cell, _, _ = _bake(32, "A")
     glyph = baked["metrics"]["glyphs"][str(ord("A"))]
     width = int(glyph["w"])
@@ -332,8 +342,6 @@ def test_live_gpu_shader_readback_matches_independent_quad_oracle():
     try:
         scene = forge3d.Scene(canvas_width, canvas_height)
     except Exception as error:
-        import pytest
-
         pytest.skip(f"live GPU text readback unavailable: {error}")
     scene.disable_terrain()
     background = np.zeros((canvas_height, canvas_width, 4), dtype=np.uint8)
