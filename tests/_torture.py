@@ -29,6 +29,21 @@ class TortureTimeout(TimeoutError):
     """Raised when a torture case exceeds its watchdog budget."""
 
 
+def _deprioritize_repo_python_path() -> None:
+    """Make spawned workers prefer the installed wheel over repo-local sources."""
+    source_python = (ROOT / "python").resolve()
+    keep: list[str] = []
+    moved: list[str] = []
+    for entry in sys.path:
+        try:
+            is_source_python = Path(entry or ".").resolve() == source_python
+        except OSError:
+            is_source_python = False
+        (moved if is_source_python else keep).append(entry)
+    if moved:
+        sys.path[:] = [*keep, *moved]
+
+
 class _GeneratedLabels:
     """Compact sequence used to exercise oversized label-input refusal."""
 
@@ -521,6 +536,7 @@ def classify_case(case: dict[str, Any], tmp_path: Path | None = None) -> dict[st
 
 def _worker_loop(connection: Any) -> None:
     """Execute public-API calls in one reusable crash-isolation process."""
+    _deprioritize_repo_python_path()
     while True:
         request = connection.recv()
         if request is None:
