@@ -1,31 +1,14 @@
 {
   "expect": {
-    "class": "ok"
+    "class": "structured_error"
   },
   "family": "rasters",
   "id": "rasters-080",
-  "operation": "gis_write_raster",
+  "operation": "cog_dataset_open",
   "payload": {
-    "array": {
-      "dtype": "float32",
-      "values": [
-        [
-          0,
-          "nan",
-          2,
-          3
-        ]
-      ]
-    },
-    "crs": "EPSG:4326",
-    "name": "raster_19",
-    "transform": [
-      1,
-      0,
-      -180,
-      0,
-      -1,
-      90
-    ]
+    "cache_budget_mb": 1,
+    "cache_size_mb": 1,
+    "hex": "49492b0008000000",
+    "name": "bigtiff-short-header"
   }
 }

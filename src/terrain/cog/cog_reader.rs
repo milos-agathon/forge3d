@@ -621,4 +621,26 @@ mod tests {
 
         assert_eq!(decoded, vec![10.0, 12.0, 15.0, 20.0, 24.0, 29.0]);
     }
+
+    #[test]
+    fn decode_heights_rejects_short_f32_payload_without_panic() {
+        let err = decode_heights(
+            &[0, 0, 128],
+            32,
+            SAMPLE_FORMAT_FLOAT,
+            1,
+            1,
+            TIFF_PREDICTOR_NONE,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, CogError::InvalidIfd(message) if message.contains("Data too short")));
+    }
+
+    #[test]
+    fn predictor_rejects_short_horizontal_payload_without_panic() {
+        let err = apply_predictor(&[0, 1, 2], TIFF_PREDICTOR_HORIZONTAL, 2, 2, 1).unwrap_err();
+
+        assert!(matches!(err, CogError::InvalidIfd(message) if message.contains("predictor")));
+    }
 }

@@ -283,6 +283,20 @@ def execute_payload(operation: str, payload: dict[str, Any], tmp_path: Path | No
             overwrite=True,
         )
         return {"width": info.width, "height": info.height, "band_count": info.band_count}
+    if operation == "cog_dataset_open":
+        from forge3d.cog import CogDataset
+
+        if tmp_path is None:
+            tmp_path = ROOT / "target" / "terminus-tmp"
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        path = tmp_path / f"{payload.get('name', 'case')}.tif"
+        path.write_bytes(bytes.fromhex(str(payload["hex"])))
+        dataset = CogDataset(
+            "file://" + str(path),
+            cache_size_mb=int(payload.get("cache_size_mb", 1)),
+            cache_budget_mb=int(payload.get("cache_budget_mb", 1)),
+        )
+        return {"bounds": dataset.bounds, "overview_count": dataset.overview_count}
     if operation == "dem_derive_water_mask":
         return {"array": gis.derive_water_mask(_array(payload["array"], default_dtype="float32"))}
     if operation == "vector_add_points":
