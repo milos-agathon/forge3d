@@ -336,13 +336,36 @@ impl TerrainScene {
         let phi_rad = params.cam_phi_deg.to_radians();
         let theta_rad = params.cam_theta_deg.to_radians();
 
-        let eye_x = params.cam_target[0] + params.cam_radius * theta_rad.sin() * phi_rad.cos();
-        let eye_y = params.cam_target[1] + params.cam_radius * theta_rad.cos();
-        let eye_z = params.cam_target[2] + params.cam_radius * theta_rad.sin() * phi_rad.sin();
+        let (eye_offset, up) = if is_zup_camera_mode(&params.camera_mode) {
+            // Z-up orbit for terrain that lives in the XY plane with heights
+            // along +Z (mesh mode): theta stays "0 looks straight down", phi
+            // is the azimuth within the terrain plane. Near-vertical views
+            // fall back to +Y for `up` because look_at is degenerate when the
+            // view direction is parallel to the up vector.
+            let offset = glam::Vec3::new(
+                params.cam_radius * theta_rad.sin() * phi_rad.cos(),
+                params.cam_radius * theta_rad.sin() * phi_rad.sin(),
+                params.cam_radius * theta_rad.cos(),
+            );
+            let up = if theta_rad.sin().abs() < 1e-4 {
+                glam::Vec3::Y
+            } else {
+                glam::Vec3::Z
+            };
+            (offset, up)
+        } else {
+            (
+                glam::Vec3::new(
+                    params.cam_radius * theta_rad.sin() * phi_rad.cos(),
+                    params.cam_radius * theta_rad.cos(),
+                    params.cam_radius * theta_rad.sin() * phi_rad.sin(),
+                ),
+                glam::Vec3::Y,
+            )
+        };
 
-        let eye = glam::Vec3::new(eye_x, eye_y, eye_z);
         let target = glam::Vec3::from_array(params.cam_target);
-        let up = glam::Vec3::Y;
+        let eye = target + eye_offset;
         let view = glam::Mat4::look_at_rh(eye, target, up);
         let aspect = params.size_px.0 as f32 / params.size_px.1 as f32;
         let proj = glam::Mat4::perspective_rh(

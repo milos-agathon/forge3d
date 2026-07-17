@@ -460,7 +460,7 @@ impl TerrainScene {
         let height_inputs =
             self.upload_height_inputs(heightmap, water_mask, offline_params.terrain_data_revision)?;
         self.prepare_geometry(&offline_params)?;
-        let probe_world_span = if offline_params.camera_mode.to_lowercase() == "mesh" {
+        let probe_world_span = if is_mesh_camera_mode(&offline_params.camera_mode) {
             offline_params.terrain_span.max(1e-3)
         } else {
             1.0

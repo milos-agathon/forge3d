@@ -1352,7 +1352,7 @@ impl TerrainMaterialVTRuntime {
         &self,
         params: &crate::terrain::render_params::TerrainRenderParams,
     ) -> ([f32; 2], [f32; 2]) {
-        if params.camera_mode.eq_ignore_ascii_case("mesh") {
+        if super::core::is_mesh_camera_mode(&params.camera_mode) {
             let aspect = params.size_px.0 as f32 / params.size_px.1.max(1) as f32;
             let center = [
                 (params.cam_target[0] / params.terrain_span.max(1e-3)) + 0.5,
