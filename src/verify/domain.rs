@@ -100,6 +100,27 @@ impl Interval {
                 || (self.lo < 0.0 && self.hi > -f32::MIN_POSITIVE))
     }
 
+    fn ftz_subnormal_hull(self) -> Option<Self> {
+        if !self.may_subnormal() {
+            return None;
+        }
+        let max_subnormal = next_down(f32::MIN_POSITIVE);
+        let has_positive = self.hi > 0.0 && self.lo < f32::MIN_POSITIVE;
+        let has_negative = self.lo < 0.0 && self.hi > -f32::MIN_POSITIVE;
+        Some(Self::new(
+            if has_negative {
+                self.lo.max(-max_subnormal)
+            } else {
+                0.0
+            },
+            if has_positive {
+                self.hi.min(max_subnormal)
+            } else {
+                -0.0
+            },
+        ))
+    }
+
     fn with_input_ftz(mut self) -> Self {
         if !self.has_finite() {
             return self;
@@ -373,35 +394,43 @@ impl Interval {
         comparison: Comparison,
         truth: bool,
     ) -> Option<(Self, Self)> {
+        let left_ftz = self.ftz_subnormal_hull();
+        let right_ftz = rhs.ftz_subnormal_hull();
         let self_ = self.with_input_ftz();
         let rhs = rhs.with_input_ftz();
-        if !truth
+        let refined = if !truth
             && (self_.may_nan || rhs.may_nan)
             && matches!(
                 comparison,
                 Comparison::Lt | Comparison::Le | Comparison::Gt | Comparison::Ge | Comparison::Eq
-            )
-        {
-            return Some((self_, rhs));
-        }
-        match (comparison, truth) {
-            (Comparison::Lt, true) => refine_ordered(self_, rhs, true),
-            (Comparison::Lt, false) => refine_ordered(rhs, self_, false).map(swap),
-            (Comparison::Le, true) => refine_ordered(self_, rhs, false),
-            (Comparison::Le, false) => refine_ordered(rhs, self_, true).map(swap),
-            (Comparison::Gt, truth) => rhs.refine(self_, Comparison::Lt, truth).map(swap),
-            (Comparison::Ge, truth) => rhs.refine(self_, Comparison::Le, truth).map(swap),
-            (Comparison::Eq, true) | (Comparison::Ne, false) => {
-                let lo = self_.lo.max(rhs.lo);
-                let hi = self_.hi.min(rhs.hi);
-                let mut left = self_.with_bounds(lo, hi);
-                let mut right = rhs.with_bounds(lo, hi);
-                left.may_nan = false;
-                right.may_nan = false;
-                viable(left, right)
+            ) {
+            Some((self_, rhs))
+        } else {
+            match (comparison, truth) {
+                (Comparison::Lt, true) => refine_ordered(self_, rhs, true),
+                (Comparison::Lt, false) => refine_ordered(rhs, self_, false).map(swap),
+                (Comparison::Le, true) => refine_ordered(self_, rhs, false),
+                (Comparison::Le, false) => refine_ordered(rhs, self_, true).map(swap),
+                (Comparison::Gt, truth) => rhs.refine(self_, Comparison::Lt, truth).map(swap),
+                (Comparison::Ge, truth) => rhs.refine(self_, Comparison::Le, truth).map(swap),
+                (Comparison::Eq, true) | (Comparison::Ne, false) => {
+                    let lo = self_.lo.max(rhs.lo);
+                    let hi = self_.hi.min(rhs.hi);
+                    let mut left = self_.with_bounds(lo, hi);
+                    let mut right = rhs.with_bounds(lo, hi);
+                    left.may_nan = false;
+                    right.may_nan = false;
+                    viable(left, right)
+                }
+                (Comparison::Eq, false) | (Comparison::Ne, true) => Some((self_, rhs)),
             }
-            (Comparison::Eq, false) | (Comparison::Ne, true) => Some((self_, rhs)),
-        }
+        };
+        refined.map(|(left, right)| {
+            (
+                left_ftz.map_or(left, |ftz| left.join(ftz)),
+                right_ftz.map_or(right, |ftz| right.join(ftz)),
+            )
+        })
     }
 
     fn with_bounds(mut self, lo: f32, hi: f32) -> Self {
@@ -719,7 +748,9 @@ mod tests {
         assert_contains(right_false, 5.0);
 
         let (equal_left, equal_right) = left.refine(right, Comparison::Eq, true).unwrap();
-        assert_eq!((equal_left.lo, equal_left.hi), (0.0, 10.0));
+        assert!(equal_left.lo < 0.0 && equal_left.lo > -f32::MIN_POSITIVE);
+        assert_eq!(equal_left.hi, 10.0);
+        assert_contains(equal_left, -f32::from_bits(1));
         assert_eq!((equal_right.lo, equal_right.hi), (0.0, 10.0));
         assert!(equal_left.may_neg_zero);
         assert!(equal_right.may_neg_zero);
@@ -943,15 +974,22 @@ mod tests {
         let negative = Interval::constant(-f32::from_bits(1));
         let zero = Interval::constant(0.0);
 
-        for (left, comparison, truth) in [
-            (positive, Comparison::Eq, true),
-            (positive, Comparison::Gt, true),
-            (positive, Comparison::Gt, false),
-            (negative, Comparison::Eq, true),
-            (negative, Comparison::Lt, true),
-            (negative, Comparison::Lt, false),
+        for (left, original, comparison, truth) in [
+            (positive, f32::from_bits(1), Comparison::Eq, true),
+            (positive, f32::from_bits(1), Comparison::Gt, true),
+            (positive, f32::from_bits(1), Comparison::Gt, false),
+            (negative, -f32::from_bits(1), Comparison::Eq, true),
+            (negative, -f32::from_bits(1), Comparison::Lt, true),
+            (negative, -f32::from_bits(1), Comparison::Lt, false),
         ] {
-            assert!(left.refine(zero, comparison, truth).is_some());
+            let (refined_left, refined_zero) = left
+                .refine(zero, comparison, truth)
+                .expect("the FTZ comparison branch remains reachable");
+            for alternative in [original, 0.0, -0.0] {
+                assert_contains(refined_left, alternative);
+            }
+            assert_contains(refined_zero, 0.0);
+            assert_contains(refined_zero, -0.0);
         }
     }
 
