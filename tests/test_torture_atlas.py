@@ -17,7 +17,12 @@ from _torture import (
     load_cases,
     scoreboard,
 )
-from tests._fuzz import failure_preserving_shrink_proof, replay_case, shrink_validation_transcript
+from tests._fuzz import (
+    failure_preserving_shrink_proof,
+    github_notice as fuzzer_github_notice,
+    replay_case,
+    shrink_validation_transcript,
+)
 from tests._torture_materiality import derive_coverage, validate_materiality
 
 
@@ -64,6 +69,12 @@ def _coverage():
 def test_every_torture_case_has_material_executable_coverage():
     errors = validate_materiality(load_cases(), _coverage())
     assert errors == [], "TERMINUS materiality gate failed:\n" + "\n".join(errors)
+
+
+def test_coverage_ledger_does_not_mirror_serialized_payload_signatures():
+    for entry in _coverage():
+        assert ":{" not in entry["input_partition"], entry["case_id"]
+        assert entry["distinguishing_feature"].strip(), entry["case_id"]
 
 
 def _materiality_case(
@@ -136,6 +147,23 @@ def test_materiality_rejects_note_or_identifier_only_uniqueness():
         _materiality_case("metadata-b", payload, notes="second explanation"),
     ]
     errors = validate_materiality(cases, _coverage_entries(*cases))
+    assert any("materiality collision" in error for error in errors)
+
+
+def test_materiality_rejects_ledger_manufactured_uniqueness():
+    payload = {"geometry": {"type": "Point", "coordinates": [0, 0]}}
+    cases = [
+        _materiality_case("ledger-a", payload, notes="first reviewed rationale"),
+        _materiality_case("ledger-b", payload, notes="second reviewed rationale"),
+    ]
+    coverage = _coverage_entries(*cases)
+    coverage[0]["input_partition"] = "manually-unique-partition-a"
+    coverage[0]["distinguishing_feature"] = "manually unique feature a"
+    coverage[1]["input_partition"] = "manually-unique-partition-b"
+    coverage[1]["distinguishing_feature"] = "manually unique feature b"
+
+    errors = validate_materiality(cases, coverage)
+
     assert any("materiality collision" in error for error in errors)
 
 
@@ -331,6 +359,47 @@ def test_fuzzer_seed_replay_and_shrinker_are_deterministic():
     assert "shrink after=" in transcript
     assert '"values": [[2.0]]' in transcript
     assert "failure_preserved=true" in transcript
+
+
+def test_fuzzer_public_annotation_contains_both_exact_digests():
+    summary = {
+        "seed": 42,
+        "cases": 10_000,
+        "first_pass": {
+            "scoreboard": {
+                "total": 10_000,
+                "ok": 7_183,
+                "structured_error": 2_817,
+                "panic": 0,
+                "hang": 0,
+                "wrong_value": 0,
+            },
+            "digest": "abc123",
+        },
+        "second_pass": {
+            "scoreboard": {
+                "total": 10_000,
+                "ok": 7_183,
+                "structured_error": 2_817,
+                "panic": 0,
+                "hang": 0,
+                "wrong_value": 0,
+            },
+            "digest": "abc123",
+        },
+        "matching_digest": True,
+        "accepted": True,
+    }
+
+    annotation = fuzzer_github_notice(summary)
+
+    assert annotation.startswith(
+        "::notice title=TERMINUS exact-head fuzzer evidence::"
+    )
+    assert "seed=42 cases=10000" in annotation
+    assert "first_digest=abc123" in annotation
+    assert "second_digest=abc123" in annotation
+    assert "matching_digest=true accepted=true" in annotation
 
 
 def test_fuzzer_projection_cases_stay_inside_area_of_use():

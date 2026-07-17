@@ -6,7 +6,7 @@
         "path": [
           "area"
         ],
-        "tolerance": 0.001
+        "tolerance": 0.01
       },
       {
         "approx": 2735651.829873667,

@@ -6,7 +6,12 @@ from pathlib import Path
 import pytest
 
 from scripts.assert_junit_zero_skips import JUnitValidationError, verify_junit
-from scripts.summarize_m06_evidence import build_summary, markdown_summary, write_summary
+from scripts.summarize_m06_evidence import (
+    build_summary,
+    github_notice,
+    markdown_summary,
+    write_summary,
+)
 
 
 def _write(tmp_path: Path, body: str) -> Path:
@@ -198,3 +203,8 @@ def test_m06_evidence_summary_extracts_adapter_and_junit_counts(tmp_path):
     rendered = markdown_summary(build_summary(tmp_path))
     assert "tests=2 failures=0 errors=0 skipped=0" in rendered
     assert "vendor=0x10de backend=vulkan" in rendered
+    annotation = github_notice(summary)
+    assert annotation.startswith("::notice title=M-06 exact-head evidence::")
+    assert "head_sha=abc123" in annotation
+    assert "adapter=NVIDIA GeForce RTX 3070" in annotation
+    assert "tests=2 failures=0 errors=0 skipped=0" in annotation

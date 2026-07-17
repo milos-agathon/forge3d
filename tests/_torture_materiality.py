@@ -1,8 +1,9 @@
 """Executable material-distinctness contract for the TERMINUS atlas.
 
-Coverage metadata never participates in the semantic signature. Every entry is
-re-derived from the operation, payload, property, and oracle, so identifiers or
-notes cannot make otherwise equivalent cases pass.
+Coverage metadata never participates in the semantic signature. The ledger's
+input partition is an operation-aware execution classification, not a copy of
+the serialized payload, and its distinguishing feature is the reviewed human
+rationale. Neither field can make otherwise equivalent cases pass.
 """
 
 from __future__ import annotations
@@ -433,6 +434,43 @@ def semantic_signature(case: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_PARTITION_KEYS = {
+    "category",
+    "classes",
+    "dtype",
+    "locus",
+    "point_count",
+    "range_classes",
+    "rank",
+    "shape",
+    "special_coordinates",
+    "type",
+    "validation",
+    "value_class",
+    "value_classes",
+    "variability",
+}
+
+
+def _execution_partition(operation: str, payload: dict[str, Any]) -> str:
+    """Classify the reached input path without serializing exact input values."""
+    tokens = [f"fields={','.join(sorted(payload)) or 'none'}"]
+
+    def visit(value: Any, path: tuple[str, ...] = ()) -> None:
+        if not isinstance(value, dict):
+            return
+        for key, child in sorted(value.items()):
+            child_path = (*path, key)
+            if key in _PARTITION_KEYS:
+                rendered = json.dumps(child, sort_keys=True, separators=(",", ":"))
+                tokens.append(f"{'.'.join(child_path)}={rendered}")
+            if isinstance(child, dict):
+                visit(child, child_path)
+
+    visit(payload)
+    return f"{operation}|{'|'.join(tokens)}"
+
+
 def derive_coverage(case: dict[str, Any]) -> dict[str, Any]:
     signature = semantic_signature(case)
     expect = case.get("expect", {"class": "ok"})
@@ -445,6 +483,7 @@ def derive_coverage(case: dict[str, Any]) -> dict[str, Any]:
     else:
         oracle_kind = "completion_classification"
     payload_text = json.dumps(signature["payload"], sort_keys=True, separators=(",", ":"))
+    input_partition = _execution_partition(case["operation"], signature["payload"])
     pathology_tokens = sorted(
         token
         for token in {
@@ -464,18 +503,19 @@ def derive_coverage(case: dict[str, Any]) -> dict[str, Any]:
         )
         if token
     )
+    reviewed_feature = str(case.get("notes", "")).strip() or input_partition
     return {
         "case_id": case["id"],
         "family": case["family"],
         "operation": case["operation"],
-        "input_partition": f"{case['operation']}:{payload_text}",
+        "input_partition": input_partition,
         "pathology": "+".join(pathology_tokens) or "none",
         "boundary": "+".join(boundary_tokens) or "ordinary",
         "oracle_kind": oracle_kind,
         "expected_outcome": "structured_error"
         if expect.get("class") == "error"
         else expect.get("class", "ok"),
-        "distinguishing_feature": payload_text,
+        "distinguishing_feature": reviewed_feature,
     }
 
 

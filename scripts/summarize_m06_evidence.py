@@ -146,6 +146,27 @@ def markdown_summary(summary: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def github_notice(summary: dict[str, Any]) -> str:
+    """Return an unauthenticated-check-visible GitHub annotation."""
+    adapter = summary["adapter"]
+    junit = summary["junit"]
+    message = (
+        f"status={summary['status']} "
+        f"head_sha={summary.get('head_sha')} "
+        f"checked_out_head={summary.get('checked_out_head')} "
+        f"adapter={adapter.get('name')} "
+        f"vendor={adapter.get('vendor_hex')} "
+        f"backend={adapter.get('backend')} "
+        f"device_type={adapter.get('device_type')} "
+        f"tests={junit.get('tests')} "
+        f"failures={junit.get('failures')} "
+        f"errors={junit.get('errors')} "
+        f"skipped={junit.get('skipped')}"
+    )
+    escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    return f"::notice title=M-06 exact-head evidence::{escaped}"
+
+
 def write_summary(artifact_dir: Path) -> dict[str, Any]:
     artifact_dir.mkdir(parents=True, exist_ok=True)
     summary = build_summary(artifact_dir)
@@ -166,6 +187,8 @@ def main() -> int:
     args = parser.parse_args()
     summary = write_summary(args.artifact_dir)
     print(markdown_summary(summary))
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(github_notice(summary))
     return 0
 
 

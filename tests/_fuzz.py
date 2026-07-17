@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any, Callable
@@ -380,6 +381,23 @@ def _write_summary_files(
         )
 
 
+def github_notice(summary: dict[str, Any]) -> str:
+    """Return the exact fuzzer proof as a public GitHub check annotation."""
+    first = summary["first_pass"]
+    second = summary["second_pass"]
+    message = (
+        f"seed={summary['seed']} cases={summary['cases']} "
+        f"first={format_scoreboard(first['scoreboard'])} "
+        f"first_digest={first['digest']} "
+        f"second={format_scoreboard(second['scoreboard'])} "
+        f"second_digest={second['digest']} "
+        f"matching_digest={str(summary['matching_digest']).lower()} "
+        f"accepted={str(summary['accepted']).lower()}"
+    )
+    escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    return f"::notice title=TERMINUS exact-head fuzzer evidence::{escaped}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cases", type=int, default=1000)
@@ -442,6 +460,8 @@ def main(argv: list[str] | None = None) -> int:
         json_path=args.summary_json,
         markdown_path=args.summary_markdown,
     )
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(github_notice(summary))
     if not accepted:
         return 1
     return 0

@@ -613,9 +613,10 @@ class TortureWorker:
             # A process can exit just after the final poll but before
             # multiprocessing refreshes exitcode. Give crash/death paths a
             # short grace before classifying the request as a true hang.
-            self._process.join(timeout=min(0.25, max(0.0, timeout)))
+            self._process.join(timeout=0.25)
+            process_alive = self._process.is_alive()
             exit_code = self._process.exitcode
-            if not self._process.is_alive():
+            if not process_alive:
                 self._stop(terminate=True)
                 self._start()
                 return {
