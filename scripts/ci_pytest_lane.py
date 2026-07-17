@@ -79,8 +79,8 @@ def main(argv: list[str]) -> int:
     code = proc.wait()
     if code and environ.get("GITHUB_ACTIONS") == "true":
         message = "\n".join(tail)
-        if len(message) > 12000:
-            message = message[-12000:]
+        if len(message) > 3500:
+            message = message[-3500:]
         print(
             f"::error title=Default Python lane failed::{_github_escape(message)}",
             flush=True,
