@@ -96,12 +96,13 @@ impl CogHeader {
     }
 
     /// Select best IFD for requested LOD.
-    pub fn select_ifd_for_lod(&self, lod: u32) -> &IfdEntry {
+    pub fn select_ifd_for_lod(&self, lod: u32) -> Result<&IfdEntry, CogError> {
         self.ifds
             .iter()
             .filter(|ifd| ifd.overview_level <= lod)
             .max_by_key(|ifd| ifd.width)
-            .unwrap_or_else(|| self.ifds.last().unwrap())
+            .or_else(|| self.ifds.last())
+            .ok_or_else(|| CogError::InvalidIfd("COG contains no image file directories".into()))
     }
 }
 
@@ -111,20 +112,7 @@ pub async fn parse_cog_header(reader: &RangeReader) -> Result<CogHeader, CogErro
 
     let (is_big_endian, is_bigtiff) = parse_tiff_header(&header_bytes)?;
 
-    let first_ifd_offset = if is_bigtiff {
-        if is_big_endian {
-            u64::from_be_bytes(header_bytes[8..16].try_into().unwrap())
-        } else {
-            u64::from_le_bytes(header_bytes[8..16].try_into().unwrap())
-        }
-    } else {
-        let offset = if is_big_endian {
-            u32::from_be_bytes(header_bytes[4..8].try_into().unwrap())
-        } else {
-            u32::from_le_bytes(header_bytes[4..8].try_into().unwrap())
-        };
-        offset as u64
-    };
+    let first_ifd_offset = first_ifd_offset(&header_bytes, is_big_endian, is_bigtiff)?;
 
     let mut ifds = Vec::new();
     let mut ifd_offset = first_ifd_offset;
@@ -148,11 +136,71 @@ pub async fn parse_cog_header(reader: &RangeReader) -> Result<CogHeader, CogErro
         }
     }
 
+    if ifds.is_empty() {
+        return Err(CogError::InvalidIfd(
+            "COG contains no image file directories".into(),
+        ));
+    }
+
     Ok(CogHeader {
         is_big_endian,
         is_bigtiff,
         ifds,
     })
+}
+
+fn first_ifd_offset(
+    header_bytes: &[u8],
+    is_big_endian: bool,
+    is_bigtiff: bool,
+) -> Result<u64, CogError> {
+    if is_bigtiff {
+        if header_bytes.len() < 16 {
+            return Err(CogError::InvalidTiffHeader(
+                "BigTIFF header too short for first IFD offset".into(),
+            ));
+        }
+        Ok(if is_big_endian {
+            u64::from_be_bytes([
+                header_bytes[8],
+                header_bytes[9],
+                header_bytes[10],
+                header_bytes[11],
+                header_bytes[12],
+                header_bytes[13],
+                header_bytes[14],
+                header_bytes[15],
+            ])
+        } else {
+            u64::from_le_bytes([
+                header_bytes[8],
+                header_bytes[9],
+                header_bytes[10],
+                header_bytes[11],
+                header_bytes[12],
+                header_bytes[13],
+                header_bytes[14],
+                header_bytes[15],
+            ])
+        })
+    } else {
+        let offset = if is_big_endian {
+            u32::from_be_bytes([
+                header_bytes[4],
+                header_bytes[5],
+                header_bytes[6],
+                header_bytes[7],
+            ])
+        } else {
+            u32::from_le_bytes([
+                header_bytes[4],
+                header_bytes[5],
+                header_bytes[6],
+                header_bytes[7],
+            ])
+        };
+        Ok(offset as u64)
+    }
 }
 
 fn parse_tiff_header(header: &[u8]) -> Result<(bool, bool), CogError> {
@@ -204,10 +252,16 @@ async fn parse_ifd(
         read_u16(&count_bytes, 0, big_endian) as u64
     };
 
-    let entries_size = entry_count * entry_size;
-    let ifd_data = reader
-        .read_range(offset + count_size, entries_size + next_size)
-        .await?;
+    let entries_size = entry_count
+        .checked_mul(entry_size)
+        .ok_or_else(|| CogError::InvalidIfd("IFD entry table size overflow".into()))?;
+    let entries_and_next = entries_size
+        .checked_add(next_size)
+        .ok_or_else(|| CogError::InvalidIfd("IFD read size overflow".into()))?;
+    let entries_offset = offset
+        .checked_add(count_size)
+        .ok_or_else(|| CogError::InvalidIfd("IFD offset overflow".into()))?;
+    let ifd_data = reader.read_range(entries_offset, entries_and_next).await?;
 
     let mut width = 0u32;
     let mut height = 0u32;
@@ -314,8 +368,19 @@ async fn parse_ifd(
         }
     }
 
-    let tiles_across = (width + tile_width - 1) / tile_width;
-    let tiles_down = (height + tile_height - 1) / tile_height;
+    if tile_width == 0 || tile_height == 0 {
+        return Err(CogError::InvalidIfd(
+            "tile width and height must be non-zero".into(),
+        ));
+    }
+    let tiles_across = width
+        .checked_add(tile_width - 1)
+        .ok_or_else(|| CogError::InvalidIfd("tile column count overflow".into()))?
+        / tile_width;
+    let tiles_down = height
+        .checked_add(tile_height - 1)
+        .ok_or_else(|| CogError::InvalidIfd("tile row count overflow".into()))?
+        / tile_height;
 
     let next_ifd_offset = if bigtiff {
         read_u64(&ifd_data, entries_size as usize, big_endian)
@@ -351,9 +416,11 @@ async fn read_offset_array(
     big_endian: bool,
 ) -> Result<Vec<u64>, CogError> {
     let item_size = type_size(field_type);
-    let bytes = reader
-        .read_range(offset, (count * item_size) as u64)
-        .await?;
+    let byte_count = count
+        .checked_mul(item_size)
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or_else(|| CogError::InvalidIfd("IFD offset array size overflow".into()))?;
+    let bytes = reader.read_range(offset, byte_count).await?;
     let mut offsets = Vec::with_capacity(count);
 
     for i in 0..count {
@@ -386,9 +453,19 @@ fn read_u32(data: &[u8], offset: usize, big_endian: bool) -> u32 {
         return 0;
     }
     if big_endian {
-        u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap())
+        u32::from_be_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ])
     } else {
-        u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
+        u32::from_le_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ])
     }
 }
 
@@ -397,9 +474,27 @@ fn read_u64(data: &[u8], offset: usize, big_endian: bool) -> u64 {
         return 0;
     }
     if big_endian {
-        u64::from_be_bytes(data[offset..offset + 8].try_into().unwrap())
+        u64::from_be_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+            data[offset + 4],
+            data[offset + 5],
+            data[offset + 6],
+            data[offset + 7],
+        ])
     } else {
-        u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap())
+        u64::from_le_bytes([
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+            data[offset + 4],
+            data[offset + 5],
+            data[offset + 6],
+            data[offset + 7],
+        ])
     }
 }
 
@@ -420,5 +515,35 @@ fn type_size(field_type: u16) -> usize {
         4 | 9 | 11 => 4,
         5 | 10 | 12 | 16 | 17 | 18 => 8,
         _ => 4,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_bigtiff_header_returns_typed_error() {
+        let header = b"II+\0\x08\0\0\0";
+        let (big_endian, bigtiff) = parse_tiff_header(header).expect("valid BigTIFF prefix");
+        let error = first_ifd_offset(header, big_endian, bigtiff).unwrap_err();
+        assert!(matches!(
+            error,
+            CogError::InvalidTiffHeader(message) if message.contains("too short")
+        ));
+    }
+
+    #[test]
+    fn selecting_from_empty_header_returns_typed_error() {
+        let header = CogHeader {
+            is_big_endian: false,
+            is_bigtiff: false,
+            ifds: Vec::new(),
+        };
+        let error = header.select_ifd_for_lod(0).unwrap_err();
+        assert!(matches!(
+            error,
+            CogError::InvalidIfd(message) if message.contains("no image file directories")
+        ));
     }
 }

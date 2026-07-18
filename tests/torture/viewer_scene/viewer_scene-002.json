@@ -1,0 +1,17 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "OutputSpec",
+    "type": "ValueError"
+  },
+  "family": "viewer_scene",
+  "id": "viewer_scene-002",
+  "operation": "output_spec",
+  "payload": {
+    "aovs": [],
+    "bit_depth": 16,
+    "height": 64,
+    "samples": 0,
+    "width": 64
+  }
+}

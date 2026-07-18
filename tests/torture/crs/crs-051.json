@@ -1,0 +1,12 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "crs",
+  "id": "crs-051",
+  "notes": "OGC URN representation exercises CRS representation parsing",
+  "operation": "gis_parse_crs",
+  "payload": {
+    "crs": "urn:ogc:def:crs:EPSG::4326"
+  }
+}

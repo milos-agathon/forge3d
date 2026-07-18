@@ -1,0 +1,25 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "geometry",
+  "id": "geometry-034",
+  "notes": "two-point diagonal set with unit size reaches point insertion",
+  "operation": "vector_add_points",
+  "payload": {
+    "point_size": 1.0,
+    "positions": {
+      "dtype": "float64",
+      "values": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          1.0,
+          1.0
+        ]
+      ]
+    }
+  }
+}

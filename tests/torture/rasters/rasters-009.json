@@ -1,0 +1,21 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidArgument",
+    "type": "ValueError"
+  },
+  "family": "rasters",
+  "id": "rasters-009",
+  "operation": "gis_normalize_raster",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "pattern": "ramp",
+      "shape": [
+        4,
+        4
+      ]
+    },
+    "method": "percentile"
+  }
+}

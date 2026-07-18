@@ -1,0 +1,16 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "labels",
+  "id": "labels-057",
+  "notes": "north-pole anchor in a zero-size label frame",
+  "operation": "label_plan_compile",
+  "payload": {
+    "anchor_count": 1,
+    "height": 0,
+    "width": 0,
+    "x": 0,
+    "y": 90
+  }
+}

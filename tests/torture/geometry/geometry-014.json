@@ -1,0 +1,22 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "geometry",
+  "id": "geometry-014",
+  "notes": "Exercises gis_validate_geometry partition {\"geometry\":{\"locus\":\"ordinary\",\"point_count\":1,\"special_coordinates\":[],\"translation_invariant_shape\":[[0.0,0.0]],\"type\":\"Polygon\"}} with ok oracle",
+  "operation": "gis_validate_geometry",
+  "payload": {
+    "geometry": {
+      "coordinates": [
+        [
+          [
+            0.001937,
+            0.001937
+          ]
+        ]
+      ],
+      "type": "Polygon"
+    }
+  }
+}

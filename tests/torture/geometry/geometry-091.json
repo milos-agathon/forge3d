@@ -1,0 +1,25 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "geometry",
+  "id": "geometry-091",
+  "notes": "f32-extreme point set with unit size reaches coordinate validation",
+  "operation": "vector_add_points",
+  "payload": {
+    "point_size": 1.0,
+    "positions": {
+      "dtype": "float64",
+      "values": [
+        [
+          "f32_max",
+          0.0
+        ],
+        [
+          "-f32_max",
+          1.0
+        ]
+      ]
+    }
+  }
+}

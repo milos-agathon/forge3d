@@ -34,6 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Detect visual golden changes
@@ -83,6 +84,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -144,6 +147,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -205,6 +210,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Build wheel
         uses: PyO3/maturin-action@v1
@@ -239,6 +246,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           # COG/mapscene fixtures under assets/ and tests/data are Git LFS
           # objects; without lfs the lane reads pointer files and fails with
           # InvalidTiffHeader (found by the first exhaustive-lane CI run).
@@ -287,6 +295,61 @@ jobs:
         run: python scripts/ci_pytest_lane.py -v --tb=short
 
   # ============================================================================
+  # TERMINUS deterministic CPU-only robustness fuzzer
+  #
+  # The command performs exactly two fixed-seed passes internally and fails on
+  # process death, timeout, property mismatch, or digest drift. It exercises
+  # only CPU-safe public APIs and never requests a GPU adapter.
+  # ============================================================================
+  test-terminus-fuzz:
+    name: TERMINUS 10k Deterministic Fuzzer (CPU)
+    needs: build-wheels
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-linux
+          path: dist/
+
+      - name: Install wheel and fuzzer dependencies
+        run: |
+          python scripts/install_compatible_wheel.py dist
+          pip install numpy
+
+      - name: Run two deterministic 10k passes
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+        run: |
+          set -o pipefail
+          mkdir -p target/terminus-fuzz-evidence
+          python -m tests._fuzz \
+            --cases 10000 \
+            --seed 42 \
+            --tmp-dir target/terminus-fuzz \
+            --summary-json target/terminus-fuzz-evidence/terminus-fuzz-summary.json \
+            --summary-markdown target/terminus-fuzz-evidence/terminus-fuzz-summary.md \
+            2>&1 | tee target/terminus-fuzz-evidence/terminus-fuzz.log
+          cat target/terminus-fuzz-evidence/terminus-fuzz-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload TERMINUS fuzzer evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terminus-fuzzer-evidence
+          path: target/terminus-fuzz-evidence/
+          if-no-files-found: error
+
+  # ============================================================================
   # Linux aarch64 Wheel Smoke Test (QEMU)
   # ============================================================================
   test-python-linux-arm:
@@ -296,6 +359,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -349,6 +414,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           # COG/mapscene fixtures under assets/ and tests/data are Git LFS
           # objects; without lfs the lane reads pointer files and fails with
           # InvalidTiffHeader (found by the first exhaustive-lane CI run).
@@ -475,6 +541,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           lfs: true
       - name: Verify runner Python
         run: python --version
@@ -552,6 +619,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           lfs: true
 
       - name: Capture checkout and LFS provenance
@@ -686,6 +754,18 @@ jobs:
           if ($pytestCode -ne 0) { exit $pytestCode }
           if ($verifyCode -ne 0) { exit $verifyCode }
 
+      - name: Summarize public M-06 evidence
+        if: always()
+        shell: pwsh
+        run: |
+          python scripts/summarize_m06_evidence.py "$env:FORGE3D_M06_ARTIFACT_DIR" *>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/public-evidence-summary.log"
+          $summaryCode = $LASTEXITCODE
+          "public_summary=$summaryCode" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/public-evidence-summary-exit-code.txt"
+          if (Test-Path "$env:FORGE3D_M06_ARTIFACT_DIR/m06-public-evidence-summary.md") {
+            Get-Content "$env:FORGE3D_M06_ARTIFACT_DIR/m06-public-evidence-summary.md" | Add-Content $env:GITHUB_STEP_SUMMARY
+          }
+          exit $summaryCode
+
       - name: Finalize evidence manifest
         if: always()
         shell: pwsh
@@ -716,6 +796,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -750,7 +832,7 @@ jobs:
   # ============================================================================
   ci-success:
     name: CI Success
-    needs: [terrain-golden-paths, test-rust, build-wheels, test-python, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, build-docs]
+    needs: [terrain-golden-paths, test-rust, build-wheels, test-python, test-terminus-fuzz, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, build-docs]
     runs-on: ubuntu-latest
     if: always()
 
@@ -770,6 +852,7 @@ jobs:
              [ "${{ needs.test-rust.result }}" != "success" ] || \
              [ "${{ needs.build-wheels.result }}" != "success" ] || \
              [ "${{ needs.test-python.result }}" != "success" ] || \
+             [ "${{ needs.test-terminus-fuzz.result }}" != "success" ] || \
              [ "${{ needs.test-python-linux-arm.result }}" != "success" ] || \
              { [ "${{ needs.test-golden-images.result }}" != "success" ] && [ "${{ needs.test-golden-images.result }}" != "skipped" ]; } || \
              { [ "${{ needs.refresh-recipe-certificates.result }}" != "success" ] && [ "${{ needs.refresh-recipe-certificates.result }}" != "skipped" ]; } || \

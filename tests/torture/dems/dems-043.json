@@ -1,0 +1,25 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "dems",
+  "id": "dems-043",
+  "notes": "signed integer DEM exercises DEM normalization method 'minmax'",
+  "operation": "gis_normalize_raster",
+  "payload": {
+    "array": {
+      "dtype": "int16",
+      "values": [
+        [
+          -2,
+          -1
+        ],
+        [
+          0,
+          1
+        ]
+      ]
+    },
+    "method": "minmax"
+  }
+}

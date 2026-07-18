@@ -1,0 +1,28 @@
+{
+  "expect": {
+    "checks": [
+      {
+        "equals": 0,
+        "path": [
+          "point_count"
+        ]
+      },
+      {
+        "equals": 0,
+        "path": [
+          "packed",
+          "size"
+        ]
+      }
+    ],
+    "class": "ok"
+  },
+  "family": "viewer_scene",
+  "id": "viewer_scene-019",
+  "notes": "empty point cloud public buffer path",
+  "operation": "point_buffer",
+  "payload": {
+    "colors": null,
+    "positions": []
+  }
+}

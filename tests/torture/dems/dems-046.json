@@ -1,0 +1,25 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "dems",
+  "id": "dems-046",
+  "notes": "unsigned integer DEM exercises DEM normalization method 'unsupported'",
+  "operation": "gis_normalize_raster",
+  "payload": {
+    "array": {
+      "dtype": "uint8",
+      "values": [
+        [
+          0,
+          1
+        ],
+        [
+          254,
+          255
+        ]
+      ]
+    },
+    "method": "unsupported"
+  }
+}

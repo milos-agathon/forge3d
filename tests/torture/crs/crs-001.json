@@ -1,0 +1,11 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "crs",
+  "id": "crs-001",
+  "operation": "gis_parse_crs",
+  "payload": {
+    "crs": "EPSG:4326"
+  }
+}

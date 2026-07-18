@@ -1,0 +1,12 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "crs",
+  "id": "crs-012",
+  "notes": "Exercises gis_parse_crs partition {\"crs\":\"EPSG:32613\"} with ok oracle",
+  "operation": "gis_parse_crs",
+  "payload": {
+    "crs": "EPSG:32613"
+  }
+}

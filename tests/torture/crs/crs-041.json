@@ -1,0 +1,15 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "crs",
+  "id": "crs-041",
+  "notes": "Exercises gis_transform_point partition {\"dst_crs\":\"EPSG:3857\",\"src_crs\":\"EPSG:4326\",\"x\":\"fractional\",\"y\":\"fractional\"} with ok oracle",
+  "operation": "gis_transform_point",
+  "payload": {
+    "dst_crs": "EPSG:3857",
+    "src_crs": "EPSG:4326",
+    "x": 0.0056359999999999995,
+    "y": 0.0056359999999999995
+  }
+}

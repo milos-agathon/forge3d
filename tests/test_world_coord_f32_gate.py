@@ -16,7 +16,29 @@ SANCTIONED = "src/camera/anchor.rs"
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
 EXPECTED_CONVERSION_COUNT = 1323
-EXPECTED_CONVERSION_SHA256 = "f091a37320becd54518275739b3d832d8b9820e45960ba85ce6a91a30eecc5bc"
+EXPECTED_CONVERSION_SHA256 = "28d1cc9db71b48c818577782ef697f54a255a6064333cf9870fd6eb1d5ba9bf6"
+
+# Reviewed TERMINUS transition from the pinned pre-remediation inventory. The
+# conversion count is unchanged: only the statement containing the existing
+# f64-to-f32 conversion moved behind a checked eight-byte reader.
+REVIEWED_INVENTORY_TRANSITION = {
+    "base_count": 1323,
+    "base_digest": "f091a37320becd54518275739b3d832d8b9820e45960ba85ce6a91a30eecc5bc",
+    "removed": (
+        "src/terrain/cog/cog_reader.rs",
+        "decode_heights",
+        "as_f32",
+        1,
+        "heights.push(f64::from_le_bytes(bytes) as f32)",
+    ),
+    "added": (
+        "src/terrain/cog/cog_reader.rs",
+        "decode_heights",
+        "as_f32",
+        1,
+        "heights.push(f64::from_le_bytes(read_le_bytes8(data, i * 8)) as f32)",
+    ),
+}
 
 
 def _strip_comments_and_strings(text: str) -> str:
@@ -150,6 +172,15 @@ def test_all_required_rejecting_probes_change_the_inventory():
     ]
     for probe in probes:
         assert _conversion_inventory_text("probe.rs", probe), f"scanner missed {probe}"
+
+
+def test_reviewed_checked_reader_inventory_transition_is_exact():
+    sites = conversion_inventory()
+    transition = REVIEWED_INVENTORY_TRANSITION
+    assert len(sites) == transition["base_count"] == EXPECTED_CONVERSION_COUNT
+    assert _inventory_digest(sites) == EXPECTED_CONVERSION_SHA256
+    assert transition["added"] in sites
+    assert transition["removed"] not in sites
 
 
 def test_anchor_narrow_is_the_only_world_conversion_implementation():

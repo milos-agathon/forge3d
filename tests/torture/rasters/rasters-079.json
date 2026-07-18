@@ -1,0 +1,17 @@
+{
+  "expect": {
+    "class": "structured_error",
+    "match": "no image file directories",
+    "type": "RuntimeError"
+  },
+  "family": "rasters",
+  "id": "rasters-079",
+  "notes": "COG constructor rejects a zero first-IFD offset without panic",
+  "operation": "cog_dataset_open",
+  "payload": {
+    "cache_budget_mb": 1,
+    "cache_size_mb": 1,
+    "hex": "49492a00000000000000000000000000",
+    "name": "classic-tiff-empty-ifd"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "geometry",
+  "id": "geometry-132",
+  "notes": "extreme finite coordinates",
+  "operation": "gis_validate_geometry",
+  "payload": {
+    "geometry": {
+      "coordinates": [
+        1e+308,
+        -1e+308
+      ],
+      "type": "Point"
+    }
+  }
+}

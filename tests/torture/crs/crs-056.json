@@ -1,0 +1,14 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "crs",
+  "id": "crs-056",
+  "notes": "dict missing code exercises CRS representation parsing",
+  "operation": "gis_parse_crs",
+  "payload": {
+    "crs": {
+      "name": "EPSG"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "TerrainSource",
+    "type": "ValueError"
+  },
+  "family": "viewer_scene",
+  "id": "viewer_scene-015",
+  "operation": "terrain_source",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "pattern": "ramp",
+      "shape": [
+        8,
+        1
+      ]
+    },
+    "crs": "EPSG:4326",
+    "metadata": {
+      "height": 2,
+      "source_id": "dem-2",
+      "width": 2
+    },
+    "nodata_policy": "bad"
+  }
+}

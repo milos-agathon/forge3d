@@ -1,0 +1,19 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "crs",
+  "id": "crs-068",
+  "operation": "gis_transform_bounds",
+  "payload": {
+    "bounds": [
+      10,
+      10,
+      20,
+      20
+    ],
+    "densify": null,
+    "dst_crs": "EPSG:3857",
+    "src_crs": "EPSG:4326"
+  }
+}

@@ -15,7 +15,9 @@ impl ColormapLUT {
     pub fn new_single_palette(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        adapter: &wgpu::Adapter,
         data: &[u8],
+        srgb: bool,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         if data.len() != 256 * 4 {
             return Err(format!(
@@ -24,6 +26,28 @@ impl ColormapLUT {
             )
             .into());
         }
+
+        // With `srgb`, same runtime format selection as `ColormapLUT::new`:
+        // stop colors are authored in sRGB, so sample them through an Srgb
+        // texture view when the adapter allows it, otherwise CPU-linearize
+        // into a Unorm texture. Without it (the default), keep the legacy
+        // bit-exact behavior — sRGB bytes uploaded straight into a Unorm
+        // texture, i.e. display-space values lit as linear — because the
+        // existing visual goldens pin that output; flipping the default is a
+        // major-release decision.
+        let force_unorm = std::env::var_os("VF_FORCE_LUT_UNORM").is_some();
+        let srgb_ok = adapter
+            .get_texture_format_features(wgpu::TextureFormat::Rgba8UnormSrgb)
+            .allowed_usages
+            .contains(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST);
+        let use_srgb = srgb && !force_unorm && srgb_ok;
+        let (format, upload) = if use_srgb {
+            (wgpu::TextureFormat::Rgba8UnormSrgb, data.to_vec())
+        } else if srgb {
+            (wgpu::TextureFormat::Rgba8Unorm, to_linear_u8_rgba(data))
+        } else {
+            (wgpu::TextureFormat::Rgba8Unorm, data.to_vec())
+        };
 
         let texture = tracked_create_texture(
             device,
@@ -37,7 +61,7 @@ impl ColormapLUT {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8Unorm,
+                format,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             },
@@ -50,7 +74,7 @@ impl ColormapLUT {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            data,
+            &upload,
             wgpu::ImageDataLayout {
                 offset: 0,
                 bytes_per_row: Some(NonZeroU32::new(256 * 4).unwrap().into()),
@@ -79,7 +103,7 @@ impl ColormapLUT {
             texture,
             view,
             sampler,
-            format: wgpu::TextureFormat::Rgba8Unorm,
+            format,
         })
     }
 

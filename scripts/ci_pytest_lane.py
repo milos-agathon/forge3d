@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections import deque
+from os import environ
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,9 +57,35 @@ def build_pytest_args(passthrough: list[str]) -> list[str]:
     return [*default_lane_files(), *passthrough]
 
 
+def _github_escape(message: str) -> str:
+    """Escape a string for GitHub workflow command annotations."""
+    return message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
 def main(argv: list[str]) -> int:
     cmd = [sys.executable, "-m", "pytest", *build_pytest_args(argv)]
-    return subprocess.call(cmd, cwd=str(ROOT))
+    tail: deque[str] = deque(maxlen=180)
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(ROOT),
+        stderr=subprocess.STDOUT,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        print(line, end="", flush=True)
+        tail.append(line.rstrip("\n"))
+    code = proc.wait()
+    if code and environ.get("GITHUB_ACTIONS") == "true":
+        message = "\n".join(tail)
+        if len(message) > 3500:
+            message = message[-3500:]
+        print(
+            f"::error title=Default Python lane failed::{_github_escape(message)}",
+            flush=True,
+        )
+    return code
 
 
 if __name__ == "__main__":

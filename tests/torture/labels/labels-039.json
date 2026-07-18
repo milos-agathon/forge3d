@@ -1,0 +1,15 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "labels",
+  "id": "labels-039",
+  "notes": "explicit Latin script exercises shaping metadata validation",
+  "operation": "text_shape",
+  "payload": {
+    "language": "en",
+    "script": "Latn",
+    "size": 12,
+    "text": "terminus"
+  }
+}

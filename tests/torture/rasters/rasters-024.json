@@ -1,0 +1,24 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidArgument",
+    "type": "ValueError"
+  },
+  "family": "rasters",
+  "id": "rasters-024",
+  "operation": "gis_normalize_raster",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": [
+        [
+          0,
+          "nan",
+          2,
+          3
+        ]
+      ]
+    },
+    "method": "percentile"
+  }
+}

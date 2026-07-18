@@ -1,0 +1,42 @@
+{
+  "expect": {
+    "checks": [
+      {
+        "equals": 4,
+        "path": [
+          "tile_count"
+        ]
+      },
+      {
+        "equals": true,
+        "path": [
+          "antimeridian_split"
+        ]
+      },
+      {
+        "equals": "invalid_bounds",
+        "path": [
+          "warnings",
+          0,
+          "code"
+        ]
+      }
+    ],
+    "class": "ok"
+  },
+  "family": "semantic",
+  "id": "semantic-029",
+  "notes": "tile split/clamp policy oracle",
+  "operation": "gis_slippy_tile_index",
+  "payload": {
+    "bounds": [
+      179,
+      80,
+      -179,
+      89
+    ],
+    "crs": "EPSG:4326",
+    "zoom": 4
+  },
+  "semantic": true
+}

@@ -1,0 +1,29 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "geometry",
+  "id": "geometry-137",
+  "notes": "three-point polyline with fractional sub-pixel size exercises polyline validation",
+  "operation": "vector_add_lines",
+  "payload": {
+    "path": {
+      "dtype": "float64",
+      "values": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          1.0,
+          1.0
+        ],
+        [
+          2.0,
+          0.0
+        ]
+      ]
+    },
+    "stroke_width": 0.5
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "geometry",
+  "id": "geometry-040",
+  "notes": "empty/undersized line variant with 3 coordinate records",
+  "operation": "gis_validate_geometry",
+  "payload": {
+    "geometry": {
+      "coordinates": [
+        [
+          0.0403,
+          -0.0403
+        ],
+        [
+          0.0403,
+          -0.0403
+        ],
+        [
+          0.0403,
+          -0.0403
+        ]
+      ],
+      "type": "LineString"
+    }
+  }
+}

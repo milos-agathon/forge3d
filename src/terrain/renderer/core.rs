@@ -254,6 +254,22 @@ pub(super) fn is_clipmap_camera_mode(camera_mode: &str) -> bool {
     terrain_camera_mode_tag(camera_mode).eq_ignore_ascii_case("clipmap")
 }
 
+/// True when the camera mode carries the `zup` option (e.g. `"mesh:zup"`).
+///
+/// Mesh-mode terrain lives in the world XY plane with heights along +Z, but
+/// the legacy orbit camera is parameterized around +Y with `up = Vec3::Y` —
+/// a grid axis — so oblique views render rolled and north-south inverted.
+/// `zup` opts into a Z-up orbit (theta = polar angle from +Z, 0 looks straight
+/// down; phi = azimuth in the terrain plane) with `up = Vec3::Z`, matching the
+/// interactive viewer's terrain semantics. Kept as an opt-in suffix so
+/// existing `"mesh"` callers keep byte-identical output.
+pub(super) fn is_zup_camera_mode(camera_mode: &str) -> bool {
+    camera_mode
+        .split(':')
+        .skip(1)
+        .any(|part| part.trim().eq_ignore_ascii_case("zup"))
+}
+
 pub(super) fn clipmap_camera_config(
     camera_mode: &str,
 ) -> Option<crate::terrain::clipmap::ClipmapConfig> {
@@ -472,5 +488,23 @@ impl Drop for TerrainScene {
         if self.reflection_probe_grid_uniform_alloc_bytes > 0 {
             tracker.free_buffer_allocation(self.reflection_probe_grid_uniform_alloc_bytes, false);
         }
+    }
+}
+
+#[cfg(test)]
+mod camera_mode_tests {
+    use super::{is_clipmap_camera_mode, is_mesh_camera_mode, is_zup_camera_mode};
+
+    #[test]
+    fn zup_suffix_is_detected_and_tag_helpers_still_match() {
+        assert!(is_zup_camera_mode("mesh:zup"));
+        assert!(is_zup_camera_mode("mesh:ZUP"));
+        assert!(is_mesh_camera_mode("mesh:zup"));
+        assert!(!is_zup_camera_mode("mesh"));
+        assert!(!is_zup_camera_mode("screen"));
+        assert!(!is_zup_camera_mode("zup"));
+        assert!(is_clipmap_camera_mode("clipmap:4:64"));
+        assert!(!is_zup_camera_mode("clipmap:4:64"));
+        assert!(is_zup_camera_mode("clipmap:4:64:zup"));
     }
 }

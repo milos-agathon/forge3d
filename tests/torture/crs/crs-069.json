@@ -1,0 +1,20 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "crs",
+  "id": "crs-069",
+  "notes": "Exercises gis_transform_bounds partition {\"bounds\":{\"classes\":[\"fractional\",\"unit\",\"ordinary\",\"unit\"],\"shape\":\"ordinary\"},\"densify\":\"ordinary\",\"dst_crs\":\"EPSG:3857\",\"src_crs\":\"EPSG:4326\"} with ok oracle",
+  "operation": "gis_transform_bounds",
+  "payload": {
+    "bounds": [
+      -0.990528,
+      -1,
+      1.009472,
+      1
+    ],
+    "densify": 4,
+    "dst_crs": "EPSG:3857",
+    "src_crs": "EPSG:4326"
+  }
+}

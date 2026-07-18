@@ -1,0 +1,21 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "geometry",
+  "id": "geometry-033",
+  "notes": "single north-pole point with non-finite size refusal exercises point-shape and size validation",
+  "operation": "vector_add_points",
+  "payload": {
+    "point_size": "nan",
+    "positions": {
+      "dtype": "float64",
+      "values": [
+        [
+          0.0,
+          90.0
+        ]
+      ]
+    }
+  }
+}

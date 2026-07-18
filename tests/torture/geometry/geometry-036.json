@@ -1,0 +1,25 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "geometry",
+  "id": "geometry-036",
+  "notes": "Exercises vector_add_points partition {\"point_size\":\"fractional\",\"positions\":{\"dtype\":\"float64\",\"shape\":\"square_small\",\"value_classes\":[\"unit\",\"zero\"],\"variability\":\"variable\"}} with error_or_value oracle",
+  "operation": "vector_add_points",
+  "payload": {
+    "point_size": 0.5,
+    "positions": {
+      "dtype": "float64",
+      "values": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          1.0,
+          1.0
+        ]
+      ]
+    }
+  }
+}

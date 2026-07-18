@@ -1,0 +1,21 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "rasters",
+  "id": "rasters-042",
+  "notes": "empty bins exercises classification threshold validation",
+  "operation": "gis_classify_raster",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "pattern": "ramp",
+      "shape": [
+        4,
+        4
+      ]
+    },
+    "bins": [],
+    "out_dtype": "uint16"
+  }
+}

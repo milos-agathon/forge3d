@@ -28,12 +28,18 @@ impl Colormap1D {
     /// Args:
     ///     stops: List of (value, color) tuples, color as "#RRGGBB"
     ///     domain: (min, max) value range
+    ///     srgb: Decode stop colors as sRGB when sampling (correct: hex
+    ///         colors are display-space). Defaults to False, which keeps the
+    ///         legacy behavior of lighting display-space bytes as if they
+    ///         were linear — existing goldens pin that output, so the
+    ///         correct decode is opt-in until a major release flips it.
     #[staticmethod]
-    #[pyo3(signature = (stops, domain))]
+    #[pyo3(signature = (stops, domain, srgb=false))]
     pub fn from_stops(
         _py: Python<'_>,
         stops: Vec<(f32, String)>,
         domain: (f32, f32),
+        srgb: bool,
     ) -> PyResult<Self> {
         if stops.is_empty() {
             return Err(PyValueError::new_err("stops must not be empty"));
@@ -68,9 +74,14 @@ impl Colormap1D {
         let lut_data = interpolate_colormap(&stops_sorted, &colors, domain, resolution)?;
 
         let ctx = crate::core::gpu::try_ctx()?;
-        let lut =
-            crate::terrain::ColormapLUT::new_single_palette(&ctx.device, &ctx.queue, &lut_data)
-                .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        let lut = crate::terrain::ColormapLUT::new_single_palette(
+            &ctx.device,
+            &ctx.queue,
+            &ctx.adapter,
+            &lut_data,
+            srgb,
+        )
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
         Ok(Self {
             lut: Arc::new(lut),

@@ -20,6 +20,7 @@ from .diagnostics import (
 
 PAYLOAD_VERSION = 2
 SUPPORTED_PAYLOAD_VERSIONS = (1, PAYLOAD_VERSION)
+MAX_LABEL_RECORDS = 100_000
 REJECTION_REASONS = (
     "collision",
     "outside_view",
@@ -1042,6 +1043,15 @@ class LabelPlan:
         del camera
         if declutter not in {"optimal", "greedy"}:
             raise ValueError("LabelPlan.compile declutter must be 'optimal' or 'greedy'")
+        try:
+            label_count = len(labels)
+        except TypeError:
+            label_count = None
+        if label_count is not None and label_count > MAX_LABEL_RECORDS:
+            raise ValueError(
+                f"LabelPlan.compile label count {label_count} exceeds the safe limit "
+                f"of {MAX_LABEL_RECORDS}"
+            )
         viewport_size = _viewport_size(viewport)
         keepout_payload = [
             region.to_dict() if isinstance(region, KeepoutRegion) else KeepoutRegion.from_dict(region).to_dict()

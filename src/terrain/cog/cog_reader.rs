@@ -148,7 +148,7 @@ impl CogHeightReader {
 
     /// Read a specific tile at given LOD.
     pub fn read_tile(&self, tile_x: u32, tile_y: u32, lod: u32) -> Result<Vec<f32>, CogError> {
-        let ifd = self.header.select_ifd_for_lod(lod);
+        let ifd = self.header.select_ifd_for_lod(lod)?;
 
         let cache_key = (tile_x, tile_y, lod);
         if let Some(cached) = self.cache.get(&cache_key) {
@@ -195,8 +195,12 @@ impl CogHeightReader {
             )
         })?;
 
-        let tile_size = (tile_width * tile_height) as usize;
-        let memory_bytes = tile_size * std::mem::size_of::<f32>();
+        let tile_size = (tile_width as usize)
+            .checked_mul(tile_height as usize)
+            .ok_or_else(|| CogError::InvalidIfd("tile element count overflow".into()))?;
+        let memory_bytes = tile_size
+            .checked_mul(std::mem::size_of::<f32>())
+            .ok_or_else(|| CogError::InvalidIfd("tile byte size overflow".into()))?;
         self.cache.insert(cache_key, heights.clone(), memory_bytes);
 
         Ok(heights)
@@ -209,7 +213,7 @@ impl CogHeightReader {
         tile_y: u32,
         lod: u32,
     ) -> Result<Vec<f32>, CogError> {
-        let ifd = self.header.select_ifd_for_lod(lod);
+        let ifd = self.header.select_ifd_for_lod(lod)?;
 
         let cache_key = (tile_x, tile_y, lod);
         if let Some(cached) = self.cache.get(&cache_key) {
@@ -246,8 +250,12 @@ impl CogHeightReader {
             ifd.predictor,
         )?;
 
-        let tile_size = (ifd.tile_width * ifd.tile_height) as usize;
-        let memory_bytes = tile_size * std::mem::size_of::<f32>();
+        let tile_size = (ifd.tile_width as usize)
+            .checked_mul(ifd.tile_height as usize)
+            .ok_or_else(|| CogError::InvalidIfd("tile element count overflow".into()))?;
+        let memory_bytes = tile_size
+            .checked_mul(std::mem::size_of::<f32>())
+            .ok_or_else(|| CogError::InvalidIfd("tile byte size overflow".into()))?;
         self.cache.insert(cache_key, heights.clone(), memory_bytes);
 
         Ok(heights)
@@ -417,7 +425,9 @@ fn decode_heights(
     tile_height: u32,
     predictor: u16,
 ) -> Result<Vec<f32>, CogError> {
-    let pixel_count = (tile_width * tile_height) as usize;
+    let pixel_count = (tile_width as usize)
+        .checked_mul(tile_height as usize)
+        .ok_or_else(|| CogError::InvalidIfd("tile element count overflow".into()))?;
     let mut heights = Vec::with_capacity(pixel_count);
     let bytes_per_sample = (bits_per_sample as usize + 7) / 8;
     let data = apply_predictor(data, predictor, bytes_per_sample, tile_width, tile_height)?;
@@ -425,54 +435,68 @@ fn decode_heights(
 
     match (bits_per_sample, sample_format) {
         (32, SAMPLE_FORMAT_FLOAT) => {
-            if data.len() < pixel_count * 4 {
+            let needed = pixel_count
+                .checked_mul(4)
+                .ok_or_else(|| CogError::InvalidIfd("f32 tile byte size overflow".into()))?;
+            if data.len() < needed {
                 return Err(CogError::InvalidIfd(format!(
                     "Data too short: {} < {}",
                     data.len(),
-                    pixel_count * 4
+                    needed
                 )));
             }
             for i in 0..pixel_count {
-                let bytes: [u8; 4] = data[i * 4..(i + 1) * 4].try_into().unwrap();
-                heights.push(f32::from_le_bytes(bytes));
+                heights.push(f32::from_le_bytes(read_le_bytes4(data, i * 4)));
             }
         }
         (64, SAMPLE_FORMAT_FLOAT) => {
-            if data.len() < pixel_count * 8 {
+            if data.len()
+                < pixel_count
+                    .checked_mul(8)
+                    .ok_or_else(|| CogError::InvalidIfd("f64 tile byte size overflow".into()))?
+            {
                 return Err(CogError::InvalidIfd("Data too short for f64".into()));
             }
             for i in 0..pixel_count {
-                let bytes: [u8; 8] = data[i * 8..(i + 1) * 8].try_into().unwrap();
-                heights.push(f64::from_le_bytes(bytes) as f32);
+                heights.push(f64::from_le_bytes(read_le_bytes8(data, i * 8)) as f32);
             }
         }
         (16, SAMPLE_FORMAT_UINT) => {
-            if data.len() < pixel_count * 2 {
+            if data.len()
+                < pixel_count
+                    .checked_mul(2)
+                    .ok_or_else(|| CogError::InvalidIfd("u16 tile byte size overflow".into()))?
+            {
                 return Err(CogError::InvalidIfd("Data too short for u16".into()));
             }
             for i in 0..pixel_count {
-                let bytes: [u8; 2] = data[i * 2..(i + 1) * 2].try_into().unwrap();
-                let val = u16::from_le_bytes(bytes);
+                let val = u16::from_le_bytes(read_le_bytes2(data, i * 2));
                 heights.push(val as f32);
             }
         }
         (16, SAMPLE_FORMAT_INT) => {
-            if data.len() < pixel_count * 2 {
+            if data.len()
+                < pixel_count
+                    .checked_mul(2)
+                    .ok_or_else(|| CogError::InvalidIfd("i16 tile byte size overflow".into()))?
+            {
                 return Err(CogError::InvalidIfd("Data too short for i16".into()));
             }
             for i in 0..pixel_count {
-                let bytes: [u8; 2] = data[i * 2..(i + 1) * 2].try_into().unwrap();
-                let val = i16::from_le_bytes(bytes);
+                let val = i16::from_le_bytes(read_le_bytes2(data, i * 2));
                 heights.push(val as f32);
             }
         }
         (32, SAMPLE_FORMAT_INT) => {
-            if data.len() < pixel_count * 4 {
+            if data.len()
+                < pixel_count
+                    .checked_mul(4)
+                    .ok_or_else(|| CogError::InvalidIfd("i32 tile byte size overflow".into()))?
+            {
                 return Err(CogError::InvalidIfd("Data too short for i32".into()));
             }
             for i in 0..pixel_count {
-                let bytes: [u8; 4] = data[i * 4..(i + 1) * 4].try_into().unwrap();
-                let val = i32::from_le_bytes(bytes);
+                let val = i32::from_le_bytes(read_le_bytes4(data, i * 4));
                 heights.push(val as f32);
             }
         }
@@ -537,8 +561,12 @@ fn apply_predictor(
         )));
     }
 
-    let row_bytes = tile_width as usize * bytes_per_sample;
-    let needed = row_bytes * tile_height as usize;
+    let row_bytes = (tile_width as usize)
+        .checked_mul(bytes_per_sample)
+        .ok_or_else(|| CogError::InvalidIfd("predictor row size overflow".into()))?;
+    let needed = row_bytes
+        .checked_mul(tile_height as usize)
+        .ok_or_else(|| CogError::InvalidIfd("predictor payload size overflow".into()))?;
     if data.len() < needed {
         return Err(CogError::InvalidIfd(format!(
             "Data too short for predictor: {} < {}",
@@ -556,18 +584,18 @@ fn apply_predictor(
             match bytes_per_sample {
                 1 => out[cur] = out[cur].wrapping_add(out[prev]),
                 2 => {
-                    let a = u16::from_le_bytes(out[prev..prev + 2].try_into().unwrap());
-                    let b = u16::from_le_bytes(out[cur..cur + 2].try_into().unwrap());
+                    let a = u16::from_le_bytes(read_le_bytes2(&out, prev));
+                    let b = u16::from_le_bytes(read_le_bytes2(&out, cur));
                     out[cur..cur + 2].copy_from_slice(&b.wrapping_add(a).to_le_bytes());
                 }
                 4 => {
-                    let a = u32::from_le_bytes(out[prev..prev + 4].try_into().unwrap());
-                    let b = u32::from_le_bytes(out[cur..cur + 4].try_into().unwrap());
+                    let a = u32::from_le_bytes(read_le_bytes4(&out, prev));
+                    let b = u32::from_le_bytes(read_le_bytes4(&out, cur));
                     out[cur..cur + 4].copy_from_slice(&b.wrapping_add(a).to_le_bytes());
                 }
                 8 => {
-                    let a = u64::from_le_bytes(out[prev..prev + 8].try_into().unwrap());
-                    let b = u64::from_le_bytes(out[cur..cur + 8].try_into().unwrap());
+                    let a = u64::from_le_bytes(read_le_bytes8(&out, prev));
+                    let b = u64::from_le_bytes(read_le_bytes8(&out, cur));
                     out[cur..cur + 8].copy_from_slice(&b.wrapping_add(a).to_le_bytes());
                 }
                 _ => unreachable!(),
@@ -575,6 +603,32 @@ fn apply_predictor(
         }
     }
     Ok(out)
+}
+
+fn read_le_bytes2(data: &[u8], offset: usize) -> [u8; 2] {
+    [data[offset], data[offset + 1]]
+}
+
+fn read_le_bytes4(data: &[u8], offset: usize) -> [u8; 4] {
+    [
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
+    ]
+}
+
+fn read_le_bytes8(data: &[u8], offset: usize) -> [u8; 8] {
+    [
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
+        data[offset + 4],
+        data[offset + 5],
+        data[offset + 6],
+        data[offset + 7],
+    ]
 }
 
 #[cfg(test)]
@@ -599,5 +653,44 @@ mod tests {
         .unwrap();
 
         assert_eq!(decoded, vec![10.0, 12.0, 15.0, 20.0, 24.0, 29.0]);
+    }
+
+    #[test]
+    fn decode_heights_rejects_short_f32_payload_without_panic() {
+        let err = decode_heights(
+            &[0, 0, 128],
+            32,
+            SAMPLE_FORMAT_FLOAT,
+            1,
+            1,
+            TIFF_PREDICTOR_NONE,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, CogError::InvalidIfd(message) if message.contains("Data too short")));
+    }
+
+    #[test]
+    fn decode_heights_rejects_short_f64_payload_without_panic() {
+        let err = decode_heights(
+            &[0, 0, 0, 0, 0, 0, 0],
+            64,
+            SAMPLE_FORMAT_FLOAT,
+            1,
+            1,
+            TIFF_PREDICTOR_NONE,
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(err, CogError::InvalidIfd(message) if message.contains("Data too short for f64"))
+        );
+    }
+
+    #[test]
+    fn predictor_rejects_short_horizontal_payload_without_panic() {
+        let err = apply_predictor(&[0, 1, 2], TIFF_PREDICTOR_HORIZONTAL, 2, 2, 1).unwrap_err();
+
+        assert!(matches!(err, CogError::InvalidIfd(message) if message.contains("predictor")));
     }
 }

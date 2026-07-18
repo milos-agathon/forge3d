@@ -1,0 +1,342 @@
+[meta]
+measured_for = "TERMINUS 34 torture atlas"
+reachable_modules = "src/gis,src/vector,src/labels,src/py_functions,src/terrain"
+count_policy = "Rust production code only; excludes #[cfg(test)] modules and test fixture files."
+step0_raw_panic = 14
+step0_raw_unwrap = 381
+step0_raw_expect = 100
+step0_reachable_panic_unwrap = 94
+required_panic_unwrap_reduction_pct = 30.0
+source_allowlist_policy = "Every remaining production panic/unwrap/expect site is capped per file and carries a reason."
+
+[[modules]]
+module = "gis"
+baseline_panic = 0
+baseline_unwrap = 9
+baseline_expect = 6
+panic = 0
+unwrap = 9
+expect = 6
+
+[[modules]]
+module = "labels"
+baseline_panic = 0
+baseline_unwrap = 28
+baseline_expect = 4
+panic = 0
+unwrap = 10
+expect = 4
+
+[[modules]]
+module = "py_functions"
+baseline_panic = 0
+baseline_unwrap = 3
+baseline_expect = 8
+panic = 0
+unwrap = 3
+expect = 8
+
+[[modules]]
+module = "terrain"
+baseline_panic = 1
+baseline_unwrap = 45
+baseline_expect = 5
+panic = 1
+unwrap = 25
+expect = 5
+
+[[modules]]
+module = "vector"
+baseline_panic = 0
+baseline_unwrap = 8
+baseline_expect = 4
+panic = 0
+unwrap = 8
+expect = 4
+
+[[source_allowlist]]
+path = "src/gis/cog_range.rs"
+panic = 0
+unwrap = 0
+expect = 1
+reason = "Block access follows the explicit loaded-state guard in the same function."
+
+[[source_allowlist]]
+path = "src/gis/domain.rs"
+panic = 0
+unwrap = 3
+expect = 0
+reason = "Canonical FeatureCollection construction installs and type-checks features before these accesses."
+
+[[source_allowlist]]
+path = "src/gis/geometry/antimeridian.rs"
+panic = 0
+unwrap = 1
+expect = 0
+reason = "The single segment is popped only after the non-empty one-segment branch is selected."
+
+[[source_allowlist]]
+path = "src/gis/geometry/topology.rs"
+panic = 0
+unwrap = 1
+expect = 0
+reason = "Topology backend singleton access follows successful one-time initialization."
+
+[[source_allowlist]]
+path = "src/gis/terrarium.rs"
+panic = 0
+unwrap = 4
+expect = 2
+reason = "Tile/cache extrema operate on validated non-empty decoded tiles and guarded cache/template options."
+
+[[source_allowlist]]
+path = "src/gis/warp.rs"
+panic = 0
+unwrap = 0
+expect = 3
+reason = "Warp helpers use constants and validated coordinate transforms whose construction cannot fail."
+
+[[source_allowlist]]
+path = "src/vector/api/py.rs"
+panic = 0
+unwrap = 0
+expect = 1
+reason = "The Python vector registry lock poisoning is a process-invariant violation."
+
+[[source_allowlist]]
+path = "src/vector/batch/mod.rs"
+panic = 0
+unwrap = 4
+expect = 0
+reason = "Batch packing unwraps values immediately after matching their present variants."
+
+[[source_allowlist]]
+path = "src/vector/extrusion.rs"
+panic = 0
+unwrap = 1
+expect = 0
+reason = "Ring tail access follows the validated minimum-ring-length check."
+
+[[source_allowlist]]
+path = "src/vector/indirect/culling.rs"
+panic = 0
+unwrap = 2
+expect = 0
+reason = "Private worker channel endpoints remain alive for the scoped send/receive operation."
+
+[[source_allowlist]]
+path = "src/vector/point/renderer/config.rs"
+panic = 0
+unwrap = 1
+expect = 0
+reason = "Default texture is read only after the OnceCell initializer succeeds."
+
+[[source_allowlist]]
+path = "src/vector/point/types.rs"
+panic = 0
+unwrap = 0
+expect = 3
+reason = "Global point configuration lock poisoning is a process-invariant violation."
+
+[[source_allowlist]]
+path = "src/labels/atlas.rs"
+panic = 0
+unwrap = 1
+expect = 0
+reason = "Atlas skyline tail access follows initialization with the mandatory sentinel node."
+
+[[source_allowlist]]
+path = "src/labels/msdf/edge.rs"
+panic = 0
+unwrap = 1
+expect = 0
+reason = "MSDF edge splitting unwraps the final element of a statically non-empty subdivision."
+
+[[source_allowlist]]
+path = "src/labels/optimal.rs"
+panic = 0
+unwrap = 0
+expect = 2
+reason = "Optimal solver state keys are inserted before the matching reconstruction lookup."
+
+[[source_allowlist]]
+path = "src/labels/shape/bidi.rs"
+panic = 0
+unwrap = 1
+expect = 0
+reason = "Paragraph level unwrap follows the explicit Some branch."
+
+[[source_allowlist]]
+path = "src/labels/shape/bidi_explicit.rs"
+panic = 0
+unwrap = 3
+expect = 0
+reason = "The bidi embedding stack is initialized with a base level and never emptied."
+
+[[source_allowlist]]
+path = "src/labels/shape/bidi_resolve.rs"
+panic = 0
+unwrap = 4
+expect = 0
+reason = "Bidi run and index tails are accessed only after non-empty guards."
+
+[[source_allowlist]]
+path = "src/labels/shape/gsub_context.rs"
+panic = 0
+unwrap = 0
+expect = 1
+reason = "Matched GSUB input positions are proven present by the preceding matcher."
+
+[[source_allowlist]]
+path = "src/labels/shape/mod.rs"
+panic = 0
+unwrap = 0
+expect = 1
+reason = "Shaping spans exclude unassigned controls before font assignment is read."
+
+[[source_allowlist]]
+path = "src/py_functions/csm.rs"
+panic = 0
+unwrap = 0
+expect = 8
+reason = "NonZero layout constants are compile-time positive and cannot be zero."
+
+[[source_allowlist]]
+path = "src/py_functions/provenance.rs"
+panic = 0
+unwrap = 3
+expect = 0
+reason = "Provenance serialization unwraps fixed JSON-compatible internal records."
+
+[[source_allowlist]]
+path = "src/terrain/clipmap/level.rs"
+panic = 0
+unwrap = 3
+expect = 0
+reason = "Clipmap mesh access follows the level ready-state invariant."
+
+[[source_allowlist]]
+path = "src/terrain/colormap_lut.rs"
+panic = 0
+unwrap = 6
+expect = 0
+reason = "Colormap anchors are validated non-empty and sorted before endpoint/interpolation access."
+
+[[source_allowlist]]
+path = "src/terrain/pipeline/bind_groups.rs"
+panic = 1
+unwrap = 0
+expect = 0
+reason = "Internal-only descriptor-indexing constructor is unreachable unless capability negotiation selected the feature."
+
+[[source_allowlist]]
+path = "src/terrain/pipeline/creation.rs"
+panic = 0
+unwrap = 1
+expect = 0
+reason = "Palette texture count is clamped to a positive negotiated limit."
+
+[[source_allowlist]]
+path = "src/terrain/renderer/aov.rs"
+panic = 0
+unwrap = 0
+expect = 1
+reason = "AOV readback buffer exists whenever the readback branch is entered."
+
+[[source_allowlist]]
+path = "src/terrain/renderer/bind_groups/layouts.rs"
+panic = 0
+unwrap = 1
+expect = 0
+reason = "Bind-group array count uses a compile-time positive constant."
+
+[[source_allowlist]]
+path = "src/terrain/renderer/draw/execute.rs"
+panic = 0
+unwrap = 0
+expect = 1
+reason = "Draw execution follows successful preparation of the required bind group."
+
+[[source_allowlist]]
+path = "src/terrain/renderer/draw/setup/context.rs"
+panic = 0
+unwrap = 1
+expect = 0
+reason = "Setup context option is read only inside its matched Some branch."
+
+[[source_allowlist]]
+path = "src/terrain/renderer/offline.rs"
+panic = 0
+unwrap = 0
+expect = 1
+reason = "Offline renderer constructs LightBuffer and its bind group atomically."
+
+[[source_allowlist]]
+path = "src/terrain/renderer/probes.rs"
+panic = 0
+unwrap = 0
+expect = 1
+reason = "Reflection probe texture access follows successful probe allocation."
+
+[[source_allowlist]]
+path = "src/terrain/renderer/shadows/setup.rs"
+panic = 0
+unwrap = 1
+expect = 0
+reason = "Cascade split vector is initialized with at least one cascade."
+
+[[source_allowlist]]
+path = "src/terrain/renderer/viewer.rs"
+panic = 0
+unwrap = 1
+expect = 0
+reason = "Renderer pipeline mutex poisoning is a process-invariant violation."
+
+[[source_allowlist]]
+path = "src/terrain/renderer/virtual_texture.rs"
+panic = 0
+unwrap = 2
+expect = 0
+reason = "Virtual-texture resources are accessed only after the enabled-state guard."
+
+[[source_allowlist]]
+path = "src/terrain/renderer/water_reflection/bind_group.rs"
+panic = 0
+unwrap = 0
+expect = 1
+reason = "Water reflection uses the atomically constructed LightBuffer bind group."
+
+[[source_allowlist]]
+path = "src/terrain/scatter.rs"
+panic = 0
+unwrap = 1
+expect = 0
+reason = "Scatter LOD list tail access follows non-empty level generation."
+
+[[source_allowlist]]
+path = "src/terrain/spike/constructor.rs"
+panic = 0
+unwrap = 2
+expect = 0
+reason = "Texture upload row constants are compile-time non-zero values."
+
+[[source_allowlist]]
+path = "src/terrain/spike/render.rs"
+panic = 0
+unwrap = 2
+expect = 0
+reason = "TerrainSpike render resources are accessed after successful constructor initialization."
+
+[[source_allowlist]]
+path = "src/terrain/stream/color.rs"
+panic = 0
+unwrap = 2
+expect = 0
+reason = "Color stream cache entries are read after insertion under the same lock."
+
+[[source_allowlist]]
+path = "src/terrain/stream/height.rs"
+panic = 0
+unwrap = 2
+expect = 0
+reason = "Height stream cache entries are read after insertion under the same lock."

@@ -1,0 +1,26 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "dems",
+  "id": "dems-054",
+  "notes": "single-cell zero DEM exercises terrain nodata policy 'bad'",
+  "operation": "terrain_source",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": [
+        [
+          0
+        ]
+      ]
+    },
+    "crs": "EPSG:4326",
+    "metadata": {
+      "height": 2,
+      "source_id": "terminus-materiality",
+      "width": 2
+    },
+    "nodata_policy": "bad"
+  }
+}

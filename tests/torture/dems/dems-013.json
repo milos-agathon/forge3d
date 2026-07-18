@@ -1,0 +1,19 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "dems",
+  "id": "dems-013",
+  "notes": "single-column ramp DEM exercises water-mask shape, dtype, and finiteness handling",
+  "operation": "dem_derive_water_mask",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "pattern": "ramp",
+      "shape": [
+        8,
+        1
+      ]
+    }
+  }
+}

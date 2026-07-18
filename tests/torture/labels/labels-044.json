@@ -1,0 +1,15 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "labels",
+  "id": "labels-044",
+  "notes": "explicit Hebrew script exercises shaping metadata validation",
+  "operation": "text_shape",
+  "payload": {
+    "language": "he",
+    "script": "Hebr",
+    "size": 12,
+    "text": "\u05d1\u05d3\u05d9\u05e7\u05d4"
+  }
+}

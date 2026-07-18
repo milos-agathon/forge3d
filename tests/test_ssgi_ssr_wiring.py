@@ -218,7 +218,18 @@ class TestSsrSceneRoundTrip:
         import numpy as np
 
         scene.disable_ssr()
+        gradient = np.zeros((64, 64, 4), dtype=np.uint8)
+        rows = np.linspace(0, 255, 64, dtype=np.uint8)[:, None]
+        gradient[..., 0] = rows
+        gradient[..., 1] = 255 - rows
+        gradient[..., 3] = 255
+        scene.set_raster_overlay(gradient, 1.0, None, None)
         baseline = np.asarray(scene.render_rgba()).copy()
+        vertical_delta = np.abs(
+            baseline.astype(np.int16) - baseline[::-1].astype(np.int16)
+        ).mean()
+        if vertical_delta <= 0.05:
+            pytest.skip("SSR output-change proof requires a vertically varying baseline")
 
         scene.set_ssr_settings(
             _native.SSRSettings(

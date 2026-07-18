@@ -1,0 +1,25 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "geometry",
+  "id": "geometry-067",
+  "notes": "mixed-finiteness point set with tiny positive size reaches coordinate validation",
+  "operation": "vector_add_points",
+  "payload": {
+    "point_size": 1e-08,
+    "positions": {
+      "dtype": "float64",
+      "values": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          "nan",
+          1.0
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "labels",
+  "id": "labels-054",
+  "notes": "ligature-disabled Latin exercises shaping metadata validation",
+  "operation": "text_shape",
+  "payload": {
+    "features": {
+      "liga": 0
+    },
+    "language": "en",
+    "script": "Latn",
+    "size": 12,
+    "text": "office"
+  }
+}

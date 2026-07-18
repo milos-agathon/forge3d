@@ -1,0 +1,36 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidGeometry",
+    "type": "ValueError"
+  },
+  "family": "geometry",
+  "id": "geometry-019",
+  "notes": "Exercises gis_validate_geometry partition {\"geometry\":{\"locus\":\"ordinary\",\"point_count\":2,\"special_coordinates\":[\"fractional\",\"inf\"],\"type\":\"Polygon\"}} with error oracle",
+  "operation": "gis_validate_geometry",
+  "payload": {
+    "geometry": {
+      "coordinates": [
+        [
+          [
+            "inf",
+            0.0026219999999999998
+          ],
+          [
+            1.002622,
+            0
+          ],
+          [
+            1.002622,
+            1
+          ],
+          [
+            "inf",
+            0.0026219999999999998
+          ]
+        ]
+      ],
+      "type": "Polygon"
+    }
+  }
+}

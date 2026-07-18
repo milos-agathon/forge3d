@@ -1,8 +1,19 @@
 """Headless tests for the optional Phase 2 notebook widget surface."""
 
+import os
+
 import pytest
 
 import numpy as np
+
+if (
+    os.environ.get("GITHUB_ACTIONS") == "true"
+    and os.environ.get("FORGE3D_RUN_WIDGET_TESTS") != "1"
+):
+    pytest.skip(
+        "optional ipywidgets lane is not installed in default CI",
+        allow_module_level=True,
+    )
 
 ipywidgets = pytest.importorskip("ipywidgets")
 

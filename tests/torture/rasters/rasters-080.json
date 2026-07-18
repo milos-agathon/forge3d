@@ -1,0 +1,17 @@
+{
+  "expect": {
+    "class": "structured_error",
+    "match": "Failed to open COG",
+    "type": "RuntimeError"
+  },
+  "family": "rasters",
+  "id": "rasters-080",
+  "notes": "short BigTIFF constructor error remains typed",
+  "operation": "cog_dataset_open",
+  "payload": {
+    "cache_budget_mb": 1,
+    "cache_size_mb": 1,
+    "hex": "49492b0008000000",
+    "name": "bigtiff-short-header"
+  }
+}
