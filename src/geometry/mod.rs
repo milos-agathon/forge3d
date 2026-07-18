@@ -10,6 +10,7 @@
 mod curves;
 #[cfg(feature = "extension-module")]
 mod displacement;
+pub mod exact;
 mod extrude;
 pub mod grid;
 mod primitives;
