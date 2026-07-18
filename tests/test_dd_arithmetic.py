@@ -237,20 +237,27 @@ def test_pinned_backend_ci_archives_full_dupla_proof() -> None:
     assert "dd_jitter_demo(frames=1_000)" in proof
 
 
-def test_gpu_unit_tests_skip_only_when_no_adapter_exists() -> None:
+def test_gpu_unit_tests_skip_only_non_proof_adapters() -> None:
     source = (ROOT / "src" / "core" / "dd_tests.rs").read_text(encoding="utf-8")
-    helper = _function_body(source, "require_gpu_or_skip")
+    helper = _function_body(source, "require_physical_gpu_or_skip")
+    assert "is_physical_proof_adapter" in helper
+    assert "Ok(context) =>" in helper
+    assert "is not proof hardware" in helper
     assert 'message.starts_with("No suitable GPU adapter found")' in helper
     assert "Err(error) => panic!" in helper
     assert "Err(_)" not in helper
+    gpu = (ROOT / "src" / "core" / "gpu.rs").read_text(encoding="utf-8")
+    classifier = _function_body(gpu, "is_physical_proof_adapter")
+    assert "!software_fallback" in classifier
+    assert "!is_virtualized_adapter_name" in classifier
     for name in (
         "forced_canary_failure_records_degradation_refuses_and_releases_resources",
         "forced_jitter_failure_releases_every_tracked_resource",
     ):
         body = _function_body(source, name)
-        assert body.count("require_gpu_or_skip") == 1
+        assert body.count("require_physical_gpu_or_skip") == 1
         assert re.search(
             r"if std::env::var_os\(CHILD\)\.is_none\(\) \{\s*"
-            r"if !require_gpu_or_skip\(",
+            r"if !require_physical_gpu_or_skip\(",
             body,
         )
