@@ -13,6 +13,7 @@ mod displacement;
 pub mod exact;
 mod extrude;
 pub mod grid;
+pub mod overlay;
 mod primitives;
 mod simplify;
 mod subdivision;

@@ -140,7 +140,7 @@ pub fn scale_expansion(expansion: &[f64], scalar: f64) -> Vec<f64> {
     out
 }
 
-fn expansion_product(left: &[f64], right: &[f64]) -> Vec<f64> {
+pub(crate) fn expansion_product(left: &[f64], right: &[f64]) -> Vec<f64> {
     let mut out = vec![0.0];
     for &component in right {
         out = expansion_sum(&out, &scale_expansion(left, component));
@@ -152,22 +152,22 @@ fn negate(expansion: &[f64]) -> Vec<f64> {
     expansion.iter().map(|value| -*value).collect()
 }
 
-fn expansion_diff(left: &[f64], right: &[f64]) -> Vec<f64> {
+pub(crate) fn expansion_diff(left: &[f64], right: &[f64]) -> Vec<f64> {
     expansion_sum(left, &negate(right))
 }
 
-fn expansion_estimate(expansion: &[f64]) -> f64 {
+pub(crate) fn expansion_estimate(expansion: &[f64]) -> f64 {
     expansion.iter().copied().sum()
 }
 
-fn expansion_value_with_exact_sign(expansion: &[f64]) -> f64 {
+pub(crate) fn expansion_value_with_exact_sign(expansion: &[f64]) -> f64 {
     match expansion.iter().rev().find(|value| **value != 0.0) {
         Some(value) => *value,
         None => 0.0,
     }
 }
 
-fn difference_expansion(a: f64, b: f64) -> Vec<f64> {
+pub(crate) fn difference_expansion(a: f64, b: f64) -> Vec<f64> {
     let (head, tail) = two_diff(a, b);
     if tail == 0.0 {
         vec![head]
@@ -371,6 +371,36 @@ pub fn incircle_with_stage(
 #[inline]
 pub fn incircle(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> f64 {
     incircle_with_stage(a, b, c, d).0
+}
+
+/// Exact-sign doubled signed area of a closed or open polygon ring.
+pub fn signed_area2(points: &[[f64; 2]]) -> f64 {
+    if points.len() < 3 || !finite_points(points) {
+        return if finite_points(points) { 0.0 } else { f64::NAN };
+    }
+    let edge_count = if points.first() == points.last() {
+        points.len() - 1
+    } else {
+        points.len()
+    };
+    let mut area = vec![0.0];
+    for index in 0..edge_count {
+        let next = (index + 1) % edge_count;
+        let (left, left_tail) = two_product(points[index][0], points[next][1]);
+        let (right, right_tail) = two_product(points[index][1], points[next][0]);
+        let left = if left_tail == 0.0 {
+            vec![left]
+        } else {
+            vec![left_tail, left]
+        };
+        let right = if right_tail == 0.0 {
+            vec![right]
+        } else {
+            vec![right_tail, right]
+        };
+        area = expansion_sum(&area, &expansion_diff(&left, &right));
+    }
+    expansion_value_with_exact_sign(&area)
 }
 
 /// Convert a predicate value to a total sign ordering.
