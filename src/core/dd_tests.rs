@@ -10,6 +10,19 @@ fn error_u2(actual: f64, exact: f64) -> f64 {
     (actual - exact).abs() / exact.abs() / DD_U.powi(2)
 }
 
+fn require_gpu_or_skip(test_name: &str) -> bool {
+    match crate::core::gpu::try_ctx() {
+        Ok(_) => true,
+        Err(crate::core::error::RenderError::Device(message))
+            if message.starts_with("No suitable GPU adapter found") =>
+        {
+            eprintln!("skipping {test_name}: no GPU adapter is exposed on this runner");
+            false
+        }
+        Err(error) => panic!("{test_name}: GPU initialization failed: {error}"),
+    }
+}
+
 #[test]
 fn encode_decode_preserves_submillimetres_at_ecef_scale() {
     let value = 6_378_137.000_25_f64;
@@ -77,6 +90,9 @@ fn normalization_is_idempotent() {
 
 #[test]
 fn gpu_canary_reports_backend_variant_and_shader_hash() {
+    if !require_gpu_or_skip("gpu_canary_reports_backend_variant_and_shader_hash") {
+        return;
+    }
     let report = selftest().expect("DD GPU exactness canary");
     assert!(report.passed);
     assert_eq!(report.mismatch_count, 0);
@@ -88,6 +104,9 @@ fn gpu_canary_reports_backend_variant_and_shader_hash() {
 
 #[test]
 fn gpu_harness_small_proof_is_bit_locked_and_leak_free() {
+    if !require_gpu_or_skip("gpu_harness_small_proof_is_bit_locked_and_leak_free") {
+        return;
+    }
     let before = crate::core::resource_tracker::ledger_snapshot();
     let generated = std::env::var("FORGE3D_DD_TEST_N")
         .ok()
@@ -159,6 +178,11 @@ fn gpu_harness_small_proof_is_bit_locked_and_leak_free() {
 fn forced_canary_failure_records_degradation_refuses_and_releases_resources() {
     const CHILD: &str = "FORGE3D_DD_FORCE_TEST_CHILD";
     if std::env::var_os(CHILD).is_none() {
+        if !require_gpu_or_skip(
+            "forced_canary_failure_records_degradation_refuses_and_releases_resources",
+        ) {
+            return;
+        }
         let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
             .arg("--exact")
             .arg("core::dd_tests::forced_canary_failure_records_degradation_refuses_and_releases_resources")
@@ -211,6 +235,9 @@ fn harness_rejects_invalid_operation_and_short_proof() {
 
 #[test]
 fn sqrt_half_ulp_tie_is_canonical_across_gpu_and_rust() {
+    if !require_gpu_or_skip("sqrt_half_ulp_tie_is_canonical_across_gpu_and_rust") {
+        return;
+    }
     let (mismatches, max_err_u2) = harness_window_for_test(DdOperation::Sqrt, 35_896_984, 1)
         .expect("sqrt tie regression window");
     assert_eq!(mismatches, 0);
@@ -219,6 +246,9 @@ fn sqrt_half_ulp_tie_is_canonical_across_gpu_and_rust() {
 
 #[test]
 fn jitter_demo_kills_absolute_f32_swim_and_is_deterministic() {
+    if !require_gpu_or_skip("jitter_demo_kills_absolute_f32_swim_and_is_deterministic") {
+        return;
+    }
     let before = crate::core::resource_tracker::ledger_snapshot();
     let report = jitter_demo(1_000).expect("DD jitter demo");
     eprintln!(
@@ -280,6 +310,9 @@ fn jitter_demo_kills_absolute_f32_swim_and_is_deterministic() {
 fn forced_jitter_failure_releases_every_tracked_resource() {
     const CHILD: &str = "FORGE3D_DD_JITTER_FAIL_CHILD";
     if std::env::var_os(CHILD).is_none() {
+        if !require_gpu_or_skip("forced_jitter_failure_releases_every_tracked_resource") {
+            return;
+        }
         let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
             .arg("--exact")
             .arg("core::dd_tests::forced_jitter_failure_releases_every_tracked_resource")
