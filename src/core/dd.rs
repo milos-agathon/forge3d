@@ -4,6 +4,9 @@ mod generator;
 mod gpu;
 mod gpu_exec;
 mod gpu_report;
+mod jitter;
+mod jitter_model;
+mod jitter_pipeline;
 mod product;
 mod proof;
 mod types;
@@ -15,6 +18,10 @@ pub(crate) use gpu::{harness, initialize_for_context, selftest};
 pub(crate) use gpu::{harness_for_test, harness_window_for_test};
 #[allow(unused_imports)] // Public Python seam is wired in DUPLA Task 4.
 pub(crate) use gpu_report::DdOperation;
+#[allow(unused_imports)] // Public Python seam is wired in DUPLA Task 4.
+pub(crate) use jitter::jitter_demo;
+#[allow(unused_imports)] // Public Python seam is wired in DUPLA Task 4.
+pub(crate) use jitter_model::DdJitterReport;
 pub use product::{two_prod, two_prod_fma, two_prod_split};
 pub use types::{DDVec3, DD};
 #[allow(unused_imports)] // dd_dot3/dd_length3 are consumed by DUPLA Task 3.

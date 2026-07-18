@@ -30,7 +30,7 @@ pub(super) struct HarnessPipeline {
     label: String,
 }
 
-fn assembled_source(variant: TwoProdVariant) -> String {
+pub(super) fn assemble_with_entry(variant: TwoProdVariant, entry: &str) -> String {
     let selected = match variant {
         TwoProdVariant::Fma => "two_prod_fma",
         TwoProdVariant::Split => "two_prod_split",
@@ -45,7 +45,11 @@ fn assembled_source(variant: TwoProdVariant) -> String {
             "__DD_BARRIER_BODY__",
             "let bits = bitcast<u32>(value);\n    let magnitude = bitcast<f32>(bits & 0x7fffffffu);\n    return select(magnitude, -magnitude, (bits & 0x80000000u) != 0u);",
         );
-    format!("{DETERMINISM}\n{}\n{}", dd, HARNESS)
+    format!("{DETERMINISM}\n{}\n{}", dd, entry)
+}
+
+fn assembled_source(variant: TwoProdVariant) -> String {
+    assemble_with_entry(variant, HARNESS)
 }
 
 impl HarnessPipeline {

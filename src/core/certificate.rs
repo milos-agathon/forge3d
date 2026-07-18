@@ -56,6 +56,7 @@ struct FinishedCapture {
     /// (kind, name, consequence), sorted by (kind, name).
     degradations: Vec<(String, String, String)>,
     precision: Option<PrecisionEvidence>,
+    jitter: Option<JitterEvidence>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -73,6 +74,24 @@ pub struct PrecisionEvidence {
     pub cited_bound_u2: f64,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct JitterEvidence {
+    pub unit: String,
+    pub backend: String,
+    pub adapter: String,
+    pub two_prod_variant: String,
+    pub shader_label: String,
+    pub shader_hash: String,
+    pub frame_count: u32,
+    pub camera_step_metres: f64,
+    pub dd_max_error_px: f64,
+    pub threshold_px: f64,
+    pub raw_max_error_px: f64,
+    pub raw_over_one_px: u32,
+    pub dd_hash_a: String,
+    pub dd_hash_b: String,
+}
+
 /// Passes recorded for the render currently in flight.
 static CURRENT: Mutex<Vec<PassRecord>> = Mutex::new(Vec::new());
 /// The last completed capture, serialized by `execution_report_json`.
@@ -83,10 +102,15 @@ thread_local! {
     static EXTERNAL_CAPTURE: RefCell<Option<RenderCaptureGuard>> = const { RefCell::new(None) };
     static CAPTURE_DEPTH: Cell<usize> = const { Cell::new(0) };
     static CURRENT_PRECISION: RefCell<Option<PrecisionEvidence>> = const { RefCell::new(None) };
+    static CURRENT_JITTER: RefCell<Option<JitterEvidence>> = const { RefCell::new(None) };
 }
 
 pub fn record_precision_evidence(evidence: PrecisionEvidence) {
     CURRENT_PRECISION.with(|slot| *slot.borrow_mut() = Some(evidence));
+}
+
+pub fn record_jitter_evidence(evidence: JitterEvidence) {
+    CURRENT_JITTER.with(|slot| *slot.borrow_mut() = Some(evidence));
 }
 
 #[must_use = "a render capture must be finished or retained until the render exits"]
@@ -192,6 +216,7 @@ pub fn begin_render_capture_with_resources(
     crate::core::shader_contract_runtime::begin_runtime_contract_capture();
     begin_degradation_capture();
     CURRENT_PRECISION.with(|slot| slot.borrow_mut().take());
+    CURRENT_JITTER.with(|slot| slot.borrow_mut().take());
     notify_python_degradation_capture("begin_capture");
     let mut cur = lock_current();
     cur.clear();
@@ -330,6 +355,7 @@ fn finish_render_capture() {
         by_label: ledger.by_label,
         degradations,
         precision: CURRENT_PRECISION.with(|slot| slot.borrow_mut().take()),
+        jitter: CURRENT_JITTER.with(|slot| slot.borrow_mut().take()),
     };
 
     *lock_last() = Some(finished);
@@ -343,6 +369,7 @@ pub fn abort_render_capture() {
     notify_python_degradation_capture("abort_capture");
     lock_current().clear();
     CURRENT_PRECISION.with(|slot| slot.borrow_mut().take());
+    CURRENT_JITTER.with(|slot| slot.borrow_mut().take());
 }
 
 /// Start a render-local capture owned by a Python renderer.
@@ -432,6 +459,8 @@ struct ReportJson<'a> {
     degradations: Vec<DegradationJson<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     precision: Option<&'a PrecisionEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    jitter: Option<&'a JitterEvidence>,
 }
 
 /// Serialize the LAST completed render capture as the canonical certificate
@@ -488,6 +517,7 @@ pub fn execution_report_json() -> Result<String, RenderError> {
             })
             .collect(),
         precision: cap.precision.as_ref(),
+        jitter: cap.jitter.as_ref(),
     };
 
     serde_json::to_string(&report)

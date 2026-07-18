@@ -216,3 +216,91 @@ fn sqrt_half_ulp_tie_is_canonical_across_gpu_and_rust() {
     assert_eq!(mismatches, 0);
     assert!(max_err_u2 <= DD_SQRT_BOUND_U2);
 }
+
+#[test]
+fn jitter_demo_kills_absolute_f32_swim_and_is_deterministic() {
+    let before = crate::core::resource_tracker::ledger_snapshot();
+    let report = jitter_demo(1_000).expect("DD jitter demo");
+    eprintln!(
+        "DUPLA jitter: dd_max={}px raw_max={}px raw_over_one={}/1000 hash={}",
+        report.dd_max_error_px, report.f32_max_error_px, report.raw_over_one_px, report.dd_hash_a
+    );
+    assert_eq!(report.dd_errors_px.len(), 1_000);
+    assert_eq!(report.f32_errors_px.len(), 1_000);
+    assert!(report.dd_max_error_px < 0.01, "{}", report.dd_max_error_px);
+    assert!(report.f32_max_error_px > 1.0);
+    assert!(report.raw_over_one_px >= 100);
+    assert_eq!(report.dd_hash_a, report.dd_hash_b);
+    assert_eq!(report.dd_hash_a.len(), 64);
+    let certificate: serde_json::Value =
+        serde_json::from_str(&report.certificate_json).expect("jitter certificate parses");
+    let pass = certificate["passes"]
+        .as_array()
+        .expect("passes")
+        .iter()
+        .find(|pass| pass["label"] == "dupla.dd_jitter")
+        .expect("timed jitter pass");
+    assert!(pass["gpu_ms"]
+        .as_f64()
+        .is_some_and(|value| value.is_finite() && value >= 0.0));
+    let evidence = &certificate["jitter"];
+    assert_eq!(evidence["unit"], "px");
+    assert_eq!(evidence["frame_count"], 1_000);
+    assert_eq!(evidence["camera_step_metres"], 0.001);
+    assert_eq!(evidence["dd_max_error_px"], report.dd_max_error_px);
+    assert_eq!(evidence["threshold_px"], 0.01);
+    assert_eq!(evidence["raw_max_error_px"], report.f32_max_error_px);
+    assert_eq!(evidence["raw_over_one_px"], report.raw_over_one_px);
+    assert_eq!(evidence["dd_hash_a"], report.dd_hash_a);
+    assert_eq!(evidence["dd_hash_b"], report.dd_hash_b);
+    assert_eq!(
+        certificate["engine"]["wgsl_module_hashes"][&report.shader_label],
+        evidence["shader_hash"]
+    );
+    assert!(evidence["backend"]
+        .as_str()
+        .is_some_and(|value| !value.is_empty()));
+    assert!(evidence["two_prod_variant"]
+        .as_str()
+        .is_some_and(|value| !value.is_empty()));
+    assert!(!report.backend.is_empty());
+    assert_eq!(report.shader_label, "dupla.dd_jitter");
+    let after = crate::core::resource_tracker::ledger_snapshot();
+    assert_eq!(
+        after.current_host_visible_bytes,
+        before.current_host_visible_bytes
+    );
+    assert_eq!(
+        after.current_device_local_bytes,
+        before.current_device_local_bytes
+    );
+}
+
+#[test]
+fn forced_jitter_failure_releases_every_tracked_resource() {
+    const CHILD: &str = "FORGE3D_DD_JITTER_FAIL_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let status = std::process::Command::new(std::env::current_exe().expect("test executable"))
+            .arg("--exact")
+            .arg("core::dd_tests::forced_jitter_failure_releases_every_tracked_resource")
+            .arg("--test-threads=1")
+            .env(CHILD, "1")
+            .env("FORGE3D_DD_FORCE_JITTER_FAIL", "1")
+            .status()
+            .expect("forced jitter subprocess starts");
+        assert!(status.success());
+        return;
+    }
+    let before = crate::core::resource_tracker::ledger_snapshot();
+    let error = jitter_demo(16).expect_err("forced jitter failure");
+    assert!(error.to_string().contains("forced DD jitter failure"));
+    let after = crate::core::resource_tracker::ledger_snapshot();
+    assert_eq!(
+        after.current_host_visible_bytes,
+        before.current_host_visible_bytes
+    );
+    assert_eq!(
+        after.current_device_local_bytes,
+        before.current_device_local_bytes
+    );
+}
