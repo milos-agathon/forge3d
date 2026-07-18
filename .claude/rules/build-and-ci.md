@@ -7,7 +7,7 @@ paths: ["Cargo.toml", "pyproject.toml", ".cargo/**", ".github/workflows/**", "py
 - Build with maturin/PyO3. Wheels use the `release-lto` profile.
 - Use `cargo forge3d-clippy`, never plain `cargo clippy`.
 - The portable CI feature list is:
-  `default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings`.
+  `default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,shader-contract-asserts`.
   `.github/workflows/ci.yml` is authoritative and the honesty gate locks every
   duplicate list. Ubuntu separately installs PROJ prerequisites and checks the
   `proj` feature.

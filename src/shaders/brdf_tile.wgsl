@@ -57,6 +57,14 @@ fn wi3_cosines(N: vec3<f32>, V: vec3<f32>, L: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(NoV, NoL, NoH);
 }
 
+fn safe_half_vector(V: vec3<f32>, L: vec3<f32>, N: vec3<f32>) -> vec3<f32> {
+    let sum = V + L;
+    if all(sum == vec3<f32>(0.0)) {
+        return N;
+    }
+    return normalize(sum);
+}
+
 // sRGB helpers (piecewise exact curve)
 fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
     let a = 0.055;
@@ -819,7 +827,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         if n_dot_l <= 0.0 || n_dot_v <= 0.0 {
             return vec4<f32>(0.0, 0.0, 0.0, 1.0);
         }
-        let half_vec = normalize(view_dir + light_dir);
+        let half_vec = safe_half_vector(view_dir, light_dir, normal);
         let n_dot_h = max(dot(normal, half_vec), 0.0);
         let v_dot_h = max(dot(view_dir, half_vec), 0.0);
         
@@ -852,7 +860,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         if n_dot_l <= 0.0 || n_dot_v <= 0.0 {
             return vec4<f32>(0.0, 0.0, 0.0, 1.0);
         }
-        let half_vec = normalize(view_dir + light_dir);
+        let half_vec = safe_half_vector(view_dir, light_dir, normal);
         let n_dot_h = max(dot(normal, half_vec), 0.0);
         let v_dot_h = max(dot(view_dir, half_vec), 0.0);
         let f0 = params.f0;
@@ -874,7 +882,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     
     // 5. NDF-only debug mode: output normalized D for shape visualization
     if params.ndf_only != 0u {
-        let half_vec = normalize(view_dir + light_dir);
+        let half_vec = safe_half_vector(view_dir, light_dir, normal);
         let n_dot_h = max(dot(normal, half_vec), 0.0);
         
         // M2.1: Compute GGX NDF
@@ -898,7 +906,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             let comp = energy_comp_factor(f0, shading.roughness);
             return finalize_output_linear(vec3<f32>(comp));
         }
-        let half_vec = normalize(view_dir + light_dir);
+        let half_vec = safe_half_vector(view_dir, light_dir, normal);
         let v_dot_h = max(dot(view_dir, half_vec), 0.0);
         let dielectric_f0 = vec3<f32>(0.04);
         let f0 = mix(dielectric_f0, params.base_color, params.metallic);
@@ -961,7 +969,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if params.debug_angle_sweep != 0u {
         if params.debug_angle_component == 0u {
             // spec only
-            let half_vec = normalize(view_dir + light_dir);
+            let half_vec = safe_half_vector(view_dir, light_dir, normal);
             let n_dot_h = max(dot(normal, half_vec), 0.0);
             let v_dot_h = max(dot(view_dir, half_vec), 0.0);
             let D = distribution_ggx(n_dot_h, shading.roughness);

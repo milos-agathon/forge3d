@@ -1,49 +1,9 @@
 use super::*;
 
-fn load_hybrid_kernel_src() -> String {
-    let sdf_primitives = include_str!("../../shaders/sdf_primitives.wgsl");
-    let sdf_operations_raw = include_str!("../../shaders/sdf_operations.wgsl");
-    let sdf_operations = sdf_operations_raw
-        .lines()
-        .filter(|l| !l.trim_start().starts_with("#include"))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let hybrid_traversal_raw = include_str!("../../shaders/hybrid_traversal.wgsl");
-    let hybrid_traversal = hybrid_traversal_raw
-        .lines()
-        .filter(|l| !l.trim_start().starts_with("#include"))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let terrain_raw = include_str!("../../shaders/hybrid_terrain_traversal.wgsl");
-    let terrain = terrain_raw
-        .lines()
-        .filter(|l| !l.trim_start().starts_with("#include"))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let kernel_raw = include_str!("../../shaders/hybrid_kernel.wgsl");
-    let kernel = kernel_raw
-        .lines()
-        .filter(|l| !l.trim_start().starts_with("#include"))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    [
-        sdf_primitives,
-        &sdf_operations,
-        &hybrid_traversal,
-        &terrain,
-        &kernel,
-    ]
-    .join("\n")
-}
-
 impl HybridPathTracer {
     pub fn new() -> Result<Self, RenderError> {
         let device = &try_ctx()?.device;
-        let shader_src = load_hybrid_kernel_src();
+        let shader_src = crate::shader_sources::hybrid_kernel();
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
             "hybrid-pt-kernel",

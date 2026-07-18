@@ -639,6 +639,16 @@ impl TerrainScene {
         );
         let uniforms =
             Self::build_uniforms_with_matrices(&state.params, &state.decoded, view, jittered_proj);
+        super::runtime_contract::record_observation(
+            "terrain.accumulate_batch",
+            &uniforms,
+            &state.materials.shading_uniforms,
+            &state.materials.overlay_binding.uniform,
+            &state.height_inputs.heightmap_data,
+            state.height_inputs.width,
+            state.height_inputs.height,
+        )
+        .map_err(anyhow::Error::msg)?;
         let uniform_buffer = tracked_create_buffer_init(
             self.device.as_ref(),
             &wgpu::util::BufferInitDescriptor {

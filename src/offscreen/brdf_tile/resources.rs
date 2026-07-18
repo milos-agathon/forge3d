@@ -288,3 +288,272 @@ fn flag(value: bool) -> u32 {
         0
     }
 }
+
+pub(super) fn record_runtime_contract_observation(
+    request: &PreparedBrdfTileRequest,
+    render_target: &[u8],
+) -> RenderResult<()> {
+    let params = brdf_tile_params(request);
+    let shading = shading_params(request);
+    let debug = debug_push(request);
+    let mut observation = crate::core::shader_contract_runtime::RuntimeContractObservation::new(
+        "render_brdf_tile",
+        "brdf_tile.pipeline",
+        "brdf_tile",
+        "src/shaders/brdf_tile.wgsl",
+        "fs_main",
+        "shaders/contracts/brdf_tile.toml",
+    );
+
+    observation.check_range(
+        "value",
+        "input.world_position",
+        None,
+        -1.0,
+        1.0,
+        -10_000_000.0,
+        10_000_000.0,
+    );
+    observation.check_range("value", "input.world_normal", None, -1.0, 1.0, -1.0, 1.0);
+    observation.check_range("value", "input.uv", None, 0.0, 1.0, 0.0, 1.0);
+
+    let (min, max) = min_max(&params.base_color);
+    observation.check_range("uniform", "params.base_color", Some(1), min, max, 0.0, 1.0);
+    let (min, max) = min_max(&params.camera_pos);
+    observation.check_range(
+        "uniform",
+        "params.camera_pos",
+        Some(1),
+        min,
+        max,
+        -10_000_000.0,
+        10_000_000.0,
+    );
+    observation.check_range(
+        "uniform",
+        "params.clearcoat",
+        Some(1),
+        params.clearcoat,
+        params.clearcoat,
+        0.0,
+        1.0,
+    );
+    observation.check_range(
+        "uniform",
+        "params.clearcoat_roughness",
+        Some(1),
+        params.clearcoat_roughness,
+        params.clearcoat_roughness,
+        0.0,
+        1.0,
+    );
+    observation.check_range(
+        "uniform",
+        "params.debug_angle_component",
+        Some(1),
+        params.debug_angle_component as f32,
+        params.debug_angle_component as f32,
+        0.0,
+        3.0,
+    );
+    for (name, value) in [
+        ("params.debug_angle_sweep", params.debug_angle_sweep),
+        ("params.debug_d", params.debug_d),
+        ("params.debug_diffuse_only", params.debug_diffuse_only),
+        ("params.debug_energy", params.debug_energy),
+        ("params.debug_lambert_only", params.debug_lambert_only),
+        ("params.debug_no_srgb", params.debug_no_srgb),
+        ("params.debug_spec_no_nl", params.debug_spec_no_nl),
+        ("params.dfg_only", params.dfg_only),
+        ("params.g_only", params.g_only),
+        ("params.ndf_only", params.ndf_only),
+        ("params.roughness_visualize", params.roughness_visualize),
+        ("params.spec_only", params.spec_only),
+    ] {
+        observation.check_range(
+            "uniform",
+            name,
+            Some(1),
+            value as f32,
+            value as f32,
+            0.0,
+            1.0,
+        );
+    }
+    observation.check_range(
+        "uniform",
+        "params.debug_kind",
+        Some(1),
+        params.debug_kind as f32,
+        params.debug_kind as f32,
+        0.0,
+        32.0,
+    );
+    let (min, max) = min_max(&params.f0);
+    observation.check_range("uniform", "params.f0", Some(1), min, max, 0.0, 1.0);
+    let (min, max) = min_max(&params.light_color);
+    observation.check_range(
+        "uniform",
+        "params.light_color",
+        Some(1),
+        min,
+        max,
+        0.0,
+        65_536.0,
+    );
+    let (min, max) = min_max(&params.light_dir);
+    observation.check_range("uniform", "params.light_dir", Some(1), min, max, -1.0, 1.0);
+    observation.check_range(
+        "uniform",
+        "params.light_intensity",
+        Some(1),
+        params.light_intensity,
+        params.light_intensity,
+        0.0,
+        65_536.0,
+    );
+    observation.check_range(
+        "uniform",
+        "params.metallic",
+        Some(1),
+        params.metallic,
+        params.metallic,
+        0.0,
+        1.0,
+    );
+    observation.check_range(
+        "uniform",
+        "params.roughness",
+        Some(1),
+        params.roughness,
+        params.roughness,
+        0.0,
+        1.0,
+    );
+    observation.check_range(
+        "uniform",
+        "params.sheen",
+        Some(1),
+        params.sheen,
+        params.sheen,
+        0.0,
+        1.0,
+    );
+    observation.check_range(
+        "uniform",
+        "params.sheen_tint",
+        Some(1),
+        params.sheen_tint,
+        params.sheen_tint,
+        0.0,
+        1.0,
+    );
+
+    observation.check_range(
+        "uniform",
+        "shading.brdf",
+        Some(2),
+        shading.brdf as f32,
+        shading.brdf as f32,
+        0.0,
+        32.0,
+    );
+    observation.check_range(
+        "uniform",
+        "shading.exposure",
+        Some(2),
+        shading.exposure,
+        shading.exposure,
+        0.0,
+        65_536.0,
+    );
+    observation.check_range(
+        "uniform",
+        "shading.metallic",
+        Some(2),
+        shading.metallic,
+        shading.metallic,
+        0.0,
+        1.0,
+    );
+    observation.check_range(
+        "uniform",
+        "shading.output_mode",
+        Some(2),
+        shading.output_mode as f32,
+        shading.output_mode as f32,
+        0.0,
+        32.0,
+    );
+    observation.check_range(
+        "uniform",
+        "shading.roughness",
+        Some(2),
+        shading.roughness,
+        shading.roughness,
+        0.0,
+        1.0,
+    );
+
+    observation.check_range(
+        "buffer",
+        "debug_buffer",
+        Some(3),
+        0.0,
+        u32::MAX as f32,
+        0.0,
+        4_294_967_296.0,
+    );
+    observation.check_length("buffer", "debug_buffer", Some(3), 4, 4);
+    observation.check_range(
+        "uniform",
+        "debug_push.mode",
+        Some(7),
+        debug.mode as f32,
+        debug.mode as f32,
+        0.0,
+        32.0,
+    );
+    observation.check_range(
+        "uniform",
+        "debug_push.roughness",
+        Some(7),
+        debug.roughness,
+        debug.roughness,
+        0.0,
+        1.0,
+    );
+
+    let (min, max) = render_target
+        .iter()
+        .copied()
+        .fold((u8::MAX, u8::MIN), |(min, max), value| {
+            (min.min(value), max.max(value))
+        });
+    observation.check_range(
+        "texture_readback",
+        "render_target.samples",
+        Some(0),
+        min as f32 / 255.0,
+        max as f32 / 255.0,
+        0.0,
+        1.0,
+    );
+    observation.check_length(
+        "texture_readback",
+        "render_target.bytes",
+        Some(0),
+        render_target.len() as u64,
+        request.expected_buffer_size() as u64,
+    );
+
+    crate::core::shader_contract_runtime::record_observation(observation)
+        .map_err(crate::core::error::RenderError::render)
+}
+
+fn min_max(values: &[f32]) -> (f32, f32) {
+    values.iter().copied().fold(
+        (f32::INFINITY, f32::NEG_INFINITY),
+        |(min_value, max_value), value| (min_value.min(value), max_value.max(value)),
+    )
+}

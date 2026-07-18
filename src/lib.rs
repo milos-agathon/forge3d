@@ -140,6 +140,7 @@ pub mod renderer;
 #[cfg(feature = "extension-module")]
 pub mod scene;
 pub mod sdf; // New SDF module
+pub(crate) mod shader_sources;
 pub mod shadows; // Shadow mapping implementations
 pub mod smoke; // Physical smoke volumes, simulation, and reference rendering
 pub mod terrain;
@@ -158,6 +159,7 @@ pub mod style; // Mapbox Style Spec import for vector/label styling
 pub mod tiles3d; // P5: 3D Tiles support (tileset.json, b3dm, pnts)
 pub mod util;
 pub mod vector;
+pub mod verify;
 pub mod viewer; // Interactive windowed viewer (Workstream I1) // P5.2: render passes wrappers // P5-export: Vector export (SVG/PDF) for print-grade overlays
 
 // Re-export commonly used types

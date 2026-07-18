@@ -3,7 +3,8 @@ use anyhow::{ensure, Result};
 use super::debug::{log_gpu_info_once, log_render_request, read_debug_dot_products};
 use super::request::BrdfTileRenderRequest;
 use super::resources::{
-    encode_render_pass, MeshBuffers, RenderTargets, TimestampResources, UniformResources,
+    encode_render_pass, record_runtime_contract_observation, MeshBuffers, RenderTargets,
+    TimestampResources, UniformResources,
 };
 
 pub(super) fn render_brdf_tile(
@@ -78,6 +79,7 @@ pub(super) fn render_brdf_tile(
         request.width,
         request.height
     );
+    record_runtime_contract_observation(&request, &buffer)?;
 
     Ok(buffer)
 }

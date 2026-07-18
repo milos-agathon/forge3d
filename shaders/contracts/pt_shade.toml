@@ -1,0 +1,12 @@
+[module]
+path = "src/shaders/pt_shade.wgsl"
+owner = "path-tracing"
+expiry = "2027-01-17"
+
+[[entry]]
+name = "main"
+proof_status = "proven"
+inputs = ["value:gid:0:4294967000", "uniform:uniforms:-65536:65536", "buffer:scene_spheres:-65536:65536:1", "buffer:area_lights:-65536:65536:1", "buffer:directional_lights:-65536:65536:1", "buffer:restir_reservoirs:-65536:65536:1", "buffer:restir_diag_flags:0:4294967000:1", "buffer:restir_debug_aov:-65536:65536:1", "buffer:restir_gbuffer:-65536:65536:1", "buffer:restir_gbuffer_pos:-65536:65536:1", "uniform:restir_settings:-65536:65536", "buffer:restir_gbuffer_mat:0:4294967000:1", "buffer:object_importance:0:65536:1", "buffer:aov_albedo_buf:0:65504:1", "buffer:aov_depth_buf:0:65504:1", "buffer:aov_normal_buf:-1:1:1", "uniform:medium_params:-65536:65536", "uniform:reference_environment:-65536:65536", "buffer:hit_queue_header:0:4294967000:1", "buffer:hit_queue:-65536:65536:1", "buffer:scatter_queue_header:0:4294967000:1", "buffer:scatter_queue:-65536:65536:1", "buffer:shadow_queue_header:0:4294967000:1", "buffer:shadow_queue:-65536:65536:1", "buffer:accum_hdr:0:65504:1"]
+outputs = ["queue_payloads:-65536:65536", "accum_hdr:0:65504"]
+invariants = ["length_product:restir_reservoirs:uniforms.width:uniforms.height", "length_product:restir_diag_flags:uniforms.width:uniforms.height", "length_product:restir_debug_aov:uniforms.width:uniforms.height", "length_product:restir_gbuffer:uniforms.width:uniforms.height", "length_product:restir_gbuffer_pos:uniforms.width:uniforms.height", "length_product:restir_gbuffer_mat:uniforms.width:uniforms.height", "length_product:aov_albedo_buf:uniforms.width:uniforms.height", "length_product:aov_depth_buf:uniforms.width:uniforms.height", "length_product:aov_normal_buf:uniforms.width:uniforms.height", "length_product:accum_hdr:uniforms.width:uniforms.height", "count_within:hit_queue_header.capacity:hit_queue", "count_within:scatter_queue_header.capacity:scatter_queue", "count_within:shadow_queue_header.capacity:shadow_queue"]
+requires_guards = ["u1 / max(1.0 - u1, 1e-6)"]

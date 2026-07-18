@@ -67,6 +67,10 @@ const TERRAIN_PI: f32 = 3.14159265358979323846;
 // each temporal merge so w_sum/M cannot blow up across hundreds of frames.
 const TERRAIN_RESTIR_M_CAP: u32 = 512u;
 
+fn terrain_reservoir_weight(w_sum: f32, m: u32, target_pdf: f32) -> f32 {
+    return w_sum / (f32(m) * target_pdf);
+}
+
 fn terrain_enabled() -> bool {
     return (terrain.mips.y & 1u) != 0u;
 }
@@ -392,7 +396,7 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
         prev_r.w_sum = prev_r.w_sum * scale;
         prev_r.m = TERRAIN_RESTIR_M_CAP;
         if (prev_r.target_pdf > 0.0) {
-            prev_r.weight = prev_r.w_sum / (f32(prev_r.m) * prev_r.target_pdf);
+            prev_r.weight = terrain_reservoir_weight(prev_r.w_sum, prev_r.m, prev_r.target_pdf);
         }
         terrain_reservoirs_prev[pix] = prev_r;
     }
@@ -485,8 +489,8 @@ fn main_terrain(@builtin(global_invocation_id) gid: vec3<u32>) {
     frame_radiance = frame_radiance / f32(spp);
 
     // Finalize + publish this frame's candidate reservoir for the reuse chain.
-    if (cand.w_sum > 0.0 && cand.target_pdf > 0.0) {
-        cand.weight = cand.w_sum / (f32(cand.m) * cand.target_pdf);
+    if (cand.m > 0u && cand.w_sum > 0.0 && cand.target_pdf > 0.0) {
+        cand.weight = terrain_reservoir_weight(cand.w_sum, cand.m, cand.target_pdf);
     }
     terrain_reservoirs_curr[pix] = cand;
 

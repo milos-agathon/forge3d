@@ -1,0 +1,11 @@
+[module]
+path = "src/shaders/pt_shade.wgsl"
+owner = "path-tracing"
+expiry = "2027-01-17"
+
+[[entry]]
+name = "prove_ggx_guard"
+proof_status = "proven"
+inputs = ["value:position:0:1"]
+outputs = ["location0:0:1000001"]
+requires_guards = ["u1 / max(1.0 - u1, 1e-6)"]

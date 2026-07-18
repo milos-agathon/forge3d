@@ -265,6 +265,8 @@ class TestNativeModuleSymbols:
         # CENSOR: certified BRDF pixel renders
         "render_brdf_tile",
         "render_brdf_tile_overrides",
+        # PROBATUM: WGSL proof report
+        "shader_report",
     ]
 
     @pytest.mark.parametrize("fn_name", EXPECTED_FUNCTIONS)

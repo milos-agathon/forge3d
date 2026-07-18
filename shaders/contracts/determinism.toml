@@ -1,0 +1,193 @@
+[module]
+path = "src/shaders/includes/determinism.wgsl"
+owner = "render-quality"
+expiry = "2027-01-17"
+
+[[entry]]
+name = "det_barrier"
+proof_status = "proven"
+inputs = ["value:x:-65536:65536"]
+outputs = ["return:-65536:65536"]
+
+[[entry]]
+name = "det_barrier3"
+proof_status = "proven"
+inputs = ["value:v:-65536:65536"]
+outputs = ["return:-65536:65536"]
+
+[[entry]]
+name = "det_barrier4"
+proof_status = "proven"
+inputs = ["value:v:-65536:65536"]
+outputs = ["return:-65536:65536"]
+
+[[entry]]
+name = "det_fma"
+proof_status = "proven"
+inputs = ["value:a:-1024:1024", "value:b:-1024:1024", "value:c:-1024:1024"]
+outputs = ["return:-1049600:1049600"]
+
+[[entry]]
+name = "det_fma3"
+proof_status = "proven"
+inputs = ["value:a:-1024:1024", "value:b:-1024:1024", "value:c:-1024:1024"]
+outputs = ["return:-1049600:1049600"]
+
+[[entry]]
+name = "det_mix"
+proof_status = "proven"
+inputs = ["value:a:-1024:1024", "value:b:-1024:1024", "value:t:0:1"]
+outputs = ["return:-1024:1024"]
+
+[[entry]]
+name = "det_mix3"
+proof_status = "proven"
+inputs = ["value:a:-1024:1024", "value:b:-1024:1024", "value:t:0:1"]
+outputs = ["return:-1024:1024"]
+
+[[entry]]
+name = "det_dot2"
+proof_status = "proven"
+inputs = ["value:a:-128:128", "value:b:-128:128"]
+outputs = ["return:-32768:32768"]
+
+[[entry]]
+name = "det_dot3"
+proof_status = "proven"
+inputs = ["value:a:-128:128", "value:b:-128:128"]
+outputs = ["return:-49152:49152"]
+
+[[entry]]
+name = "det_dot4"
+proof_status = "proven"
+inputs = ["value:a:-128:128", "value:b:-128:128"]
+outputs = ["return:-65536:65536"]
+
+[[entry]]
+name = "det_inverse_sqrt"
+proof_status = "proven"
+inputs = ["value:x:0.000001:65536"]
+outputs = ["return:0:1024"]
+
+[[entry]]
+name = "det_rcp"
+proof_status = "proven"
+inputs = ["value:x:-65536:65536"]
+outputs = ["return:-1000000:1000000"]
+invariants = ["abs_ge:x:0.000001"]
+
+[[entry]]
+name = "det_div"
+proof_status = "proven"
+inputs = ["value:a:-65536:65536", "value:b:-65536:65536"]
+outputs = ["return:-65536000000:65536000000"]
+invariants = ["abs_ge:b:0.000001"]
+
+[[entry]]
+name = "det_sqrt"
+proof_status = "proven"
+inputs = ["value:x:-65536:65536"]
+outputs = ["return:0:256.001"]
+
+[[entry]]
+name = "det_normalize2"
+proof_status = "proven"
+inputs = ["value:v:-128:128"]
+outputs = ["return:-1.01:1.01"]
+
+[[entry]]
+name = "det_normalize3"
+proof_status = "proven"
+inputs = ["value:v:-128:128"]
+outputs = ["return:-1.01:1.01"]
+
+[[entry]]
+name = "det_reflect3"
+proof_status = "proven"
+inputs = ["value:i:-1:1", "value:n:-1:1"]
+outputs = ["return:-7:7"]
+
+[[entry]]
+name = "det_cross3"
+proof_status = "proven"
+inputs = ["value:a:-128:128", "value:b:-128:128"]
+outputs = ["return:-32768:32768"]
+
+[[entry]]
+name = "det_mat3_mul_vec3"
+proof_status = "proven"
+inputs = ["value:m:-16:16", "value:v:-16:16"]
+outputs = ["return:-768:768"]
+
+[[entry]]
+name = "det_mat4_mul_vec4"
+proof_status = "proven"
+inputs = ["value:m:-16:16", "value:v:-16:16"]
+outputs = ["return:-1024:1024"]
+
+[[entry]]
+name = "det_pow"
+proof_status = "proven"
+inputs = ["value:x:0.0001:16", "value:y:-8:8"]
+outputs = ["return:0:1.000001e32"]
+
+[[entry]]
+name = "det_pow3"
+proof_status = "proven"
+inputs = ["value:x:0.0001:16", "value:y:-8:8"]
+outputs = ["return:0:1.000001e32"]
+
+[[entry]]
+name = "det_exp"
+proof_status = "proven"
+inputs = ["value:x:-10:10"]
+outputs = ["return:0:30000"]
+
+[[entry]]
+name = "det_exp3"
+proof_status = "proven"
+inputs = ["value:x:-10:10"]
+outputs = ["return:0:30000"]
+
+[[entry]]
+name = "det_exp2"
+proof_status = "proven"
+inputs = ["value:x:-10:10"]
+outputs = ["return:0:2048"]
+
+[[entry]]
+name = "det_log2"
+proof_status = "proven"
+inputs = ["value:x:0.000001:65536"]
+outputs = ["return:-32:32"]
+
+[[entry]]
+name = "det_sin"
+proof_status = "proven"
+inputs = ["value:x:-1000:1000"]
+outputs = ["return:-1.1:1.1"]
+
+[[entry]]
+name = "det_cos"
+proof_status = "proven"
+inputs = ["value:x:-1000:1000"]
+outputs = ["return:-1.1:1.1"]
+
+[[entry]]
+name = "det_atan01"
+proof_status = "proven"
+inputs = ["value:a:0:1"]
+outputs = ["return:0:1"]
+
+[[entry]]
+name = "det_atan2"
+proof_status = "proven"
+inputs = ["value:y:-65536:65536", "value:x:-65536:65536"]
+outputs = ["return:-3.2:3.2"]
+invariants = ["sum_abs_ge:x:y:0.000001"]
+
+[[entry]]
+name = "det_acos"
+proof_status = "proven"
+inputs = ["value:x:-1:1"]
+outputs = ["return:0:3.2"]

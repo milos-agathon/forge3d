@@ -15,15 +15,15 @@ SANCTIONED = "src/camera/anchor.rs"
 
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
-EXPECTED_CONVERSION_COUNT = 1279
-EXPECTED_CONVERSION_SHA256 = "27153146bc49a4004cd49b998bd34a52efe410ad885ad98c45af8d2168def9b8"
+EXPECTED_CONVERSION_COUNT = 1323
+EXPECTED_CONVERSION_SHA256 = "28d1cc9db71b48c818577782ef697f54a255a6064333cf9870fd6eb1d5ba9bf6"
 
 # Reviewed TERMINUS transition from the pinned pre-remediation inventory. The
 # conversion count is unchanged: only the statement containing the existing
 # f64-to-f32 conversion moved behind a checked eight-byte reader.
 REVIEWED_INVENTORY_TRANSITION = {
-    "base_count": 1279,
-    "base_digest": "875dd365debe1992628e61773ffa66be13e26f63d2ec9d6b6661c5758638bbcd",
+    "base_count": 1323,
+    "base_digest": "f091a37320becd54518275739b3d832d8b9820e45960ba85ce6a91a30eecc5bc",
     "removed": (
         "src/terrain/cog/cog_reader.rs",
         "decode_heights",

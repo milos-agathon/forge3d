@@ -31,6 +31,7 @@ pub(in crate::terrain::renderer) struct PreparedMaterials {
     pub(in crate::terrain::renderer) gpu_materials:
         Arc<crate::render::material_set::GpuMaterialSet>,
     pub(in crate::terrain::renderer) shading_buffer: TrackedBuffer,
+    pub(in crate::terrain::renderer) shading_uniforms: Vec<f32>,
     pub(in crate::terrain::renderer) overlay_buffer: TrackedBuffer,
     pub(in crate::terrain::renderer) overlay_binding: OverlayBinding,
     pub(in crate::terrain::renderer) fallback_colormap_view: Option<wgpu::TextureView>,
@@ -237,6 +238,7 @@ impl TerrainScene {
         Ok(PreparedMaterials {
             gpu_materials,
             shading_buffer,
+            shading_uniforms,
             overlay_buffer,
             overlay_binding,
             fallback_colormap_view,

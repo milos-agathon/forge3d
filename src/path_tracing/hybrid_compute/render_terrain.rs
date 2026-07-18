@@ -20,6 +20,197 @@ use crate::path_tracing::restir::{
     create_reservoir_buffer, create_restir_gbuffer, create_restir_gbuffer_pos, Reservoir,
 };
 
+fn finite_min_max(values: impl Iterator<Item = f32>) -> (f32, f32) {
+    values.fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), value| {
+        (lo.min(value), hi.max(value))
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_runtime_contract(
+    desc: &TerrainReferenceDesc,
+    base: &Uniforms,
+    hybrid: &HybridUniforms,
+    lighting: &LightingUniforms,
+    terrain: &super::terrain_heightfield::TerrainPtUniforms,
+    frames: u32,
+    reservoirs: &[Reservoir],
+    accum: &[f32],
+    welford: &[f32],
+    beauty: &[u8],
+) -> Result<(), RenderError> {
+    if !crate::core::shader_contract_runtime::capture_active() {
+        return Ok(());
+    }
+    let mut observed = crate::core::shader_contract_runtime::RuntimeContractObservation::new(
+        &format!("hybrid-terrain-{}x{}-{frames}f", desc.width, desc.height),
+        "hybrid_pt.terrain",
+        "hybrid_terrain_traversal",
+        "src/shaders/hybrid_terrain_traversal.wgsl",
+        "main_terrain",
+        "shaders/contracts/hybrid_terrain_traversal.toml",
+    );
+    {
+        let mut check = |name: &str, values: &[f32], lo: f32, hi: f32| {
+            let (actual_lo, actual_hi) = finite_min_max(values.iter().copied());
+            observed.check_range("uniform", name, None, actual_lo, actual_hi, lo, hi);
+        };
+        check("uniforms.width", &[base.width as f32], 8.0, 8.0);
+        check("uniforms.height", &[base.height as f32], 8.0, 8.0);
+        check("uniforms.cam_origin.x", &[base.cam_origin[0]], 0.0, 0.0);
+        check("uniforms.cam_origin.y", &[base.cam_origin[1]], 3.0, 3.0);
+        check("uniforms.cam_origin.z", &[base.cam_origin[2]], 8.0, 8.0);
+        check("uniforms.cam_right", &base.cam_right, 0.0, 1.0);
+        check("uniforms.cam_up", &base.cam_up, -0.36, 0.94);
+        check("uniforms.cam_forward", &base.cam_forward, -0.94, 0.0);
+        check("uniforms.cam_aspect", &[base.cam_aspect], 1.0, 1.0);
+        check("uniforms.cam_fov_y", &[base.cam_fov_y], 0.78, 0.79);
+        check("uniforms.cam_exposure", &[base.cam_exposure], 1.0, 1.0);
+        check(
+            "uniforms.frame_index",
+            &[0.0, frames.saturating_sub(1) as f32],
+            0.0,
+            3.0,
+        );
+        check(
+            "uniforms.dispatch_gid",
+            &[
+                0.0,
+                (desc.width.max(desc.height).div_ceil(8) * 8 - 1) as f32,
+            ],
+            0.0,
+            7.0,
+        );
+        check(
+            "hybrid_uniforms.traversal_mode",
+            &[hybrid.traversal_mode as f32],
+            3.0,
+            3.0,
+        );
+        check(
+            "hybrid_uniforms.mesh_vertex_count",
+            &[hybrid.mesh_vertex_count as f32],
+            0.0,
+            0.0,
+        );
+        check(
+            "hybrid_uniforms.mesh_index_count",
+            &[hybrid.mesh_index_count as f32],
+            0.0,
+            0.0,
+        );
+        check("lighting.light_dir", &lighting.light_dir, -0.51, 0.72);
+        check("lighting.light_color", &lighting.light_color, 2.29, 2.5);
+        check(
+            "lighting.shadows_enabled",
+            &[lighting.shadows_enabled as f32],
+            1.0,
+            1.0,
+        );
+        check("terrain.origin_spacing", &terrain.origin_spacing, -1.5, 1.0);
+        check("terrain.h_params", &terrain.h_params, 0.0, 1.0);
+        check("terrain.albedo_pad", &terrain.albedo_pad, 0.0, 0.6);
+        check(
+            "terrain.dims",
+            &terrain.dims.map(|value| value as f32),
+            3.0,
+            4.0,
+        );
+        check(
+            "terrain.mips",
+            &terrain.mips.map(|value| value as f32),
+            0.0,
+            3.0,
+        );
+        check(
+            "terrain.extra",
+            &terrain.extra.map(|value| value as f32),
+            0.0,
+            32.0,
+        );
+        check("terrain_height_tex.samples", &desc.heights, 0.0, 0.0);
+        check("accum_hdr.samples", accum, 0.0, 131_026.0);
+        let welford_mean = welford.iter().step_by(2).copied().collect::<Vec<_>>();
+        let welford_m2 = welford
+            .iter()
+            .skip(1)
+            .step_by(2)
+            .copied()
+            .collect::<Vec<_>>();
+        check("terrain_welford.mean", &welford_mean, 0.0, 65_504.0);
+        check("terrain_welford.m2", &welford_m2, 0.0, 8_581_615_000.0);
+    }
+
+    observed.check_length(
+        "buffer",
+        "terrain_reservoirs_prev",
+        None,
+        reservoirs.len() as u64,
+        (desc.width as u64) * (desc.height as u64),
+    );
+    let (m_min, m_max) = reservoirs.iter().fold((u32::MAX, 0u32), |(lo, hi), value| {
+        (lo.min(value.m), hi.max(value.m))
+    });
+    observed.check_range(
+        "buffer",
+        "terrain_reservoirs_prev.m",
+        None,
+        m_min as f32,
+        m_max as f32,
+        0.0,
+        512.0,
+    );
+    let (reservoir_min, reservoir_max) = finite_min_max(
+        reservoirs
+            .iter()
+            .flat_map(|value| [value.w_sum, value.weight, value.target_pdf]),
+    );
+    observed.check_range(
+        "buffer",
+        "terrain_reservoirs_prev.weights",
+        None,
+        reservoir_min,
+        reservoir_max,
+        0.0,
+        65_536.0,
+    );
+    for axis in 0..3 {
+        let directions = reservoirs
+            .iter()
+            .filter(|value| value.m > 0 && value.weight > 0.0 && value.target_pdf > 0.0)
+            .map(|value| value.sample.direction[axis]);
+        let (lo, hi) = finite_min_max(directions);
+        let (expected_lo, expected_hi) = match axis {
+            0 => (0.49, 0.51),
+            1 => (0.70, 0.72),
+            _ => (-0.51, -0.49),
+        };
+        observed.check_range(
+            "buffer",
+            &format!("terrain_reservoirs_prev.direction.{axis}"),
+            None,
+            lo,
+            hi,
+            expected_lo,
+            expected_hi,
+        );
+    }
+    let beauty_values = beauty
+        .chunks_exact(2)
+        .map(|bytes| f16::from_bits(u16::from_le_bytes([bytes[0], bytes[1]])).to_f32());
+    let (beauty_min, beauty_max) = finite_min_max(beauty_values);
+    observed.check_range(
+        "texture",
+        "out_tex.samples",
+        None,
+        beauty_min,
+        beauty_max,
+        0.0,
+        1.0,
+    );
+    crate::core::shader_contract_runtime::record_observation(observed).map_err(RenderError::render)
+}
+
 /// Frames per convergence window: the gate measures the variance of the
 /// accumulated mean luminance across the last N frames (02-prometheus DoD).
 pub const WELFORD_WINDOW: u32 = 32;
@@ -1027,6 +1218,22 @@ impl HybridPathTracer {
 
         // --- Readbacks ---
         let beauty = read_texture_pixels(device, queue, &out_tex, width, height, 8)?;
+        let accum_bytes = read_buffer(device, queue, &accum_buf, px_count * 16)?;
+        let accum: &[f32] = bytemuck::cast_slice(&accum_bytes);
+        let welford_bytes = read_buffer(device, queue, &welford_buf, px_count * 8)?;
+        let welford: &[f32] = bytemuck::cast_slice(&welford_bytes);
+        record_runtime_contract(
+            desc,
+            &base,
+            &hybrid_uniforms,
+            &lighting,
+            &terrain_uniforms,
+            frames,
+            reservoirs,
+            accum,
+            welford,
+            &beauty,
+        )?;
         let mut rgba = vec![0u8; (width as usize) * (height as usize) * 4];
         for (i, px) in beauty.chunks_exact(8).enumerate() {
             for c in 0..3 {
