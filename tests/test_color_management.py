@@ -104,7 +104,8 @@ def test_gpu_tonemap_loaders_use_common_source() -> None:
     loaders = {
         ROOT / "src" / "pipeline" / "hdr_offscreen" / "pipeline.rs": common,
         ROOT / "src" / "terrain" / "renderer" / "offline.rs": common,
-        ROOT / "src" / "terrain" / "renderer" / "pipeline_cache.rs": common,
+        ROOT / "src" / "shader_sources.rs": common,
+        ROOT / "src" / "terrain" / "renderer" / "pipeline_cache.rs": "shader_sources::terrain",
         ROOT / "src" / "pipeline" / "pbr" / "rendering.rs": common,
         ROOT / "src" / "pipeline" / "pbr" / "tone_mapping.rs": common,
     }

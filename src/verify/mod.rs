@@ -750,6 +750,8 @@ mod tests {
 
     #[test]
     fn runtime_assert_report_fails_closed_without_observations() {
+        crate::core::shader_contract_runtime::begin_runtime_contract_capture();
+        crate::core::shader_contract_runtime::finish_runtime_contract_capture();
         let report = shader_report(None).unwrap();
         assert_eq!(report["runtime_assert"]["status"], "not_run");
         assert_eq!(report["runtime_assert"]["checked_scenes"], 0);

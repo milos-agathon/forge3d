@@ -90,6 +90,7 @@ PORTABLE_CI_CARGO_FEATURES = {
     "enable-hdr-offscreen",
     "enable-renderer-config",
     "enable-staging-rings",
+    "shader-contract-asserts",
 }
 DEDICATED_SYSTEM_FEATURES = {"proj"}
 

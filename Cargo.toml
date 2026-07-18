@@ -22,20 +22,8 @@ crate-type = ["lib", "cdylib"]
 default = ["images", "enable-gpu-instancing", "enable-staging-rings"]
 # Enable this when building the Python extension (maturin will pass this feature).
 extension-module = ["pyo3/extension-module"]
-# Standard Python-extension feature surface expected by the ABI contract tests.
-python-extension = [
-    "extension-module",
-    "weighted-oit",
-    "enable-tbn",
-    "enable-gpu-instancing",
-    "enable-staging-rings",
-    "copc_laz",
-    "cog_streaming",
-    "gis-remote",
-    "geos-topology",
-]
 # Debug-only runtime contract assertions for proven shader inputs.
-shader-contract-asserts = ["python-extension"]
+shader-contract-asserts = []
 # Optional async/double-buffered readback (R9)
 async_readback = ["dep:tokio"]
 weighted-oit = []

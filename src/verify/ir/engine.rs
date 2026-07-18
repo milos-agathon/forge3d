@@ -6,9 +6,9 @@ use std::collections::HashMap;
 
 const FNV1A_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV1A_PRIME: u64 = 0x0000_0100_0000_01b3;
-const PINNED_DETERMINISM_SOURCE_HASH: u64 = 0x74af_497c_c89d_cab9;
-pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0x6a5a_411a_c1b0_23fc;
-pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0x4a21_092c_dedf_4463;
+const PINNED_DETERMINISM_SOURCE_HASH: u64 = 0xa85d_315e_c1f1_a349;
+pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0x4758_e817_2f5b_182e;
+pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0x3490_5cee_758d_c003;
 
 #[derive(Clone, Copy)]
 pub(super) enum FunctionRef {
@@ -2319,9 +2319,14 @@ fn statement_return_handle(statement: &Statement) -> Option<Handle<Expression>> 
 }
 
 pub(super) fn stable_hash(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(FNV1A_OFFSET, |hash, byte| {
-        (hash ^ u64::from(*byte)).wrapping_mul(FNV1A_PRIME)
-    })
+    bytes
+        .iter()
+        .enumerate()
+        .filter(|(index, byte)| **byte != b'\r' || bytes.get(index + 1).copied() != Some(b'\n'))
+        .map(|(_, byte)| byte)
+        .fold(FNV1A_OFFSET, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(FNV1A_PRIME)
+        })
 }
 
 fn next_up(value: f32) -> f32 {

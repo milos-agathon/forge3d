@@ -490,6 +490,14 @@ fn hybrid_renderer_source_hash_is_pinned() {
 }
 
 #[test]
+fn source_hash_ignores_platform_line_endings() {
+    assert_eq!(
+        super::engine::stable_hash(b"first\nsecond\n"),
+        super::engine::stable_hash(b"first\r\nsecond\r\n")
+    );
+}
+
+#[test]
 fn xorshift_body_mutation_invalidates_callers() {
     let source = r#"
 fn xorshift32(state: ptr<function, u32>) -> f32 {
