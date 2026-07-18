@@ -8,6 +8,7 @@ import pytest
 
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "check_determinism_hashes.py"
+DUPLA_SCRIPT = Path(__file__).parents[1] / "scripts" / "run_dupla_proof.py"
 WORKFLOW = Path(__file__).parents[1] / ".github" / "workflows" / "determinism-matrix.yml"
 SCENE = "terra_determinata_v1"
 SHA = "d" * 64
@@ -49,6 +50,44 @@ def _run(tmp_path, golden=SHA):
             str(golden_file),
             "--scene",
             SCENE,
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+
+def _dupla_proof() -> dict:
+    operation = {
+        "generated_count": 100_000_000,
+        "adversarial_count": 1_000_000,
+        "mismatch_count": 0,
+        "max_err_u2": 1.0,
+        "cited_bound_u2": 3.0,
+    }
+    return {
+        "schema": "forge3d.dupla-proof.v1",
+        "backend": "vulkan",
+        "adapter": "hardware",
+        "selftest": {"passed": True, "mismatch_count": 0},
+        "harness": {name: dict(operation) for name in ("add", "mul", "div", "sqrt")},
+        "jitter": {
+            "dd_max_error_px": 0.001,
+            "raw_over_one_px": 100,
+            "dd_hash_a": SHA,
+            "dd_hash_b": SHA,
+        },
+    }
+
+
+def _validate_dupla(tmp_path, *legs):
+    return subprocess.run(
+        [
+            sys.executable,
+            str(DUPLA_SCRIPT),
+            "--validate-artifacts",
+            str(tmp_path),
+            "--expected-legs",
+            *legs,
         ],
         capture_output=True,
         text=True,
@@ -99,3 +138,31 @@ def test_matrix_rejects_golden_or_pairwise_mismatch(tmp_path, actual):
     result = _run(tmp_path)
     assert result.returncode == 1
     assert "mismatch" in result.stderr
+
+
+def test_dupla_aggregation_accepts_verified_and_explicit_absence(tmp_path):
+    (tmp_path / "dupla-proof-nvidia.json").write_text(json.dumps(_dupla_proof()))
+    (tmp_path / "dupla-proof-intel.ABSENT").write_text("no physical adapter\n")
+    result = _validate_dupla(tmp_path, "nvidia", "intel")
+    assert result.returncode == 0, result.stderr
+    assert "VERIFIED" in result.stdout and "ABSENT" in result.stdout
+
+
+def test_dupla_aggregation_rejects_failed_or_missing_proof(tmp_path):
+    (tmp_path / "dupla-proof-amd.FAILED").write_text("bound exceeded\n")
+    failed = _validate_dupla(tmp_path, "amd")
+    assert failed.returncode == 1
+    assert "DUPLA proof failed" in failed.stderr
+    missing = _validate_dupla(tmp_path, "nvidia")
+    assert missing.returncode == 1
+    assert "expected exactly one DUPLA result" in missing.stderr
+
+
+def test_dupla_aggregation_rejects_invalid_evidence(tmp_path):
+    proof = _dupla_proof()
+    proof["harness"]["mul"]["max_err_u2"] = 8.0
+    proof["harness"]["mul"]["cited_bound_u2"] = 7.0
+    (tmp_path / "dupla-proof-nvidia.json").write_text(json.dumps(proof))
+    result = _validate_dupla(tmp_path, "nvidia")
+    assert result.returncode == 1
+    assert "cited bound exceeded" in result.stderr

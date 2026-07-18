@@ -16,6 +16,8 @@ RUST_PRODUCT = ROOT / "src" / "core" / "dd" / "product.rs"
 GENERATOR = ROOT / "scripts" / "generate_dd.py"
 HARNESS = ROOT / "src" / "shaders" / "dd_harness.wgsl"
 GPU = ROOT / "src" / "core" / "dd" / "gpu.rs"
+PY_FUNCTIONS = ROOT / "src" / "py_functions" / "precision.rs"
+PY_REGISTRAR = ROOT / "src" / "py_module" / "functions" / "precision.rs"
 
 
 def _function_body(source: str, name: str) -> str:
@@ -134,6 +136,7 @@ def test_codegen_files_respect_repository_size_guideline() -> None:
         RUST,
         RUST_PRODUCT,
         RUST_VECTOR,
+        ROOT / "src" / "core" / "dd" / "types.rs",
     ):
         assert len(path.read_text(encoding="utf-8").splitlines()) <= 300, path
 
@@ -190,3 +193,35 @@ def test_gpu_proof_uses_tracked_buffers_and_certificate_evidence() -> None:
     certificate = (ROOT / "src" / "core" / "certificate.rs").read_text(encoding="utf-8")
     assert "PrecisionEvidence" in certificate
     assert 'skip_serializing_if = "Option::is_none"' in certificate
+
+
+def test_precision_native_surface_is_registered_and_stubbed() -> None:
+    functions = PY_FUNCTIONS.read_text(encoding="utf-8")
+    registrar = PY_REGISTRAR.read_text(encoding="utf-8")
+    package = (ROOT / "python" / "forge3d" / "__init__.py").read_text(encoding="utf-8")
+    package_stub = (ROOT / "python" / "forge3d" / "__init__.pyi").read_text(encoding="utf-8")
+    module_stub = (ROOT / "python" / "forge3d" / "precision.pyi").read_text(encoding="utf-8")
+    for name in ("dd_selftest", "dd_harness", "dd_jitter_demo"):
+        assert f"fn {name}" in functions
+        assert f"py_functions::{name}" in registrar
+        assert f'"{name}"' in package
+        assert name in package_stub
+        assert f"def {name}" in module_stub
+    assert functions.count("map_err(PyErr::from)") == 3
+    assert functions.count("allow_threads") == 3
+
+
+def test_pinned_backend_ci_archives_full_dupla_proof() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "determinism-matrix.yml").read_text(
+        encoding="utf-8"
+    )
+    proof = (ROOT / "scripts" / "run_dupla_proof.py").read_text(encoding="utf-8")
+    assert "Prove DUPLA precision" in workflow
+    assert "WGPU_BACKENDS: ${{ matrix.backend }}" in workflow
+    assert "run_dupla_proof.py" in workflow
+    assert "dupla-proof-${{ matrix.leg }}.json" in workflow
+    assert "--validate-artifacts hashes" in workflow
+    assert "continue-on-error" not in workflow
+    assert 'OPERATIONS = ("add", "mul", "div", "sqrt")' in proof
+    assert "100_000_000" in proof
+    assert "dd_jitter_demo(frames=1_000)" in proof

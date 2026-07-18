@@ -1,3 +1,14 @@
+/// Unit roundoff for IEEE-754 binary32.
+pub const DD_U: f64 = 5.960_464_477_539_063e-8;
+/// Joldeș-Muller-Popescu (2017) addition bound, in u².
+pub const DD_ADD_BOUND_U2: f64 = 3.0;
+/// Joldeș-Muller-Popescu (2017) multiplication bound, in u².
+pub const DD_MUL_BOUND_U2: f64 = 7.0;
+/// Joldeș-Muller-Popescu (2017) division bound, in u².
+pub const DD_DIV_BOUND_U2: f64 = 15.0;
+/// DUPLA square-root bound, in u².
+pub const DD_SQRT_BOUND_U2: f64 = 15.0;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct DD {

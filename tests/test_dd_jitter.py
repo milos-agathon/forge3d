@@ -35,3 +35,11 @@ def test_jitter_demo_is_opt_in_only() -> None:
     source = RUST.read_text(encoding="utf-8")
     assert "pub fn jitter_demo" in source
     assert "initialize_for_context" not in source
+
+
+def test_jitter_demo_is_exposed_to_the_determinism_proof() -> None:
+    proof = (ROOT / "scripts" / "run_dupla_proof.py").read_text(encoding="utf-8")
+    assert "dd_jitter_demo(frames=1_000)" in proof
+    assert 'jitter["dd_hash_a"] == jitter["dd_hash_b"]' in proof
+    assert 'jitter["dd_max_error_px"] < 0.01' in proof
+    assert 'jitter["raw_over_one_px"] >= 100' in proof

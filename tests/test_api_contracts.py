@@ -137,6 +137,10 @@ class TestNativeModuleSymbols:
         "vector_render_oit_edl_py",
         "read_laz_point_attributes",
         "copc_read_node_points",
+        # DUPLA: verified GPU double-float proof surface
+        "dd_selftest",
+        "dd_harness",
+        "dd_jitter_demo",
         # AEQUITAS: PT-vs-raster adjudication pair
         "render_adjudication_pair",
         # PROMETHEUS: GPU terrain path-traced reference
@@ -763,6 +767,11 @@ class TestPackageLevelApiContracts:
         # CENSOR: certified BRDF pixel renders
         "render_brdf_tile",
         "render_brdf_tile_overrides",
+        # DUPLA: verified precision module and package-level convenience calls
+        "precision",
+        "dd_selftest",
+        "dd_harness",
+        "dd_jitter_demo",
     ]
 
     @pytest.mark.parametrize("attr_name", EXPECTED_PACKAGE_ATTRS)
@@ -786,6 +795,14 @@ class TestPackageLevelApiContracts:
         """forge3d.has_gpu() must return a boolean."""
         result = f3d.has_gpu()
         assert isinstance(result, bool)
+
+    def test_precision_module_exports_native_proof_calls(self):
+        """DUPLA's wrapper module stays thin and points at registered natives."""
+        assert f3d.precision.dd_selftest is f3d.dd_selftest
+        assert f3d.precision.dd_harness is f3d.dd_harness
+        assert f3d.precision.dd_jitter_demo is f3d.dd_jitter_demo
+        for name in ("dd_selftest", "dd_harness", "dd_jitter_demo"):
+            assert callable(getattr(_native, name))
 
     def test_legacy_render_api_removed(self):
         """Legacy top-level render helpers stay removed."""

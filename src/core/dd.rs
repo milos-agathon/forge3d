@@ -12,33 +12,20 @@ mod proof;
 mod types;
 mod vector;
 
-#[allow(unused_imports)] // Public Python seam is wired in DUPLA Task 4.
 pub(crate) use gpu::{harness, initialize_for_context, selftest};
 #[cfg(test)]
 pub(crate) use gpu::{harness_for_test, harness_window_for_test};
-#[allow(unused_imports)] // Public Python seam is wired in DUPLA Task 4.
+#[cfg(test)]
 pub(crate) use gpu_report::DdOperation;
-#[allow(unused_imports)] // Public Python seam is wired in DUPLA Task 4.
 pub(crate) use jitter::jitter_demo;
-#[allow(unused_imports)] // Public Python seam is wired in DUPLA Task 4.
-pub(crate) use jitter_model::DdJitterReport;
 pub use product::{two_prod, two_prod_fma, two_prod_split};
-pub use types::{DDVec3, DD};
-#[allow(unused_imports)] // dd_dot3/dd_length3 are consumed by DUPLA Task 3.
+pub use types::{
+    DDVec3, DD, DD_ADD_BOUND_U2, DD_DIV_BOUND_U2, DD_MUL_BOUND_U2, DD_SQRT_BOUND_U2, DD_U,
+};
+#[allow(unused_imports)] // Complete Rust mirror surface; exercised by core/dd_tests.rs.
 pub use vector::{dd_dot3, dd_length3, dd_sub_vec3};
 
 // BEGIN GENERATED DD MIRROR
-/// Unit roundoff for IEEE-754 binary32.
-pub const DD_U: f64 = 5.960_464_477_539_063e-8;
-/// Joldeș-Muller-Popescu (2017) relative-error bound, in u².
-pub const DD_ADD_BOUND_U2: f64 = 3.0;
-/// Joldeș-Muller-Popescu (2017) relative-error bound, in u².
-pub const DD_MUL_BOUND_U2: f64 = 7.0;
-/// Joldeș-Muller-Popescu (2017) relative-error bound, in u².
-pub const DD_DIV_BOUND_U2: f64 = 15.0;
-/// DUPLA square-root relative-error gate, in u².
-pub const DD_SQRT_BOUND_U2: f64 = 15.0;
-
 impl DD {
     /// Split a finite, binary32-range f64 into a normalized pair.
     pub fn from_f64(value: f64) -> Self {

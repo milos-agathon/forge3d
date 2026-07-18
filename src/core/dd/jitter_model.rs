@@ -64,10 +64,13 @@ pub(super) fn build_model(frames: u32) -> RenderResult<JitterModel> {
         .collect();
     let cameras = camera_values
         .iter()
-        .map(|value| CameraPair {
-            camera_dd: DDVec3::from_dvec3(*value),
-            padding: [0.0; 2],
-            raw_f32: [value.x as f32, value.y as f32, value.z as f32, 0.0],
+        .map(|value| {
+            let camera_dd = DDVec3::from_dvec3(*value);
+            CameraPair {
+                camera_dd,
+                padding: [0.0; 2],
+                raw_f32: [camera_dd.x.hi, camera_dd.y.hi, camera_dd.z.hi, 0.0],
+            }
         })
         .collect();
     Ok(JitterModel {

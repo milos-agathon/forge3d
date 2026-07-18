@@ -9,6 +9,8 @@ import os
 import numpy as np
 from . import gis
 from . import text as text
+from . import precision as precision
+from .precision import dd_harness, dd_jitter_demo, dd_selftest
 from .graticule import GraticuleSpec, generate_graticule
 from .legend import Legend, LegendConfig
 from .map_plate import BBox, MapPlate, MapPlateConfig, PlateRegion
