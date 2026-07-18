@@ -397,6 +397,7 @@ tests/test_*examples*.py
 scripts/*
 !scripts/summarize_m06_evidence.py
 !scripts/run_dupla_proof.py
+!scripts/hydrate_lfs_from_media.py
 
 # forge3d outputs (A13) 
 out/
