@@ -86,10 +86,15 @@ fn polygonal_from_overlay(value: MultiPolygon) -> Geometry {
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    match polygons.len() {
-        0 => Geometry::Empty,
-        1 => Geometry::Polygon(polygons.pop().unwrap()),
-        _ => Geometry::MultiPolygon(polygons),
+    if polygons.is_empty() {
+        Geometry::Empty
+    } else if polygons.len() == 1 {
+        match polygons.pop() {
+            Some(polygon) => Geometry::Polygon(polygon),
+            None => Geometry::Empty,
+        }
+    } else {
+        Geometry::MultiPolygon(polygons)
     }
 }
 

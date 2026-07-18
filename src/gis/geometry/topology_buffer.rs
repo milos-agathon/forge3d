@@ -1,14 +1,13 @@
 //! Optional geo-backed buffer implementation; never used for boolean overlay.
 
-#[cfg(feature = "geos-topology")]
 use crate::gis::error::GisError;
 use crate::gis::error::GisResult;
 
 use super::model::Geometry;
+#[cfg(not(feature = "geos-topology"))]
+use super::model::BACKEND_UNAVAILABLE;
 #[cfg(feature = "geos-topology")]
 use super::model::{Coord, EMPTY_GEOMETRY};
-#[cfg(not(feature = "geos-topology"))]
-use super::topology::require_topology_backend;
 
 #[cfg(feature = "geos-topology")]
 pub(super) fn buffer_topology(
@@ -32,8 +31,9 @@ pub(super) fn buffer_topology(
     _distance: f64,
     _quad_segs: usize,
 ) -> GisResult<Geometry> {
-    require_topology_backend("buffer_geometry")?;
-    unreachable!("buffer backend is feature-gated")
+    Err(GisError::BackendUnavailable(format!(
+        "{BACKEND_UNAVAILABLE}: geos-topology feature required for buffer_geometry"
+    )))
 }
 
 #[cfg(feature = "geos-topology")]
@@ -125,7 +125,10 @@ fn multi_polygon_from_geo(value: geo::MultiPolygon<f64>) -> GisResult<Geometry> 
         })
         .collect::<Vec<_>>();
     Ok(if polygons.len() == 1 {
-        Geometry::Polygon(polygons.into_iter().next().unwrap())
+        match polygons.into_iter().next() {
+            Some(polygon) => Geometry::Polygon(polygon),
+            None => Geometry::MultiPolygon(Vec::new()),
+        }
     } else {
         Geometry::MultiPolygon(polygons)
     })
