@@ -28,7 +28,8 @@ degradation and raises; it never returns quietly degraded low components.
 adversarial cases and checks their `(hi, lo)` words against the Rust mirror.
 The result reports `max_err_u2` and `cited_bound_u2`, where
 `u = 2^-24`, plus backend, adapter, selected product variant, counts, shader
-identity, mismatches, and a signed render-certificate JSON payload.
+identity, mismatches, and render-certificate evidence as an unsigned
+execution-report JSON payload.
 
 The enforced Joldeș–Muller–Popescu bounds are 3 u² for addition, 7 u² for
 multiplication, and 15 u² for division and square root. Expect a full default
@@ -39,9 +40,10 @@ run to be expensive: it is an acceptance proof, not a per-frame diagnostic.
 Runs the committed Everest ECEF scene while the camera dollies by one
 millimetre per frame. It returns both screen-space error curves, their maxima,
 the number of raw-`f32` frames above one pixel, two DD render hashes, backend
-and shader identity, and a signed certificate. Acceptance requires every DD
-error below 0.01 px, at least 10% of raw-`f32` frames above 1 px, and identical
-DD hashes across both render executions.
+and shader identity, and render-certificate evidence in an unsigned execution
+report. Acceptance requires every DD error below 0.01 px, at least 10% of
+raw-`f32` frames above 1 px, and identical DD hashes across both render
+executions.
 
 All three calls raise `RuntimeError` for missing hardware, unsupported or
 unverified arithmetic, invalid arguments, proof failures, and resource or

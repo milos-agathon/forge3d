@@ -96,6 +96,26 @@ pub(super) struct JitterMetrics {
     pub raw_over_one_px: u32,
 }
 
+pub(super) fn validate_acceptance(
+    metrics: &JitterMetrics,
+    frames: u32,
+    hashes: (&str, &str),
+) -> RenderResult<()> {
+    if metrics.dd_max_error_px >= 0.01 || metrics.raw_over_one_px * 10 < frames {
+        return Err(RenderError::render(format!(
+            "DD jitter thresholds failed: dd={}px raw_over_one={}/{frames}",
+            metrics.dd_max_error_px, metrics.raw_over_one_px
+        )));
+    }
+    if hashes.0 != hashes.1 {
+        return Err(RenderError::render(format!(
+            "DD jitter render hashes differ: {} != {}",
+            hashes.0, hashes.1
+        )));
+    }
+    Ok(())
+}
+
 pub(super) fn reduce_measurements(
     measured: &[[f32; 2]],
     model: &JitterModel,
@@ -159,5 +179,19 @@ mod tests {
         let model = build_model(1).unwrap();
         assert!(reduce_measurements(&[[f32::NAN, 0.0]], &model).is_err());
         assert!(reduce_measurements(&[[0.0, f32::INFINITY]], &model).is_err());
+    }
+
+    #[test]
+    fn unequal_render_hashes_fail_native_acceptance() {
+        let metrics = JitterMetrics {
+            dd_errors_px: vec![0.0; 10],
+            f32_errors_px: vec![2.0; 10],
+            dd_max_error_px: 0.0,
+            f32_max_error_px: 2.0,
+            raw_over_one_px: 10,
+        };
+        assert!(validate_acceptance(&metrics, 10, ("same", "same")).is_ok());
+        let error = validate_acceptance(&metrics, 10, ("first", "second")).unwrap_err();
+        assert!(error.to_string().contains("render hashes differ"));
     }
 }

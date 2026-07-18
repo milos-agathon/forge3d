@@ -195,6 +195,16 @@ def test_gpu_proof_uses_tracked_buffers_and_certificate_evidence() -> None:
     assert 'skip_serializing_if = "Option::is_none"' in certificate
 
 
+def test_all_dupla_shaders_are_in_the_proof_coverage_ledger() -> None:
+    ledger = (ROOT / "tests" / "shader_proofs_ledger.toml").read_text(encoding="utf-8")
+    for path in (
+        "src/shaders/includes/dd.wgsl",
+        "src/shaders/dd_harness.wgsl",
+        "src/shaders/dd_jitter.wgsl",
+    ):
+        assert f'path = "{path}"' in ledger
+
+
 def test_precision_native_surface_is_registered_and_stubbed() -> None:
     functions = PY_FUNCTIONS.read_text(encoding="utf-8")
     registrar = PY_REGISTRAR.read_text(encoding="utf-8")

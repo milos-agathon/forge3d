@@ -27,6 +27,8 @@ def test_jitter_demo_contract_is_1000_one_millimetre_frames() -> None:
     assert "dd_errors_px" in source and "f32_errors_px" in source
     assert "raw_over_one_px" in source
     assert "dd_hash_a" in source and "dd_hash_b" in source
+    assert "validate_acceptance" in source
+    assert "DD jitter render hashes differ" in MODEL.read_text(encoding="utf-8")
     assert "OneShotTiming" in source
     assert "tracked_create_buffer" in source
 

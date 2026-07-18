@@ -225,12 +225,7 @@ pub fn jitter_demo(frames: u32) -> RenderResult<DdJitterReport> {
     let dd_hash_b = hash_render(device, queue, &target, 64, 64)?;
 
     let metrics = reduce_measurements(&measured, &model)?;
-    if metrics.dd_max_error_px >= 0.01 || metrics.raw_over_one_px * 10 < frames {
-        return Err(RenderError::render(format!(
-            "DD jitter thresholds failed: dd={}px raw_over_one={}/{frames}",
-            metrics.dd_max_error_px, metrics.raw_over_one_px
-        )));
-    }
+    super::jitter_model::validate_acceptance(&metrics, frames, (&dd_hash_a, &dd_hash_b))?;
     let shader_hash = crate::core::shader_registry::shader_hashes_snapshot()
         .get(LABEL)
         .cloned()
