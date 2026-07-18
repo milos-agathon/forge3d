@@ -1,0 +1,18 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "exceeds the safe limit",
+    "type": "ValueError"
+  },
+  "family": "labels",
+  "id": "labels-059",
+  "notes": "one-million-anchor bounded refusal",
+  "operation": "label_plan_compile",
+  "payload": {
+    "anchor_count": 1000000,
+    "height": 256,
+    "width": 256,
+    "x": 180,
+    "y": 90
+  }
+}

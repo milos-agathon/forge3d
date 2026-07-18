@@ -1,0 +1,29 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "geometry",
+  "id": "geometry-136",
+  "notes": "three-point polyline with tiny positive width reaches polyline insertion",
+  "operation": "vector_add_lines",
+  "payload": {
+    "path": {
+      "dtype": "float64",
+      "values": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          1.0,
+          1.0
+        ],
+        [
+          2.0,
+          0.0
+        ]
+      ]
+    },
+    "stroke_width": 1e-08
+  }
+}

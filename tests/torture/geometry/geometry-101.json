@@ -1,0 +1,30 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "geometry",
+  "id": "geometry-101",
+  "operation": "gis_interpolate_line",
+  "payload": {
+    "crs": "EPSG:4326",
+    "distance": 0,
+    "geometry": {
+      "coordinates": [
+        [
+          179,
+          0
+        ],
+        [
+          -179,
+          0
+        ],
+        [
+          178,
+          1
+        ]
+      ],
+      "type": "LineString"
+    },
+    "normalized": true
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "text",
+    "type": "TextShapingError"
+  },
+  "family": "labels",
+  "id": "labels-041",
+  "operation": "text_shape",
+  "payload": {
+    "size": 0,
+    "text": "\u0645\u0631\u062d\u0628\u0627"
+  }
+}

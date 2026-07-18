@@ -1,0 +1,25 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidShape",
+    "type": "ValueError"
+  },
+  "family": "rasters",
+  "id": "rasters-045",
+  "notes": "Exercises gis_classify_raster partition {\"array\":{\"dtype\":\"float32\",\"shape\":\"empty\",\"value_classes\":[],\"variability\":\"empty\"},\"bins\":[\"unit\",\"zero\",\"unit\",\"ordinary\"],\"nodata\":\"large\",\"out_dtype\":\"uint16\"} with error oracle",
+  "operation": "gis_classify_raster",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": []
+    },
+    "bins": [
+      -1,
+      0,
+      1,
+      2
+    ],
+    "nodata": -10044.0,
+    "out_dtype": "uint16"
+  }
+}

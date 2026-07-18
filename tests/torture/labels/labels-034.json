@@ -1,0 +1,17 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "missing glyph U+0065; font chain tried",
+    "type": "TextShapingError"
+  },
+  "family": "labels",
+  "id": "labels-034",
+  "operation": "text_shape",
+  "payload": {
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 12,
+    "text": "edge\ncase"
+  }
+}

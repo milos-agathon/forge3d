@@ -52,6 +52,11 @@ pub(crate) fn slippy_tiles(
             "latitude was clamped to the Web Mercator valid range",
             Some("bounds"),
         ));
+        crate::core::degradation::record_degradation(
+            "input_clamped",
+            "web_mercator_latitude",
+            "latitude bounds were clamped to the Web Mercator valid range",
+        );
     }
     let antimeridian_split = bounds_wgs84.left > bounds_wgs84.right;
     let intervals = if antimeridian_split {

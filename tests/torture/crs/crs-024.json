@@ -1,0 +1,14 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidCrs",
+    "type": "ValueError"
+  },
+  "family": "crs",
+  "id": "crs-024",
+  "notes": "Exercises gis_parse_crs partition {\"crs\":\"invalid-crs-24\"} with error oracle",
+  "operation": "gis_parse_crs",
+  "payload": {
+    "crs": "invalid-crs-24"
+  }
+}

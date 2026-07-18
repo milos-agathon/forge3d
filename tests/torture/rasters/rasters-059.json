@@ -1,0 +1,23 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "rasters",
+  "id": "rasters-059",
+  "notes": "Exercises gis_apply_nodata partition {\"array\":{\"dtype\":\"float32\",\"shape\":\"single_row\",\"value_classes\":[\"fractional\",\"nan\",\"ordinary\"],\"variability\":\"mixed_finiteness\"},\"nodata\":null} with ok oracle",
+  "operation": "gis_apply_nodata",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": [
+        [
+          0.008102,
+          "nan",
+          2,
+          3
+        ]
+      ]
+    },
+    "nodata": null
+  }
+}

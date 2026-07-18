@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+from _loopback import bind_loopback_or_skip
 
 import forge3d.gis as gis
 from forge3d._native import NATIVE_AVAILABLE
@@ -125,7 +126,7 @@ def test_query_osm_features_explicit_endpoint_and_cache(tmp_path: Path):
         def log_message(self, *_args):
             pass
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = bind_loopback_or_skip(ThreadingHTTPServer, Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     endpoint = f"http://127.0.0.1:{server.server_port}/api/interpreter"

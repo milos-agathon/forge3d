@@ -1,0 +1,25 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "dems",
+  "id": "dems-040",
+  "notes": "mixed-finiteness DEM exercises DEM normalization method 'unsupported'",
+  "operation": "gis_normalize_raster",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": [
+        [
+          0,
+          "nan"
+        ],
+        [
+          "inf",
+          1
+        ]
+      ]
+    },
+    "method": "unsupported"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "labels",
+  "id": "labels-029",
+  "operation": "text_shape",
+  "payload": {
+    "size": 12,
+    "text": "A"
+  }
+}

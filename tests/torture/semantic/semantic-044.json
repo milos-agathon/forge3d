@@ -1,0 +1,34 @@
+{
+  "expect": {
+    "checks": [
+      {
+        "approx": -119.99999999999999,
+        "path": [
+          "roundtrip",
+          0
+        ],
+        "tolerance": 1e-07
+      },
+      {
+        "approx": -44.99999999999999,
+        "path": [
+          "roundtrip",
+          1
+        ],
+        "tolerance": 1e-07
+      }
+    ],
+    "class": "ok"
+  },
+  "family": "semantic",
+  "id": "semantic-044",
+  "notes": "projection round-trip closure oracle",
+  "operation": "gis_transform_roundtrip",
+  "payload": {
+    "dst_crs": "EPSG:3857",
+    "src_crs": "EPSG:4326",
+    "x": -120,
+    "y": -45
+  },
+  "semantic": true
+}

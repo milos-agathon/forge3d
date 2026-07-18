@@ -1,0 +1,21 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "Shape",
+    "type": "ValueError"
+  },
+  "family": "dems",
+  "id": "dems-003",
+  "notes": "Exercises dem_derive_water_mask partition {\"array\":{\"dtype\":\"float32\",\"shape\":\"single_column\",\"variability\":\"ramp\"}} with error oracle",
+  "operation": "dem_derive_water_mask",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "pattern": "ramp",
+      "shape": [
+        8,
+        1
+      ]
+    }
+  }
+}

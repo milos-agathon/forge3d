@@ -1,0 +1,25 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "geometry",
+  "id": "geometry-044",
+  "notes": "duplicate point pair with ordinary size exercises point-shape and size validation",
+  "operation": "vector_add_points",
+  "payload": {
+    "point_size": 4.0,
+    "positions": {
+      "dtype": "float64",
+      "values": [
+        [
+          1.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0
+        ]
+      ]
+    }
+  }
+}

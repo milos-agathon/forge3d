@@ -1,0 +1,15 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "geometry",
+  "id": "geometry-122",
+  "operation": "gis_simplify_geometry",
+  "payload": {
+    "crs": "EPSG:4326",
+    "generated": "regular_polygon",
+    "radius": 1.6,
+    "tolerance": 0.07,
+    "vertices": 14
+  }
+}

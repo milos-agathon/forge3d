@@ -1,0 +1,24 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "geometry",
+  "id": "geometry-133",
+  "notes": "positive and negative f32 subnormal coordinates",
+  "operation": "gis_validate_geometry",
+  "payload": {
+    "geometry": {
+      "coordinates": [
+        [
+          "subnormal",
+          "-subnormal"
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      "type": "LineString"
+    }
+  }
+}

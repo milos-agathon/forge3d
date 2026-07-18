@@ -1,0 +1,15 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "dems",
+  "id": "dems-008",
+  "notes": "empty DEM exercises water-mask shape, dtype, and finiteness handling",
+  "operation": "dem_derive_water_mask",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": []
+    }
+  }
+}

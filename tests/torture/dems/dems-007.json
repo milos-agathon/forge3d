@@ -1,0 +1,19 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "dems",
+  "id": "dems-007",
+  "notes": "Exercises dem_derive_water_mask partition {\"array\":{\"dtype\":\"float32\",\"shape\":\"rectangular_small\",\"value_class\":\"fractional\",\"variability\":\"constant\"}} with ok oracle",
+  "operation": "dem_derive_water_mask",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "fill": 0.25,
+      "shape": [
+        3,
+        2
+      ]
+    }
+  }
+}

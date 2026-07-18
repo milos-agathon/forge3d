@@ -1,0 +1,16 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "geometry coordinate count exceeds the safe limit",
+    "type": "ValueError"
+  },
+  "family": "geometry",
+  "id": "geometry-131",
+  "notes": "one-million-vertex ring watchdog case",
+  "operation": "gis_validate_geometry",
+  "payload": {
+    "generated": "regular_polygon",
+    "radius": 1.0,
+    "vertices": 1000000
+  }
+}

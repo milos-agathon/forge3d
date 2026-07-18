@@ -1,0 +1,24 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "dems",
+  "id": "dems-021",
+  "notes": "unsigned integer DEM exercises water-mask shape, dtype, and finiteness handling",
+  "operation": "dem_derive_water_mask",
+  "payload": {
+    "array": {
+      "dtype": "uint8",
+      "values": [
+        [
+          0,
+          1
+        ],
+        [
+          254,
+          255
+        ]
+      ]
+    }
+  }
+}

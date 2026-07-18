@@ -1,0 +1,17 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "missing glyph U+1F600; font chain tried",
+    "type": "TextShapingError"
+  },
+  "family": "labels",
+  "id": "labels-035",
+  "operation": "text_shape",
+  "payload": {
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 256,
+    "text": "\ud83d\ude00"
+  }
+}

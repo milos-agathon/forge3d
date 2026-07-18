@@ -112,6 +112,11 @@ class TestFiltersAndContract:
         with pytest.raises(ValueError, match="z_scale"):
             TerrainScatterSource(np.full((8, 8), 1.0, dtype=np.float32), z_scale=0.0)
 
+    def test_source_rejects_z_scale_that_overflows_scaled_heights(self) -> None:
+        heightmap = np.asarray([[0.0, 1.0], [2.0, 3.0]], dtype=np.float32)
+        with pytest.raises(ValueError, match="z_scale produces non-finite scaled heights"):
+            TerrainScatterSource(heightmap, z_scale=1.0e308)
+
     def test_pixel_to_contract_translation_uses_scaled_height(self) -> None:
         source = TerrainScatterSource(np.asarray([[10.0, 20.0], [30.0, 50.0]], dtype=np.float32), z_scale=2.0)
         transforms = seeded_random_transforms(

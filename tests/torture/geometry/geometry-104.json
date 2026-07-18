@@ -1,0 +1,25 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "geometry",
+  "id": "geometry-104",
+  "notes": "subnormal point set with tiny positive size reaches point insertion",
+  "operation": "vector_add_points",
+  "payload": {
+    "point_size": 1e-08,
+    "positions": {
+      "dtype": "float64",
+      "values": [
+        [
+          "subnormal",
+          "-subnormal"
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ]
+    }
+  }
+}

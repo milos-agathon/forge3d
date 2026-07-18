@@ -1,0 +1,19 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "rasters",
+  "id": "rasters-007",
+  "operation": "gis_normalize_raster",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "fill": 7,
+      "shape": [
+        2,
+        3
+      ]
+    },
+    "method": "minmax"
+  }
+}

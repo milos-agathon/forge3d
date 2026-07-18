@@ -1,0 +1,14 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "missing glyph U+1F600; font chain tried",
+    "type": "TextShapingError"
+  },
+  "family": "labels",
+  "id": "labels-017",
+  "operation": "text_shape",
+  "payload": {
+    "size": 1,
+    "text": "\ud83d\ude00"
+  }
+}

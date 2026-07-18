@@ -1,0 +1,18 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "crs",
+  "id": "crs-083",
+  "operation": "gis_slippy_tile_index",
+  "payload": {
+    "bounds": [
+      10,
+      10,
+      20,
+      20
+    ],
+    "crs": "EPSG:4326",
+    "zoom": 2
+  }
+}

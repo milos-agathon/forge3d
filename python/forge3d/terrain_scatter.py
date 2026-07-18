@@ -218,7 +218,11 @@ class TerrainScatterSource:
         self.min_height = float(np.min(self.heightmap))
         self.max_height = float(np.max(self.heightmap))
 
-        self._scaled_heights = np.ascontiguousarray((self.heightmap - self.min_height) * self.z_scale)
+        with np.errstate(over="ignore", invalid="ignore"):
+            scaled_heights = (self.heightmap - self.min_height) * self.z_scale
+        if not np.all(np.isfinite(scaled_heights)):
+            raise ValueError("z_scale produces non-finite scaled heights")
+        self._scaled_heights = np.ascontiguousarray(scaled_heights)
         x_step = self.terrain_width / max(self.width - 1, 1)
         z_step = self.terrain_width / max(self.height - 1, 1)
         dz_dz, dz_dx = np.gradient(self._scaled_heights, z_step, x_step)

@@ -1,0 +1,15 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "labels",
+  "id": "labels-019",
+  "operation": "text_shape",
+  "payload": {
+    "fonts": [
+      "assets/fonts/NotoSansHebrew-subset.ttf"
+    ],
+    "size": 12,
+    "text": ""
+  }
+}

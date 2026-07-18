@@ -1,0 +1,26 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "dems",
+  "id": "dems-055",
+  "notes": "single-row ramp DEM exercises terrain nodata policy 'fill'",
+  "operation": "terrain_source",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "pattern": "ramp",
+      "shape": [
+        1,
+        8
+      ]
+    },
+    "crs": "EPSG:4326",
+    "metadata": {
+      "height": 2,
+      "source_id": "terminus-materiality",
+      "width": 2
+    },
+    "nodata_policy": "fill"
+  }
+}

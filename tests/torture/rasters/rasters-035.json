@@ -1,0 +1,23 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidShape",
+    "type": "ValueError"
+  },
+  "family": "rasters",
+  "id": "rasters-035",
+  "operation": "gis_classify_raster",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": []
+    },
+    "bins": [
+      -1,
+      0,
+      1,
+      2
+    ],
+    "out_dtype": "uint16"
+  }
+}

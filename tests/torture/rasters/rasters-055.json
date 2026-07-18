@@ -1,0 +1,17 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidShape",
+    "type": "ValueError"
+  },
+  "family": "rasters",
+  "id": "rasters-055",
+  "operation": "gis_apply_nodata",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": []
+    },
+    "nodata": null
+  }
+}

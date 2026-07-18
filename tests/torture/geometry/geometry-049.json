@@ -1,0 +1,29 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "geometry",
+  "id": "geometry-049",
+  "notes": "three collinear points with fractional sub-pixel size exercises point-shape and size validation",
+  "operation": "vector_add_points",
+  "payload": {
+    "point_size": 0.5,
+    "positions": {
+      "dtype": "float64",
+      "values": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          1.0,
+          0.0
+        ],
+        [
+          2.0,
+          0.0
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "rasters",
+  "id": "rasters-073",
+  "operation": "gis_write_raster",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": [
+        [
+          0
+        ],
+        [
+          1
+        ],
+        [
+          2
+        ],
+        [
+          3
+        ]
+      ]
+    },
+    "crs": null,
+    "name": "raster_12",
+    "transform": [
+      1,
+      0,
+      -180,
+      0,
+      -1,
+      90
+    ]
+  }
+}

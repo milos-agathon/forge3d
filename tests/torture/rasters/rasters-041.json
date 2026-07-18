@@ -1,0 +1,31 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "rasters",
+  "id": "rasters-041",
+  "notes": "Exercises gis_classify_raster partition {\"array\":{\"dtype\":\"float32\",\"shape\":\"square_small\",\"value_classes\":[\"-f32_max\",\"f32_max\",\"ordinary\",\"unit\"],\"variability\":\"variable\"},\"bins\":[\"unit\",\"zero\",\"unit\",\"ordinary\"],\"out_dtype\":\"uint16\"} with ok oracle",
+  "operation": "gis_classify_raster",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": [
+        [
+          "f32_max",
+          "-f32_max"
+        ],
+        [
+          1.005636,
+          -1
+        ]
+      ]
+    },
+    "bins": [
+      -1,
+      0,
+      1,
+      2
+    ],
+    "out_dtype": "uint16"
+  }
+}

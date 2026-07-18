@@ -1,0 +1,18 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "exceeds the safe limit",
+    "type": "ValueError"
+  },
+  "family": "labels",
+  "id": "labels-060",
+  "notes": "safe-limit boundary refusal with antipodal anchors",
+  "operation": "label_plan_compile",
+  "payload": {
+    "anchor_count": 100001,
+    "height": 4096,
+    "width": 4096,
+    "x": -180,
+    "y": -90
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "z_scale produces non-finite scaled heights",
+    "type": "ValueError"
+  },
+  "family": "viewer_scene",
+  "id": "viewer_scene-018",
+  "notes": "absurd terrain z_scale is a structured refusal, not an overflowed scene",
+  "operation": "terrain_scatter_source",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": [
+        [
+          0.0,
+          1.0
+        ],
+        [
+          2.0,
+          3.0
+        ]
+      ]
+    },
+    "terrain_width": 100.0,
+    "z_scale": 1e+308
+  }
+}

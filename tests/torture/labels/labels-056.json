@@ -1,0 +1,17 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "font not found",
+    "type": "TextShapingError"
+  },
+  "family": "labels",
+  "id": "labels-056",
+  "operation": "text_shape",
+  "payload": {
+    "fonts": [
+      "missing-font.ttf"
+    ],
+    "size": 0,
+    "text": "A"
+  }
+}

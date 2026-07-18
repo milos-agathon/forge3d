@@ -1,0 +1,17 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidBounds",
+    "type": "ValueError"
+  },
+  "family": "crs",
+  "id": "crs-046",
+  "notes": "Exercises gis_transform_point partition {\"dst_crs\":\"EPSG:3857\",\"src_crs\":\"EPSG:4326\",\"x\":\"fractional\",\"y\":\"ordinary\"} with error oracle",
+  "operation": "gis_transform_point",
+  "payload": {
+    "dst_crs": "EPSG:3857",
+    "src_crs": "EPSG:4326",
+    "x": 0.006320999999999999,
+    "y": -89.993679
+  }
+}

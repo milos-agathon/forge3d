@@ -1,0 +1,23 @@
+{
+  "append_only_policy": "Shrunken fuzz failures are added as new numbered descriptors with seed notes; removing cases requires golden-style review.",
+  "families": {
+    "crs": 90,
+    "dems": 60,
+    "geometry": 140,
+    "labels": 60,
+    "rasters": 80,
+    "semantic": 50,
+    "viewer_scene": 20
+  },
+  "schema": {
+    "expect_classes": [
+      "ok",
+      "error",
+      "panic",
+      "hang"
+    ],
+    "watchdog_seconds_default": 10
+  },
+  "semantic_value_cases": 50,
+  "total_cases": 500
+}

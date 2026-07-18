@@ -1,0 +1,21 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidBounds",
+    "type": "ValueError"
+  },
+  "family": "crs",
+  "id": "crs-063",
+  "operation": "gis_transform_bounds",
+  "payload": {
+    "bounds": [
+      -10,
+      84,
+      10,
+      89
+    ],
+    "densify": 4,
+    "dst_crs": "EPSG:3857",
+    "src_crs": "EPSG:4326"
+  }
+}

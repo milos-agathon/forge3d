@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -34,6 +35,7 @@ else:  # pragma: no cover - exercised only without the compiled extension
 
 RasterReadResult = dict
 _MISSING = object()
+_MAX_GEOMETRY_COORDINATES = 250_000
 
 
 def _require_native():
@@ -146,8 +148,42 @@ def vector_bounds(
     return _require_native().vector_bounds(_path_or_self(source), layer=layer)
 
 
+def _coordinate_count(value: Any, limit: int) -> int:
+    """Count nested coordinate records without expanding oversized sequences."""
+    if isinstance(value, Mapping):
+        if "coordinates" in value:
+            return _coordinate_count(value["coordinates"], limit)
+        total = 0
+        for item in value.get("geometries", ()) or ():
+            total += _coordinate_count(item, max(0, limit - total))
+            if total > limit:
+                break
+        return total
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return 0
+        if value.shape[0] > limit:
+            return limit + 1
+        return int(np.prod(value.shape[:-1])) if value.ndim > 1 else 1
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        if len(value) > limit:
+            return limit + 1
+        if len(value) and not isinstance(value[0], (Mapping, Sequence, np.ndarray)):
+            return 1
+        total = 0
+        for item in value:
+            total += _coordinate_count(item, max(0, limit - total))
+            if total > limit:
+                break
+        return total
+    return 0
 def validate_geometry(geometry: dict[str, Any]):
     """Validate a GeoJSON-like geometry object."""
+    coordinate_count = _coordinate_count(geometry, _MAX_GEOMETRY_COORDINATES)
+    if coordinate_count > _MAX_GEOMETRY_COORDINATES:
+        raise ValueError(
+            f"geometry coordinate count exceeds the safe limit of {_MAX_GEOMETRY_COORDINATES}"
+        )
     return _require_native().validate_geometry(geometry)
 
 

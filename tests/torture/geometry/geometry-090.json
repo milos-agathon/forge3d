@@ -1,0 +1,17 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidGeometry",
+    "type": "ValueError"
+  },
+  "family": "geometry",
+  "id": "geometry-090",
+  "operation": "gis_representative_point",
+  "payload": {
+    "crs": "EPSG:4326",
+    "geometry": {
+      "coordinates": [],
+      "type": "MultiPolygon"
+    }
+  }
+}

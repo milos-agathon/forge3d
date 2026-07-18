@@ -1,0 +1,16 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "dems",
+  "id": "dems-024",
+  "notes": "empty DEM exercises DEM normalization method 'unsupported'",
+  "operation": "gis_normalize_raster",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": []
+    },
+    "method": "unsupported"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "dems",
+  "id": "dems-009",
+  "notes": "single-cell zero DEM exercises water-mask shape, dtype, and finiteness handling",
+  "operation": "dem_derive_water_mask",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": [
+        [
+          0
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidTransform",
+    "type": "ValueError"
+  },
+  "family": "rasters",
+  "id": "rasters-064",
+  "operation": "gis_write_raster",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": [
+        [
+          0,
+          "nan",
+          2,
+          3
+        ]
+      ]
+    },
+    "crs": null,
+    "name": "raster_3",
+    "transform": [
+      "nan",
+      0,
+      0,
+      0,
+      -1,
+      2
+    ]
+  }
+}

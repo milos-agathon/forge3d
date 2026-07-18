@@ -1,0 +1,32 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "viewer_scene",
+  "id": "viewer_scene-016",
+  "operation": "terrain_source",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": [
+        [
+          "nan",
+          1,
+          2
+        ],
+        [
+          3,
+          "nan",
+          4
+        ]
+      ]
+    },
+    "crs": "EPSG:4326",
+    "metadata": {
+      "height": 2,
+      "source_id": "dem-3",
+      "width": 2
+    },
+    "nodata_policy": "fill"
+  }
+}

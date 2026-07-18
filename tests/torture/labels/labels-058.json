@@ -1,0 +1,16 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "labels",
+  "id": "labels-058",
+  "notes": "south-pole anchors in a one-pixel frame",
+  "operation": "label_plan_compile",
+  "payload": {
+    "anchor_count": 2,
+    "height": 1,
+    "width": 1,
+    "x": 0,
+    "y": -90
+  }
+}

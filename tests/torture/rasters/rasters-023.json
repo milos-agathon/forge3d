@@ -1,0 +1,26 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidArgument",
+    "type": "ValueError"
+  },
+  "family": "rasters",
+  "id": "rasters-023",
+  "operation": "gis_normalize_raster",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": [
+        [
+          "nan",
+          "nan"
+        ],
+        [
+          "nan",
+          "nan"
+        ]
+      ]
+    },
+    "method": "zscore"
+  }
+}

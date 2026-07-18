@@ -1,0 +1,11 @@
+{
+  "expect": {
+    "class": "ok"
+  },
+  "family": "viewer_scene",
+  "id": "viewer_scene-009",
+  "operation": "viewer_set_msaa",
+  "payload": {
+    "samples": 1
+  }
+}

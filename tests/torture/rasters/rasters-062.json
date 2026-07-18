@@ -1,0 +1,30 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidTransform",
+    "type": "ValueError"
+  },
+  "family": "rasters",
+  "id": "rasters-062",
+  "operation": "gis_write_raster",
+  "payload": {
+    "array": {
+      "dtype": "float32",
+      "values": [
+        [
+          0
+        ]
+      ]
+    },
+    "crs": "EPSG:4326",
+    "name": "raster_1",
+    "transform": [
+      0,
+      0,
+      0,
+      0,
+      -1,
+      2
+    ]
+  }
+}

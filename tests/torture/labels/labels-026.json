@@ -1,0 +1,17 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "text",
+    "type": "TextShapingError"
+  },
+  "family": "labels",
+  "id": "labels-026",
+  "operation": "text_shape",
+  "payload": {
+    "fonts": [
+      "assets/fonts/NotoSansArabic-subset.ttf"
+    ],
+    "size": 0,
+    "text": "\ud83d\ude00"
+  }
+}

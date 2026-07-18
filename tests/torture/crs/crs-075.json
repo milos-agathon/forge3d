@@ -1,0 +1,22 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidBounds",
+    "type": "ValueError"
+  },
+  "family": "crs",
+  "id": "crs-075",
+  "notes": "Exercises gis_transform_bounds partition {\"bounds\":{\"classes\":[\"nan\",\"zero\",\"ordinary\",\"unit\"],\"shape\":\"non_finite\"},\"densify\":\"ordinary\",\"dst_crs\":\"EPSG:3857\",\"src_crs\":\"EPSG:4326\"} with error oracle",
+  "operation": "gis_transform_bounds",
+  "payload": {
+    "bounds": [
+      "nan",
+      0,
+      1.010294,
+      1
+    ],
+    "densify": 4,
+    "dst_crs": "EPSG:3857",
+    "src_crs": "EPSG:4326"
+  }
+}

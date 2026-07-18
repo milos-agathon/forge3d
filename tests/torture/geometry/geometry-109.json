@@ -1,0 +1,25 @@
+{
+  "expect": {
+    "class": "error_or_value"
+  },
+  "family": "geometry",
+  "id": "geometry-109",
+  "notes": "minimum two-point line with unit width reaches polyline insertion",
+  "operation": "vector_add_lines",
+  "payload": {
+    "path": {
+      "dtype": "float64",
+      "values": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          1.0,
+          1.0
+        ]
+      ]
+    },
+    "stroke_width": 1.0
+  }
+}

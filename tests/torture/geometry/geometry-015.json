@@ -1,0 +1,20 @@
+{
+  "expect": {
+    "class": "error",
+    "match": "InvalidGeometry",
+    "type": "ValueError"
+  },
+  "family": "geometry",
+  "id": "geometry-015",
+  "notes": "Exercises gis_validate_geometry partition {\"geometry\":{\"locus\":\"empty\",\"point_count\":0,\"special_coordinates\":[\"fractional\",\"nan\"],\"type\":\"Point\"}} with error oracle",
+  "operation": "gis_validate_geometry",
+  "payload": {
+    "geometry": {
+      "coordinates": [
+        "nan",
+        0.002074
+      ],
+      "type": "Point"
+    }
+  }
+}
