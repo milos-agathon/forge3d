@@ -1,5 +1,25 @@
 //! DUPLA double-float arithmetic.
 
+mod generator;
+mod gpu;
+mod gpu_exec;
+mod gpu_report;
+mod product;
+mod proof;
+mod types;
+mod vector;
+
+#[allow(unused_imports)] // Public Python seam is wired in DUPLA Task 4.
+pub(crate) use gpu::{harness, initialize_for_context, selftest};
+#[cfg(test)]
+pub(crate) use gpu::{harness_for_test, harness_window_for_test};
+#[allow(unused_imports)] // Public Python seam is wired in DUPLA Task 4.
+pub(crate) use gpu_report::DdOperation;
+pub use product::{two_prod, two_prod_fma, two_prod_split};
+pub use types::{DDVec3, DD};
+#[allow(unused_imports)] // dd_dot3/dd_length3 are consumed by DUPLA Task 3.
+pub use vector::{dd_dot3, dd_length3, dd_sub_vec3};
+
 // BEGIN GENERATED DD MIRROR
 /// Unit roundoff for IEEE-754 binary32.
 pub const DD_U: f64 = 5.960_464_477_539_063e-8;
@@ -12,51 +32,13 @@ pub const DD_DIV_BOUND_U2: f64 = 15.0;
 /// DUPLA square-root relative-error gate, in u².
 pub const DD_SQRT_BOUND_U2: f64 = 15.0;
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct DD {
-    pub hi: f32,
-    pub lo: f32,
-}
-
 impl DD {
-    pub const ZERO: Self = Self { hi: 0.0, lo: 0.0 };
-
     /// Split a finite, binary32-range f64 into a normalized pair.
-    ///
-    /// Internal callers must uphold the finite/range precondition; the public
-    /// Python boundary validates it before reaching this arithmetic layer.
     pub fn from_f64(value: f64) -> Self {
         debug_assert!(value.is_finite() && value.abs() <= f32::MAX as f64);
         let hi = value as f32;
         let lo = (value - hi as f64) as f32;
         dd_renorm(Self { hi, lo })
-    }
-
-    pub fn to_f64(self) -> f64 {
-        self.hi as f64 + self.lo as f64
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct DDVec3 {
-    pub x: DD,
-    pub y: DD,
-    pub z: DD,
-}
-
-impl DDVec3 {
-    pub fn from_dvec3(value: glam::DVec3) -> Self {
-        Self {
-            x: DD::from_f64(value.x),
-            y: DD::from_f64(value.y),
-            z: DD::from_f64(value.z),
-        }
-    }
-
-    pub fn to_dvec3(self) -> glam::DVec3 {
-        glam::DVec3::new(self.x.to_f64(), self.y.to_f64(), self.z.to_f64())
     }
 }
 
@@ -66,77 +48,100 @@ fn dd_barrier(value: f32) -> f32 {
 }
 
 /// Knuth two_sum: six flops, exact under round-to-nearest barring overflow.
+fn two_sum_subnormal(a: f32, b: f32, a_bits: u32, b_bits: u32, a_sub: bool, b_sub: bool) -> DD {
+    if a_sub && b_sub {
+        let mut a_signed = (a_bits & 0x007f_ffff) as i32;
+        if a_bits & 0x8000_0000 != 0 {
+            a_signed = -a_signed;
+        }
+        let mut b_signed = (b_bits & 0x007f_ffff) as i32;
+        if b_bits & 0x8000_0000 != 0 {
+            b_signed = -b_signed;
+        }
+        let total = a_signed + b_signed;
+        if total == 0 {
+            return DD::ZERO;
+        }
+        let mut sign = 0;
+        let mut magnitude = total;
+        if magnitude < 0 {
+            sign = 0x8000_0000;
+            magnitude = -magnitude;
+        }
+        return DD {
+            hi: f32::from_bits(sign | magnitude as u32),
+            lo: 0.0,
+        };
+    }
+    if a_sub && b_bits & 0x7fff_ffff == 0 {
+        return DD { hi: a, lo: 0.0 };
+    }
+    if b_sub && a_bits & 0x7fff_ffff == 0 {
+        return DD { hi: b, lo: 0.0 };
+    }
+    if a_sub {
+        return DD { hi: b, lo: a };
+    }
+    DD { hi: a, lo: b }
+}
+
 pub fn two_sum(a: f32, b: f32) -> DD {
-    let hi = a + b;
-    let b_virtual = hi - a;
-    let a_virtual = hi - b_virtual;
-    let b_roundoff = b - b_virtual;
-    let a_roundoff = a - a_virtual;
-    let lo = a_roundoff + b_roundoff;
+    let a_bits = a.to_bits();
+    let b_bits = b.to_bits();
+    let a_sub = a_bits & 0x007f_ffff != 0 && a_bits & 0x7f80_0000 == 0;
+    let b_sub = b_bits & 0x007f_ffff != 0 && b_bits & 0x7f80_0000 == 0;
+    if a_sub || b_sub {
+        return two_sum_subnormal(a, b, a_bits, b_bits, a_sub, b_sub);
+    }
+    let hi = dd_barrier(a + b);
+    let b_virtual = dd_barrier(hi - a);
+    let a_virtual = dd_barrier(hi - b_virtual);
+    let b_roundoff = dd_barrier(b - b_virtual);
+    let a_roundoff = dd_barrier(a - a_virtual);
+    let lo = dd_barrier(a_roundoff + b_roundoff);
     DD { hi, lo }
 }
 
 /// Dekker quick_two_sum: exact when |a| >= |b| under round-to-nearest.
 pub fn quick_two_sum(a: f32, b: f32) -> DD {
-    let hi = a + b;
-    let lo = b - (hi - a);
+    let hi = dd_barrier(a + b);
+    let lo = dd_barrier(b - dd_barrier(hi - a));
     DD { hi, lo }
-}
-
-fn split_scaled(a: f32) -> DD {
-    let magnitude = a.abs();
-    let mut scaled = a;
-    let mut undo = 1.0;
-    if magnitude > 1.267_650_6e30 {
-        scaled = dd_barrier(a * 3.725_290_3e-9);
-        undo = 268_435_456.0;
-    } else if magnitude != 0.0 && magnitude < 7.888_609e-31 {
-        scaled = dd_barrier(a * 268_435_456.0);
-        undo = 3.725_290_3e-9;
-    }
-    let c = dd_barrier(4097.0 * scaled);
-    let hi = c - (c - scaled);
-    let lo = scaled - hi;
-    DD {
-        hi: dd_barrier(hi * undo),
-        lo: dd_barrier(lo * undo),
-    }
-}
-
-/// Dekker/Veltkamp split two-product, exact for finite non-overflowing products.
-pub fn two_prod_split(a: f32, b: f32) -> DD {
-    let hi = dd_barrier(a * b);
-    let sa = split_scaled(a);
-    let sb = split_scaled(b);
-    let e0 = dd_barrier(sa.hi * sb.hi) - hi;
-    let e1 = e0 + dd_barrier(sa.hi * sb.lo);
-    let e2 = e1 + dd_barrier(sa.lo * sb.hi);
-    let lo = e2 + dd_barrier(sa.lo * sb.lo);
-    DD { hi, lo }
-}
-
-/// IEEE fused-multiply-add two-product; selected only after a GPU exactness canary.
-#[allow(dead_code)] // Exercised by the backend preflight introduced in DUPLA Task 2.
-pub fn two_prod_fma(a: f32, b: f32) -> DD {
-    let hi = dd_barrier(a * b);
-    let lo = a.mul_add(b, -hi);
-    DD { hi, lo }
-}
-
-pub fn two_prod(a: f32, b: f32) -> DD {
-    two_prod_split(a, b)
 }
 
 pub fn dd_renorm(value: DD) -> DD {
     quick_two_sum(value.hi, value.lo)
 }
 
+fn dd_canonicalize_tie(value: DD) -> DD {
+    let bits = value.hi.to_bits();
+    let biased = (bits >> 23) & 0xff;
+    if biased <= 24 || bits & 1 == 0 {
+        return value;
+    }
+    let half_ulp = f32::from_bits((biased - 24) << 23);
+    let lo_bits = value.lo.abs().to_bits();
+    let half_bits = half_ulp.to_bits();
+    if lo_bits > half_bits || half_bits - lo_bits > 1 {
+        return value;
+    }
+    let increment = (value.lo > 0.0) != (value.hi < 0.0);
+    let mut adjacent_bits = bits - 1;
+    if increment {
+        adjacent_bits = bits + 1;
+    }
+    DD {
+        hi: f32::from_bits(adjacent_bits),
+        lo: -value.lo,
+    }
+}
+
 /// Joldeș-Muller-Popescu (2017): accurate double-word add <= 3u².
 pub fn dd_add(a: DD, b: DD) -> DD {
     let s = two_sum(a.hi, b.hi);
     let t = two_sum(a.lo, b.lo);
-    let merged = quick_two_sum(s.hi, s.lo + t.hi);
-    quick_two_sum(merged.hi, merged.lo + t.lo)
+    let merged = quick_two_sum(s.hi, dd_barrier(s.lo + t.hi));
+    quick_two_sum(merged.hi, dd_barrier(merged.lo + t.lo))
 }
 
 pub fn dd_sub(a: DD, b: DD) -> DD {
@@ -154,10 +159,19 @@ pub fn dd_mul(a: DD, b: DD) -> DD {
     let p = two_prod(a.hi, b.hi);
     let cross0 = dd_barrier(a.hi * b.lo);
     let cross1 = dd_barrier(a.lo * b.hi);
-    let correction = (p.lo + cross0) + cross1;
+    let correction = dd_barrier(dd_barrier(p.lo + cross0) + cross1);
     quick_two_sum(p.hi, correction)
 }
 
+fn dd_mul_split_fixed(a: DD, b: DD) -> DD {
+    let p = two_prod_split(a.hi, b.hi);
+    let cross0 = dd_barrier(a.hi * b.lo);
+    let cross1 = dd_barrier(a.lo * b.hi);
+    let correction = dd_barrier(dd_barrier(p.lo + cross0) + cross1);
+    quick_two_sum(p.hi, correction)
+}
+
+/// Newton-Raphson reciprocal from multiplication/addition only (JMP 2017 division setup).
 pub fn dd_reciprocal_refine(x: f32) -> f32 {
     let ax = x.abs();
     let mut y = f32::from_bits(0x7ef3_11c3_u32 - ax.to_bits());
@@ -179,20 +193,44 @@ pub fn dd_div(a: DD, b: DD) -> DD {
     let q = DD { hi: q_hi, lo: 0.0 };
     let remainder = dd_sub(a, dd_mul(b, q));
     let q_lo = dd_barrier((remainder.hi + remainder.lo) * reciprocal);
-    dd_add(q, DD { hi: q_lo, lo: 0.0 })
+    let first = dd_add(q, DD { hi: q_lo, lo: 0.0 });
+    let final_remainder = dd_sub(a, dd_mul(b, first));
+    let final_lo = dd_barrier((final_remainder.hi + final_remainder.lo) * reciprocal);
+    dd_add(
+        first,
+        DD {
+            hi: final_lo,
+            lo: 0.0,
+        },
+    )
 }
 
+/// Hardware inverse-sqrt is a seed only; no error-free step depends on its accuracy.
 pub fn dd_inverse_sqrt_seed(x: f32) -> f32 {
     x.sqrt().recip()
 }
 
-fn inverse_sqrt_residual(x: f32, y: f32) -> f32 {
-    f32::abs(1.0 - dd_barrier(x * dd_barrier(y * y)))
+fn inverse_sqrt_residual(x: f32, y: f32) -> DD {
+    let yy = dd_mul_split_fixed(DD { hi: y, lo: 0.0 }, DD { hi: y, lo: 0.0 });
+    let xyy = dd_mul_split_fixed(DD { hi: x, lo: 0.0 }, yy);
+    dd_sub(DD { hi: 1.0, lo: 0.0 }, xyy)
 }
 
+fn inverse_sqrt_residual_better(candidate: DD, best: DD) -> bool {
+    f32::abs(candidate.hi) < f32::abs(best.hi)
+        || (f32::abs(candidate.hi) == f32::abs(best.hi)
+            && f32::abs(candidate.lo) < f32::abs(best.lo))
+}
+
+fn inverse_sqrt_residual_equal(candidate: DD, best: DD) -> bool {
+    candidate.hi == best.hi && candidate.lo == best.lo
+}
+
+/// Newton inverse-square-root refinement using multiplication/addition only.
 pub fn dd_inverse_sqrt_refine(x: f32, seed: f32) -> f32 {
     let half_x = dd_barrier(0.5 * x);
     let mut y = seed;
+    y = dd_barrier(y * (1.5 - dd_barrier(half_x * dd_barrier(y * y))));
     y = dd_barrier(y * (1.5 - dd_barrier(half_x * dd_barrier(y * y))));
     y = dd_barrier(y * (1.5 - dd_barrier(half_x * dd_barrier(y * y))));
     y = dd_barrier(y * (1.5 - dd_barrier(half_x * dd_barrier(y * y))));
@@ -202,7 +240,9 @@ pub fn dd_inverse_sqrt_refine(x: f32, seed: f32) -> f32 {
     let below_bits = best_bits - 1;
     let below = f32::from_bits(below_bits);
     let below_error = inverse_sqrt_residual(x, below);
-    if below_error < best_error || (below_error == best_error && below_bits < best_bits) {
+    if inverse_sqrt_residual_better(below_error, best_error)
+        || (inverse_sqrt_residual_equal(below_error, best_error) && below_bits < best_bits)
+    {
         best = below;
         best_bits = below_bits;
         best_error = below_error;
@@ -210,13 +250,15 @@ pub fn dd_inverse_sqrt_refine(x: f32, seed: f32) -> f32 {
     let above_bits = y.to_bits() + 1;
     let above = f32::from_bits(above_bits);
     let above_error = inverse_sqrt_residual(x, above);
-    if above_error < best_error || (above_error == best_error && above_bits < best_bits) {
+    if inverse_sqrt_residual_better(above_error, best_error)
+        || (inverse_sqrt_residual_equal(above_error, best_error) && above_bits < best_bits)
+    {
         best = above;
     }
     best
 }
 
-/// Newton inverse-square-root refinement plus one correction; <= 15u² gate.
+/// Newton inverse-square-root refinement plus two residual corrections; <= 15u² gate.
 pub fn dd_sqrt(a: DD) -> DD {
     debug_assert!(a.hi.is_finite() && a.hi >= 0.0);
     if a.hi == 0.0 {
@@ -229,31 +271,30 @@ pub fn dd_sqrt(a: DD) -> DD {
         lo: 0.0,
     };
     let remainder = dd_sub(a, dd_mul(root, root));
-    let root_lo = dd_barrier(dd_barrier(0.5 * remainder.hi) * inverse);
-    dd_add(
+    let inverse_two_root = dd_reciprocal_refine(dd_barrier(2.0 * root_hi));
+    let root_lo = dd_barrier(dd_barrier(remainder.hi + remainder.lo) * inverse_two_root);
+    let first = dd_add(
         root,
         DD {
             hi: root_lo,
             lo: 0.0,
         },
-    )
+    );
+    let canonical_root = DD {
+        hi: first.hi,
+        lo: 0.0,
+    };
+    let canonical_remainder = dd_sub(a, dd_mul(canonical_root, canonical_root));
+    let canonical_inverse = dd_reciprocal_refine(dd_barrier(2.0 * first.hi));
+    let canonical_lo =
+        dd_barrier(dd_barrier(canonical_remainder.hi + canonical_remainder.lo) * canonical_inverse);
+    dd_canonicalize_tie(dd_add(
+        canonical_root,
+        DD {
+            hi: canonical_lo,
+            lo: 0.0,
+        },
+    ))
 }
 
-#[allow(dead_code)] // Wired into the DD vertex path in DUPLA Task 3.
-pub fn dd_dot3(a: DDVec3, b: DDVec3) -> DD {
-    dd_add(dd_add(dd_mul(a.x, b.x), dd_mul(a.y, b.y)), dd_mul(a.z, b.z))
-}
-
-#[allow(dead_code)] // Wired into the DD vertex path in DUPLA Task 3.
-pub fn dd_length3(value: DDVec3) -> DD {
-    dd_sqrt(dd_dot3(value, value))
-}
-
-pub fn dd_sub_vec3(a: DDVec3, b: DDVec3) -> DDVec3 {
-    DDVec3 {
-        x: dd_sub(a.x, b.x),
-        y: dd_sub(a.y, b.y),
-        z: dd_sub(a.z, b.z),
-    }
-}
 // END GENERATED DD MIRROR

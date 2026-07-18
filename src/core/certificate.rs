@@ -55,6 +55,22 @@ struct FinishedCapture {
     by_label: BTreeMap<String, u64>,
     /// (kind, name, consequence), sorted by (kind, name).
     degradations: Vec<(String, String, String)>,
+    precision: Option<PrecisionEvidence>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PrecisionEvidence {
+    pub backend: String,
+    pub adapter: String,
+    pub operation: String,
+    pub two_prod_variant: String,
+    pub shader_label: String,
+    pub shader_hash: String,
+    pub generated_count: u64,
+    pub adversarial_count: u64,
+    pub mismatch_count: u64,
+    pub max_err_u2: f64,
+    pub cited_bound_u2: f64,
 }
 
 /// Passes recorded for the render currently in flight.
@@ -66,6 +82,11 @@ static CAPTURE_USES_GPU: AtomicBool = AtomicBool::new(true);
 thread_local! {
     static EXTERNAL_CAPTURE: RefCell<Option<RenderCaptureGuard>> = const { RefCell::new(None) };
     static CAPTURE_DEPTH: Cell<usize> = const { Cell::new(0) };
+    static CURRENT_PRECISION: RefCell<Option<PrecisionEvidence>> = const { RefCell::new(None) };
+}
+
+pub fn record_precision_evidence(evidence: PrecisionEvidence) {
+    CURRENT_PRECISION.with(|slot| *slot.borrow_mut() = Some(evidence));
 }
 
 #[must_use = "a render capture must be finished or retained until the render exits"]
@@ -170,6 +191,7 @@ pub fn begin_render_capture_with_resources(
     begin_shader_render_capture(&BTreeMap::new());
     crate::core::shader_contract_runtime::begin_runtime_contract_capture();
     begin_degradation_capture();
+    CURRENT_PRECISION.with(|slot| slot.borrow_mut().take());
     notify_python_degradation_capture("begin_capture");
     let mut cur = lock_current();
     cur.clear();
@@ -307,6 +329,7 @@ fn finish_render_capture() {
         peak_device_local_bytes: ledger.peak_device_local_bytes,
         by_label: ledger.by_label,
         degradations,
+        precision: CURRENT_PRECISION.with(|slot| slot.borrow_mut().take()),
     };
 
     *lock_last() = Some(finished);
@@ -319,6 +342,7 @@ pub fn abort_render_capture() {
     crate::core::degradation::abort_degradation_capture();
     notify_python_degradation_capture("abort_capture");
     lock_current().clear();
+    CURRENT_PRECISION.with(|slot| slot.borrow_mut().take());
 }
 
 /// Start a render-local capture owned by a Python renderer.
@@ -406,6 +430,8 @@ struct ReportJson<'a> {
     passes: Vec<PassJson<'a>>,
     allocations: AllocationsJson<'a>,
     degradations: Vec<DegradationJson<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    precision: Option<&'a PrecisionEvidence>,
 }
 
 /// Serialize the LAST completed render capture as the canonical certificate
@@ -461,6 +487,7 @@ pub fn execution_report_json() -> Result<String, RenderError> {
                 consequence,
             })
             .collect(),
+        precision: cap.precision.as_ref(),
     };
 
     serde_json::to_string(&report)
@@ -634,5 +661,39 @@ mod tests {
             .map(|pass| pass["label"].as_str().expect("pass label"))
             .collect();
         assert_eq!(labels, ["outer.before", "inner.gpu", "outer.after"]);
+    }
+
+    #[test]
+    fn precision_evidence_is_scoped_and_optional() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+        let dd = begin_render_capture("test.dd");
+        record_precision_evidence(PrecisionEvidence {
+            backend: "vulkan".to_string(),
+            adapter: "test-adapter".to_string(),
+            operation: "add".to_string(),
+            two_prod_variant: "fma".to_string(),
+            shader_label: "forge3d.dd_harness.v1".to_string(),
+            shader_hash: "abc123".to_string(),
+            generated_count: 100_000_000,
+            adversarial_count: 1_000_000,
+            mismatch_count: 0,
+            max_err_u2: 2.5,
+            cited_bound_u2: 3.0,
+        });
+        dd.finish();
+        let with_precision: serde_json::Value =
+            serde_json::from_str(&execution_report_json().expect("DD certificate must assemble"))
+                .expect("DD certificate parses");
+        assert_eq!(with_precision["precision"]["operation"], "add");
+        assert_eq!(with_precision["precision"]["mismatch_count"], 0);
+
+        let ordinary = begin_render_capture("test.ordinary");
+        ordinary.finish();
+        let without_precision: serde_json::Value = serde_json::from_str(
+            &execution_report_json().expect("ordinary certificate must assemble"),
+        )
+        .expect("ordinary certificate parses");
+        assert!(without_precision.get("precision").is_none());
     }
 }

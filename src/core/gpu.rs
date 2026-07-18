@@ -353,14 +353,16 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
             poison_context(format!("device lost ({reason:?}): {msg}"));
         });
 
-        Ok(GpuContext {
+        let context = GpuContext {
             instance,
             device: Arc::new(device),
             queue: Arc::new(queue),
             adapter: Arc::new(adapter),
             software_fallback,
             capabilities,
-        })
+        };
+        crate::core::dd::initialize_for_context(&context)?;
+        Ok(context)
     })
 }
 
