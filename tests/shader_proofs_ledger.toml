@@ -175,12 +175,6 @@ owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
-path = "src/shaders/gbuffer/common.wgsl"
-reason = "gbuffer/common.wgsl: nonlinear native-math result envelopes are not yet modeled"
-owner = "render-quality"
-expiry = "2027-01-17"
-
-[[unproven]]
 path = "src/shaders/gi/debug.wgsl"
 reason = "gi/debug.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
@@ -237,12 +231,6 @@ expiry = "2027-01-17"
 [[unproven]]
 path = "src/shaders/ibl_prefilter.wgsl"
 reason = "ibl_prefilter.wgsl: texture/resource dimension and sampling relations are not yet modeled"
-owner = "render-quality"
-expiry = "2027-01-17"
-
-[[unproven]]
-path = "src/shaders/ibl.wgsl"
-reason = "ibl.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"
 
@@ -445,18 +433,6 @@ owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
-path = "src/shaders/restir_spatial.wgsl"
-reason = "restir_spatial.wgsl: nonlinear native-math result envelopes are not yet modeled"
-owner = "render-quality"
-expiry = "2027-01-17"
-
-[[unproven]]
-path = "src/shaders/restir_temporal.wgsl"
-reason = "restir_temporal.wgsl: storage-buffer index and count relations are not yet modeled"
-owner = "render-quality"
-expiry = "2027-01-17"
-
-[[unproven]]
 path = "src/shaders/sdf_operations.wgsl"
 reason = "sdf_operations.wgsl: nonlinear native-math result envelopes are not yet modeled"
 owner = "render-quality"
@@ -649,12 +625,6 @@ owner = "render-quality"
 expiry = "2027-01-17"
 
 [[unproven]]
-path = "src/shaders/velocity.wgsl"
-reason = "velocity.wgsl: entry varying and uniform-member ranges are not yet modeled"
-owner = "render-quality"
-expiry = "2027-01-17"
-
-[[unproven]]
 path = "src/shaders/viewer_volumetrics.wgsl"
 reason = "viewer_volumetrics.wgsl: texture/resource dimension and sampling relations are not yet modeled"
 owner = "render-quality"
@@ -663,5 +633,29 @@ expiry = "2027-01-17"
 [[unproven]]
 path = "src/shaders/volumetric.wgsl"
 reason = "volumetric.wgsl: texture/resource dimension and sampling relations are not yet modeled"
+owner = "render-quality"
+expiry = "2027-01-17"
+
+[[unproven]]
+path = "src/viewer/pointcloud/pointcloud.wgsl"
+reason = "viewer/pointcloud/pointcloud.wgsl: inputs and sampling relations are not yet modeled"
+owner = "render-quality"
+expiry = "2027-01-17"
+
+[[unproven]]
+path = "src/viewer/terrain/dof/dof.wgsl"
+reason = "viewer/terrain/dof/dof.wgsl: texture relations are not yet modeled"
+owner = "render-quality"
+expiry = "2027-01-17"
+
+[[unproven]]
+path = "src/viewer/terrain/shader_pbr/terrain_pbr.wgsl"
+reason = "viewer/terrain/shader_pbr/terrain_pbr.wgsl: resource relations are not yet modeled"
+owner = "render-quality"
+expiry = "2027-01-17"
+
+[[unproven]]
+path = "src/viewer/terrain/shader_pbr/terrain_shadow_depth.wgsl"
+reason = "viewer/terrain/shader_pbr/terrain_shadow_depth.wgsl: shadow relations are not yet modeled"
 owner = "render-quality"
 expiry = "2027-01-17"

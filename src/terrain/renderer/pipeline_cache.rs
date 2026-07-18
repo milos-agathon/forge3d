@@ -59,76 +59,7 @@ impl TerrainScene {
     /// Preprocess terrain shader by resolving #include directives
     /// WGSL doesn't have a preprocessor, so we manually expand includes
     pub(super) fn preprocess_terrain_shader() -> String {
-        // Helper to strip #include lines from a shader source
-        fn strip_includes(source: &str) -> String {
-            source
-                .lines()
-                .filter(|l| !l.trim_start().starts_with("#include"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        }
-
-        // Pinned-order float helpers must lead the module so every det_* call
-        // site below (tonemap_common, lighting_ibl, terrain) resolves.
-        let determinism = include_str!("../../shaders/includes/determinism.wgsl");
-
-        // Load nested includes for lighting.wgsl
-        let lights = include_str!("../../shaders/lights.wgsl");
-
-        // Load BRDF dispatch and its includes
-        let brdf_common = include_str!("../../shaders/brdf/common.wgsl");
-        let brdf_lambert = include_str!("../../shaders/brdf/lambert.wgsl");
-        let brdf_phong = include_str!("../../shaders/brdf/phong.wgsl");
-        let brdf_oren_nayar = include_str!("../../shaders/brdf/oren_nayar.wgsl");
-        let brdf_cook_torrance = include_str!("../../shaders/brdf/cook_torrance.wgsl");
-        let brdf_disney_principled = include_str!("../../shaders/brdf/disney_principled.wgsl");
-        let brdf_ashikhmin_shirley = include_str!("../../shaders/brdf/ashikhmin_shirley.wgsl");
-        let brdf_ward = include_str!("../../shaders/brdf/ward.wgsl");
-        let brdf_toon = include_str!("../../shaders/brdf/toon.wgsl");
-        let brdf_minnaert = include_str!("../../shaders/brdf/minnaert.wgsl");
-
-        let brdf_dispatch_raw = include_str!("../../shaders/brdf/dispatch.wgsl");
-        let brdf_dispatch = strip_includes(brdf_dispatch_raw);
-
-        // Load lighting.wgsl and strip its includes
-        let lighting_raw = include_str!("../../shaders/lighting.wgsl");
-        let lighting = strip_includes(lighting_raw);
-
-        // Load lighting_ibl.wgsl (no includes)
-        let lighting_ibl = include_str!("../../shaders/lighting_ibl.wgsl");
-        // Load shared terrain noise helpers
-        let terrain_noise = include_str!("../../shaders/terrain_noise.wgsl");
-        let terrain_probes = include_str!("../../shaders/terrain_probes.wgsl");
-        let tonemap_common = include_str!("../../shaders/includes/tonemap_common.wgsl");
-
-        // Load main terrain shader and strip includes
-        // Shader version: 2024-01-water-blue-fix
-        let terrain_raw = include_str!("../../shaders/terrain_pbr_pom.wgsl");
-        let terrain = strip_includes(terrain_raw);
-
-        // Concatenate in dependency order
-        format!(
-            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
-            determinism,
-            lights,
-            brdf_common,
-            brdf_lambert,
-            brdf_phong,
-            brdf_oren_nayar,
-            brdf_cook_torrance,
-            brdf_disney_principled,
-            brdf_ashikhmin_shirley,
-            brdf_ward,
-            brdf_toon,
-            brdf_minnaert,
-            brdf_dispatch,
-            lighting,
-            lighting_ibl,
-            terrain_noise,
-            terrain_probes,
-            tonemap_common,
-            terrain
-        )
+        crate::shader_sources::terrain()
     }
 
     pub(super) fn create_render_pipeline(

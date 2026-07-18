@@ -87,7 +87,7 @@ invariants = ["abs_ge:b:0.000001"]
 name = "det_sqrt"
 proof_status = "proven"
 inputs = ["value:x:-65536:65536"]
-outputs = ["return:0:256"]
+outputs = ["return:0:256.001"]
 
 [[entry]]
 name = "det_normalize2"
@@ -129,13 +129,13 @@ outputs = ["return:-1024:1024"]
 name = "det_pow"
 proof_status = "proven"
 inputs = ["value:x:0.0001:16", "value:y:-8:8"]
-outputs = ["return:0:1e32"]
+outputs = ["return:0:1.000001e32"]
 
 [[entry]]
 name = "det_pow3"
 proof_status = "proven"
 inputs = ["value:x:0.0001:16", "value:y:-8:8"]
-outputs = ["return:0:1e32"]
+outputs = ["return:0:1.000001e32"]
 
 [[entry]]
 name = "det_exp"

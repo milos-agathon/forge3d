@@ -523,6 +523,16 @@ impl TerrainScene {
             height_inputs.width as f32,
             height_inputs.height as f32,
         )?;
+        super::runtime_contract::record_observation(
+            "terrain.render_internal_with_aov",
+            &uniforms,
+            &materials.shading_uniforms,
+            &materials.overlay_binding.uniform,
+            &height_inputs.heightmap_data,
+            height_inputs.width,
+            height_inputs.height,
+        )
+        .map_err(anyhow::Error::msg)?;
         let uniform_buffer = tracked_create_buffer_init(
             self.device.as_ref(),
             &wgpu::util::BufferInitDescriptor {

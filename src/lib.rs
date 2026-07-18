@@ -140,6 +140,7 @@ pub mod renderer;
 #[cfg(feature = "extension-module")]
 pub mod scene;
 pub mod sdf; // New SDF module
+pub(crate) mod shader_sources;
 pub mod shadows; // Shadow mapping implementations
 pub mod smoke; // Physical smoke volumes, simulation, and reference rendering
 pub mod terrain;

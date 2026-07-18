@@ -436,6 +436,10 @@ fn smith_G_aniso(l: vec3<f32>, v: vec3<f32>, t: vec3<f32>, b: vec3<f32>, n: vec3
     return smith_G1_aniso(l, t, b, n, ax, ay) * smith_G1_aniso(v, t, b, n, ax, ay);
 }
 
+fn guarded_ggx_u1_ratio(u1: f32) -> f32 {
+    return u1 / max(1.0 - u1, 1e-6);
+}
+
 fn sample_ggx_anisotropic(u1: f32, u2: f32, ax: f32, ay: f32) -> vec3<f32> {
     // Heitz-style anisotropic GGX sampling
     let two_pi = 6.283185307179586;
@@ -445,7 +449,7 @@ fn sample_ggx_anisotropic(u1: f32, u2: f32, ax: f32, ay: f32) -> vec3<f32> {
     let cosPhi = cos(phi);
     let sinPhi = sin(phi);
     let denom = (cosPhi * cosPhi) / max(ax * ax, 1e-8) + (sinPhi * sinPhi) / max(ay * ay, 1e-8);
-    let cosTheta = 1.0 / sqrt(1.0 + (u1 / max(1.0 - u1, 1e-6)) * denom);
+    let cosTheta = 1.0 / sqrt(1.0 + guarded_ggx_u1_ratio(u1) * denom);
     let sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
     return vec3<f32>(sinTheta * cosPhi, sinTheta * sinPhi, cosTheta);
 }

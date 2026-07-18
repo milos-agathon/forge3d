@@ -29,7 +29,11 @@ impl EntryContract {
     /// Missing facts are deliberately `None`; the interpreter must use its
     /// NaN/Inf-capable top value rather than inventing a safe range.
     pub(crate) fn input(&self, name: &str) -> Option<&InputContract> {
-        self.inputs.iter().find(|input| input.name() == name)
+        self.inputs.iter().find(|input| {
+            input.name() == name
+                || matches!(input, InputContract::BufferField(_))
+                    && input.name().replace("[]", "") == name
+        })
     }
 }
 
@@ -45,6 +49,7 @@ pub(crate) enum InputContract {
         range: RangeContract,
         length: BufferLength,
     },
+    BufferField(RangeContract),
     Sampler(String),
 }
 
@@ -66,6 +71,7 @@ impl InputContract {
         match self {
             Self::Value(range) | Self::Uniform(range) => &range.name,
             Self::Texture { range, .. } | Self::Buffer { range, .. } => &range.name,
+            Self::BufferField(range) => &range.name,
             Self::Sampler(name) => name,
         }
     }
@@ -76,6 +82,7 @@ pub(crate) struct RangeContract {
     pub name: String,
     pub min: f32,
     pub max: f32,
+    pub allow_nan: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,14 +135,51 @@ pub(crate) fn validate_contract_semantics(
         .iter()
         .map(|input| (input.name().to_string(), input_kind(input)))
         .collect();
+    let mut component_covered = BTreeSet::new();
+    for (name, kind) in &expected {
+        let Some(ty) = known_symbol_type(module, root, name) else {
+            continue;
+        };
+        let naga::TypeInner::Vector { size, .. } = module.types[ty].inner else {
+            continue;
+        };
+        let components = ["x", "y", "z", "w"]
+            .iter()
+            .take(match size {
+                naga::VectorSize::Bi => 2,
+                naga::VectorSize::Tri => 3,
+                naga::VectorSize::Quad => 4,
+            })
+            .map(|component| format!("{name}.{component}"))
+            .collect::<Vec<_>>();
+        if components
+            .iter()
+            .all(|component| actual.get(component) == Some(kind))
+        {
+            component_covered.extend(components);
+        }
+    }
     let missing: Vec<_> = expected
         .keys()
-        .filter(|name| !actual.contains_key(*name))
+        .filter(|name| {
+            !actual.contains_key(*name)
+                && !component_covered
+                    .iter()
+                    .any(|component| component.starts_with(&format!("{name}.")))
+        })
         .cloned()
         .collect();
     let extra: Vec<_> = actual
         .keys()
-        .filter(|name| !expected.contains_key(*name))
+        .filter(|name| {
+            let buffer_field = contract.inputs.iter().any(|input| {
+                matches!(input, InputContract::BufferField(range) if &range.name == *name)
+                    && name
+                        .split_once("[]")
+                        .is_some_and(|(root, _)| expected.get(root) == Some(&ExpectedKind::Buffer))
+            });
+            !expected.contains_key(*name) && !component_covered.contains(*name) && !buffer_field
+        })
         .cloned()
         .collect();
     let wrong_kind: Vec<_> = expected
@@ -893,6 +937,7 @@ fn input_kind(input: &InputContract) -> ExpectedKind {
         InputContract::Uniform(_) => ExpectedKind::Uniform,
         InputContract::Texture { .. } => ExpectedKind::Texture,
         InputContract::Buffer { .. } => ExpectedKind::Buffer,
+        InputContract::BufferField(_) => ExpectedKind::Buffer,
         InputContract::Sampler(_) => ExpectedKind::Sampler,
     }
 }
@@ -1464,7 +1509,8 @@ pub(crate) fn parse_ledger(text: &str) -> anyhow::Result<Vec<LedgerRow>> {
             }
             let module = path
                 .strip_prefix("src/shaders/")
-                .context("ledger path is outside src/shaders")?;
+                .or_else(|| path.strip_prefix("src/"))
+                .context("ledger path is outside src")?;
             anyhow::ensure!(
                 reason.starts_with(&format!("{module}: ")),
                 "ledger reason for {path} is not module-specific"
@@ -1518,6 +1564,12 @@ fn parse_inputs(value: &str) -> anyhow::Result<Vec<InputContract>> {
                         BufferLength::Fixed(positive_u32(length, "buffer length")?)
                     },
                 },
+                ["buffer_field", name, min, max] => {
+                    if !name.contains("[]") {
+                        bail!("buffer field {name} must include [] after the buffer name");
+                    }
+                    InputContract::BufferField(range(name, min, max)?)
+                }
                 ["sampler", name] if !name.is_empty() => InputContract::Sampler((*name).into()),
                 _ => bail!("malformed input {item:?}"),
             };
@@ -1535,14 +1587,19 @@ fn parse_outputs(value: &str) -> anyhow::Result<Vec<RangeContract>> {
         .into_iter()
         .map(|item| {
             let parts: Vec<_> = item.split(':').collect();
-            let [name, min, max] = parts.as_slice() else {
-                bail!("malformed output {item:?}");
+            let output = match parts.as_slice() {
+                [name, min, max] => range(name, min, max)?,
+                [name, min, max, "nan"] => {
+                    let mut output = range(name, min, max)?;
+                    output.allow_nan = true;
+                    output
+                }
+                _ => bail!("malformed output {item:?}"),
             };
-            let range = range(name, min, max)?;
-            if !names.insert(range.name.clone()) {
-                bail!("duplicate output {}", range.name);
+            if !names.insert(output.name.clone()) {
+                bail!("duplicate output {}", output.name);
             }
-            Ok(range)
+            Ok(output)
         })
         .collect()
 }
@@ -1685,6 +1742,7 @@ fn range(name: &str, min: &str, max: &str) -> anyhow::Result<RangeContract> {
         name: name.into(),
         min,
         max,
+        allow_nan: false,
     })
 }
 
@@ -1793,7 +1851,7 @@ fn parse_symbol(value: &str, kind: &str) -> anyhow::Result<String> {
 }
 
 fn validate_path(path: &str) -> anyhow::Result<()> {
-    if !path.starts_with("src/shaders/") && !path.starts_with("tests/data/shader_proofs/") {
+    if !path.starts_with("src/") && !path.starts_with("tests/data/shader_proofs/") {
         bail!("invalid shader path {path}");
     }
     if !path.ends_with(".wgsl") || path.contains("..") || path.contains('\\') {
@@ -2079,7 +2137,7 @@ expiry = "2027-01-17"
             );
         }
 
-        let hybrid_source = super::super::preprocess_hybrid_shader();
+        let hybrid_source = crate::shader_sources::hybrid_kernel();
         let hybrid_module = naga::front::wgsl::parse_str(&hybrid_source).unwrap();
         let hybrid =
             std::fs::read_to_string(root.join("shaders/contracts/hybrid_terrain_traversal.toml"))
@@ -2114,7 +2172,7 @@ expiry = "2027-01-17"
             );
         }
 
-        let terrain_source = super::super::preprocess_terrain_shader();
+        let terrain_source = crate::shader_sources::terrain();
         let terrain_module = naga::front::wgsl::parse_str(&terrain_source).unwrap();
         let terrain =
             std::fs::read_to_string(root.join("shaders/contracts/terrain_pbr_pom.toml")).unwrap();

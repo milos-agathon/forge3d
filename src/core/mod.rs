@@ -19,6 +19,9 @@ pub mod capabilities;
 // CENSOR: WGSL shader-hash registry + validation error scopes
 pub mod shader_registry;
 
+// PROBATUM: feature-gated runtime shader-contract observations
+pub(crate) mod shader_contract_runtime;
+
 // CENSOR Task 9: RenderCertificate execution report (per-render pass timings)
 pub mod certificate;
 

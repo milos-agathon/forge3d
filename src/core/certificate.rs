@@ -168,6 +168,7 @@ pub fn begin_render_capture_with_resources(
 
     begin_ledger_capture(allocation_owner_ids);
     begin_shader_render_capture(&BTreeMap::new());
+    crate::core::shader_contract_runtime::begin_runtime_contract_capture();
     begin_degradation_capture();
     notify_python_degradation_capture("begin_capture");
     let mut cur = lock_current();
@@ -229,6 +230,7 @@ fn finish_render_capture() {
     degradations.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
 
     let wgsl_module_hashes = finish_shader_render_capture();
+    crate::core::shader_contract_runtime::finish_runtime_contract_capture();
     let (adapter, requested, granted, limits) = if !uses_gpu {
         (
             AdapterSnapshot {
@@ -313,6 +315,7 @@ fn finish_render_capture() {
 pub fn abort_render_capture() {
     abort_ledger_capture();
     crate::core::shader_registry::abort_shader_render_capture();
+    crate::core::shader_contract_runtime::abort_runtime_contract_capture();
     crate::core::degradation::abort_degradation_capture();
     notify_python_degradation_capture("abort_capture");
     lock_current().clear();

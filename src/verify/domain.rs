@@ -82,6 +82,69 @@ impl Interval {
         }
     }
 
+    pub(crate) fn unknown() -> Self {
+        Self::top(true)
+    }
+
+    pub(crate) fn is_finite_only(self) -> bool {
+        self.has_finite() && !self.may_nan && !self.may_pos_inf && !self.may_neg_inf
+    }
+
+    pub(crate) fn is_within(self, lo: f32, hi: f32) -> bool {
+        self.is_finite_only() && self.lo >= lo && self.hi <= hi
+    }
+
+    pub(crate) fn negate(self) -> Self {
+        if self.has_infinity() || self.may_nan {
+            return Self::top(true);
+        }
+        bounds(-(self.hi as f64), -(self.lo as f64), false)
+    }
+
+    pub(crate) fn abs(self) -> Self {
+        if self.has_infinity() || self.may_nan {
+            return Self::top(true);
+        }
+        if self.lo >= 0.0 {
+            self
+        } else if self.hi <= 0.0 {
+            self.negate()
+        } else {
+            bounds(
+                0.0,
+                (self.lo as f64).abs().max((self.hi as f64).abs()),
+                false,
+            )
+        }
+    }
+
+    pub(crate) fn sign(self) -> Self {
+        if self.has_infinity() || self.may_nan {
+            return Self::top(true);
+        }
+        Self::new(
+            if self.lo < 0.0 { -1.0 } else { 0.0 },
+            if self.hi > 0.0 { 1.0 } else { 0.0 },
+        )
+    }
+
+    pub(crate) fn square(self) -> Self {
+        if self.may_nan || self.has_infinity() {
+            return Self::top(true);
+        }
+        let maximum = (self.lo as f64).abs().max((self.hi as f64).abs());
+        let minimum = if self.lo <= 0.0 && self.hi >= 0.0 {
+            0.0
+        } else {
+            (self.lo as f64).abs().min((self.hi as f64).abs())
+        };
+        bounds(minimum * minimum, maximum * maximum, false)
+    }
+
+    pub(crate) fn rounded_bounds(lo: f64, hi: f64) -> Self {
+        bounds(lo, hi, false)
+    }
+
     fn has_finite(self) -> bool {
         self.lo <= self.hi
     }
@@ -161,13 +224,10 @@ impl Interval {
         if self_.has_infinity() || rhs.has_infinity() {
             return Self::top(true);
         }
-        expand_ulps(
-            bounds(
-                self_.lo as f64 + rhs.lo as f64,
-                self_.hi as f64 + rhs.hi as f64,
-                self_.may_nan || rhs.may_nan,
-            ),
-            1,
+        bounds(
+            self_.lo as f64 + rhs.lo as f64,
+            self_.hi as f64 + rhs.hi as f64,
+            self_.may_nan || rhs.may_nan,
         )
     }
 
@@ -177,13 +237,10 @@ impl Interval {
         if self_.has_infinity() || rhs.has_infinity() {
             return Self::top(true);
         }
-        expand_ulps(
-            bounds(
-                self_.lo as f64 - rhs.hi as f64,
-                self_.hi as f64 - rhs.lo as f64,
-                self_.may_nan || rhs.may_nan,
-            ),
-            1,
+        bounds(
+            self_.lo as f64 - rhs.hi as f64,
+            self_.hi as f64 - rhs.lo as f64,
+            self_.may_nan || rhs.may_nan,
         )
     }
 
@@ -226,20 +283,60 @@ impl Interval {
         )
     }
 
-    pub(crate) fn sqrt(self) -> Self {
-        let input = self.with_input_ftz();
-        if input.may_nan
-            || input.has_infinity()
-            || !input.has_finite()
-            || input.lo < 0.0
-            || (input.may_zero() && input.hi > 0.0)
-        {
+    pub(crate) fn div_with_abs_min(self, rhs: Self, minimum: f32) -> Self {
+        if !minimum.is_finite() || minimum <= 0.0 || rhs.may_nan || rhs.has_infinity() {
+            return self.div(rhs);
+        }
+        let mut result = None;
+        if rhs.has_finite() && rhs.lo <= -minimum {
+            let negative = Self::new(rhs.lo, rhs.hi.min(-minimum));
+            result = Some(self.div(negative));
+        }
+        if rhs.has_finite() && rhs.hi >= minimum {
+            let positive = Self::new(rhs.lo.max(minimum), rhs.hi);
+            result = Some(result.map_or_else(
+                || self.div(positive),
+                |value: Self| value.join(self.div(positive)),
+            ));
+        }
+        result.unwrap_or_else(|| Self::top(true))
+    }
+
+    pub(crate) fn ratio_with_positive_offset(self, offset: f32) -> Self {
+        if !self.is_finite_only() || self.lo < 0.0 || !offset.is_finite() || offset <= 0.0 {
             return Self::top(true);
         }
-        if input.lo == 0.0 && input.hi == 0.0 {
-            return Self::constant(0.0);
+        expand_ulps(
+            bounds(
+                self.lo as f64 / (self.lo as f64 + offset as f64),
+                self.hi as f64 / (self.hi as f64 + offset as f64),
+                false,
+            ),
+            NATIVE_OP_ULPS,
+        )
+    }
+
+    pub(crate) fn sqrt(self) -> Self {
+        let input = self.with_input_ftz();
+        if input.may_nan || input.has_infinity() || !input.has_finite() || input.lo < 0.0 {
+            return Self::top(true);
         }
-        Self::constant(1.0).div(input.inverse_sqrt())
+        let direct = input.nonnegative_sqrt();
+        if input.lo > 0.0 {
+            direct.join(Self::constant(1.0).div(input.inverse_sqrt()))
+        } else {
+            direct
+        }
+    }
+
+    pub(crate) fn nonnegative_sqrt(self) -> Self {
+        if self.may_nan || self.has_infinity() || !self.has_finite() || self.lo < 0.0 {
+            return Self::top(true);
+        }
+        expand_ulps(
+            bounds((self.lo as f64).sqrt(), (self.hi as f64).sqrt(), false),
+            NATIVE_OP_ULPS,
+        )
     }
 
     pub(crate) fn inverse_sqrt(self) -> Self {
@@ -314,8 +411,21 @@ impl Interval {
     }
 
     pub(crate) fn mix(self, rhs: Self, factor: Self) -> Self {
-        self.mul(Self::constant(1.0).sub(factor))
-            .add(rhs.mul(factor))
+        if !self.is_finite_only() || !rhs.is_finite_only() || !factor.is_finite_only() {
+            return Self::top(true);
+        }
+        let mut candidates = [0.0; 8];
+        let mut index = 0;
+        for left in [self.lo, self.hi] {
+            for right in [rhs.lo, rhs.hi] {
+                for factor in [factor.lo, factor.hi] {
+                    candidates[index] =
+                        left as f64 * (1.0 - factor as f64) + right as f64 * factor as f64;
+                    index += 1;
+                }
+            }
+        }
+        from_candidates(&candidates, false)
     }
 
     pub(crate) fn select(on_false: Self, on_true: Self, condition: Option<bool>) -> Self {
@@ -529,17 +639,21 @@ fn expand_ulps(mut interval: Interval, count: usize) -> Interval {
         return interval;
     }
     for _ in 0..count {
-        let lo = next_down(interval.lo);
-        if lo == f32::NEG_INFINITY {
-            return Interval::top(true);
-        } else {
-            interval.lo = lo;
+        if interval.lo != 0.0 {
+            let lo = next_down(interval.lo);
+            if lo == f32::NEG_INFINITY {
+                return Interval::top(true);
+            } else {
+                interval.lo = lo;
+            }
         }
-        let hi = next_up(interval.hi);
-        if hi == f32::INFINITY {
-            return Interval::top(true);
-        } else {
-            interval.hi = hi;
+        if interval.hi != 0.0 {
+            let hi = next_up(interval.hi);
+            if hi == f32::INFINITY {
+                return Interval::top(true);
+            } else {
+                interval.hi = hi;
+            }
         }
     }
     include_result_ftz(interval)
@@ -1046,11 +1160,11 @@ mod tests {
     }
 
     #[test]
-    fn add_and_sub_include_a_neighbor_across_large_exponent_gaps() {
+    fn add_and_sub_round_large_exponent_gaps_to_the_large_operand() {
         let tiny = Interval::constant(f32::MIN_POSITIVE);
         let one = Interval::constant(1.0);
-        assert_contains(one.sub(tiny), next_down(1.0));
-        assert_contains(one.add(tiny), next_up(1.0));
+        assert_eq!(one.sub(tiny), one);
+        assert_eq!(one.add(tiny), one);
     }
 
     #[test]
