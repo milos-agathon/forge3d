@@ -4,6 +4,10 @@
 
 // Foundational modules
 pub mod context;
+#[allow(dead_code)] // Removed once DUPLA Tasks 2-3 wire the arithmetic into GPU paths.
+pub(crate) mod dd;
+#[cfg(test)]
+mod dd_tests;
 pub mod device_caps;
 pub mod error;
 pub mod gpu;

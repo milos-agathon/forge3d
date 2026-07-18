@@ -12,6 +12,7 @@
 
 use glam::{DVec3, Mat4, Vec3};
 
+use crate::core::dd::DDVec3;
 use crate::geo::units::{Coord, CrsTag, EpochTag};
 
 /// An f64 world-space origin that render-space f32 values are measured from.
@@ -133,6 +134,12 @@ impl Anchor {
     /// geometry authored relative to `object_origin`.
     pub fn model_offset(&self, object_origin: DVec3) -> Vec3 {
         self.to_render_vec3(object_origin)
+    }
+
+    /// Split an absolute f64 world position into a normalized double-float
+    /// pair per component without discarding the f64 residual.
+    pub fn to_dd(&self, p: DVec3) -> DDVec3 {
+        DDVec3::from_dvec3(p)
     }
 
     /// Restore a render-space coordinate already represented as f64 (for

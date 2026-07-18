@@ -121,6 +121,9 @@ _NATIVE_ONLY_EXPORTS = (
         "sign_render_certificate_digest",  # CENSOR: native Ed25519 signer
         "request_host_visible_allocation_for_test",  # CENSOR: budget-enforce test helper
         "shader_report",  # PROBATUM: WGSL proof report
+        "dd_selftest",  # DUPLA: GPU DD exactness canary
+        "dd_harness",  # DUPLA: GPU DD bounds proof
+        "dd_jitter_demo",  # DUPLA: Everest absolute-coordinate demo
 )
 
 if _NATIVE_MODULE is not None:
@@ -615,6 +618,8 @@ from .text_atlas import (
     validate_atlas_metrics,
 )
 from . import text as text
+from . import precision as precision
+from .precision import dd_harness, dd_jitter_demo, dd_selftest
 
 # -----------------------------------------------------------------------------
 # Public API
@@ -625,6 +630,10 @@ __all__ = [
     "version",
     "text",
     "verify",
+    "precision",
+    "dd_selftest",
+    "dd_harness",
+    "dd_jitter_demo",
     # Core rendering
     "Renderer",
     "PathTracer",

@@ -10,6 +10,7 @@ mod interactive;
 mod io_import;
 mod labels;
 mod license;
+mod precision;
 mod provenance;
 mod rendering;
 mod tiles3d;
@@ -22,6 +23,7 @@ pub(crate) fn register_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     diagnostics::register_diagnostics_py_functions(m)?;
     license::register_license_py_functions(m)?;
     provenance::register_provenance_py_functions(m)?;
+    precision::register_precision_py_functions(m)?;
     camera::register_camera_py_functions(m)?;
     rendering::register_rendering_py_functions(m)?;
     gis::register_gis_py_functions(m)?;

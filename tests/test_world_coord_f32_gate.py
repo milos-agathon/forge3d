@@ -12,6 +12,22 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SANCTIONED = "src/camera/anchor.rs"
+SANCTIONED_DD_SPLITS = {
+    (
+        "src/core/dd.rs",
+        "from_f64",
+        "as_f32",
+        1,
+        "let hi = value as f32",
+    ),
+    (
+        "src/core/dd.rs",
+        "from_f64",
+        "as_f32",
+        2,
+        "let lo = (value - hi as f64) as f32",
+    ),
+}
 
 # Updated only after reviewing the complete inventory printed by a failure.
 # The digest includes (file, function, operation, ordinal, normalized statement).
@@ -123,12 +139,17 @@ def _conversion_inventory_text(rel: str, raw: str):
     return sites
 
 
-def conversion_inventory():
+def _complete_conversion_inventory():
     sites = []
     for path in sorted((ROOT / "src").rglob("*.rs")):
         rel = path.relative_to(ROOT).as_posix()
         sites.extend(_conversion_inventory_text(rel, path.read_text(encoding="utf-8")))
     return sites
+
+
+def conversion_inventory():
+    """Reviewed narrowing inventory, excluding the exact lossless DD split."""
+    return [site for site in _complete_conversion_inventory() if site not in SANCTIONED_DD_SPLITS]
 
 
 def _inventory_digest(sites) -> str:
@@ -174,6 +195,15 @@ def test_all_required_rejecting_probes_change_the_inventory():
         assert _conversion_inventory_text("probe.rs", probe), f"scanner missed {probe}"
 
 
+def test_dd_encode_has_exactly_the_two_reviewed_split_casts():
+    actual = {
+        site
+        for site in _complete_conversion_inventory()
+        if site[0] == "src/core/dd.rs" and site[1] == "from_f64"
+    }
+    assert actual == SANCTIONED_DD_SPLITS
+
+
 def test_reviewed_checked_reader_inventory_transition_is_exact():
     sites = conversion_inventory()
     transition = REVIEWED_INVENTORY_TRANSITION
@@ -195,6 +225,13 @@ def test_anchor_narrow_is_the_only_world_conversion_implementation():
     assert position.count("Self::narrow(") == 3
     direction = _function_body(SANCTIONED, "direction_to_render")
     assert direction.count("Self::narrow(") == 3
+
+
+def test_anchor_dd_split_is_a_named_non_narrowing_crossing():
+    body = re.sub(r"\s+", " ", _function_body(SANCTIONED, "to_dd"))
+    assert "DDVec3::from_dvec3(p)" in body
+    assert "Self::narrow(" not in body
+    assert " as f32" not in body
 
 
 def test_each_viewer_world_route_calls_its_active_anchor_in_the_same_function():
