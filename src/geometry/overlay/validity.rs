@@ -58,8 +58,11 @@ fn rings_cross_or_overlap(left: &Ring, right: &Ring) -> bool {
     ring_segments(left).into_iter().any(|left_segment| {
         ring_segments(right).into_iter().any(|right_segment| {
             let intersections = segment_intersections(left_segment, right_segment);
+            // Collinear boundary sharing is not an interior overlap.  It is
+            // required for canonical antimeridian pieces, whose +/-180 seam
+            // becomes one shared segment when aligned onto a common sheet.
             if intersections.len() > 1 {
-                return true;
+                return false;
             }
             intersections.first().is_some_and(|point| {
                 let left_endpoint = *point == left_segment.start || *point == left_segment.end;

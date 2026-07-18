@@ -13,6 +13,13 @@ pub fn validate_geometry_py(py: Python<'_>, geometry: &Bound<'_, PyAny>) -> PyRe
     json_to_py(py, &result)
 }
 
+#[pyfunction(name = "is_valid")]
+pub fn is_valid_py(py: Python<'_>, geometry: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let source = py_to_json_strict(geometry)?;
+    let result = super::is_valid(&source)?;
+    json_to_py(py, &result)
+}
+
 #[pyfunction(name = "repair_geometry", signature = (geometry, *, method = "make_valid"))]
 pub fn repair_geometry_py(
     py: Python<'_>,
@@ -102,6 +109,54 @@ pub fn union_geometries_py(
     let source = py_to_json_strict(geometries)?;
     let spec = crate::gis::extract_crs(crs)?;
     let result = super::union_geometries(&source, spec)?;
+    json_to_py(py, &result)
+}
+
+#[pyfunction(name = "union", signature = (geometries, *, crs = None))]
+pub fn union_py(
+    py: Python<'_>,
+    geometries: &Bound<'_, PyAny>,
+    crs: Option<&Bound<'_, PyAny>>,
+) -> PyResult<PyObject> {
+    union_geometries_py(py, geometries, crs)
+}
+
+#[pyfunction(name = "intersection", signature = (geometries, *, crs = None))]
+pub fn intersection_geometries_py(
+    py: Python<'_>,
+    geometries: &Bound<'_, PyAny>,
+    crs: Option<&Bound<'_, PyAny>>,
+) -> PyResult<PyObject> {
+    let source = py_to_json_strict(geometries)?;
+    let spec = crate::gis::extract_crs(crs)?;
+    let result = super::intersection_geometries(&source, spec)?;
+    json_to_py(py, &result)
+}
+
+#[pyfunction(name = "difference", signature = (geometries, *, crs = None))]
+pub fn difference_geometries_py(
+    py: Python<'_>,
+    geometries: &Bound<'_, PyAny>,
+    crs: Option<&Bound<'_, PyAny>>,
+) -> PyResult<PyObject> {
+    let source = py_to_json_strict(geometries)?;
+    let spec = crate::gis::extract_crs(crs)?;
+    let result = super::difference_geometries(&source, spec)?;
+    json_to_py(py, &result)
+}
+
+#[pyfunction(
+    name = "symmetric_difference",
+    signature = (geometries, *, crs = None)
+)]
+pub fn symmetric_difference_geometries_py(
+    py: Python<'_>,
+    geometries: &Bound<'_, PyAny>,
+    crs: Option<&Bound<'_, PyAny>>,
+) -> PyResult<PyObject> {
+    let source = py_to_json_strict(geometries)?;
+    let spec = crate::gis::extract_crs(crs)?;
+    let result = super::symmetric_difference_geometries(&source, spec)?;
     json_to_py(py, &result)
 }
 

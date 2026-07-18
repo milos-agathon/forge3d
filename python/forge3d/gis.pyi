@@ -188,6 +188,9 @@ def vector_bounds(
 def validate_geometry(geometry: dict[str, Any]) -> dict[str, Any]: ...
 
 
+def is_valid(geometry: dict[str, Any]) -> dict[str, Any]: ...
+
+
 def repair_geometry(
     geometry: dict[str, Any],
     *,
@@ -234,6 +237,34 @@ def interpolate_line(
 
 
 def union_geometries(
+    geometries: list[dict[str, Any]] | tuple[dict[str, Any], ...] | dict[str, Any],
+    *,
+    crs: str | int | dict[str, Any] | None = ...,
+) -> dict[str, Any]: ...
+
+
+def union(
+    geometries: list[dict[str, Any]] | tuple[dict[str, Any], ...] | dict[str, Any],
+    *,
+    crs: str | int | dict[str, Any] | None = ...,
+) -> dict[str, Any]: ...
+
+
+def intersection(
+    geometries: list[dict[str, Any]] | tuple[dict[str, Any], ...] | dict[str, Any],
+    *,
+    crs: str | int | dict[str, Any] | None = ...,
+) -> dict[str, Any]: ...
+
+
+def difference(
+    geometries: list[dict[str, Any]] | tuple[dict[str, Any], ...] | dict[str, Any],
+    *,
+    crs: str | int | dict[str, Any] | None = ...,
+) -> dict[str, Any]: ...
+
+
+def symmetric_difference(
     geometries: list[dict[str, Any]] | tuple[dict[str, Any], ...] | dict[str, Any],
     *,
     crs: str | int | dict[str, Any] | None = ...,
