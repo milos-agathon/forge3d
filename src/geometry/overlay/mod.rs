@@ -10,14 +10,24 @@
 //! and rounding introduces no new crossings.
 
 mod faces;
+mod rectangles;
 mod rings;
 pub mod snap;
 pub mod sweep;
 pub mod validity;
 
+#[cfg(feature = "extension-module")]
+mod verification;
+#[cfg(all(feature = "extension-module", feature = "geos-topology"))]
+mod verification_oracle;
+
 use std::fmt;
 
+use crate::geometry::exact::predicates::signed_area2;
+
 pub use validity::{is_valid_polygonal, ValidityReport};
+#[cfg(feature = "extension-module")]
+pub use verification::euclidea_boolean_fuzz_report_py;
 
 /// A finite planar point.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -112,23 +122,45 @@ fn polygon_segments(polygonal: &MultiPolygon) -> Vec<Segment> {
     segments
 }
 
+fn snap_ring(ring: &Ring, grid: snap::SnapGrid) -> Option<Ring> {
+    let mut snapped = Vec::with_capacity(ring.len());
+    for point in ring.iter().copied().map(|point| grid.snap(point)) {
+        if snapped.last() != Some(&point) {
+            snapped.push(point);
+        }
+    }
+    if snapped.first() != snapped.last() {
+        snapped.push(*snapped.first()?);
+    }
+    if snapped.len() < 4
+        || signed_area2(
+            &snapped
+                .iter()
+                .copied()
+                .map(Point::as_array)
+                .collect::<Vec<_>>(),
+        ) == 0.0
+    {
+        None
+    } else {
+        Some(snapped)
+    }
+}
+
 fn snap_polygonal(value: &MultiPolygon, grid: snap::SnapGrid) -> MultiPolygon {
     MultiPolygon(
         value
             .0
             .iter()
-            .map(|polygon| Polygon {
-                exterior: polygon
-                    .exterior
-                    .iter()
-                    .copied()
-                    .map(|point| grid.snap(point))
-                    .collect(),
-                holes: polygon
-                    .holes
-                    .iter()
-                    .map(|ring| ring.iter().copied().map(|point| grid.snap(point)).collect())
-                    .collect(),
+            .filter_map(|polygon| {
+                Some(Polygon {
+                    exterior: snap_ring(&polygon.exterior, grid)?,
+                    holes: polygon
+                        .holes
+                        .iter()
+                        .filter_map(|ring| snap_ring(ring, grid))
+                        .collect(),
+                })
             })
             .collect(),
     )
@@ -140,28 +172,35 @@ pub fn overlay(
     right: &MultiPolygon,
     operation: BooleanOp,
 ) -> Result<OverlayResult, OverlayError> {
-    let left_validity = is_valid_polygonal(left);
-    if !left_validity.valid {
-        return Err(OverlayError(format!(
-            "invalid left polygonal input: {}",
-            left_validity.reasons.join("; ")
-        )));
-    }
-    let right_validity = is_valid_polygonal(right);
-    if !right_validity.valid {
-        return Err(OverlayError(format!(
-            "invalid right polygonal input: {}",
-            right_validity.reasons.join("; ")
-        )));
-    }
-
     let grid = snap::SnapGrid::for_polygonals(left, right)?;
     let snapped_left = snap_polygonal(left, grid);
     let snapped_right = snap_polygonal(right, grid);
-    let mut segments = polygon_segments(&snapped_left);
-    segments.extend(polygon_segments(&snapped_right));
-    let atomic = sweep::snap_rounded_atomic_segments(&segments, grid)?;
-    let geometry = faces::assemble(&atomic, &snapped_left, &snapped_right, operation, grid)?;
+    let geometry =
+        if let Some(result) = rectangles::try_overlay(&snapped_left, &snapped_right, operation) {
+            // Recognition proves closure, four distinct axis-aligned corners,
+            // and no holes or self-intersections, so the general O(n^2)
+            // checker is redundant on this common exact fast path.
+            result?
+        } else {
+            let left_validity = is_valid_polygonal(left);
+            if !left_validity.valid {
+                return Err(OverlayError(format!(
+                    "invalid left polygonal input: {}",
+                    left_validity.reasons.join("; ")
+                )));
+            }
+            let right_validity = is_valid_polygonal(right);
+            if !right_validity.valid {
+                return Err(OverlayError(format!(
+                    "invalid right polygonal input: {}",
+                    right_validity.reasons.join("; ")
+                )));
+            }
+            let mut segments = polygon_segments(&snapped_left);
+            segments.extend(polygon_segments(&snapped_right));
+            let atomic = sweep::snap_rounded_atomic_segments(&segments, grid)?;
+            faces::assemble(&atomic, &snapped_left, &snapped_right, operation, grid)?
+        };
     let report = is_valid_polygonal(&geometry);
     if !report.valid {
         return Err(OverlayError(format!(

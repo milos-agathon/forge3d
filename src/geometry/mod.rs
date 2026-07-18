@@ -36,7 +36,11 @@ mod py_advanced;
 #[cfg(feature = "extension-module")]
 mod py_bindings;
 
+#[cfg(feature = "extension-module")]
+pub use exact::euclidea_predicate_report_py;
 pub use extrude::{extrude_polygon, extrude_polygon_with_options, ExtrudeOptions};
+#[cfg(feature = "extension-module")]
+pub use overlay::euclidea_boolean_fuzz_report_py;
 pub use primitives::{
     generate_cone, generate_cylinder, generate_plane, generate_primitive, generate_sphere,
     generate_text3d_stub, generate_torus, generate_unit_box, PrimitiveParams, PrimitiveType,

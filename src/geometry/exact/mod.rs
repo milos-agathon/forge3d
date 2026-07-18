@@ -7,6 +7,11 @@
 pub mod oracle;
 pub mod predicates;
 
+#[cfg(feature = "extension-module")]
+mod py;
+
 pub use predicates::{
     incircle, incircle_with_stage, orient2d, orient2d_with_stage, PredicateStage,
 };
+#[cfg(feature = "extension-module")]
+pub use py::euclidea_predicate_report_py;

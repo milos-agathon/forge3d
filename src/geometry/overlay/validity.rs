@@ -3,6 +3,7 @@
 use super::faces::{locate_in_ring, Location};
 use super::sweep::segment_intersections;
 use super::{MultiPolygon, Point, Ring, Segment};
+use crate::geometry::exact::predicates::signed_area2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidityReport {
@@ -33,6 +34,16 @@ fn check_ring(ring: &Ring, label: &str, reasons: &mut Vec<String>) {
     }
     if ring.windows(2).any(|pair| pair[0] == pair[1]) {
         reasons.push(format!("{label} has a zero-length edge"));
+    }
+    if signed_area2(
+        &ring
+            .iter()
+            .copied()
+            .map(Point::as_array)
+            .collect::<Vec<_>>(),
+    ) == 0.0
+    {
+        reasons.push(format!("{label} has zero signed area"));
     }
     let segments = ring_segments(ring);
     for left in 0..segments.len() {

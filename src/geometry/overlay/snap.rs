@@ -20,7 +20,7 @@ impl SnapGrid {
         {
             if !point.is_finite() {
                 return Err(OverlayError(
-                    "non-finite coordinate rejected before polygon sweep".to_string(),
+                    "NaN or infinity coordinate rejected before polygon sweep".to_string(),
                 ));
             }
             any = true;
@@ -36,9 +36,12 @@ impl SnapGrid {
         } else {
             ((maximum.to_bits() >> 52) & 0x7ff) as i32 - 1023
         };
-        // Four ulps at the largest coordinate.  A power-of-two cell makes the
+        // Sixty-four ulps at the largest coordinate.  The extra guard bits
+        // ensure 0--4 ULP near-coincident boundaries occupy one hot pixel,
+        // which is the separation precondition of Hobby snap rounding.  A
+        // power-of-two cell makes the
         // round-to-even index and its reconstruction byte-identical.
-        let step = 2f64.powi((exponent - 50).clamp(-1070, 970));
+        let step = 2f64.powi((exponent - 46).clamp(-1070, 970));
         Ok(Self { step })
     }
 
