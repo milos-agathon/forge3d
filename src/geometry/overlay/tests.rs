@@ -13,6 +13,37 @@ fn square(min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> MultiPolygon {
     }])
 }
 
+fn polygonal_area(value: &MultiPolygon) -> f64 {
+    value
+        .0
+        .iter()
+        .map(|polygon| {
+            let ring_area = |ring: &Ring| {
+                signed_area2(
+                    &ring
+                        .iter()
+                        .copied()
+                        .map(Point::as_array)
+                        .collect::<Vec<_>>(),
+                )
+                .abs()
+                    * 0.5
+            };
+            ring_area(&polygon.exterior) - polygon.holes.iter().map(ring_area).sum::<f64>()
+        })
+        .sum()
+}
+
+fn donut() -> MultiPolygon {
+    let exterior = square(0.0, 0.0, 10.0, 10.0).0[0].exterior.clone();
+    let mut hole = square(3.0, 3.0, 7.0, 7.0).0[0].exterior.clone();
+    hole.reverse();
+    MultiPolygon(vec![Polygon {
+        exterior,
+        holes: vec![hole],
+    }])
+}
+
 #[test]
 fn overlapping_square_operations_are_valid_and_deterministic() {
     let left = square(0.0, 0.0, 2.0, 2.0);
@@ -112,5 +143,58 @@ fn deterministic_triangle_corpus_stays_valid() {
             });
             assert!(is_valid_polygonal(&result.geometry).valid);
         }
+    }
+}
+
+#[test]
+fn input_holes_and_multipolygons_work_for_all_boolean_operations() {
+    let left = donut();
+    let right = square(5.0, -1.0, 11.0, 11.0);
+    let mut results = Vec::new();
+    for operation in [
+        BooleanOp::Union,
+        BooleanOp::Intersection,
+        BooleanOp::Difference,
+        BooleanOp::SymmetricDifference,
+    ] {
+        let result = overlay(&left, &right, operation);
+        assert!(result.is_ok(), "{result:?}");
+        let Ok(result) = result else {
+            return;
+        };
+        assert!(is_valid_polygonal(&result.geometry).valid);
+        assert!(result.max_snap_motion <= result.snap_motion_bound);
+        results.push(result.geometry);
+    }
+    assert_eq!(polygonal_area(&results[0]), 114.0);
+    assert_eq!(polygonal_area(&results[1]), 42.0);
+    assert_eq!(polygonal_area(&results[2]), 42.0);
+    assert_eq!(polygonal_area(&results[3]), 72.0);
+    assert_eq!(
+        polygonal_area(&results[0]) + polygonal_area(&results[1]),
+        polygonal_area(&left) + polygonal_area(&right)
+    );
+
+    let multi = MultiPolygon(vec![
+        square(-3.0, -3.0, -1.0, -1.0).0[0].clone(),
+        square(12.0, 12.0, 14.0, 14.0).0[0].clone(),
+    ]);
+    let expected_areas = [92.0, 0.0, 8.0, 92.0];
+    for (operation, expected_area) in [
+        BooleanOp::Union,
+        BooleanOp::Intersection,
+        BooleanOp::Difference,
+        BooleanOp::SymmetricDifference,
+    ]
+    .into_iter()
+    .zip(expected_areas)
+    {
+        let result = overlay(&multi, &left, operation);
+        assert!(result.is_ok(), "{result:?}");
+        let Ok(result) = result else {
+            return;
+        };
+        assert!(is_valid_polygonal(&result.geometry).valid);
+        assert_eq!(polygonal_area(&result.geometry), expected_area);
     }
 }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -38,7 +39,10 @@ def test_one_hundred_thousand_pairs_are_valid_conservative_and_deterministic() -
         assert report["benchmark_ratio"] <= 3.0, report
 
 
-@pytest.mark.parametrize("operation", [gis.union, gis.intersection, gis.difference])
+@pytest.mark.parametrize(
+    "operation",
+    [gis.union, gis.intersection, gis.difference, gis.symmetric_difference],
+)
 def test_seeded_python_generators_cover_pathological_polygon_families(operation) -> None:
     for left, right in SeededPolygonCorpus().pairs(120):
         if not gis.is_valid(left)["valid"] or not gis.is_valid(right)["valid"]:
@@ -48,10 +52,14 @@ def test_seeded_python_generators_cover_pathological_polygon_families(operation)
 
 
 def test_shrinker_negative_control_reaches_triangles() -> None:
-    pair = next(SeededPolygonCorpus().pairs(1))
+    corpus = SeededPolygonCorpus()
+    pair = next(corpus.pairs(1))
+    before = tuple(len(geometry["coordinates"][0]) - 1 for geometry in pair)
     shrunk = shrink_failure(pair, lambda _pair: True)
-    for geometry in shrunk:
-        assert len(geometry["coordinates"][0]) == 4
+    after = tuple(len(geometry["coordinates"][0]) - 1 for geometry in shrunk)
+    assert corpus.seed == 0x4555434C49444541
+    assert before == (4, 7)
+    assert after == (3, 3)
 
 
 def test_validity_checker_rejects_seeded_star_self_intersections() -> None:
@@ -63,15 +71,20 @@ def test_validity_checker_rejects_seeded_star_self_intersections() -> None:
 
 def test_overlay_geometry_decisions_use_exact_ordering_and_ordered_maps() -> None:
     source_dir = ROOT / "src" / "geometry" / "overlay"
-    decision_files = [
-        source_dir / name
-        for name in ("faces.rs", "rings.rs", "sweep.rs", "validity.rs")
-    ]
+    non_decision_files = {"tests.rs", "verification.rs", "verification_oracle.rs"}
+    decision_files = sorted(
+        path for path in source_dir.glob("*.rs") if path.name not in non_decision_files
+    )
     combined = "\n".join(path.read_text(encoding="utf-8") for path in decision_files)
     assert "HashMap" not in combined
     assert "partial_cmp" not in combined
+    assert "orient2d_fast" not in combined
+    assert "incircle_fast" not in combined
     assert "orient2d(" in combined
     assert "exact_cross(" in combined
-    # The sole raw shoelace cross is isolated in verification.rs for area
-    # measurement; topology decisions must never use this sign pattern.
-    assert ".x *" not in combined or ".y -" not in combined
+    # Raw two-product determinants are forbidden in every production overlay
+    # module. The sole shoelace expression is isolated in verification.rs for
+    # area measurement and is deliberately excluded above.
+    atom = r"[A-Za-z_]\w*(?:\.[xy]|\[\s*\d+\s*\])?"
+    raw_cross = re.compile(rf"\b{atom}\s*\*\s*{atom}\s*-\s*{atom}\s*\*\s*{atom}\b")
+    assert raw_cross.search(combined) is None
