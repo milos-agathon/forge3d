@@ -65,6 +65,62 @@ jobs:
               - 'docs/gallery/**'
 
   # ============================================================================
+  # Materialize Git LFS fixtures once, then fan them out through Actions.
+  #
+  # The exhaustive Python matrix, visual goldens, and M-06 all require the real
+  # raster/image payloads. Pulling the complete LFS set independently in every
+  # consumer multiplies one workflow into ~14 identical LFS downloads and can
+  # exhaust the repository budget before tests start. This job preserves full
+  # fixture coverage while paying the LFS transfer only once per workflow.
+  # ============================================================================
+  stage-lfs-fixtures:
+    name: Stage Git LFS Fixtures
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Pull required LFS fixture payloads
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull \
+            --include="assets/highres.png,assets/swiss-legend.png,assets/tif/*.tif,data/pol_pd_2020_1km_UNadj.tif" \
+            --exclude=""
+
+      - name: Verify and record fixture provenance
+        run: python scripts/verify_lfs_fixtures.py --write-manifest target/lfs-fixtures-manifest.json
+
+      - name: Upload materialized fixture bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: lfs-fixtures
+          path: |
+            assets/highres.png
+            assets/swiss-legend.png
+            assets/tif/Bryce_Canyon.tif
+            assets/tif/Gore_Range_Albers_1m.tif
+            assets/tif/Mount_Fuji_30m.tif
+            assets/tif/dem_rainier.tif
+            assets/tif/luxembourg_dem.tif
+            assets/tif/switzerland_dem.tif
+            assets/tif/switzerland_land_cover.tif
+            data/pol_pd_2020_1km_UNadj.tif
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+      - name: Upload LFS fixture manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: lfs-fixture-manifest
+          path: target/lfs-fixtures-manifest.json
+          if-no-files-found: error
+          retention-days: 1
+
+  # ============================================================================
   # Rust Tests (cargo test)
   # ============================================================================
   test-rust:
@@ -234,7 +290,7 @@ jobs:
   # ============================================================================
   test-python:
     name: Test Python (${{ matrix.os }})
-    needs: build-wheels
+    needs: [build-wheels, stage-lfs-fixtures]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     strategy:
@@ -247,15 +303,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          # COG/mapscene fixtures under assets/ and tests/data are Git LFS
-          # objects; without lfs the lane reads pointer files and fails with
-          # InvalidTiffHeader (found by the first exhaustive-lane CI run).
-          lfs: true
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Restore materialized LFS fixtures
+        uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixtures
+          path: .
+
+      - name: Restore LFS fixture manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixture-manifest
+          path: target
+
+      - name: Verify materialized LFS fixtures
+        run: python scripts/verify_lfs_fixtures.py --manifest target/lfs-fixtures-manifest.json
 
       - name: Download wheel artifact
         uses: actions/download-artifact@v4
@@ -387,7 +454,7 @@ jobs:
   # ============================================================================
   test-golden-images:
     name: Visual Goldens
-    needs: [build-wheels, terrain-golden-paths]
+    needs: [build-wheels, terrain-golden-paths, stage-lfs-fixtures]
     # macos-14 is the repository's gated real-GPU lane (Metal). Hosted
     # Windows runners only expose WARP here, which made this job perpetually
     # report ABSENT and prevented an actual image mismatch from failing CI.
@@ -415,15 +482,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          # COG/mapscene fixtures under assets/ and tests/data are Git LFS
-          # objects; without lfs the lane reads pointer files and fails with
-          # InvalidTiffHeader (found by the first exhaustive-lane CI run).
-          lfs: true
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+
+      - name: Restore materialized LFS fixtures
+        uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixtures
+          path: .
+
+      - name: Restore LFS fixture manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixture-manifest
+          path: target
+
+      - name: Verify materialized LFS fixtures
+        run: python scripts/verify_lfs_fixtures.py --manifest target/lfs-fixtures-manifest.json
 
       - name: Download wheel artifact
         uses: actions/download-artifact@v4
@@ -529,7 +607,7 @@ jobs:
 
   refresh-recipe-certificates:
     name: Refresh Recipe Certificates
-    needs: build-wheels
+    needs: [build-wheels, stage-lfs-fixtures]
     if: github.event_name == 'workflow_dispatch' && inputs.update_recipe_certificates
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     env:
@@ -542,9 +620,20 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          lfs: true
       - name: Verify runner Python
         run: python --version
+      - name: Restore materialized LFS fixtures
+        uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixtures
+          path: .
+      - name: Restore LFS fixture manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixture-manifest
+          path: target
+      - name: Verify materialized LFS fixtures
+        run: python scripts/verify_lfs_fixtures.py --manifest target/lfs-fixtures-manifest.json
       - uses: actions/download-artifact@v4
         with:
           name: wheels-windows
@@ -579,7 +668,7 @@ jobs:
   # ============================================================================
   test-m06-full-geospatial-viewer:
     name: M-06 Full Geospatial Viewer (NVIDIA Vulkan)
-    needs: build-wheels
+    needs: [build-wheels, stage-lfs-fixtures]
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     timeout-minutes: 35
     env:
@@ -620,7 +709,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          lfs: true
 
       - name: Capture checkout and LFS provenance
         if: always()
@@ -641,6 +729,25 @@ jobs:
         run: |
           python --version 2>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/python-bootstrap-version.txt"
           python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"
+
+      - name: Restore materialized LFS fixtures
+        uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixtures
+          path: .
+
+      - name: Restore LFS fixture manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixture-manifest
+          path: target
+
+      - name: Verify materialized LFS fixtures
+        shell: pwsh
+        run: |
+          python scripts/verify_lfs_fixtures.py --manifest target/lfs-fixtures-manifest.json *>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/lfs-fixture-verification.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item target/lfs-fixtures-manifest.json "$env:FORGE3D_M06_ARTIFACT_DIR/lfs-fixtures-manifest.json"
 
       - uses: actions/download-artifact@v4
         with:
@@ -832,7 +939,7 @@ jobs:
   # ============================================================================
   ci-success:
     name: CI Success
-    needs: [terrain-golden-paths, test-rust, build-wheels, test-python, test-terminus-fuzz, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, build-docs]
+    needs: [terrain-golden-paths, stage-lfs-fixtures, test-rust, build-wheels, test-python, test-terminus-fuzz, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, build-docs]
     runs-on: ubuntu-latest
     if: always()
 
@@ -849,6 +956,7 @@ jobs:
           # `success` and is surfaced by the lane line below, not swallowed.
           echo "golden lane: ${{ needs.test-golden-images.outputs.lane || 'skipped(paths)' }}"
           if [ "${{ needs.terrain-golden-paths.result }}" != "success" ] || \
+             [ "${{ needs.stage-lfs-fixtures.result }}" != "success" ] || \
              [ "${{ needs.test-rust.result }}" != "success" ] || \
              [ "${{ needs.build-wheels.result }}" != "success" ] || \
              [ "${{ needs.test-python.result }}" != "success" ] || \

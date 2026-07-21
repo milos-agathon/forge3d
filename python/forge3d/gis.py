@@ -187,6 +187,11 @@ def validate_geometry(geometry: dict[str, Any]):
     return _require_native().validate_geometry(geometry)
 
 
+def is_valid(geometry: dict[str, Any]) -> dict[str, Any]:
+    """Return the exact polygonal validity report for a GeoJSON geometry."""
+    return _require_native().is_valid(geometry)
+
+
 def repair_geometry(geometry: dict[str, Any], *, method: str = "make_valid"):
     """Repair a GeoJSON-like geometry object through the native topology backend."""
     return _require_native().repair_geometry(geometry, method=method)
@@ -278,6 +283,42 @@ def union_geometries(
     conflicting embedded CRSs raise ``crs_mismatch``.
     """
     return _require_native().union_geometries(geometries, crs=crs)
+
+
+def union(
+    geometries: list[dict[str, Any]] | tuple[dict[str, Any], ...] | dict[str, Any],
+    *,
+    crs: str | int | dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the exact snap-rounded union of polygonal geometries."""
+    return _require_native().union(geometries, crs=crs)
+
+
+def intersection(
+    geometries: list[dict[str, Any]] | tuple[dict[str, Any], ...] | dict[str, Any],
+    *,
+    crs: str | int | dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the exact snap-rounded intersection of polygonal geometries."""
+    return _require_native().intersection(geometries, crs=crs)
+
+
+def difference(
+    geometries: list[dict[str, Any]] | tuple[dict[str, Any], ...] | dict[str, Any],
+    *,
+    crs: str | int | dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Subtract each later polygonal geometry from the first."""
+    return _require_native().difference(geometries, crs=crs)
+
+
+def symmetric_difference(
+    geometries: list[dict[str, Any]] | tuple[dict[str, Any], ...] | dict[str, Any],
+    *,
+    crs: str | int | dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the exact snap-rounded symmetric difference."""
+    return _require_native().symmetric_difference(geometries, crs=crs)
 
 
 def dissolve_vector(source: os.PathLike[str] | str | dict[str, Any], *, by=None):
@@ -1002,6 +1043,7 @@ __all__ = [
     "vector_crs",
     "vector_bounds",
     "validate_geometry",
+    "is_valid",
     "repair_geometry",
     "geometry_measure",
     "measure_geometries",
@@ -1009,6 +1051,10 @@ __all__ = [
     "representative_point",
     "interpolate_line",
     "union_geometries",
+    "union",
+    "intersection",
+    "difference",
+    "symmetric_difference",
     "dissolve_vector",
     "buffer_geometry",
     "clip_vector",

@@ -1,6 +1,14 @@
 use super::*;
 
 pub(super) fn register_geometry_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(
+        crate::geometry::euclidea_predicate_report_py,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        crate::geometry::euclidea_boolean_fuzz_report_py,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(crate::vector::extrude_polygon_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::vector::add_polygons_py, m)?)?;
     m.add_function(wrap_pyfunction!(crate::vector::add_lines_py, m)?)?;

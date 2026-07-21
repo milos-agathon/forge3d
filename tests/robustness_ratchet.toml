@@ -76,13 +76,6 @@ expect = 0
 reason = "The single segment is popped only after the non-empty one-segment branch is selected."
 
 [[source_allowlist]]
-path = "src/gis/geometry/topology.rs"
-panic = 0
-unwrap = 1
-expect = 0
-reason = "Topology backend singleton access follows successful one-time initialization."
-
-[[source_allowlist]]
 path = "src/gis/terrarium.rs"
 panic = 0
 unwrap = 4
