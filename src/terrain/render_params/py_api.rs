@@ -83,6 +83,11 @@ impl TerrainRenderParams {
         self.colormap_strength
     }
 
+    #[getter]
+    pub fn hue_variation_strength(&self) -> f32 {
+        self.hue_variation_strength
+    }
+
     /// P5: Get AO weight (0.0 = no AO, 1.0 = full AO)
     #[getter]
     pub fn ao_weight(&self) -> f32 {
