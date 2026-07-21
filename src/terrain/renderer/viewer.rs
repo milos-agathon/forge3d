@@ -243,6 +243,25 @@ impl TerrainScene {
             }
         };
 
+        // The viewer has no TerrainRenderParams object. Preserve its prior binding
+        // bytes except for the new hue lane, which keeps the historical 0.08 default.
+        let mut viewer_overlay_lanes = uniforms.to_debug_lanes_44();
+        viewer_overlay_lanes[14] = 0.08;
+        let viewer_overlay_buffer = match tracked_create_buffer_init(
+            self.device.as_ref(),
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("terrain.viewer.overlay_uniforms"),
+                contents: bytemuck::cast_slice(&viewer_overlay_lanes),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        ) {
+            Ok(buffer) => buffer,
+            Err(err) => {
+                log::error!(target: "terrain.viewer", "failed to allocate viewer overlay uniform buffer: {err}");
+                return false;
+            }
+        };
+
         let pipeline_guard = self.pipeline.lock().unwrap();
         let pipeline = &pipeline_guard.pipeline;
         let lut_view = &self.height_curve_identity_view;
@@ -286,7 +305,7 @@ impl TerrainScene {
                 },
                 wgpu::BindGroupEntry {
                     binding: 8,
-                    resource: uniform_buffer.as_entire_binding(),
+                    resource: viewer_overlay_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 9,

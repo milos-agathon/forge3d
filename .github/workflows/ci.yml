@@ -23,6 +23,60 @@ env:
 
 jobs:
   # ============================================================================
+  # Shared Git LFS fixtures
+  #
+  # Hosted matrix jobs start on fresh machines. Fetching LFS in every checkout
+  # multiplied the same download across all 12 Python jobs plus visual/M-06
+  # lanes. Resolve the exact union once, package lane-specific subsets, and let
+  # consumers restore those subsets from one short-lived Actions artifact.
+  # ============================================================================
+  prepare-lfs-fixtures:
+    name: Prepare LFS Fixtures
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Download the required LFS objects once
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull \
+            --include="assets/tif/Mount_Fuji_30m.tif,assets/tif/dem_rainier.tif,assets/tif/switzerland_dem.tif" \
+            --exclude=""
+
+          for fixture in \
+            assets/tif/Mount_Fuji_30m.tif \
+            assets/tif/dem_rainier.tif \
+            assets/tif/switzerland_dem.tif; do
+            if [ "$(wc -c < "$fixture")" -le 1024 ]; then
+              echo "::error::$fixture is still an LFS pointer"
+              exit 1
+            fi
+          done
+
+      - name: Package lane-specific fixture subsets
+        shell: bash
+        run: |
+          mkdir -p lfs-fixture-bundles
+          zip -q lfs-fixture-bundles/python-tiffs.zip \
+            assets/tif/Mount_Fuji_30m.tif \
+            assets/tif/dem_rainier.tif \
+            assets/tif/switzerland_dem.tif
+          zip -q lfs-fixture-bundles/m06-dem.zip \
+            assets/tif/switzerland_dem.tif
+
+      - name: Upload shared LFS fixture bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: lfs-fixture-bundles
+          path: lfs-fixture-bundles/*.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  # ============================================================================
   # Visual Golden Change Detection
   # ============================================================================
   terrain-golden-paths:
@@ -234,7 +288,7 @@ jobs:
   # ============================================================================
   test-python:
     name: Test Python (${{ matrix.os }})
-    needs: build-wheels
+    needs: [build-wheels, prepare-lfs-fixtures]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     strategy:
@@ -247,15 +301,20 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          # COG/mapscene fixtures under assets/ and tests/data are Git LFS
-          # objects; without lfs the lane reads pointer files and fails with
-          # InvalidTiffHeader (found by the first exhaustive-lane CI run).
-          lfs: true
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Download shared LFS fixture artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixture-bundles
+          path: lfs-fixture-bundles
+
+      - name: Restore Python TIFF fixtures
+        run: python -m zipfile -e lfs-fixture-bundles/python-tiffs.zip .
 
       - name: Download wheel artifact
         uses: actions/download-artifact@v4
@@ -415,10 +474,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          # COG/mapscene fixtures under assets/ and tests/data are Git LFS
-          # objects; without lfs the lane reads pointer files and fails with
-          # InvalidTiffHeader (found by the first exhaustive-lane CI run).
-          lfs: true
+          # Pixel baselines under tests/golden are regular Git objects. This
+          # lane's scenes are generated in-test, so it needs no LFS fixture.
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -542,7 +599,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          lfs: true
       - name: Verify runner Python
         run: python --version
       - uses: actions/download-artifact@v4
@@ -579,7 +635,7 @@ jobs:
   # ============================================================================
   test-m06-full-geospatial-viewer:
     name: M-06 Full Geospatial Viewer (NVIDIA Vulkan)
-    needs: build-wheels
+    needs: [build-wheels, prepare-lfs-fixtures]
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     timeout-minutes: 35
     env:
@@ -620,7 +676,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          lfs: true
+
+      - name: Download shared LFS fixture artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixture-bundles
+          path: lfs-fixture-bundles
+
+      - name: Restore the M-06 DEM only
+        shell: pwsh
+        run: Expand-Archive lfs-fixture-bundles/m06-dem.zip -DestinationPath . -Force
 
       - name: Capture checkout and LFS provenance
         if: always()
@@ -832,7 +897,7 @@ jobs:
   # ============================================================================
   ci-success:
     name: CI Success
-    needs: [terrain-golden-paths, test-rust, build-wheels, test-python, test-terminus-fuzz, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, build-docs]
+    needs: [prepare-lfs-fixtures, terrain-golden-paths, test-rust, build-wheels, test-python, test-terminus-fuzz, test-python-linux-arm, test-golden-images, refresh-recipe-certificates, test-m06-full-geospatial-viewer, build-docs]
     runs-on: ubuntu-latest
     if: always()
 
@@ -848,7 +913,8 @@ jobs:
           # aggregator. `absent` (no usable adapter) still reports as job
           # `success` and is surfaced by the lane line below, not swallowed.
           echo "golden lane: ${{ needs.test-golden-images.outputs.lane || 'skipped(paths)' }}"
-          if [ "${{ needs.terrain-golden-paths.result }}" != "success" ] || \
+          if [ "${{ needs.prepare-lfs-fixtures.result }}" != "success" ] || \
+             [ "${{ needs.terrain-golden-paths.result }}" != "success" ] || \
              [ "${{ needs.test-rust.result }}" != "success" ] || \
              [ "${{ needs.build-wheels.result }}" != "success" ] || \
              [ "${{ needs.test-python.result }}" != "success" ] || \
