@@ -108,9 +108,16 @@ jobs:
             assets/tif/switzerland_dem.tif
             assets/tif/switzerland_land_cover.tif
             data/pol_pd_2020_1km_UNadj.tif
-            target/lfs-fixtures-manifest.json
           if-no-files-found: error
           compression-level: 0
+          retention-days: 1
+
+      - name: Upload LFS fixture manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: lfs-fixture-manifest
+          path: target/lfs-fixtures-manifest.json
+          if-no-files-found: error
           retention-days: 1
 
   # ============================================================================
@@ -308,6 +315,12 @@ jobs:
           name: lfs-fixtures
           path: .
 
+      - name: Restore LFS fixture manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixture-manifest
+          path: target
+
       - name: Verify materialized LFS fixtures
         run: python scripts/verify_lfs_fixtures.py --manifest target/lfs-fixtures-manifest.json
 
@@ -481,6 +494,12 @@ jobs:
           name: lfs-fixtures
           path: .
 
+      - name: Restore LFS fixture manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixture-manifest
+          path: target
+
       - name: Verify materialized LFS fixtures
         run: python scripts/verify_lfs_fixtures.py --manifest target/lfs-fixtures-manifest.json
 
@@ -608,6 +627,11 @@ jobs:
         with:
           name: lfs-fixtures
           path: .
+      - name: Restore LFS fixture manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixture-manifest
+          path: target
       - name: Verify materialized LFS fixtures
         run: python scripts/verify_lfs_fixtures.py --manifest target/lfs-fixtures-manifest.json
       - uses: actions/download-artifact@v4
@@ -711,6 +735,12 @@ jobs:
         with:
           name: lfs-fixtures
           path: .
+
+      - name: Restore LFS fixture manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixture-manifest
+          path: target
 
       - name: Verify materialized LFS fixtures
         shell: pwsh

@@ -280,6 +280,8 @@ def test_ci_materializes_lfs_fixtures_once_and_verifies_every_consumer():
     assert workflow.count("git lfs pull") == 1
     assert "lfs: true" not in workflow
     assert workflow.count("name: Restore materialized LFS fixtures") == 4
+    assert workflow.count("name: Restore LFS fixture manifest") == 4
+    assert "name: lfs-fixture-manifest" in workflow
     assert workflow.count("name: Verify materialized LFS fixtures") == 4
     assert "needs: [build-wheels, stage-lfs-fixtures]" in workflow
     assert "needs: [build-wheels, terrain-golden-paths, stage-lfs-fixtures]" in workflow
