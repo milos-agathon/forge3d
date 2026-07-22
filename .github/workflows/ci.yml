@@ -799,8 +799,10 @@ jobs:
             'tests/test_vector_overlay_rendering.py'
           )
           $tests -join "`n" | Set-Content "$env:FORGE3D_M06_ARTIFACT_DIR/pytest-files.txt"
+          $pytestBaseTemp = Join-Path $env:RUNNER_TEMP "pytest-m06-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $pytestCache = Join-Path $env:RUNNER_TEMP "pytest-cache-m06-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           $started = Get-Date
-          python -m pytest @tests -v --tb=short --junitxml="$env:FORGE3D_M06_ARTIFACT_DIR/junit.xml" *>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/pytest.log"
+          python -m pytest @tests -v --tb=short --basetemp=$pytestBaseTemp -o "cache_dir=$pytestCache" --junitxml="$env:FORGE3D_M06_ARTIFACT_DIR/junit.xml" *>&1 | Tee-Object "$env:FORGE3D_M06_ARTIFACT_DIR/pytest.log"
           $pytestCode = $LASTEXITCODE
           $finished = Get-Date
           @{
