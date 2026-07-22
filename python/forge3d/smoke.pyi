@@ -127,6 +127,7 @@ class SmokeDomain:
         sun_direction: tuple[float, float, float] = ...,
         settings: SmokeRenderSettings | None = ...,
         certificate: bool | str | Path = ...,
+        cache: str | Path | None = ...,
     ) -> np.ndarray: ...
     def render_projection_rgba(
         self,
@@ -136,6 +137,7 @@ class SmokeDomain:
         sun_direction: tuple[float, float, float] = ...,
         settings: SmokeRenderSettings | None = ...,
         certificate: bool | str | Path = ...,
+        cache: str | Path | None = ...,
     ) -> np.ndarray: ...
 
 

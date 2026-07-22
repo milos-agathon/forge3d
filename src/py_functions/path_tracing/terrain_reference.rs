@@ -76,6 +76,7 @@ fn extract_sun_color(obj: &Bound<'_, PyAny>) -> PyResult<[f32; 3]> {
     seed = 7u32,
     certificate = None,
     sun_color = None,
+    cache = None,
 ))]
 pub(crate) fn hybrid_render_terrain_reference(
     py: Python<'_>,
@@ -100,7 +101,9 @@ pub(crate) fn hybrid_render_terrain_reference(
     seed: u32,
     certificate: Option<Bound<'_, PyAny>>,
     sun_color: Option<Bound<'_, PyAny>>,
+    cache: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
+    let _ = cache;
     use crate::path_tracing::hybrid_compute::{HybridPathTracer, TerrainReferenceDesc};
     use numpy::PyArray1;
 

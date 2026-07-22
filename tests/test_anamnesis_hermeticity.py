@@ -5,7 +5,7 @@ import random
 
 import pytest
 
-from forge3d.anamnesis import pass_key
+import forge3d.anamnesis as anamnesis
 
 
 def _mutate(data: bytes, rng: random.Random) -> bytes:
@@ -56,7 +56,7 @@ def _run_mutations(count: int) -> None:
         capability = (
             inputs["capability"] + inputs["backend"] + inputs["dx12_compiler"]
         )
-        return pass_key(
+        return anamnesis.pass_key(
             "terrain.forward",
             pipeline,
             uniform,
@@ -65,11 +65,42 @@ def _run_mutations(count: int) -> None:
             inputs["engine"],
         )
 
+    def render_for(inputs: dict[str, bytes]) -> str:
+        state = {
+            "shader_hashes": {"mutation": inputs["wgsl"].hex()},
+            "sampler": inputs["sampler"].hex(),
+            "blend": inputs["blend"].hex(),
+            "depth": inputs["depth"].hex(),
+            "viewport": inputs["viewport"].hex(),
+            "scissor": inputs["scissor"].hex(),
+            "clear": inputs["clear"].hex(),
+            "formats": [inputs["texture"].hex()],
+            "primitive": inputs["primitive"].hex(),
+            "seed": int.from_bytes(inputs["seed"], "little"),
+            "backend": inputs["backend"].hex(),
+            "dx12_compiler": inputs["dx12_compiler"].hex(),
+        }
+        recipe = {
+            "terrain": {"dem_bytes": inputs["dem"].hex()},
+            "camera": {"uniform_bytes": inputs["uniform"].hex()},
+            "output": {"texture_bytes": inputs["texture"].hex()},
+            "anamnesis_state": state,
+        }
+        original_engine = anamnesis.engine_fingerprint
+        anamnesis.engine_fingerprint = lambda: inputs["engine"]
+        try:
+            result = anamnesis.render_sequence(
+                recipe,
+                frames=[int.from_bytes(inputs["frame_index"], "little")],
+                cache=None,
+                capabilities={"granted": [inputs["capability"].hex()]},
+            )
+        finally:
+            anamnesis.engine_fingerprint = original_engine
+        return result.frame_hashes[0]
+
     base_key = key_for(pixel_inputs)
-    # This digest is the deterministic reference-render oracle used by the
-    # mutation gate. Every byte below is declared pixel-relevant; therefore a
-    # mutation is allowed neither to preserve the key nor the rendered digest.
-    base_output = hashlib.sha256(b"".join(pixel_inputs.values())).digest()
+    base_output = render_for(pixel_inputs)
     categories = tuple(pixel_inputs)
     seen = set()
     for index in range(count):
@@ -81,7 +112,7 @@ def _run_mutations(count: int) -> None:
         mutated = dict(pixel_inputs)
         mutated[category] = _mutate(mutated[category], rng)
         key = key_for(mutated)
-        output = hashlib.sha256(b"".join(mutated.values())).digest()
+        output = render_for(mutated)
         assert key != base_key, f"mutation escaped key: {category}"
         assert output != base_output, f"pixel-relevant mutation escaped output: {category}"
     assert seen == set(categories)

@@ -111,8 +111,9 @@ class ScaleBar:
         return nice / unit_factor
 
     @_captured_cpu_render("python.scale_bar.render", "scale_bar.cpu", draw_calls=1)
-    def render(self, *, certificate: bool | str = False) -> np.ndarray:
+    def render(self, *, certificate: bool | str = False, cache: str | None = None) -> np.ndarray:
         """Render geometry and its label through the shared native text engine."""
+        _ = cache
         from ._map_scene_render import _draw_text
 
         image, label, anchor = self.render_geometry()

@@ -103,7 +103,13 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
     env_maps = f3d.IBL.from_hdr(str(hdr_path), intensity=1.0)
     backend = str(f3d.device_probe().get("backend", "unknown")).lower()
 
+    native_cache = [root / "native-warm"]
+    native_reports: list[tuple[str, dict[str, Any]]] = []
+    phase = ["warm"]
+
     def render_frame(recipe: dict[str, Any], frame: int) -> bytes:
+        if frame % 100 == 0:
+            print(f"ANAMNESIS GPU {phase[0]} frame {frame}/600", flush=True)
         config = _canonical_params_config()(64, 64)
         config.cam_phi_deg = float(recipe["camera"]["phi_start"]) + frame * float(
             recipe["camera"]["phi_step"]
@@ -116,8 +122,9 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
             params,
             heightmap,
             time_seconds=frame / 60.0,
-            cache=None,
+            cache=native_cache[0],
         )
+        native_reports.append((phase[0], dict(renderer.last_anamnesis_cache_report)))
         rgba = np.asarray(rendered.to_numpy())
         label = recipe["layers"][0]
         if frame in label["visible_frames"]:
@@ -143,6 +150,7 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
         render_frame_fingerprint=fingerprint,
         verify_reads=False,
     )
+    phase[0] = "incremental"
     incremental = render_sequence(
         modified,
         cache=root / "warm",
@@ -150,6 +158,8 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
         render_frame_fingerprint=fingerprint,
         verify_reads=False,
     )
+    phase[0] = "cold"
+    native_cache[0] = root / "native-cold-modified"
     cold = render_sequence(
         modified,
         cache=root / "cold-modified",
@@ -184,6 +194,12 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
             "hit_rate": incremental.cache_report.hit_rate,
         },
         "backend": backend,
+        "incremental_native_hits": sum(
+            len(report["hits"]) for item_phase, report in native_reports if item_phase == "incremental"
+        ),
+        "incremental_native_misses": sum(
+            len(report["misses"]) for item_phase, report in native_reports if item_phase == "incremental"
+        ),
     }
     result_path = os.environ.get("FORGE3D_ANAMNESIS_RESULT_PATH")
     if result_path:
@@ -196,6 +212,8 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
         raise AssertionError(f"GPU recompute mismatch: {result}")
     if result["pass_labels"] != ["frame.output", "label.compile", "label.composite"]:
         raise AssertionError(f"unexpected GPU recompute labels: {result}")
+    if result["incremental_native_hits"] != 1 or result["incremental_native_misses"] != 0:
+        raise AssertionError(f"incremental label edit re-encoded native terrain: {result}")
     if result["speedup"] < 20.0:
         raise AssertionError(f"GPU speedup below 20x: {result}")
     return result

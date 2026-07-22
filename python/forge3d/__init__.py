@@ -335,9 +335,10 @@ class Renderer:
         "python.renderer.render_triangle_rgba", "renderer.cpu_triangle", draw_calls=1
     )
     def render_triangle_rgba(
-        self, *, certificate: bool | str | Path = False
+        self, *, certificate: bool | str | Path = False, cache: str | Path | None = None
     ) -> np.ndarray:
         """Render a basic triangle pattern (fallback test method)."""
+        _ = cache
         from . import _degradation
 
         _degradation.record(
@@ -358,10 +359,14 @@ class Renderer:
         return img
 
     def render_triangle_png(
-        self, path, *, certificate: bool | str | Path = False
+        self,
+        path: str | Path,
+        *,
+        certificate: bool | str | Path = False,
+        cache: str | Path | None = None,
     ) -> None:
         """Render triangle to PNG file."""
-        numpy_to_png(path, self.render_triangle_rgba(certificate=certificate))
+        numpy_to_png(path, self.render_triangle_rgba(certificate=certificate, cache=cache))
 
 
 # -----------------------------------------------------------------------------

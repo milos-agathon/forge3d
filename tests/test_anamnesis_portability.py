@@ -61,6 +61,22 @@ def test_portable_store_hits_and_capability_mismatch_misses(tmp_path):
     )
     cache = tmp_path / "cache"
     record = tmp_path / "record.json"
+    consumer_blob = tmp_path / "consumer.png"
+    consumer_blob.write_bytes(frame_blob.read_bytes())
+    consumer_adapter = tmp_path / "consumer-adapter.jsonl"
+    consumer_adapter.write_text(
+        json.dumps(
+            {
+                "adapter": {
+                    "backend": "dx12",
+                    "name": "physical-test-consumer",
+                    "software_fallback": False,
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     seeded = _run(
         "seed",
@@ -75,7 +91,17 @@ def test_portable_store_hits_and_capability_mismatch_misses(tmp_path):
         "--adapter-record",
         str(adapter_record),
     )
-    checked = _run("check", "--cache", str(cache), "--record", str(record))
+    checked = _run(
+        "check",
+        "--cache",
+        str(cache),
+        "--record",
+        str(record),
+        "--consumer-frame-blob",
+        str(consumer_blob),
+        "--consumer-adapter-record",
+        str(consumer_adapter),
+    )
     mismatched = _run("mismatch", "--cache", str(cache), "--record", str(record))
 
     assert seeded["misses"] > 0

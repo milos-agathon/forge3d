@@ -317,13 +317,35 @@ jobs:
           maturin develop --release
       - name: Require portable hits and mismatch isolation
         shell: bash
+        env:
+          FORGE3D_DETERMINISTIC: '1'
+          WGPU_BACKENDS: dx12
         run: |
           source .venv/Scripts/activate
           if [ -f seeded/ANAMNESIS.ABSENT ]; then
             echo "ABSENT: Linux/Vulkan seed host exposed no physical adapter"
           else
+            set +e
+            set -o pipefail
+            python -m forge3d.determinism \
+              --scene terra_determinata_v1 --width 512 --height 512 \
+              --out-png anamnesis-consumer.png 2>anamnesis-consumer.err \
+              | tee anamnesis-consumer.jsonl
+            status=$?
+            set -e
+            set +o pipefail
+            if [ $status -ne 0 ]; then
+              if grep -Eq "software rasterizer|hypervisor-virtualized GPU|No suitable GPU adapter" anamnesis-consumer.err; then
+                echo "ABSENT: Windows/DX12 consumer host exposed no physical adapter"
+                exit 0
+              fi
+              cat anamnesis-consumer.err
+              exit $status
+            fi
             python scripts/check_anamnesis_portability.py check \
-              --cache seeded/anamnesis-store --record seeded/anamnesis-record.json
+              --cache seeded/anamnesis-store --record seeded/anamnesis-record.json \
+              --consumer-frame-blob anamnesis-consumer.png \
+              --consumer-adapter-record anamnesis-consumer.jsonl
             python scripts/check_anamnesis_portability.py mismatch \
               --cache seeded/anamnesis-store --record seeded/anamnesis-record.json
           fi

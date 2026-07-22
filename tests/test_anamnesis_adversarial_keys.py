@@ -81,3 +81,18 @@ def test_fast_pack_cannot_bypass_blob_integrity(tmp_path):
     rerender = render_sequence(recipe, frames=[0], cache=tmp_path, verify_reads=False)
     assert (0, "frame.output") in rerender.observed_recompute
     assert any((tmp_path / "quarantine").iterdir())
+
+
+def test_fast_pack_is_counted_against_store_payload_budget(tmp_path):
+    max_bytes = 1024
+    render_sequence(
+        {"terrain": {"dem": list(range(64))}},
+        frames=range(8),
+        cache=tmp_path,
+        max_bytes=max_bytes,
+        verify_reads=False,
+    )
+    payload_bytes = sum(path.stat().st_size for path in tmp_path.glob("??/*/blob"))
+    fast_pack = tmp_path / "fastpack.json"
+    fast_pack_bytes = fast_pack.stat().st_size if fast_pack.exists() else 0
+    assert payload_bytes + fast_pack_bytes <= max_bytes

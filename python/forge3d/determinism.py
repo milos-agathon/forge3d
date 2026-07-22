@@ -162,6 +162,7 @@ def _render_reference_inprocess(
     height: int,
     out_png: Union[str, Path],
     certificate: Union[bool, str, Path] = False,
+    cache: Union[str, Path, None] = None,
 ) -> str:
     """Render the canonical scene in THIS process and return the PNG SHA-256.
 
@@ -211,6 +212,7 @@ def render_reference(
     backend: Optional[str] = None,
     out_png: Union[str, Path],
     certificate: Union[bool, str, Path] = False,
+    cache: Union[str, Path, None] = None,
 ) -> str:
     """Render the canonical deterministic scene and return the PNG's SHA-256.
 
@@ -232,6 +234,7 @@ def render_reference(
     GPU context creation, because the backend is locked process-wide at first
     use and ``Session(backend=...)`` does not switch it.
     """
+    _ = cache
     scene = scene_spec or CANONICAL_SCENE
     if backend is None and not (
         os.environ.get("WGPU_BACKENDS") or os.environ.get("WGPU_BACKEND")

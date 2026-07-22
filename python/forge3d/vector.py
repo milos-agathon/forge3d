@@ -408,7 +408,7 @@ class VectorScene:
     # Rendering
     # ------------------------------------------------------------------
     def render_oit(
-        self, width: int, height: int, *, certificate: bool | str = False
+        self, width: int, height: int, *, certificate: bool | str = False, cache: str | None = None
     ) -> np.ndarray:
         """Render collected vectors using weighted blended OIT to an RGBA image."""
         from . import vector_render_oit_py as _render
@@ -421,6 +421,7 @@ class VectorScene:
             polyline_rgba=self._polyline_rgba or None,
             stroke_width=self._stroke_width or None,
             certificate=certificate,
+            cache=cache,
         )
         return result
 
@@ -431,6 +432,7 @@ class VectorScene:
         base_pick_id: int = 1,
         *,
         certificate: bool | str = False,
+        cache: str | None = None,
     ) -> np.ndarray:
         """Render full R32Uint picking map for the collected vectors."""
         from . import vector_render_pick_map_py as _pick
@@ -440,6 +442,7 @@ class VectorScene:
             polylines=self._polylines or None,
             base_pick_id=int(base_pick_id),
             certificate=certificate,
+            cache=cache,
         )
         return result
 
@@ -450,6 +453,7 @@ class VectorScene:
         base_pick_id: int = 1,
         *,
         certificate: bool | str = False,
+        cache: str | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Render combined OIT RGBA and full pick map in one call.
 
@@ -466,5 +470,6 @@ class VectorScene:
             stroke_width=self._stroke_width or None,
             base_pick_id=int(base_pick_id),
             certificate=certificate,
+            cache=cache,
         )
         return result

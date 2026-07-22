@@ -40,6 +40,8 @@ def main() -> int:
     parser.add_argument("--frame-blob")
     parser.add_argument("--golden")
     parser.add_argument("--adapter-record")
+    parser.add_argument("--consumer-frame-blob")
+    parser.add_argument("--consumer-adapter-record")
     args = parser.parse_args()
     record_path = Path(args.record)
 
@@ -97,6 +99,32 @@ def main() -> int:
     record = json.loads(record_path.read_text(encoding="utf-8"))
     expected = record["frame_hashes"]
     golden_sha256 = record["golden_sha256"]
+    if args.mode == "check":
+        if not args.consumer_frame_blob or not args.consumer_adapter_record:
+            parser.error(
+                "check requires --consumer-frame-blob and --consumer-adapter-record"
+            )
+        consumer_sha256 = hashlib.sha256(
+            Path(args.consumer_frame_blob).read_bytes()
+        ).hexdigest()
+        if consumer_sha256 != golden_sha256:
+            raise SystemExit(
+                "consumer render differs from committed golden: "
+                f"actual={consumer_sha256} golden={golden_sha256}"
+            )
+        consumer_lines = Path(args.consumer_adapter_record).read_text(
+            encoding="utf-8"
+        ).splitlines()
+        consumer_adapter = json.loads(consumer_lines[-1]).get("adapter")
+        if not consumer_adapter or consumer_adapter.get("software_fallback") is not False:
+            raise SystemExit("consumer render lacks attributable physical-adapter metadata")
+        producer_backend = str(record["producer_adapter"].get("backend", "")).lower()
+        consumer_backend = str(consumer_adapter.get("backend", "")).lower()
+        if producer_backend != "vulkan" or consumer_backend != "dx12":
+            raise SystemExit(
+                "portability check requires physical Vulkan producer and DX12 consumer; "
+                f"got producer={producer_backend!r} consumer={consumer_backend!r}"
+            )
     active_recipe = (
         recipe(_PORTABLE_PROFILE + "-mismatch") if args.mode == "mismatch" else recipe()
     )

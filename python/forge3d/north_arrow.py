@@ -34,8 +34,9 @@ class NorthArrow:
         self.config = config or NorthArrowConfig()
 
     @_captured_cpu_render("python.north_arrow.render", "north_arrow.cpu", draw_calls=1)
-    def render(self, *, certificate: bool | str = False) -> np.ndarray:
+    def render(self, *, certificate: bool | str = False, cache: str | None = None) -> np.ndarray:
         """Render arrow geometry and the N label through native shaping."""
+        _ = cache
         from ._map_scene_render import _draw_text
 
         image, label, anchor = self.render_geometry()

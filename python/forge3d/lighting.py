@@ -364,7 +364,8 @@ class RestirDI:
                      g_buffer: dict,
                      output_format: str = "rgba",
                      *,
-                     certificate: bool | str = False) -> np.ndarray:
+                     certificate: bool | str = False,
+                     cache: str | None = None) -> np.ndarray:
         """Render a frame using ReSTIR DI.
 
         Args:
@@ -376,6 +377,7 @@ class RestirDI:
         Returns:
             Rendered image as numpy array
         """
+        _ = cache
         if self._native_restir is None or not hasattr(_forge3d, "restir_render_frame"):
             raise RuntimeError("Native ReSTIR implementation not available")
 

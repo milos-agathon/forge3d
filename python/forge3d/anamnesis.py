@@ -219,16 +219,39 @@ class _Store:
         self.verify_reads = bool(verify_reads)
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / "quarantine").mkdir(exist_ok=True)
-        self._current_bytes = self._inventory_bytes()
         self._fast: dict[str, dict[str, Any]] = {}
+        self._fast_pack_bytes = 0
         fast_path = self.root / _FAST_PACK
         if not self.verify_reads and fast_path.is_file():
             try:
+                self._fast_pack_bytes = fast_path.stat().st_size
                 packed = json.loads(fast_path.read_text(encoding="utf-8"))
                 if packed.get("schema") == "forge3d.anamnesis.fastpack/1":
-                    self._fast = dict(packed.get("entries", {}))
-            except (OSError, ValueError):
+                    entries = dict(packed.get("entries", {}))
+                    total = 0
+                    for key, item in entries.items():
+                        blob = bytes.fromhex(str(item["blob_hex"]))
+                        meta = dict(item["meta"])
+                        if not (
+                            meta.get("key") == key
+                            and int(meta.get("byte_length", -1)) == len(blob)
+                            and meta.get("self_hash") == _sha256(blob)
+                        ):
+                            raise ValueError("invalid ANAMNESIS fast-pack entry")
+                        total += len(blob)
+                    if {path.name for path in self.entries()} == set(entries):
+                        self._fast = entries
+                        self._current_bytes = total
+            except (KeyError, OSError, TypeError, ValueError):
                 self._fast = {}
+                self._fast_pack_bytes = 0
+        if not self._fast:
+            self._current_bytes = self._inventory_bytes()
+        if self._current_bytes + self._fast_pack_bytes > self.max_bytes:
+            fast_path.unlink(missing_ok=True)
+            self._fast.clear()
+            self._fast_pack_bytes = 0
+            self.gc(self.max_bytes)
 
     def _inventory_bytes(self) -> int:
         total = 0
@@ -297,6 +320,8 @@ class _Store:
         target = self.entry(key)
         if target.is_dir() and self.get(key) is not None:
             return
+        (self.root / _FAST_PACK).unlink(missing_ok=True)
+        self._fast_pack_bytes = 0
         if self._current_bytes + len(blob) > self.max_bytes:
             self.gc(self.max_bytes - len(blob))
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -340,6 +365,7 @@ class _Store:
         temporary = self.root / f".{_FAST_PACK}.tmp-{os.getpid()}"
         temporary.write_text(data, encoding="utf-8")
         temporary.replace(self.root / _FAST_PACK)
+        self._fast_pack_bytes = len(data.encode("utf-8"))
 
     def _write_meta(self, path: Path, meta: Mapping[str, Any]) -> None:
         data = json.dumps(
@@ -362,6 +388,8 @@ class _Store:
         )
 
     def gc(self, target_bytes: int) -> int:
+        (self.root / _FAST_PACK).unlink(missing_ok=True)
+        self._fast_pack_bytes = 0
         records: list[tuple[int, str, int, Path]] = []
         total = 0
         for path in self.entries():
@@ -576,7 +604,11 @@ def render_sequence(
             detected_backend
             or ("reference-cpu" if render_frame is None else "external-renderer-unknown")
         )
-    capability_source = {} if render_frame is None else capabilities
+    capability_source = (
+        capabilities
+        if capabilities is not None
+        else ({} if render_frame is None else None)
+    )
     caps = capability_fingerprint(capability_source, backend=str(state["backend"]))
     engine = engine_fingerprint()
     store = _Store(cache, max_bytes, verify_reads) if cache is not None else None

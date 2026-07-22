@@ -15,14 +15,16 @@ use super::super::*;
 /// with identical camera/light fields for both paths (single scene source).
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-#[pyo3(signature = (width, height, spp, certificate = None))]
+#[pyo3(signature = (width, height, spp, certificate = None, cache = None))]
 pub(crate) fn render_adjudication_pair(
     py: Python<'_>,
     width: u32,
     height: u32,
     spp: u32,
     certificate: Option<Bound<'_, PyAny>>,
+    cache: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
+    let _ = cache;
     use numpy::PyArray1;
 
     let certificate_capture =
