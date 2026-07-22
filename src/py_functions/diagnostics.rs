@@ -30,71 +30,13 @@ pub(crate) fn report_device(py: Python<'_>) -> PyResult<Py<PyDict>> {
 #[cfg(feature = "extension-module")]
 #[pyfunction]
 pub(crate) fn c5_build_framegraph_report(py: Python<'_>) -> PyResult<Py<PyDict>> {
-    // Build a small framegraph with non-overlapping transient resources to allow aliasing
-    let mut fg = Fg::new();
-
-    // Three color targets (transient, aliasable)
-    let extent = FgExtent3d {
-        width: 256,
-        height: 256,
-        depth_or_array_layers: 1,
-    };
-    let usage = FgTexUsages::RENDER_ATTACHMENT | FgTexUsages::TEXTURE_BINDING;
-
-    let gbuffer = fg.add_resource(FgResourceDesc {
-        name: "gbuffer".to_string(),
-        resource_type: FgResourceType::ColorAttachment,
-        format: Some(FgTexFormat::Rgba8UnormSrgb),
-        extent: Some(extent),
-        size: None,
-        usage: Some(usage),
-        can_alias: true,
-    });
-
-    let tmp = fg.add_resource(FgResourceDesc {
-        name: "lighting_tmp".to_string(),
-        resource_type: FgResourceType::ColorAttachment,
-        format: Some(FgTexFormat::Rgba8UnormSrgb),
-        extent: Some(extent),
-        size: None,
-        usage: Some(usage),
-        can_alias: true,
-    });
-
-    let ldr = fg.add_resource(FgResourceDesc {
-        name: "ldr_output".to_string(),
-        resource_type: FgResourceType::ColorAttachment,
-        format: Some(FgTexFormat::Rgba8UnormSrgb),
-        extent: Some(extent),
-        size: None,
-        usage: Some(usage),
-        can_alias: true,
-    });
-
-    // Passes
-    fg.add_pass("g_buffer", FgPassType::Graphics, |pb| {
-        pb.write(gbuffer);
-        Ok(())
-    })?;
-
-    fg.add_pass("lighting", FgPassType::Graphics, |pb| {
-        pb.read(gbuffer).write(tmp);
-        Ok(())
-    })?;
-
-    fg.add_pass("post", FgPassType::Graphics, |pb| {
-        pb.read(tmp).write(ldr);
-        Ok(())
-    })?;
-
-    // Compile + plan barriers
-    fg.compile().map_err(PyErr::from)?;
-    let (_plan, _barriers) = fg.get_execution_plan().map_err(PyErr::from)?;
-
-    // Metrics
-    let metrics = fg.metrics();
-    let alias_reuse = metrics.aliased_count > 0;
-    let barrier_ok = true;
+    let plan = crate::core::framegraph_impl::compile_renderer_graph(&[
+        "diagnostic.g_buffer",
+        "diagnostic.lighting",
+        "diagnostic.post",
+    ])?;
+    let alias_reuse = plan.metrics.aliased_count > 0;
+    let barrier_ok = plan.labels.len() == 3;
 
     let d = PyDict::new_bound(py);
     d.set_item("alias_reuse", alias_reuse)?;

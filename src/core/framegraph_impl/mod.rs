@@ -7,7 +7,7 @@ pub mod barriers;
 pub mod types;
 
 use super::error::{RenderError, RenderResult};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use barriers::BarrierPlanner;
 pub use types::{
@@ -30,6 +30,7 @@ impl PassBuilder {
                 reads: Vec::new(),
                 writes: Vec::new(),
                 can_parallelize: false,
+                pass_key: None,
             },
         }
     }
@@ -51,15 +52,23 @@ impl PassBuilder {
         self.desc.can_parallelize = true;
         self
     }
+
+    /// Attach the already-computed ANAMNESIS key for this pass. The framegraph
+    /// does not invent missing key inputs; callers leave the hook unset when
+    /// their pass declaration is incomplete.
+    pub fn pass_key(&mut self, key: crate::core::anamnesis::PassKey) -> &mut Self {
+        self.desc.pass_key = Some(key);
+        self
+    }
 }
 
 /// Main framegraph for managing render passes and resources
 #[derive(Debug)]
 pub struct FrameGraph {
     /// All resources in the graph
-    resources: HashMap<ResourceHandle, ResourceInfo>,
+    resources: BTreeMap<ResourceHandle, ResourceInfo>,
     /// All passes in the graph  
-    passes: HashMap<PassHandle, PassInfo>,
+    passes: BTreeMap<PassHandle, PassInfo>,
     /// Next resource ID to assign
     next_resource_id: usize,
     /// Next pass ID to assign
@@ -74,8 +83,8 @@ impl FrameGraph {
     /// Create a new framegraph
     pub fn new() -> Self {
         Self {
-            resources: HashMap::new(),
-            passes: HashMap::new(),
+            resources: BTreeMap::new(),
+            passes: BTreeMap::new(),
             next_resource_id: 0,
             next_pass_id: 0,
             barrier_planner: BarrierPlanner::new(),
@@ -136,6 +145,7 @@ impl FrameGraph {
         }
 
         let info = PassInfo {
+            handle,
             desc: builder.desc,
             dependencies: Vec::new(),
             dependents: Vec::new(),
@@ -175,6 +185,7 @@ impl FrameGraph {
         let barriers = self
             .barrier_planner
             .plan_barriers(&pass_infos, &self.resources);
+        self.metrics.barrier_count = barriers.len();
 
         Ok((sorted_passes, barriers))
     }
@@ -202,7 +213,7 @@ impl FrameGraph {
         }
 
         // Find dependencies based on resource usage
-        let pass_handles: Vec<_> = self.passes.keys().cloned().collect();
+        let pass_handles: Vec<_> = self.passes.keys().copied().collect();
 
         for &pass_a in &pass_handles {
             for &pass_b in &pass_handles {
@@ -224,6 +235,11 @@ impl FrameGraph {
                     }
                 }
             }
+        }
+
+        for pass_info in self.passes.values_mut() {
+            pass_info.dependencies.sort_by_key(|handle| handle.0);
+            pass_info.dependents.sort_by_key(|handle| handle.0);
         }
 
         Ok(())
@@ -260,7 +276,7 @@ impl FrameGraph {
     /// Perform transient resource aliasing optimization
     fn alias_transient_resources(&mut self) -> RenderResult<()> {
         // Simple aliasing: resources that don't overlap in lifetime can share memory
-        let resource_handles: Vec<_> = self.resources.keys().cloned().collect();
+        let resource_handles: Vec<_> = self.resources.keys().copied().collect();
         let mut aliased_count = 0;
         let mut memory_saved = 0u64;
 
@@ -338,51 +354,46 @@ impl FrameGraph {
         }
     }
 
-    /// Topologically sort passes for execution
+    /// Topologically sort passes with a label-first tie break. A `BTreeMap`
+    /// alone would only stabilize insertion handles; label ordering makes the
+    /// plan invariant when independent declarations are presented shuffled.
     fn topological_sort(&self) -> RenderResult<Vec<PassHandle>> {
-        let mut result = Vec::new();
-        let mut visited = std::collections::HashSet::new();
-        let mut temp_visited = std::collections::HashSet::new();
-
-        for &pass_handle in self.passes.keys() {
-            if !visited.contains(&pass_handle) {
-                self.dfs_visit(pass_handle, &mut visited, &mut temp_visited, &mut result)?;
+        let mut indegree: BTreeMap<PassHandle, usize> = self
+            .passes
+            .iter()
+            .map(|(handle, info)| (*handle, info.dependencies.len()))
+            .collect();
+        let mut ready: BTreeSet<(String, usize)> = self
+            .passes
+            .iter()
+            .filter(|(handle, _)| indegree.get(handle) == Some(&0))
+            .map(|(handle, info)| (info.desc.name.clone(), handle.0))
+            .collect();
+        let mut result = Vec::with_capacity(self.passes.len());
+        while let Some((label, raw_handle)) = ready.pop_first() {
+            let handle = PassHandle(raw_handle);
+            let _ = label;
+            result.push(handle);
+            let mut dependents = self.passes[&handle].dependents.clone();
+            dependents.sort_by(|a, b| {
+                self.passes[a]
+                    .desc
+                    .name
+                    .cmp(&self.passes[b].desc.name)
+                    .then_with(|| a.0.cmp(&b.0))
+            });
+            for dependent in dependents {
+                let count = indegree.get_mut(&dependent).expect("dependent is declared");
+                *count -= 1;
+                if *count == 0 {
+                    ready.insert((self.passes[&dependent].desc.name.clone(), dependent.0));
+                }
             }
         }
-
-        result.reverse(); // DFS gives reverse topological order
-        Ok(result)
-    }
-
-    /// DFS helper for topological sort
-    fn dfs_visit(
-        &self,
-        pass_handle: PassHandle,
-        visited: &mut std::collections::HashSet<PassHandle>,
-        temp_visited: &mut std::collections::HashSet<PassHandle>,
-        result: &mut Vec<PassHandle>,
-    ) -> RenderResult<()> {
-        if temp_visited.contains(&pass_handle) {
+        if result.len() != self.passes.len() {
             return Err(RenderError::render("Circular dependency in framegraph"));
         }
-
-        if visited.contains(&pass_handle) {
-            return Ok(());
-        }
-
-        temp_visited.insert(pass_handle);
-
-        if let Some(pass_info) = self.passes.get(&pass_handle) {
-            for &dep in &pass_info.dependencies {
-                self.dfs_visit(dep, visited, temp_visited, result)?;
-            }
-        }
-
-        temp_visited.remove(&pass_handle);
-        visited.insert(pass_handle);
-        result.push(pass_handle);
-
-        Ok(())
+        Ok(result)
     }
 
     /// Update execution metrics
@@ -398,8 +409,155 @@ impl FrameGraph {
     }
 }
 
+impl FrameGraph {
+    /// Stable labels for an execution plan, used by ANAMNESIS dry-run and
+    /// diagnostics without exposing insertion-dependent handles.
+    pub fn execution_labels(&mut self) -> RenderResult<Vec<String>> {
+        let (plan, _) = self.get_execution_plan()?;
+        Ok(plan
+            .into_iter()
+            .filter_map(|handle| self.passes.get(&handle).map(|info| info.desc.name.clone()))
+            .collect())
+    }
+
+    pub fn pass_info(&self, handle: PassHandle) -> Option<&PassInfo> {
+        self.passes.get(&handle)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn independent_plan(order: &[&str]) -> Vec<String> {
+        let mut graph = FrameGraph::new();
+        for label in order {
+            graph
+                .add_pass(label, PassType::Compute, |_| Ok(()))
+                .unwrap();
+        }
+        graph.compile().unwrap();
+        graph.execution_labels().unwrap()
+    }
+
+    #[test]
+    fn compile_order_is_stable_across_shuffled_declarations() {
+        let expected = vec![
+            "alpha".to_string(),
+            "middle".to_string(),
+            "zeta".to_string(),
+        ];
+        let permutations = [
+            ["zeta", "alpha", "middle"],
+            ["middle", "zeta", "alpha"],
+            ["alpha", "middle", "zeta"],
+        ];
+        for index in 0..100 {
+            assert_eq!(
+                independent_plan(&permutations[index % permutations.len()]),
+                expected
+            );
+        }
+    }
+}
+
 impl Default for FrameGraph {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Compiled declaration plan shared by every offline renderer path and the C5
+/// diagnostic. Keeping construction here gives the crate one production
+/// `FrameGraph::new()` path instead of a renderer graph plus a fake diagnostic
+/// graph that can drift.
+#[derive(Clone, Debug)]
+pub struct RendererGraphPlan {
+    pub labels: Vec<String>,
+    pub metrics: FrameGraphMetrics,
+    pub barrier_count: usize,
+    next_pass: usize,
+}
+
+impl RendererGraphPlan {
+    /// Advance the production encoder through the compiled graph. Renderers
+    /// call this immediately before recording the named phase; a hand-rolled
+    /// phase cannot silently drift from the dependency plan.
+    pub fn enter(&mut self, label: &str) -> RenderResult<()> {
+        let expected = self.labels.get(self.next_pass).ok_or_else(|| {
+            RenderError::render(format!(
+                "renderer executed undeclared pass {label:?} after graph completion"
+            ))
+        })?;
+        if expected != label {
+            return Err(RenderError::render(format!(
+                "renderer pass order mismatch: expected {expected:?}, got {label:?}"
+            )));
+        }
+        self.next_pass += 1;
+        Ok(())
+    }
+
+    pub fn finish(self) -> RenderResult<()> {
+        if self.next_pass != self.labels.len() {
+            return Err(RenderError::render(format!(
+                "renderer stopped after {} of {} compiled passes",
+                self.next_pass,
+                self.labels.len()
+            )));
+        }
+        Ok(())
+    }
+}
+
+pub fn compile_renderer_graph(labels: &[&str]) -> RenderResult<RendererGraphPlan> {
+    if labels.is_empty() {
+        return Err(RenderError::render(
+            "offline renderer graph requires at least one pass",
+        ));
+    }
+    let mut graph = FrameGraph::new();
+    let mut previous = None;
+    for (index, label) in labels.iter().enumerate() {
+        if label.trim().is_empty() {
+            return Err(RenderError::render(
+                "offline renderer pass labels must be non-empty",
+            ));
+        }
+        let output = graph.add_resource(ResourceDesc {
+            name: format!("{label}.output"),
+            resource_type: ResourceType::ColorAttachment,
+            format: Some(wgpu::TextureFormat::Rgba32Float),
+            extent: Some(wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            }),
+            size: None,
+            usage: Some(
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            ),
+            can_alias: index + 1 < labels.len(),
+        });
+        graph.add_pass(label, PassType::Graphics, |pass| {
+            if let Some(input) = previous {
+                pass.read(input);
+            }
+            pass.write(output);
+            Ok(())
+        })?;
+        previous = Some(output);
+    }
+    graph.compile()?;
+    let (handles, barriers) = graph.get_execution_plan()?;
+    let labels = handles
+        .into_iter()
+        .filter_map(|handle| graph.pass_info(handle).map(|info| info.desc.name.clone()))
+        .collect();
+    Ok(RendererGraphPlan {
+        labels,
+        metrics: graph.metrics().clone(),
+        barrier_count: barriers.len(),
+        next_pass: 0,
+    })
 }

@@ -18,6 +18,14 @@ impl TerrainScene {
         water_mask: Option<PyReadonlyArray2<f32>>,
         time_seconds: f32,
     ) -> Result<crate::Frame> {
+        let mut graph = crate::core::framegraph_impl::compile_renderer_graph(&[
+            "terrain.prepare",
+            "terrain.shadow",
+            "terrain.forward",
+            "terrain.resolve",
+        ])?;
+        debug_assert_eq!(graph.labels.len(), 4);
+        graph.enter("terrain.prepare")?;
         let (certificate_capture, _allocation_scope) =
             self.begin_certificate_capture("terrain.render_internal");
         let mut timing = self.take_render_timing();
@@ -154,6 +162,7 @@ impl TerrainScene {
         )?;
         ts_end(&mut timing, &mut encoder, sun_vis_scope, 0);
 
+        graph.enter("terrain.shadow")?;
         let shadow_scope = ts_begin(&mut timing, &mut encoder, "terrain.shadow");
         let shadow_setup = self.prepare_shadow_setup(
             &mut encoder,
@@ -250,6 +259,7 @@ impl TerrainScene {
             ts_end(&mut timing, &mut encoder, bg_scope, 1);
         }
 
+        graph.enter("terrain.forward")?;
         let main_scope = ts_begin(&mut timing, &mut encoder, "terrain.main");
         self.run_main_pass(
             &mut encoder,
@@ -286,6 +296,7 @@ impl TerrainScene {
             )?;
         }
 
+        graph.enter("terrain.resolve")?;
         let resolve_scope = ts_begin(&mut timing, &mut encoder, "terrain.resolve");
         let (final_texture, final_width, final_height) =
             self.resolve_output(&mut encoder, params, decoded, render_targets)?;
@@ -295,6 +306,7 @@ impl TerrainScene {
             t.resolve_queries(&mut encoder);
         }
         self.queue.submit(Some(encoder.finish()));
+        graph.finish()?;
         self.finish_material_vt_frame()?;
 
         // Live GPU-pass timings for the certificate: read back the resolved

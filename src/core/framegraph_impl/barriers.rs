@@ -4,9 +4,9 @@
 //! to ensure correct resource state transitions.
 
 use super::types::{
-    BarrierType, PassHandle, PassInfo, ResourceBarrier, ResourceHandle, ResourceInfo, ResourceType,
+    BarrierType, PassInfo, ResourceBarrier, ResourceHandle, ResourceInfo, ResourceType,
 };
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use wgpu::{BufferUsages, TextureUsages};
 
 // ToPassHandle trait is defined below
@@ -15,7 +15,7 @@ use wgpu::{BufferUsages, TextureUsages};
 #[derive(Debug)]
 pub struct BarrierPlanner {
     /// Current usage state of each resource
-    resource_states: HashMap<ResourceHandle, ResourceUsage>,
+    resource_states: BTreeMap<ResourceHandle, ResourceUsage>,
 }
 
 /// Current usage state of a resource
@@ -33,7 +33,7 @@ impl BarrierPlanner {
     /// Create a new barrier planner
     pub fn new() -> Self {
         Self {
-            resource_states: HashMap::new(),
+            resource_states: BTreeMap::new(),
         }
     }
 
@@ -41,7 +41,7 @@ impl BarrierPlanner {
     pub fn plan_barriers(
         &mut self,
         passes: &[PassInfo],
-        resources: &HashMap<ResourceHandle, ResourceInfo>,
+        resources: &BTreeMap<ResourceHandle, ResourceInfo>,
     ) -> Vec<ResourceBarrier> {
         let mut barriers = Vec::new();
 
@@ -64,7 +64,7 @@ impl BarrierPlanner {
     fn plan_pass_barriers(
         &self,
         pass_info: &PassInfo,
-        resources: &HashMap<ResourceHandle, ResourceInfo>,
+        resources: &BTreeMap<ResourceHandle, ResourceInfo>,
     ) -> Vec<ResourceBarrier> {
         let mut barriers = Vec::new();
 
@@ -117,7 +117,7 @@ impl BarrierPlanner {
                             old_usage: *old,
                             new_usage: *new,
                         },
-                        before_pass: pass_info.desc.pass_type.to_pass_handle(),
+                        before_pass: pass_info.handle,
                     })
                 } else {
                     None
@@ -131,7 +131,7 @@ impl BarrierPlanner {
                             old_usage: *old,
                             new_usage: *new,
                         },
-                        before_pass: pass_info.desc.pass_type.to_pass_handle(),
+                        before_pass: pass_info.handle,
                     })
                 } else {
                     None
@@ -146,7 +146,7 @@ impl BarrierPlanner {
                 Some(ResourceBarrier {
                     resource: resource_handle,
                     barrier_type: BarrierType::MemoryBarrier,
-                    before_pass: pass_info.desc.pass_type.to_pass_handle(),
+                    before_pass: pass_info.handle,
                 })
             }
         }
@@ -194,7 +194,7 @@ impl BarrierPlanner {
     fn update_resource_states_after_pass(
         &mut self,
         pass_info: &PassInfo,
-        resources: &HashMap<ResourceHandle, ResourceInfo>,
+        resources: &BTreeMap<ResourceHandle, ResourceInfo>,
     ) {
         // Update states for all resources used by this pass
         let mut all_resources = pass_info.desc.reads.clone();
@@ -217,17 +217,5 @@ impl BarrierPlanner {
 impl Default for BarrierPlanner {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-// Helper trait to convert pass types to pass handles
-trait ToPassHandle {
-    fn to_pass_handle(&self) -> PassHandle;
-}
-
-impl ToPassHandle for super::types::PassType {
-    fn to_pass_handle(&self) -> PassHandle {
-        // Legacy pass types do not track handles yet; use a dummy handle.
-        PassHandle(0)
     }
 }

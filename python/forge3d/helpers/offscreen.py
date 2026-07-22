@@ -40,6 +40,7 @@ def render_offscreen_rgba(
     frames: int = 1,
     denoiser: str = "off",
     certificate: bool | str = False,
+    cache: str | None = None,
 ) -> np.ndarray:
     """Render an RGBA image offscreen and return a numpy array.
 
@@ -60,24 +61,52 @@ def render_offscreen_rgba(
     # --- Native path: Scene.render_rgba() is an instance method. ---
     if _is_native_scene(scene):
         try:
-            return scene.render_rgba(certificate=certificate)
+            return scene.render_rgba(certificate=certificate, cache=cache)
         except (RuntimeError, OSError) as exc:
             print(
                 f"[forge3d] native render_rgba failed, using CPU fallback: {exc}",
                 file=sys.stderr,
             )
 
-    # --- Fallback: deterministic CPU path tracer. ---
-    return _fallback_render_rgba(
-        w,
-        h,
-        scene=scene,
-        camera=camera,
-        seed=int(seed),
-        frames=int(frames),
-        denoiser=str(denoiser),
-        certificate=certificate,
+    def render_cpu() -> np.ndarray:
+        return _fallback_render_rgba(
+            w,
+            h,
+            scene=scene,
+            camera=camera,
+            seed=int(seed),
+            frames=int(frames),
+            denoiser=str(denoiser),
+            certificate=certificate,
+        )
+
+    if cache is None or certificate or (scene is not None and not isinstance(scene, Mapping)):
+        return render_cpu()
+
+    from ..anamnesis import render_sequence
+
+    recipe = {
+        "terrain": {},
+        "camera": dict(camera or {}),
+        "scene": dict(scene) if isinstance(scene, Mapping) else None,
+        "anamnesis_state": {"seed": int(seed), "backend": "reference-cpu"},
+        "output": {
+            "width": w,
+            "height": h,
+            "frames": int(frames),
+            "denoiser": str(denoiser),
+            "dtype": "uint8",
+        },
+    }
+    result = render_sequence(
+        recipe,
+        frames=[0],
+        cache=cache,
+        render_frame=lambda _recipe, _frame: np.ascontiguousarray(render_cpu(), dtype=np.uint8).tobytes(),
+        render_frame_fingerprint=b"forge3d.path_tracing.render_rgba/v1",
+        capabilities={},
     )
+    return np.frombuffer(result.frame_blobs[0], dtype=np.uint8).reshape(h, w, 4).copy()
 
 
 def _png_array_for_bit_depth(rgba: np.ndarray, bit_depth: int) -> np.ndarray:

@@ -86,11 +86,16 @@ pub struct PassDesc {
     pub writes: Vec<ResourceHandle>,
     /// Whether this pass can run in parallel with others
     pub can_parallelize: bool,
+    /// Optional ANAMNESIS identity computed from the pass's complete declared
+    /// input space. `None` means the pass is deliberately not cacheable.
+    pub pass_key: Option<crate::core::anamnesis::PassKey>,
 }
 
 /// Pass information with computed dependencies
 #[derive(Debug, Clone)]
 pub struct PassInfo {
+    /// Stable handle assigned when the pass was declared.
+    pub handle: PassHandle,
     /// Pass description
     pub desc: PassDesc,
     /// Passes that must complete before this one
@@ -132,7 +137,7 @@ pub struct ResourceBarrier {
 }
 
 /// Framegraph execution metrics
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct FrameGraphMetrics {
     /// Number of passes in the graph
     pub pass_count: usize,

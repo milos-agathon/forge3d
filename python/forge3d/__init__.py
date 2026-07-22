@@ -121,6 +121,9 @@ _NATIVE_ONLY_EXPORTS = (
         "sign_render_certificate_digest",  # CENSOR: native Ed25519 signer
         "request_host_visible_allocation_for_test",  # CENSOR: budget-enforce test helper
         "shader_report",  # PROBATUM: WGSL proof report
+        "anamnesis_leaf_key",  # ANAMNESIS: native content key primitive
+        "anamnesis_pass_key",  # ANAMNESIS: native hermetic pass key
+        "anamnesis_engine_fingerprint",  # ANAMNESIS: pinned engine identity
 )
 
 if _NATIVE_MODULE is not None:
@@ -168,6 +171,12 @@ class _NativeSymbolMissing(AttributeError):
 
 
 def __getattr__(name: str):
+    if name == "anamnesis":
+        import importlib
+
+        module = importlib.import_module(".anamnesis", __name__)
+        globals()[name] = module
+        return module
     if name in _NATIVE_ONLY_EXPORTS:
         if _NATIVE_MODULE is None:
             cause = native_import_error()
@@ -761,6 +770,7 @@ __all__ = [
     "io",
     "terrain_scatter",
     "animation",
+    "anamnesis",
     "camera_rigs",
     "datasets",
     "widgets",

@@ -3,10 +3,49 @@
 //! built from. Falls back to "unknown" when git is unavailable (e.g. building
 //! from an unpacked source tarball).
 
+use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+fn shader_tree_hash(root: &Path) -> String {
+    fn collect(path: &Path, files: &mut Vec<PathBuf>) {
+        let Ok(entries) = fs::read_dir(path) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect(&path, files);
+            } else if path.extension().and_then(|value| value.to_str()) == Some("wgsl") {
+                files.push(path);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    collect(root, &mut files);
+    files.sort();
+    let mut hash = Sha256::new();
+    for path in files {
+        // Path display uses `\\` on Windows and `/` on Unix. Hash only the
+        // shader-root-relative component sequence with an explicit `/`
+        // separator so identical source trees have identical engine
+        // fingerprints across the portability matrix.
+        let relative = path.strip_prefix(root).unwrap_or(&path);
+        let normalized = relative
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+        hash.update(normalized.as_bytes());
+        if let Ok(bytes) = fs::read(path) {
+            hash.update((bytes.len() as u64).to_le_bytes());
+            hash.update(bytes);
+        }
+    }
+    format!("{:x}", hash.finalize())
+}
 
 fn main() {
     let sha = Command::new("git")
@@ -21,6 +60,10 @@ fn main() {
 
     println!("cargo:rustc-env=FORGE3D_GIT_SHA={sha}");
     write_registered_wgsl_modules();
+    println!(
+        "cargo:rustc-env=FORGE3D_WGSL_TREE_SHA256={}",
+        shader_tree_hash(Path::new("src/shaders"))
+    );
     // Re-run when HEAD moves so the embedded SHA stays current. `.git/HEAD`
     // changes on branch switches; `.git/logs/HEAD` changes on every commit
     // (including same-branch commits), so watching it refreshes the embedded

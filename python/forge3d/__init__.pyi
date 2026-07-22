@@ -217,8 +217,8 @@ class Scene:
         up: Tuple[float, float, float],
         fovy_deg: float, znear: float, zfar: float) -> None: ...
     def set_height_from_r32f(self, height_r32f: np.ndarray) -> None: ...
-    def render_png(self, path: PathLikeStr, certificate: bool | str | PathLikeStr | None = ...) -> None: ...
-    def render_rgba(self, certificate: bool | str | PathLikeStr | None = ...) -> np.ndarray: ...  # (H,W,4) uint8, C-contiguous
+    def render_png(self, path: PathLikeStr, certificate: bool | str | PathLikeStr | None = ..., cache: str | PathLikeStr | None = ...) -> None: ...
+    def render_rgba(self, certificate: bool | str | PathLikeStr | None = ..., cache: str | PathLikeStr | None = ...) -> np.ndarray: ...  # (H,W,4) uint8, C-contiguous
     def set_msaa_samples(self, samples: int) -> int: ...
     def debug_uniforms_f32(self) -> np.ndarray: ...
     def debug_lut_format(self) -> str: ...
@@ -707,6 +707,8 @@ class CameraAnimation:
 
 class TerrainRenderer:
     def __init__(self, session: "Session") -> None: ...
+    @property
+    def last_anamnesis_cache_report(self) -> dict[str, Any]: ...
     def render_terrain_pbr_pom(
         self,
         material_set: "MaterialSet",
@@ -717,6 +719,7 @@ class TerrainRenderer:
         water_mask: Optional[np.ndarray] = ...,
         time_seconds: float = ...,
         certificate: bool | str | PathLikeStr | None = ...,
+        cache: str | PathLikeStr | None = ...,
     ) -> Frame: ...
     def render_with_aov(
         self,
@@ -727,6 +730,7 @@ class TerrainRenderer:
         water_mask: Optional[np.ndarray] = ...,
         time_seconds: float = ...,
         certificate: bool | str | PathLikeStr | None = ...,
+        cache: str | PathLikeStr | None = ...,
     ) -> Tuple[Frame, AovFrame]: ...
     def begin_offline_accumulation(
         self,
@@ -811,6 +815,8 @@ def render_offline(
     settings: OfflineQualitySettings,
     progress_callback: Optional[Callable[[OfflineProgress], None]] = ...,
     water_mask: Optional[np.ndarray] = ...,
+    certificate: bool | str | PathLikeStr = ...,
+    cache: str | PathLikeStr | None = ...,
 ) -> OfflineResult: ...
 
 def oidn_available() -> bool: ...
@@ -1343,6 +1349,16 @@ def abort_render_execution_capture() -> None: ...
 
 # CENSOR: native Ed25519 certificate signer (signature hex, public-key hex)
 def sign_render_certificate_digest(seed: bytes, digest: bytes) -> tuple[str, str]: ...
+def anamnesis_leaf_key(content: bytes) -> str: ...
+def anamnesis_pass_key(
+    label: str,
+    pipeline_descriptor: bytes,
+    uniform_bytes: bytes,
+    input_keys: list[str],
+    capability_fingerprint: bytes,
+    engine_fingerprint: bytes,
+) -> str: ...
+def anamnesis_engine_fingerprint() -> str: ...
 
 # CENSOR: budget-enforce test helper (raises MemoryBudgetExceeded when over budget)
 def request_host_visible_allocation_for_test(bytes: int, label: str) -> None: ...
@@ -1408,6 +1424,7 @@ def render_offscreen_rgba(
     frames: int = ...,
     denoiser: str = ...,
     certificate: bool | str | PathLikeStr = ...,
+    cache: str | PathLikeStr | None = ...,
 ) -> np.ndarray: ...
 
 # P2.3: Label style bindings

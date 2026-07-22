@@ -69,6 +69,7 @@ pub mod scene_graph;
 pub mod multi_thread;
 
 // C7: Async compute prepasses
+pub mod anamnesis;
 pub mod async_compute;
 
 // R9: Async and double-buffered readback system (opt-in)

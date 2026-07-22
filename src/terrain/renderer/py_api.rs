@@ -1,6 +1,7 @@
 use super::*;
 use crate::terrain::render_params;
 use numpy::PyUntypedArrayMethods;
+use pyo3::types::PyDict;
 
 #[pymethods]
 impl TerrainRenderer {
@@ -16,7 +17,10 @@ impl TerrainRenderer {
             PyRuntimeError::new_err(format!("Failed to create TerrainRenderer: {:#}", e))
         })?;
 
-        Ok(Self { scene })
+        Ok(Self {
+            scene,
+            last_anamnesis_report: crate::core::anamnesis::CacheReport::default(),
+        })
     }
 
     #[pyo3(signature = (lights))]
@@ -65,7 +69,7 @@ impl TerrainRenderer {
         self.scene.light_debug_info()
     }
 
-    #[pyo3(signature = (material_set, env_maps, params, heightmap, target=None, water_mask=None, time_seconds=0.0, certificate=None))]
+    #[pyo3(signature = (material_set, env_maps, params, heightmap, target=None, water_mask=None, time_seconds=0.0, certificate=None, cache=None))]
     pub fn render_terrain_pbr_pom<'py>(
         &mut self,
         py: Python<'py>,
@@ -77,7 +81,9 @@ impl TerrainRenderer {
         water_mask: Option<PyReadonlyArray2<'py, f32>>,
         time_seconds: f32,
         certificate: Option<Bound<'py, PyAny>>,
+        cache: Option<Bound<'py, PyAny>>,
     ) -> PyResult<Py<crate::Frame>> {
+        self.last_anamnesis_report = crate::core::anamnesis::CacheReport::default();
         if self
             .scene
             .offline_session_active()
@@ -94,24 +100,54 @@ impl TerrainRenderer {
             ));
         }
 
-        let frame = self
-            .scene
-            .render_internal(
-                material_set,
-                env_maps,
-                params,
-                heightmap,
-                water_mask,
-                time_seconds,
-            )
-            .map_err(|e| PyRuntimeError::new_err(format!("Rendering failed: {:#}", e)))?;
+        let prepared_cache = super::anamnesis_cache::prepare_frame_cache(
+            py,
+            &self.scene,
+            cache.as_ref(),
+            certificate.as_ref(),
+            material_set,
+            env_maps,
+            params,
+            &heightmap,
+            water_mask.as_ref(),
+            time_seconds,
+        )?;
+        let frame = if let Some(prepared) = prepared_cache.as_ref() {
+            let device = self.scene.device.clone();
+            let queue = self.scene.queue.clone();
+            let (frame, report) = prepared.execute(device, queue, || {
+                self.scene
+                    .render_internal(
+                        material_set,
+                        env_maps,
+                        params,
+                        heightmap,
+                        water_mask,
+                        time_seconds,
+                    )
+                    .map_err(|e| PyRuntimeError::new_err(format!("Rendering failed: {e:#}")))
+            })?;
+            self.last_anamnesis_report = report;
+            frame
+        } else {
+            self.scene
+                .render_internal(
+                    material_set,
+                    env_maps,
+                    params,
+                    heightmap,
+                    water_mask,
+                    time_seconds,
+                )
+                .map_err(|e| PyRuntimeError::new_err(format!("Rendering failed: {e:#}")))?
+        };
 
         crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
 
         Py::new(py, frame)
     }
 
-    #[pyo3(signature = (material_set, env_maps, params, heightmap, water_mask=None, time_seconds=0.0, certificate=None))]
+    #[pyo3(signature = (material_set, env_maps, params, heightmap, water_mask=None, time_seconds=0.0, certificate=None, cache=None))]
     pub fn render_with_aov<'py>(
         &mut self,
         py: Python<'py>,
@@ -122,7 +158,9 @@ impl TerrainRenderer {
         water_mask: Option<PyReadonlyArray2<'py, f32>>,
         time_seconds: f32,
         certificate: Option<Bound<'py, PyAny>>,
+        cache: Option<Bound<'py, PyAny>>,
     ) -> PyResult<(Py<crate::Frame>, Py<crate::AovFrame>)> {
+        let _ = cache;
         if self
             .scene
             .offline_session_active()
@@ -154,6 +192,20 @@ impl TerrainRenderer {
             "TerrainRenderer(backend=wgpu, device={:?})",
             self.scene.device.features()
         )
+    }
+
+    /// Report the most recent native one-shot ANAMNESIS lookup.
+    #[getter]
+    fn last_anamnesis_cache_report(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let report = &self.last_anamnesis_report;
+        let dict = PyDict::new_bound(py);
+        dict.set_item("hits", &report.hits)?;
+        dict.set_item("misses", &report.misses)?;
+        dict.set_item("bytes_read", report.bytes_read)?;
+        dict.set_item("bytes_written", report.bytes_written)?;
+        dict.set_item("wall_ms_saved", report.wall_ms_saved)?;
+        dict.set_item("hit_rate", report.hit_rate())?;
+        Ok(dict.into())
     }
 
     #[cfg(feature = "enable-gpu-instancing")]

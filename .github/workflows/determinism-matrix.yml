@@ -55,6 +55,10 @@ on:
       - 'scripts/check_determinism_hashes.py'
       - 'tests/test_determinism_hash.py'
       - 'tests/test_determinism_matrix.py'
+      - 'python/forge3d/anamnesis.py'
+      - 'src/core/anamnesis/**'
+      - 'scripts/check_anamnesis_portability.py'
+      - 'tests/test_anamnesis_*.py'
       - 'tests/goldens/determinism/**'
       - '.github/workflows/determinism-matrix.yml'
   pull_request:
@@ -69,6 +73,10 @@ on:
       - 'scripts/check_determinism_hashes.py'
       - 'tests/test_determinism_hash.py'
       - 'tests/test_determinism_matrix.py'
+      - 'python/forge3d/anamnesis.py'
+      - 'src/core/anamnesis/**'
+      - 'scripts/check_anamnesis_portability.py'
+      - 'tests/test_anamnesis_*.py'
       - 'tests/goldens/determinism/**'
       - '.github/workflows/determinism-matrix.yml'
 
@@ -211,6 +219,114 @@ jobs:
           name: determinism-hash-wasm
           path: hash-out/
           if-no-files-found: error
+
+  anamnesis-seed:
+    name: anamnesis golden-store seed (linux/vulkan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Mesa Vulkan drivers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools libvulkan1
+      - name: Build extension
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install -U pip maturin numpy pytest
+          maturin develop --release
+      - name: Gate ANAMNESIS incrementality, speed, hermeticity, and corruption handling
+        run: |
+          source .venv/bin/activate
+          python -m pytest \
+            tests/test_anamnesis_incremental.py \
+            tests/test_anamnesis_adversarial_keys.py \
+            tests/test_anamnesis_inertness.py \
+            tests/test_anamnesis_hermeticity.py \
+            tests/test_anamnesis_portability.py \
+            tests/test_anamnesis_uniform_layout.py \
+            -v --tb=short
+      - name: Render golden and populate portable store
+        shell: bash
+        env:
+          FORGE3D_DETERMINISTIC: '1'
+          WGPU_BACKENDS: vulkan
+        run: |
+          source .venv/bin/activate
+          set +e
+          set -o pipefail
+          python -m forge3d.determinism \
+            --scene terra_determinata_v1 --width 512 --height 512 \
+            --out-png anamnesis-golden.png 2>anamnesis-render.err \
+            | tee anamnesis-render.jsonl
+          status=$?
+          set -e
+          set +o pipefail
+          if [ $status -ne 0 ]; then
+            {
+              echo "ABSENT: no physical Linux/Vulkan adapter for ANAMNESIS portability seed"
+              tail -n 20 anamnesis-render.err || true
+            } > ANAMNESIS.ABSENT
+          else
+            FORGE3D_RUN_GPU_ANAMNESIS=1 \
+            FORGE3D_ANAMNESIS_RESULT_PATH=anamnesis-gpu-result.json \
+              python -m pytest \
+                tests/test_anamnesis_incremental.py::test_real_gpu_600_frame_acceptance \
+                tests/test_anamnesis_inertness.py::test_native_terrain_cache_skips_encoder_and_invalidates_dem \
+                -v --tb=short
+            python scripts/check_anamnesis_portability.py seed \
+              --cache anamnesis-store --record anamnesis-record.json \
+              --frame-blob anamnesis-golden.png \
+              --golden tests/goldens/determinism/terra_determinata_v1.sha256 \
+              --adapter-record anamnesis-render.jsonl
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anamnesis-store-linux
+          path: |
+            anamnesis-store/
+            anamnesis-record.json
+            anamnesis-gpu-result.json
+            ANAMNESIS.ABSENT
+          if-no-files-found: error
+
+  anamnesis-portability:
+    name: anamnesis portability consume (windows)
+    needs: anamnesis-seed
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: anamnesis-store-linux
+          path: seeded
+      - name: Build extension
+        shell: bash
+        run: |
+          python -m venv .venv
+          source .venv/Scripts/activate
+          python -m pip install -U pip maturin numpy
+          maturin develop --release
+      - name: Require portable hits and mismatch isolation
+        shell: bash
+        run: |
+          source .venv/Scripts/activate
+          if [ -f seeded/ANAMNESIS.ABSENT ]; then
+            echo "ABSENT: Linux/Vulkan seed host exposed no physical adapter"
+          else
+            python scripts/check_anamnesis_portability.py check \
+              --cache seeded/anamnesis-store --record seeded/anamnesis-record.json
+            python scripts/check_anamnesis_portability.py mismatch \
+              --cache seeded/anamnesis-store --record seeded/anamnesis-record.json
+          fi
 
   diff:
     name: diff hashes (zero-byte tolerance)

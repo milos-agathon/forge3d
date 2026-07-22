@@ -162,6 +162,11 @@ pub fn render_forward_hdr(
     draws: &[ForwardDraw],
     mut timing: Option<(&mut crate::core::gpu_timing::OneShotTiming, &str)>,
 ) -> Result<Vec<f32>, RenderError> {
+    let mut graph = crate::core::framegraph_impl::compile_renderer_graph(&[
+        "offscreen.forward",
+        "offscreen.readback",
+    ])?;
+    debug_assert_eq!(graph.labels, ["offscreen.forward", "offscreen.readback"]);
     match targets.color_format {
         wgpu::TextureFormat::Rgba32Float | wgpu::TextureFormat::Rgba16Float => {}
         other => {
@@ -176,6 +181,7 @@ pub fn render_forward_hdr(
     let timing_scope = timing
         .as_mut()
         .and_then(|(t, label)| t.begin(&mut encoder, label));
+    graph.enter("offscreen.forward")?;
     encode_forward_pass(&mut encoder, targets, clear, draws);
     if let Some((t, _)) = timing.as_mut() {
         t.end(&mut encoder, timing_scope, draws.len() as u32);
@@ -185,7 +191,8 @@ pub fn render_forward_hdr(
 
     // read_hdr_texture's wrapper already accounts the staging-buffer footprint;
     // no manual mirror here (it would double-count host-visible bytes).
-    crate::core::hdr::read_hdr_texture(
+    graph.enter("offscreen.readback")?;
+    let result = crate::core::hdr::read_hdr_texture(
         device,
         queue,
         &targets.color,
@@ -193,7 +200,9 @@ pub fn render_forward_hdr(
         targets.height,
         targets.color_format,
     )
-    .map_err(RenderError::Readback)
+    .map_err(RenderError::Readback)?;
+    graph.finish()?;
+    Ok(result)
 }
 
 #[cfg(test)]

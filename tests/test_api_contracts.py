@@ -151,6 +151,9 @@ class TestNativeModuleSymbols:
         "mesh_generate_plane_tbn",
         # CARTOGRAPHER-PRIME: bounded-optimal label declutter
         "declutter_optimal",
+        "anamnesis_leaf_key",
+        "anamnesis_pass_key",
+        "anamnesis_engine_fingerprint",
         # G-002a1: Rust-backed GIS raster metadata/write foundation
         "read_raster_info",
         "read_raster",

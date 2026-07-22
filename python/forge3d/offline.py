@@ -85,6 +85,7 @@ def render_offline(
     progress_callback: Optional[Callable[[OfflineProgress], None]] = None,
     water_mask: Optional[np.ndarray] = None,
     certificate: "bool | str | Any" = False,
+    cache: "str | Any | None" = None,
 ) -> OfflineResult:
     """Render terrain through the TV12 offline accumulation pipeline.
 
@@ -100,6 +101,12 @@ def render_offline(
     metadata under ``certificate_payload_sha256``.
     """
 
+    # The native accumulation object is stateful and currently cannot be
+    # reconstructed from a blob without losing its AOV/HDR type contract.
+    # Soundness therefore chooses an explicit false miss for this entry point;
+    # `forge3d.anamnesis.render_sequence` provides pass-granular sequence
+    # caching, while accepting `cache=` here keeps the render API uniform.
+    _ = cache
     from . import certificate as _certificate
 
     with _certificate._render_capture(
