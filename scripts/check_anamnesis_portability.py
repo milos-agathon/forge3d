@@ -1,57 +1,77 @@
-"""CI driver for ANAMNESIS store portability and mismatch isolation."""
+"""Fail-closed native-terrain cache portability and mismatch controls."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
+import tempfile
 
 import numpy as np
 
 import forge3d as f3d
-from forge3d.anamnesis import render_sequence
+from forge3d.determinism import (
+    _canonical_params_config,
+    canonical_heightmap,
+    write_canonical_hdr,
+)
 
 
-_PORTABLE_PROFILE = "terra-determinata-portable-v1"
-_RENDERER_FINGERPRINT = hashlib.sha256(
-    b"forge3d.anamnesis.terra-determinata-golden/v1"
-).digest()
-_PASS_FINGERPRINTS = {
-    label: hashlib.sha256(_RENDERER_FINGERPRINT + label.encode("utf-8")).digest()
-    for label in ("terrain.shade", "accumulation", "frame.output")
-}
+_PORTABLE_PROFILE = "terra-determinata-native-portable-v1"
+_PASS_LABELS = [
+    "terrain.prepare",
+    "terrain.shadow",
+    "terrain.forward",
+    "terrain.resolve",
+]
 
 
-def _identity(_state, _frame, inputs):
-    return inputs[0]
+def _adapter(path: str) -> dict:
+    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    adapter = json.loads(lines[-1]).get("adapter")
+    if not adapter or adapter.get("software_fallback") is not False:
+        raise SystemExit("render lacks attributable physical-adapter metadata")
+    return dict(adapter)
 
 
-def _pass_contexts(golden_sha256: str) -> dict[str, bytes]:
-    return {
-        "terrain.shade": (
-            b"terra-determinata-production-rgba/v1\0"
-            + golden_sha256.encode("ascii")
-        ),
-        "accumulation": b"identity/no-hidden-inputs/v1",
-        "frame.output": b"identity/no-hidden-inputs/v1",
-    }
+def _machine_id(path: str | None) -> str:
+    if not path:
+        raise SystemExit("native portability requires --machine-id-file")
+    value = Path(path).read_text(encoding="utf-8").strip().lower()
+    if not value or value in {"none", "unknown", "00000000-0000-0000-0000-000000000000"}:
+        raise SystemExit("native portability machine identity is absent or invalid")
+    return value
 
 
-def recipe(profile: str = _PORTABLE_PROFILE) -> dict:
-    return {
-        "terrain": {"dem_sha256": "42" * 32, "z_scale": 2.0},
-        "atmosphere": {"model": "clear"},
-        "lighting": {"azimuth": 210.0, "elevation": 33.0},
-        "camera": {"path": "terra-determinata-portability-v1"},
-        # This is an effective deterministic compatibility backend, not an
-        # omitted backend. A physical backend may enter this equivalence class
-        # only after the TERRA matrix proves its output equals the committed
-        # golden. Changing the profile is therefore a mandatory key miss.
-        "anamnesis_state": {"backend": profile},
-        "layers": [],
-        "output": {"width": 512, "height": 512, "samples": 4},
-    }
+def _runner_name(value: str) -> str:
+    value = value.strip()
+    if not value:
+        raise SystemExit("native portability requires an attributable runner name")
+    return value
+
+
+def _native_render(cache: str, *, height_delta: float = 0.0) -> tuple[bytes, dict]:
+    os.environ["FORGE3D_ANAMNESIS_COMPATIBILITY_PROFILE"] = _PORTABLE_PROFILE
+    heightmap = np.ascontiguousarray(canonical_heightmap(), dtype=np.float32)
+    if height_delta:
+        heightmap = heightmap.copy()
+        heightmap[0, 0] += np.float32(height_delta)
+    with tempfile.TemporaryDirectory(prefix="forge3d-anamnesis-portable-") as root:
+        hdr_path = Path(root) / "environment.hdr"
+        write_canonical_hdr(str(hdr_path))
+        renderer = f3d.TerrainRenderer(f3d.Session(window=False))
+        frame = renderer.render_terrain_pbr_pom(
+            f3d.MaterialSet.terrain_default(),
+            f3d.IBL.from_hdr(str(hdr_path), intensity=1.0),
+            f3d.TerrainRenderParams(_canonical_params_config()(512, 512)),
+            heightmap,
+            time_seconds=0.0,
+            cache=cache,
+        )
+        rgba = np.ascontiguousarray(frame.to_numpy(), dtype=np.uint8).tobytes()
+        return rgba, dict(renderer.last_anamnesis_cache_report)
 
 
 def main() -> int:
@@ -64,6 +84,8 @@ def main() -> int:
     parser.add_argument("--adapter-record")
     parser.add_argument("--consumer-frame-blob")
     parser.add_argument("--consumer-adapter-record")
+    parser.add_argument("--machine-id-file")
+    parser.add_argument("--runner-name", default=os.environ.get("RUNNER_NAME", ""))
     parser.add_argument("--producer-backend", default="vulkan")
     parser.add_argument("--consumer-backend", default="dx12")
     args = parser.parse_args()
@@ -72,61 +94,48 @@ def main() -> int:
     if args.mode == "seed":
         if not args.frame_blob or not args.golden or not args.adapter_record:
             parser.error("seed requires --frame-blob, --golden, and --adapter-record")
-        png_blob = Path(args.frame_blob).read_bytes()
-        actual_sha256 = hashlib.sha256(png_blob).hexdigest()
+        png_sha256 = hashlib.sha256(Path(args.frame_blob).read_bytes()).hexdigest()
         golden_sha256 = Path(args.golden).read_text(encoding="utf-8").split()[0]
-        if actual_sha256 != golden_sha256:
+        if png_sha256 != golden_sha256:
             raise SystemExit(
-                f"seed render differs from committed golden: actual={actual_sha256} "
+                f"seed render differs from committed golden: actual={png_sha256} "
                 f"golden={golden_sha256}"
             )
-        adapter_lines = Path(args.adapter_record).read_text(encoding="utf-8").splitlines()
-        adapter = json.loads(adapter_lines[-1]).get("adapter")
-        if not adapter or adapter.get("software_fallback") is not False:
-            raise SystemExit("seed render lacks attributable physical-adapter metadata")
-        rgba = np.ascontiguousarray(f3d.png_to_numpy(args.frame_blob), dtype=np.uint8)
-        if rgba.shape != (512, 512, 4):
-            raise SystemExit(f"unexpected seed RGBA shape: {rgba.shape!r}")
-        frame_blob = rgba.tobytes()
-        rgba_sha256 = hashlib.sha256(frame_blob).hexdigest()
-        result = render_sequence(
-            recipe(),
-            frames=[0],
-            cache=args.cache,
-            pass_executors={
-                "terrain.shade": lambda _state, _frame, _inputs: frame_blob,
-                "accumulation": _identity,
-                "frame.output": _identity,
-            },
-            pass_executor_fingerprints=_PASS_FINGERPRINTS,
-            pass_executor_contexts=_pass_contexts(golden_sha256),
-            capabilities={},
-        )
+        adapter = _adapter(args.adapter_record)
+        machine_id = _machine_id(args.machine_id_file)
+        runner_name = _runner_name(args.runner_name)
+        rgba, report = _native_render(args.cache)
+        if (
+            report["hits"]
+            or report["misses"] != _PASS_LABELS
+            or report["graph_command_submissions"] != 6
+        ):
+            raise SystemExit(f"native producer did not seed every terrain pass: {report}")
         record_path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "schema": "forge3d.anamnesis.native-portability/1",
+            "golden_sha256": golden_sha256,
+            "rgba_sha256": hashlib.sha256(rgba).hexdigest(),
+            "producer_adapter": adapter,
+            "producer_machine_id": machine_id,
+            "producer_runner_name": runner_name,
+            "compatibility_profile": _PORTABLE_PROFILE,
+            "engine_fingerprint": json.loads(f3d.anamnesis_engine_fingerprint()),
+            "native_passes": _PASS_LABELS,
+            "seed_report": report,
+        }
         record_path.write_text(
-            json.dumps(
-                {
-                    "frame_hashes": result.frame_hashes,
-                    "golden_sha256": golden_sha256,
-                    "rgba_sha256": rgba_sha256,
-                    "width": 512,
-                    "height": 512,
-                    "producer_adapter": adapter,
-                    "compatibility_profile": _PORTABLE_PROFILE,
-                },
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
+            json.dumps(record, sort_keys=True) + "\n", encoding="utf-8"
         )
         print(
             json.dumps(
                 {
                     "mode": "seed",
-                    "hits": len(result.cache_report.hits),
-                    "misses": len(result.cache_report.misses),
-                    "hit_rate": result.cache_report.hit_rate,
-                    "bytes_written": result.cache_report.bytes_written,
+                    "machine_id": machine_id,
+                    "runner_name": runner_name,
+                    "hits": len(report["hits"]),
+                    "misses": len(report["misses"]),
+                    "bytes_written": report["bytes_written"],
                 },
                 sort_keys=True,
             )
@@ -134,107 +143,92 @@ def main() -> int:
         return 0
 
     record = json.loads(record_path.read_text(encoding="utf-8"))
-    expected = record["frame_hashes"]
-    golden_sha256 = record["golden_sha256"]
+    if record.get("schema") != "forge3d.anamnesis.native-portability/1":
+        raise SystemExit("portability record is not a native terrain graph record")
+    if record.get("compatibility_profile") != _PORTABLE_PROFILE:
+        raise SystemExit("portability record compatibility profile mismatch")
+    if record.get("engine_fingerprint") != json.loads(
+        f3d.anamnesis_engine_fingerprint()
+    ):
+        raise SystemExit("portability record was not produced by this exact engine head")
+
     if args.mode == "check":
         if not args.consumer_frame_blob or not args.consumer_adapter_record:
             parser.error(
                 "check requires --consumer-frame-blob and --consumer-adapter-record"
             )
-        consumer_sha256 = hashlib.sha256(
+        machine_id = _machine_id(args.machine_id_file)
+        runner_name = _runner_name(args.runner_name)
+        if machine_id == record["producer_machine_id"]:
+            raise SystemExit(
+                "portability requires distinct physical machines; "
+                f"producer and consumer both identify as {machine_id!r}"
+            )
+        if runner_name == record.get("producer_runner_name"):
+            raise SystemExit(
+                "portability requires distinct GitHub runner identities; "
+                f"both jobs ran on {runner_name!r}"
+            )
+        consumer_png_sha = hashlib.sha256(
             Path(args.consumer_frame_blob).read_bytes()
         ).hexdigest()
-        if consumer_sha256 != golden_sha256:
+        if consumer_png_sha != record["golden_sha256"]:
             raise SystemExit(
                 "consumer render differs from committed golden: "
-                f"actual={consumer_sha256} golden={golden_sha256}"
+                f"actual={consumer_png_sha} golden={record['golden_sha256']}"
             )
-        consumer_lines = Path(args.consumer_adapter_record).read_text(
-            encoding="utf-8"
-        ).splitlines()
-        consumer_adapter = json.loads(consumer_lines[-1]).get("adapter")
-        if not consumer_adapter or consumer_adapter.get("software_fallback") is not False:
-            raise SystemExit("consumer render lacks attributable physical-adapter metadata")
+        consumer_adapter = _adapter(args.consumer_adapter_record)
         producer_backend = str(record["producer_adapter"].get("backend", "")).lower()
         consumer_backend = str(consumer_adapter.get("backend", "")).lower()
-        expected_producer = str(args.producer_backend).lower()
-        expected_consumer = str(args.consumer_backend).lower()
         if (
-            producer_backend != expected_producer
-            or consumer_backend != expected_consumer
+            producer_backend != args.producer_backend.lower()
+            or consumer_backend != args.consumer_backend.lower()
         ):
             raise SystemExit(
-                "portability check physical backend mismatch; "
-                f"expected producer={expected_producer!r} consumer={expected_consumer!r}, "
-                f"got producer={producer_backend!r} consumer={consumer_backend!r}"
+                "physical backend mismatch: "
+                f"producer={producer_backend!r}, consumer={consumer_backend!r}"
             )
-        consumer_rgba = np.ascontiguousarray(
-            f3d.png_to_numpy(args.consumer_frame_blob), dtype=np.uint8
-        )
-        consumer_raw = consumer_rgba.tobytes()
-        if hashlib.sha256(consumer_raw).hexdigest() != record["rgba_sha256"]:
-            raise SystemExit(
-                "consumer production RGBA differs from the seeded production pass"
-            )
-    active_recipe = (
-        recipe(_PORTABLE_PROFILE + "-mismatch") if args.mode == "mismatch" else recipe()
-    )
-
-    def should_not_render(_state, _frame, _inputs):
-        if args.mode == "check":
-            raise RuntimeError("portable cache unexpectedly invoked the renderer")
-        return b"capability-mismatch-recomputed"
-
-    result = render_sequence(
-        active_recipe,
-        frames=[0],
-        cache=args.cache,
-        pass_executors={
-            "terrain.shade": should_not_render,
-            "accumulation": _identity,
-            "frame.output": _identity,
-        },
-        pass_executor_fingerprints=_PASS_FINGERPRINTS,
-        pass_executor_contexts=_pass_contexts(golden_sha256),
-        capabilities={},
-    )
-    if args.mode == "check":
-        if result.cache_report.hit_rate < 0.99:
-            raise SystemExit(f"portability hit rate {result.cache_report.hit_rate:.6f} < 0.99")
-        if result.frame_hashes != expected:
-            raise SystemExit("portable cache frame hashes differ from seed host")
-        if any(
-            frame_hash != record["rgba_sha256"] for frame_hash in result.frame_hashes
+        rgba, report = _native_render(args.cache)
+        if (
+            report["hits"] != _PASS_LABELS
+            or report["misses"]
+            or report["graph_command_submissions"] != 0
         ):
-            raise SystemExit(
-                "portable cached production RGBA differs from the seed host"
-            )
-        restored = bytes(
-            f3d.anamnesis_restore_rgba8(
-                result.frame_blobs[0],
-                int(record["width"]),
-                int(record["height"]),
-            )
-        )
-        if restored != result.frame_blobs[0] or restored != consumer_raw:
-            raise SystemExit(
-                "portable cached pass did not rehydrate byte-identically as a GPU texture"
-            )
-    elif result.cache_report.hit_rate != 0.0:
-        raise SystemExit(
-            f"capability/backend mismatch served hits: {result.cache_report.hit_rate:.6f}"
-        )
+            raise SystemExit(f"native consumer did not restore every terrain pass: {report}")
+        if hashlib.sha256(rgba).hexdigest() != record["rgba_sha256"]:
+            raise SystemExit("native portable restoration differs from producer RGBA")
+        result = {
+            "mode": "check",
+            "distinct_machine": True,
+            "producer_machine_id": record["producer_machine_id"],
+            "consumer_machine_id": machine_id,
+            "producer_runner_name": record.get("producer_runner_name"),
+            "consumer_runner_name": runner_name,
+            "producer_adapter": record["producer_adapter"],
+            "consumer_adapter": consumer_adapter,
+            "hashes_match": True,
+            "hits": len(report["hits"]),
+            "misses": len(report["misses"]),
+            "hit_rate": report["hit_rate"],
+            "bytes_read": report["bytes_read"],
+        }
+        print(json.dumps(result, sort_keys=True))
+        return 0
+
+    _, report = _native_render(args.cache, height_delta=0.25)
+    if (
+        report["hits"]
+        or report["misses"] != _PASS_LABELS
+        or report["graph_command_submissions"] != 6
+    ):
+        raise SystemExit(f"native content mismatch served stale terrain passes: {report}")
     print(
         json.dumps(
             {
-                "mode": args.mode,
-                "hashes_match": result.frame_hashes == expected,
-                "golden_sha256": golden_sha256,
-                "hits": len(result.cache_report.hits),
-                "misses": len(result.cache_report.misses),
-                "hit_rate": result.cache_report.hit_rate,
-                "bytes_read": result.cache_report.bytes_read,
-                "bytes_written": result.cache_report.bytes_written,
+                "mode": "mismatch",
+                "hits": 0,
+                "misses": len(report["misses"]),
+                "hit_rate": report["hit_rate"],
             },
             sort_keys=True,
         )

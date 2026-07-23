@@ -281,6 +281,25 @@ impl IBL {
         self.rotation_deg.to_radians()
     }
 
+    /// Exact decoded environment-map state uploaded by the terrain renderer.
+    pub(crate) fn anamnesis_bytes(&self) -> Result<Vec<u8>> {
+        let image = self
+            .hdr_image
+            .as_ref()
+            .ok_or_else(|| anyhow!("HDR image data missing for ANAMNESIS identity"))?;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"forge3d.terrain.ibl/v1\0");
+        bytes.extend_from_slice(&image.width.to_le_bytes());
+        bytes.extend_from_slice(&image.height.to_le_bytes());
+        bytes.extend_from_slice(bytemuck::cast_slice(&image.data));
+        bytes.extend_from_slice(&self.intensity.to_bits().to_le_bytes());
+        bytes.extend_from_slice(&self.rotation_deg.to_bits().to_le_bytes());
+        bytes.extend_from_slice(format!("{:?}", self.quality).as_bytes());
+        bytes.push(u8::from(self.use_auto_quality));
+        bytes.extend_from_slice(&self.base_resolution.to_le_bytes());
+        Ok(bytes)
+    }
+
     pub(crate) fn ensure_gpu_resources(
         &self,
         device: &Arc<wgpu::Device>,

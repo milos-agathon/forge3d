@@ -495,12 +495,24 @@ impl TerrainScene {
         let mut graph = super::render_graph::build_terrain_render_graph(
             params.size_px.0,
             params.size_px.1,
+            params.size_px.0,
+            params.size_px.1,
             height_width as u32,
             height_height as u32,
+            self.csm_renderer.allocation_size,
+            self.csm_renderer.allocation_layers,
             self.color_format,
             true,
-            declaration_uniforms,
-        )?;
+            super::render_graph::TerrainPassDeclarations {
+                prepare: declaration_uniforms.clone(),
+                shadow: declaration_uniforms.clone(),
+                forward: declaration_uniforms.clone(),
+                resolve: declaration_uniforms,
+                prepared_output_size: std::mem::size_of::<crate::terrain::TerrainUniforms>() as u64,
+            },
+            false,
+        )?
+        .plan;
         debug_assert_eq!(graph.labels.len(), 4);
         let (certificate_capture, _allocation_scope) =
             self.begin_certificate_capture("terrain.render_internal_with_aov");
@@ -815,7 +827,7 @@ impl TerrainScene {
             }
             let resolve_scope = ts_begin(&mut timing, &mut encoder, "terrain.resolve");
             let (final_texture, final_width, final_height) =
-                self.resolve_output(&mut encoder, params, decoded, render_targets)?;
+                self.resolve_output(&mut encoder, params, decoded, &render_targets)?;
 
             let albedo_texture = self.resolve_aux_output(
                 &mut encoder,

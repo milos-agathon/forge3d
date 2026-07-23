@@ -14,5 +14,5 @@ pub use key::{
     PassKey, PassKeyMaterial,
 };
 pub use report::CacheReport;
-pub use scheduler::{GraphScheduler, PassRequest, Scheduler};
+pub use scheduler::{GraphPassAction, GraphPassOutcome, GraphScheduler, PassRequest, Scheduler};
 pub use store::{ContentStore, StoreMetadata, VerifyReport};

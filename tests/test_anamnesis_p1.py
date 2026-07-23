@@ -22,12 +22,31 @@ def test_production_renderers_consume_real_framegraph_barriers():
     terrain_aov = (ROOT / "src/terrain/renderer/aov.rs").read_text(encoding="utf-8")
     diagnostics = (ROOT / "src/py_functions/diagnostics.rs").read_text(encoding="utf-8")
 
-    assert "pub fn execute_with_barriers" in framegraph
+    assert "pub struct RendererGraphExecution" in framegraph
+    assert "pub enum RendererGraphResource" in framegraph
+    assert "pub fn begin_execution" in framegraph
+    assert "pub fn run_pass" in framegraph
+    assert "pub fn encoder(&mut self)" in framegraph
+    assert "queue.submit" in framegraph
     assert 'execute_with_barriers("offscreen.forward"' in forward
     assert 'execute_with_barriers("offscreen.readback"' in forward
     assert "offscreen readback lost its compiled color transition" in forward
-    assert 'execute_with_barriers("terrain.forward"' in terrain
-    assert 'execute_with_barriers("terrain.resolve"' in terrain
+    assert ".begin_execution(self.device.clone(), self.queue.clone())" in terrain
+    assert 'execution.run_pass("terrain.forward"' in terrain
+    assert 'execution.run_pass("terrain.resolve"' in terrain
+    assert "execution.bind_texture(handles.shadow" in terrain
+    assert "execution.bind_buffer(handles.prepared" in terrain
+    assert "prepare_declaration.extend_from_slice(&prepared_bytes)" in terrain
+    assert "execute_with_barriers" not in terrain
+    assert "let _ = cache" not in (ROOT / "src/terrain/renderer/py_api.rs").read_text(
+        encoding="utf-8"
+    )
+    assert "does not yet serialize the multi-attachment AOV graph" in (
+        ROOT / "src/terrain/renderer/py_api.rs"
+    ).read_text(encoding="utf-8")
+    assert '"FORGE3D_TERRAIN_SHADOW_DEBUG"' in (
+        ROOT / "src/terrain/renderer/py_api.rs"
+    ).read_text(encoding="utf-8")
     assert "lost its compiled shadow transition" in terrain
     assert "lost its compiled beauty transition" in terrain
     assert 'execute_with_barriers("terrain.forward_aov"' in terrain_aov
@@ -53,6 +72,9 @@ def test_p1_rejecting_controls_cover_recompute_and_complete_disk_bound():
     adversarial = (ROOT / "tests/test_anamnesis_adversarial_keys.py").read_text(
         encoding="utf-8"
     )
+    native_acceptance = (ROOT / "tests/anamnesis_gpu_acceptance.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "test_opaque_renderer_recipe_change_alone_cannot_serve_stale_hit" in inertness
     assert "test_output_destination_is_proven_irrelevant_to_pixel_keys" in inertness
@@ -60,6 +82,10 @@ def test_p1_rejecting_controls_cover_recompute_and_complete_disk_bound():
     assert "set(incremental.observed_recompute)" in incremental
     assert "test_complete_store_footprint_is_hard_bounded" in adversarial
     assert "test_tiny_budget_rejects_unrepresentable_self_describing_entry" in adversarial
+    assert "cache=None" not in native_acceptance
+    assert '"incremental_native_invocations": 600' in native_acceptance
+    assert '"graph_command_submissions"' in native_acceptance
+    assert "changed_report[\"misses\"] != list(_NATIVE_PASSES)" in native_acceptance
 
 
 def test_p1_portability_and_production_lanes_fail_closed():
@@ -83,8 +109,16 @@ def test_p1_portability_and_production_lanes_fail_closed():
         ci, "test-anamnesis-portability", "test-anamnesis-production"
     )
     production = _job(ci, "test-anamnesis-production", "build-docs")
+    assert (
+        "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia, anamnesis-producer]"
+        in physical_seed
+    )
+    assert (
+        "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia, anamnesis-consumer]"
+        in physical_consumer
+    )
+    assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in production
     for job in (physical_seed, physical_consumer, production):
-        assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in job
         assert "Prove exact-head checkout" in job
         assert "ANAMNESIS.ABSENT" not in job
     assert "--require-nvidia-vulkan" in physical_seed
@@ -94,6 +128,12 @@ def test_p1_portability_and_production_lanes_fail_closed():
     assert '--json "anamnesis-portability-consumer-adapter.json"' in physical_consumer
     assert "RUNNER_TEMP/anamnesis-portability-consumer-adapter.json" not in physical_consumer
     assert "anamnesis-portability-result.json" in physical_consumer
+    assert "Win32_ComputerSystemProduct" in physical_seed
+    assert "Win32_ComputerSystemProduct" in physical_consumer
+    assert "--machine-id-file" in physical_seed
+    assert "--machine-id-file" in physical_consumer
+    assert "--runner-name '${{ runner.name }}'" in physical_seed
+    assert "--runner-name '${{ runner.name }}'" in physical_consumer
     assert "test_real_gpu_600_frame_acceptance" in production
     assert "test_public_gpu_graph_cache_restores_intermediate_texture" in production
     assert "scripts/assert_junit_zero_skips.py" in production

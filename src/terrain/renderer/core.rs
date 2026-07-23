@@ -168,6 +168,7 @@ pub struct ViewerTerrainData {
 pub struct TerrainRenderer {
     pub(super) scene: TerrainScene,
     pub(super) last_anamnesis_report: crate::core::anamnesis::CacheReport,
+    pub(super) last_anamnesis_graph_submissions: usize,
 }
 
 pub(super) struct OfflineAccumulationState {

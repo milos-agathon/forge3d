@@ -857,20 +857,21 @@ jobs:
   # ============================================================================
   # ANAMNESIS physical cross-backend portability
   #
-  # The protected NVIDIA runner supplies both the Vulkan producer and the DX12
-  # consumer. The Linux/Vulkan matrix remains as the hosted backend-specific
-  # harness and may report ABSENT when GitHub exposes no physical Linux GPU.
+  # Two protected NVIDIA machines are mandatory: a producer-only Vulkan runner
+  # and a consumer-only DX12 runner. Machine UUID and runner-name equality are
+  # rejecting failures. The Linux/Vulkan matrix remains the hosted harness.
   # ============================================================================
   test-anamnesis-portability-seed:
     name: ANAMNESIS Physical Seed (Windows Vulkan)
     needs: build-wheels
-    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia, anamnesis-producer]
     timeout-minutes: 20
     env:
       FORGE3D_DETERMINISTIC: '1'
       WGPU_BACKEND: vulkan
       WGPU_BACKENDS: vulkan
       FORGE3D_NO_BOOTSTRAP: '1'
+      FORGE3D_ANAMNESIS_COMPATIBILITY_PROFILE: terra-determinata-native-portable-v1
 
     steps:
       - uses: actions/checkout@v4
@@ -897,7 +898,15 @@ jobs:
         shell: pwsh
         run: |
           python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "anamnesis-portability-producer-adapter.json"
-      - name: Render TERRA golden and seed real pass output
+      - name: Record immutable producer machine identity
+        shell: pwsh
+        run: |
+          $identity = (Get-CimInstance Win32_ComputerSystemProduct).UUID.Trim().ToLowerInvariant()
+          if (-not $identity -or $identity -eq '00000000-0000-0000-0000-000000000000') {
+            throw "ANAMNESIS producer machine identity is absent"
+          }
+          $identity | Set-Content "anamnesis-portability-producer-machine-id.txt"
+      - name: Render TERRA golden and seed native terrain graph
         shell: pwsh
         run: |
           python -m forge3d.determinism `
@@ -911,6 +920,8 @@ jobs:
             --frame-blob anamnesis-portable-producer.png `
             --golden tests/goldens/determinism/terra_determinata_v1.sha256 `
             --adapter-record anamnesis-portable-producer.jsonl `
+            --machine-id-file anamnesis-portability-producer-machine-id.txt `
+            --runner-name '${{ runner.name }}' `
             --producer-backend vulkan --consumer-backend dx12
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
@@ -921,18 +932,20 @@ jobs:
             anamnesis-portable-record.json
             anamnesis-portable-producer.jsonl
             anamnesis-portability-producer-adapter.json
+            anamnesis-portability-producer-machine-id.txt
           if-no-files-found: error
 
   test-anamnesis-portability:
     name: ANAMNESIS Physical Consume (Windows DX12)
     needs: [build-wheels, test-anamnesis-portability-seed]
-    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia, anamnesis-consumer]
     timeout-minutes: 20
     env:
       FORGE3D_DETERMINISTIC: '1'
       WGPU_BACKEND: dx12
       WGPU_BACKENDS: dx12
       FORGE3D_NO_BOOTSTRAP: '1'
+      FORGE3D_ANAMNESIS_COMPATIBILITY_PROFILE: terra-determinata-native-portable-v1
 
     steps:
       - uses: actions/checkout@v4
@@ -963,7 +976,15 @@ jobs:
         shell: pwsh
         run: |
           python scripts/terrain_ci_probe.py --mode terrain --json "anamnesis-portability-consumer-adapter.json"
-      - name: Render fresh consumer and require portable GPU restoration
+      - name: Record immutable consumer machine identity
+        shell: pwsh
+        run: |
+          $identity = (Get-CimInstance Win32_ComputerSystemProduct).UUID.Trim().ToLowerInvariant()
+          if (-not $identity -or $identity -eq '00000000-0000-0000-0000-000000000000') {
+            throw "ANAMNESIS consumer machine identity is absent"
+          }
+          $identity | Set-Content "anamnesis-portability-consumer-machine-id.txt"
+      - name: Render fresh consumer and require native graph restoration
         shell: pwsh
         run: |
           python -m forge3d.determinism `
@@ -976,6 +997,8 @@ jobs:
             --record seeded/anamnesis-portable-record.json `
             --consumer-frame-blob anamnesis-portable-consumer.png `
             --consumer-adapter-record anamnesis-portable-consumer.jsonl `
+            --machine-id-file anamnesis-portability-consumer-machine-id.txt `
+            --runner-name '${{ runner.name }}' `
             --producer-backend vulkan --consumer-backend dx12 `
             | Tee-Object -FilePath anamnesis-portability-result.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -992,6 +1015,7 @@ jobs:
             anamnesis-portability-result.json
             anamnesis-portable-consumer.jsonl
             anamnesis-portability-consumer-adapter.json
+            anamnesis-portability-consumer-machine-id.txt
           if-no-files-found: error
 
   # ============================================================================
@@ -1047,7 +1071,7 @@ jobs:
         shell: pwsh
         run: |
           $junit = Join-Path $env:RUNNER_TEMP "anamnesis-p0-native-junit.xml"
-          python -m pytest tests/test_anamnesis_inertness.py::test_native_terrain_incomplete_cache_conservatively_recomputes -v --tb=short --junitxml="$junit"
+          python -m pytest tests/test_anamnesis_inertness.py::test_native_terrain_cache_restores_all_graph_passes -v --tb=short --junitxml="$junit"
           $pytestCode = $LASTEXITCODE
           python scripts/assert_junit_zero_skips.py "$junit"
           $verifyCode = $LASTEXITCODE

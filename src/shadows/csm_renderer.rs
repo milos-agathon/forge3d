@@ -12,6 +12,7 @@ use crate::core::resource_tracker::{
     tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
 };
 use glam::{Mat4, Vec3, Vec4};
+use std::sync::Arc;
 use wgpu::{
     AddressMode, BindGroup, BufferDescriptor, BufferUsages, CompareFunction, Device, Extent3d,
     FilterMode, Queue, Sampler, SamplerDescriptor, Texture, TextureDescriptor, TextureDimension,
@@ -22,9 +23,11 @@ use wgpu::{
 #[derive(Debug)]
 pub struct CsmRenderer {
     pub config: CsmConfig,
+    pub allocation_size: u32,
+    pub allocation_layers: u32,
     pub uniforms: CsmUniforms,
     pub uniform_buffer: TrackedBuffer,
-    pub shadow_maps: TrackedTexture,
+    pub shadow_maps: Arc<TrackedTexture>,
     pub shadow_map_views: Vec<TextureView>,
     pub shadow_sampler: Sampler,
     pub evsm_maps: Option<TrackedTexture>,
@@ -44,12 +47,14 @@ impl CsmRenderer {
             },
         )?;
 
-        let shadow_maps = create_shadow_map_texture(device, &config)?;
+        let shadow_maps = Arc::new(create_shadow_map_texture(device, &config)?);
         let shadow_map_views = create_shadow_map_views(&shadow_maps, &config);
         let shadow_sampler = create_shadow_sampler(device);
         let evsm_maps = create_evsm_maps(device, &config)?;
 
         Ok(Self {
+            allocation_size: config.shadow_map_size,
+            allocation_layers: config.cascade_count,
             config,
             uniforms: CsmUniforms::default(),
             uniform_buffer,
@@ -323,7 +328,10 @@ fn create_shadow_map_texture(device: &Device, config: &CsmConfig) -> RenderResul
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::Depth32Float,
-            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+            usage: TextureUsages::RENDER_ATTACHMENT
+                | TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_SRC
+                | TextureUsages::COPY_DST,
             view_formats: &[],
         },
     )

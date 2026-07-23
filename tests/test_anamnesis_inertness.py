@@ -27,7 +27,7 @@ def test_native_recompute_control_is_required_on_physical_gpu_ci():
         "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]",
         "WGPU_BACKEND: vulkan",
         "FORGE3D_RUN_GPU_ANAMNESIS: '1'",
-        "test_native_terrain_incomplete_cache_conservatively_recomputes",
+        "test_native_terrain_cache_restores_all_graph_passes",
         "--junitxml",
         "scripts/assert_junit_zero_skips.py",
         "anamnesis-p0-adapter.json",
@@ -250,7 +250,7 @@ def test_offscreen_helper_cache_is_inert_and_serves_identical_bytes(tmp_path):
     os.environ.get("FORGE3D_RUN_GPU_ANAMNESIS") != "1",
     reason="set FORGE3D_RUN_GPU_ANAMNESIS=1 on a hardware-backed runner",
 )
-def test_native_terrain_incomplete_cache_conservatively_recomputes(tmp_path):
+def test_native_terrain_cache_restores_all_graph_passes(tmp_path):
     hdr_path = tmp_path / "environment.hdr"
     write_canonical_hdr(str(hdr_path))
     renderer = f3d.TerrainRenderer(f3d.Session(window=False))
@@ -262,6 +262,7 @@ def test_native_terrain_incomplete_cache_conservatively_recomputes(tmp_path):
     uncached = renderer.render_terrain_pbr_pom(
         material_set, env_maps, params, heightmap, cache=None
     ).to_numpy()
+    uncached_report = dict(renderer.last_anamnesis_cache_report)
     first = renderer.render_terrain_pbr_pom(
         material_set, env_maps, params, heightmap, cache=tmp_path / "native"
     ).to_numpy()
@@ -270,6 +271,26 @@ def test_native_terrain_incomplete_cache_conservatively_recomputes(tmp_path):
         material_set, env_maps, params, heightmap, cache=tmp_path / "native"
     ).to_numpy()
     second_report = dict(renderer.last_anamnesis_cache_report)
+
+    camera_config = _canonical_params_config()(64, 64)
+    camera_config.cam_phi_deg = 55.0
+    changed_camera_params = f3d.TerrainRenderParams(camera_config)
+    camera_changed = renderer.render_terrain_pbr_pom(
+        material_set,
+        env_maps,
+        changed_camera_params,
+        heightmap,
+        cache=tmp_path / "native",
+    ).to_numpy()
+    camera_changed_report = dict(renderer.last_anamnesis_cache_report)
+    camera_restored = renderer.render_terrain_pbr_pom(
+        material_set,
+        env_maps,
+        changed_camera_params,
+        heightmap,
+        cache=tmp_path / "native",
+    ).to_numpy()
+    camera_restored_report = dict(renderer.last_anamnesis_cache_report)
 
     changed_heightmap = heightmap.copy()
     changed_heightmap[0, 0] += np.float32(0.25)
@@ -283,14 +304,45 @@ def test_native_terrain_incomplete_cache_conservatively_recomputes(tmp_path):
     changed_report = dict(renderer.last_anamnesis_cache_report)
 
     assert uncached.tobytes() == first.tobytes() == second.tobytes()
-    assert first_report == {
-        "hits": [],
-        "misses": [],
-        "bytes_read": 0,
-        "bytes_written": 0,
-        "wall_ms_saved": 0.0,
-        "hit_rate": 0.0,
-    }
-    assert second_report == first_report
-    assert changed_report == first_report
+    assert uncached_report["hits"] == []
+    assert uncached_report["misses"] == []
+    assert uncached_report["bytes_read"] == 0
+    assert uncached_report["bytes_written"] == 0
+    assert uncached_report["graph_command_submissions"] == 3
+    pass_labels = [
+        "terrain.prepare",
+        "terrain.shadow",
+        "terrain.forward",
+        "terrain.resolve",
+    ]
+    assert first_report["hits"] == []
+    assert first_report["misses"] == pass_labels
+    assert first_report["bytes_written"] > 0
+    assert first_report["hit_rate"] == 0.0
+    assert first_report["graph_command_submissions"] == 6
+    assert second_report["hits"] == pass_labels
+    assert second_report["misses"] == []
+    assert second_report["bytes_read"] > 0
+    assert second_report["bytes_written"] == 0
+    assert second_report["hit_rate"] == 1.0
+    assert second_report["graph_command_submissions"] == 0
+    assert camera_changed_report["hits"] == ["terrain.shadow"]
+    assert camera_changed_report["misses"] == [
+        "terrain.prepare",
+        "terrain.forward",
+        "terrain.resolve",
+    ]
+    assert camera_changed_report["bytes_read"] > 0
+    assert camera_changed_report["bytes_written"] > 0
+    assert camera_changed_report["graph_command_submissions"] == 4
+    assert camera_changed.tobytes() != second.tobytes()
+    assert camera_restored_report["hits"] == pass_labels
+    assert camera_restored_report["misses"] == []
+    assert camera_restored_report["graph_command_submissions"] == 0
+    assert camera_restored.tobytes() == camera_changed.tobytes()
+    assert changed_report["hits"] == []
+    assert changed_report["misses"] == pass_labels
+    assert changed_report["bytes_written"] > 0
+    assert changed_report["hit_rate"] == 0.0
+    assert changed_report["graph_command_submissions"] == 6
     assert changed.tobytes() != second.tobytes()

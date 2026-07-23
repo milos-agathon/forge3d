@@ -1,6 +1,27 @@
 use crate::core::framegraph_impl::{
-    PassType, RendererGraphBuilder, RendererGraphPlan, ResourceDesc, ResourceType,
+    PassType, RendererGraphBuilder, RendererGraphPlan, ResourceDesc, ResourceHandle, ResourceType,
 };
+
+pub(super) struct TerrainGraphHandles {
+    pub(super) height: ResourceHandle,
+    pub(super) prepared: ResourceHandle,
+    pub(super) shadow: ResourceHandle,
+    pub(super) beauty: ResourceHandle,
+    pub(super) resolved: ResourceHandle,
+}
+
+pub(super) struct TerrainRenderGraph {
+    pub(super) plan: RendererGraphPlan,
+    pub(super) handles: TerrainGraphHandles,
+}
+
+pub(super) struct TerrainPassDeclarations {
+    pub(super) prepare: Vec<u8>,
+    pub(super) shadow: Vec<u8>,
+    pub(super) forward: Vec<u8>,
+    pub(super) resolve: Vec<u8>,
+    pub(super) prepared_output_size: u64,
+}
 
 fn texture_resource(
     name: &str,
@@ -35,24 +56,23 @@ fn pipeline_material(label: &str, color_format: wgpu::TextureFormat, aov: bool) 
     bytes.push(0);
     bytes.extend_from_slice(format!("{color_format:?}").as_bytes());
     bytes.push(u8::from(aov));
-    for (shader_label, shader_hash) in crate::core::shader_registry::shader_hashes_snapshot() {
-        bytes.extend_from_slice(&(shader_label.len() as u64).to_le_bytes());
-        bytes.extend_from_slice(shader_label.as_bytes());
-        bytes.extend_from_slice(&(shader_hash.len() as u64).to_le_bytes());
-        bytes.extend_from_slice(shader_hash.as_bytes());
-    }
     bytes
 }
 
 pub(super) fn build_terrain_render_graph(
     output_width: u32,
     output_height: u32,
+    internal_width: u32,
+    internal_height: u32,
     height_width: u32,
     height_height: u32,
+    shadow_resolution: u32,
+    shadow_layers: u32,
     color_format: wgpu::TextureFormat,
     aov: bool,
-    declaration_uniforms: Vec<u8>,
-) -> crate::core::error::RenderResult<RendererGraphPlan> {
+    declarations: TerrainPassDeclarations,
+    cacheable: bool,
+) -> crate::core::error::RenderResult<TerrainRenderGraph> {
     let mut builder = RendererGraphBuilder::new();
     let height = builder.add_resource(texture_resource(
         "terrain.height.input",
@@ -69,30 +89,38 @@ pub(super) fn build_terrain_render_graph(
         resource_type: ResourceType::UniformBuffer,
         format: None,
         extent: None,
-        size: Some(declaration_uniforms.len().max(1) as u64),
+        size: Some(declarations.prepared_output_size.max(1)),
         usage: None,
         can_alias: false,
         is_transient: true,
     });
-    let shadow = builder.add_resource(texture_resource(
+    let mut shadow_desc = texture_resource(
         "terrain.shadow.depth",
         ResourceType::DepthStencilAttachment,
         wgpu::TextureFormat::Depth32Float,
-        output_width,
-        output_height,
-        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        shadow_resolution,
+        shadow_resolution,
+        wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC
+            | wgpu::TextureUsages::COPY_DST,
         true,
         false,
-    ));
+    );
+    if let Some(extent) = shadow_desc.extent.as_mut() {
+        extent.depth_or_array_layers = shadow_layers.max(1);
+    }
+    let shadow = builder.add_resource(shadow_desc);
     let beauty = builder.add_resource(texture_resource(
         "terrain.forward.beauty",
         ResourceType::ColorAttachment,
         color_format,
-        output_width,
-        output_height,
+        internal_width,
+        internal_height,
         wgpu::TextureUsages::RENDER_ATTACHMENT
             | wgpu::TextureUsages::TEXTURE_BINDING
-            | wgpu::TextureUsages::COPY_SRC,
+            | wgpu::TextureUsages::COPY_SRC
+            | wgpu::TextureUsages::COPY_DST,
         true,
         false,
     ));
@@ -101,8 +129,8 @@ pub(super) fn build_terrain_render_graph(
             "terrain.forward.aov",
             ResourceType::ColorAttachment,
             wgpu::TextureFormat::Rgba32Float,
-            output_width,
-            output_height,
+            internal_width,
+            internal_height,
             wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::COPY_SRC,
@@ -118,27 +146,29 @@ pub(super) fn build_terrain_render_graph(
         output_height,
         wgpu::TextureUsages::RENDER_ATTACHMENT
             | wgpu::TextureUsages::TEXTURE_BINDING
-            | wgpu::TextureUsages::COPY_SRC,
+            | wgpu::TextureUsages::COPY_SRC
+            | wgpu::TextureUsages::COPY_DST,
         false,
         false,
     ));
-    let cache_reason =
-        "native intermediate restore is disabled until every mutable terrain binding is keyed";
     builder.add_pass("terrain.prepare", PassType::Transfer, |pass| {
         pass.read(height)
             .write(prepared)
             .pipeline_descriptor(pipeline_material("terrain.prepare", color_format, aov))
-            .uniform_bytes(declaration_uniforms.clone())
-            .disable_cache(cache_reason);
+            .uniform_bytes(declarations.prepare.clone());
+        if !cacheable {
+            pass.disable_cache("native terrain cache declaration is unavailable for this render");
+        }
         Ok(())
     })?;
     builder.add_pass("terrain.shadow", PassType::Graphics, |pass| {
         pass.read(height)
-            .read(prepared)
             .write(shadow)
             .pipeline_descriptor(pipeline_material("terrain.shadow", color_format, aov))
-            .uniform_bytes(declaration_uniforms.clone())
-            .disable_cache(cache_reason);
+            .uniform_bytes(declarations.shadow);
+        if !cacheable {
+            pass.disable_cache("native terrain cache declaration is unavailable for this render");
+        }
         Ok(())
     })?;
     let forward_label = if aov {
@@ -152,8 +182,10 @@ pub(super) fn build_terrain_render_graph(
             .read(shadow)
             .write(beauty)
             .pipeline_descriptor(pipeline_material(forward_label, color_format, aov))
-            .uniform_bytes(declaration_uniforms.clone())
-            .disable_cache(cache_reason);
+            .uniform_bytes(declarations.forward);
+        if !cacheable {
+            pass.disable_cache("native terrain cache declaration is unavailable for this render");
+        }
         if let Some(resource) = aov_resource {
             pass.write(resource);
         }
@@ -168,12 +200,23 @@ pub(super) fn build_terrain_render_graph(
         pass.read(beauty)
             .write(resolved)
             .pipeline_descriptor(pipeline_material(resolve_label, color_format, aov))
-            .uniform_bytes(declaration_uniforms)
-            .disable_cache(cache_reason);
+            .uniform_bytes(declarations.resolve);
+        if !cacheable {
+            pass.disable_cache("native terrain cache declaration is unavailable for this render");
+        }
         if let Some(resource) = aov_resource {
             pass.read(resource);
         }
         Ok(())
     })?;
-    builder.compile()
+    Ok(TerrainRenderGraph {
+        plan: builder.compile()?,
+        handles: TerrainGraphHandles {
+            height,
+            prepared,
+            shadow,
+            beauty,
+            resolved,
+        },
+    })
 }

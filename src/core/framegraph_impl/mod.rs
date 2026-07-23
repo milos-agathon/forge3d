@@ -7,7 +7,9 @@ pub mod barriers;
 pub mod types;
 
 use super::error::{RenderError, RenderResult};
+use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer, TrackedTexture};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use barriers::BarrierPlanner;
 pub use types::{
@@ -816,6 +818,391 @@ impl RendererGraphPlan {
             )));
         }
         Ok(())
+    }
+
+    /// Turn this compiled declaration into the sole owner of a production
+    /// execution. The execution object owns every command encoder it creates
+    /// and holds shared ownership of each tracked GPU resource bound to the
+    /// graph. Renderer callbacks can encode commands only through a
+    /// [`RendererPassContext`].
+    pub fn begin_execution(
+        self,
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
+    ) -> RendererGraphExecution {
+        RendererGraphExecution {
+            plan: self,
+            device,
+            queue,
+            resources: BTreeMap::new(),
+            submitted_command_buffers: 0,
+        }
+    }
+}
+
+/// A tracked GPU resource whose lifetime is owned by a graph execution.
+#[derive(Debug)]
+pub enum RendererGraphResource {
+    Texture(Arc<TrackedTexture>),
+    Buffer(Arc<TrackedBuffer>),
+}
+
+/// Context for one declared pass.
+///
+/// The command encoder is created lazily. Cache restoration that uses
+/// `Queue::write_*` therefore submits no empty command buffer, while a
+/// recomputed pass cannot obtain an encoder outside this graph-owned context.
+pub struct RendererPassContext<'a> {
+    label: &'a str,
+    barriers: &'a [ResourceBarrier],
+    device: &'a wgpu::Device,
+    queue: &'a wgpu::Queue,
+    resources: &'a BTreeMap<ResourceHandle, RendererGraphResource>,
+    encoder: Option<wgpu::CommandEncoder>,
+}
+
+impl<'a> RendererPassContext<'a> {
+    pub fn label(&self) -> &str {
+        self.label
+    }
+
+    pub fn barriers(&self) -> &[ResourceBarrier] {
+        self.barriers
+    }
+
+    pub fn device(&self) -> &wgpu::Device {
+        self.device
+    }
+
+    pub fn queue(&self) -> &wgpu::Queue {
+        self.queue
+    }
+
+    pub fn encoder(&mut self) -> &mut wgpu::CommandEncoder {
+        self.encoder.get_or_insert_with(|| {
+            self.device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some(self.label),
+                })
+        })
+    }
+
+    /// Drop commands recorded only to rebuild CPU-side/bind-group state for a
+    /// cache restoration. The restored graph resource remains authoritative
+    /// and no command buffer from the skipped producer is submitted.
+    pub fn discard_encoder(&mut self) {
+        self.encoder.take();
+    }
+
+    pub fn texture(&self, handle: ResourceHandle) -> RenderResult<&wgpu::Texture> {
+        match self.resources.get(&handle) {
+            Some(RendererGraphResource::Texture(texture)) => Ok(texture.inner()),
+            Some(RendererGraphResource::Buffer(_)) => Err(RenderError::render(format!(
+                "graph pass {:?} requested texture {:?}, but a buffer is bound",
+                self.label, handle
+            ))),
+            None => Err(RenderError::render(format!(
+                "graph pass {:?} requested unbound texture {:?}",
+                self.label, handle
+            ))),
+        }
+    }
+
+    pub fn buffer(&self, handle: ResourceHandle) -> RenderResult<&wgpu::Buffer> {
+        match self.resources.get(&handle) {
+            Some(RendererGraphResource::Buffer(buffer)) => Ok(buffer.inner()),
+            Some(RendererGraphResource::Texture(_)) => Err(RenderError::render(format!(
+                "graph pass {:?} requested buffer {:?}, but a texture is bound",
+                self.label, handle
+            ))),
+            None => Err(RenderError::render(format!(
+                "graph pass {:?} requested unbound buffer {:?}",
+                self.label, handle
+            ))),
+        }
+    }
+}
+
+/// Graph-owned production execution substrate.
+///
+/// Unlike `RendererGraphPlan::execute_with_barriers`, this type owns command
+/// encoder creation/submission and the shared tracked resources addressed by
+/// the compiled graph. That makes pass execution and cache restoration use
+/// one authoritative resource/transition boundary.
+pub struct RendererGraphExecution {
+    plan: RendererGraphPlan,
+    device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
+    resources: BTreeMap<ResourceHandle, RendererGraphResource>,
+    submitted_command_buffers: usize,
+}
+
+impl RendererGraphExecution {
+    pub fn plan(&self) -> &RendererGraphPlan {
+        &self.plan
+    }
+
+    pub fn bind_texture(
+        &mut self,
+        handle: ResourceHandle,
+        texture: Arc<TrackedTexture>,
+    ) -> RenderResult<()> {
+        self.validate_binding(handle, false)?;
+        self.resources
+            .insert(handle, RendererGraphResource::Texture(texture));
+        Ok(())
+    }
+
+    pub fn bind_buffer(
+        &mut self,
+        handle: ResourceHandle,
+        buffer: Arc<TrackedBuffer>,
+    ) -> RenderResult<()> {
+        self.validate_binding(handle, true)?;
+        self.resources
+            .insert(handle, RendererGraphResource::Buffer(buffer));
+        Ok(())
+    }
+
+    fn validate_binding(&self, handle: ResourceHandle, buffer: bool) -> RenderResult<()> {
+        let resource = self.plan.resource(handle).ok_or_else(|| {
+            RenderError::render(format!("cannot bind undeclared graph resource {handle:?}"))
+        })?;
+        let declared_buffer = matches!(
+            resource.desc.resource_type,
+            ResourceType::StorageBuffer | ResourceType::UniformBuffer
+        );
+        if declared_buffer != buffer {
+            return Err(RenderError::render(format!(
+                "graph resource {:?} type mismatch for {:?}",
+                resource.desc.name, handle
+            )));
+        }
+        Ok(())
+    }
+
+    fn validate_pass_resources(&self, label: &str) -> RenderResult<()> {
+        let pass = self
+            .plan
+            .pass(label)
+            .ok_or_else(|| RenderError::render(format!("unknown graph pass {label:?}")))?;
+        for handle in pass.reads.iter().chain(&pass.writes) {
+            if !self.resources.contains_key(handle) {
+                let name = self
+                    .plan
+                    .resource(*handle)
+                    .map(|resource| resource.desc.name.as_str())
+                    .unwrap_or("<unknown>");
+                return Err(RenderError::render(format!(
+                    "graph pass {label:?} has no bound production resource for {name:?}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Execute or restore one pass in compiled order.
+    ///
+    /// A recompute requests `context.encoder()` and is submitted here. A
+    /// restore normally writes through `context.queue()` and submits nothing.
+    pub fn run_pass<T, E, F>(&mut self, label: &str, run: F) -> Result<T, E>
+    where
+        E: From<RenderError>,
+        F: FnOnce(&mut RendererPassContext<'_>) -> Result<T, E>,
+    {
+        self.validate_pass_resources(label).map_err(E::from)?;
+        self.plan.advance(label).map_err(E::from)?;
+        let barriers = self
+            .plan
+            .barriers_before(label)
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut context = RendererPassContext {
+            label,
+            barriers: &barriers,
+            device: self.device.as_ref(),
+            queue: self.queue.as_ref(),
+            resources: &self.resources,
+            encoder: None,
+        };
+        let output = run(&mut context)?;
+        if let Some(encoder) = context.encoder {
+            self.queue.submit(Some(encoder.finish()));
+            self.submitted_command_buffers += 1;
+        }
+        Ok(output)
+    }
+
+    pub fn submitted_command_buffers(&self) -> usize {
+        self.submitted_command_buffers
+    }
+
+    /// Serialize a graph-owned texture into tightly packed layer-major bytes.
+    ///
+    /// The copy encoder is owned and submitted by this execution object, just
+    /// like a render-pass encoder. `bytes_per_pixel` is explicit because the
+    /// framegraph descriptor already fixes the texture format.
+    pub fn read_texture_tight(
+        &mut self,
+        handle: ResourceHandle,
+        width: u32,
+        height: u32,
+        layers: u32,
+        bytes_per_pixel: u32,
+        aspect: wgpu::TextureAspect,
+    ) -> RenderResult<Vec<u8>> {
+        let texture = match self.resources.get(&handle) {
+            Some(RendererGraphResource::Texture(texture)) => texture,
+            _ => {
+                return Err(RenderError::render(format!(
+                    "cannot serialize unbound graph texture {handle:?}"
+                )))
+            }
+        };
+        let tight_row = width
+            .checked_mul(bytes_per_pixel)
+            .ok_or_else(|| RenderError::render("graph texture row size overflow"))?;
+        let alignment = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let padded_row = tight_row.div_ceil(alignment) * alignment;
+        let buffer_size = (padded_row as u64)
+            .checked_mul(height as u64)
+            .and_then(|value| value.checked_mul(layers as u64))
+            .ok_or_else(|| RenderError::render("graph texture readback size overflow"))?;
+        let staging = tracked_create_buffer(
+            self.device.as_ref(),
+            &wgpu::BufferDescriptor {
+                label: Some("framegraph.texture.readback"),
+                size: buffer_size.max(1),
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        )?;
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("framegraph.texture.readback"),
+            });
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                texture: texture.inner(),
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect,
+            },
+            wgpu::ImageCopyBuffer {
+                buffer: &staging,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: layers,
+            },
+        );
+        self.queue.submit(Some(encoder.finish()));
+        self.submitted_command_buffers += 1;
+        self.device.poll(wgpu::Maintain::Wait);
+        let slice = staging.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = sender.send(result);
+        });
+        self.device.poll(wgpu::Maintain::Wait);
+        receiver
+            .recv()
+            .map_err(|error| RenderError::render(format!("readback callback failed: {error}")))?
+            .map_err(|error| RenderError::render(format!("readback mapping failed: {error:?}")))?;
+        let mapped = slice.get_mapped_range();
+        let mut tight =
+            Vec::with_capacity((tight_row as usize) * (height as usize) * (layers as usize));
+        for layer in 0..layers {
+            let layer_offset = layer as usize * padded_row as usize * height as usize;
+            for row in 0..height {
+                let offset = layer_offset + row as usize * padded_row as usize;
+                tight.extend_from_slice(&mapped[offset..offset + tight_row as usize]);
+            }
+        }
+        drop(mapped);
+        staging.unmap();
+        Ok(tight)
+    }
+
+    /// Rehydrate tightly packed bytes into a graph-owned texture.
+    pub fn write_texture_tight(
+        &self,
+        handle: ResourceHandle,
+        bytes: &[u8],
+        width: u32,
+        height: u32,
+        layers: u32,
+        bytes_per_pixel: u32,
+        aspect: wgpu::TextureAspect,
+    ) -> RenderResult<()> {
+        let texture = match self.resources.get(&handle) {
+            Some(RendererGraphResource::Texture(texture)) => texture,
+            _ => {
+                return Err(RenderError::render(format!(
+                    "cannot restore unbound graph texture {handle:?}"
+                )))
+            }
+        };
+        let row = width
+            .checked_mul(bytes_per_pixel)
+            .ok_or_else(|| RenderError::render("graph texture row size overflow"))?;
+        let expected = (row as usize)
+            .checked_mul(height as usize)
+            .and_then(|value| value.checked_mul(layers as usize))
+            .ok_or_else(|| RenderError::render("graph texture restore size overflow"))?;
+        if bytes.len() != expected {
+            return Err(RenderError::render(format!(
+                "graph texture restore length mismatch: expected {expected}, got {}",
+                bytes.len()
+            )));
+        }
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: texture.inner(),
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect,
+            },
+            bytes,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(row),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: layers,
+            },
+        );
+        Ok(())
+    }
+
+    pub fn write_buffer(&self, handle: ResourceHandle, bytes: &[u8]) -> RenderResult<()> {
+        let buffer = match self.resources.get(&handle) {
+            Some(RendererGraphResource::Buffer(buffer)) => buffer,
+            _ => {
+                return Err(RenderError::render(format!(
+                    "cannot restore unbound graph buffer {handle:?}"
+                )))
+            }
+        };
+        self.queue.write_buffer(buffer.inner(), 0, bytes);
+        Ok(())
+    }
+
+    pub fn finish(self) -> RenderResult<usize> {
+        let submitted = self.submitted_command_buffers;
+        self.plan.finish()?;
+        Ok(submitted)
     }
 }
 

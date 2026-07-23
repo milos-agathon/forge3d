@@ -1,10 +1,4 @@
-"""Real GPU 600-frame ANAMNESIS acceptance workload.
-
-This is imported by the opt-in pytest gate and can also be executed directly.
-It uses the production TerrainRenderer for every cold frame. The only CPU step
-is a tiny deterministic label composite, which makes the changed label visible
-in exactly one frame and therefore gives the expected three-pass invalidation.
-"""
+"""Physical 600-frame acceptance for native terrain ANAMNESIS passes."""
 
 from __future__ import annotations
 
@@ -15,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 from typing import Any
 
 import numpy as np
@@ -28,6 +23,12 @@ from forge3d.determinism import (
 )
 
 
+_NATIVE_PASSES = (
+    "terrain.prepare",
+    "terrain.shadow",
+    "terrain.forward",
+    "terrain.resolve",
+)
 _GLYPHS = {
     " ": (0, 0, 0, 0, 0),
     "N": (0x7F, 0x02, 0x04, 0x08, 0x7F),
@@ -44,24 +45,22 @@ _GLYPHS = {
 }
 
 
-def _composite_label(rgba: np.ndarray, text: str) -> np.ndarray:
-    output = np.ascontiguousarray(rgba, dtype=np.uint8).copy()
-    height, width, _ = output.shape
-    origin_x, origin_y = 1, 1
+def _composite_label(rgba: bytes, text: str) -> bytes:
+    output = np.frombuffer(rgba, dtype=np.uint8).reshape((64, 64, 4)).copy()
     for character_index, character in enumerate(text):
-        columns = _GLYPHS.get(character, _GLYPHS[" "])
-        for x, column in enumerate(columns):
-            pixel_x = origin_x + character_index * 6 + x
-            if pixel_x >= width:
+        for x, column in enumerate(_GLYPHS.get(character, _GLYPHS[" "])):
+            pixel_x = 1 + character_index * 6 + x
+            if pixel_x >= 64:
                 break
             for y in range(7):
-                pixel_y = origin_y + y
-                if pixel_y < height and column & (1 << y):
-                    output[pixel_y, pixel_x] = (255, 255, 255, 255)
-    return output
+                if column & (1 << y):
+                    output[1 + y, pixel_x] = (255, 255, 255, 255)
+    return output.tobytes()
 
 
-def _recipe(text: str, *, backend: str, height_sha256: str, hdr_sha256: str) -> dict[str, Any]:
+def _recipe(
+    text: str, *, backend: str, height_sha256: str, hdr_sha256: str
+) -> dict[str, Any]:
     return {
         "terrain": {
             "height_sha256": height_sha256,
@@ -70,7 +69,7 @@ def _recipe(text: str, *, backend: str, height_sha256: str, hdr_sha256: str) -> 
             "z_scale": 1.0,
         },
         "camera": {
-            "path": "anamnesis-real-terrain-flythrough/v1",
+            "path": "anamnesis-real-terrain-flythrough/v2",
             "phi_start": 20.0,
             "phi_step": 0.25,
             "theta": 45.0,
@@ -88,6 +87,62 @@ def _recipe(text: str, *, backend: str, height_sha256: str, hdr_sha256: str) -> 
     }
 
 
+def _render_phase(
+    *,
+    renderer: Any,
+    material_set: Any,
+    env_maps: Any,
+    heightmap: np.ndarray,
+    cache: Path,
+    phase: str,
+) -> tuple[list[bytes], float, dict[str, Any]]:
+    started = time.perf_counter()
+    frames: list[bytes] = []
+    hits: list[str] = []
+    misses: list[str] = []
+    bytes_read = 0
+    bytes_written = 0
+    wall_ms_saved = 0.0
+    graph_command_submissions = 0
+    for frame_index in range(600):
+        if frame_index % 100 == 0:
+            print(f"ANAMNESIS GPU {phase} frame {frame_index}/600", flush=True)
+        config = _canonical_params_config()(64, 64)
+        config.cam_phi_deg = 20.0 + frame_index * 0.25
+        config.cam_theta_deg = 45.0
+        frame = renderer.render_terrain_pbr_pom(
+            material_set,
+            env_maps,
+            f3d.TerrainRenderParams(config),
+            heightmap,
+            time_seconds=frame_index / 60.0,
+            cache=cache,
+        )
+        frames.append(np.ascontiguousarray(frame.to_numpy(), dtype=np.uint8).tobytes())
+        report = dict(renderer.last_anamnesis_cache_report)
+        hits.extend(report["hits"])
+        misses.extend(report["misses"])
+        bytes_read += int(report["bytes_read"])
+        bytes_written += int(report["bytes_written"])
+        wall_ms_saved += float(report["wall_ms_saved"])
+        graph_command_submissions += int(report["graph_command_submissions"])
+    elapsed = time.perf_counter() - started
+    total = len(hits) + len(misses)
+    return (
+        frames,
+        elapsed,
+        {
+            "hits": hits,
+            "misses": misses,
+            "bytes_read": bytes_read,
+            "bytes_written": bytes_written,
+            "wall_ms_saved": wall_ms_saved,
+            "graph_command_submissions": graph_command_submissions,
+            "hit_rate": len(hits) / total if total else 0.0,
+        },
+    )
+
+
 def run_acceptance(root: str | Path) -> dict[str, Any]:
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
@@ -96,69 +151,72 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
     hdr_path = root / "environment.hdr"
     write_canonical_hdr(str(hdr_path))
     hdr_sha256 = hashlib.sha256(hdr_path.read_bytes()).hexdigest()
-
-    session = f3d.Session(window=False)
-    renderer = f3d.TerrainRenderer(session)
+    renderer = f3d.TerrainRenderer(f3d.Session(window=False))
     material_set = f3d.MaterialSet.terrain_default()
     env_maps = f3d.IBL.from_hdr(str(hdr_path), intensity=1.0)
     backend = str(f3d.device_probe().get("backend", "unknown")).lower()
 
-    phase = ["warm"]
-    executor_calls: list[tuple[str, str, int]] = []
+    seeded, _, seed_report = _render_phase(
+        renderer=renderer,
+        material_set=material_set,
+        env_maps=env_maps,
+        heightmap=heightmap,
+        cache=root / "warm-native",
+        phase="seed",
+    )
+    incremental, incremental_seconds, incremental_report = _render_phase(
+        renderer=renderer,
+        material_set=material_set,
+        env_maps=env_maps,
+        heightmap=heightmap,
+        cache=root / "warm-native",
+        phase="incremental",
+    )
+    cold, cold_seconds, cold_report = _render_phase(
+        renderer=renderer,
+        material_set=material_set,
+        env_maps=env_maps,
+        heightmap=heightmap,
+        cache=root / "cold-native",
+        phase="cold",
+    )
 
-    def render_terrain_shade(
-        state: dict[str, Any], frame: int, _inputs: list[bytes]
-    ) -> bytes:
-        executor_calls.append((phase[0], "terrain.shade", frame))
-        if frame % 100 == 0:
-            print(f"ANAMNESIS GPU {phase[0]} frame {frame}/600", flush=True)
-        config = _canonical_params_config()(64, 64)
-        camera = state["camera"]
-        config.cam_phi_deg = float(camera["phi_start"]) + frame * float(
-            camera["phi_step"]
-        )
-        config.cam_theta_deg = float(camera["theta"])
-        params = f3d.TerrainRenderParams(config)
-        rendered = renderer.render_terrain_pbr_pom(
-            material_set,
-            env_maps,
-            params,
-            heightmap,
-            time_seconds=frame / 60.0,
-            cache=None,
-        )
-        return np.ascontiguousarray(rendered.to_numpy(), dtype=np.uint8).tobytes()
+    # Exercise the outer recipe scheduler too. Its terrain node consumes the
+    # frames already produced by the native graph above; it never substitutes
+    # for or bypasses the direct 600-frame native pass proof.
+    outer_phase = ["seed"]
+    outer_calls: list[tuple[str, str, int]] = []
+    native_frames = {
+        "seed": seeded,
+        "incremental": incremental,
+        "cold": cold,
+    }
+
+    def terrain_frame(_state: Any, frame: int, _inputs: list[bytes]) -> bytes:
+        outer_calls.append((outer_phase[0], "terrain.shade", frame))
+        return native_frames[outer_phase[0]][frame]
 
     def identity(_state: Any, frame: int, inputs: list[bytes]) -> bytes:
-        executor_calls.append((phase[0], "identity", frame))
+        outer_calls.append((outer_phase[0], "identity", frame))
         return inputs[0]
 
-    def compile_labels(state: list[dict[str, Any]], frame: int, _inputs: list[bytes]) -> bytes:
-        executor_calls.append((phase[0], "label.compile", frame))
+    def compile_labels(
+        state: list[dict[str, Any]], frame: int, _inputs: list[bytes]
+    ) -> bytes:
+        outer_calls.append((outer_phase[0], "label.compile", frame))
         return json.dumps(state, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
     def composite_label(_state: Any, frame: int, inputs: list[bytes]) -> bytes:
-        executor_calls.append((phase[0], "label.composite", frame))
-        rgba = np.frombuffer(inputs[0], dtype=np.uint8).reshape((64, 64, 4))
-        labels = json.loads(inputs[1].decode("utf-8"))
-        return _composite_label(rgba, str(labels[0]["text"])).tobytes()
+        outer_calls.append((outer_phase[0], "label.composite", frame))
+        return _composite_label(inputs[0], json.loads(inputs[1])[0]["text"])
 
     pass_executors = {
-        "terrain.shade": render_terrain_shade,
+        "terrain.shade": terrain_frame,
         "accumulation": identity,
         "label.compile": compile_labels,
         "label.composite": composite_label,
         "frame.output": identity,
     }
-
-    original = _recipe(
-        "Old summit",
-        backend=backend,
-        height_sha256=height_sha256,
-        hdr_sha256=hdr_sha256,
-    )
-    modified = copy.deepcopy(original)
-    modified["layers"][0]["text"] = "New summit"
     fingerprint = hashlib.sha256(
         Path(__file__).read_bytes() + f3d.__version__.encode("ascii")
     ).digest()
@@ -166,14 +224,13 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
         label: hashlib.sha256(fingerprint + label.encode("utf-8")).digest()
         for label in pass_executors
     }
-    terrain_context = hashlib.sha256(
-        b"terrain-default/v1\0"
-        + heightmap.tobytes()
-        + hdr_path.read_bytes()
-        + f3d.__version__.encode("ascii")
-    ).digest()
     pass_contexts = {
-        "terrain.shade": terrain_context,
+        "terrain.shade": hashlib.sha256(
+            b"native-terrain-graph/v2\0"
+            + heightmap.tobytes()
+            + hdr_path.read_bytes()
+            + f3d.__version__.encode("ascii")
+        ).digest(),
         "accumulation": b"identity/no-hidden-inputs/v1",
         "label.compile": b"canonical-json-label-compiler/v1",
         "label.composite": json.dumps(
@@ -183,81 +240,175 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
         ).encode("utf-8"),
         "frame.output": b"identity/no-hidden-inputs/v1",
     }
-
+    original = _recipe(
+        "Old summit",
+        backend=backend,
+        height_sha256=height_sha256,
+        hdr_sha256=hdr_sha256,
+    )
+    modified = copy.deepcopy(original)
+    modified["layers"][0]["text"] = "New summit"
     render_sequence(
         original,
-        cache=root / "warm",
+        cache=root / "outer-warm",
         pass_executors=pass_executors,
         pass_executor_fingerprints=pass_fingerprints,
         pass_executor_contexts=pass_contexts,
         verify_reads=False,
     )
-    phase[0] = "incremental"
-    incremental = render_sequence(
+    outer_phase[0] = "incremental"
+    outer_incremental = render_sequence(
         modified,
-        cache=root / "warm",
+        cache=root / "outer-warm",
         pass_executors=pass_executors,
         pass_executor_fingerprints=pass_fingerprints,
         pass_executor_contexts=pass_contexts,
         verify_reads=False,
     )
-    phase[0] = "cold"
-    cold = render_sequence(
+    outer_phase[0] = "cold"
+    outer_cold = render_sequence(
         modified,
-        cache=root / "cold-modified",
+        cache=root / "outer-cold",
         pass_executors=pass_executors,
         pass_executor_fingerprints=pass_fingerprints,
         pass_executor_contexts=pass_contexts,
         verify_reads=False,
+    )
+    symmetric_difference = sorted(
+        set(outer_incremental.predicted_recompute)
+        ^ set(outer_incremental.observed_recompute)
     )
 
-    symmetric_difference = sorted(
-        set(incremental.predicted_recompute) ^ set(incremental.observed_recompute)
+    # Rejecting control: a one-word DEM edit must invalidate exactly every
+    # dependent native terrain pass, then restore all four on repetition.
+    changed_heightmap = heightmap.copy()
+    changed_heightmap[0, 0] += np.float32(0.25)
+    changed_config = _canonical_params_config()(64, 64)
+    changed_config.cam_phi_deg = 20.0
+    changed_config.cam_theta_deg = 45.0
+    changed_params = f3d.TerrainRenderParams(changed_config)
+    changed_frame = renderer.render_terrain_pbr_pom(
+        material_set,
+        env_maps,
+        changed_params,
+        changed_heightmap,
+        time_seconds=0.0,
+        cache=root / "warm-native",
     )
+    changed_report = dict(renderer.last_anamnesis_cache_report)
+    restored_changed = renderer.render_terrain_pbr_pom(
+        material_set,
+        env_maps,
+        changed_params,
+        changed_heightmap,
+        time_seconds=0.0,
+        cache=root / "warm-native",
+    )
+    restored_changed_report = dict(renderer.last_anamnesis_cache_report)
+
+    expected_incremental_hits = list(_NATIVE_PASSES) * 600
     result = {
         "matching_frames": sum(
             left == right
-            for left, right in zip(incremental.frame_hashes, cold.frame_hashes, strict=True)
+            for left, right in zip(
+                outer_incremental.frame_hashes, outer_cold.frame_hashes, strict=True
+            )
         ),
-        "frame_count": len(cold.frame_hashes),
-        "hash_lists_equal": incremental.frame_hashes == cold.frame_hashes,
-        "predicted": len(incremental.predicted_recompute),
-        "observed": len(incremental.observed_recompute),
+        "frame_count": 600,
+        "hash_lists_equal": outer_incremental.frame_hashes == outer_cold.frame_hashes,
+        "predicted": len(outer_incremental.predicted_recompute),
+        "observed": len(outer_incremental.observed_recompute),
         "symmetric_difference": symmetric_difference,
-        "pass_labels": sorted({label for _, label in incremental.observed_recompute}),
-        "cold_seconds": cold.elapsed_seconds,
-        "incremental_seconds": incremental.elapsed_seconds,
-        "speedup": cold.elapsed_seconds / incremental.elapsed_seconds,
-        "cache_report": {
-            "hits": len(incremental.cache_report.hits),
-            "misses": len(incremental.cache_report.misses),
-            "bytes_read": incremental.cache_report.bytes_read,
-            "bytes_written": incremental.cache_report.bytes_written,
-            "wall_ms_saved": incremental.cache_report.wall_ms_saved,
-            "hit_rate": incremental.cache_report.hit_rate,
-        },
-        "backend": backend,
-        "incremental_terrain_executions": sum(
-            1
-            for item_phase, label, _ in executor_calls
-            if item_phase == "incremental" and label == "terrain.shade"
+        "pass_labels": sorted(
+            {label for _, label in outer_incremental.observed_recompute}
         ),
+        "native_predicted": 0,
+        "native_observed": len(incremental_report["misses"]),
+        "native_incremental_hits": len(incremental_report["hits"]),
+        "native_incremental_misses": len(incremental_report["misses"]),
+        "native_incremental_graph_submissions": incremental_report[
+            "graph_command_submissions"
+        ],
+        "native_invalidation_predicted": len(_NATIVE_PASSES),
+        "native_invalidation_observed": len(changed_report["misses"]),
+        "native_pass_labels": list(_NATIVE_PASSES),
+        "cold_seconds": cold_seconds,
+        "incremental_seconds": incremental_seconds,
+        "speedup": cold_seconds / incremental_seconds,
+        "cache_report": {
+            key: value
+            for key, value in incremental_report.items()
+            if key not in {"hits", "misses"}
+        }
+        | {
+            "hits": len(incremental_report["hits"]),
+            "misses": len(incremental_report["misses"]),
+        },
+        "seed_native_misses": len(seed_report["misses"]),
+        "seed_native_hits": len(seed_report["hits"]),
+        "seed_graph_command_submissions": seed_report[
+            "graph_command_submissions"
+        ],
+        "cold_native_misses": len(cold_report["misses"]),
+        "cold_native_hits": len(cold_report["hits"]),
+        "cold_graph_command_submissions": cold_report[
+            "graph_command_submissions"
+        ],
+        "incremental_native_invocations": 600,
+        "incremental_outer_terrain_executions": sum(
+            1
+            for phase, label, _ in outer_calls
+            if phase == "incremental" and label == "terrain.shade"
+        ),
+        "backend": backend,
     }
+    if result["matching_frames"] != 600 or not result["hash_lists_equal"]:
+        raise AssertionError(f"GPU frame hash mismatch: {result}")
+    if seeded != incremental:
+        raise AssertionError(f"native warm restoration differs from its seed: {result}")
+    if (
+        result["predicted"] != 3
+        or result["observed"] != 3
+        or symmetric_difference
+    ):
+        raise AssertionError(f"outer recompute mismatch: {result}")
+    if result["pass_labels"] != ["frame.output", "label.compile", "label.composite"]:
+        raise AssertionError(f"unexpected outer recompute labels: {result}")
+    if result["incremental_outer_terrain_executions"] != 0:
+        raise AssertionError(f"outer scheduler recomputed terrain node: {result}")
+    if incremental_report["hits"] != expected_incremental_hits:
+        raise AssertionError(f"native pass restoration order mismatch: {result}")
+    if incremental_report["misses"] or incremental_report["hit_rate"] != 1.0:
+        raise AssertionError(f"incremental native terrain recomputed: {result}")
+    if incremental_report["graph_command_submissions"] != 0:
+        raise AssertionError(f"restored native graph submitted GPU work: {result}")
+    if (
+        len(seed_report["misses"]) != 1801
+        or len(seed_report["hits"]) != 599
+        or seed_report["graph_command_submissions"] != 2402
+        or len(cold_report["misses"]) != 1801
+        or len(cold_report["hits"]) != 599
+        or cold_report["graph_command_submissions"] != 2402
+    ):
+        raise AssertionError(f"native cold per-pass recompute set mismatch: {result}")
+    if changed_report["hits"] or changed_report["misses"] != list(_NATIVE_PASSES):
+        raise AssertionError(f"native DEM invalidation mismatch: {result}")
+    if changed_report["graph_command_submissions"] != 6:
+        raise AssertionError(f"native DEM invalidation did not execute graph work: {result}")
+    if restored_changed_report["hits"] != list(_NATIVE_PASSES):
+        raise AssertionError(f"changed native resources did not restore: {result}")
+    if restored_changed_report["graph_command_submissions"] != 0:
+        raise AssertionError(f"changed native restoration submitted GPU work: {result}")
+    if changed_frame.to_numpy().tobytes() != restored_changed.to_numpy().tobytes():
+        raise AssertionError(f"changed native restoration is not byte-identical: {result}")
+    if result["speedup"] < 20.0:
+        raise AssertionError(f"GPU speedup below 20x: {result}")
+
     result_path = os.environ.get("FORGE3D_ANAMNESIS_RESULT_PATH")
     if result_path:
         Path(result_path).write_text(
             json.dumps(result, sort_keys=True) + "\n", encoding="utf-8"
         )
-    if result["matching_frames"] != 600 or not result["hash_lists_equal"]:
-        raise AssertionError(f"GPU frame hash mismatch: {result}")
-    if result["predicted"] != 3 or result["observed"] != 3 or symmetric_difference:
-        raise AssertionError(f"GPU recompute mismatch: {result}")
-    if result["pass_labels"] != ["frame.output", "label.compile", "label.composite"]:
-        raise AssertionError(f"unexpected GPU recompute labels: {result}")
-    if result["incremental_terrain_executions"] != 0:
-        raise AssertionError(f"incremental label edit re-encoded native terrain: {result}")
-    if result["speedup"] < 20.0:
-        raise AssertionError(f"GPU speedup below 20x: {result}")
     return result
 
 

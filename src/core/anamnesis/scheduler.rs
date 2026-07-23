@@ -36,10 +36,26 @@ pub struct Scheduler {
 /// caller must materialize the serialized texture/buffer before dependents
 /// run, under the same barriers as a freshly encoded producer.
 pub struct GraphScheduler {
-    store: ContentStore,
+    store: Option<ContentStore>,
     report: CacheReport,
     capability_fingerprint_bytes: Vec<u8>,
     engine_fingerprint_bytes: Vec<u8>,
+}
+
+pub enum GraphPassAction<'a> {
+    Execute {
+        barriers: &'a [&'a ResourceBarrier],
+        capture_output: bool,
+    },
+    Restore {
+        blob: &'a [u8],
+        barriers: &'a [&'a ResourceBarrier],
+    },
+}
+
+pub enum GraphPassOutcome {
+    Executed(Vec<u8>),
+    Restored,
 }
 
 impl GraphScheduler {
@@ -49,7 +65,23 @@ impl GraphScheduler {
         engine_fingerprint_bytes: Vec<u8>,
     ) -> Self {
         Self {
-            store,
+            store: Some(store),
+            report: CacheReport::default(),
+            capability_fingerprint_bytes,
+            engine_fingerprint_bytes,
+        }
+    }
+
+    /// Execute the same graph substrate without store participation.
+    ///
+    /// This is the opt-in inertness path: passes execute in graph order, but
+    /// the cache report remains empty and no filesystem is opened.
+    pub fn disabled(
+        capability_fingerprint_bytes: Vec<u8>,
+        engine_fingerprint_bytes: Vec<u8>,
+    ) -> Self {
+        Self {
+            store: None,
             report: CacheReport::default(),
             capability_fingerprint_bytes,
             engine_fingerprint_bytes,
@@ -101,8 +133,9 @@ impl GraphScheduler {
             );
             let barriers = graph.barriers_before(&pass.name);
             let cacheable = pass.cache_disabled_reason.is_none();
-            let blob = if cacheable {
-                match self.store.get(key)? {
+            let blob = if cacheable && self.store.is_some() {
+                let store = self.store.as_ref().expect("checked store presence");
+                match store.get(key)? {
                     Some((blob, metadata)) => {
                         restore(pass, &blob, &barriers)?;
                         self.report.hits.push(pass.name.clone());
@@ -113,7 +146,7 @@ impl GraphScheduler {
                     None => {
                         let started = Instant::now();
                         let blob = execute(pass, &barriers)?;
-                        self.store.put_measured(
+                        store.put_measured(
                             key,
                             &blob,
                             derivation,
@@ -127,10 +160,141 @@ impl GraphScheduler {
                 }
             } else {
                 let blob = execute(pass, &barriers)?;
-                self.report.misses.push(pass.name.clone());
+                if self.store.is_some() {
+                    self.report.misses.push(pass.name.clone());
+                }
                 blob
             };
             let _ = blob;
+            for output in &pass.writes {
+                resource_keys.insert(*output, key);
+            }
+        }
+        Ok(resource_keys)
+    }
+
+    /// Single-callback graph traversal for stateful native renderers.
+    ///
+    /// Rust renderers usually need the same mutable scene and resource owner
+    /// for both recompute and restore. A single callback avoids manufacturing
+    /// disjoint mutable borrows while preserving the exact scheduler policy.
+    pub fn execute_graph_with<F>(
+        &mut self,
+        graph: &RendererGraphPlan,
+        leaf_keys: &BTreeMap<ResourceHandle, PassKey>,
+        mut run: F,
+    ) -> Result<BTreeMap<ResourceHandle, PassKey>>
+    where
+        F: FnMut(&PassDesc, GraphPassAction<'_>) -> Result<GraphPassOutcome>,
+    {
+        let mut resource_keys = leaf_keys.clone();
+        for pass in graph.ordered_passes() {
+            let inputs = pass
+                .reads
+                .iter()
+                .map(|handle| {
+                    let resource = graph.resource(*handle).ok_or_else(|| {
+                        Error::new(
+                            ErrorKind::InvalidInput,
+                            format!("framegraph pass {:?} reads an unknown resource", pass.name),
+                        )
+                    })?;
+                    let key = resource_keys.get(handle).copied().ok_or_else(|| {
+                        Error::new(
+                            ErrorKind::InvalidInput,
+                            format!(
+                                "framegraph pass {:?} reads resource {:?} before it has a key",
+                                pass.name, resource.desc.name
+                            ),
+                        )
+                    })?;
+                    Ok(InputKey::new(resource.desc.name.clone(), key))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let (key, derivation) = pass_key(
+                &pass.name,
+                &pass.pipeline_descriptor_bytes,
+                &pass.uniform_bytes,
+                &inputs,
+                &self.capability_fingerprint_bytes,
+                &self.engine_fingerprint_bytes,
+            );
+            let barriers = graph.barriers_before(&pass.name);
+            let cacheable = pass.cache_disabled_reason.is_none();
+            if cacheable && self.store.is_some() {
+                let store = self.store.as_ref().expect("checked store presence");
+                if let Some((blob, metadata)) = store.get(key)? {
+                    match run(
+                        pass,
+                        GraphPassAction::Restore {
+                            blob: &blob,
+                            barriers: &barriers,
+                        },
+                    )? {
+                        GraphPassOutcome::Restored => {}
+                        GraphPassOutcome::Executed(_) => {
+                            return Err(Error::new(
+                                ErrorKind::InvalidData,
+                                format!(
+                                    "graph pass {:?} executed during a cache restoration",
+                                    pass.name
+                                ),
+                            ))
+                        }
+                    }
+                    self.report.hits.push(pass.name.clone());
+                    self.report.bytes_read += blob.len() as u64;
+                    self.report.wall_ms_saved += metadata.measured_wall_ms.max(0.0);
+                } else {
+                    let started = Instant::now();
+                    let blob = match run(
+                        pass,
+                        GraphPassAction::Execute {
+                            barriers: &barriers,
+                            capture_output: true,
+                        },
+                    )? {
+                        GraphPassOutcome::Executed(blob) => blob,
+                        GraphPassOutcome::Restored => {
+                            return Err(Error::new(
+                                ErrorKind::InvalidData,
+                                format!(
+                                    "graph pass {:?} restored without a cached blob",
+                                    pass.name
+                                ),
+                            ))
+                        }
+                    };
+                    store.put_measured(
+                        key,
+                        &blob,
+                        derivation,
+                        None,
+                        started.elapsed().as_secs_f64() * 1000.0,
+                    )?;
+                    self.report.misses.push(pass.name.clone());
+                    self.report.bytes_written += blob.len() as u64;
+                }
+            } else {
+                match run(
+                    pass,
+                    GraphPassAction::Execute {
+                        barriers: &barriers,
+                        capture_output: false,
+                    },
+                )? {
+                    GraphPassOutcome::Executed(_) => {}
+                    GraphPassOutcome::Restored => {
+                        return Err(Error::new(
+                            ErrorKind::InvalidData,
+                            format!("uncached graph pass {:?} did not execute", pass.name),
+                        ))
+                    }
+                }
+                if self.store.is_some() {
+                    self.report.misses.push(pass.name.clone());
+                }
+            }
             for output in &pass.writes {
                 resource_keys.insert(*output, key);
             }
