@@ -47,9 +47,40 @@ def test_callback_requires_explicit_renderer_fingerprint(tmp_path):
         )
 
 
-def test_opaque_renderer_recipe_and_fingerprint_changes_cannot_serve_stale_hits(
-    tmp_path,
-):
+def test_opaque_renderer_recipe_change_alone_cannot_serve_stale_hit(tmp_path):
+    calls: list[str] = []
+
+    def renderer(recipe, _frame):
+        identity = str(recipe["scene"]["identity"])
+        calls.append(identity)
+        return identity.encode("ascii")
+
+    recipe_a = {"scene": {"identity": "A"}, "output": {"format": "png"}}
+    recipe_b = {"scene": {"identity": "B"}, "output": {"format": "png"}}
+    first = render_sequence(
+        recipe_a,
+        frames=[0],
+        cache=tmp_path,
+        render_frame=renderer,
+        render_frame_fingerprint=b"same-renderer",
+        render_frame_context=b"same-external-context",
+    )
+    second = render_sequence(
+        recipe_b,
+        frames=[0],
+        cache=tmp_path,
+        render_frame=renderer,
+        render_frame_fingerprint=b"same-renderer",
+        render_frame_context=b"same-external-context",
+    )
+
+    assert first.frame_blobs == [b"A"]
+    assert second.frame_blobs == [b"B"]
+    assert calls == ["A", "B"]
+    assert (0, "frame.output") in second.observed_recompute
+
+
+def test_opaque_renderer_fingerprint_change_alone_cannot_serve_stale_hit(tmp_path):
     calls: list[str] = []
 
     def renderer_a(_recipe, _frame):
@@ -60,28 +91,92 @@ def test_opaque_renderer_recipe_and_fingerprint_changes_cannot_serve_stale_hits(
         calls.append("b")
         return b"B"
 
-    recipe_a = {"scene": {"identity": "A"}, "output": {"format": "png"}}
-    recipe_b = {"scene": {"identity": "B"}, "output": {"format": "png"}}
+    recipe = {"scene": {"identity": "same"}, "output": {"format": "png"}}
     first = render_sequence(
-        recipe_a,
+        recipe,
         frames=[0],
         cache=tmp_path,
         render_frame=renderer_a,
         render_frame_fingerprint=b"renderer-A",
-        render_frame_context=b"captured-output-A",
+        render_frame_context=b"same-external-context",
     )
     second = render_sequence(
-        recipe_b,
+        recipe,
         frames=[0],
         cache=tmp_path,
         render_frame=renderer_b,
         render_frame_fingerprint=b"renderer-B",
-        render_frame_context=b"captured-output-B",
+        render_frame_context=b"same-external-context",
     )
 
     assert first.frame_blobs == [b"A"]
     assert second.frame_blobs == [b"B"]
     assert calls == ["a", "b"]
+    assert (0, "frame.output") in second.observed_recompute
+
+
+def test_opaque_renderer_context_change_alone_cannot_serve_stale_hit(tmp_path):
+    calls: list[str] = []
+
+    def renderer_a(_recipe, _frame):
+        calls.append("a")
+        return b"A"
+
+    def renderer_b(_recipe, _frame):
+        calls.append("b")
+        return b"B"
+
+    recipe = {"scene": {"identity": "same"}, "output": {"format": "png"}}
+    first = render_sequence(
+        recipe,
+        frames=[0],
+        cache=tmp_path,
+        render_frame=renderer_a,
+        render_frame_fingerprint=b"same-renderer",
+        render_frame_context=b"captured-input-A",
+    )
+    second = render_sequence(
+        recipe,
+        frames=[0],
+        cache=tmp_path,
+        render_frame=renderer_b,
+        render_frame_fingerprint=b"same-renderer",
+        render_frame_context=b"captured-input-B",
+    )
+
+    assert first.frame_blobs == [b"A"]
+    assert second.frame_blobs == [b"B"]
+    assert calls == ["a", "b"]
+    assert (0, "frame.output") in second.observed_recompute
+
+
+def test_reference_work_factor_change_cannot_serve_stale_hit(tmp_path):
+    recipe = {
+        "terrain": {"dem": [0, 1]},
+        "camera": {"eye": [1, 2, 3]},
+        "output": {"format": "png"},
+    }
+    first = render_sequence(
+        recipe,
+        frames=[0],
+        cache=tmp_path,
+        reference_work_factor=0,
+    )
+    second = render_sequence(
+        recipe,
+        frames=[0],
+        cache=tmp_path,
+        reference_work_factor=1,
+    )
+    uncached_second = render_sequence(
+        recipe,
+        frames=[0],
+        cache=None,
+        reference_work_factor=1,
+    )
+
+    assert first.frame_blobs != second.frame_blobs
+    assert second.frame_blobs == uncached_second.frame_blobs
     assert (0, "frame.output") in second.observed_recompute
 
 

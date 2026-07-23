@@ -27,7 +27,6 @@ use super::render_params::{AddressModeNative, FilterModeNative};
 use crate::lighting::types::{Light, LightType};
 use crate::lighting::LightBuffer;
 
-mod anamnesis_cache;
 mod aov;
 mod atmosphere;
 mod bind_groups;

@@ -100,47 +100,23 @@ impl TerrainRenderer {
             ));
         }
 
-        let prepared_cache = super::anamnesis_cache::prepare_frame_cache(
-            py,
-            &self.scene,
-            cache.as_ref(),
-            certificate.as_ref(),
-            material_set,
-            env_maps,
-            params,
-            &heightmap,
-            water_mask.as_ref(),
-            time_seconds,
-        )?;
-        let frame = if let Some(prepared) = prepared_cache.as_ref() {
-            let device = self.scene.device.clone();
-            let queue = self.scene.queue.clone();
-            let (frame, report) = prepared.execute(device, queue, || {
-                self.scene
-                    .render_internal(
-                        material_set,
-                        env_maps,
-                        params,
-                        heightmap,
-                        water_mask,
-                        time_seconds,
-                    )
-                    .map_err(|e| PyRuntimeError::new_err(format!("Rendering failed: {e:#}")))
-            })?;
-            self.last_anamnesis_report = report;
-            frame
-        } else {
-            self.scene
-                .render_internal(
-                    material_set,
-                    env_maps,
-                    params,
-                    heightmap,
-                    water_mask,
-                    time_seconds,
-                )
-                .map_err(|e| PyRuntimeError::new_err(format!("Rendering failed: {e:#}")))?
-        };
+        // Native one-shot terrain caching remains intentionally unsupported:
+        // its live VT, streaming, scatter, overlay-uniform, and pipeline state
+        // are not yet owned by the ANAMNESIS framegraph. Ignore `cache` and
+        // execute the renderer so this public compatibility kwarg can produce
+        // only a conservative false miss, never a stale hit.
+        let _ = cache;
+        let frame = self
+            .scene
+            .render_internal(
+                material_set,
+                env_maps,
+                params,
+                heightmap,
+                water_mask,
+                time_seconds,
+            )
+            .map_err(|e| PyRuntimeError::new_err(format!("Rendering failed: {e:#}")))?;
 
         crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
 
