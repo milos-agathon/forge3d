@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from forge3d.anamnesis import explain, render_sequence
+from forge3d.anamnesis import _Store, explain, render_sequence
 
 
 def _recipe(text: str) -> dict:
@@ -118,6 +118,46 @@ def test_structured_scheduler_executes_only_changed_passes(tmp_path):
         ("identity", 250),
         ("identity", 250),
     ]
+
+
+def test_incremental_elides_unchanged_ancestors_and_batches_lru_touches(
+    tmp_path, monkeypatch
+):
+    original = _recipe("Old summit")
+    original["layers"][0]["visible_frames"] = [5]
+    modified = copy.deepcopy(original)
+    modified["layers"][0]["text"] = "New summit"
+    frames = range(12)
+
+    render_sequence(original, frames=frames, cache=tmp_path, verify_reads=False)
+    metadata_mtimes = {
+        path: path.stat().st_mtime_ns for path in tmp_path.glob("??/*/meta.json")
+    }
+    read_keys: list[str] = []
+    original_get = _Store.get
+
+    def recording_get(self, key, **kwargs):
+        read_keys.append(key)
+        return original_get(self, key, **kwargs)
+
+    monkeypatch.setattr(_Store, "get", recording_get)
+    incremental = render_sequence(
+        modified,
+        frames=frames,
+        cache=tmp_path,
+        verify_reads=False,
+    )
+
+    # Eleven unchanged terminal frames plus the unchanged accumulation input
+    # to the one changed label composite. Shadow/shade ancestors are committed
+    # transitively by those keys and require no filesystem read.
+    assert len(read_keys) == 12
+    assert incremental.prediction_matches
+    assert (tmp_path / "access.log").is_file()
+    assert all(
+        path.stat().st_mtime_ns == modified_at
+        for path, modified_at in metadata_mtimes.items()
+    )
 
 
 @pytest.mark.slow

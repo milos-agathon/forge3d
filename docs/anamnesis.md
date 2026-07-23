@@ -39,6 +39,15 @@ entry directories, control files, and quarantine all count toward the hard
 `max_bytes` on-disk bound. Corrupt data is quarantined and its build manifest
 is invalidated before the next render.
 
+Warm sequence builds keep a bounded, signature-checked in-process L1 for stores
+they just populated. A changed blob or metadata timestamp invalidates that L1
+entry and routes through the normal integrity/quarantine path. Unchanged
+ancestors committed by a restored descendant key are elided; only terminal
+outputs and the direct inputs of actual misses are materialized. LRU touches
+are appended once per sequence to the shared `access.log` journal, which both
+the Python and Rust garbage collectors consult. This avoids thousands of
+per-hit metadata rewrites without weakening cross-language eviction order.
+
 The store defaults to `.forge3d/cache`. Use:
 
 ```text
@@ -86,11 +95,11 @@ changes one visible label, and requires:
 - zero incremental native-terrain encodes;
 - at least 20× cold-to-incremental wall-clock speedup.
 
-The physical portability lane seeds a production TERRA pass on macOS/Metal,
-transfers the unified store to a separate Windows/NVIDIA DX12 runner, requires
-at least 99% hits, independently re-renders the committed TERRA golden, and
-rehydrates the cached raw RGBA pass as a GPU texture before byte comparison.
-A changed compatibility profile must produce 0% hits. The requested
-Linux/Vulkan-to-Windows/DX12 workflow remains present as a backend-specific
-lane and may emit `ABSENT` only for a proven lack of a physical Linux adapter;
-other failures are fatal.
+The physical portability lane seeds a production TERRA pass on a protected
+Apple M4/Metal runner, transfers the unified store to a separate
+Windows/NVIDIA DX12 runner, requires at least 99% hits, independently
+re-renders the committed TERRA golden, and rehydrates the cached raw RGBA pass
+as a GPU texture before byte comparison. A changed compatibility profile must
+produce 0% hits. The requested Linux/Vulkan-to-Windows/DX12 workflow remains
+present as a backend-specific lane and may emit `ABSENT` only for a proven lack
+of a physical Linux adapter; other failures are fatal.

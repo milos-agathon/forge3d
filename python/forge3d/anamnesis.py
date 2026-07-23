@@ -10,6 +10,7 @@ GPU-independent for hermeticity and store testing.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import asdict, dataclass, field, is_dataclass
 import argparse
 import hashlib
@@ -43,6 +44,8 @@ _DEFAULT_MAX_BYTES = 10 * 1024 * 1024 * 1024
 _META_NAME = "meta.json"
 _BLOB_NAME = "blob"
 _LAST_MANIFEST = "last_manifest.json"
+_ACCESS_LOG = "access.log"
+_STORE_POOL_LIMIT = 4
 
 
 def _segment(tag: bytes, value: bytes) -> bytes:
@@ -250,6 +253,11 @@ class _Store:
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / "quarantine").mkdir(exist_ok=True)
         self._current_bytes = self.disk_bytes()
+        self._root_identity = self._identity()
+        self._memory_entries: dict[
+            str, tuple[bytes, dict[str, Any], tuple[int, int, int, int]]
+        ] = {}
+        self._touched_keys: set[str] = set()
         if self._current_bytes > self.max_bytes:
             self.gc(self.max_bytes)
         if self._current_bytes > self.max_bytes:
@@ -275,6 +283,30 @@ class _Store:
     def entry(self, key: str) -> Path:
         return self.root / key[:2] / key
 
+    def _identity(self) -> tuple[int, int]:
+        stat = self.root.stat()
+        return int(stat.st_dev), int(stat.st_ino)
+
+    def reusable(self) -> bool:
+        try:
+            return self._identity() == self._root_identity
+        except OSError:
+            return False
+
+    @staticmethod
+    def _entry_signature(path: Path) -> tuple[int, int, int, int] | None:
+        try:
+            blob = (path / _BLOB_NAME).stat()
+            meta = (path / _META_NAME).stat()
+        except OSError:
+            return None
+        return (
+            int(blob.st_size),
+            int(blob.st_mtime_ns),
+            int(meta.st_size),
+            int(meta.st_mtime_ns),
+        )
+
     def get(
         self,
         key: str,
@@ -284,7 +316,18 @@ class _Store:
     ) -> tuple[bytes, dict[str, Any]] | None:
         path = self.entry(key)
         if not path.is_dir():
+            self._memory_entries.pop(key, None)
             return None
+        signature = self._entry_signature(path)
+        remembered = self._memory_entries.get(key)
+        if (
+            signature is not None
+            and remembered is not None
+            and remembered[2] == signature
+        ):
+            if touch:
+                self._touched_keys.add(key)
+            return remembered[0], dict(remembered[1])
         try:
             blob = (path / _BLOB_NAME).read_bytes()
             meta = json.loads((path / _META_NAME).read_text(encoding="utf-8"))
@@ -298,12 +341,10 @@ class _Store:
                 self._quarantine(path, key)
             return None
         if touch:
-            meta_path = path / _META_NAME
-            before = meta_path.stat().st_size
-            meta["last_access_unix_ms"] = time.time_ns() // 1_000_000
-            self._write_meta(path, meta)
-            self._current_bytes += meta_path.stat().st_size - before
-            os.utime(path, None)
+            self._touched_keys.add(key)
+        signature = self._entry_signature(path)
+        if signature is not None:
+            self._memory_entries[key] = (blob, dict(meta), signature)
         return blob, meta
 
     def put_pass(
@@ -436,6 +477,9 @@ class _Store:
                 shutil.rmtree(target, ignore_errors=True)
                 self._current_bytes = self.disk_bytes()
                 raise ValueError("ANAMNESIS complete on-disk footprint exceeds max_bytes")
+        signature = self._entry_signature(target)
+        if signature is not None:
+            self._memory_entries[key] = (bytes(blob), dict(complete), signature)
 
     def _write_meta(self, path: Path, meta: Mapping[str, Any]) -> None:
         data = json.dumps(
@@ -459,12 +503,16 @@ class _Store:
 
     def gc(self, target_bytes: int) -> int:
         records: list[tuple[int, str, int, Path]] = []
+        access_times = self._read_access_times()
         total = self.disk_bytes()
         for path in self.entries():
             try:
                 meta = json.loads((path / _META_NAME).read_text(encoding="utf-8"))
                 size = self._tree_bytes(path)
-                accessed = int(meta["last_access_unix_ms"])
+                accessed = max(
+                    int(meta["last_access_unix_ms"]),
+                    access_times.get(path.name, 0),
+                )
             except (OSError, ValueError, KeyError):
                 size, accessed = self._tree_bytes(path), 0
             records.append((accessed, path.name, size, path))
@@ -483,8 +531,11 @@ class _Store:
             if total <= max(0, int(target_bytes)):
                 break
             shutil.rmtree(path)
+            self._memory_entries.pop(path.name, None)
+            self._touched_keys.discard(path.name)
             total = self.disk_bytes()
             removed += size
+        self._compact_access_log()
         self._current_bytes = self.disk_bytes()
         return removed
 
@@ -515,6 +566,8 @@ class _Store:
         # integrity rejects it, that manifest is no longer a valid independent
         # prediction baseline for a retry.
         (self.root / _LAST_MANIFEST).unlink(missing_ok=True)
+        self._memory_entries.pop(key, None)
+        self._touched_keys.discard(key)
         self._current_bytes = self.disk_bytes()
 
     @staticmethod
@@ -566,25 +619,116 @@ class _Store:
             and material.get("engine_fingerprint_sha256") == _sha256(engine)
         )
 
-    def write_control(self, name: str, payload: bytes) -> None:
+    def _read_access_times(self) -> dict[str, int]:
+        result: dict[str, int] = {}
+        try:
+            lines = (self.root / _ACCESS_LOG).read_text(encoding="ascii").splitlines()
+        except OSError:
+            return result
+        for line in lines:
+            try:
+                timestamp, key = line.split("\t", 1)
+                if len(key) != 64:
+                    continue
+                int(key, 16)
+                result[key] = max(result.get(key, 0), int(timestamp))
+            except (ValueError, TypeError):
+                continue
+        return result
+
+    def _compact_access_log(self) -> None:
+        target = self.root / _ACCESS_LOG
+        if not target.exists():
+            return
+        access_times = self._read_access_times()
+        live = {path.name for path in self.entries()}
+        payload = "".join(
+            f"{access_times[key]}\t{key}\n"
+            for key in sorted(access_times.keys() & live)
+        ).encode("ascii")
+        self._replace_control(_ACCESS_LOG, payload, enforce=False)
+
+    def flush_accesses(self) -> None:
+        if not self._touched_keys:
+            return
+        now = time.time_ns() // 1_000_000
+        payload = "".join(
+            f"{now}\t{key}\n" for key in sorted(self._touched_keys)
+        ).encode("ascii")
+        target = self.root / _ACCESS_LOG
+        before_root = self.root.stat().st_size
+        before = target.stat().st_size if target.exists() else 0
+        with target.open("ab") as stream:
+            stream.write(payload)
+        after_root = self.root.stat().st_size
+        self._current_bytes += len(payload) + (after_root - before_root)
+        self._touched_keys.clear()
+        # Compact duplicate generations before the journal becomes material.
+        if target.stat().st_size > max(1024 * 1024, before * 2):
+            self._compact_access_log()
+        if self._current_bytes > self.max_bytes:
+            self.gc(self.max_bytes)
+        if self._current_bytes > self.max_bytes:
+            raise ValueError("ANAMNESIS complete on-disk footprint exceeds max_bytes")
+
+    def _replace_control(
+        self,
+        name: str,
+        payload: bytes,
+        *,
+        enforce: bool,
+    ) -> None:
         target = self.root / name
         temporary = self.root / f".{name}.tmp-{os.getpid()}"
+        old_size = target.stat().st_size if target.exists() else 0
+        root_before = self.root.stat().st_size
         temporary.write_bytes(payload)
-        projected = self.disk_bytes()
-        self._current_bytes = projected
-        if projected > self.max_bytes:
-            self.gc(self.max_bytes - temporary.stat().st_size)
-        if self.disk_bytes() > self.max_bytes:
+        root_with_temp = self.root.stat().st_size
+        projected_peak = (
+            self._current_bytes
+            + temporary.stat().st_size
+            + (root_with_temp - root_before)
+        )
+        if enforce and projected_peak > self.max_bytes:
             temporary.unlink(missing_ok=True)
-            raise ValueError(
-                f"ANAMNESIS control file {name!r} exceeds the complete store budget"
-            )
+            self.gc(max(0, self.max_bytes - len(payload)))
+            root_before = self.root.stat().st_size
+            old_size = target.stat().st_size if target.exists() else 0
+            temporary.write_bytes(payload)
         temporary.replace(target)
-        self._current_bytes = self.disk_bytes()
-        if self._current_bytes > self.max_bytes:
+        root_after = self.root.stat().st_size
+        self._current_bytes += len(payload) - old_size + (root_after - root_before)
+        if enforce and self._current_bytes > self.max_bytes:
+            self.gc(self.max_bytes)
+        if enforce and self._current_bytes > self.max_bytes:
             target.unlink(missing_ok=True)
             self._current_bytes = self.disk_bytes()
             raise ValueError("ANAMNESIS complete on-disk footprint exceeds max_bytes")
+
+    def write_control(self, name: str, payload: bytes) -> None:
+        self._replace_control(name, payload, enforce=True)
+
+
+_STORE_POOL: OrderedDict[tuple[str, int, bool], _Store] = OrderedDict()
+
+
+def _pooled_store(
+    root: str | os.PathLike[str],
+    max_bytes: int,
+    verify_reads: bool,
+) -> _Store:
+    key = (
+        os.path.normcase(os.path.abspath(os.fspath(root))),
+        int(max_bytes),
+        bool(verify_reads),
+    )
+    remembered = _STORE_POOL.pop(key, None)
+    if remembered is None or not remembered.reusable():
+        remembered = _Store(root, max_bytes, verify_reads)
+    _STORE_POOL[key] = remembered
+    while len(_STORE_POOL) > _STORE_POOL_LIMIT:
+        _STORE_POOL.popitem(last=False)
+    return remembered
 
 
 def _recipe_payload(recipe: Any) -> dict[str, Any]:
@@ -870,7 +1014,11 @@ def render_sequence(
     )
     caps = capability_fingerprint(capability_source, backend=str(state["backend"]))
     engine = engine_fingerprint()
-    store = _Store(cache, max_bytes, verify_reads) if cache is not None else None
+    store = (
+        _pooled_store(cache, max_bytes, verify_reads)
+        if cache is not None
+        else None
+    )
     report = CacheReport()
     previous_manifest = _load_manifest(store)
     pixel_recipe = _pixel_recipe_payload(payload)
@@ -976,12 +1124,37 @@ def render_sequence(
     predicted = [(plan.frame, plan.label) for plan in predicted_plans]
     predicted_instances = {plan.instance for plan in predicted_plans}
 
+    # An unchanged cached node is already represented by its Merkle key in a
+    # cached descendant. Restore only terminal outputs and the direct inputs
+    # needed by actual misses; reading every shadow/shade/accumulation ancestor
+    # would turn a 600-frame label edit into thousands of pointless filesystem
+    # operations. Elided ancestors remain logical hits because the restored
+    # descendant key commits to them transitively.
+    required_instances = set(output_instances)
+    pending_instances = list(output_instances)
+    while pending_instances:
+        instance = pending_instances.pop()
+        plan = plans_by_instance[instance]
+        if instance not in predicted_instances:
+            continue
+        for _, input_instance in plan.inputs:
+            if input_instance not in required_instances:
+                required_instances.add(input_instance)
+                pending_instances.append(input_instance)
+
     observed: list[tuple[int, str]] = []
     blobs_by_instance: dict[str, bytes] = {}
     memo: dict[str, bytes] = {}
     if not dry_run:
         for plan in plans:
             force_recompute = plan.instance in predicted_instances
+            if plan.instance not in required_instances:
+                if force_recompute:
+                    raise RuntimeError(
+                        f"ANAMNESIS internal reachability error: {plan.instance}"
+                    )
+                report.hits.append(plan.label)
+                continue
             if not force_recompute and plan.key in memo:
                 blob = memo[plan.key]
                 report.hits.append(plan.label)
@@ -1000,6 +1173,11 @@ def render_sequence(
                     0.0, float(meta.get("measured_wall_ms", 0.0))
                 )
             else:
+                if not force_recompute:
+                    raise RuntimeError(
+                        "ANAMNESIS prediction mismatch: "
+                        f"{[(plan.frame, plan.label)]!r}"
+                    )
                 pass_started = time.perf_counter()
                 if plan.label in executors:
                     blob = bytes(
@@ -1070,6 +1248,7 @@ def render_sequence(
             },
             error_context="ANAMNESIS manifest",
         )
+        store.flush_accesses()
         store.write_control(_LAST_MANIFEST, manifest)
     return SequenceResult(
         frame_hashes=hashes,

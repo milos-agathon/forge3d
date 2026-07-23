@@ -4,6 +4,7 @@ use super::key::{
     reconstruct_pass_key, sha256, EngineFingerprint, InputKey, PassKey, PassKeyMaterial,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Error, ErrorKind, Result};
 use std::path::{Path, PathBuf};
@@ -11,6 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const BLOB_NAME: &str = "blob";
 const META_NAME: &str = "meta.json";
+const ACCESS_LOG: &str = "access.log";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -270,9 +272,15 @@ impl ContentStore {
     fn gc_to(&self, target_bytes: u64) -> Result<u64> {
         let mut entries = Vec::new();
         let mut total = tree_bytes(&self.root)?;
+        let access_times = self.access_times()?;
         for path in self.entries()? {
             if let Ok(meta) = read_meta(&path) {
-                entries.push((meta.last_access_unix_ms, tree_bytes(&path)?, path));
+                entries.push((
+                    meta.last_access_unix_ms
+                        .max(access_times.get(&meta.key).copied().unwrap_or_default()),
+                    tree_bytes(&path)?,
+                    path,
+                ));
             }
         }
         entries.extend(self.quarantine_entries()?);
@@ -291,10 +299,14 @@ impl ContentStore {
 
     fn gc_for_staged(&self, temp: &Path, staged_bytes: u64) -> Result<()> {
         let mut candidates = Vec::new();
+        let access_times = self.access_times()?;
         for path in self.entries()? {
             if path != temp {
                 let accessed = read_meta(&path)
-                    .map(|meta| meta.last_access_unix_ms)
+                    .map(|meta| {
+                        meta.last_access_unix_ms
+                            .max(access_times.get(&meta.key).copied().unwrap_or_default())
+                    })
                     .unwrap_or_default();
                 candidates.push((accessed, path));
             }
@@ -330,6 +342,7 @@ impl ContentStore {
         if tree_bytes(&self.root)? <= self.max_bytes {
             return Ok(());
         }
+        let access_times = self.access_times()?;
         let mut candidates = self
             .entries()?
             .into_iter()
@@ -337,7 +350,10 @@ impl ContentStore {
             .collect::<Vec<_>>();
         candidates.sort_by_key(|path| {
             read_meta(path)
-                .map(|meta| meta.last_access_unix_ms)
+                .map(|meta| {
+                    meta.last_access_unix_ms
+                        .max(access_times.get(&meta.key).copied().unwrap_or_default())
+                })
                 .unwrap_or_default()
         });
         for path in candidates {
@@ -358,6 +374,29 @@ impl ContentStore {
             ));
         }
         Ok(())
+    }
+
+    fn access_times(&self) -> Result<BTreeMap<PassKey, u64>> {
+        let value = match fs::read_to_string(self.root.join(ACCESS_LOG)) {
+            Ok(value) => value,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(BTreeMap::new()),
+            Err(error) => return Err(error),
+        };
+        let mut result = BTreeMap::new();
+        for line in value.lines() {
+            let Some((timestamp, key)) = line.split_once('\t') else {
+                continue;
+            };
+            let (Ok(timestamp), Ok(key)) = (timestamp.parse::<u64>(), PassKey::from_hex(key))
+            else {
+                continue;
+            };
+            result
+                .entry(key)
+                .and_modify(|current: &mut u64| *current = (*current).max(timestamp))
+                .or_insert(timestamp);
+        }
+        Ok(result)
     }
 
     fn entries(&self) -> Result<Vec<PathBuf>> {
@@ -520,6 +559,30 @@ mod tests {
         assert!(store.get(b).unwrap().is_some());
         assert!(store.get(c).unwrap().is_some());
         assert!(tree_bytes(&root).unwrap() <= store.max_bytes);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rust_gc_honors_python_batched_access_journal() {
+        let root = scratch("shared-lru-journal");
+        let store = ContentStore::new(&root, 64 * 1024, false).unwrap();
+        let (a, da) = derivation("a", b"aaaa");
+        store.put(a, b"aaaa", da).unwrap();
+        std::thread::sleep(Duration::from_millis(2));
+        let (b, db) = derivation("b", b"bbbb");
+        store.put(b, b"bbbb", db).unwrap();
+        fs::write(
+            root.join(ACCESS_LOG),
+            format!("{}\t{}\n", now_ms() + 1_000, a),
+        )
+        .unwrap();
+
+        store
+            .gc(tree_bytes(&root).unwrap() - tree_bytes(&store.entry_dir(b)).unwrap())
+            .unwrap();
+
+        assert!(store.get(a).unwrap().is_some());
+        assert!(store.get(b).unwrap().is_none());
         fs::remove_dir_all(root).unwrap();
     }
 

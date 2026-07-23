@@ -857,18 +857,17 @@ jobs:
   # ============================================================================
   # ANAMNESIS physical cross-machine portability
   #
-  # The Intel macOS family is selected deliberately: GitHub's arm64 macOS
-  # family exposes only the Apple Paravirtual adapter, which deterministic mode
-  # correctly rejects. The runtime probe below still requires a non-virtual
-  # Metal adapter; the protected NVIDIA runner supplies the physically distinct
-  # DX12 consumer. The older Linux/Vulkan matrix remains as the requested
-  # backend-specific harness and may report ABSENT when GitHub exposes no
-  # physical Linux GPU.
+  # Standard GitHub macOS runners expose only the Apple Paravirtual adapter,
+  # which deterministic mode correctly rejects. The protected physical M4
+  # runner supplies the Metal producer; the protected NVIDIA runner supplies
+  # the physically distinct DX12 consumer. The older Linux/Vulkan matrix
+  # remains as the requested backend-specific harness and may report ABSENT
+  # when GitHub exposes no physical Linux GPU.
   # ============================================================================
   test-anamnesis-portability-seed:
-    name: ANAMNESIS Physical Seed (macOS Intel Metal)
+    name: ANAMNESIS Physical Seed (M4 Metal)
     needs: build-wheels
-    runs-on: macos-15-intel
+    runs-on: [self-hosted, macOS, ARM64, forge3d-gpu, gpu-metal]
     timeout-minutes: 20
     env:
       FORGE3D_DETERMINISTIC: '1'
@@ -890,17 +889,17 @@ jobs:
           path: dist/
       - name: Install exact-head wheel
         run: |
-          python scripts/install_compatible_wheel.py dist
-          pip install numpy pillow
+          python3 scripts/install_compatible_wheel.py dist
+          python3 -m pip install numpy pillow
       - name: Render TERRA golden and seed real pass output
         shell: bash
         run: |
           set -o pipefail
-          python -m forge3d.determinism \
+          python3 -m forge3d.determinism \
             --scene terra_determinata_v1 --width 512 --height 512 \
             --out-png anamnesis-portable-producer.png \
             | tee anamnesis-portable-producer.jsonl
-          python scripts/check_anamnesis_portability.py seed \
+          python3 scripts/check_anamnesis_portability.py seed \
             --cache anamnesis-portable-store \
             --record anamnesis-portable-record.json \
             --frame-blob anamnesis-portable-producer.png \

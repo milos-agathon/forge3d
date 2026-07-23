@@ -90,8 +90,18 @@ def test_complete_store_footprint_is_hard_bounded(tmp_path):
     # entry directory; the test budget must fit a self-describing sequence
     # before it can meaningfully assert the hard upper bound.
     max_bytes = 512 * 1024
+    recipe = {"terrain": {"dem": list(range(64))}}
     render_sequence(
-        {"terrain": {"dem": list(range(64))}},
+        recipe,
+        frames=range(8),
+        cache=tmp_path,
+        max_bytes=max_bytes,
+        verify_reads=False,
+    )
+    # A warm read creates the batched cross-language LRU journal; it is a
+    # control file and must remain inside the same complete-footprint bound.
+    render_sequence(
+        recipe,
         frames=range(8),
         cache=tmp_path,
         max_bytes=max_bytes,
