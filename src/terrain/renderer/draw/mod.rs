@@ -353,12 +353,16 @@ impl TerrainScene {
                             )?;
                             context.discard_encoder();
                             if decoded.shadow.enabled {
+                                let restored_depth =
+                                    restored_depth.as_deref().ok_or_else(|| {
+                                        anyhow!(
+                                            "enabled shadow restoration has no decoded depth bytes"
+                                        )
+                                    })?;
                                 restore_texture(
                                     context,
                                     handles.shadow,
-                                    restored_depth
-                                        .as_deref()
-                                        .expect("enabled shadow restoration has depth bytes"),
+                                    restored_depth,
                                     shadow_width,
                                     shadow_width,
                                     shadow_layers,

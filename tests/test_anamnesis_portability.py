@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -68,6 +69,10 @@ def test_engine_wgsl_fingerprint_uses_portable_relative_paths():
 
 
 def test_portable_store_hits_and_capability_mismatch_misses(tmp_path):
+    if os.environ.get("FORGE3D_RUN_GPU_ANAMNESIS") != "1":
+        pytest.skip(
+            "native portability is exercised by the protected producer/consumer jobs"
+        )
     if not f3d.has_gpu():
         pytest.skip("portable resource rehydration requires a GPU adapter")
     frame_blob = tmp_path / "terra.png"

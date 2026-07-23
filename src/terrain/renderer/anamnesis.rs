@@ -105,6 +105,22 @@ pub(super) struct PassBlob<'a> {
     pub(super) payload: &'a [u8],
 }
 
+fn blob_u32(blob: &[u8], offset: usize) -> Result<u32> {
+    let bytes = blob
+        .get(offset..offset + 4)
+        .ok_or_else(|| anyhow!("native terrain blob header is truncated"))?;
+    Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+}
+
+fn blob_u64(blob: &[u8], offset: usize) -> Result<u64> {
+    let bytes = blob
+        .get(offset..offset + 8)
+        .ok_or_else(|| anyhow!("native terrain blob header is truncated"))?;
+    Ok(u64::from_le_bytes([
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+    ]))
+}
+
 pub(super) fn encode_blob(
     kind: BlobKind,
     width: u32,
@@ -127,24 +143,13 @@ pub(super) fn decode_blob(blob: &[u8]) -> Result<PassBlob<'_>> {
     if blob.len() < 32 || &blob[..8] != BLOB_MAGIC {
         return Err(anyhow!("invalid native terrain ANAMNESIS blob header"));
     }
-    let word = |offset: usize| {
-        u32::from_le_bytes(
-            blob[offset..offset + 4]
-                .try_into()
-                .expect("validated blob header length"),
-        )
-    };
-    let kind = match word(8) {
+    let kind = match blob_u32(blob, 8)? {
         1 => BlobKind::Prepared,
         2 => BlobKind::ShadowDepth32,
         3 => BlobKind::Rgba8,
         value => return Err(anyhow!("unknown native terrain blob kind {value}")),
     };
-    let payload_len = u64::from_le_bytes(
-        blob[24..32]
-            .try_into()
-            .expect("validated blob header length"),
-    );
+    let payload_len = blob_u64(blob, 24)?;
     let payload_len = usize::try_from(payload_len).context("terrain blob length overflow")?;
     if blob.len() != 32 + payload_len {
         return Err(anyhow!(
@@ -154,9 +159,9 @@ pub(super) fn decode_blob(blob: &[u8]) -> Result<PassBlob<'_>> {
     }
     Ok(PassBlob {
         kind,
-        width: word(12),
-        height: word(16),
-        layers: word(20),
+        width: blob_u32(blob, 12)?,
+        height: blob_u32(blob, 16)?,
+        layers: blob_u32(blob, 20)?,
         payload: &blob[32..],
     })
 }
@@ -201,10 +206,10 @@ pub(super) fn encode_depth_rle(bytes: &[u8]) -> Result<Vec<u8>> {
     let Some(first) = words.next() else {
         return Ok(encoded);
     };
-    let mut current = <[u8; 4]>::try_from(first).expect("four-byte chunk");
+    let mut current = [first[0], first[1], first[2], first[3]];
     let mut count = 1u32;
     for word in words {
-        let word = <[u8; 4]>::try_from(word).expect("four-byte chunk");
+        let word = [word[0], word[1], word[2], word[3]];
         if word == current && count != u32::MAX {
             count += 1;
         } else {
@@ -225,7 +230,7 @@ pub(super) fn decode_depth_rle(encoded: &[u8], expected_bytes: usize) -> Result<
     }
     let mut decoded = Vec::with_capacity(expected_bytes);
     for run in encoded.chunks_exact(8) {
-        let count = u32::from_le_bytes(run[..4].try_into().expect("four-byte run count"));
+        let count = u32::from_le_bytes([run[0], run[1], run[2], run[3]]);
         if count == 0 {
             return Err(anyhow!("depth32 RLE contains a zero-length run"));
         }
