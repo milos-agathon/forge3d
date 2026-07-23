@@ -896,7 +896,7 @@ jobs:
       - name: Require physical NVIDIA Vulkan producer
         shell: pwsh
         run: |
-          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:RUNNER_TEMP/anamnesis-portability-producer-adapter.json"
+          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "anamnesis-portability-producer-adapter.json"
       - name: Render TERRA golden and seed real pass output
         shell: pwsh
         run: |
@@ -920,7 +920,7 @@ jobs:
             anamnesis-portable-store/
             anamnesis-portable-record.json
             anamnesis-portable-producer.jsonl
-            ${{ runner.temp }}/anamnesis-portability-producer-adapter.json
+            anamnesis-portability-producer-adapter.json
           if-no-files-found: error
 
   test-anamnesis-portability:
@@ -962,7 +962,7 @@ jobs:
       - name: Require physical DX12 consumer
         shell: pwsh
         run: |
-          python scripts/terrain_ci_probe.py --mode terrain --json "$env:RUNNER_TEMP/anamnesis-portability-consumer-adapter.json"
+          python scripts/terrain_ci_probe.py --mode terrain --json "anamnesis-portability-consumer-adapter.json"
       - name: Render fresh consumer and require portable GPU restoration
         shell: pwsh
         run: |
@@ -991,7 +991,7 @@ jobs:
           path: |
             anamnesis-portability-result.json
             anamnesis-portable-consumer.jsonl
-            ${{ runner.temp }}/anamnesis-portability-consumer-adapter.json
+            anamnesis-portability-consumer-adapter.json
           if-no-files-found: error
 
   # ============================================================================

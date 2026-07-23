@@ -88,7 +88,11 @@ def test_p1_portability_and_production_lanes_fail_closed():
         assert "Prove exact-head checkout" in job
         assert "ANAMNESIS.ABSENT" not in job
     assert "--require-nvidia-vulkan" in physical_seed
+    assert '--json "anamnesis-portability-producer-adapter.json"' in physical_seed
+    assert "RUNNER_TEMP/anamnesis-portability-producer-adapter.json" not in physical_seed
     assert "WGPU_BACKEND: dx12" in physical_consumer
+    assert '--json "anamnesis-portability-consumer-adapter.json"' in physical_consumer
+    assert "RUNNER_TEMP/anamnesis-portability-consumer-adapter.json" not in physical_consumer
     assert "anamnesis-portability-result.json" in physical_consumer
     assert "test_real_gpu_600_frame_acceptance" in production
     assert "test_public_gpu_graph_cache_restores_intermediate_texture" in production
