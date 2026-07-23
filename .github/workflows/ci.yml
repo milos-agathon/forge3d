@@ -857,15 +857,18 @@ jobs:
   # ============================================================================
   # ANAMNESIS physical cross-machine portability
   #
-  # Hosted macOS supplies the physical producer; the protected NVIDIA runner
-  # supplies the physically distinct DX12 consumer. The older Linux/Vulkan
-  # matrix remains as the requested backend-specific harness and may report
-  # ABSENT when GitHub exposes no physical Linux GPU.
+  # The Intel macOS family is selected deliberately: GitHub's arm64 macOS
+  # family exposes only the Apple Paravirtual adapter, which deterministic mode
+  # correctly rejects. The runtime probe below still requires a non-virtual
+  # Metal adapter; the protected NVIDIA runner supplies the physically distinct
+  # DX12 consumer. The older Linux/Vulkan matrix remains as the requested
+  # backend-specific harness and may report ABSENT when GitHub exposes no
+  # physical Linux GPU.
   # ============================================================================
   test-anamnesis-portability-seed:
-    name: ANAMNESIS Physical Seed (macOS Metal)
+    name: ANAMNESIS Physical Seed (macOS Intel Metal)
     needs: build-wheels
-    runs-on: macos-14
+    runs-on: macos-15-intel
     timeout-minutes: 20
     env:
       FORGE3D_DETERMINISTIC: '1'
