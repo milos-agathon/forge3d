@@ -214,7 +214,9 @@ mod tests {
             .unwrap_or_default()
             .as_nanos();
         let root = std::env::temp_dir().join(format!("forge3d-anamnesis-scheduler-{nonce}"));
-        let store = ContentStore::new(&root, 16 * 1024, true).unwrap();
+        // Linux allocates 4 KiB per directory; leave enough room for the
+        // self-describing entry plus root, quarantine, and hash-prefix dirs.
+        let store = ContentStore::new(&root, 64 * 1024, true).unwrap();
         let engine = EngineFingerprint::current().canonical_bytes();
         let encoded = Cell::new(0u32);
         let execute = |scheduler: &mut Scheduler| {

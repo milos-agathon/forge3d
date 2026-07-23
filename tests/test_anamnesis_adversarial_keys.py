@@ -86,7 +86,10 @@ def _complete_footprint(path) -> int:
 
 
 def test_complete_store_footprint_is_hard_bounded(tmp_path):
-    max_bytes = 64 * 1024
+    # Linux filesystems commonly allocate 4 KiB for every hash-prefix and
+    # entry directory; the test budget must fit a self-describing sequence
+    # before it can meaningfully assert the hard upper bound.
+    max_bytes = 512 * 1024
     render_sequence(
         {"terrain": {"dem": list(range(64))}},
         frames=range(8),

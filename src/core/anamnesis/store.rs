@@ -490,7 +490,7 @@ mod tests {
     #[test]
     fn corruption_is_quarantined_and_becomes_a_miss() {
         let root = scratch("corrupt");
-        let store = ContentStore::new(&root, 16 * 1024, true).unwrap();
+        let store = ContentStore::new(&root, 64 * 1024, true).unwrap();
         let (key, material) = derivation("pass", b"good");
         store.put(key, b"good", material).unwrap();
         fs::write(store.entry_dir(key).join(BLOB_NAME), b"hood").unwrap();
@@ -504,7 +504,7 @@ mod tests {
     #[test]
     fn lru_eviction_respects_bound() {
         let root = scratch("lru");
-        let store = ContentStore::new(&root, 16 * 1024, false).unwrap();
+        let store = ContentStore::new(&root, 64 * 1024, false).unwrap();
         let (a, da) = derivation("a", b"aaaa");
         store.put(a, b"aaaa", da).unwrap();
         std::thread::sleep(Duration::from_millis(2));
@@ -526,12 +526,13 @@ mod tests {
     #[test]
     fn complete_footprint_never_exceeds_bound() {
         let root = scratch("hard-bound");
-        let store = ContentStore::new(&root, 16 * 1024, false).unwrap();
+        let max_bytes = 64 * 1024;
+        let store = ContentStore::new(&root, max_bytes, false).unwrap();
         for index in 0..8 {
             let blob = vec![index; 256];
             let (key, material) = derivation(&format!("pass-{index}"), &blob);
             store.put(key, &blob, material).unwrap();
-            assert!(tree_bytes(&root).unwrap() <= 16 * 1024);
+            assert!(tree_bytes(&root).unwrap() <= max_bytes);
         }
         fs::remove_dir_all(root).unwrap();
     }
