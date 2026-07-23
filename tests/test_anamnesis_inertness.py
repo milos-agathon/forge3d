@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -13,6 +14,27 @@ from forge3d.determinism import (
     write_canonical_hdr,
 )
 from forge3d.helpers.offscreen import render_offscreen_rgba
+
+
+def test_native_recompute_control_is_required_on_physical_gpu_ci():
+    workflow = (
+        Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
+    ).read_text(encoding="utf-8")
+    production_job = workflow.split("  test-anamnesis-production:", 1)[1].split(
+        "\n  build-docs:", 1
+    )[0]
+    required_fragments = (
+        "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]",
+        "WGPU_BACKEND: vulkan",
+        "FORGE3D_RUN_GPU_ANAMNESIS: '1'",
+        "test_native_terrain_incomplete_cache_conservatively_recomputes",
+        "--junitxml",
+        "scripts/assert_junit_zero_skips.py",
+        "anamnesis-p0-adapter.json",
+        '$actual | Set-Content "$env:RUNNER_TEMP/anamnesis-checked-out-head.txt"',
+    )
+    for fragment in required_fragments:
+        assert fragment in production_job
 
 
 def test_cache_none_is_byte_identical_to_enabled_cold_render(tmp_path):
@@ -267,6 +289,7 @@ def test_native_terrain_incomplete_cache_conservatively_recomputes(tmp_path):
         "bytes_read": 0,
         "bytes_written": 0,
         "wall_ms_saved": 0.0,
+        "hit_rate": 0.0,
     }
     assert second_report == first_report
     assert changed_report == first_report

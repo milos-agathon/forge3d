@@ -1009,6 +1009,7 @@ jobs:
           if ($actual -ne $expected) {
             throw "ANAMNESIS checkout mismatch: expected=$expected actual=$actual"
           }
+          $actual | Set-Content "$env:RUNNER_TEMP/anamnesis-checked-out-head.txt"
       - uses: actions/download-artifact@v4
         with:
           name: wheels-windows
@@ -1021,19 +1022,33 @@ jobs:
       - name: Require physical NVIDIA Vulkan terrain execution
         shell: pwsh
         run: |
-          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan
+          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:RUNNER_TEMP/anamnesis-p0-adapter.json"
       - name: Gate 600/600 bytes, exact recompute set, and 20x speedup
         shell: pwsh
         env:
           FORGE3D_ANAMNESIS_RESULT_PATH: ${{ runner.temp }}/anamnesis-production-result.json
         run: |
           python -m pytest tests/test_anamnesis_incremental.py::test_real_gpu_600_frame_acceptance -v --tb=short
+      - name: Reject native final-frame stale hits
+        shell: pwsh
+        run: |
+          $junit = Join-Path $env:RUNNER_TEMP "anamnesis-p0-native-junit.xml"
+          python -m pytest tests/test_anamnesis_inertness.py::test_native_terrain_incomplete_cache_conservatively_recomputes -v --tb=short --junitxml="$junit"
+          $pytestCode = $LASTEXITCODE
+          python scripts/assert_junit_zero_skips.py "$junit"
+          $verifyCode = $LASTEXITCODE
+          if ($pytestCode -ne 0) { exit $pytestCode }
+          if ($verifyCode -ne 0) { exit $verifyCode }
       - name: Upload ANAMNESIS production evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: anamnesis-production-evidence
-          path: ${{ runner.temp }}/anamnesis-production-result.json
+          path: |
+            ${{ runner.temp }}/anamnesis-production-result.json
+            ${{ runner.temp }}/anamnesis-p0-native-junit.xml
+            ${{ runner.temp }}/anamnesis-p0-adapter.json
+            ${{ runner.temp }}/anamnesis-checked-out-head.txt
           if-no-files-found: error
 
   # ============================================================================
