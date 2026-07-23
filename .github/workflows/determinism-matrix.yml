@@ -265,29 +265,28 @@ jobs:
         shell: bash
         env:
           FORGE3D_DETERMINISTIC: '1'
+          WGPU_BACKEND: vulkan
           WGPU_BACKENDS: vulkan
         run: |
           source .venv/bin/activate
           set +e
-          set -o pipefail
-          python -m forge3d.determinism \
-            --scene terra_determinata_v1 --width 512 --height 512 \
-            --out-png anamnesis-golden.png 2>anamnesis-render.err \
-            | tee anamnesis-render.jsonl
-          status=$?
+          python scripts/terrain_ci_probe.py \
+            --mode terrain --json anamnesis-seed-adapter.json
+          probe_status=$?
           set -e
-          set +o pipefail
-          if [ $status -ne 0 ]; then
-            if grep -Eq "software rasterizer|hypervisor-virtualized GPU|No suitable GPU adapter" anamnesis-render.err; then
-              {
-                echo "ABSENT: no physical Linux/Vulkan adapter for ANAMNESIS portability seed"
-                tail -n 20 anamnesis-render.err || true
-              } > ANAMNESIS.ABSENT
-            else
-              cat anamnesis-render.err
-              exit $status
-            fi
+          if [ "$probe_status" -eq 2 ]; then
+            echo "ABSENT: terrain_ci_probe proved no physical Linux/Vulkan adapter" \
+              > ANAMNESIS.ABSENT
+          elif [ "$probe_status" -ne 0 ]; then
+            echo "ANAMNESIS seed probe crashed on a CI-safe adapter"
+            exit "$probe_status"
           else
+            set -o pipefail
+            python -m forge3d.determinism \
+              --scene terra_determinata_v1 --width 512 --height 512 \
+              --out-png anamnesis-golden.png \
+              | tee anamnesis-render.jsonl
+            set +o pipefail
             FORGE3D_RUN_GPU_ANAMNESIS=1 \
             FORGE3D_ANAMNESIS_RESULT_PATH=anamnesis-gpu-result.json \
               python -m pytest \
@@ -306,6 +305,7 @@ jobs:
             anamnesis-store/
             anamnesis-record.json
             anamnesis-gpu-result.json
+            anamnesis-seed-adapter.json
             ANAMNESIS.ABSENT
           if-no-files-found: error
 
@@ -341,6 +341,7 @@ jobs:
         shell: bash
         env:
           FORGE3D_DETERMINISTIC: '1'
+          WGPU_BACKEND: dx12
           WGPU_BACKENDS: dx12
         run: |
           source .venv/Scripts/activate
@@ -348,22 +349,24 @@ jobs:
             echo "ABSENT: Linux/Vulkan seed host exposed no physical adapter"
           else
             set +e
+            python scripts/terrain_ci_probe.py \
+              --mode terrain --json anamnesis-consumer-adapter.json
+            probe_status=$?
+            set -e
+            if [ "$probe_status" -eq 2 ]; then
+              echo "ABSENT: terrain_ci_probe proved no physical Windows/DX12 adapter" \
+                > ANAMNESIS.CONSUMER.ABSENT
+              exit 0
+            elif [ "$probe_status" -ne 0 ]; then
+              echo "ANAMNESIS consumer probe crashed on a CI-safe adapter"
+              exit "$probe_status"
+            fi
             set -o pipefail
             python -m forge3d.determinism \
               --scene terra_determinata_v1 --width 512 --height 512 \
-              --out-png anamnesis-consumer.png 2>anamnesis-consumer.err \
+              --out-png anamnesis-consumer.png \
               | tee anamnesis-consumer.jsonl
-            status=$?
-            set -e
             set +o pipefail
-            if [ $status -ne 0 ]; then
-              if grep -Eq "software rasterizer|hypervisor-virtualized GPU|No suitable GPU adapter" anamnesis-consumer.err; then
-                echo "ABSENT: Windows/DX12 consumer host exposed no physical adapter"
-                exit 0
-              fi
-              cat anamnesis-consumer.err
-              exit $status
-            fi
             python scripts/check_anamnesis_portability.py check \
               --cache seeded/anamnesis-store --record seeded/anamnesis-record.json \
               --consumer-frame-blob anamnesis-consumer.png \
@@ -371,6 +374,15 @@ jobs:
             python scripts/check_anamnesis_portability.py mismatch \
               --cache seeded/anamnesis-store --record seeded/anamnesis-record.json
           fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: anamnesis-hosted-consumer-evidence
+          path: |
+            anamnesis-consumer-adapter.json
+            anamnesis-consumer.jsonl
+            ANAMNESIS.CONSUMER.ABSENT
+          if-no-files-found: warn
 
   diff:
     name: diff hashes (zero-byte tolerance)

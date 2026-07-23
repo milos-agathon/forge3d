@@ -451,7 +451,7 @@ pub fn render_forward_hdr_incremental(
     let timing_scope = timing
         .as_mut()
         .and_then(|(t, label)| t.begin(&mut encoder, label));
-    graph.execute("offscreen.forward", || {
+    graph.execute_with_barriers("offscreen.forward", |_barriers| {
         encode_forward_pass(&mut encoder, targets, clear, draws);
         Ok::<(), RenderError>(())
     })?;
@@ -460,7 +460,12 @@ pub fn render_forward_hdr_incremental(
         t.resolve(&mut encoder);
     }
     queue.submit(std::iter::once(encoder.finish()));
-    let result = graph.execute("offscreen.readback", || {
+    let result = graph.execute_with_barriers("offscreen.readback", |barriers| {
+        if barriers.is_empty() {
+            return Err(RenderError::Render(
+                "offscreen readback lost its compiled color transition".into(),
+            ));
+        }
         crate::core::hdr::read_hdr_texture(
             device,
             queue,

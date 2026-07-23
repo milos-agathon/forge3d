@@ -593,6 +593,58 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("pipeline descriptor"));
     }
+
+    #[test]
+    fn production_execution_receives_compiled_resource_transitions() {
+        let mut builder = RendererGraphBuilder::new();
+        let output = builder.add_resource(ResourceDesc {
+            name: "production.color".into(),
+            resource_type: ResourceType::ColorAttachment,
+            format: Some(wgpu::TextureFormat::Rgba8Unorm),
+            extent: Some(wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            }),
+            size: None,
+            usage: Some(
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            ),
+            can_alias: false,
+            is_transient: true,
+        });
+        builder
+            .add_pass("render", PassType::Graphics, |pass| {
+                pass.write(output)
+                    .pipeline_descriptor(b"render-pipeline".to_vec())
+                    .uniform_bytes(Vec::new());
+                Ok(())
+            })
+            .unwrap();
+        builder
+            .add_pass("consume", PassType::Transfer, |pass| {
+                pass.read(output)
+                    .pipeline_descriptor(b"copy-pipeline".to_vec())
+                    .uniform_bytes(Vec::new());
+                Ok(())
+            })
+            .unwrap();
+        let mut plan = builder.compile().unwrap();
+        plan.execute_with_barriers("render", |barriers| {
+            assert!(barriers.is_empty());
+            Ok::<(), RenderError>(())
+        })
+        .unwrap();
+        plan.execute_with_barriers("consume", |barriers| {
+            assert!(
+                !barriers.is_empty(),
+                "consumer must receive the compiled attachment-to-read transition"
+            );
+            Ok::<(), RenderError>(())
+        })
+        .unwrap();
+        plan.finish().unwrap();
+    }
 }
 
 impl Default for FrameGraph {
@@ -713,8 +765,22 @@ impl RendererGraphPlan {
         E: From<RenderError>,
         F: FnOnce() -> Result<T, E>,
     {
+        self.execute_with_barriers(label, |_| execute())
+    }
+
+    /// Execute one declared production phase with its compiled transition plan.
+    ///
+    /// wgpu performs the backend transition encoding, but the renderer still
+    /// consumes this explicit plan so a framegraph regression cannot silently
+    /// reduce production execution to label-order validation.
+    pub fn execute_with_barriers<T, E, F>(&mut self, label: &str, execute: F) -> Result<T, E>
+    where
+        E: From<RenderError>,
+        F: FnOnce(&[&ResourceBarrier]) -> Result<T, E>,
+    {
         self.advance(label).map_err(E::from)?;
-        execute()
+        let barriers = self.barriers_before(label);
+        execute(&barriers)
     }
 
     pub fn pass(&self, label: &str) -> Option<&PassDesc> {

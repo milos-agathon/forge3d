@@ -506,7 +506,7 @@ impl TerrainScene {
             self.begin_certificate_capture("terrain.render_internal_with_aov");
         let mut timing = self.take_render_timing();
         let decoded = params.decoded();
-        let height_inputs = graph.execute("terrain.prepare", || {
+        let height_inputs = graph.execute_with_barriers("terrain.prepare", |_barriers| {
             self.prepare_frame_lighting(decoded)?;
             let inputs =
                 self.upload_height_inputs(heightmap, water_mask, params.terrain_data_revision)?;
@@ -658,7 +658,7 @@ impl TerrainScene {
         )?;
         ts_end(&mut timing, &mut encoder, sun_vis_scope, 0);
 
-        let shadow_setup = graph.execute("terrain.shadow", || {
+        let shadow_setup = graph.execute_with_barriers("terrain.shadow", |_barriers| {
             let shadow_scope = ts_begin(&mut timing, &mut encoder, "terrain.shadow");
             let setup = self.prepare_shadow_setup(
                 &mut encoder,
@@ -754,7 +754,12 @@ impl TerrainScene {
             ts_end(&mut timing, &mut encoder, bg_scope, 1);
         }
 
-        graph.execute("terrain.forward_aov", || {
+        graph.execute_with_barriers("terrain.forward_aov", |barriers| {
+            if barriers.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "terrain.forward_aov lost its compiled shadow transition"
+                ));
+            }
             let main_scope = ts_begin(&mut timing, &mut encoder, "terrain.main");
             self.run_main_pass_with_aov(
                 &mut encoder,
@@ -802,7 +807,12 @@ impl TerrainScene {
             albedo_texture,
             normal_texture,
             depth_texture,
-        ) = graph.execute("terrain.resolve_aov", || {
+        ) = graph.execute_with_barriers("terrain.resolve_aov", |barriers| {
+            if barriers.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "terrain.resolve_aov lost its compiled beauty transition"
+                ));
+            }
             let resolve_scope = ts_begin(&mut timing, &mut encoder, "terrain.resolve");
             let (final_texture, final_width, final_height) =
                 self.resolve_output(&mut encoder, params, decoded, render_targets)?;

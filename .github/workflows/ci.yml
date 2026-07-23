@@ -868,6 +868,7 @@ jobs:
     timeout-minutes: 20
     env:
       FORGE3D_DETERMINISTIC: '1'
+      WGPU_BACKEND: vulkan
       WGPU_BACKENDS: vulkan
       FORGE3D_NO_BOOTSTRAP: '1'
 
@@ -892,6 +893,10 @@ jobs:
         run: |
           python scripts/install_compatible_wheel.py dist
           pip install numpy pillow
+      - name: Require physical NVIDIA Vulkan producer
+        shell: pwsh
+        run: |
+          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:RUNNER_TEMP/anamnesis-portability-producer-adapter.json"
       - name: Render TERRA golden and seed real pass output
         shell: pwsh
         run: |
@@ -915,6 +920,7 @@ jobs:
             anamnesis-portable-store/
             anamnesis-portable-record.json
             anamnesis-portable-producer.jsonl
+            ${{ runner.temp }}/anamnesis-portability-producer-adapter.json
           if-no-files-found: error
 
   test-anamnesis-portability:
@@ -924,6 +930,7 @@ jobs:
     timeout-minutes: 20
     env:
       FORGE3D_DETERMINISTIC: '1'
+      WGPU_BACKEND: dx12
       WGPU_BACKENDS: dx12
       FORGE3D_NO_BOOTSTRAP: '1'
 
@@ -952,6 +959,10 @@ jobs:
         run: |
           python scripts/install_compatible_wheel.py dist
           pip install numpy pillow
+      - name: Require physical DX12 consumer
+        shell: pwsh
+        run: |
+          python scripts/terrain_ci_probe.py --mode terrain --json "$env:RUNNER_TEMP/anamnesis-portability-consumer-adapter.json"
       - name: Render fresh consumer and require portable GPU restoration
         shell: pwsh
         run: |
@@ -977,7 +988,10 @@ jobs:
         if: always()
         with:
           name: anamnesis-portability-evidence
-          path: anamnesis-portability-result.json
+          path: |
+            anamnesis-portability-result.json
+            anamnesis-portable-consumer.jsonl
+            ${{ runner.temp }}/anamnesis-portability-consumer-adapter.json
           if-no-files-found: error
 
   # ============================================================================
@@ -1039,6 +1053,16 @@ jobs:
           $verifyCode = $LASTEXITCODE
           if ($pytestCode -ne 0) { exit $pytestCode }
           if ($verifyCode -ne 0) { exit $verifyCode }
+      - name: Prove per-pass GPU resource restoration
+        shell: pwsh
+        run: |
+          $junit = Join-Path $env:RUNNER_TEMP "anamnesis-p1-gpu-restore-junit.xml"
+          python -m pytest tests/test_anamnesis_p1.py::test_public_gpu_graph_cache_restores_intermediate_texture -v --tb=short --junitxml="$junit"
+          $pytestCode = $LASTEXITCODE
+          python scripts/assert_junit_zero_skips.py "$junit"
+          $verifyCode = $LASTEXITCODE
+          if ($pytestCode -ne 0) { exit $pytestCode }
+          if ($verifyCode -ne 0) { exit $verifyCode }
       - name: Upload ANAMNESIS production evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -1047,6 +1071,7 @@ jobs:
           path: |
             ${{ runner.temp }}/anamnesis-production-result.json
             ${{ runner.temp }}/anamnesis-p0-native-junit.xml
+            ${{ runner.temp }}/anamnesis-p1-gpu-restore-junit.xml
             ${{ runner.temp }}/anamnesis-p0-adapter.json
             ${{ runner.temp }}/anamnesis-checked-out-head.txt
           if-no-files-found: error
