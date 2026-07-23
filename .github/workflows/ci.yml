@@ -855,23 +855,20 @@ jobs:
           if-no-files-found: error
 
   # ============================================================================
-  # ANAMNESIS physical cross-machine portability
+  # ANAMNESIS physical cross-backend portability
   #
-  # Standard GitHub macOS runners expose only the Apple Paravirtual adapter,
-  # which deterministic mode correctly rejects. The protected physical M4
-  # runner supplies the Metal producer; the protected NVIDIA runner supplies
-  # the physically distinct DX12 consumer. The older Linux/Vulkan matrix
-  # remains as the requested backend-specific harness and may report ABSENT
-  # when GitHub exposes no physical Linux GPU.
+  # The protected NVIDIA runner supplies both the Vulkan producer and the DX12
+  # consumer. The Linux/Vulkan matrix remains as the hosted backend-specific
+  # harness and may report ABSENT when GitHub exposes no physical Linux GPU.
   # ============================================================================
   test-anamnesis-portability-seed:
-    name: ANAMNESIS Physical Seed (M4 Metal)
+    name: ANAMNESIS Physical Seed (Windows Vulkan)
     needs: build-wheels
-    runs-on: [self-hosted, macOS, ARM64, forge3d-gpu, gpu-metal]
+    runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     timeout-minutes: 20
     env:
       FORGE3D_DETERMINISTIC: '1'
-      WGPU_BACKENDS: metal
+      WGPU_BACKENDS: vulkan
       FORGE3D_NO_BOOTSTRAP: '1'
 
     steps:
@@ -879,33 +876,38 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Prove exact-head checkout
-        shell: bash
-        env:
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+        shell: pwsh
+        run: |
+          $expected = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $expected) {
+            throw "ANAMNESIS checkout mismatch: expected=$expected actual=$actual"
+          }
       - uses: actions/download-artifact@v4
         with:
-          name: wheels-macos
+          name: wheels-windows
           path: dist/
       - name: Install exact-head wheel
+        shell: pwsh
         run: |
-          python3 scripts/install_compatible_wheel.py dist
-          python3 -m pip install numpy pillow
+          python scripts/install_compatible_wheel.py dist
+          pip install numpy pillow
       - name: Render TERRA golden and seed real pass output
-        shell: bash
+        shell: pwsh
         run: |
-          set -o pipefail
-          python3 -m forge3d.determinism \
-            --scene terra_determinata_v1 --width 512 --height 512 \
-            --out-png anamnesis-portable-producer.png \
-            | tee anamnesis-portable-producer.jsonl
-          python3 scripts/check_anamnesis_portability.py seed \
-            --cache anamnesis-portable-store \
-            --record anamnesis-portable-record.json \
-            --frame-blob anamnesis-portable-producer.png \
-            --golden tests/goldens/determinism/terra_determinata_v1.sha256 \
-            --adapter-record anamnesis-portable-producer.jsonl \
-            --producer-backend metal --consumer-backend dx12
+          python -m forge3d.determinism `
+            --scene terra_determinata_v1 --width 512 --height 512 `
+            --out-png anamnesis-portable-producer.png `
+            | Tee-Object -FilePath anamnesis-portable-producer.jsonl
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/check_anamnesis_portability.py seed `
+            --cache anamnesis-portable-store `
+            --record anamnesis-portable-record.json `
+            --frame-blob anamnesis-portable-producer.png `
+            --golden tests/goldens/determinism/terra_determinata_v1.sha256 `
+            --adapter-record anamnesis-portable-producer.jsonl `
+            --producer-backend vulkan --consumer-backend dx12
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
           name: anamnesis-physical-portable-store
@@ -963,13 +965,13 @@ jobs:
             --record seeded/anamnesis-portable-record.json `
             --consumer-frame-blob anamnesis-portable-consumer.png `
             --consumer-adapter-record anamnesis-portable-consumer.jsonl `
-            --producer-backend metal --consumer-backend dx12 `
+            --producer-backend vulkan --consumer-backend dx12 `
             | Tee-Object -FilePath anamnesis-portability-result.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/check_anamnesis_portability.py mismatch `
             --cache seeded/anamnesis-portable-store `
             --record seeded/anamnesis-portable-record.json `
-            --producer-backend metal --consumer-backend dx12
+            --producer-backend vulkan --consumer-backend dx12
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         if: always()

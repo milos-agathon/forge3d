@@ -15,6 +15,18 @@ ROOT = Path(__file__).resolve().parents[1]
 DRIVER = ROOT / "scripts" / "check_anamnesis_portability.py"
 
 
+def test_ci_portability_seed_uses_windows_vulkan():
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    seed_job = ci.split("  test-anamnesis-portability-seed:", 1)[1].split(
+        "\n  test-anamnesis-portability:", 1
+    )[0]
+    assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in seed_job
+    assert "WGPU_BACKENDS: vulkan" in seed_job
+    assert "name: wheels-windows" in seed_job
+    assert "--producer-backend vulkan --consumer-backend dx12" in seed_job
+    assert "metal" not in seed_job.lower()
+
+
 def _run(*arguments: str) -> dict:
     completed = subprocess.run(
         [sys.executable, str(DRIVER), *arguments],
