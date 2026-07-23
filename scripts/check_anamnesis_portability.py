@@ -52,12 +52,11 @@ def _runner_name(value: str) -> str:
     return value
 
 
-def _native_render(cache: str, *, height_delta: float = 0.0) -> tuple[bytes, dict]:
-    os.environ["FORGE3D_ANAMNESIS_COMPATIBILITY_PROFILE"] = _PORTABLE_PROFILE
+def _native_render(
+    cache: str, *, compatibility_profile: str = _PORTABLE_PROFILE
+) -> tuple[bytes, dict]:
+    os.environ["FORGE3D_ANAMNESIS_COMPATIBILITY_PROFILE"] = compatibility_profile
     heightmap = np.ascontiguousarray(canonical_heightmap(), dtype=np.float32)
-    if height_delta:
-        heightmap = heightmap.copy()
-        heightmap[0, 0] += np.float32(height_delta)
     with tempfile.TemporaryDirectory(prefix="forge3d-anamnesis-portable-") as root:
         hdr_path = Path(root) / "environment.hdr"
         write_canonical_hdr(str(hdr_path))
@@ -215,13 +214,18 @@ def main() -> int:
         print(json.dumps(result, sort_keys=True))
         return 0
 
-    _, report = _native_render(args.cache, height_delta=0.25)
+    rgba, report = _native_render(
+        args.cache, compatibility_profile=_PORTABLE_PROFILE + "-mismatch"
+    )
     if (
         report["hits"]
         or report["misses"] != _PASS_LABELS
         or report["graph_command_submissions"] != 6
     ):
-        raise SystemExit(f"native content mismatch served stale terrain passes: {report}")
+        raise SystemExit(f"native compatibility mismatch served stale terrain passes: {report}")
+    hashes_match = hashlib.sha256(rgba).hexdigest() == record["rgba_sha256"]
+    if not hashes_match:
+        raise SystemExit("capability-isolation render changed canonical native RGBA")
     print(
         json.dumps(
             {
@@ -229,6 +233,8 @@ def main() -> int:
                 "hits": 0,
                 "misses": len(report["misses"]),
                 "hit_rate": report["hit_rate"],
+                "hashes_match": hashes_match,
+                "mismatch_dimension": "compatibility_profile",
             },
             sort_keys=True,
         )

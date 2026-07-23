@@ -162,7 +162,8 @@ def test_portable_store_hits_and_capability_mismatch_misses(tmp_path):
     assert checked["hashes_match"] is True
     assert checked["distinct_machine"] is True
     assert mismatched["hit_rate"] == 0.0
-    assert mismatched["hashes_match"] is False
+    assert mismatched["hashes_match"] is True
+    assert mismatched["mismatch_dimension"] == "compatibility_profile"
 
 
 def test_seed_rejects_blob_that_differs_from_committed_golden(tmp_path):
