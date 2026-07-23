@@ -249,15 +249,21 @@ def test_m06_evidence_summary_fails_closed_on_synthetic_merge_checkout(tmp_path,
 
 
 def test_ci_checkout_steps_pin_pull_requests_to_the_exact_head():
-    workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text(
-        encoding="utf-8"
-    )
-    checkout_steps = workflow.split("- uses: actions/checkout@v4")[1:]
+    root = Path(__file__).resolve().parents[1]
     exact_ref = "ref: ${{ github.event.pull_request.head.sha || github.sha }}"
+    expected_counts = {
+        "ci.yml": 15,
+        "determinism-matrix.yml": 5,
+    }
 
-    # Fifteen required jobs own independent checkouts; the exact count keeps a
-    # newly added job from bypassing this provenance review accidentally.
-    assert len(checkout_steps) == 15
-    for index, tail in enumerate(checkout_steps, start=1):
-        step = tail.split("\n\n", 1)[0]
-        assert exact_ref in step, f"checkout step {index} is not exact-head pinned"
+    for name, expected_count in expected_counts.items():
+        workflow = (root / ".github" / "workflows" / name).read_text(encoding="utf-8")
+        checkout_steps = workflow.split("- uses: actions/checkout@v4")[1:]
+        # Exact counts keep a newly added job from bypassing this provenance
+        # review accidentally.
+        assert len(checkout_steps) == expected_count
+        for index, tail in enumerate(checkout_steps, start=1):
+            step = tail.split("\n\n", 1)[0]
+            assert exact_ref in step, (
+                f"{name} checkout step {index} is not exact-head pinned"
+            )
