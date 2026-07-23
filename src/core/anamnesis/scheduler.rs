@@ -133,9 +133,8 @@ impl GraphScheduler {
             );
             let barriers = graph.barriers_before(&pass.name);
             let cacheable = pass.cache_disabled_reason.is_none();
-            let blob = if cacheable && self.store.is_some() {
-                let store = self.store.as_ref().expect("checked store presence");
-                match store.get(key)? {
+            let blob = match (cacheable, self.store.as_ref()) {
+                (true, Some(store)) => match store.get(key)? {
                     Some((blob, metadata)) => {
                         restore(pass, &blob, &barriers)?;
                         self.report.hits.push(pass.name.clone());
@@ -157,13 +156,14 @@ impl GraphScheduler {
                         self.report.bytes_written += blob.len() as u64;
                         blob
                     }
+                },
+                _ => {
+                    let blob = execute(pass, &barriers)?;
+                    if self.store.is_some() {
+                        self.report.misses.push(pass.name.clone());
+                    }
+                    blob
                 }
-            } else {
-                let blob = execute(pass, &barriers)?;
-                if self.store.is_some() {
-                    self.report.misses.push(pass.name.clone());
-                }
-                blob
             };
             let _ = blob;
             for output in &pass.writes {
@@ -221,8 +221,7 @@ impl GraphScheduler {
             );
             let barriers = graph.barriers_before(&pass.name);
             let cacheable = pass.cache_disabled_reason.is_none();
-            if cacheable && self.store.is_some() {
-                let store = self.store.as_ref().expect("checked store presence");
+            if let (true, Some(store)) = (cacheable, self.store.as_ref()) {
                 if let Some((blob, metadata)) = store.get(key)? {
                     match run(
                         pass,
